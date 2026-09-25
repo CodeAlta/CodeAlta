@@ -59,8 +59,7 @@ let setArchived: (value: boolean) => void = () => {};
 let setSession: (value: string) => void = () => {};
 let setHost: (value: string | null) => void = () => {};
 let setView: (value: "workspace" | "reminders") => void = () => {};
-let configurationOpens = 0;
-const fixture = { calls, reads, configurationOpens: () => configurationOpens,
+const fixture = { calls, reads,
   draftVisible: (id: string, selected: string | null) => drafts.visible(id, selected),
   archive: (value: boolean) => setArchived(value), session: (value: string) => setSession(value),
   host: (value: string | null) => setHost(value), view: (value: "workspace" | "reminders") => setView(value),
@@ -139,7 +138,7 @@ function App() {
         capability={capability} runtimeReader={runtimeReader} permissionReviewer={null} draftIndicators={drafts}
         selections={selections} compactTrigger={trigger} /> : null}
       readOnly={<ReadOnlyComposer key={sessionId} sessionId={sessionId} provider="fixture" draftIndicators={drafts}
-        onOpenConfiguration={() => { configurationOpens++; }} reason={archived ? "Archived project; this session is read-only. Sending is unavailable." : undefined} />}
+        reason={archived ? "Archived project; this session is read-only. Sending is unavailable." : undefined} />}
       recovery={current ? <ArchivedActionRecovery epoch={epoch} sessionId={sessionId} submissions={submissions}
         steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} asks={asks} inputs={inputs} permissions={permissions} /> : null} />}
     {view === "reminders" && <ReminderScopeGate snapshot={snapshot} projectId="project" session={current || undefined}

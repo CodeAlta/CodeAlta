@@ -26,12 +26,21 @@ If `../obj/neoastra` does not exist in a fresh checkout, first run the desktop b
 the next section to generate the typed contracts/client, then return here and run `npm ci`. This
 generates build inputs only; it does not launch the native host or read a profile.
 
-Select projects and sessions, send messages in the local composer, visit **Configuration**, and
+Select projects and sessions, send messages in the local composer, open **Settings** from the
+bottom-left project rail (or a supported shortcut/palette action), and
 switch themes. Demo messages disappear on refresh. `npm run build:demo` produces the same preview
 as static files under `dist/`; `npm run build` builds the production NeoAstra-connected frontend.
 The packaged desktop uses the generated bridge and never includes the demo backend.
 
-**Configuration → General → Appearance & navigator** manages the local dark/light theme,
+Settings opens a modal overlay approximately 80% of the desktop viewport; the selected session,
+composer draft and timeline remain mounted underneath but cannot be interacted with while it is
+open. Use the overlay's sections and Back to settings control, Escape or Close settings to return;
+at narrow widths it uses viewport margins and scrolls internally. Configuration, Providers,
+Models, Agent prompts, MCP Servers and Logs are **not** workspace tabs. Future session/file tabs
+are separate; no multi-workspace tabbing is implemented here. Reminders remains a guarded
+selected-session tool, not a Settings section.
+
+**Settings → Overview → General → Appearance & navigator** manages the local dark/light theme,
 project sorting and desktop project-rail collapse. The rail's Sort projects selector and
 Show/Hide projects button use the same live preferences; changes apply immediately and are
 saved only to this WebView's local storage (theme, projectSort and projectRail v1 keys).
@@ -45,8 +54,8 @@ change the selected project/session, draft, requests, pane widths or timeline po
 The TUI's recent-session count, language and command approval policy are **not** configurable
 from this desktop screen; this is not full General/Navigator parity.
 
-**Configuration → General → About** and the implemented-actions palette open the same
-read-only modal. In the packaged desktop it reports the product and informational version
+**Settings → About** and the implemented-actions palette open the same read-only About dialog
+within the Settings overlay. In the packaged desktop it reports the product and informational version
 from the running host's boot response, with a separate build field only for a recognized
 version `+metadata` suffix. Missing or invalid/overlong fields are marked unavailable,
 rather than replaced with an advertised version. The dialog distinguishes a browser demo,
@@ -56,7 +65,7 @@ downloads and installation are **not supported** in this desktop view; no update
 Closing About or the palette returns focus to its connected opener only when no newer focus move, navigation
 or modal has taken precedence.
 
-**Configuration → Application Logs** (also in the implemented-actions palette) offers an
+**Settings → Logs** (also in the implemented-actions palette) offers an
 explicit **Refresh logs** and a **Wrap lines** toggle. It displays at most 64 newest
 plain-text rows from this desktop process's bounded in-memory capture (128 rows and
 128 KiB estimated UTF-8 payload budget, 2,048 characters per message, and a 48 KiB
@@ -109,7 +118,7 @@ submissions may authenticate or use configured provider storage/network. It adds
 state to `.alta` and performs no storage migration. Help/version and rejected arguments do not initialize
 native services or create storage. Explicit catalog and scoped-owned options retain stricter validation.
 
-The **Models** tab (or `Ctrl+G`, then `Ctrl+O`) opens a separate read-only model catalog in owned
+The **Models** Settings section (or `Ctrl+G`, then `Ctrl+O`) opens a read-only model catalog in owned
 mode. Select a registered provider to request its actual host-reported models; search their names,
 IDs and descriptions and open a model for supported efforts, capabilities and token limits. Provider
 reads are capped at 32 and model reads at 128 and 96 KiB serialized, with omitted results identified; availability and
@@ -123,9 +132,9 @@ the selected agent prompt, and cannot change an in-flight/uncertain exact Send; 
 the running turn or queued work. A different provider, missing choices or changed host/session
 cannot apply the selection. Provider authentication and global defaults remain TUI workflows.
 
-The **Providers** tab (Settings → Open provider management, or `Ctrl+G`, then `Ctrl+R`)
+The **Providers** Settings section (or `Ctrl+G`, then `Ctrl+R`)
 lists at most 32 configured providers with adapter type, enabled/default settings, configured
-default model and **cached** host initialization availability. Opening the tab or selecting a row
+default model and **cached** host initialization availability. Opening the section or selecting a row
 does not probe. **Test selected provider** explicitly starts only that enabled provider through
 the shared initialization service; it can use configured provider storage or network in an owned
 launch. The result is a completed initialization/probe, not proof of authentication or a live
@@ -135,7 +144,7 @@ browser request. Catalog-only mode lists saved descriptors read-only without run
 Provider enablement, defaults, authentication and configuration writes are not available here;
 they require a separately verified safe persisted-source mutation contract.
 
-The **Agent prompts** tab (Settings → Browse agent prompts, or `Ctrl+G`, then `Ctrl+H`)
+The **Agent prompts** Settings section (or `Ctrl+G`, then `Ctrl+H`)
 shows effective prompts discovered by the shared host catalog for the exact selected owned
 session. It shows name, ID, description, effective source scope and a read-only excerpt of the
 effective agent prompt body (up to 2,048 characters per prompt). An appended prompt may include
@@ -147,7 +156,7 @@ prompt are shown separately. Selecting a prompt validates fresh session choices 
 only that exact session's next Send, retaining its model/effort; pending exact Send, stale host,
 session changes and unavailable prompts cannot apply. Create/edit/delete remain TUI workflows.
 
-The **MCP Servers** tab shows fixed-file global configuration and the selected owned session's
+The **MCP Servers** Settings section shows fixed-file global configuration and the selected owned session's
 catalog-resolved project overlay. It displays at most 64 safe server identifiers, transport,
 effective configured policy enabled state (merged MCP enabled AND server-local enabled) and
 project/global override evidence. Missing or
@@ -156,7 +165,7 @@ paths or raw diagnostics. Configuration is **not** a connection or tool-availabi
 Desktop plugins remain off. This screen is read-only; connect, tools, add/edit/delete and
 runtime lifecycle are not implemented. No MCP inventory is available in catalog-only mode.
 
-The **Reminders** tab is available only with a selected owned session. It lists that session's
+The **Reminders** session tool is available only with a selected owned session. It lists that session's
 active and completed attempts, lets you create a delayed Markdown prompt (whole seconds 1–86400,
 1–20 attempts), refresh the list, and delete only after typing the exact reminder ID. At most 32
 retained reminders per session and 256 per host are accepted; deleting a completed entry frees a slot.
@@ -265,7 +274,8 @@ Delete and panel shortcuts. Neither card sends, retries or retargets an operatio
   does not. No archived controls can resolve, cancel or retry an interaction. These records are
   bounded app-instance evidence, not host execution/completion proof. The archived and catalog-only
   composer is a compact, auto-growing **draft-only** editor: ordinary Enter makes a new line, Send
-  is unavailable, and the configuration icon still opens provider settings (Ctrl+G, Ctrl+U).
+  is unavailable; Settings opens only from the project rail, shortcut or palette (Ctrl+G, Ctrl+U
+  opens Settings when no owned context refresh is available).
   Model/prompt/reasoning are not inferred from unavailable runtime state. Draft restoration uses
   WebView-local storage when available; a failed write does not certify an off-session draft badge.
   Recovery evidence does not persist across app reloads. Missing, changed, duplicated, omitted

@@ -1,10 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { promptEditorHeight } from "./workspacePresentation";
-import { AppIcon } from "./AppIcon";
 
-export function ReadOnlyComposer({ sessionId, provider, onOpenConfiguration, draftIndicators, reason }: {
-  sessionId: string; provider: string | null; onOpenConfiguration: () => void;
+export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason }: {
+  sessionId: string; provider: string | null;
   draftIndicators: ReturnType<typeof createDraftIndicators>; reason?: string;
 }) {
   const [draft, setDraft] = useState(() => ({ text: restoreDraft(key => localStorage.getItem(key), sessionId), editGeneration: null as number | null }));
@@ -42,9 +41,6 @@ export function ReadOnlyComposer({ sessionId, provider, onOpenConfiguration, dra
     <div className="composer-toolbar">
       <p id="catalog-draft-status" role="status">Draft only — {reason ?? "No owned desktop host; sending is unavailable. Drafts stay local when storage permits."}</p>
       <div className="history-controls">
-        <button id="open-provider-configuration" type="button" className="composer-icon-button"
-          onClick={onOpenConfiguration} aria-label="Open provider configuration" title="Open provider configuration (Ctrl+G, Ctrl+U)">
-          <AppIcon name="settings" size={16} /></button>
         <button type="button" className="primary-button send-button" disabled aria-describedby="catalog-draft-status">Send unavailable</button>
       </div>
     </div>

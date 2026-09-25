@@ -17,7 +17,7 @@ test("production archived composer/reminder gates retain exact owner evidence wi
   assert.match(source, /readOnly=\{<ReadOnlyComposer/);
   assert.match(source, /recovery=\{ownedHost \? <ArchivedActionRecovery/);
   assert.match(source, /action === "compact"[\s\S]*?currentProjectWritable\(\)/);
-  assert.match(source, /view === "reminders" \? <ReminderScopeGate/);
+  assert.match(source, /view === "reminders" \? <div className="reminders-destination">[\s\S]*?<ReminderScopeGate/);
   const root = await mkdtemp(join(tmpdir(), "codealta-archive-recovery-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -111,17 +111,12 @@ test("production archived composer/reminder gates retain exact owner evidence wi
       for (const theme of ["dark", "light"]) {
         await evaluate(`document.documentElement.dataset.theme='${theme}'`);
         assert.equal(await evaluate(`(() => { const input=document.querySelector('#catalog-prompt'); const toolbar=document.querySelector('.catalog-composer .composer-toolbar');
-          const button=document.querySelector('#open-provider-configuration'); const status=document.querySelector('#catalog-draft-status');
-          if (!input || !toolbar || !button || !status) return false;
-          const rect=input.getBoundingClientRect(), bar=toolbar.getBoundingClientRect(), icon=button.getBoundingClientRect();
-          const color=s=>getComputedStyle(s).color.match(/\\d+/g).slice(0,3).map(Number);
-          const bg=getComputedStyle(button).backgroundColor.match(/\\d+/g).slice(0,3).map(Number);
-          const lum=v=>{const x=v/255;return x<=.04045?x/12.92:((x+.055)/1.055)**2.4};
-          const l=a=>.2126*lum(a[0])+.7152*lum(a[1])+.0722*lum(a[2]);
-          const ratio=(Math.max(l(color(button)),l(bg))+.05)/(Math.min(l(color(button)),l(bg))+.05);
+          const status=document.querySelector('#catalog-draft-status');
+          if (!input || !toolbar || !status) return false;
+          const rect=input.getBoundingClientRect(), bar=toolbar.getBoundingClientRect();
           return rect.width<=${width} && rect.height>=50 && rect.height<80 && input.scrollHeight<=input.clientHeight+2
-            && bar.top>=rect.bottom && icon.width>=30 && icon.height>=30 && status.getBoundingClientRect().width>0
-            && ratio>=4.5 && document.documentElement.scrollWidth<=${width}; })()`), true, `${width}px ${theme} compact layout and icon contrast`);
+            && bar.top>=rect.bottom && status.getBoundingClientRect().width>0
+            && !document.querySelector('#open-provider-configuration') && document.documentElement.scrollWidth<=${width}; })()`), true, `${width}px ${theme} compact layout without redundant settings trigger`);
       }
     }
     await evaluate(`(() => { const input=document.querySelector('#catalog-prompt'); input.focus();
@@ -136,14 +131,11 @@ test("production archived composer/reminder gates retain exact owner evidence wi
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 2 });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 2 });
     assert.equal(await evaluate("window.archivedRecoveryFixture.calls.length"), 14);
-    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
-    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
-    assert.equal(await evaluate("document.activeElement?.id==='open-provider-configuration' && getComputedStyle(document.activeElement).outlineWidth==='2px'"), true);
+    assert.equal(await evaluate("!!document.querySelector('#open-provider-configuration')"), false);
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "g", code: "KeyG", windowsVirtualKeyCode: 71, modifiers: 2 });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "g", code: "KeyG", windowsVirtualKeyCode: 71, modifiers: 2 });
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "u", code: "KeyU", windowsVirtualKeyCode: 85, modifiers: 2 });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "u", code: "KeyU", windowsVirtualKeyCode: 85, modifiers: 2 });
-    assert.equal(await evaluate("window.archivedRecoveryFixture.configurationOpens()"), 1);
     await evaluate(`(() => { const input=document.querySelector('#catalog-prompt');
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,Array(50).fill('draft line').join('\\n'));
       input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
@@ -219,13 +211,11 @@ test("production archived composer/reminder gates retain exact owner evidence wi
     assert.equal(await evaluate("document.querySelector('#catalog-draft-status')?.textContent.includes('Draft only')"), true);
     assert.equal(await evaluate("document.querySelector('#catalog-draft-status')?.textContent.includes('archived')"), false);
     assert.equal(await evaluate("document.querySelector('#catalog-prompt').value"), "Private local draft");
-    const opens = await evaluate("window.archivedRecoveryFixture.configurationOpens()");
-    await evaluate("document.querySelector('#open-provider-configuration').click(); document.querySelector('#catalog-prompt').focus()");
+    await evaluate("document.querySelector('#catalog-prompt').focus()");
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "g", code: "KeyG", windowsVirtualKeyCode: 71, modifiers: 2 });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "g", code: "KeyG", windowsVirtualKeyCode: 71, modifiers: 2 });
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "u", code: "KeyU", windowsVirtualKeyCode: 85, modifiers: 2 });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "u", code: "KeyU", windowsVirtualKeyCode: 85, modifiers: 2 });
-    assert.equal(await evaluate("window.archivedRecoveryFixture.configurationOpens()"), Number(opens) + 2);
     assert.equal(await evaluate("window.archivedRecoveryFixture.calls.length"), countAtArchive);
     await evaluate("window.archivedRecoveryFixture.session('two')");
     assert.equal(await wait("document.querySelector('#catalog-prompt')?.value===''"), "ready");

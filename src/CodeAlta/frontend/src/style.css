@@ -51,13 +51,23 @@ button:focus-visible, input:focus, textarea:focus-visible, select:focus, summary
 code, pre { font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace; }
 
 .app-shell { height: 100vh; min-height: 0; display: grid; grid-template-rows: 58px minmax(0, 1fr); overflow: hidden; background: var(--bg); }
-.topbar { height: 58px; display: grid; grid-template-columns: minmax(240px, 1fr) auto minmax(240px, 1fr); align-items: center; padding: 0 18px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 94%, transparent); }
+.topbar { height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 18px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 94%, transparent); }
 .brand { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
 .brand small { color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .03em; text-transform: uppercase; }
 .brand-mark, .empty-logo { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; color: white; font-weight: 800; background: linear-gradient(145deg, #b394ff, #6d43dc); box-shadow: 0 8px 20px rgba(117, 76, 220, .25); }
-.topnav { display: flex; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
-.topnav button { padding: 6px 13px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; cursor: pointer; }
-.topnav button[aria-current="page"] { color: var(--text); background: var(--panel-3); box-shadow: 0 1px 5px rgba(0, 0, 0, .12); }
+.settings-dialog { width: 80vw; height: 80dvh; max-width: none; max-height: none; padding: 0; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 15px; color: var(--text); background: var(--panel); box-shadow: var(--shadow); }
+.settings-dialog[open] { display: flex; flex-direction: column; }
+.settings-dialog::backdrop { background: rgba(0, 0, 0, .62); backdrop-filter: blur(3px); }
+.settings-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+.settings-dialog-header h2 { margin: 0; font-size: 19px; }
+.settings-dialog-header > div { display: flex; align-items: center; gap: 10px; }
+.settings-dialog-navigation { display: flex; flex-wrap: wrap; gap: 5px; padding: 8px 20px; border-bottom: 1px solid var(--line); }
+.settings-dialog-navigation button { padding: 6px 10px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; cursor: pointer; }
+.settings-dialog-navigation button[aria-current="page"] { color: var(--text); background: var(--panel-3); }
+.settings-dialog-content { min-width: 0; min-height: 0; flex: 1; overflow: auto; }
+.settings-dialog-content > .configuration-page { height: auto; overflow: visible; padding: 24px; }
+.settings-dialog-content > :not(.configuration-page) { padding: 24px; }
+.reminders-destination { min-height: 0; overflow-y: auto; }
 .project-rail-toggle { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--panel-2); font-size: 11px; cursor: pointer; }
 .project-rail-toggle:hover { background: var(--accent-soft); }
 .project-rail-toggle[aria-expanded="true"] { border-color: var(--accent); }
@@ -466,8 +476,6 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .shortcut-dialog dd { color: var(--muted); font-size: 12px; }
 
 @media (max-width: 980px) {
-  .topbar { grid-template-columns: 1fr auto; }
-  .topnav { order: 3; grid-column: 1 / -1; justify-self: center; transform: translateY(-45px); }
   .configuration-page { padding-inline: 24px; }
   .settings-layout { grid-template-columns: 1fr; }
   .settings-navigation { position: static; }
@@ -481,8 +489,10 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 @media (max-width: 875px) {
   .brand small { display: none; }
   .brand { flex-wrap: wrap; }
-  .topbar { position: sticky; top: 0; z-index: 5; grid-template-columns: minmax(0, 1fr); height: auto; min-height: 58px; padding-block: 10px; }
-  .topnav { position: fixed; z-index: 6; right: 10px; bottom: 10px; order: initial; grid-column: auto; transform: none; box-shadow: var(--shadow); }
+  .topbar { position: sticky; top: 0; z-index: 5; height: auto; min-height: 58px; padding-block: 10px; }
+  .settings-dialog { width: calc(100vw - 24px); height: calc(100dvh - 24px); }
+  .settings-dialog-header, .settings-dialog-navigation { padding-inline: 12px; }
+  .settings-dialog-content > .configuration-page, .settings-dialog-content > :not(.configuration-page) { padding: 14px; }
   .connection { display: none; }
   .app-shell { grid-template-rows: auto minmax(0, 1fr); }
   .workspace-shell, .workspace-shell:not(.project-rail-open) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(340px, 45vh) minmax(0, 1fr); grid-template-areas: "sessions" "content"; height: auto; }

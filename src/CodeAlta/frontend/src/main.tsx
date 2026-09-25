@@ -1,4 +1,4 @@
-import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject } from "react";
+import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import {
   boot, configuration, applicationLogs, modelCatalog, promptCatalog, mcpInventory, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
@@ -64,7 +64,7 @@ import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from
 import { useWindowPreferences } from "./windowPreferences";
 import { GeneralSettings } from "./GeneralSettings";
 import { ApplicationLogsPanel } from "./ApplicationLogsPanel";
-import { AboutDialog, AboutSettingsEntry, openAboutPaletteAction } from "./AboutDialog";
+import { AboutDialog, AboutSettingsEntry } from "./AboutDialog";
 import { ProjectDetailsEntry, type ProjectDetailsContext } from "./ProjectDetailsEntry";
 import { createApplicationLogClearActions } from "./applicationLogClear";
 import { SessionInfoDialog } from "./SessionInfoDialog";
@@ -79,6 +79,7 @@ type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; e
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 type View = "workspace" | "configuration" | "providers" | "models" | "prompts" | "reminders" | "mcp" | "logs";
+type SettingsSection = Exclude<View, "workspace" | "reminders">;
 const paneLayoutStorageKey = "codealta.desktop.panes.v1";
 
 function App() {
@@ -103,9 +104,40 @@ function App() {
   const [view, setView] = useState<View>("workspace");
   const currentView = useRef<View>(view);
   currentView.current = view;
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsVisible = useRef(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("configuration");
+  const currentSettingsSection = useRef<SettingsSection>(settingsSection);
+  currentSettingsSection.current = settingsSection;
+  const settingsOrigin = useRef<HTMLElement | null>(null);
+  const settingsOriginView = useRef<View>("workspace");
   const [focusRestoration] = useState(createPaletteFocusRestoration);
   useEffect(() => () => focusRestoration.cancel(), [focusRestoration]);
-  function navigate(next: View) { focusRestoration.cancel(); currentView.current = next; setView(next); }
+  function closeSettings() {
+    settingsVisible.current = false;
+    setSettingsOpen(false);
+    const origin = settingsOrigin.current;
+    focusRestoration.schedule(origin, () => currentView.current === settingsOriginView.current,
+      () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
+  }
+  function navigate(next: View) {
+    focusRestoration.cancel();
+    if (next === "workspace" || next === "reminders") {
+      settingsVisible.current = false;
+      setSettingsOpen(false);
+      currentView.current = next;
+      setView(next);
+    } else {
+      if (!settingsVisible.current) {
+        settingsOrigin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        settingsOriginView.current = currentView.current;
+      }
+      currentSettingsSection.current = next;
+      setSettingsSection(next);
+      settingsVisible.current = true;
+      setSettingsOpen(true);
+    }
+  }
   const [search, setSearch] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
   const { projectSort, setProjectSort, theme, setTheme, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices } = useWindowPreferences();
@@ -116,7 +148,7 @@ function App() {
   const [dialog, setDialog] = useState<"project" | "help" | "about" | null>(null);
   const aboutOrigin = useRef<{ element: HTMLElement | null; view: View } | null>(null);
   function openAbout(element: HTMLElement | null) {
-    if (dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+    if (dialog || document.querySelector('dialog[open]:not(.settings-dialog), [role="dialog"][aria-modal="true"]:not(.settings-dialog)')) return;
     focusRestoration.cancel();
     aboutOrigin.current = { element, view: currentView.current };
     setDialog("about");
@@ -125,7 +157,7 @@ function App() {
     const origin = aboutOrigin.current;
     setDialog(null);
     focusRestoration.schedule(origin?.element ?? null, () => currentView.current === origin?.view,
-      () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
+      () => !!document.querySelector('dialog[open]:not(.settings-dialog), [role="dialog"][aria-modal="true"]:not(.settings-dialog)'));
   }
   const [paletteOpen, setPaletteOpen] = useState(false);
   const paletteCapture = useRef<PaletteContext | null>(null);
@@ -404,12 +436,12 @@ function App() {
     palettePending.current = null;
     if (dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') ||
       !paletteAvailable(action, captured, paletteContext())) return;
-    if (openAboutPaletteAction(action, paletteOrigin.current, openAbout)) return;
+    if (action === "about") { navigate("configuration"); settingsOrigin.current = paletteOrigin.current; aboutOrigin.current = { element: null, view: currentView.current }; setDialog("about"); return; }
     if (action === "sessionInfo") sessionInfoTrigger.current?.click();
     else if (action === "reminders") navigate("reminders");
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
     else if (action === "focusSearch") searchInput.current?.focus();
-    else navigate(action === "settings" ? "configuration" : action);
+    else { navigate(action === "settings" ? "configuration" : action); settingsOrigin.current = paletteOrigin.current; }
   });
 
   useEffect(() => {
@@ -447,6 +479,7 @@ function App() {
   });
 
   function runShortcut(action: ShortcutAction) {
+    if (settingsVisible.current) { if (action === "escape" && !dialog) closeSettings(); return; }
     const projects = projectListing?.projects ?? [];
     if (action === "messagePrevious" || action === "messageNext" || action === "messageFirst" || action === "messageLatest") {
       const selection = selectedSessionInfoSelection(snapshot, selectedSession, projectId,
@@ -483,7 +516,7 @@ function App() {
     else if (action === "models") navigate("models");
     else if (action === "prompts") navigate("prompts");
     else if (action === "providers") navigate("providers");
-    else if (action === "settings" || action === "plugins") navigate("configuration");
+    else if (action === "settings" || action === "plugins") navigate(action === "plugins" ? "mcp" : "configuration");
     else if (action === "toggleNotes") setNotesVisible(value => !value);
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
     else if (action === "focusSearch") searchInput.current?.focus();
@@ -507,7 +540,10 @@ function App() {
       const next = visibleSessions[(index + (action === "nextSession" ? 1 : -1) + visibleSessions.length) % visibleSessions.length].id;
       selectedSessionId.current = next;
       setSessionId(next);
-    } else if (action === "context") activateContextShortcut(workspaceShell.current);
+    } else if (action === "context") {
+      if (workspaceShell.current?.querySelector(".owned-session #refresh-session-context")) activateContextShortcut(workspaceShell.current);
+      else navigate("configuration");
+    }
   }
 
   function openSelectedReminders(session: string, epoch: string, scope: string | null) {
@@ -891,76 +927,17 @@ function App() {
         {view === "workspace" && <ProjectRailToggle expanded={railVisible} onToggle={toggleProjects} buttonRef={projectRailToggle} />}
         <button type="button" className="project-rail-toggle" aria-label="Open command palette" aria-haspopup="dialog" onClick={openPalette}>Commands <kbd>Ctrl+P</kbd></button>
       </div>
-      <nav className="topnav" aria-label="Primary navigation">
-        <button type="button" aria-current={view === "workspace" ? "page" : undefined} onClick={() => navigate("workspace")}>Sessions</button>
-        <button type="button" aria-current={view === "configuration" ? "page" : undefined} onClick={() => navigate("configuration")}>Configuration</button>
-        <button type="button" aria-current={view === "providers" ? "page" : undefined} onClick={() => navigate("providers")}>Providers</button>
-        <button type="button" aria-current={view === "models" ? "page" : undefined} onClick={() => navigate("models")}>Models</button>
-        <button type="button" aria-current={view === "prompts" ? "page" : undefined} onClick={() => navigate("prompts")}>Agent prompts</button>
-        <button type="button" aria-current={view === "mcp" ? "page" : undefined} onClick={() => navigate("mcp")}>MCP Servers</button>
-        <button type="button" aria-current={view === "reminders" ? "page" : undefined} onClick={() => navigate("reminders")}>Reminders</button>
-      </nav>
       <div className={`connection ${error ? "connection-error" : connected ? "connection-live" : "connection-readonly"}`}>
         <span className="connection-dot" />
         {error ? "Bridge unavailable" : demoMode ? "Local demo" : connected ? "Runtime connected" : "Catalog only"}
       </div>
     </header>
 
-    {view === "configuration"
-      ? <ConfigurationPanel status={status} selectedSession={selectedSession} configurationState={configurationState}
-          preferences={{ theme, setTheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices }}
-          onOpenProviders={() => navigate("providers")} onOpenModels={() => navigate("models")} onOpenPrompts={() => navigate("prompts")} onOpenLogs={() => navigate("logs")}
-          onOpenAbout={openAbout} />
-      : view === "logs" ? <ApplicationLogsPanel clearActions={logClearActions} read={demoMode
-          ? async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }) : applicationLogs.read} />
-      : view === "providers" ? <ProvidersPanel epoch={owned ? status!.hostEpoch : null}
-          read={modelCatalog.providers} probe={modelCatalog.probe} catalogProviders={configurationState.snapshot?.providers} holds={providerProbeHolds}
-          onOpenModels={() => navigate("models")} />
-      : view === "mcp" ? <McpServersPanel target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
-          ? { sessionId: selectedSession.id, epoch: status!.hostEpoch!, projectId: selectedSession.projectId ?? null } : null}
-          read={mcpInventory.list} />
-      : view === "reminders" ? <ReminderScopeGate snapshot={snapshot} projectId={projectId}
+    {view === "reminders" ? <div className="reminders-destination"><button type="button" className="quiet-button" onClick={() => navigate("workspace")}>Back to session</button><ReminderScopeGate snapshot={snapshot} projectId={projectId}
           session={selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId ? selectedSession : undefined}
           epoch={owned && (currentProjectWritable() || !!snapshot && archivedProjectScope(snapshot, projectId)) ? status!.hostEpoch! : null}
           read={readReminders} readDetail={readReminderDetail} actions={reminderActions} mutationAllowed={!!mutation?.capability.canMutate()}
-          canMutate={() => !!mutation?.capability.canMutate()} />
-      : view === "prompts" ? <PromptCatalogPanel epoch={owned ? status!.hostEpoch : null} readPrompts={promptCatalog.list}
-          readChoices={sessionOperations.choices} target={owned && currentProjectWritable() && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
-            ? { sessionId: selectedSession.id, epoch: status!.hostEpoch! } : null}
-          selections={nextSendSelections} pendingSend={!!(selectedSession && submissions.pending(selectedSession.id))}
-          pendingSelection={selectedSession ? submissions.pending(selectedSession.id)?.request.selection ?? null : null}
-          onApply={async (target, signal) => {
-            const result = await applyPromptNextSend(target, () => ({ epoch: currentHostEpoch.current ?? null,
-              active: currentView.current === "prompts" && !signal.aborted,
-              sessionId: selectedScope.current === projectId ? selectedSessionId.current : null,
-              canMutate: !!mutation?.capability.canMutate() && currentProjectWritable(), pending: !!submissions.pending(target.sessionId) }),
-            async (epoch, sessionId) => {
-              const value = await sessionOperations.choices({ expectedEpoch: epoch, sessionId }, { signal, timeoutMilliseconds: 15000 });
-              mutation?.capability.observe(value);
-              return value;
-            }, nextSendSelections);
-            if (result === "applied" && !signal.aborted) navigate("workspace");
-            return result;
-          }} />
-      : view === "models" ? <ModelCatalogPanel epoch={owned ? status!.hostEpoch : null}
-          readProviders={modelCatalog.providers} readModels={modelCatalog.models} readChoices={sessionOperations.choices}
-          target={owned && currentProjectWritable() && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
-            ? { sessionId: selectedSession.id, epoch: status!.hostEpoch! } : null}
-          selections={nextSendSelections} pendingSend={!!(selectedSession && submissions.pending(selectedSession.id))}
-          pendingSelection={selectedSession ? submissions.pending(selectedSession.id)?.request.selection ?? null : null}
-          onApply={async (target, signal) => {
-            const result = await applyCatalogNextSend(target, () => ({ epoch: currentHostEpoch.current ?? null,
-              active: currentView.current === "models",
-              sessionId: !signal.aborted && selectedScope.current === projectId ? selectedSessionId.current : null,
-              canMutate: !!mutation?.capability.canMutate() && currentProjectWritable(), pending: !!submissions.pending(target.sessionId) }),
-            async (epoch, sessionId) => {
-              const value = await sessionOperations.choices({ expectedEpoch: epoch, sessionId }, { signal, timeoutMilliseconds: 15000 });
-              mutation?.capability.observe(value);
-              return value;
-            }, nextSendSelections);
-            if (result === "applied" && !signal.aborted) navigate("workspace");
-            return result;
-          }} />
+          canMutate={() => !!mutation?.capability.canMutate()} /></div>
       : <div className={`workspace-shell${railVisible ? " project-rail-open" : ""}`} ref={workspaceShell} style={{
           "--project-pane-width": `${visiblePaneLayout.projects}px`,
           "--session-pane-width": `${visibleSessionWidth}px`,
@@ -1122,10 +1099,62 @@ function App() {
                 submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} draftIndicators={draftIndicators}
                  askActions={askActions} display={display} scrollMemory={scrollMemory} runtimeReader={runtimeReader}
                  permissionReviewer={permissionReviewer} inputReviewer={inputReviewer} configuration={configurationState.snapshot}
-                 onNotesChange={updateHistoryNotes} onOpenConfiguration={() => navigate("configuration")} selections={nextSendSelections}
+                  onNotesChange={updateHistoryNotes} selections={nextSendSelections}
                 timelineCommand={timelineCommand} />}
         </main>
       </div>}
+    {settingsOpen && <SettingsOverlay section={settingsSection} onSection={navigate}
+      onClose={closeSettings} onAbout={openAbout}>
+      {settingsSection === "configuration" ? <ConfigurationPanel status={status} selectedSession={selectedSession} configurationState={configurationState}
+        preferences={{ theme, setTheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices }}
+        onOpenProviders={() => navigate("providers")} onOpenModels={() => navigate("models")} onOpenPrompts={() => navigate("prompts")} onOpenLogs={() => navigate("logs")}
+        onOpenAbout={openAbout} />
+      : settingsSection === "logs" ? <ApplicationLogsPanel clearActions={logClearActions} read={demoMode
+        ? async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }) : applicationLogs.read} />
+      : settingsSection === "providers" ? <ProvidersPanel epoch={owned ? status!.hostEpoch : null}
+        read={modelCatalog.providers} probe={modelCatalog.probe} catalogProviders={configurationState.snapshot?.providers} holds={providerProbeHolds}
+        onOpenModels={() => navigate("models")} />
+      : settingsSection === "mcp" ? <McpServersPanel target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
+        ? { sessionId: selectedSession.id, epoch: status!.hostEpoch!, projectId: selectedSession.projectId ?? null } : null}
+        read={mcpInventory.list} />
+      : settingsSection === "prompts" ? <PromptCatalogPanel epoch={owned ? status!.hostEpoch : null} readPrompts={promptCatalog.list}
+        readChoices={sessionOperations.choices} target={owned && currentProjectWritable() && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
+          ? { sessionId: selectedSession.id, epoch: status!.hostEpoch! } : null}
+        selections={nextSendSelections} pendingSend={!!(selectedSession && submissions.pending(selectedSession.id))}
+        pendingSelection={selectedSession ? submissions.pending(selectedSession.id)?.request.selection ?? null : null}
+        onApply={async (target, signal) => {
+          const result = await applyPromptNextSend(target, () => ({ epoch: currentHostEpoch.current ?? null,
+            active: settingsVisible.current && currentSettingsSection.current === "prompts" && !signal.aborted,
+            sessionId: selectedScope.current === projectId ? selectedSessionId.current : null,
+            canMutate: !!mutation?.capability.canMutate() && currentProjectWritable(), pending: !!submissions.pending(target.sessionId) }),
+          async (epoch, sessionId) => {
+            const value = await sessionOperations.choices({ expectedEpoch: epoch, sessionId }, { signal, timeoutMilliseconds: 15000 });
+            mutation?.capability.observe(value);
+            return value;
+          }, nextSendSelections);
+          if (result === "applied" && !signal.aborted) closeSettings();
+          return result;
+        }} />
+      : <ModelCatalogPanel epoch={owned ? status!.hostEpoch : null}
+        readProviders={modelCatalog.providers} readModels={modelCatalog.models} readChoices={sessionOperations.choices}
+        target={owned && currentProjectWritable() && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
+          ? { sessionId: selectedSession.id, epoch: status!.hostEpoch! } : null}
+        selections={nextSendSelections} pendingSend={!!(selectedSession && submissions.pending(selectedSession.id))}
+        pendingSelection={selectedSession ? submissions.pending(selectedSession.id)?.request.selection ?? null : null}
+        onApply={async (target, signal) => {
+          const result = await applyCatalogNextSend(target, () => ({ epoch: currentHostEpoch.current ?? null,
+            active: settingsVisible.current && currentSettingsSection.current === "models",
+            sessionId: !signal.aborted && selectedScope.current === projectId ? selectedSessionId.current : null,
+            canMutate: !!mutation?.capability.canMutate() && currentProjectWritable(), pending: !!submissions.pending(target.sessionId) }),
+          async (epoch, sessionId) => {
+            const value = await sessionOperations.choices({ expectedEpoch: epoch, sessionId }, { signal, timeoutMilliseconds: 15000 });
+            mutation?.capability.observe(value);
+            return value;
+          }, nextSendSelections);
+          if (result === "applied" && !signal.aborted) closeSettings();
+          return result;
+        }} />}
+    </SettingsOverlay>}
     {dialog === "project" && <OpenProjectDialog snapshot={snapshot} getCurrentSnapshot={() => currentSnapshot.current}
       epoch={owned ? status?.hostEpoch : undefined}
       capability={owned ? mutation?.capability : undefined} opening={projectOpening}
@@ -1159,7 +1188,45 @@ function App() {
   </div>;
 }
 
-function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, remindersTrigger, compactTrigger, onOpenReminders, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, onOpenConfiguration, selections, timelineCommand }: {
+// Native modal matches the other shell dialogs: showModal supplies inert background,
+// browser-managed focus trapping and nested native About dialog top-layer ordering.
+function SettingsOverlay({ section, onSection, onClose, onAbout, children }: {
+  section: SettingsSection; onSection: (section: SettingsSection) => void;
+  onClose: () => void; onAbout: (origin: HTMLElement | null) => void; children: ReactNode;
+}) {
+  const modal = useRef<HTMLDialogElement>(null);
+  const composingEscape = useRef(false);
+  useLayoutEffect(() => {
+    const element = modal.current;
+    element?.showModal();
+    return () => { if (element?.open) element.close(); };
+  }, []);
+  const destinations: readonly [SettingsSection, string][] = [
+    ["configuration", "Overview"], ["providers", "Providers"], ["models", "Models"],
+    ["prompts", "Agent prompts"], ["mcp", "MCP Servers"], ["logs", "Logs"],
+  ];
+  return <dialog ref={modal} className="settings-dialog" aria-modal="true" aria-labelledby="settings-title"
+    onKeyDown={event => {
+      event.stopPropagation();
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.repeat) composingEscape.current = true;
+      else onClose();
+    }} onKeyUp={() => { composingEscape.current = false; }} onCompositionEnd={() => { composingEscape.current = false; }}
+    onCancel={event => { event.preventDefault(); if (!composingEscape.current) onClose(); }}>
+    <header className="settings-dialog-header"><h2 id="settings-title">Settings</h2>
+      <div>{section !== "configuration" && <button type="button" className="quiet-button" onClick={() => onSection("configuration")}>Back to settings</button>}
+        <button type="button" className="icon-button" aria-label="Close settings" onClick={onClose}><AppIcon name="close" size={16} /></button></div></header>
+    <nav className="settings-dialog-navigation" aria-label="Settings sections">
+      {destinations.map(([value, label]) => <button key={value} type="button" aria-current={section === value ? "page" : undefined}
+        onClick={() => onSection(value)}>{label}</button>)}
+      <button type="button" onClick={event => onAbout(event.currentTarget)}>About</button>
+    </nav>
+    <div className="settings-dialog-content" key={section}>{children}</div>
+  </dialog>;
+}
+
+function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, remindersTrigger, compactTrigger, onOpenReminders, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, selections, timelineCommand }: {
   session: WorkspaceSession;
   snapshot: WorkspaceSnapshot;
   selectedProjectId: string | null;
@@ -1185,7 +1252,6 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
   inputReviewer: ReturnType<typeof createUserInputReviewer>;
   configuration: ConfigurationSnapshot | undefined;
   onNotesChange: (markdown: string) => void;
-  onOpenConfiguration: () => void;
   selections: ReturnType<typeof createNextSendSelectionStore>;
   timelineCommand: RefObject<TimelineCommand | null>;
 }) {
@@ -1268,7 +1334,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
           owned={status?.hostEpoch && mutation ? <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
               remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)}
               reminderActions={reminderActions} readReminderCount={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? readReminders : undefined} /> : null}
-          readOnly={<ReadOnlyComposer sessionId={session.id} provider={session.providerKey} onOpenConfiguration={onOpenConfiguration} draftIndicators={draftIndicators}
+          readOnly={<ReadOnlyComposer sessionId={session.id} provider={session.providerKey} draftIndicators={draftIndicators}
               reason={archivedScope ? "Archived project; this session is read-only. Sending is unavailable." : undefined} />}
           recovery={ownedHost ? <ArchivedActionRecovery epoch={status!.hostEpoch!} sessionId={session.id} submissions={submissions}
             steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue}

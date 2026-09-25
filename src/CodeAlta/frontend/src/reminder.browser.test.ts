@@ -13,7 +13,7 @@ const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
 
 test("mounted reminders show exact detail, load a guarded new Create, and fence stale/uncertain work", { skip: !edge, timeout: 60_000 }, async () => {
   const app = readFileSync(fileURLToPath(new URL("./main.tsx", import.meta.url)), "utf8");
-  assert.match(app, /view === "reminders" \? <ReminderScopeGate/);
+  assert.match(app, /view === "reminders" \? <div className="reminders-destination">[\s\S]*?<ReminderScopeGate/);
   assert.match(app, /read=\{readReminders\}/);
   assert.match(app, /readDetail=\{readReminderDetail\}/);
   const root = await mkdtemp(join(tmpdir(), "codealta-reminder-mounted-"));

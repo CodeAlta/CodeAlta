@@ -13,7 +13,7 @@ const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
 
 test("mounted MCP inventory searches, details, read errors and fences session switches", { skip: !edge, timeout: 60_000 }, async () => {
   const app = readFileSync(fileURLToPath(new URL("./main.tsx", import.meta.url)), "utf8");
-  assert.match(app, /view === "mcp" \? <McpServersPanel/);
+  assert.match(app, /settingsSection === "mcp" \? <McpServersPanel/);
   assert.match(app, /read=\{mcpInventory\.list\}/);
   const dir = await mkdtemp(join(tmpdir(), "codealta-mcp-mounted-"));
   let browser: ReturnType<typeof spawn> | undefined;

@@ -14,7 +14,7 @@ const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
 // Mounts the actual OwnedSessionPanel with production style.css, not an OS select popup or native WebView2.
 test("mounted composer stays compact and its controls remain legible in both themes", { skip: !edge, timeout: 60_000 }, async () => {
   const app = readFileSync(fileURLToPath(new URL("./main.tsx", import.meta.url)), "utf8");
-  assert.match(app, /action === "context"\) activateContextShortcut\(workspaceShell\.current\)/,
+  assert.match(app, /action === "context"\)[\s\S]*?activateContextShortcut\(workspaceShell\.current\)/,
     "the mounted shortcut dispatcher must remain wired to the production app");
   assert.match(app, /compactTrigger: compactTrigger\.current/,
     "the mounted compaction shortcut trigger must remain wired to the production dispatcher");
@@ -664,13 +664,9 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await compactKey('.composer-toolbar .send-button'), false);
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar .send-button')?.disabled`), true);
     assert.equal(await evaluate(`window.fixture.abortCalls.length`), 3);
-    await evaluate(`(() => { document.querySelector('.owned-session').remove();
-      const catalog = document.createElement('section'); catalog.className = 'composer catalog-composer';
-      const button = document.createElement('button'); button.id = 'open-provider-configuration';
-      button.onclick = () => window.fixture.catalogOpens++;
-      catalog.append(button); document.querySelector('.session-workspace').append(catalog);
-      for (const key of ['g', 'u']) button.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true })); })()`);
-    assert.equal(Number(await evaluate("window.fixture.catalogOpens")), 1, "catalog-only context chord retains its provider-configuration action");
+    await evaluate(`document.querySelector('.owned-session').remove()`);
+    assert.equal(await evaluate(`!!document.querySelector('#open-provider-configuration')`), false,
+      "catalog-only composer has no redundant visible configuration launcher");
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')`), false,
       "catalog-only view never exposes owned steering");
     assert.equal(await evaluate(`!!document.querySelector(${JSON.stringify(queueButton)})`), false);

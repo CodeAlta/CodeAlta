@@ -54,7 +54,7 @@ export function AboutDialog({ status, bootError, demo, onClose }: {
       event.stopPropagation();
       if (event.key !== "Escape") return;
       event.preventDefault();
-      if (!event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) close();
+      if (!event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && !event.repeat) close();
       else composingEscape.current = true;
     }} onKeyUp={() => { composingEscape.current = false; }} onCompositionEnd={() => { composingEscape.current = false; }}
     onCancel={event => { event.preventDefault(); if (!composingEscape.current) close(); }}>
