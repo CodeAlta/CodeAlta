@@ -90,6 +90,8 @@ test("production archived composer/reminder gates retain exact owner evidence wi
     assert.equal(await evaluate("document.querySelector('.catalog-composer').innerText.includes('Archived project; this session is read-only.')"), true);
     assert.equal(await evaluate("document.querySelector('.catalog-composer').innerText.includes('Recorded by session')"), false);
     assert.equal(await evaluate("document.querySelector('.catalog-composer .send-button')?.disabled"), true);
+    assert.equal(await evaluate("!!document.querySelector('.composer-toolbar [aria-label=\"Steer current composer to observed run\"]')"), false,
+      "archived read-only gate must not mount a steering composer action");
     assert.equal(await evaluate("document.querySelector('.catalog-composer .prompt-input')?.rows"), 1);
     assert.equal(await evaluate("document.querySelector('.catalog-composer .composer-toolbar').compareDocumentPosition(document.querySelector('#catalog-prompt')) & Node.DOCUMENT_POSITION_PRECEDING"), 2);
     assert.equal(await wait("document.body.innerText.includes('Original Send text')"), "ready");
@@ -206,6 +208,8 @@ test("production archived composer/reminder gates retain exact owner evidence wi
     assert.equal(await wait("document.body.innerText.includes('Select an owned session')"), "ready");
     await evaluate("window.archivedRecoveryFixture.view('workspace'); window.archivedRecoveryFixture.archive(false); window.archivedRecoveryFixture.session('one')");
     assert.equal(await wait("!!document.querySelector('#catalog-prompt')"), "ready");
+    assert.equal(await evaluate("!!document.querySelector('.composer-toolbar [aria-label=\"Steer current composer to observed run\"]')"), false,
+      "catalog-only gate does not expose owned steering after host loss");
     assert.equal(await evaluate("document.querySelector('#catalog-draft-status')?.textContent.includes('Draft only')"), true);
     assert.equal(await evaluate("document.querySelector('#catalog-draft-status')?.textContent.includes('archived')"), false);
     assert.equal(await evaluate("document.querySelector('#catalog-prompt').value"), "Private local draft");

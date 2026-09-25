@@ -135,6 +135,8 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
   const runtimeConfiguration = observedTarget?.entry;
   const mcpPlugin = configuration?.plugins.find(plugin => `${plugin.id} ${plugin.name}`.toLowerCase().includes("mcp"));
   const canCaptureSteer = captureSteering(epoch, sessionId, observedTarget, steerText, "availability") !== null;
+  const availableComposerSteer = captureSteering(epoch, sessionId, observedTarget, text, "availability");
+  const observedSteerRun = captureSteering(epoch, sessionId, observedTarget, "x", "availability");
   const availableCompact = captureCompaction(epoch, sessionId, observedTarget, "availability");
   const availableAbortRun = captureAbortRun(epoch, sessionId, observedTarget, "availability");
   const canCaptureQueue = captureQueue(epoch, sessionId, observedTarget, queueText, "availability") !== null;
@@ -209,6 +211,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
   function steer(fromComposer = false) {
     const signal = scope.current?.signal;
     if (!signal || signal.aborted || !capability.canMutate()) return;
+    if (fromComposer && submissions.pending(sessionId)) return; // Disabled Send recovery is not the editable composer draft.
     const retained = steering.pending(sessionId);
     if (fromComposer && retained) {
       setMessage("A steering request is retained. Review or retry that exact request in the steering controls first.");
@@ -351,6 +354,11 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
         aria-label="Reminders for selected session" title="Reminders for selected session (Ctrl+G, Ctrl+D)"
         onClick={onOpenReminders}><AppIcon name="reminder" size={16} /></button>}
       <button id="expand-session-prompt" type="button" className="composer-icon-button" disabled={!!pending || invalidEpoch} aria-label="Expand prompt editor" title="Edit prompt in a large window (F6)" onClick={() => setExpanded(true)}><AppIcon name="expand" size={16} /></button>
+      {observedSteerRun && <button type="button" className="composer-icon-button" onClick={() => steer(true)}
+        disabled={invalidEpoch || !!pending || !!pendingSteer || !availableComposerSteer || !capability.canSubmit(availableComposerSteer)}
+        aria-label="Steer current composer to observed run" aria-describedby="observed-steering-help"
+        title={`Steer current composer to observed run ${observedSteerRun.expectedRunId} (Ctrl+Enter; point-in-time observation, not run completion; retained steering requires separate manual review)`}>
+        <AppIcon name="steer" size={16} /></button>}
       {(availableCompact || pendingCompact) && <button ref={compactTrigger} type="button" className="composer-icon-button" onClick={compact}
         data-epoch={epoch} data-session-id={sessionId} data-project-id={projectId ?? ""}
         disabled={invalidEpoch || !!pendingCompact?.inFlight || (pendingCompact
@@ -372,6 +380,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
     </div>
     </div>
     <span id="observed-run-cancellation-help" className="sr-only">Targets a point-in-time observed run, not the original Send receipt. Cancellation signalled does not confirm run completion. Retained requests are only retried manually against their original target after the previous wait settles.</span>
+    <span id="observed-steering-help" className="sr-only">Uses current composer text and the point-in-time observed run. Admission is not run completion. Retained steering is reviewed or retried separately, never from this button.</span>
     <span id="observed-compaction-help" className="sr-only">Point-in-time idle observation permits only an attempt; the provider must prove idle. Busy is a permanent outcome, not an automatic retry. Retained requests are retried manually against their original attachment after the previous wait settles.</span>
     {choicesNotice !== "Selections apply on Send; active runs and queued text are unchanged." && <p className="composer-notice" role={choicesNotice.includes("could not") || choicesNotice.includes("unavailable") ? "alert" : "status"}>{choicesNotice}
       {(choicesNotice.includes("could not") || choicesNotice.includes("unavailable")) && <button type="button" disabled={!!pending || invalidEpoch} onClick={() => setChoicesRevision(value => value + 1)}>Retry choices</button>}</p>}

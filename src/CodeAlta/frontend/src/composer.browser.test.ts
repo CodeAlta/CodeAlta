@@ -151,6 +151,8 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar')?.textContent.includes('Refresh receipts')`), false);
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), false,
       "host availability without an observed run cannot expose cancellation");
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')`), false,
+      "host availability without an observed run cannot expose steering");
     const waitFor = (condition: string) => evaluate(`new Promise(resolve => { const end = Date.now() + 4000; const check = () => {
       if (${condition}) resolve('ready'); else if (Date.now() > end) resolve('timed out'); else setTimeout(check, 25); }; check(); })`);
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), false,
@@ -198,12 +200,15 @@ test("mounted composer stays compact and its controls remain legible in both the
     await evaluate(`window.fixture.flags({retiring:true}); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`[...document.querySelectorAll('.advanced-session-controls dt')].some(el => el.textContent.includes('Attachment retiring') && el.nextElementSibling?.textContent === 'yes')`), "ready");
     assert.equal(await waitFor(`!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), "ready");
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')`), false);
     await evaluate(`window.fixture.flags({transitioning:true}); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`[...document.querySelectorAll('.advanced-session-controls .detail')].some(el => el.textContent.includes('coordinator transition recorded: yes'))`), "ready");
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), false);
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')`), false);
     await evaluate(`window.fixture.flags({draining:true}); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`[...document.querySelectorAll('.advanced-session-controls dt')].some(el => el.textContent.includes('Queue drain in progress') && el.nextElementSibling?.textContent === 'yes')`), "ready");
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), false);
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')`), false);
     await evaluate(`window.fixture.flags({}); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), "ready");
     await evaluate(`(() => { const el = document.querySelector('.prompt-input');
@@ -256,6 +261,83 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await waitFor(`!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), "ready");
     assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), "ready");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar .send-button')?.textContent`), "Send");
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')`), true);
+    const steerButton = '.composer-toolbar [aria-label="Steer current composer to observed run"]';
+    const writePrompt = (value: string) => evaluate(`(() => {const el=document.querySelector('#session-prompt');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,${JSON.stringify(value)});
+      el.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+    const steerKey = () => evaluate(`(() => {const el=document.querySelector('#session-prompt');
+      const event=new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,bubbles:true,cancelable:true});
+      el.dispatchEvent(event);return event.defaultPrevented;})()`);
+    await writePrompt("  ");
+    assert.equal(await waitFor(`document.querySelector(${JSON.stringify(steerButton)})?.disabled`), "ready");
+    await writePrompt("Toolbar instruction");
+    assert.equal(await waitFor(`!document.querySelector(${JSON.stringify(steerButton)})?.disabled`), "ready");
+    for (const width of [390, 1120]) {
+      await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
+      for (const theme of ["dark", "light"]) {
+        await evaluate(`document.documentElement.dataset.theme = '${theme}'`);
+        const layout = await sample();
+        const icon = JSON.parse((await evaluate(`JSON.stringify((() => {const b=document.querySelector(${JSON.stringify(steerButton)}),s=getComputedStyle(b);
+          b.focus();return {label:b.getAttribute('aria-label'),title:b.title,svg:!!b.querySelector('svg[aria-hidden="true"]'),
+            color:s.color,background:s.backgroundColor,outline:getComputedStyle(b).outlineStyle};})())`))!) as
+          {label:string;title:string;svg:boolean;color:string;background:string;outline:string};
+        assert.equal(icon.label, "Steer current composer to observed run");
+        assert.ok(icon.title.includes("run-one") && icon.svg && icon.outline === "solid");
+        assert.ok(contrast(icon.color, icon.background) >= 4.5, `${width}/${theme} steer contrast: ${JSON.stringify(icon)}`);
+        assert.ok(layout.pageWidth <= layout.viewWidth + 2 && layout.panelScrollWidth <= layout.panelWidth + 2
+          && layout.toolbar <= (width === 390 ? 100 : 80), `${width}/${theme} steer controls overflow: ${JSON.stringify(layout)}`);
+      }
+    }
+    const refreshBeforeSteer = await evaluate(`window.fixture.refreshes`);
+    await evaluate(`(() => {window.fixture.steerMode('hold');const b=document.querySelector(${JSON.stringify(steerButton)});
+      b.click();b.click();const event=new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,bubbles:true,cancelable:true});
+      document.querySelector('#session-prompt').dispatchEvent(event);})()`);
+    assert.equal(await evaluate(`window.fixture.steerCalls.length`), 1, "click, duplicate click and Ctrl+Enter share the in-flight owner latch");
+    assert.equal(await evaluate(`window.fixture.refreshes`), refreshBeforeSteer, "toolbar uses the observed target without a hidden refresh");
+    assert.equal(await evaluate(`JSON.stringify((({text,expectedEpoch,sessionId,expectedRuntimeInstanceId,expectedAttachmentGeneration,expectedRunId})=>
+      ({text,expectedEpoch,sessionId,expectedRuntimeInstanceId,expectedAttachmentGeneration,expectedRunId}))(window.fixture.steerCalls[0]))`),
+      JSON.stringify({text:"Toolbar instruction",expectedEpoch:"fixture-epoch",sessionId:"fixture-session",
+        expectedRuntimeInstanceId:"fixture-runtime",expectedAttachmentGeneration:"gen-12",expectedRunId:"run-one"}));
+    await writePrompt("Edited after toolbar click");
+    await evaluate(`window.fixture.settleSteer()`);
+    assert.equal(await waitFor(`document.querySelector('#session-prompt').value === 'Edited after toolbar click' &&
+      !document.querySelector(${JSON.stringify(steerButton)})?.disabled`), "ready", "accepted steering cannot erase newer Send draft edits");
+    await evaluate(`window.fixture.steerMode('uncertain')`);
+    assert.equal(await steerKey(), true);
+    assert.equal(await waitFor(`!!document.querySelector('.context-actions button')?.textContent.includes('Retry exact steering request')`), "ready");
+    assert.equal(await evaluate(`window.fixture.steerCalls.length`), 2);
+    assert.equal(await evaluate(`window.fixture.steerCalls[1].text`), "Edited after toolbar click");
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(steerButton)})?.disabled`), true);
+    await writePrompt("Newer independent draft");
+    await evaluate(`window.fixture.observe('run-two',13); document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`document.querySelector('.advanced-session-controls dd')?.textContent === 'gen-13'`), "ready");
+    assert.equal(await steerKey(), true);
+    await evaluate(`document.querySelector(${JSON.stringify(steerButton)})?.click()`);
+    assert.equal(await evaluate(`window.fixture.steerCalls.length`), 2, "retained steering never retries or retargets from composer");
+    await evaluate(`window.fixture.switchSession('fixture-other')`);
+    assert.equal(await waitFor(`!!document.querySelector('#session-prompt')`), "ready");
+    assert.equal(await evaluate(`!!document.querySelector('.context-actions button')?.textContent.includes('Retry exact steering request')`), false);
+    await evaluate(`window.fixture.switchSession('fixture-session')`);
+    assert.equal(await waitFor(`!!document.querySelector('.context-actions button')?.textContent.includes('Retry exact steering request')`), "ready");
+    assert.equal(await evaluate(`document.querySelector('#session-prompt').value`), "Newer independent draft");
+    await evaluate(`window.fixture.steerMode('hold');document.querySelector('.context-actions button').click();
+      document.querySelector('.context-actions button').click()`);
+    assert.equal(await evaluate(`window.fixture.steerCalls.length`), 3);
+    assert.equal(await evaluate(`window.fixture.steerCalls[2].clientRequestId === window.fixture.steerCalls[1].clientRequestId &&
+      window.fixture.steerCalls[2].expectedRunId === 'run-one' && window.fixture.steerCalls[2].text === 'Edited after toolbar click'`), true);
+    await evaluate(`window.fixture.settleSteer()`);
+    assert.equal(await waitFor(`!document.querySelector(${JSON.stringify(steerButton)})?.disabled`), "ready");
+    assert.equal(await evaluate(`document.querySelector('#session-prompt').value`), "Newer independent draft");
+    await evaluate(`document.querySelector(${JSON.stringify(steerButton)})?.click()`);
+    assert.equal(await evaluate(`window.fixture.steerCalls.length`), 4);
+    assert.equal(await evaluate(`JSON.stringify([window.fixture.steerCalls[3].text,window.fixture.steerCalls[3].expectedRunId,
+      window.fixture.steerCalls[3].expectedAttachmentGeneration,window.fixture.steerCalls[3].clientRequestId !== window.fixture.steerCalls[1].clientRequestId])`),
+      '["Newer independent draft","run-two","gen-13",true]');
+    await evaluate(`window.fixture.settleSteer()`);
+    assert.equal(await waitFor(`document.querySelector('#session-prompt').value === ''`), "ready");
+    await evaluate(`window.fixture.observe('run-one',12);document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`document.querySelector('.advanced-session-controls dd')?.textContent === 'gen-12'`), "ready");
     for (const width of [390, 1120]) {
       await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
       for (const theme of ["dark", "light"]) {
@@ -280,8 +362,8 @@ test("mounted composer stays compact and its controls remain legible in both the
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
     assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]')`), "ready",
       `keyboard activation: ${await evaluate(`JSON.stringify([window.fixture.abortCalls.length,document.activeElement?.outerHTML?.slice(0,300)])`)}`);
-    assert.equal(await evaluate(`document.querySelector('.composer-notice[role="status"]')?.textContent.includes('uncertain')`), true);
-    assert.equal(await evaluate(`document.querySelector('.composer-notice:not([role])')?.textContent.includes('run run-one')`), true);
+    assert.equal(await evaluate(`[...document.querySelectorAll('.composer-notice[role="status"]')].some(el=>el.textContent.includes('uncertain'))`), true);
+    assert.equal(await evaluate(`[...document.querySelectorAll('.composer-notice:not([role])')].some(el=>el.textContent.includes('run run-one'))`), true);
     assert.equal(await evaluate(`JSON.stringify(window.fixture.abortCalls.map(({expectedEpoch,sessionId,expectedRuntimeInstanceId,expectedAttachmentGeneration,expectedRunId}) =>
       ({expectedEpoch,sessionId,expectedRuntimeInstanceId,expectedAttachmentGeneration,expectedRunId})))`),
       JSON.stringify([{ expectedEpoch: "fixture-epoch", sessionId: "fixture-session", expectedRuntimeInstanceId: "fixture-runtime",
@@ -337,6 +419,8 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await evaluate(`document.querySelector('.prompt-input').value`), "Pending exact Send text");
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), true,
       "pending exact Send recovery does not disappear when observed-run cancellation is available");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')?.disabled`), true,
+      "the retained Send text shown in a disabled editor is not an editable steering draft");
     await evaluate(`window.fixture.observe(null, 13); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), "ready");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar .send-button')?.textContent`), "Retry exact request",
@@ -348,6 +432,10 @@ test("mounted composer stays compact and its controls remain legible in both the
       "stale runtime identity cannot authorize another observed-run action");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]') === null`), true,
       "stale runtime identity cannot authorize an idle compaction attempt");
+    const steerCount = await evaluate(`window.fixture.steerCalls.length`);
+    await evaluate(`document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')?.click()`);
+    assert.equal(await evaluate(`window.fixture.steerCalls.length`), steerCount,
+      "stale runtime/host authority cannot dispatch toolbar steering");
     assert.equal(await compactKey('.project-rename input'), false);
     assert.equal(await compactKey('.composer-toolbar .send-button'), false);
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar .send-button')?.disabled`), true);
@@ -359,6 +447,8 @@ test("mounted composer stays compact and its controls remain legible in both the
       catalog.append(button); document.querySelector('.session-workspace').append(catalog);
       for (const key of ['g', 'u']) button.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true })); })()`);
     assert.equal(Number(await evaluate("window.fixture.catalogOpens")), 1, "catalog-only context chord retains its provider-configuration action");
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')`), false,
+      "catalog-only view never exposes owned steering");
   } finally {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 999, method: "Browser.close" }));
     socket?.close();

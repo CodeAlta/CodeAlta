@@ -502,6 +502,10 @@ After **Refresh runtime state**, **Steer observed run** submits text to that exa
 attachment and recorded non-null run. It never creates or replaces a runtime, falls back to a
 send/queue, or silently targets a later run. The host rechecks ownership and target identity;
 stale, retiring, transitioning, terminated or unsupported targets fail rather than retarget.
+When an eligible run is observed, the compact composer also offers a labelled **Steer current composer**
+icon beside Send; it uses the same current-draft action as `Ctrl+Enter` and is disabled for empty text,
+retained steering or unavailable mutation authority. It does not retry a retained request; use the
+separate steering controls for explicit exact-target recovery. A pending Send is not an editable steering draft.
 Steering preserves the existing run's permission authority and cannot reopen a closed review
 window. Text is limited to 32,768 UTF-16 units. Success means input submitted, not run completed.
 An uncertain steering request retains its immutable target, key and text across selection changes.

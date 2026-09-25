@@ -12,7 +12,7 @@ import { createDraftIndicators } from "./promptDraft";
 import { dispatchWorkspaceShortcut, type ShortcutSession, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
 import { activateContextShortcut } from "./contextShortcut";
 import { createNextSendSelectionStore } from "./nextSendSelection";
-import type { SessionAbortRunRequest, SessionCompactRequest, SessionAdmission, SessionRuntimeStateResponse } from "#neoastra";
+import type { SessionAbortRunRequest, SessionCompactRequest, SessionSteerRequest, SessionAdmission, SessionRuntimeStateResponse } from "#neoastra";
 
 const unavailable = async (): Promise<never> => { throw new Error("Fixture must not submit operations"); };
 const epoch = "fixture-epoch";
@@ -32,7 +32,19 @@ let abortMode: "hold" | "fail" | "uncertain" = "hold";
 let settleAbort: ((value: SessionAdmission) => void) | undefined;
 let compactMode: "hold" | "busy" | "uncertain" = "hold";
 let settleCompact: ((value: SessionAdmission) => void) | undefined;
+let steerMode: "hold" | "uncertain" = "hold";
+let settleSteer: ((value: SessionAdmission) => void) | undefined;
 const counts = { refreshes: 0, catalogOpens: 0, abortCalls: [] as SessionAbortRunRequest[], compactCalls: [] as SessionCompactRequest[],
+  steerCalls: [] as SessionSteerRequest[],
+  steerMode(value: typeof steerMode) { steerMode = value; },
+  settleSteer() {
+    const request = counts.steerCalls.at(-1)!;
+    settleSteer?.({ status: "accepted", epoch: request.expectedEpoch,
+      receipt: { kind: "Steer", clientRequestId: request.clientRequestId, sessionId: request.sessionId,
+        operationId: "fixture-steer", targetOperationId: null, state: "completed", outcome: "Completed", code: null,
+        runId: request.expectedRunId, queueInsertion: null } });
+    settleSteer = undefined;
+  },
   observe(run: string | null, generation = 12, instance = "fixture-runtime") {
     observedRun = run; attachment = generation; runtime = instance; hasEntry = true;
   },
@@ -84,7 +96,11 @@ window.addEventListener("keydown", event => {
 });
 const props = {
   epoch, sessionId, submissions: createOwnedSubmissions(unavailable, unavailable),
-  steering: createSteeringSubmissions(unavailable), compaction: createCompactionSubmissions(async request => {
+  steering: createSteeringSubmissions(async request => {
+    counts.steerCalls.push(request);
+    if (steerMode === "uncertain") throw new Error("fixture steering wait timed out");
+    return new Promise(resolve => { settleSteer = resolve; });
+  }), compaction: createCompactionSubmissions(async request => {
     counts.compactCalls.push(request);
     if (compactMode === "busy") return { status: "busy", epoch: request.expectedEpoch, receipt: null };
     if (compactMode === "uncertain") throw new Error("fixture compaction wait timed out");
