@@ -200,10 +200,38 @@ test("mounted persisted tool details wrap without changing follow, older anchor 
     assert.equal(await wait("document.querySelector('.timeline-scroll').dataset.following==='false'"), true);
     await evaluate("(() => {const s=document.querySelector('.timeline-scroll');s.scrollTop=s.scrollHeight;s.dispatchEvent(new Event('scroll',{bubbles:true}))})()");
     assert.equal(await wait(`${distance}<3 && document.querySelector('.timeline-scroll').dataset.following==='true'`), true);
-    await evaluate("(() => { const s=document.querySelector('.timeline-scroll'); document.querySelector('.deferred-layout').style.height='790px'; const x=s.getBoundingClientRect().left+s.clientWidth+2; s.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerType:'mouse',pointerId:7,clientX:x}));s.scrollTop=600;s.dispatchEvent(new Event('scroll',{bubbles:true}));s.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerType:'mouse',pointerId:7})); })()");
+    // A still-held scrollbar gesture must outlive the 500 ms one-shot intent timeout.
+    await evaluate("(async () => { const s=document.querySelector('.timeline-scroll'); const x=s.getBoundingClientRect().left+s.clientWidth+2; s.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerType:'mouse',pointerId:7,clientX:x,buttons:1})); await new Promise(resolve=>setTimeout(resolve,550)); document.querySelector('.deferred-layout').style.height='790px'; s.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerType:'mouse',pointerId:7,clientX:x,buttons:1}));s.scrollTop=600;s.dispatchEvent(new Event('scroll',{bubbles:true}));s.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerType:'mouse',pointerId:7})); })()");
     assert.equal(await wait("document.querySelector('.timeline-scroll').dataset.following==='false'"), true);
     await evaluate("(() => {const s=document.querySelector('.timeline-scroll');s.scrollTop=s.scrollHeight;s.dispatchEvent(new Event('scroll',{bubbles:true}))})()");
     assert.equal(await wait(`${distance}<3 && document.querySelector('.timeline-scroll').dataset.following==='true'`), true);
+    // The first scroll consumes its intent. Returning to the tail while still held must
+    // not prevent the next movement from opting out when geometry grows again.
+    await evaluate(`(() => {const s=document.querySelector('.timeline-scroll'),x=s.getBoundingClientRect().left+s.clientWidth+2;
+      s.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerType:'mouse',pointerId:11,clientX:x,buttons:1}));
+      s.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerType:'mouse',pointerId:11,buttons:1}));
+      s.scrollTop=600;s.dispatchEvent(new Event('scroll',{bubbles:true}));})()`);
+    assert.equal(await wait("document.querySelector('.timeline-scroll').dataset.following==='false'"), true);
+    await evaluate("(() => {const s=document.querySelector('.timeline-scroll');s.scrollTop=s.scrollHeight;s.dispatchEvent(new Event('scroll',{bubbles:true}))})()");
+    assert.equal(await wait(`${distance}<3 && document.querySelector('.timeline-scroll').dataset.following==='true'`), true);
+    await evaluate(`(() => {const s=document.querySelector('.timeline-scroll');document.querySelector('.deferred-layout').style.height='820px';
+      window.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerType:'mouse',pointerId:11,buttons:1}));
+      s.scrollTop=600;s.dispatchEvent(new Event('scroll',{bubbles:true}));
+      window.dispatchEvent(new PointerEvent('pointerup',{pointerType:'mouse',pointerId:11}));})()`);
+    assert.equal(await wait("document.querySelector('.timeline-scroll').dataset.following==='false'"), true);
+    await evaluate("(() => {const s=document.querySelector('.timeline-scroll');s.scrollTop=s.scrollHeight;s.dispatchEvent(new Event('scroll',{bubbles:true}))})()");
+    assert.equal(await wait(`${distance}<3 && document.querySelector('.timeline-scroll').dataset.following==='true'`), true);
+    // A released/canceled/lost drag cannot lend an unconsumed intent to later layout-only scrolls.
+    for (const [index, end] of ["pointerup", "pointercancel", "blur", "lost-buttons"].entries()) {
+      await evaluate(`(() => {const s=document.querySelector('.timeline-scroll'),x=s.getBoundingClientRect().left+s.clientWidth+2;
+        s.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerType:'mouse',pointerId:12,clientX:x,buttons:1}));
+        window.dispatchEvent(new PointerEvent('pointermove',{pointerType:'mouse',pointerId:12,buttons:1}));
+        ${end === "blur" ? "window.dispatchEvent(new Event('blur'));" :
+          `window.dispatchEvent(new PointerEvent('${end === "lost-buttons" ? "pointermove" : end}',{pointerType:'mouse',pointerId:12,buttons:0}));`}
+        document.querySelector('.deferred-layout').style.height='${830 + index * 10}px';
+        s.scrollTop=600;s.dispatchEvent(new Event('scroll',{bubbles:true}));})()`);
+      assert.equal(await wait(`${distance}<3 && document.querySelector('.timeline-scroll').dataset.following==='true'`), true, end);
+    }
     await evaluate("(() => { const s=document.querySelector('.timeline-scroll');document.querySelector('.deferred-layout').style.height='860px';s.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerType:'touch',pointerId:8,clientY:200}));s.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerType:'touch',pointerId:8,clientY:300}));s.scrollTop=600;s.dispatchEvent(new Event('scroll',{bubbles:true}));s.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerType:'touch',pointerId:8})); })()");
     assert.equal(await wait("document.querySelector('.timeline-scroll').dataset.following==='false'"), true);
     await evaluate("(() => {const s=document.querySelector('.timeline-scroll');s.scrollTop=s.scrollHeight;s.dispatchEvent(new Event('scroll',{bubbles:true}))})()");
@@ -211,6 +239,7 @@ test("mounted persisted tool details wrap without changing follow, older anchor 
     await evaluate("document.querySelector('.timeline-scroll').focus({preventScroll:true})");
     await press("PageUp", "PageUp", 33);
     assert.equal(await wait("document.querySelector('.timeline-scroll').dataset.following==='false'"), true);
+    await evaluate("(() => {const s=document.querySelector('.timeline-scroll'),x=s.getBoundingClientRect().left+s.clientWidth+2;s.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerType:'mouse',pointerId:13,clientX:x,buttons:1}));})()");
     await evaluate("window.toolFixture.hold();document.querySelector('.keyboard-target').focus();document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'F4',ctrlKey:true,bubbles:true,cancelable:true}))");
     assert.equal(await wait("document.querySelector('.navigation-notice').textContent.includes('Refreshing')"), true);
     await evaluate("window.toolFixture.select('B');window.toolFixture.release()");
@@ -222,6 +251,8 @@ test("mounted persisted tool details wrap without changing follow, older anchor 
     assert.equal(await evaluate("!!document.querySelectorAll('.timeline-message')[1].querySelector('.tool-detail-wrap')"), false);
     assert.equal(await wait(`${distance}<3 && document.querySelector('.timeline-scroll').dataset.following==='true'`), true);
     await evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+    await evaluate("(() => {const s=document.querySelector('.timeline-scroll');window.dispatchEvent(new PointerEvent('pointermove',{pointerType:'mouse',pointerId:13,buttons:1}));document.querySelector('.deferred-layout').style.height='120px';s.scrollTop=0;s.dispatchEvent(new Event('scroll',{bubbles:true}));})()");
+    assert.equal(await wait(`${distance}<3 && document.querySelector('.timeline-scroll').dataset.following==='true'`), true);
     await evaluate("document.querySelector('.timeline-scroll').addEventListener('wheel',e=>window.toolFixture.lastWheel={y:e.deltaY,top:e.currentTarget.scrollTop,target:e.target?.tagName})");
     const viewport = await evaluate("(() => { const s=document.querySelector('.timeline-scroll'),r=s.getBoundingClientRect(); return {x:r.left+s.clientWidth-12,y:r.top+s.clientHeight/2}; })()") as {x:number;y:number};
     await command("Input.dispatchMouseEvent", { type: "mouseWheel", ...viewport, deltaX: 0, deltaY: -600 });

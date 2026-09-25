@@ -95,6 +95,7 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
   const observedHeight = useRef<number | null>(null);
   const layoutUntil = useRef(0);
   const scrollIntent = useRef<{ top: number; direction: -1 | 0 | 1; until: number } | null>(null);
+  const scrollbarDrag = useRef<number | null>(null);
   const touchStart = useRef<{ id: number; y: number } | null>(null);
   const prependMetrics = useRef<{ metrics: ScrollMetrics; anchor: HTMLElement | null; top: number } | null>(null);
   const messageAnchor = useRef<{ row: HTMLElement; top: number } | null>(null);
@@ -105,6 +106,29 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     if (element) selection.pauseAt(element.scrollTop);
     setFollowing(false);
   }, [selection]);
+  useEffect(() => {
+    // A native scrollbar drag can leave the scroller. Observe its lifetime without
+    // capturing the pointer or interfering with the browser's scrollbar handling.
+    const move = (event: globalThis.PointerEvent) => {
+      if (scrollbarDrag.current !== event.pointerId) return;
+      if (event.target instanceof Node && elementRef.current?.contains(event.target)) return;
+      if (event.buttons & 1) markScrollIntent(0);
+      else endScrollbarDrag(event.pointerId);
+    };
+    const end = (event: globalThis.PointerEvent) => endScrollbarDrag(event.pointerId);
+    const blur = () => { endScrollbarDrag(); touchStart.current = null; };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      window.removeEventListener("blur", blur);
+      blur();
+    };
+  }, []);
   useEffect(() => {
     const element = elementRef.current;
     if (!element) return;
@@ -164,6 +188,11 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     const element = elementRef.current;
     if (element) scrollIntent.current = { top: element.scrollTop, direction, until: performance.now() + 500 };
   }
+  function endScrollbarDrag(id?: number) {
+    if (scrollbarDrag.current === null || id !== undefined && scrollbarDrag.current !== id) return;
+    scrollbarDrag.current = null;
+    scrollIntent.current = null;
+  }
   function wheel(event: WheelEvent<HTMLDivElement>) {
     if (event.defaultPrevented || event.ctrlKey || event.deltaY === 0 ||
       (event.target as Element).closest(".event-details pre")) return;
@@ -182,16 +211,24 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
       return;
     }
     const element = event.currentTarget;
-    if (event.target === element && event.clientX >= element.getBoundingClientRect().left + element.clientWidth)
+    if (event.target === element && event.buttons & 1 &&
+      event.clientX >= element.getBoundingClientRect().left + element.clientWidth) {
+      scrollbarDrag.current = event.pointerId;
       markScrollIntent(0); // Only the scrollbar gutter, not a detail or Wrap control.
+    }
   }
   function pointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (scrollbarDrag.current === event.pointerId) {
+      if (event.buttons & 1) markScrollIntent(0);
+      else endScrollbarDrag(event.pointerId);
+    }
     const start = touchStart.current;
     if (event.pointerType === "touch" && start?.id === event.pointerId && Math.abs(event.clientY - start.y) > 3)
       markScrollIntent(event.clientY < start.y ? 1 : -1);
   }
   function pointerEnd(event: PointerEvent<HTMLDivElement>) {
     if (touchStart.current?.id === event.pointerId) touchStart.current = null;
+    endScrollbarDrag(event.pointerId);
   }
   function beforeOlderPage() {
     const element = elementRef.current;
@@ -218,6 +255,7 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     const element = elementRef.current;
     if (element) {
       scrollIntent.current = null;
+      scrollbarDrag.current = null;
       touchStart.current = null;
       layoutUntil.current = 0;
       selection.jump(element);
