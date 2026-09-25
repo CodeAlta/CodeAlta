@@ -436,6 +436,13 @@ read the original retained head, then **Answer original ask** or **Cancel origin
 starts a new normal text submission to the original session with the original AskId. Cancel removes
 only an unclaimed pending ask; it does not stop the producer run or an admitted answer. A committed
 ask can outlive its producer. Requests and answers each have an aggregate 8,192 UTF-16-unit text limit.
+For a validated multi-question head, **Previous question** and **Next question** show the current
+position/title and move between questions without wrapping. The panel retains every question's
+local choices and text when switching and on same-head refresh; only an explicit **Answer original
+ask** submits all question indexes, including unvisited/empty answers under existing validation.
+Navigation never submits, reads or acknowledges an action, and does not implement the TUI's
+SubmitOrAdvance or Ctrl+N/P commands. A changed head resets the visible question rather than
+rebinding an old draft; single-question asks keep the original simple editor.
 Unsubmitted text and selected-choice drafts survive explicit refreshes of the same validated
 pending head, including edits made while its read is in flight. The editor compares the full
 handle and all validated question, choice and freeform fields, not just AskId; answer/cancel

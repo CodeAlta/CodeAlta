@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from "react";
 import { sessionAsks } from "#neoastra";
 import { askWireHandle, captureAskAction, type AskHandle, type AskPage, type AskQuestion, type createAskActions } from "./sessionAsks";
 import type { createMutationCapability } from "./sessionOperations";
@@ -23,10 +23,12 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
   const [revision, setRevision] = useState(0);
   const [, repaint] = useState(0);
   const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [questionSelection, setQuestionSelection] = useState<{ source: string; index: number } | null>(null);
   const [discard, setDiscard] = useState<number | null>(null);
   const nextDraft = useRef(0);
   const readVersion = useRef(0);
   const sourceAuthority = useRef<string | null>(null);
+  const focusGeneration = useRef(0);
   const scope = JSON.stringify([epoch, sessionId]);
   const previousScope = useRef(scope);
   useEffect(() => {
@@ -34,7 +36,9 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
     const old = previousScope.current;
     previousScope.current = scope;
     readVersion.current++;
+    focusGeneration.current++;
     sourceAuthority.current = null;
+    setQuestionSelection(null);
     setPage(undefined);
     setNotice("Refresh asks to read the retained backend state.");
     setDrafts(current => current.map(d => JSON.stringify([d.epoch, d.sessionId]) === old ? { ...d, detached: true } : d));
@@ -52,30 +56,54 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
         () => !controller.signal.aborted && version === readVersion.current && scope === previousScope.current,
         () => { capability.observe({ status: "stale_epoch", epoch }); });
       if (!next) return;
+      focusGeneration.current++;
       setReadPending(current => current?.epoch === epoch && current.sessionId === sessionId && current.version === version ? null : current);
       const source = next.head?.state === "pending" ? draftSource(epoch, sessionId, next.head) : null;
+      if (sourceAuthority.current !== source) setQuestionSelection(null);
       sourceAuthority.current = source; // Fence old DOM handlers before the next page commits.
       setDrafts(current => current.map(d => !d.detached && d.epoch === epoch && d.sessionId === sessionId && d.source !== source
         ? { ...d, detached: true } : d));
       setPage({ epoch, sessionId, version, page: next });
       setNotice(next.head ? "Answer or cancel the original pending ask." : "No pending head reported. Absence is not acknowledgment.");
     }).catch(() => { if (!controller.signal.aborted && version === readVersion.current && scope === previousScope.current) {
+      focusGeneration.current++;
+      setQuestionSelection(null);
       setReadPending(current => current?.epoch === epoch && current.sessionId === sessionId && current.version === version ? null : current);
       sourceAuthority.current = null;
       setDrafts(current => current.map(d => !d.detached && d.epoch === epoch && d.sessionId === sessionId ? { ...d, detached: true } : d));
       setPage(undefined); setNotice("Ask read failed; no action outcome can be inferred.");
     } });
-    return () => { controller.abort(); void observer; };
+    return () => { focusGeneration.current++; controller.abort(); void observer; };
   }, [epoch, sessionId, revision, actions, capability, scope]);
   const page = pageState?.epoch === epoch && pageState.sessionId === sessionId ? pageState.page : undefined;
   const head = page?.head;
   const source = head?.state === "pending" ? draftSource(epoch, sessionId, head) : null;
+  const questionIndex = questionSelection?.source === source && head && questionSelection.index < head.request.questions.length
+    ? questionSelection.index : 0;
   const active = drafts.find(d => !d.detached && d.epoch === epoch && d.sessionId === sessionId && d.source === source);
   const recovery = drafts.filter(d => d.detached && d.epoch === epoch && d.sessionId === sessionId);
   const blocked = !capability.canMutate() || !head || head.state !== "pending" || actions.blocked(head.handle)
     || (!active && drafts.length >= maximumDrafts);
   const reading = readPending?.epoch === epoch && readPending.sessionId === sessionId && readPending.version === readVersion.current;
   const pageUsable = pageState?.epoch === epoch && pageState.sessionId === sessionId && pageState.version === readVersion.current;
+  const navigate = (direction: -1 | 1, event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (blocked || !head || !source || sourceAuthority.current !== source || event.defaultPrevented) return;
+    const next = Math.max(0, Math.min(questionIndex + direction, head.request.questions.length - 1));
+    if (next === questionIndex) return;
+    const button = event.currentTarget;
+    const focus = document.activeElement === button;
+    const version = readVersion.current;
+    const generation = ++focusGeneration.current;
+    setQuestionSelection({ source, index: next });
+    if (!focus) return;
+    requestAnimationFrame(() => {
+      if (generation !== focusGeneration.current || version !== readVersion.current || scope !== previousScope.current
+        || sourceAuthority.current !== source || !button.isConnected || document.activeElement !== button
+        || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+      const input = button.closest("fieldset")?.querySelector<HTMLElement>(`[data-ask-question="${next}"] input, [data-ask-question="${next}"] textarea`);
+      if (input?.isConnected && !input.matches(":disabled")) input.focus();
+    });
+  };
   const edit = (update: (draft: Draft) => Draft) => {
     if (blocked || !head || !source || sourceAuthority.current !== source) return;
     const captured = head;
@@ -105,7 +133,7 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
     } catch { setNotice("The answer is invalid or exceeds the 8,192-character aggregate limit."); }
   };
   const retained = actions.forSession(sessionId).filter(entry => entry.request.expectedHostEpoch === epoch);
-  const refresh = () => { const version = ++readVersion.current; setReadPending({ epoch, sessionId, version }); setRevision(value => value + 1); };
+  const refresh = () => { focusGeneration.current++; const version = ++readVersion.current; setReadPending({ epoch, sessionId, version }); setRevision(value => value + 1); };
   const visible = recovery.length > 0 || showAskDetails(page, retained.length, notice.startsWith("Ask read failed"), !canMutate);
   if (!visible) return <button type="button" className="ask-refresh" onClick={refresh}>Check asks</button>;
   return <section aria-label="Owned asks">
@@ -135,7 +163,16 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
     {page?.hasMore && <p>Additional retained asks or dispositions are omitted from this bounded view.</p>}
     {head && <fieldset disabled={blocked}>
       <legend>Original ask {head.handle.askId} · {head.state}</legend>
-      {head.request.questions.map((question, index) => <div key={index}>
+      {head.request.questions.length > 1 && <div className="ask-question-navigation" role="group" aria-label="Ask question navigation">
+        <p aria-label="Ask question position">Question {questionIndex + 1} of {head.request.questions.length}: {head.request.questions[questionIndex].title}</p>
+        <button type="button" disabled={questionIndex === 0} onKeyDown={event => {
+          if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.repeat) event.preventDefault();
+        }} onClick={event => navigate(-1, event)}>Previous question</button>
+        <button type="button" disabled={questionIndex === head.request.questions.length - 1} onKeyDown={event => {
+          if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.repeat) event.preventDefault();
+        }} onClick={event => navigate(1, event)}>Next question</button>
+      </div>}
+      {head.request.questions.map((question, index) => index !== questionIndex ? null : <div key={index} data-ask-question={index}>
         <h4>{question.title}</h4><p>{question.question}</p>{question.description && <p>{question.description}</p>}
         {question.choices.map((choice, choiceIndex) => <label key={choiceIndex}>
           <input type="checkbox" checked={(active?.choices[index] ?? []).includes(choiceIndex)} onChange={event => { const checked = event.target.checked; edit(current => ({ ...current,

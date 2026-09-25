@@ -90,6 +90,8 @@ test("mounted production ask editor retains only exact validated drafts through 
     const head = {handle,request:{questions:[question]},state:'pending'};
     await evaluate(`window.askFixture.page(${JSON.stringify(head)})`);
     assert.equal(await waitFor(`!!document.querySelector('[aria-label="Owned asks"] textarea')`), 'ready');
+    assert.equal(await evaluate(`!!document.querySelector('[aria-label="Ask question navigation"]')`), false,
+      'single-question ask keeps its original simple editor');
     await evaluate(`(() => {const el=document.querySelector('[aria-label="Owned asks"] textarea');
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,${JSON.stringify('Exact unsent text 😀\nline two')});
       el.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[aria-label="Owned asks"] input[type=checkbox]').click();
@@ -310,6 +312,181 @@ test("mounted production ask editor retains only exact validated drafts through 
     assert.equal(await waitFor(`window.askFixture.requests.length===22`), 'ready');
     assert.equal(await waitFor(`document.querySelector(${JSON.stringify(captured)}+' pre')?.textContent==='Only fresh answer should submit'`), 'ready',
       'remounted owned panel projects the app-owned original even without a completed new list read');
+    // A fresh isolated app owner lets the same production panel exercise multi-question navigation.
+    await command('Page.navigate', { url: pathToFileURL(page).href });
+    assert.equal(await waitFor(`window.askFixture?.requests.length===1`), 'ready');
+    const multi = {...head, request:{questions:[question,
+      {title:'Options only',question:'Pick one or more',description:null,
+        choices:[{title:'Red',description:null},{title:'Blue',description:null}],freeform:null},
+      {title:'Text only',question:'Explain',description:null,choices:[],freeform:{title:'Explanation',placeholder:null}}]}};
+    await evaluate(`window.askFixture.page(${JSON.stringify(multi)})`);
+    assert.equal(await waitFor(`document.querySelector('[aria-label="Ask question position"]')?.textContent.includes('Question 1 of 3: Choice and text')`), 'ready');
+    const position = () => evaluate(`document.querySelector('[aria-label="Ask question position"]')?.textContent`);
+    const nav = (label: string) => evaluate(`[...document.querySelectorAll('[aria-label="Ask question navigation"] button')]
+      .find(el=>el.textContent===${JSON.stringify(label)})?.click()`);
+    assert.equal(await evaluate(`JSON.stringify([...document.querySelectorAll('[aria-label="Ask question navigation"] button')]
+      .map(el=>el.disabled))`), '[true,false]');
+    assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Owned asks"] fieldset h4').length`), 1);
+    await nav('Previous question');
+    assert.equal(await position(), 'Question 1 of 3: Choice and text', 'previous clamps without wrapping');
+    await write('First answer 😀');
+    await evaluate(`document.querySelector('[aria-label="Owned asks"] input[type=checkbox]').click()`);
+    await evaluate(`[...document.querySelectorAll('[aria-label="Ask question navigation"] button')]
+      .find(el=>el.textContent==='Next question').focus()`);
+    await evaluate(`(() => {const button=document.activeElement;
+      button.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true,cancelable:true}));
+      button.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',repeat:true,bubbles:true,cancelable:true}));})()`);
+    assert.equal(await position(), 'Question 1 of 3: Choice and text', 'IME/repeat cannot navigate');
+    await command('Page.bringToFront');
+    await command('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
+    await command('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+    assert.equal(await waitFor(`document.querySelector('[aria-label="Ask question position"]')?.textContent.includes('Question 2 of 3')`), 'ready');
+    assert.equal(await waitFor(`document.activeElement?.matches('[data-ask-question="1"] input')`), 'ready',
+      'keyboard Next focuses a connected input only after explicit navigation');
+    assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Owned asks"] fieldset h4').length`), 1);
+    assert.equal(await evaluate(`!!document.querySelector('[aria-label="Owned asks"] fieldset textarea')`), false);
+    await evaluate(`document.querySelectorAll('[data-ask-question="1"] input[type=checkbox]')[1].click()`);
+    await evaluate(`[...document.querySelectorAll('[aria-label="Ask question navigation"] button')]
+      .find(el=>el.textContent==='Next question').focus()`);
+    await nav('Next question');
+    assert.equal(await waitFor(`document.activeElement?.matches('[data-ask-question="2"] textarea')`), 'ready');
+    assert.equal(await position(), 'Question 3 of 3: Text only');
+    assert.equal(await evaluate(`JSON.stringify([...document.querySelectorAll('[aria-label="Ask question navigation"] button')]
+      .map(el=>el.disabled))`), '[false,true]');
+    await nav('Next question');
+    assert.equal(await position(), 'Question 3 of 3: Text only', 'next clamps without wrapping');
+    await write('Third answer\nline two');
+    assert.equal(await evaluate(`window.askFixture.answers.length+window.askFixture.cancellations.length+window.askFixture.requests.length`), 1,
+      'navigation is local: no submission, cancel, observation or read');
+    await click('Refresh asks');
+    assert.equal(await waitFor(`window.askFixture.requests.length===2`), 'ready');
+    await nav('Previous question');
+    assert.equal(await position(), 'Question 2 of 3: Options only');
+    assert.equal(await evaluate(`document.querySelectorAll('[data-ask-question="1"] input[type=checkbox]')[1].checked`), true);
+    await nav('Previous question');
+    assert.equal(await evaluate(`document.querySelector('[data-ask-question="0"] textarea').value`), 'First answer 😀');
+    await write('Edited while same-head read pending');
+    await click('Answer original ask');
+    assert.equal(await evaluate(`window.askFixture.answers.length`), 0, 'in-flight read still fences admission');
+    await evaluate(`window.askFixture.page(${JSON.stringify(multi)})`);
+    assert.equal(await waitFor(`document.querySelector('[data-ask-question="0"] textarea')?.value==='Edited while same-head read pending'`), 'ready');
+    assert.equal(await position(), 'Question 1 of 3: Choice and text');
+    await nav('Next question'); await nav('Next question');
+    assert.equal(await evaluate(`document.querySelector('[data-ask-question="2"] textarea').value`), 'Third answer\nline two');
+    assert.equal(await evaluate(`!!document.querySelector('[data-ask-question="2"] input')`), false);
+    const revisedMulti = {...multi, request:{questions:[multi.request.questions[0],
+      {...multi.request.questions[1],description:'Different immutable question shape'},multi.request.questions[2]]}};
+    await click('Refresh asks');
+    assert.equal(await waitFor(`window.askFixture.requests.length===3`), 'ready');
+    await evaluate(`window.askFixture.page(${JSON.stringify(revisedMulti)})`);
+    assert.equal(await waitFor(`document.querySelectorAll('.ask-draft-recovery').length===1`), 'ready');
+    assert.equal(await position(), 'Question 1 of 3: Choice and text', 'changed question shape resets selection');
+    assert.equal(await evaluate(`document.querySelector('.ask-draft-recovery').textContent.includes('Third answer')`), true);
+    await nav('Next question');
+    assert.equal(await evaluate(`document.querySelector('[data-ask-question="1"] input').checked`), false);
+    await click('Refresh asks');
+    assert.equal(await waitFor(`window.askFixture.requests.length===4`), 'ready');
+    await evaluate(`window.askFixture.page(${JSON.stringify(multi)})`);
+    assert.equal(await waitFor(`document.querySelector('[aria-label="Ask question position"]')?.textContent.includes('Question 1 of 3')`), 'ready',
+      'A-B-A cannot revive a detached selection or answers');
+    assert.equal(await evaluate(`document.querySelector('[data-ask-question="0"] textarea').value`), '');
+    await nav('Next question');
+    assert.equal(await evaluate(`document.querySelector('[data-ask-question="1"] input').checked`), false);
+    await nav('Next question');
+    await write('Recoverable third question');
+    await click('Refresh asks');
+    assert.equal(await waitFor(`window.askFixture.requests.length===5`), 'ready');
+    await evaluate(`window.askFixture.page(null)`);
+    assert.equal(await waitFor(`!document.querySelector('[aria-label="Ask question position"]')`), 'ready');
+    assert.equal(await evaluate(`[...document.querySelectorAll('.ask-draft-recovery')]
+      .some(el=>el.textContent.includes('Recoverable third question'))`), true);
+    await click('Refresh asks');
+    assert.equal(await waitFor(`window.askFixture.requests.length===6`), 'ready');
+    await evaluate(`window.askFixture.fail()`);
+    assert.equal(await waitFor(`document.querySelector('[aria-label="Owned asks"]')?.textContent.includes('Ask read failed')`), 'ready');
+    assert.equal(await evaluate(`window.askFixture.answers.length`), 0);
+    await click('Refresh asks');
+    assert.equal(await waitFor(`window.askFixture.requests.length===7`), 'ready');
+    await evaluate(`window.askFixture.page(${JSON.stringify({...multi,request:{questions:[multi.request.questions[0],
+      {...multi.request.questions[1],question:''},multi.request.questions[2]]}})})`);
+    assert.equal(await waitFor(`document.querySelector('[aria-label="Owned asks"]')?.textContent.includes('Ask read failed')`), 'ready');
+    assert.equal(await evaluate(`!!document.querySelector('[aria-label="Ask question position"]')`), false,
+      'malformed page cannot authorize navigation or submission');
+    await evaluate(`window.askFixture.scope('session-other')`);
+    assert.equal(await waitFor(`window.askFixture.requests.length===8`), 'ready');
+    assert.equal(await evaluate(`document.querySelectorAll('.ask-draft-recovery').length`), 0);
+    await evaluate(`window.askFixture.page(null);window.askFixture.scope('session-one','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')`);
+    assert.equal(await waitFor(`window.askFixture.requests.length===9`), 'ready');
+    assert.equal(await evaluate(`document.querySelectorAll('.ask-draft-recovery').length`), 0);
+    await evaluate(`window.askFixture.page(null);window.askFixture.scope('session-one',window.askFixture.epoch)`);
+    assert.equal(await waitFor(`window.askFixture.requests.length===10`), 'ready');
+    await evaluate(`window.askFixture.page(${JSON.stringify(multi)})`);
+    assert.equal(await waitFor(`document.querySelector('[aria-label="Ask question position"]')?.textContent.includes('Question 1 of 3')`), 'ready');
+    assert.equal(await evaluate(`document.querySelector('[data-ask-question="0"] textarea').value`), '');
+    assert.equal(await evaluate(`[...document.querySelectorAll('.ask-draft-recovery')]
+      .some(el=>el.textContent.includes('Recoverable third question'))`), true,
+      'restored scope retains separate read-only recovery without reactivating it');
+    for (const theme of ['dark','light']) for (const width of [390,1120]) {
+      await evaluate(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);
+      await command('Emulation.setDeviceMetricsOverride',{width,height:680,deviceScaleFactor:1,mobile:false});
+      assert.equal(await evaluate(`document.querySelector('[aria-label="Ask question navigation"]').getBoundingClientRect().right<=innerWidth
+        && document.documentElement.scrollWidth<=innerWidth`), true, `${theme}/${width} navigation stays within viewport`);
+      assert.equal(await evaluate(`getComputedStyle(document.querySelector('[aria-label="Ask question navigation"]')).display`), 'flex');
+    }
+    await write('Final first answer');
+    await evaluate(`document.querySelector('[data-ask-question="0"] input[type=checkbox]').click()`);
+    await evaluate(`(() => { const button=[...document.querySelectorAll('[aria-label="Ask question navigation"] button')]
+      .find(el=>el.textContent==='Next question'); button.focus(); button.click();
+      document.querySelector('[aria-label="Owned asks"] > button').focus(); })()`);
+    assert.equal(await waitFor(`document.querySelector('[aria-label="Ask question position"]')?.textContent.includes('Question 2 of 3')`), 'ready');
+    assert.equal(await evaluate(`document.activeElement?.textContent`), 'Refresh asks',
+      'deferred question focus never steals a newer user focus');
+    await evaluate(`document.querySelectorAll('[data-ask-question="1"] input[type=checkbox]')[1].click()`);
+    await nav('Next question');
+    await write('Final third answer\n😀');
+    await nav('Previous question');
+    assert.equal(await evaluate(`document.querySelectorAll('[data-ask-question="1"] input[type=checkbox]')[1].checked`), true);
+    await nav('Previous question');
+    assert.equal(await evaluate(`document.querySelector('[data-ask-question="0"] textarea').value`), 'Final first answer');
+    await click('Answer original ask');
+    assert.equal(await waitFor(`window.askFixture.answers.length===1`), 'ready');
+    assert.equal(await evaluate(`JSON.stringify(window.askFixture.answers[0].action.answers)`), JSON.stringify([
+      {questionIndex:0,selectedChoiceIndexes:[0],freeformText:'Final first answer'},
+      {questionIndex:1,selectedChoiceIndexes:[1],freeformText:null},
+      {questionIndex:2,selectedChoiceIndexes:[],freeformText:'Final third answer\n😀'}
+    ]), 'one explicit Answer captures every question, including a hidden text answer');
+    assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Captured original ask answer"] [aria-label^="Captured answer"]').length`), 2);
+    await click('Answer original ask'); await click('Cancel original ask');
+    assert.equal(await evaluate(`window.askFixture.answers.length+window.askFixture.cancellations.length`), 1);
+    await evaluate(`window.askFixture.failAnswer()`);
+    assert.equal(await waitFor(`document.querySelector('[aria-label="Captured original ask answer"]')?.textContent.includes('Transport uncertain')`), 'ready');
+    await click('Discard local draft…'); await click('Confirm discard local draft');
+    assert.equal(await evaluate(`document.querySelector('[aria-label="Captured original ask answer"]').textContent.includes('Final first answer')`), true,
+      'draft discard does not erase independent submitted evidence');
+    await evaluate(`window.askFixture.scope('session-other')`);
+    assert.equal(await waitFor(`window.askFixture.requests.length===11`), 'ready');
+    assert.equal(await evaluate(`!!document.querySelector('[aria-label="Captured original ask answer"]')`), false);
+    await evaluate(`window.askFixture.page(null);window.askFixture.scope('session-one','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')`);
+    assert.equal(await waitFor(`window.askFixture.requests.length===12`), 'ready');
+    assert.equal(await evaluate(`!!document.querySelector('[aria-label="Captured original ask answer"]')`), false);
+    await evaluate(`window.askFixture.page(null);window.askFixture.scope('session-one',window.askFixture.epoch)`);
+    assert.equal(await waitFor(`window.askFixture.requests.length===13`), 'ready');
+    assert.equal(await waitFor(`document.querySelector('[aria-label="Captured original ask answer"]')?.textContent.includes('Final third answer')`), 'ready');
+    await evaluate(`window.askFixture.page(null)`);
+    assert.equal(await waitFor(`document.querySelector('[aria-label="Owned asks"]')?.textContent.includes('No pending head reported')`), 'ready');
+    const nextMulti = {...multi,handle:{...handle,askId:'99999999-9999-4999-8999-999999999999'}};
+    await click('Refresh asks');
+    assert.equal(await waitFor(`window.askFixture.requests.length===14`), 'ready');
+    await evaluate(`window.askFixture.page(${JSON.stringify(nextMulti)})`);
+    assert.equal(await waitFor(`document.querySelector('[aria-label="Ask question position"]')?.textContent.includes('Question 1 of 3')`), 'ready');
+    assert.equal(await evaluate(`document.querySelector('[data-ask-question="0"] textarea').value`), '');
+    await click('Answer original ask');
+    assert.equal(await waitFor(`window.askFixture.answers.length===2`), 'ready');
+    assert.equal(await evaluate(`JSON.stringify(window.askFixture.answers[1].action.answers)`), JSON.stringify([
+      {questionIndex:0,selectedChoiceIndexes:[],freeformText:null},
+      {questionIndex:1,selectedChoiceIndexes:[],freeformText:null},
+      {questionIndex:2,selectedChoiceIndexes:[],freeformText:null}
+    ]), 'unvisited questions are still represented exactly under existing validation');
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }
