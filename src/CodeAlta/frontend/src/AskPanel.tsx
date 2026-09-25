@@ -7,6 +7,7 @@ import { showAskDetails } from "./workspacePresentation";
 type Props = { epoch: string; sessionId: string; actions: ReturnType<typeof createAskActions>; capability: ReturnType<typeof createMutationCapability> };
 type Draft = { id: number; epoch: string; sessionId: string; source: string; handle: AskHandle;
   questions: readonly AskQuestion[]; text: Record<number, string>; choices: Record<number, number[]>; detached: boolean };
+type RetainedAction = ReturnType<ReturnType<typeof createAskActions>["forSession"]>[number];
 const maximumDrafts = 8;
 
 // The parsed page is a bounded projection. Include every validated handle and question/option/freeform field,
@@ -17,6 +18,7 @@ function draftSource(epoch: string, sessionId: string, head: NonNullable<AskPage
 
 export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
   const [pageState, setPage] = useState<{ epoch: string; sessionId: string; version: number; page: AskPage }>();
+  const [readPending, setReadPending] = useState<{ epoch: string; sessionId: string; version: number } | null>(null);
   const [notice, setNotice] = useState("Refresh asks to read the retained backend state.");
   const [revision, setRevision] = useState(0);
   const [, repaint] = useState(0);
@@ -42,6 +44,7 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
   useEffect(() => {
     const controller = new AbortController();
     const version = readVersion.current;
+    setReadPending({ epoch, sessionId, version });
     // Read only; selection cancellation cannot reach any action or its app-owned original waiter.
     const original = sessionAsks.list({ expectedHostEpoch: epoch, sessionId }, { signal: controller.signal, timeoutMilliseconds: 8000 });
     const observer = original.then(value => {
@@ -49,6 +52,7 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
         () => !controller.signal.aborted && version === readVersion.current && scope === previousScope.current,
         () => { capability.observe({ status: "stale_epoch", epoch }); });
       if (!next) return;
+      setReadPending(current => current?.epoch === epoch && current.sessionId === sessionId && current.version === version ? null : current);
       const source = next.head?.state === "pending" ? draftSource(epoch, sessionId, next.head) : null;
       sourceAuthority.current = source; // Fence old DOM handlers before the next page commits.
       setDrafts(current => current.map(d => !d.detached && d.epoch === epoch && d.sessionId === sessionId && d.source !== source
@@ -56,6 +60,7 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
       setPage({ epoch, sessionId, version, page: next });
       setNotice(next.head ? "Answer or cancel the original pending ask." : "No pending head reported. Absence is not acknowledgment.");
     }).catch(() => { if (!controller.signal.aborted && version === readVersion.current && scope === previousScope.current) {
+      setReadPending(current => current?.epoch === epoch && current.sessionId === sessionId && current.version === version ? null : current);
       sourceAuthority.current = null;
       setDrafts(current => current.map(d => !d.detached && d.epoch === epoch && d.sessionId === sessionId ? { ...d, detached: true } : d));
       setPage(undefined); setNotice("Ask read failed; no action outcome can be inferred.");
@@ -69,7 +74,8 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
   const recovery = drafts.filter(d => d.detached && d.epoch === epoch && d.sessionId === sessionId);
   const blocked = !capability.canMutate() || !head || head.state !== "pending" || actions.blocked(head.handle)
     || (!active && drafts.length >= maximumDrafts);
-  const reading = !pageState || pageState.epoch !== epoch || pageState.sessionId !== sessionId || pageState.version !== readVersion.current;
+  const reading = readPending?.epoch === epoch && readPending.sessionId === sessionId && readPending.version === readVersion.current;
+  const pageUsable = pageState?.epoch === epoch && pageState.sessionId === sessionId && pageState.version === readVersion.current;
   const edit = (update: (draft: Draft) => Draft) => {
     if (blocked || !head || !source || sourceAuthority.current !== source) return;
     const captured = head;
@@ -84,8 +90,8 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
     });
   };
   const submit = (kind: "answer" | "cancel") => {
-    if (blocked || reading || !head || !source || sourceAuthority.current !== source
-      || pageState?.version !== readVersion.current || draftSource(epoch, sessionId, head) !== source) return;
+    if (blocked || reading || !pageUsable || !head || !source || sourceAuthority.current !== source
+      || draftSource(epoch, sessionId, head) !== source) return;
     try {
       const answers = kind === "cancel" ? [] : head.request.questions.map((_, index) => ({ questionIndex: index,
         selectedChoiceIndexes: active?.choices[index] ?? [], freeformText: active?.text[index] || null }));
@@ -99,7 +105,7 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
     } catch { setNotice("The answer is invalid or exceeds the 8,192-character aggregate limit."); }
   };
   const retained = actions.forSession(sessionId).filter(entry => entry.request.expectedHostEpoch === epoch);
-  const refresh = () => { readVersion.current++; setRevision(value => value + 1); };
+  const refresh = () => { const version = ++readVersion.current; setReadPending({ epoch, sessionId, version }); setRevision(value => value + 1); };
   const visible = recovery.length > 0 || showAskDetails(page, retained.length, notice.startsWith("Ask read failed"), !canMutate);
   if (!visible) return <button type="button" className="ask-refresh" onClick={refresh}>Check asks</button>;
   return <section aria-label="Owned asks">
@@ -141,16 +147,30 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
           placeholder={question.freeform.placeholder ?? undefined} onChange={event => { const value = event.target.value; edit(current => ({ ...current,
             text: { ...current.text, [index]: value } })); }} /></label>}
       </div>)}
-      <button type="button" disabled={reading} onClick={() => submit("answer")}>Answer original ask</button>
-      <button type="button" disabled={reading} onClick={() => submit("cancel")}>Cancel original ask</button>
+      <button type="button" disabled={reading || !pageUsable} onClick={() => submit("answer")}>Answer original ask</button>
+      <button type="button" disabled={reading || !pageUsable} onClick={() => submit("cancel")}>Cancel original ask</button>
     </fieldset>}
     {page?.latest && <p>Latest backend disposition: {page.latest.status} · ask {page.latest.handle.askId}. This is not acknowledgment of an earlier transport request.</p>}
     {retained.map(entry => <div key={entry.request.action.actionId}>
       <p>Original {entry.kind} · ask {entry.request.action.handle.askId} · transport: {entry.transport}{entry.result && ` · ${entry.result.status}`}</p>
+      {entry.kind === "answer" && <CapturedAnswer entry={entry} />}
       {entry.observed && <p>Separate backend observation: {entry.observed.status}{entry.observed.runId && ` · run ${entry.observed.runId}`}</p>}
       <button type="button" onClick={() => { void actions.observeRemote(entry.request.action.actionId, request => sessionAsks.observe({
         expectedHostEpoch: request.expectedHostEpoch, actionId: request.action.actionId, handle: askWireHandle(request.action.handle),
       }, { timeoutMilliseconds: 8000 }), () => { capability.observe({ status: "stale_epoch", epoch }); }); }}>Observe original action</button>
+    </div>)}
+  </section>;
+}
+
+function CapturedAnswer({ entry }: { entry: RetainedAction }) {
+  const request = entry.request;
+  const handle = request.action.handle;
+  return <section className="ask-captured-answer" aria-label="Captured original ask answer">
+    <p>Original captured answer (read-only). Transport {entry.transport}; admission is not run completion. Question and choice wording was not captured by this action; indexes below are exact, not inferred from a refreshed ask. This is owner evidence, not a discardable local draft.</p>
+    <p className="detail">Host {request.expectedHostEpoch} · session {handle.sessionId} · operation {handle.operationId} · runtime {handle.runtimeInstanceId} · attachment {handle.attachmentGeneration} · provider {handle.providerId} · run {handle.runId} · ask {handle.askId} · generation {handle.responseGeneration} · action {request.action.actionId}</p>
+    {request.action.answers.map(answer => <div key={answer.questionIndex}>
+      <p>Question index {answer.questionIndex} · selected choice indexes: {answer.selectedChoiceIndexes.join(", ") || "None"}</p>
+      {answer.freeformText !== null && <pre aria-label={`Captured answer for question ${answer.questionIndex}`}>{answer.freeformText}</pre>}
     </div>)}
   </section>;
 }

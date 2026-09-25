@@ -445,6 +445,14 @@ away, archival or closing the window unmounts the panel and loses unsubmitted dr
 host epoch/session cannot see another scope's local recovery. This adds no reads beyond the
 existing mount/selection read and explicit Refresh; it adds no persistence, retry, rebind or
 submission route.
+After an answer is captured, the panel exposes its **original immutable action** separately
+from those discardable local drafts: full captured freeform text, question/choice indexes and
+original host epoch, session, complete handle and action ID remain inspectable during pending
+and uncertain transport, including failed or changed list reads and same-host panel remount.
+Question/choice wording is not stored in that action and is never invented from a later head.
+Discarding a local draft cannot remove or acknowledge a submitted answer. An actual failed
+list read is reported as failed, not as a still-pending refresh; neither state permits stale
+submission. Archived scopes continue using their existing read-only recovery gate.
 
 Original actions survive selection changes and panel remounts. An eight-second timeout permanently
 marks the original transport result uncertain and prevents competing actions; it is not proof of

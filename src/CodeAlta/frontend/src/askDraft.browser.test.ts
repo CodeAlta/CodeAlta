@@ -144,6 +144,8 @@ test("mounted production ask editor retains only exact validated drafts through 
     await evaluate(`window.askFixture.fail()`);
     assert.equal(await waitFor(`document.querySelectorAll('.ask-draft-recovery').length===3 &&
       !document.querySelector('[aria-label="Owned asks"] textarea')`), 'ready', 'failed read retains old drafts only as read-only recovery');
+    assert.equal(await evaluate(`document.querySelector('[aria-label="Owned asks"]').textContent.includes('Ask refresh pending')`), false,
+      'a settled failed read must not be labeled pending, although its old page remains unusable');
     assert.equal(await evaluate(`document.querySelectorAll('.ask-draft-recovery')[2].querySelector('pre').textContent`), 'Third draft');
     await click('Discard local draft…');
     assert.equal(await evaluate(`document.querySelectorAll('.ask-draft-recovery').length`), 3, 'discard requires confirmation');
@@ -169,29 +171,77 @@ test("mounted production ask editor retains only exact validated drafts through 
     assert.equal(await waitFor(`window.askFixture.answers.length===1`), 'ready');
     assert.equal(await evaluate(`JSON.stringify(window.askFixture.answers[0].action.answers)`),
       JSON.stringify([{questionIndex:0,selectedChoiceIndexes:[0],freeformText:'Only fresh answer should submit'}]));
+    assert.equal(await evaluate(`[...document.querySelectorAll('[aria-label="Owned asks"] textarea, [aria-label="Owned asks"] pre')]
+      .some(el=>(el.value ?? el.textContent).includes('Only fresh answer should submit'))`), true,
+      'the exact submitted answer must remain inspectable while its original waiter is pending');
+    const captured = '[aria-label="Captured original ask answer"]';
+    assert.equal(await evaluate(`JSON.stringify((() => {const card=document.querySelector(${JSON.stringify(captured)});
+      return {text:card.querySelector('pre').textContent, indexes:card.textContent.includes('Question index 0 · selected choice indexes: 0'),
+        host:card.textContent.includes(window.askFixture.epoch),session:card.textContent.includes('session-one'),
+        operation:card.textContent.includes(${JSON.stringify(handle.operationId)}),
+        runtime:card.textContent.includes(${JSON.stringify(handle.runtimeInstanceId)}),
+        attachment:card.textContent.includes('attachment 12'),provider:card.textContent.includes('fixture-provider'),
+        run:card.textContent.includes('run-one'),ask:card.textContent.includes(${JSON.stringify(handle.askId)}),
+        generation:card.textContent.includes('generation 0'),action:card.textContent.includes(window.askFixture.answers[0].action.actionId),
+        inventedWording:card.textContent.includes('Which option?')};})())`), JSON.stringify({
+      text:'Only fresh answer should submit',indexes:true,host:true,session:true,operation:true,runtime:true,
+      attachment:true,provider:true,run:true,ask:true,generation:true,action:true,inventedWording:false
+    }), 'only immutable action fields, not refreshed question wording, supply captured owner evidence');
+    await click('Refresh asks');
+    assert.equal(await waitFor(`window.askFixture.requests.length===10`), 'ready');
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(captured)}+' pre').textContent`), 'Only fresh answer should submit');
+    await evaluate(`window.askFixture.page(${JSON.stringify(head)})`);
+    assert.equal(await waitFor(`document.querySelector(${JSON.stringify(captured)}+' pre')?.textContent==='Only fresh answer should submit'`), 'ready');
     await click('Answer original ask'); await click('Cancel original ask');
     assert.equal(await evaluate(`window.askFixture.answers.length+window.askFixture.cancellations.length`), 1,
       'pending owner excludes a competing answer/cancel');
     await evaluate(`window.askFixture.failAnswer()`);
     assert.equal(await waitFor(`document.querySelector('[aria-label="Owned asks"]')?.textContent.includes('uncertain')`), 'ready');
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(captured)}+' pre').textContent`), 'Only fresh answer should submit');
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(captured)}).textContent.includes('Transport uncertain')`), true);
     await click('Answer original ask'); await click('Cancel original ask');
     assert.equal(await evaluate(`window.askFixture.answers.length+window.askFixture.cancellations.length`), 1,
       'uncertain original answer is not retried by a refreshed editor');
+    await click('Refresh asks');
+    assert.equal(await waitFor(`window.askFixture.requests.length===11`), 'ready');
+    await evaluate(`window.askFixture.page(${JSON.stringify(changed)})`);
+    assert.equal(await waitFor(`document.querySelector('[aria-label="Owned asks"] legend')?.textContent.includes('33333333')`), 'ready');
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(captured)}+' pre').textContent`), 'Only fresh answer should submit');
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(captured)}).textContent.includes('Changed immutable question shape')`), false,
+      'replacement question wording cannot be invented in the original action evidence');
+    await click('Refresh asks');
+    assert.equal(await waitFor(`window.askFixture.requests.length===12`), 'ready');
+    await evaluate(`window.askFixture.page(null)`);
+    assert.equal(await waitFor(`!document.querySelector('[aria-label="Owned asks"] fieldset')`), 'ready');
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(captured)}+' pre').textContent`), 'Only fresh answer should submit');
+    assert.equal(await evaluate(`document.querySelector('[aria-label="Owned asks"]').textContent.includes('Ask refresh pending')`), false);
+    await click('Refresh asks');
+    assert.equal(await waitFor(`window.askFixture.requests.length===13`), 'ready');
+    await evaluate(`window.askFixture.fail()`);
+    assert.equal(await waitFor(`document.querySelector('[aria-label="Owned asks"]')?.textContent.includes('Ask read failed')`), 'ready');
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(captured)}+' pre').textContent`), 'Only fresh answer should submit');
+    assert.equal(await evaluate(`document.querySelector('[aria-label="Owned asks"]').textContent.includes('Ask refresh pending')`), false);
+    assert.equal(await evaluate(`window.askFixture.answers.length+window.askFixture.cancellations.length`), 1,
+      'read/disclosure never readmits a captured answer');
     const cancelHead = {...head,handle:{...handle,askId:'44444444-4444-4444-8444-444444444444'}};
     await click('Refresh asks');
-    assert.equal(await waitFor(`window.askFixture.requests.length===10`), 'ready');
+    assert.equal(await waitFor(`window.askFixture.requests.length===14`), 'ready');
     await evaluate(`window.askFixture.page(${JSON.stringify(cancelHead)})`);
     assert.equal(await waitFor(`document.querySelector('[aria-label="Owned asks"] legend')?.textContent.includes('44444444')`), 'ready');
     await write('Local draft before session replacement');
     await evaluate(`window.askFixture.scope('session-other')`);
-    assert.equal(await waitFor(`window.askFixture.requests.length===11`), 'ready');
+    assert.equal(await waitFor(`window.askFixture.requests.length===15`), 'ready');
     assert.equal(await evaluate(`document.querySelectorAll('.ask-draft-recovery').length`), 0,
       'local recovery stays private to the original session');
+    assert.equal(await evaluate(`!!document.querySelector(${JSON.stringify(captured)})`), false,
+      'original answer is not exposed in another session');
     await evaluate(`window.askFixture.page(null);window.askFixture.scope('session-one')`);
-    assert.equal(await waitFor(`window.askFixture.requests.length===12`), 'ready');
+    assert.equal(await waitFor(`window.askFixture.requests.length===16`), 'ready');
     await evaluate(`window.askFixture.page(${JSON.stringify(cancelHead)})`);
     assert.equal(await waitFor(`[...document.querySelectorAll('.ask-draft-recovery pre')]
       .some(el=>el.textContent==='Local draft before session replacement')`), 'ready');
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(captured)}+' pre').textContent`), 'Only fresh answer should submit',
+      'app-owned action survives panel scope changes independently of the local draft');
     assert.equal(await evaluate(`document.querySelector('[aria-label="Owned asks"] textarea').value`), '',
       'scope round-trip does not silently reactivate the detached local draft');
     await write('Unsent when cancel was captured');
@@ -211,20 +261,25 @@ test("mounted production ask editor retains only exact validated drafts through 
     assert.equal(await evaluate(`window.askFixture.cancellations.length`), 1);
     assert.equal(await evaluate(`document.querySelector('[aria-label="Owned asks"]').textContent.includes('Original cancel')`), true,
       'discarding the local draft cannot acknowledge an uncertain owner action');
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(captured)}+' pre').textContent`), 'Only fresh answer should submit',
+      'local discard cannot erase separate immutable answer evidence');
     const malformedHead = {...head, handle:{...handle,askId:'55555555-5555-4555-8555-555555555555'}};
     await click('Refresh asks');
-    assert.equal(await waitFor(`window.askFixture.requests.length===13`), 'ready');
+    assert.equal(await waitFor(`window.askFixture.requests.length===17`), 'ready');
     await evaluate(`window.askFixture.page(${JSON.stringify(malformedHead)})`);
     assert.equal(await waitFor(`document.querySelector('[aria-label="Owned asks"] legend')?.textContent.includes('55555555')`), 'ready');
     await write('Retained after malformed read');
     await click('Refresh asks');
-    assert.equal(await waitFor(`window.askFixture.requests.length===14`), 'ready');
+    assert.equal(await waitFor(`window.askFixture.requests.length===18`), 'ready');
     await evaluate(`window.askFixture.page(${JSON.stringify({...malformedHead, request:{questions:[{...question,choices:[],freeform:null}]}})})`);
     assert.equal(await waitFor(`[...document.querySelectorAll('.ask-draft-recovery pre')]
       .some(el=>el.textContent==='Retained after malformed read')`), 'ready');
     assert.equal(await evaluate(`!document.querySelector('[aria-label="Owned asks"] textarea')`), true);
+    assert.equal(await evaluate(`document.querySelector('[aria-label="Owned asks"]').textContent.includes('Ask refresh pending')`), false,
+      'a settled malformed read blocks mutations but is not pending');
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(captured)}+' pre').textContent`), 'Only fresh answer should submit');
     await click('Refresh asks');
-    assert.equal(await waitFor(`window.askFixture.requests.length===15`), 'ready');
+    assert.equal(await waitFor(`window.askFixture.requests.length===19`), 'ready');
     await evaluate(`window.askFixture.page(null,{epoch:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'})`);
     assert.equal(await waitFor(`document.querySelector('[aria-label="Owned asks"]')?.textContent.includes('Host identity changed')`), 'ready');
     assert.equal(await evaluate(`[...document.querySelectorAll('.ask-draft-recovery pre')]
@@ -237,18 +292,24 @@ test("mounted production ask editor retains only exact validated drafts through 
       `${width}/${theme} read-only recovery remains bounded`);
     }
     await evaluate(`window.askFixture.scope('session-other')`);
-    assert.equal(await waitFor(`window.askFixture.requests.length===16`), 'ready');
+    assert.equal(await waitFor(`window.askFixture.requests.length===20`), 'ready');
     assert.equal(await evaluate(`document.querySelectorAll('.ask-draft-recovery').length`), 0,
       'no old-session text in new scope');
+    assert.equal(await evaluate(`!!document.querySelector(${JSON.stringify(captured)})`), false);
     await evaluate(`window.askFixture.page(null)`);
     await evaluate(`window.askFixture.scope('session-one','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')`);
-    assert.equal(await waitFor(`window.askFixture.requests.length===17`), 'ready');
+    assert.equal(await waitFor(`window.askFixture.requests.length===21`), 'ready');
     assert.equal(await evaluate(`document.querySelectorAll('.ask-draft-recovery').length`), 0, 'no old-epoch text in replacement host');
+    assert.equal(await evaluate(`!!document.querySelector(${JSON.stringify(captured)})`), false, 'no old-epoch action text');
     await evaluate(`window.askFixture.archive(true)`);
     assert.equal(await waitFor(`!!document.querySelector('#archived-ask')`), 'ready');
     assert.equal(await evaluate(`!!document.querySelector('[aria-label="Owned asks"]')`), false);
     assert.equal(await evaluate(`!!document.querySelector('#owned-ask-gate')`), false);
-    assert.equal(await evaluate(`window.askFixture.requests.length`), 17, 'actual archived composer gate cannot start another ask read');
+    assert.equal(await evaluate(`window.askFixture.requests.length`), 21, 'actual archived composer gate cannot start another ask read');
+    await evaluate(`window.askFixture.scope('session-one',window.askFixture.epoch);window.askFixture.archive(false)`);
+    assert.equal(await waitFor(`window.askFixture.requests.length===22`), 'ready');
+    assert.equal(await waitFor(`document.querySelector(${JSON.stringify(captured)}+' pre')?.textContent==='Only fresh answer should submit'`), 'ready',
+      'remounted owned panel projects the app-owned original even without a completed new list read');
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }
