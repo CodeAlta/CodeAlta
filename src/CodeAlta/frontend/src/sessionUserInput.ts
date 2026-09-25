@@ -1,3 +1,5 @@
+import { createOwnerChangeSignal } from "./ownerChangeSignal";
+
 export type InputHandle = Readonly<{ operationId: string; runtimeInstanceId: string; attachmentGeneration: string;
   sessionId: string; runId: string | null; interactionId: string; attemptId: string }>;
 export type InputAnswer = Readonly<{ promptId: string; value: string }>;
@@ -69,6 +71,8 @@ function answersFor(entry: InputEntry, answers: readonly InputAnswer[]): boolean
 export function createUserInputReviewer(list: (r: ListRequest) => Promise<unknown>, resolve: (r: ActionRequest) => Promise<unknown>,
   cancel: (r: Omit<ActionRequest, "answers">) => Promise<unknown>) {
   let original: Original | undefined; let revoked = false; let selected: object | undefined; let notify = () => {};
+  const change = createOwnerChangeSignal();
+  const publish = () => { change.changed(); notify(); };
   // Bounded app-owned authority, not an attempted-ID ledger. Action start and acknowledgment
   // invalidate every retained page and every read admitted before that boundary, across remounts.
   let authority: object = {};
@@ -78,15 +82,17 @@ export function createUserInputReviewer(list: (r: ListRequest) => Promise<unknow
     return !revoked;
   };
   return {
+    subscribe: change.subscribe, getSnapshot: change.getSnapshot,
     blocked: () => revoked || original !== undefined,
     original: () => original ? { kind: original.kind, status: original.status, sessionId: original.request.handle.sessionId, action: original.action } : undefined,
+    readOriginal: () => original ? Object.freeze({ request: original.request, action: original.action, kind: original.kind, status: original.status }) : undefined,
     observeOriginal() { if (original?.kind === "terminal") original.observed = true; return this.original(); },
-    acknowledge() { if (original?.kind !== "terminal" || !original.observed) return false; authority = {}; original = undefined; notify(); return true; },
+    acknowledge() { if (original?.kind !== "terminal" || !original.observed) return false; authority = {}; original = undefined; publish(); return true; },
     forSelection(epoch: string, session: string, signal: AbortSignal, changed: () => void, invalidate: () => void, allowed = () => true) {
       const selection = {}; selected = selection; let page: InputPage | undefined; let reading: Promise<void> | undefined;
       let pageAuthority: object | undefined;
       const current = () => selected === selection && !signal.aborted;
-      notify = () => { if (current()) changed(); };
+      notify = () => { if (current()) { try { changed(); } catch { /* Presentation cannot interrupt original ownership. */ } } };
       const act = (action: "resolve" | "cancel", handle: InputHandle, answers: readonly InputAnswer[]): Promise<void> => {
         if (original) return original.waiter; // Synchronous, global original exclusion, including after remount.
         const entry = pageAuthority === authority ? page?.entries.find(e => inputHandle(handle) && same(e.handle, handle)) : undefined;
@@ -103,10 +109,10 @@ export function createUserInputReviewer(list: (r: ListRequest) => Promise<unknow
               entryOriginal.kind = "terminal"; entryOriginal.status = value.status;
             } else { entryOriginal.kind = "uncertain"; entryOriginal.status = "uncertain"; }
           } catch { entryOriginal.kind = "uncertain"; entryOriginal.status = "uncertain"; }
-          notify();
+          publish();
         });
         const entryOriginal: Original = { request, action, waiter, kind: "pending", status: "pending", observed: false };
-        original = entryOriginal; authority = {}; notify(); return waiter;
+        original = entryOriginal; authority = {}; publish(); return waiter;
       };
       return {
         page: () => pageAuthority === authority ? page : undefined,

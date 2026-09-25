@@ -15,6 +15,10 @@ import { createRuntimeStateReader } from "./runtimeState";
 import { createDraftIndicators } from "./promptDraft";
 import { createNextSendSelectionStore } from "./nextSendSelection";
 import { dispatchWorkspaceShortcut, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
+import { createAskActions, captureAskAction } from "./sessionAsks";
+import { createUserInputReviewer } from "./sessionUserInput";
+import { createPermissionReviewer, type PermissionReviewState } from "./sessionPermissions";
+import type { SessionPermissionCommand, SessionPermissionResolution } from "#neoastra";
 
 const epoch = "12345678-1234-1234-1234-123456789abc";
 const sessions: WorkspaceSession[] = ["one", "two"].map(id => ({ id, title: id, fullTitle: id, fullTitleTruncated: false,
@@ -32,6 +36,18 @@ const steering = createSteeringSubmissions(request => hold("steer", request));
 const compaction = createCompactionSubmissions(request => hold("compact", request));
 const abortRuns = createAbortRunSubmissions(request => hold("cancel", request));
 const queue = createQueueSubmissions(request => hold("queue", request), request => hold("cancelQueue", request));
+const asks = createAskActions(request => hold("answerAsk", request), request => hold("cancelAsk", request));
+const reads: string[] = [];
+const inputHandle = (sessionId: string) => ({ operationId: "33333333-3333-3333-3333-333333333333", runtimeInstanceId: "22222222-2222-2222-2222-222222222222",
+  attachmentGeneration: "5", sessionId, runId: "run-1", interactionId: `input-${sessionId}`, attemptId: "55555555-5555-5555-5555-555555555555" });
+const inputs = createUserInputReviewer(async request => { reads.push(`input:${request.sessionId}`); return { status: "ok", hostEpoch: epoch, sessionId: request.sessionId,
+  entries: [{ handle: inputHandle(request.sessionId), providerId: "fixture", prompts: [{ id: "q", question: "Question", header: null,
+    options: [], allowFreeform: true }] }], hasMore: false }; }, request => hold("resolveInput", request), request => hold("cancelInput", request));
+const permissionEntry: SessionPermissionCommand = { handle: inputHandle("one"), providerId: "fixture",
+  command: "original command", workingDirectory: "C:\\fixture", reason: null };
+const permissions = createPermissionReviewer(async request => { reads.push(`permission:${request.sessionId}`); return { status: "ok" as const, hostEpoch: epoch, sessionId: request.sessionId,
+  entries: request.sessionId === "one" ? [permissionEntry] : [], hasMore: false }; },
+  request => hold("permission", request) as Promise<SessionPermissionResolution>);
 const reminders = createReminderActions(request => hold("createReminder", request), request => hold("deleteReminder", request), undefined,
   request => hold("save", request));
 const runtimeReader = createRuntimeStateReader(async request => ({ status: "ok", hostEpoch: epoch, sessionId: request.sessionId,
@@ -42,8 +58,27 @@ let setArchived: (value: boolean) => void = () => {};
 let setSession: (value: string) => void = () => {};
 let setHost: (value: string | null) => void = () => {};
 let setView: (value: "workspace" | "reminders") => void = () => {};
-const fixture = { calls, archive: (value: boolean) => setArchived(value), session: (value: string) => setSession(value),
+const fixture = { calls, reads, archive: (value: boolean) => setArchived(value), session: (value: string) => setSession(value),
   host: (value: string | null) => setHost(value), view: (value: "workspace" | "reminders") => setView(value),
+  ask: (sessionId: string, kind: "answer" | "cancel") => asks.submit(kind, captureAskAction(epoch, {
+    operationId: "33333333-3333-3333-3333-333333333333", runtimeInstanceId: "22222222-2222-2222-2222-222222222222",
+    attachmentGeneration: "5", providerId: "fixture", sessionId, runId: "run-1",
+    askId: sessionId === "one" ? "66666666-6666-6666-6666-666666666666" : "77777777-7777-7777-7777-777777777777", responseGeneration: "1",
+  }, kind === "answer" ? [{ questionIndex: 0, freeformText: `Original ${sessionId} answer` }] : [],
+  sessionId === "one" ? "88888888-8888-8888-8888-888888888888" : "99999999-9999-9999-9999-999999999999"), () => true),
+  input: async (sessionId: string, action: "resolve" | "cancel") => {
+    const selected = inputs.forSelection(epoch, sessionId, new AbortController().signal, () => {}, () => {});
+    await selected.refresh();
+    void (action === "resolve" ? selected.resolve(inputHandle(sessionId), [{ promptId: "q", value: `Original ${sessionId} input` }])
+      : selected.cancel(inputHandle(sessionId)));
+  },
+  permission: async () => {
+    let ready: PermissionReviewState | undefined;
+    const selected = permissions.forSelection({ expectedHostEpoch: epoch, sessionId: "one" }, new AbortController().signal, state => { ready = state; });
+    await selected.refresh();
+    if (ready?.kind !== "ready") throw new Error("Permission fixture not ready");
+    void selected.decide(ready.entries[0], "allow_once");
+  },
   save: (sessionId: string) => reminders.submit({ epoch, sessionId }, { expectedEpoch: epoch, sessionId,
     reminderId: "reminder-1", editRevision: "7", content: `Saved exact message for ${sessionId}` }, "save"),
   steer: (sessionId: string) => steering.submit({ expectedEpoch: epoch, sessionId, clientRequestId: `steer-${sessionId}`,
@@ -101,7 +136,7 @@ function App() {
       readOnly={<ReadOnlyComposer key={sessionId} sessionId={sessionId} provider="fixture" draftIndicators={drafts}
         onOpenConfiguration={() => {}} reason="Archived project; this session is read-only. Your draft remains saved." />}
       recovery={current ? <ArchivedActionRecovery epoch={epoch} sessionId={sessionId} submissions={submissions}
-        steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} /> : null} />}
+        steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} asks={asks} inputs={inputs} permissions={permissions} /> : null} />}
     {view === "reminders" && <ReminderScopeGate snapshot={snapshot} projectId="project" session={current || undefined}
       epoch={current ? epoch : null} mutationAllowed={capability.canMutate()} canMutate={capability.canMutate}
       read={async request => ({ status: "ok", epoch: request.expectedEpoch, sessionId: request.sessionId,

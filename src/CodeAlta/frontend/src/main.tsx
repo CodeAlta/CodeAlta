@@ -1217,7 +1217,8 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
           readOnly={<ReadOnlyComposer sessionId={session.id} provider={session.providerKey} configuration={configurationSnapshot} onOpenConfiguration={onOpenConfiguration} draftIndicators={draftIndicators}
               reason={archivedScope ? "Archived project; this session is read-only. Your draft remains saved." : undefined} />}
           recovery={ownedHost ? <ArchivedActionRecovery epoch={status!.hostEpoch!} sessionId={session.id} submissions={submissions}
-            steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} /> : null} />
+            steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue}
+            asks={askActions} inputs={inputReviewer} permissions={permissionReviewer} /> : null} />
       </>}
   </div>;
 }

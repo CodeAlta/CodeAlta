@@ -4,13 +4,19 @@ import type { createSteeringSubmissions } from "./sessionSteering";
 import type { createCompactionSubmissions } from "./sessionCompaction";
 import type { createAbortRunSubmissions } from "./sessionAbortRun";
 import type { createQueueSubmissions } from "./sessionQueue";
+import type { createAskActions } from "./sessionAsks";
+import type { createUserInputReviewer } from "./sessionUserInput";
+import type { createPermissionReviewer } from "./sessionPermissions";
+import { ArchivedInteractionRecovery } from "./ArchivedInteractionRecovery";
 
 // Read-only projection of exact app-owned intents. No RPCs, receipt reconciliation or retry controls.
-export function ArchivedActionRecovery({ epoch, sessionId, submissions, steering, compaction, abortRuns, queue }: {
+export function ArchivedActionRecovery({ epoch, sessionId, submissions, steering, compaction, abortRuns, queue, asks, inputs, permissions }: {
   epoch: string; sessionId: string;
   submissions: ReturnType<typeof createOwnedSubmissions>; steering: ReturnType<typeof createSteeringSubmissions>;
   compaction: ReturnType<typeof createCompactionSubmissions>; abortRuns: ReturnType<typeof createAbortRunSubmissions>;
   queue: ReturnType<typeof createQueueSubmissions>;
+  asks: ReturnType<typeof createAskActions>; inputs: ReturnType<typeof createUserInputReviewer>;
+  permissions: ReturnType<typeof createPermissionReviewer>;
 }) {
   useSyncExternalStore(submissions.subscribe, submissions.getSnapshot);
   useSyncExternalStore(steering.subscribe, steering.getSnapshot);
@@ -31,9 +37,10 @@ export function ArchivedActionRecovery({ epoch, sessionId, submissions, steering
   const capturedCompact = compact && matching(compact.request) ? compact : null;
   const capturedCancel = cancel && matching(cancel.request) ? cancel : null;
   const capturedQueue = queued && matching(queued.request) ? queued : null;
-  if (!capturedSend && !capturedSteer && !capturedCompact && !capturedCancel && !capturedQueue && !aborts.length && !cancellations.length) return null;
+  const interactions = <ArchivedInteractionRecovery epoch={epoch} sessionId={sessionId} asks={asks} inputs={inputs} permissions={permissions} />;
+  if (!capturedSend && !capturedSteer && !capturedCompact && !capturedCancel && !capturedQueue && !aborts.length && !cancellations.length) return interactions;
   const state = (inFlight: boolean) => inFlight ? "Original waiter pending" : "Outcome uncertain; original waiter settled";
-  return <section aria-label="Archived owned action recovery" className="archived-action-recovery">
+  return <><section aria-label="Archived owned action recovery" className="archived-action-recovery">
     <h2>Archived session — retained owner evidence (read-only)</h2>
     <p>No new submissions, cancellation, retries or retargeting are available here. This evidence is in this app instance only;
       an admitted action may have completed independently. Inspect receipts outside this archived scope.</p>
@@ -62,5 +69,5 @@ export function ArchivedActionRecovery({ epoch, sessionId, submissions, steering
     {cancellations.map(item => <div key={item.intent.request.targetOperationId}><h3>Queue cancellation · {state(item.inFlight)}</h3>
       <p>Host <code>{epoch}</code> · session <code>{sessionId}</code> · original operation <code>{item.intent.request.targetOperationId}</code>
         · request <code>{item.intent.request.clientRequestId}</code></p></div>)}
-  </section>;
+  </section>{interactions}</>;
 }

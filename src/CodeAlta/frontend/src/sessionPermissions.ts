@@ -1,5 +1,6 @@
 import type { SessionPermissionCommand, SessionPermissionCommandHandle, SessionPermissionResolution,
   SessionPermissionResolveRequest, SessionPermissionsPage, SessionPermissionsRequest } from "#neoastra";
+import { createOwnerChangeSignal } from "./ownerChangeSignal";
 
 export type CommandDecision = "allow_once" | "deny" | "cancel";
 export type PermissionReviewState =
@@ -16,6 +17,7 @@ export type PermissionDecisionObservation = Readonly<{
 }>;
 type RetainedDecision = {
   readonly origin: DecisionOrigin;
+  readonly providerId: string; readonly command: string; readonly workingDirectory: string; readonly reason: string | null;
   readonly controller: AbortController;
   waiter: Promise<SessionPermissionResolution> | null;
   state: PermissionDecisionObservation["state"];
@@ -33,6 +35,7 @@ export function createPermissionReviewer(
   let runtime: string | null = null;
   let reloadCode: string | null = null;
   let retained: RetainedDecision | null = null;
+  const change = createOwnerChangeSignal();
   const latch = (code: string) => {
     // Epoch invalidation is permanent, including when a former selection's reply arrives late.
     if (code === "stale_epoch") reloadCode = code;
@@ -41,6 +44,10 @@ export function createPermissionReviewer(
   const replaceable = () => retained === null
     || ((retained.state === "resolved" || retained.state === "rejected") && retained.observed);
   return {
+    subscribe: change.subscribe, getSnapshot: change.getSnapshot,
+    // Non-acknowledging projection: observeDecision intentionally remains an explicit, gate-releasing action.
+    readOriginal: () => retained && Object.freeze({ origin: retained.origin, providerId: retained.providerId, command: retained.command,
+      workingDirectory: retained.workingDirectory, reason: retained.reason, state: retained.state, code: retained.code }),
     forSelection(request: SessionPermissionsRequest, signal: AbortSignal, publish: (value: PermissionReviewState) => void) {
       // Caller-owned request objects and later selections cannot change captured authority.
       const selectedRequest = Object.freeze({ expectedHostEpoch: request.expectedHostEpoch, sessionId: request.sessionId });
@@ -110,9 +117,11 @@ export function createPermissionReviewer(
           const original: RetainedDecision = {
             origin: Object.freeze({ expectedHostEpoch: selectedRequest.expectedHostEpoch,
               handle: Object.freeze({ ...entry.handle }), decision }),
+            providerId: entry.providerId, command: entry.command, workingDirectory: entry.workingDirectory, reason: entry.reason,
             controller: new AbortController(), waiter: null, state: "pending", code: null, observed: false,
           };
           retained = original; // Synchronous exclusion, before any callback or transport can reenter.
+          change.changed();
           try {
             publish({ kind: "resolving" });
             if (reloadCode) {
@@ -134,6 +143,7 @@ export function createPermissionReviewer(
             }
           } catch { latch("uncertain"); }
           if (reloadCode) { original.state = "error"; original.code = reloadCode; }
+          change.changed();
           // Neither live terminal publication nor mounting acknowledges a result for replacement.
           if (!active()) return;
           if (original.state === "resolved" || original.state === "rejected") publish({ kind: "result", code: original.state });

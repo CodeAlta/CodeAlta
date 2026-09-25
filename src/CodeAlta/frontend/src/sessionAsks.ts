@@ -132,8 +132,9 @@ export function createAskActions(answer: Rpc, cancel: Rpc) {
   const entries = new Map<string, Entry>();
   const observations: Observation[] = []; // Bounded original explicit reads, not an automatic polling loop.
   const listeners = new Set<() => void>();
+  let revision = 0;
   let invalid = false;
-  const publish = () => { for (const listener of listeners) { try { listener(); } catch { /* Presentation cannot change retained evidence. */ } } };
+  const publish = () => { revision++; for (const listener of listeners) { try { listener(); } catch { /* Presentation cannot change retained evidence. */ } } };
   const view = (entry: Entry) => Object.freeze({ request: entry.request, kind: entry.kind, transport: entry.transport, result: entry.result, observed: entry.observed });
   const blocked = (handle: AskHandle) => invalid || [...entries.values()].some(e => e.request.action.handle.askId === handle.askId
     && (e.transport !== "settled" || !e.observed || e.result?.status === "indeterminate" || same(e.request.action.handle, handle)));
@@ -152,6 +153,7 @@ export function createAskActions(answer: Rpc, cancel: Rpc) {
   };
   return {
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    getSnapshot: () => revision,
     get(id: string) { const value = entries.get(id); return value ? view(value) : undefined; },
     forSession(session: string) { return [...entries.values()].filter(e => e.request.action.handle.sessionId === session).map(view); },
     blocked(handle: AskHandle) { return blocked(handle); },

@@ -188,7 +188,14 @@ compaction, observed-run cancellation and Abort/cancel-Queue intents remain visi
 read-only recovery card for the same unique project path, session and host epoch. The Reminders
 view likewise retains exact pending/uncertain Save evidence while disabling Create, Save,
 Delete and panel shortcuts. Neither card sends, retries or retargets an operation; a late
-definite outcome can remove an owner intent. Drafts remain local to the read-only composer,
+  definite outcome can remove an owner intent. Already-admitted Ask answer/cancel, nonsecret
+  provider input and command-permission decisions also show their original host, session, handle,
+  decision, captured text and pending/late result in a read-only archived card. It never lists,
+  observes or acknowledges those owners: in particular, explicitly observing a terminal
+  command-permission decision in the mutable review would enable a fresh review, but this card
+  does not. No archived controls can resolve, cancel or retry an interaction. These records are
+  bounded app-instance evidence, not host execution/completion proof. Drafts remain local to the
+  read-only composer,
 and this does not persist recovery across app reloads. Missing, changed, duplicated, omitted
 and unreadable entries cannot be opened from a stale list. The separate absolute-folder field
 still requires an owned host, preview and explicit trust confirmation to import an arbitrary

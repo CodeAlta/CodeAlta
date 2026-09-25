@@ -257,6 +257,8 @@ test("permission response identity mismatch or transport failure is uncertain an
     const scope = reviewer.forSelection(request, f.controller().signal, value => states.push(value));
     await f.wait(scope.refresh()); const entry = ready(states).entries[0];
     await f.wait(scope.decide(entry, "allow_once")); await f.wait(scope.refresh()); await f.wait(scope.decide(entry, "allow_once"));
+    assert.deepEqual(reviewer.readOriginal()?.state, "error");
+    assert.equal(reviewer.readOriginal()?.code, "uncertain");
     assert.equal(scope.observeDecision()?.state, "error");
     assert.equal(scope.observeDecision()?.code, "uncertain");
     const fresh = reviewer.forSelection(request, f.controller().signal, value => states.push(value));
@@ -267,6 +269,30 @@ test("permission response identity mismatch or transport failure is uncertain an
     assert.deepEqual(states.at(-1), { kind: "error", code: "uncertain", reloadRequired: true });
     assert.equal(JSON.stringify(states).includes("private"), false);
   }
+}));
+
+test("read-only permission snapshot retains command and terminal original without acknowledging its review gate", () => Fixture.run(async f => {
+  const pending = f.gate(resolution()); const states: PermissionReviewState[] = [];
+  let lists = 0, resolves = 0, notices = 0;
+  const reviewer = f.reviewer(async () => { lists++; return page(); }, () => { resolves++; return pending.promise; });
+  reviewer.subscribe(() => { notices++; });
+  const old = reviewer.forSelection(request, f.controller().signal, value => states.push(value));
+  await f.wait(old.refresh()); const entry = ready(states).entries[0];
+  const work = f.keep(old.decide(entry, "allow_once"));
+  assert.equal(reviewer.readOriginal()?.state, "pending");
+  assert.equal(reviewer.readOriginal()?.command, entry.command);
+  assert.equal(reviewer.readOriginal()?.workingDirectory, entry.workingDirectory);
+  const revision = notices;
+  pending.resolve(resolution()); await f.wait(work);
+  assert.equal(notices, revision + 1);
+  assert.equal(reviewer.readOriginal()?.state, "resolved");
+  const next = reviewer.forSelection(request, f.controller().signal, value => states.push(value));
+  await f.wait(next.refresh()); await f.wait(next.decide(entry, "deny"));
+  assert.equal(lists, 1); assert.equal(resolves, 1);
+  assert.equal(reviewer.readOriginal()?.state, "resolved");
+  // Only explicit observation is allowed to unlock fresh review; archived projection does not call it.
+  assert.equal(next.observeDecision()?.state, "resolved");
+  await f.wait(next.refresh()); assert.equal(lists, 2);
 }));
 
 // Replaces historical "detach during decision keeps uncertainty across selections and discards late responses":
