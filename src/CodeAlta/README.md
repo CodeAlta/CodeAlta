@@ -45,6 +45,19 @@ change the selected project/session, draft, requests, pane widths or timeline po
 The TUI's recent-session count, language and command approval policy are **not** configurable
 from this desktop screen; this is not full General/Navigator parity.
 
+**Configuration → Application Logs** (also in the implemented-actions palette) offers an
+explicit **Refresh logs** and a **Wrap lines** toggle. It displays at most 64 newest
+plain-text rows from this desktop process's bounded in-memory capture (128 rows and
+128 KiB estimated UTF-8 payload budget, 2,048 characters per message, and a 48 KiB
+JSON response cap). Older captured entries and response-limited rows are reported;
+long messages are marked truncated. Logging keeps its existing file writer, levels,
+rotation and lifetime, but this screen **never opens log files**: it cannot show earlier
+processes, all file records, or exception attachments/structured properties. If another
+owner initialized logging first, in-memory capture is unavailable and no attempt is made
+to replace that logger; the browser demo also has no desktop capture. No automatic polling, Clear, export, deletion or logging-policy
+controls are provided. Logs may contain sensitive content; this screen renders them as
+inert text locally, without link activation or external requests.
+
 For the real local desktop, build from `src` (the frontend dependency/build switches are shown for
 repeat builds that already have generated contracts and `node_modules`):
 

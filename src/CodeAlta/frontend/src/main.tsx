@@ -1,7 +1,7 @@
 import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  boot, configuration, modelCatalog, promptCatalog, mcpInventory, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
+  boot, configuration, applicationLogs, modelCatalog, promptCatalog, mcpInventory, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionUserInput, type BootStatus,
   type ReminderListRequest,
   type ReminderDetailRequest,
@@ -61,6 +61,7 @@ import { ProjectRailToggle } from "./ProjectRailToggle";
 import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./projectRailVisibility";
 import { useWindowPreferences } from "./windowPreferences";
 import { GeneralSettings } from "./GeneralSettings";
+import { ApplicationLogsPanel } from "./ApplicationLogsPanel";
 import { SessionInfoDialog } from "./SessionInfoDialog";
 import { restoreSessionInfoFocus, selectedSessionInfoAvailable, selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
 import { CommandPalette } from "./CommandPalette";
@@ -72,7 +73,7 @@ type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; e
   latestReady: () => boolean; latest: () => void; cancelLatest: () => void }>;
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
-type View = "workspace" | "configuration" | "providers" | "models" | "prompts" | "reminders" | "mcp";
+type View = "workspace" | "configuration" | "providers" | "models" | "prompts" | "reminders" | "mcp" | "logs";
 const paneLayoutStorageKey = "codealta.desktop.panes.v1";
 
 function App() {
@@ -862,7 +863,9 @@ function App() {
     {view === "configuration"
       ? <ConfigurationPanel status={status} selectedSession={selectedSession} configurationState={configurationState}
           preferences={{ theme, setTheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices }}
-          onOpenProviders={() => navigate("providers")} onOpenModels={() => navigate("models")} onOpenPrompts={() => navigate("prompts")} />
+          onOpenProviders={() => navigate("providers")} onOpenModels={() => navigate("models")} onOpenPrompts={() => navigate("prompts")} onOpenLogs={() => navigate("logs")} />
+      : view === "logs" ? <ApplicationLogsPanel read={demoMode
+          ? async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0 }) : applicationLogs.read} />
       : view === "providers" ? <ProvidersPanel epoch={owned ? status!.hostEpoch : null}
           read={modelCatalog.providers} probe={modelCatalog.probe} catalogProviders={configurationState.snapshot?.providers} holds={providerProbeHolds}
           onOpenModels={() => navigate("models")} />
@@ -1248,7 +1251,7 @@ function DemoConversation({ session }: { session: WorkspaceSession }) {
   </section>;
 }
 
-function ConfigurationPanel({ status, selectedSession, configurationState, preferences, onOpenProviders, onOpenModels, onOpenPrompts }: {
+function ConfigurationPanel({ status, selectedSession, configurationState, preferences, onOpenProviders, onOpenModels, onOpenPrompts, onOpenLogs }: {
   status: BootStatus | undefined;
   selectedSession: WorkspaceSession | undefined;
   configurationState: { snapshot?: ConfigurationSnapshot; error?: string };
@@ -1256,6 +1259,7 @@ function ConfigurationPanel({ status, selectedSession, configurationState, prefe
   onOpenModels: () => void;
   onOpenProviders: () => void;
   onOpenPrompts: () => void;
+  onOpenLogs: () => void;
 }) {
   const inventory = configurationState.snapshot;
   const [scope, setScope] = useState<ConfigurationScope>("all");
@@ -1274,6 +1278,7 @@ function ConfigurationPanel({ status, selectedSession, configurationState, prefe
       </aside>
       <div className="settings-grid">
       {visible.has("appearance") && <GeneralSettings {...preferences} />}
+      {visible.has("logs") && <section className="settings-card"><div className="settings-icon"><AppIcon name="history" size={19} /></div><div><h2>Application Logs</h2><p>Read a bounded snapshot of this process's in-memory desktop logs. No log files are opened.</p><button type="button" className="quiet-button" onClick={onOpenLogs}>Open application logs</button></div></section>}
       {visible.has("providers") && <section className="settings-card"><div className="settings-icon"><AppIcon name="model" size={19} /></div><div><h2>Providers</h2><p>Current session provider: <strong>{selectedSession?.providerKey ?? "not recorded"}</strong>.</p>
         <button type="button" className="quiet-button" onClick={onOpenProviders}>Open provider management</button>
         {configurationState.error && <p className="error-text">{configurationState.error}</p>}

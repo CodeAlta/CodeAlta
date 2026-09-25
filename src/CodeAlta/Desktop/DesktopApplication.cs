@@ -10,7 +10,7 @@ using XenoAtom.Logging;
 
 namespace CodeAlta.Desktop;
 
-internal sealed class DesktopApplication(DesktopLaunchOptions options)
+internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLogCapture? logCapture)
 {
     private CodeAltaSingleInstanceGuard? _lease;
     private Task<CodeAltaHost>? _hostCreation;
@@ -21,23 +21,26 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
     internal int ExitCode { get; private set; } = 1;
 
     internal static int Run(DesktopLaunchOptions options)
-        => Run(options, RunCore);
+        => RunWithCapture(options, RunCore);
 
     // Initialize before any host/provider acquisition. A failed/unconfirmed lifetime can still
     // own callbacks, so leave its logger available until process exit rather than breaking them.
     internal static int Run(DesktopLaunchOptions options, Func<DesktopLaunchOptions, int> run)
+        => RunWithCapture(options, (launch, _) => run(launch));
+
+    private static int RunWithCapture(DesktopLaunchOptions options, Func<DesktopLaunchOptions, DesktopLogCapture?, int> run)
     {
-        var ownsLogging = DesktopLogging.Initialize(options.DataRoot);
-        var result = run(options);
-        if (ownsLogging && result == 0) LogManager.Shutdown();
+        var capture = DesktopLogging.Initialize(options.DataRoot);
+        var result = run(options, capture);
+        if (capture is not null && result == 0) LogManager.Shutdown();
         return result;
     }
 
-    private static int RunCore(DesktopLaunchOptions options)
+    private static int RunCore(DesktopLaunchOptions options, DesktopLogCapture? capture)
     {
-        if (options.Owned is not null) return RunOwned(options);
+        if (options.Owned is not null) return RunOwned(options, capture);
         Directory.CreateDirectory(options.DataRoot);
-        var desktop = new DesktopApplication(options);
+        var desktop = new DesktopApplication(options, capture);
         var result = NeoApplication.Run(new NeoApplicationOptions
         {
             ApplicationName = "CodeAlta",
@@ -51,9 +54,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
         uri.IsAbsoluteUri && uri.Scheme == "app" && uri.Host == "codealta" && uri.Port == -1 &&
         string.IsNullOrEmpty(uri.UserInfo) && uri.AbsolutePath == "/index.html" && string.IsNullOrEmpty(uri.Query);
 
-    private static int RunOwned(DesktopLaunchOptions options)
+    private static int RunOwned(DesktopLaunchOptions options, DesktopLogCapture? capture)
     {
-        var desktop = new DesktopApplication(options);
+        var desktop = new DesktopApplication(options, capture);
         try
         {
             desktop._lease = CodeAltaSingleInstanceGuard.Acquire(Path.Combine(options.CatalogRoot!, "alta.lock"));
@@ -183,6 +186,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
                     builder.AddBootService(new BootService(epoch, options.ReviewOwnedCommandPermissions, options.EnableOwnedUserInput));
                     builder.AddWorkspaceService(workspace);
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime));
+                    builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
                     providers = new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch);
                     builder.AddModelCatalogService(providers);
                     builder.AddPromptCatalogService(new PromptCatalogService(host.Commands, epoch));
@@ -323,6 +327,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
             builder.AddBootService(new BootService());
             builder.AddWorkspaceService(new WorkspaceService(options.CatalogRoot));
             builder.AddConfigurationService(new ConfigurationService(options.CatalogRoot!));
+            builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
             builder.AddModelCatalogService(new ModelCatalogService());
             builder.AddPromptCatalogService(new PromptCatalogService());
             await using var rpc = builder.Build();

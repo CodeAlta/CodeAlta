@@ -5,10 +5,10 @@ namespace CodeAlta.Desktop;
 
 internal static class DesktopLogging
 {
-    internal static bool Initialize(string dataRoot)
+    internal static DesktopLogCapture? Initialize(string dataRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataRoot);
-        if (LogManager.IsInitialized) return false;
+        if (LogManager.IsInitialized) return null;
         var directory = Path.Combine(dataRoot, "logs");
         Directory.CreateDirectory(directory);
         var config = new LogManagerConfig
@@ -16,6 +16,8 @@ internal static class DesktopLogging
             AsyncErrorHandler = static failure => Console.Error.WriteLine($"[CodeAlta desktop logging] {failure.Message}"),
         };
         config.RootLogger.MinimumLevel = LogLevel.Warn;
+        var capture = new DesktopLogCapture();
+        config.RootLogger.Writers.Add(new DesktopCaptureLogWriter(capture));
         config.RootLogger.Writers.Add(new FileLogWriter(new FileLogWriterOptions(Path.Combine(directory, "codealta.log"))
         {
             AutoFlush = true, FileSizeLimitBytes = 10L * 1024 * 1024,
@@ -24,6 +26,6 @@ internal static class DesktopLogging
         }));
         config.Loggers.Add("CodeAlta", LogLevel.Info);
         LogManager.InitializeForAsync(config);
-        return true;
+        return capture;
     }
 }

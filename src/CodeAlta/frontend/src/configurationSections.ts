@@ -1,5 +1,5 @@
 export type ConfigurationScope = "all" | "general" | "agent" | "extensions";
-export type ConfigurationSectionId = "appearance" | "providers" | "prompts" | "skills" | "plugins" | "about";
+export type ConfigurationSectionId = "appearance" | "logs" | "providers" | "prompts" | "skills" | "plugins" | "about";
 
 type ConfigurationSection = Readonly<{
   id: ConfigurationSectionId;
@@ -9,6 +9,7 @@ type ConfigurationSection = Readonly<{
 
 const sections: readonly ConfigurationSection[] = [
   { id: "appearance", scope: "general", searchText: "appearance theme dark light display navigator project sort recent name desktop rail collapse visibility" },
+  { id: "logs", scope: "general", searchText: "application logs diagnostic current process in memory refresh" },
   { id: "providers", scope: "general", searchText: "providers accounts models enabled default reasoning" },
   { id: "prompts", scope: "agent", searchText: "agent prompts instructions system" },
   { id: "skills", scope: "agent", searchText: "skills project global activation" },

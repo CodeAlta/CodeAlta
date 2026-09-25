@@ -46,7 +46,7 @@ function App() {
   const [session, setSession] = useState("one");
   const [epoch, setEpoch] = useState<string | null>("e1");
   const [project, setProject] = useState<string | null>("project");
-  const [view, setView] = useState<"workspace" | "reminders" | "mcp" | "configuration" | "providers" | "models" | "prompts">("workspace");
+  const [view, setView] = useState<"workspace" | "reminders" | "mcp" | "configuration" | "providers" | "models" | "prompts" | "logs">("workspace");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const captured = useRef<PaletteContext | null>(null);
   const pending = useRef<{ action: PaletteAction; context: PaletteContext } | null>(null);

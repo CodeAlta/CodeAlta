@@ -299,7 +299,7 @@ test("mounted workspace dispatches reminders, session info and implemented palet
     await evaluate("document.querySelector('[aria-label=\"Open command palette\"]').click()");
     assert.equal(await wait("!!document.querySelector('.command-palette[open]')"), "ready");
     await evaluate("document.querySelector('#palette-search').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}))");
-    assert.equal(await evaluate("document.querySelector('.command-palette [aria-selected=true]').textContent"), "Providers");
+    assert.equal(await evaluate("document.querySelector('.command-palette [aria-selected=true]').textContent"), "Application Logs");
     await evaluate("document.querySelector('#palette-search').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',isComposing:true,bubbles:true,cancelable:true}))");
     assert.equal(await evaluate("!!document.querySelector('.command-palette')"), true);
     const paletteColors: string[] = [];
@@ -349,17 +349,17 @@ test("mounted workspace dispatches reminders, session info and implemented palet
       assert.equal(await evaluate(scrollOutsideResults), outerScroll);
       assert.equal(await evaluate("document.activeElement?.id"), "palette-search");
       await evaluate(`(${searchPalette})('')`);
-      assert.equal(await wait("document.querySelectorAll('#palette-results [role=option]').length === 8"), "ready");
+      assert.equal(await wait("document.querySelectorAll('#palette-results [role=option]').length === 9"), "ready");
       await evaluate("document.querySelector('#palette-search').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}))");
       assert.equal(await wait("document.querySelector('#palette-search')?.getAttribute('aria-activedescendant') === 'palette-option-focusPrompt'"), "ready");
       assert.equal(await evaluate(activeVisible), true);
       await evaluate("window.reminderNavigationFixture.host('e2')");
-      assert.equal(await wait("document.querySelectorAll('#palette-results [role=option]').length === 6"), "ready");
+      assert.equal(await wait("document.querySelectorAll('#palette-results [role=option]').length === 7"), "ready");
       assert.equal(await evaluate(activeVisible), true);
       assert.equal(await evaluate(scrollOutsideResults), outerScroll);
       assert.equal(await evaluate("!!document.querySelector('.reminder-page')"), false);
       await evaluate("window.reminderNavigationFixture.host('e1')");
-      assert.equal(await wait("document.querySelectorAll('#palette-results [role=option]').length === 8"), "ready");
+      assert.equal(await wait("document.querySelectorAll('#palette-results [role=option]').length === 9"), "ready");
       assert.equal(await evaluate(activeVisible), true);
       assert.equal(await evaluate(scrollOutsideResults), outerScroll);
       assert.equal(await evaluate("document.activeElement?.id"), "palette-search");
@@ -369,7 +369,7 @@ test("mounted workspace dispatches reminders, session info and implemented palet
     assert.equal(await wait("document.querySelectorAll('#palette-results [role=option]').length === 1"), "ready");
     await evaluate(`(${searchPalette})('')`);
     assert.equal(await wait("document.querySelectorAll('#palette-results [role=option]').length >= 7"), "ready");
-    for (let index = 0; index < 5; index++)
+    for (let index = 0; index < 6; index++)
       await evaluate("document.querySelector('#palette-search').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}))");
     assert.equal(await wait("document.querySelector('#palette-search')?.getAttribute('aria-activedescendant') === 'palette-option-reminders'"), "ready");
     assert.equal(await evaluate(activeVisible), true);

@@ -278,6 +278,15 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .settings-card .settings-checkbox { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer; }
 .settings-card .settings-checkbox input { flex: none; }
 .settings-card p.notice { color: var(--text); }
+.logs-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 18px; }
+.logs-toolbar button { display: inline-flex; align-items: center; gap: 7px; }
+.logs-toolbar label { display: inline-flex; align-items: center; gap: 6px; }
+.logs-rows { padding: 0; margin: 0; list-style: none; border: 1px solid var(--line); border-radius: 10px; max-height: min(60vh, 720px); overflow: auto; background: var(--panel); }
+.logs-rows li { padding: 10px 14px; border-bottom: 1px solid var(--line); min-width: 0; }
+.logs-rows li:last-child { border-bottom: 0; }
+.logs-metadata { display: block; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.logs-rows pre { margin: 6px 0 0; font: inherit; white-space: pre; overflow-wrap: normal; }
+.logs-wrap pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .settings-icon { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); color: var(--accent); font-weight: 700; }
 .inventory-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; padding: 9px 0; border-top: 1px solid var(--line); }
 .inventory-row > span:first-child { min-width: 0; display: grid; gap: 3px; }
