@@ -84,6 +84,18 @@ test("mounted saved-project dialog preserves exact read-only navigation and isol
     await evaluate("window.shellEvents=0; window.addEventListener('keydown',()=>window.shellEvents++)");
     await open();
     assert.equal(await evaluate("document.activeElement?.id"), "saved-project-filter");
+    await edit("#project-folder-path", "C:\\Work\\Al");
+    assert.equal(await evaluate("window.openProjectFixture.completionCalls.length"), 0);
+    await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').click()");
+    assert.equal(await wait("window.openProjectFixture.completionCalls.length===1"), "ready");
+    assert.equal(await evaluate("JSON.stringify(window.openProjectFixture.completionCalls[0].request)"),
+      JSON.stringify({ expectedHostEpoch: "12345678-1234-1234-1234-123456789abc", directoryPath: "C:\\Work\\", prefix: "Al" }));
+    await evaluate(`window.openProjectFixture.completionCalls[0].resolve({status:'complete',hostEpoch:'12345678-1234-1234-1234-123456789abc',
+      directoryPath:'C:\\\\Work\\\\',prefix:'Al',directories:['C:\\\\Work\\\\Alpha'],entriesVisited:1,omittedUnsafeEntries:false})`);
+    assert.equal(await wait("document.querySelectorAll('#folder-suggestions [role=option]').length===1"), "ready");
+    await evaluate("document.querySelector('#folder-suggestions [role=option]').click()");
+    assert.equal(await evaluate("document.querySelector('#project-folder-path').value"), "C:\\Work\\Alpha");
+    assert.equal(await evaluate("window.openProjectFixture.calls.length"), 0);
     assert.equal(await evaluate("window.shellEvents"), 0);
     assert.equal(await evaluate("[...document.querySelectorAll('#saved-project-results [role=option] strong')].map(x=>x.textContent).join(',')"), "Alpha,Beta,Legacy (archived, read-only)");
     await edit("#saved-project-filter", "C:/catalog/bet");
@@ -178,10 +190,13 @@ test("mounted saved-project dialog preserves exact read-only navigation and isol
     assert.equal(await wait("document.body.innerText.includes('Captured import pending')"), "ready");
     assert.equal(await evaluate("document.body.innerText.includes('12345678-1234-1234-1234-123456789abc') && document.body.innerText.includes('C:/different') && document.body.innerText.includes('C:/normalized')"), true);
     assert.equal(await evaluate("document.querySelector('#saved-project-results button').disabled"), true);
+    assert.equal(await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').disabled"), true);
+    assert.equal(await evaluate("window.openProjectFixture.completionCalls.length"), 1);
     await evaluate("document.querySelector('#saved-project-results button').click()");
     await press("Enter", "Enter", 13);
     assert.equal(await evaluate("document.querySelector('#selection').textContent"), "one / session-one");
     assert.equal(await evaluate("window.openProjectFixture.calls.length"), 2);
+    assert.equal(await evaluate("window.openProjectFixture.completionCalls.length"), 1);
     await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Cancel').click()");
     assert.equal(await wait("!document.querySelector('#saved-project-filter')"), "ready");
     await evaluate("window.openProjectFixture.calls[1].reject(new Error('lost result'))");
@@ -189,6 +204,7 @@ test("mounted saved-project dialog preserves exact read-only navigation and isol
     assert.equal(await wait("document.body.innerText.includes('Captured import uncertain')"), "ready");
     assert.equal(await evaluate("document.body.innerText.includes('no navigation, new request or retry')"), true);
     assert.equal(await evaluate("document.querySelector('#saved-project-results button').disabled"), true);
+    assert.equal(await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').disabled"), true);
     await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Refresh projects').click()");
     assert.equal(await wait("document.body.innerText.includes('snapshot is truncated')"), "ready");
     assert.equal(await evaluate("document.body.innerText.includes('Captured import uncertain')"), true);
@@ -231,6 +247,135 @@ test("mounted saved-project dialog preserves exact read-only navigation and isol
     await press("Enter", "Enter", 13);
     assert.equal(await evaluate("document.querySelector('#selection').textContent"), "one / session-one");
     assert.equal(await evaluate("window.openProjectFixture.calls.length"), 2);
+    await command("Page.navigate", { url: pathToFileURL(page).href });
+    assert.equal(await wait("window.openProjectFixture?.completionCalls.length === 0 && !!document.querySelector('button')"), "ready");
+    await evaluate("window.openProjectFixture.host(false)");
+    await open();
+    assert.equal(await evaluate("!!document.querySelector('#project-folder-path')"), false);
+    assert.equal(await evaluate("window.openProjectFixture.completionCalls.length"), 0);
+    await press("Escape", "Escape", 27);
+    await evaluate("window.openProjectFixture.demo=true; window.openProjectFixture.host(true)");
+    await open();
+    await edit("#project-folder-path", "C:\\Work\\Al");
+    assert.equal(await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').disabled"), true);
+    assert.equal(await evaluate("window.openProjectFixture.completionCalls.length"), 0);
+    await press("Escape", "Escape", 27);
+    await evaluate("window.openProjectFixture.demo=false; window.openProjectFixture.host(false)");
+    await evaluate("window.openProjectFixture.host(true)");
+    await open();
+    for (const path of ["relative", "C:\\", "\\\\server\\share\\", "C:\\Work\\..\\Al"]) {
+      await edit("#project-folder-path", path);
+      await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').click()");
+      assert.equal(await wait("!!document.querySelector('#folder-suggestion-status')"), "ready");
+      assert.equal(await evaluate("window.openProjectFixture.completionCalls.length"), 0);
+    }
+    await edit("#project-folder-path", "C:\\Work\\Al");
+    await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').click()");
+    assert.equal(await wait("window.openProjectFixture.completionCalls.length===1"), "ready");
+    assert.equal(await evaluate("JSON.stringify(window.openProjectFixture.completionCalls[0].request)"),
+      JSON.stringify({ expectedHostEpoch: "12345678-1234-1234-1234-123456789abc", directoryPath: "C:\\Work\\", prefix: "Al" }));
+    await edit("#project-folder-path", "C:\\Work\\AX");
+    await edit("#project-folder-path", "C:\\Work\\Al");
+    assert.equal(await evaluate("window.openProjectFixture.completionCalls[0].signal.aborted"), true);
+    const completionResponse = (directories: string[], status = "complete", extra: object = {}) => ({ status,
+      hostEpoch: "12345678-1234-1234-1234-123456789abc", directoryPath: "C:\\Work\\", prefix: "Al", directories,
+      entriesVisited: directories.length, omittedUnsafeEntries: false, ...extra });
+    const settle = (index: number, response: object) => evaluate(`window.openProjectFixture.completionCalls[${index}].resolve(${JSON.stringify(response)})`);
+    await settle(0, completionResponse(["C:\\Work\\Alpha"]));
+    assert.equal(await evaluate("!!document.querySelector('#folder-suggestions')"), false); // ABA edit rejects the late original.
+    await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').click()");
+    assert.equal(await wait("window.openProjectFixture.completionCalls.length===2"), "ready");
+    await settle(1, completionResponse([], "busy"));
+    assert.equal(await wait("document.body.innerText.includes('previous directory read is still in progress')"), "ready");
+    assert.equal(await evaluate("window.openProjectFixture.completionCalls.length"), 2); // No automatic retry.
+    await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').click()");
+    assert.equal(await wait("window.openProjectFixture.completionCalls.length===3"), "ready");
+    await settle(2, completionResponse(["C:\\Elsewhere\\Alpha"]));
+    assert.equal(await wait("document.body.innerText.includes('invalid or foreign response')"), "ready");
+    assert.equal(await evaluate("!!document.querySelector('#folder-suggestions')"), false);
+    await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').click()");
+    assert.equal(await wait("window.openProjectFixture.completionCalls.length===4"), "ready");
+    await settle(3, completionResponse([], "complete"));
+    assert.equal(await wait("document.body.innerText.includes('No matching folders observed')"), "ready");
+    await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').click()");
+    assert.equal(await wait("window.openProjectFixture.completionCalls.length===5"), "ready");
+    await settle(4, completionResponse(["C:\\Work\\Alpha", "C:\\Work\\Alpine"], "incomplete", { omittedUnsafeEntries: true }));
+    assert.equal(await wait("document.querySelectorAll('#folder-suggestions [role=option]').length===2"), "ready");
+    assert.equal(await evaluate("document.body.innerText.includes('Incomplete observed subset') && document.body.innerText.includes('Unsafe entries were omitted')"), true);
+    for (const theme of ["dark", "light"]) for (const width of [390, 1120]) {
+      await evaluate(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);
+      await command("Emulation.setDeviceMetricsOverride", { width, height: 680, deviceScaleFactor: 1, mobile: false });
+      assert.equal(await evaluate("document.querySelector('.app-dialog').getBoundingClientRect().right <= innerWidth && document.documentElement.scrollWidth <= innerWidth"), true);
+    }
+    await evaluate("document.querySelector('#project-folder-path').focus()");
+    await press("ArrowDown", "ArrowDown", 40);
+    assert.equal(await evaluate("document.activeElement?.getAttribute('role')"), "option");
+    await press("Enter", "Enter", 13, true);
+    await evaluate(`(() => { const option=document.activeElement;
+      option.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',repeat:true,bubbles:true,cancelable:true}));
+      option.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true,cancelable:true})); })()`);
+    assert.equal(await evaluate("document.querySelector('#project-folder-path').value"), "C:\\Work\\Al");
+    await press("ArrowDown", "ArrowDown", 40);
+    assert.equal(await evaluate("document.activeElement?.textContent"), "C:\\Work\\Alpine");
+    await press("Enter", "Enter", 13);
+    assert.equal(await evaluate("document.querySelector('#project-folder-path').value"), "C:\\Work\\Alpine");
+    assert.equal(await evaluate("window.openProjectFixture.calls.length"), 0);
+    assert.equal(await evaluate("document.querySelector('#selection').textContent"), "one / session-one");
+    await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Check folder').click()");
+    assert.equal(await wait("window.openProjectFixture.calls.length===1"), "ready");
+    await evaluate(`window.openProjectFixture.calls[0].resolve({status:'confirmation_required',hostEpoch:'12345678-1234-1234-1234-123456789abc',
+      requestedPath:'C:\\\\Work\\\\Alpine',projectPath:'C:\\\\Work\\\\Alpine',projectId:null})`);
+    assert.equal(await wait("!!document.querySelector('.project-import input[type=checkbox]')"), "ready");
+    await evaluate("document.querySelector('.project-import input[type=checkbox]').click()");
+    assert.equal(await evaluate("document.querySelector('.project-import input[type=checkbox]').checked"), true);
+    await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').click()");
+    assert.equal(await wait("window.openProjectFixture.completionCalls.length===6"), "ready");
+    assert.equal(await evaluate("window.openProjectFixture.completionCalls[5].request.prefix"), "Alpine");
+    await settle(5, completionResponse(["C:\\Work\\AlpineNew"], "complete", { prefix: "Alpine" }));
+    assert.equal(await wait("!!document.querySelector('#folder-suggestions [role=option]')"), "ready");
+    await evaluate("document.querySelector('#folder-suggestions [role=option]').click()");
+    assert.equal(await evaluate("document.querySelector('#project-folder-path').value"), "C:\\Work\\AlpineNew");
+    assert.equal(await evaluate("!!document.querySelector('.project-import input[type=checkbox]')"), false);
+    assert.equal(await evaluate("window.openProjectFixture.calls.length"), 1);
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"Session draft\"]').value"), "preserved draft");
+    await edit("#project-folder-path", "C:\\Work\\Al");
+    await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').click()");
+    assert.equal(await wait("window.openProjectFixture.completionCalls.length===7"), "ready");
+    await evaluate("window.openProjectFixture.session='session-other'; window.openProjectFixture.refresh()");
+    assert.equal(await wait("window.openProjectFixture.completionCalls[6].signal.aborted"), "ready");
+    await settle(6, completionResponse(["C:\\Work\\Alpha"]));
+    assert.equal(await evaluate("!!document.querySelector('#folder-suggestions')"), false);
+    await evaluate("window.openProjectFixture.session='session-one'; window.openProjectFixture.refresh()");
+    await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').click()");
+    assert.equal(await wait("window.openProjectFixture.completionCalls.length===8"), "ready");
+    await evaluate("window.openProjectFixture.host(false)");
+    assert.equal(await wait("window.openProjectFixture.completionCalls[7].signal.aborted"), "ready");
+    await settle(7, completionResponse(["C:\\Work\\Alpha"]));
+    assert.equal(await evaluate("!!document.querySelector('#folder-suggestions')"), false);
+    await evaluate("window.openProjectFixture.host(true)");
+    await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').click()");
+    assert.equal(await wait("window.openProjectFixture.completionCalls.length===9"), "ready");
+    await press("Escape", "Escape", 27);
+    assert.equal(await wait("window.openProjectFixture.completionCalls[8].signal.aborted"), "ready");
+    await open();
+    await settle(8, completionResponse(["C:\\Work\\Alpha"]));
+    assert.equal(await evaluate("!!document.querySelector('#folder-suggestions')"), false);
+    await edit("#project-folder-path", "");
+    await evaluate("document.querySelector('#project-folder-path').focus()");
+    await command("Input.insertText", { text: "C:\\Work\\Al" });
+    assert.equal(await evaluate("document.querySelector('#project-folder-path').value"), "C:\\Work\\Al");
+    assert.equal(await evaluate("window.openProjectFixture.completionCalls.length"), 9);
+    await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').click()");
+    assert.equal(await wait("window.openProjectFixture.completionCalls.length===10"), "ready");
+    await evaluate("window.openProjectFixture.completionCalls[9].reject(new Error('private path detail'))");
+    assert.equal(await wait("document.body.innerText.includes('suggestion wait failed')"), "ready");
+    assert.equal(await evaluate("document.body.innerText.includes('private path detail')"), false);
+    assert.equal(await evaluate("window.openProjectFixture.completionCalls.length"), 10);
+    await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').click()");
+    assert.equal(await wait("window.openProjectFixture.completionCalls.length===11"), "ready");
+    await settle(10, completionResponse(["C:\\Work\\Alpha"], "complete", { prefix: "Other" }));
+    assert.equal(await wait("document.body.innerText.includes('invalid or foreign response')"), "ready");
+    assert.equal(await evaluate("!!document.querySelector('#folder-suggestions')"), false);
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }

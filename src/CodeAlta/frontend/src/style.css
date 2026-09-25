@@ -467,6 +467,9 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .app-dialog #saved-project-results [aria-selected="true"] { background: var(--accent-soft); }
 .project-import { display: grid; justify-items: start; gap: 8px; min-width: 0; overflow-y: auto; margin-top: 10px; }
 .project-import #project-folder-path { width: 100%; min-width: 0; }
+.project-import #folder-suggestions { width: 100%; min-width: 0; min-height: 0; max-height: 180px; }
+.project-import #folder-suggestions button, .project-import #folder-suggestions small { min-width: 0; }
+.project-import #folder-suggestions small { display: block; max-width: 100%; }
 .project-import p { margin: 0; overflow-wrap: anywhere; }
 .project-import label { display: flex; align-items: start; gap: 6px; }
 .project-import label input { margin-top: 2px; }

@@ -1174,6 +1174,10 @@ function App() {
     {dialog === "project" && <OpenProjectDialog snapshot={snapshot} getCurrentSnapshot={() => currentSnapshot.current}
       epoch={owned ? status?.hostEpoch : undefined}
       capability={owned ? mutation?.capability : undefined} opening={projectOpening}
+      allowCompletion={!demoMode}
+      getCurrentEpoch={() => owned ? currentHostEpoch.current ?? undefined : undefined}
+      getCurrentScope={() => ({ projectId: selectedScope.current, sessionId: selectedSessionId.current })}
+      completeDirectory={workspace.completeDirectory}
       onOpen={shown => {
         if (projectOpening.getSnapshot() || currentSnapshot.current !== snapshot || !savedProjectSelection(shown, currentSnapshot.current)) return false;
         selectProject(shown.id); setDialog(null); return true;
