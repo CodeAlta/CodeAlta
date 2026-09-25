@@ -108,8 +108,14 @@ test("production composer usage inspector reads only on intent and fences late/f
     await evaluate(`document.querySelector('${modal} button[aria-label="Close usage inspector"]').click()`);
     await evaluate(`document.querySelector('${trigger}').click()`);
     assert.equal(await wait("window.settingsShellFixture.usageReads.length===5"), true);
-    await evaluate(`document.querySelector('${modal} button[aria-label="Close usage inspector"]').click(); window.settingsShellFixture.usageReads[4].resolve(${observed})`);
+    await evaluate(`window.usageOriginalFrame=requestAnimationFrame; window.usageCloseFrames=[];
+      window.requestAnimationFrame=callback=>{window.usageCloseFrames.push(callback); return 123456;};
+      document.querySelector('${modal} button[aria-label="Close usage inspector"]').click(); window.settingsShellFixture.usageReads[4].resolve(${observed})`);
     assert.equal(await wait(`!document.querySelector('${modal}')`), true);
+    assert.equal(await evaluate(`(() => { window.requestAnimationFrame=window.usageOriginalFrame;
+      const editor=document.querySelector('#session-prompt'); editor.focus();
+      for(const callback of window.usageCloseFrames) callback(performance.now());
+      return document.activeElement===editor; })()`), true, "usage close must not steal a newer composer focus move");
     for (const width of [390, 1120]) for (const theme of ["dark", "light"]) {
       await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
       await evaluate(`document.documentElement.dataset.theme='${theme}'; document.querySelector('${trigger}').click()`);
@@ -147,6 +153,67 @@ test("production composer usage inspector reads only on intent and fences late/f
     await command("Page.reload");
     assert.equal(await wait("!!document.querySelector('#catalog-prompt')"), true);
     assert.equal(await evaluate(`!document.querySelector('${trigger}') && window.settingsShellFixture.usageReads.length===0`), true);
+    await evaluate("localStorage.removeItem('usageFixtureArchived')");
+    await command("Page.reload");
+    assert.equal(await wait(`!!document.querySelector('${trigger}')`), true);
+    await evaluate(`document.querySelector('${trigger}').click()`);
+    assert.equal(await wait(`document.querySelector('${modal}')?.open`), true);
+    await evaluate(`window.usageOriginalFrame=requestAnimationFrame; window.usageCloseFrames=[];
+      window.requestAnimationFrame=callback=>{window.usageCloseFrames.push(callback); return 123456;};
+      document.querySelector('${modal} button[aria-label="Close usage inspector"]').click()`);
+    assert.equal(await wait(`!document.querySelector('${modal}')`), true);
+    await evaluate(`window.requestAnimationFrame=window.usageOriginalFrame; document.querySelector('${trigger}').click()`);
+    assert.equal(await wait(`document.querySelector('${modal}')?.open`), true);
+    assert.equal(await evaluate(`(() => { for(const callback of window.usageCloseFrames) callback(performance.now());
+      return document.querySelector('${modal}')?.open && document.activeElement?.closest('${modal}')!==null; })()`), true,
+      "a deferred close may not steal focus from a reopened usage dialog");
+    await evaluate(`document.querySelector('${modal} button[aria-label="Close usage inspector"]').click()`);
+    assert.equal(await wait(`!document.querySelector('${modal}') && document.activeElement===document.querySelector('${trigger}')`), true);
+
+    await evaluate(`document.querySelector('${trigger}').click()`);
+    assert.equal(await wait(`document.querySelector('${modal}')?.open`), true);
+    await evaluate(`window.usageOriginalFrame=requestAnimationFrame; window.usageCloseFrames=[];
+      window.requestAnimationFrame=callback=>{window.usageCloseFrames.push(callback); return 123456;};
+      document.querySelector('${modal} button[aria-label="Close usage inspector"]').click()`);
+    assert.equal(await wait(`!document.querySelector('${modal}')`), true);
+    await evaluate("window.requestAnimationFrame=window.usageOriginalFrame; document.querySelector('.project-rail .icon-label-button').click()");
+    assert.equal(await wait("document.querySelector('.settings-dialog')?.open"), true);
+    await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(button=>button.textContent==='About').click()");
+    assert.equal(await wait("document.querySelector('.about-dialog')?.open"), true);
+    assert.equal(await evaluate(`(() => { for(const callback of window.usageCloseFrames) callback(performance.now());
+      return document.querySelector('.about-dialog')?.open && document.activeElement?.closest('.about-dialog')!==null; })()`), true,
+      "a deferred usage close may not steal focus from nested About in Settings");
+    await evaluate("document.querySelector('.about-dialog [aria-label=\"Close About\"]').click()");
+    await wait("!document.querySelector('.about-dialog')");
+    await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
+    assert.equal(await wait("!document.querySelector('.settings-dialog')"), true);
+
+    await evaluate(`document.querySelector('${trigger}').click()`);
+    assert.equal(await wait(`document.querySelector('${modal}')?.open`), true);
+    await evaluate(`window.usageOriginalFrame=requestAnimationFrame; window.usageCloseFrames=[];
+      window.requestAnimationFrame=callback=>{window.usageCloseFrames.push(callback); return 123456;};
+      document.querySelector('${modal} button[aria-label="Close usage inspector"]').click()`);
+    assert.equal(await wait(`!document.querySelector('${modal}')`), true);
+    await evaluate(`window.requestAnimationFrame=window.usageOriginalFrame;
+      [...document.querySelectorAll('button')].find(button=>button.textContent.includes('Commands') && button.textContent.includes('Ctrl+P')).click()`);
+    assert.equal(await wait("document.querySelector('.command-palette')?.open"), true);
+    assert.equal(await evaluate("(() => { for(const callback of window.usageCloseFrames) callback(performance.now()); return document.querySelector('.command-palette')?.open && document.activeElement?.closest('.command-palette')!==null; })()"), true,
+      "a deferred usage close may not steal focus from the command palette");
+    await evaluate("document.querySelector('[aria-label=\"Close command palette\"]').click()");
+    assert.equal(await wait("!document.querySelector('.command-palette')"), true);
+
+    await evaluate(`document.querySelector('${trigger}').click()`);
+    assert.equal(await wait(`document.querySelector('${modal}')?.open`), true);
+    await evaluate(`window.oldUsageTrigger=document.querySelector('${trigger}'); window.usageOriginalFrame=requestAnimationFrame; window.usageCloseFrames=[];
+      window.requestAnimationFrame=callback=>{window.usageCloseFrames.push(callback); return 123456;};
+      document.querySelector('${modal} button[aria-label="Close usage inspector"]').click()`);
+    assert.equal(await wait(`!document.querySelector('${modal}')`), true);
+    await evaluate(`window.requestAnimationFrame=window.usageOriginalFrame; document.querySelector('.session-row:nth-child(2) > button:first-child').click()`);
+    assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='two' && !window.oldUsageTrigger.isConnected"), true);
+    assert.equal(await evaluate(`(() => { const editor=document.querySelector('#session-prompt'); editor.focus();
+      for(const callback of window.usageCloseFrames) callback(performance.now());
+      return document.activeElement===editor; })()`), true,
+      "a deferred usage close may not steal focus from a replacement session composer");
   } finally {
     socket?.close(); browser?.kill();
     await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });

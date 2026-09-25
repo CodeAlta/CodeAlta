@@ -3,6 +3,7 @@ import { sessionUsage, type SessionUsageResponse } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { usageMessage, validateUsage, type UsageTarget } from "./sessionUsage";
 import type { createMutationCapability } from "./sessionOperations";
+import { createPaletteFocusRestoration } from "./paletteActions";
 
 const show = (value: string | number | null) => value === null ? "Unknown" : String(value);
 
@@ -12,6 +13,7 @@ export function SessionUsageInspector({ target, capability }: {
   const trigger = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const request = useRef<AbortController | null>(null);
+  const [focusRestoration] = useState(createPaletteFocusRestoration);
   const current = useRef(false);
   const composingEscape = useRef(false);
   const [open, setOpen] = useState(false);
@@ -25,14 +27,15 @@ export function SessionUsageInspector({ target, capability }: {
     element?.showModal();
     return () => { if (element?.open) element.close(); };
   }, [open, allowed]);
-  useEffect(() => () => { current.current = false; request.current?.abort(); }, []);
+  useEffect(() => () => { current.current = false; request.current?.abort(); focusRestoration.cancel(); }, [focusRestoration]);
   useEffect(() => {
     if (allowed) return;
+    focusRestoration.cancel();
     current.current = false;
     request.current?.abort();
     setOpen(false);
     setSnapshot(null);
-  }, [allowed]);
+  }, [allowed, focusRestoration]);
   function close() {
     current.current = false;
     request.current?.abort();
@@ -40,7 +43,8 @@ export function SessionUsageInspector({ target, capability }: {
     setOpen(false);
     setSnapshot(null);
     const button = trigger.current;
-    requestAnimationFrame(() => { if (!current.current && button?.isConnected && !button.disabled) button.focus(); });
+    focusRestoration.schedule(button, () => !!button && !current.current && capability.canMutate() && trigger.current === button && !button.disabled,
+      () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
   }
   function read() {
     if (!current.current || !capability.canMutate()) return;
@@ -77,6 +81,7 @@ export function SessionUsageInspector({ target, capability }: {
   const snapshotRuntime = useRef<string | null>(null);
   function openDialog() {
     if (!capability.canMutate() || current.current) return;
+    focusRestoration.cancel();
     current.current = true;
     snapshotRuntime.current = null;
     setOpen(true);
