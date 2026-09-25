@@ -24,6 +24,12 @@ CodeAlta keeps user-owned durable state under a global root and project-local `.
 
 The runtime creates directories as needed. Provider auth managers also write under `~/.alta/auth/`, for example subscription credentials and direct-provider token caches. Protocol traces, session journals, auth files, and provider caches can contain prompts, tool arguments, model output, file paths, command output, or credentials; treat them as private user data.
 
+### Bounded project ownership prerequisite
+
+`ProjectCatalog.ReadBoundedOwnershipAsync(projectId, expectedProjectPath)` is an opt-in Catalog-only check for a host-known ID and normalized absolute path. It does not change `LoadAsync`, `GetByIdAsync`, or `GetByPathAsync`, and does not yet validate session metadata or integrate with runtime or frontends. It streams the catalog's flat `*.md` and legacy `<slug>/readme.md` sources, counts every root entry plus encountered legacy readmes (including unrelated entries), and caps enumeration at 128 entries plus one over-limit sentinel. It reads at most 32 KiB plus one byte per file and at most 512 KiB of actual source bytes in aggregate. An exact exhausted byte budget without observed EOF is incomplete, not evidence of absence. Only a full scan without errors, invalid metadata, conflicting IDs/paths, or exceeded limits returns `Match` or `Missing` with `Complete = true`; `Match` exposes the preferred flat descriptor's archived state (legacy when no flat source exists). Conflicting flat/legacy identities fail closed; linked/reparse paths and I/O failures return `ReadError`. Cancellation throws rather than certifying a result. No filename is inferred from the requested ID, and the scan does not write sources or fall back to the ordinary unbounded loader.
+
+The scan checks observed path attributes but is **not** an atomic cross-process snapshot: external catalog modifications or link swaps between enumeration, checks, and reads can invalidate an answer. Its limits and invalid/ambiguous results intentionally deny ownership rather than attempting to recover silently. A later runtime-owned session identity check must use its own bounded contract; this Catalog result alone does not establish session-metadata identity or native/full parity.
+
 ## Project-local state
 
 Project-local CodeAlta state lives under `<project>/.alta/`:
