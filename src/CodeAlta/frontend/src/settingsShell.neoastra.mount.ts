@@ -4,16 +4,17 @@ const epoch = "12345678-1234-1234-1234-123456789abc";
 const session = { id: "one", title: "one", fullTitle: "one", fullTitleTruncated: false,
   parentSessionId: null, scopeKind: "project", projectId: "project", lineageIssue: null,
   workspacePath: "/fixture/project", providerKey: "fixture", updatedAt: "2026-09-24T00:00:00Z" };
-const catalog = { configured: true, projects: [{ id: "project", name: "Project", path: "/fixture/project", archived: false }],
+const catalog = { configured: true, projects: [{ id: "project", name: "Project", path: "/fixture/project", archived: localStorage.getItem("usageFixtureArchived") === "true" }],
   sessions: [session, { ...session, id: "two", title: "two", fullTitle: "two" }],
-  projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false };
+  projectsTruncated: localStorage.getItem("usageFixtureTruncated") === "true", sessionsTruncated: false, displayTextTruncated: false };
 const unavailable = async () => { throw new Error("test bridge unavailable"); };
 const calls: string[] = [];
 const sends: unknown[] = [];
 const choiceReads: Array<{ request: { expectedEpoch: string; sessionId: string }; resolve: (value: unknown) => void }> = [];
+const usageReads: Array<{ request: unknown; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
 const probes: unknown[] = [];
 const clearRequests: unknown[] = [];
-Object.assign(window, { settingsShellFixture: { calls, sends, choiceReads, probes, clearRequests,
+Object.assign(window, { settingsShellFixture: { calls, sends, choiceReads, usageReads, probes, clearRequests,
   releaseChoices(mode: "ok" | "stale" | "different" = "ok") { for (const read of choiceReads.splice(0)) {
     const value = choices(read.request);
     read.resolve(mode === "stale" ? { ...value, status: "stale_epoch", epoch: "different-host" }
@@ -51,6 +52,7 @@ export const mcpInventory = { list: unavailable };
 export const reminder = { list: unavailable, detail: unavailable, create: unavailable, delete: unavailable, save: unavailable };
 export const sessionDisplay = { observe: unavailable };
 export const sessionRuntimeState = { current: unavailable };
+export const sessionUsage = { read: (request: unknown) => new Promise((resolve, reject) => usageReads.push({ request, resolve, reject })) };
 export const sessionPermissions = { list: unavailable, resolve: unavailable };
 export const sessionOperations = { choices: (request: { expectedEpoch: string; sessionId: string }) =>
   localStorage.getItem("settingsFixtureHoldChoices") === "true" ? new Promise(resolve => choiceReads.push({ request, resolve })) : Promise.resolve(choices(request)),

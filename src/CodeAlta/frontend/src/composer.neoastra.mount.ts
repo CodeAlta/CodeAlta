@@ -10,3 +10,4 @@ export const sessionOperations = { choices: async ({ expectedEpoch, sessionId }:
   fixture.fixtureReceiptReads = (fixture.fixtureReceiptReads ?? 0) + 1;
   return { status: "ok", epoch: expectedEpoch, rows: fixture.fixtureReceiptRows ?? [], next: null };
 } };
+export const sessionUsage = { read: async () => { throw new Error("Usage is not available in this isolated fixture."); } };

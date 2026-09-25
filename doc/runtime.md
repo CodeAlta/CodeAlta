@@ -128,7 +128,12 @@ remain distinct and never imply zero. Numeric Int64s (including generation, sequ
 and finite provider-reported cost/duration cross JavaScript as decimal strings; cost has no inferred
 currency. The response omits paths, details, raw provider events, labels and history. Neither the
 catalog nor journal read is an atomic cross-process snapshot or CAS against external changes/link swaps.
-This adds no popup, polling or full/native usage parity qualification.
+The Desktop composer now offers an opt-in HTML-dialog read-only usage inspector only for an exact uniquely
+verified, untruncated owned writable scope; it reads on opening or explicit Refresh only. It validates
+the epoch/session/runtime GUID/attachment/event sequence and each nullable wire field before displaying
+anything. Old close/selection/scope/host responses cannot publish, and refresh replaces rather than merges
+one attachment's last observation. It never polls, infers totals/current occupancy or establishes full/native
+usage parity qualification.
 
 ### Committed live display window (M4 foundation, not complete M4)
 

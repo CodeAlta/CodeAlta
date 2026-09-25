@@ -7,3 +7,4 @@ export const sessionOperations = {
     return fixture.readChoices(expectedEpoch, sessionId);
   },
 };
+export const sessionUsage = { read: async () => { throw new Error("Usage is not available in this isolated fixture."); } };

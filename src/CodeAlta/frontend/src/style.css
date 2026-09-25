@@ -432,6 +432,11 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .expanded-prompt-dialog p { margin: 0; color: var(--muted); font-size: 12px; }
 .app-dialog { width: min(620px, 100%); max-height: min(720px, calc(100vh - 48px)); display: flex; flex-direction: column; padding: 18px; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 15px; background: var(--panel); box-shadow: var(--shadow); }
 .session-info-dialog { width: min(560px, calc(100vw - 32px)); color: var(--text); }
+.session-usage-dialog { width: min(510px, calc(100vw - 32px)); max-height: min(640px, calc(100dvh - 32px)); color: var(--text); }
+.session-usage-dialog::backdrop { background: rgba(0, 0, 0, .62); }
+.session-usage-dialog > p { margin: 0 0 10px; font-size: 12px; overflow-wrap: anywhere; }
+.session-usage-dialog > footer { gap: 12px; flex-wrap: wrap; }
+.session-usage-fields { flex: 1 1 auto; }
 .command-palette { width: min(560px, calc(100vw - 32px)); max-height: min(600px, calc(100dvh - 32px)); color: var(--text); }
 .command-palette::backdrop { background: rgba(0, 0, 0, .62); }
 .command-palette > label { font-size: 12px; }

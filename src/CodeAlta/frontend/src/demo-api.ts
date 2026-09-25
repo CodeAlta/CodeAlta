@@ -89,6 +89,7 @@ const emptyPage = async () => ({ status: "ok", rows: [], next: null, epoch: "dem
 
 export const sessionDisplay = Object.freeze({ observe: unavailable });
 export const sessionRuntimeState = Object.freeze({ current: unavailable });
+export const sessionUsage = Object.freeze({ read: unavailable });
 export const sessionPermissions = Object.freeze({ list: emptyPage, resolve: unavailable });
 export const sessionOperations = Object.freeze({
   abort: unavailable, abortRun: unavailable, cancelQueue: unavailable, compact: unavailable,

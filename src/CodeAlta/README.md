@@ -296,7 +296,7 @@ Canceling an RPC waiter does not stop the shared catalog's background load. Exis
 teardown waits only a bounded time, so cache work can outlive bridge teardown; complete
 native lifecycle qualification remains open.
 
-### Read-only owned usage RPC (no popup)
+### Read-only owned usage RPC and compact composer inspector
 
 `sessionUsage.read` is an owned-only generated Desktop RPC for an existing actor and the actual host epoch.
 It requires explicit project ID/path or global scope, checks the exact persisted session header using a
@@ -306,7 +306,15 @@ transitioning/closed/stale and read failures from a real zero. It returns only b
 typed numeric usage, source/timestamps, omission/invalid flags and decimal-string 64-bit counters; no
 history, provider probe, catalog limits, inferred totals or raw paths/details. External catalog and
 journal changes are checked point-in-time, not with a cross-process atomic guarantee. There is no
-usage popup or full/native usage parity yet.
+full/native usage parity yet. A compact composer usage icon appears only for an exact, uniquely verified
+owned writable project/global session in the untruncated catalog. Opening its HTML read-only dialog
+or pressing **Refresh usage** performs one explicit `sessionUsage.read`; it never polls or probes providers.
+Values are labeled **last observed**, with nullable reported window/last-operation fields, source/scope/
+timestamps, attachment, invalid/omission evidence and safe unavailable states. Long counters display
+exact decimal strings; absent fields remain unknown, not zero, and cost has no inferred currency. Closing,
+changing scope or host, and replacing the attachment discard prior presentation rather than merging totals.
+The dialog does not establish current context, a complete history, atomic ownership against external
+writers or native/full TUI parity.
 
 ### Persisted event history
 

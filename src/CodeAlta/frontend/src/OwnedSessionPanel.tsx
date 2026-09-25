@@ -17,10 +17,13 @@ import { dispatchComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import type { createReminderActions } from "./reminderActions";
 import { validReminderList } from "./reminderListObservation";
+import { SessionUsageInspector } from "./SessionUsageInspector";
+import type { UsageTarget } from "./sessionUsage";
 
-export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, reminderActions, readReminderCount }: {
+export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, reminderActions, readReminderCount }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
   projectId?: string | null;
+  usageTarget?: UsageTarget | null;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
   permissionReviewer: ReturnType<typeof createPermissionReviewer> | null;
   steering: ReturnType<typeof createSteeringSubmissions>;
@@ -417,6 +420,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
     </div>
     <div className="history-controls">
       <span className="sr-only">Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer</span>
+      {usageTarget && <SessionUsageInspector key={JSON.stringify(usageTarget)} target={usageTarget} capability={capability} />}
       {onOpenReminders && <button ref={remindersTrigger} type="button" className="composer-icon-button" data-reminder-count=""
         disabled={invalidEpoch} aria-label={reminderLabel} title={`${reminderLabel} (Ctrl+G, Ctrl+D)`}
         onClick={onOpenReminders}><AppIcon name="reminder" size={16} /><span className="reminder-count" aria-hidden="true">{observedReminderCount ?? "?"}</span></button>}
