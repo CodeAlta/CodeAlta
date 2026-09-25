@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import type { BootStatus } from "#neoastra";
 import { AboutDialog, AboutSettingsEntry, openAboutPaletteAction } from "./AboutDialog";
 import { CommandPalette } from "./CommandPalette";
-import { paletteAvailable, paletteShortcut, restorePaletteFocus, type PaletteAction, type PaletteContext } from "./paletteActions";
+import { createPaletteFocusRestoration, paletteAvailable, paletteShortcut, type PaletteAction, type PaletteContext } from "./paletteActions";
 
 const one: BootStatus = { productName: "Fixture Desktop", version: "2.7.9+build.123", state: "owned-text-only",
   hostAvailable: true, hostEpoch: "epoch-one", commandReviewEnabled: false, ownedAsksEnabled: false, ownedUserInputEnabled: false };
@@ -16,6 +16,8 @@ function Window() {
   const [about, setAbout] = useState(false);
   const [palette, setPalette] = useState(false);
   const [view, setView] = useState("configuration");
+  const [focusRestoration] = useState(createPaletteFocusRestoration);
+  useLayoutEffect(() => () => focusRestoration.cancel(), [focusRestoration]);
   const viewRef = useRef(view); viewRef.current = view;
   const captured = useRef<PaletteContext | null>(null);
   const origin = useRef<HTMLElement | null>(null);
@@ -23,23 +25,26 @@ function Window() {
   const pending = useRef<PaletteAction | null>(null);
   function openAbout(element: HTMLElement | null) {
     if (about || document.querySelector('dialog[open]')) return;
+    focusRestoration.cancel();
     aboutOrigin.current = { element, view: viewRef.current };
     setAbout(true);
   }
   function closeAbout() {
     const capturedOrigin = aboutOrigin.current;
     setAbout(false);
-    requestAnimationFrame(() => restorePaletteFocus(capturedOrigin?.element ?? null, viewRef.current === capturedOrigin?.view,
-      !!document.querySelector('dialog[open]')));
+    focusRestoration.schedule(capturedOrigin?.element ?? null, () => viewRef.current === capturedOrigin?.view,
+      () => !!document.querySelector('dialog[open]'));
   }
   function openPalette() {
     if (palette || about || document.querySelector('dialog[open]')) return;
+    focusRestoration.cancel();
     origin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     captured.current = context;
     setPalette(true);
   }
   function choose(action: PaletteAction) {
     if (!captured.current || !paletteAvailable(action, captured.current, context)) return;
+    focusRestoration.cancel();
     pending.current = action;
     setPalette(false);
   }
@@ -51,7 +56,7 @@ function Window() {
   });
   function dismissPalette() {
     setPalette(false);
-    requestAnimationFrame(() => restorePaletteFocus(origin.current, true, !!document.querySelector('dialog[open]')));
+    focusRestoration.schedule(origin.current, () => true, () => !!document.querySelector('dialog[open]'));
   }
   useLayoutEffect(() => {
     const keyDown = (event: KeyboardEvent) => { if (paletteShortcut(event, palette || about)) { event.preventDefault(); openPalette(); } };
@@ -59,6 +64,7 @@ function Window() {
     return () => window.removeEventListener("keydown", keyDown);
   });
   Object.assign(window, { aboutFixture: { setStatus, setError, setDemo, setView,
+    paletteOrigin: () => origin.current,
     product: one, catalog: { ...one, hostAvailable: false, hostEpoch: null, state: "in-development" } } });
   return <div className="app-shell"><header className="topbar"><button id="commands" type="button" onClick={openPalette}>Commands</button>
     <button id="settings" type="button" onClick={() => setView("configuration")}>Settings</button></header>

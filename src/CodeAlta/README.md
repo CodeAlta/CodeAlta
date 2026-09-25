@@ -53,6 +53,8 @@ rather than replaced with an advertised version. The dialog distinguishes a brow
 a pending/failed boot, an owned host and catalog-only browsing; it is not a runtime health check. Inspecting it
 does not fetch updates or read files, send data, or write configuration. TUI update checks,
 downloads and installation are **not supported** in this desktop view; no update status is known.
+Closing About or the palette returns focus to its connected opener only when no newer focus move, navigation
+or modal has taken precedence.
 
 **Configuration → Application Logs** (also in the implemented-actions palette) offers an
 explicit **Refresh logs** and a **Wrap lines** toggle. It displays at most 64 newest

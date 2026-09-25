@@ -88,16 +88,45 @@ test("mounted About settings and palette inspect only current boot identity", { 
     assert.equal(await wait("document.activeElement?.textContent==='Open About'"), true);
     await press(" ", "Space", 32);
     assert.equal(await wait("!!document.querySelector('.about-dialog[open]')"), true);
+    // Hold the scheduled close restoration so a newer, explicit focus move can
+    // occur before it. The callback must not steal that focus or the palette origin.
+    await evaluate(`(() => {window.heldFocusFrames=[];const original=requestAnimationFrame;
+      window.requestAnimationFrame=callback=>{window.heldFocusFrames.push(callback);return -window.heldFocusFrames.length};
+      window.releaseFocusFrames=()=>{window.requestAnimationFrame=original;const frames=window.heldFocusFrames.splice(0);for(const frame of frames)frame(performance.now())};})()`);
     await press("Escape", "Escape", 27);
     assert.equal(await wait("!document.querySelector('.about-dialog')"), true);
-    await evaluate("document.querySelector('#commands').focus()");
+    assert.equal(await evaluate("window.heldFocusFrames.length"), 1);
+    const restored = await evaluate(`(() => {document.querySelector('#commands').focus();const before=document.activeElement.id;
+      window.releaseFocusFrames();return {before,after:document.activeElement.id}})()`) as {before:string;after:string};
+    assert.equal(restored.before, "commands");
+    assert.equal(restored.after, "commands", JSON.stringify(restored));
     await press("p", "KeyP", 80, 2);
+    assert.equal(await evaluate("window.aboutFixture.paletteOrigin()?.id"), "commands");
     assert.equal(await wait("!!document.querySelector('.command-palette[open]')"), true);
     await command("Input.insertText", { text: "About" });
     assert.equal(await wait("document.querySelectorAll('#palette-results [role=option]').length===1"), true);
     await press("Enter", "Enter", 13);
     assert.equal(await wait("!!document.querySelector('.about-dialog[open]') && !document.querySelector('.command-palette')"), true);
     await click(".about-dialog footer button");
+    assert.equal(await wait("document.activeElement?.id==='commands'"), true);
+    // A close callback that runs after the next palette opens cannot move focus
+    // out of that modal, even when its original trigger remains connected.
+    await open();
+    await evaluate(`(() => {window.heldFocusFrames=[];const original=requestAnimationFrame;
+      window.requestAnimationFrame=callback=>{window.heldFocusFrames.push(callback);return -window.heldFocusFrames.length};
+      window.releaseFocusFrames=()=>{window.requestAnimationFrame=original;const frames=window.heldFocusFrames.splice(0);for(const frame of frames)frame(performance.now())};})()`);
+    await press("Escape", "Escape", 27);
+    assert.equal(await wait("!document.querySelector('.about-dialog')"), true);
+    assert.equal(await evaluate("window.heldFocusFrames.length"), 1);
+    await evaluate("document.querySelector('#commands').focus()");
+    await press("p", "KeyP", 80, 2);
+    assert.equal(await wait("!!document.querySelector('.command-palette[open]')"), true);
+    assert.equal(await evaluate("window.aboutFixture.paletteOrigin()?.id"), "commands");
+    const paletteFocus = await evaluate("document.activeElement?.outerHTML");
+    assert.equal(await evaluate("document.querySelector('.command-palette').contains(document.activeElement)"), true);
+    await evaluate("window.releaseFocusFrames()");
+    assert.equal(await evaluate("document.activeElement?.outerHTML"), paletteFocus);
+    await press("Escape", "Escape", 27);
     assert.equal(await wait("document.activeElement?.id==='commands'"), true);
     await click(".settings-card button");
     await evaluate("window.aboutFixture.setStatus({...window.aboutFixture.product,productName:'Next host',version:'3.0.0+fresh',hostEpoch:'epoch-two'})");

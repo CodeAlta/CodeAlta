@@ -68,7 +68,7 @@ import { createApplicationLogClearActions } from "./applicationLogClear";
 import { SessionInfoDialog } from "./SessionInfoDialog";
 import { restoreSessionInfoFocus, selectedSessionInfoAvailable, selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
 import { CommandPalette } from "./CommandPalette";
-import { paletteAvailable, paletteShortcut, restorePaletteFocus, type PaletteAction, type PaletteContext } from "./paletteActions";
+import { createPaletteFocusRestoration, paletteAvailable, paletteShortcut, type PaletteAction, type PaletteContext } from "./paletteActions";
 import "./style.css";
 
 type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; epoch: string | null;
@@ -101,7 +101,9 @@ function App() {
   const [view, setView] = useState<View>("workspace");
   const currentView = useRef<View>(view);
   currentView.current = view;
-  function navigate(next: View) { currentView.current = next; setView(next); }
+  const [focusRestoration] = useState(createPaletteFocusRestoration);
+  useEffect(() => () => focusRestoration.cancel(), [focusRestoration]);
+  function navigate(next: View) { focusRestoration.cancel(); currentView.current = next; setView(next); }
   const [search, setSearch] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
   const { projectSort, setProjectSort, theme, setTheme, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices } = useWindowPreferences();
@@ -113,14 +115,15 @@ function App() {
   const aboutOrigin = useRef<{ element: HTMLElement | null; view: View } | null>(null);
   function openAbout(element: HTMLElement | null) {
     if (dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+    focusRestoration.cancel();
     aboutOrigin.current = { element, view: currentView.current };
     setDialog("about");
   }
   function closeAbout() {
     const origin = aboutOrigin.current;
     setDialog(null);
-    requestAnimationFrame(() => restorePaletteFocus(origin?.element ?? null, currentView.current === origin?.view,
-      !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')));
+    focusRestoration.schedule(origin?.element ?? null, () => currentView.current === origin?.view,
+      () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
   }
   const [paletteOpen, setPaletteOpen] = useState(false);
   const paletteCapture = useRef<PaletteContext | null>(null);
@@ -372,6 +375,7 @@ function App() {
 
   function openPalette() {
     if (paletteOpen || dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+    focusRestoration.cancel();
     paletteOrigin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     paletteCapture.current = paletteContext();
     setPaletteOpen(true);
@@ -381,14 +385,13 @@ function App() {
     const origin = paletteOrigin.current;
     const originView = currentView.current;
     setPaletteOpen(false);
-    requestAnimationFrame(() => {
-      restorePaletteFocus(origin, currentView.current === originView,
-        !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
-    });
+    focusRestoration.schedule(origin, () => currentView.current === originView,
+      () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
   }
 
   function choosePalette(action: PaletteAction) {
     if (!paletteCapture.current || !paletteAvailable(action, paletteCapture.current, paletteContext())) return;
+    focusRestoration.cancel();
     palettePending.current = { action, captured: paletteCapture.current };
     setPaletteOpen(false);
   }
