@@ -9,6 +9,77 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class ReminderRpcTests
 {
     [TestMethod]
+    public async Task SaveUsesExactOwnedSnapshotAndKeepsScheduleAcrossConflictsDeletionAndCompletion()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-reminder-edit-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            using var clock = new LiteralClock();
+            var sends = new List<OwnedTextSendRequest>();
+            await using var service = new ReminderService("epoch", (id, _) => Task.FromResult(id is "one" or "two" or "ONE"), request =>
+            {
+                sends.Add(request);
+                return new(OwnedSessionCommandAdmissionKind.Busy);
+            }, clock);
+            var created = await service.Create(new("epoch", "one", "original", 60, 1), default);
+            var id = created.ReminderId!;
+            var before = (await service.List(new("epoch", "one"), default)).Reminders.Single();
+            var detail = await service.Detail(new("epoch", "one", id), default);
+            Assert.AreEqual("0", detail.EditRevision);
+            var request = new ReminderSaveRequest("epoch", "one", id, detail.EditRevision!, "edited\nfull");
+            Assert.AreEqual("stale_epoch", (await service.Save(request with { ExpectedEpoch = "other" }, default)).Status);
+            Assert.AreEqual("missing_reminder", (await service.Save(request with { SessionId = "two" }, default)).Status);
+            Assert.AreEqual("missing_reminder", (await service.Save(request with { SessionId = "ONE" }, default)).Status);
+            Assert.AreEqual("missing_reminder", (await service.Save(request with { ReminderId = id.ToUpperInvariant() }, default)).Status);
+            Assert.AreEqual("invalid_request", (await service.Save(request with { EditRevision = "-1" }, default)).Status);
+            Assert.AreEqual("invalid_request", (await service.Save(request with { Content = "\ud800" }, default)).Status);
+            Assert.AreEqual("ok", (await service.Save(request, default)).Status);
+            var after = (await service.List(new("epoch", "one"), default)).Reminders.Single();
+            Assert.AreEqual(before.DueAt, after.DueAt);
+            Assert.AreEqual(before.DelaySeconds, after.DelaySeconds);
+            Assert.AreEqual(before.RepeatCount, after.RepeatCount);
+            Assert.AreEqual(before.FiredCount, after.FiredCount);
+            Assert.AreEqual("conflict", (await service.Save(request, default)).Status);
+            Assert.AreEqual("edited\nfull", (await service.Detail(new("epoch", "one", id), default)).Content);
+            await clock.TimerCreated();
+            clock.Advance(TimeSpan.FromSeconds(60));
+            for (var i = 0; i < 100000 && (await service.List(new("epoch", "one"), default)).CompletedCount == 0; i++) await Task.Yield();
+            Assert.HasCount(1, sends);
+            Assert.AreEqual("edited\nfull", sends[0].Text);
+            var current = await service.Detail(new("epoch", "one", id), default);
+            Assert.AreEqual("completed", (await service.Save(request with { EditRevision = current.EditRevision! }, default)).Status);
+            Assert.AreEqual("ok", service.Delete(new("epoch", "one", id, id), default).Status);
+            Assert.AreEqual("missing_reminder", (await service.Save(request, default)).Status);
+            service.CloseAdmission();
+            Assert.AreEqual("closed", (await service.Save(request, default)).Status);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
+    public async Task SaveWaitingForSessionReadCannotPassClosedAdmission()
+    {
+        using var clock = new LiteralClock();
+        var releaseRead = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var enteredRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var service = new ReminderService("epoch", (id, _) =>
+        {
+            enteredRead.TrySetResult();
+            return releaseRead.Task;
+        }, _ => throw new AssertFailedException("No delivery expected."), clock);
+        var request = new ReminderSaveRequest("epoch", "one", "reminder-1", "0", "new message");
+        var pending = service.Save(request, default);
+        try
+        {
+            await enteredRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            service.CloseAdmission();
+        }
+        finally { releaseRead.TrySetResult(true); }
+        Assert.AreEqual("closed", (await pending.WaitAsync(TimeSpan.FromSeconds(5))).Status);
+    }
+
+    [TestMethod]
     public async Task DetailReadsExactRetainedMessageWithoutChangingDeliveryOrSchedule()
     {
         using var clock = new LiteralClock();

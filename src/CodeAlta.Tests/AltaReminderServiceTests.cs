@@ -647,6 +647,39 @@ public sealed class AltaReminderServiceTests
     private sealed record Delivery(string? Target, bool Stdin, bool QueueIfBusy, string Content,
         AltaCallerIdentity Caller, string? Cwd, CancellationToken CancellationToken);
 
+    [TestMethod]
+    public async Task GuardedContentEditRejectsUnseenEditsAndWrongOwnerWithoutChangingSchedule()
+    {
+        using var clock = new ManualClock();
+        await using var service = new AltaReminderService(new AltaServiceCollection(), clock, new LiteralDelivery());
+        var reminder = service.Create(new AltaReminderCreateRequest
+        {
+            TargetSessionId = "one", Content = "original", Duration = TimeSpan.FromMinutes(1), RepeatCount = 2,
+        });
+        Assert.IsTrue(service.TryGetEditSnapshot(reminder.ReminderId, out var before, out var content, out var revision));
+        Assert.AreEqual("original", content);
+        Assert.AreEqual("0", revision);
+        Assert.AreEqual(AltaReminderContentUpdateResult.Missing,
+            service.TryUpdateContent(reminder.ReminderId, "ONE", revision!, "wrong", out _, out _));
+        Assert.AreEqual(AltaReminderContentUpdateResult.Updated,
+            service.TryUpdateContent(reminder.ReminderId, "one", revision!, "changed", out var updated, out _));
+        Assert.AreEqual(before!.DueAt, updated!.DueAt);
+        Assert.AreEqual(before.RepeatCount, updated.RepeatCount);
+        Assert.AreEqual(before.FiredCount, updated.FiredCount);
+        Assert.AreEqual(AltaReminderContentUpdateResult.Conflict,
+            service.TryUpdateContent(reminder.ReminderId, "one", revision!, "lost", out _, out _));
+        Assert.IsTrue(service.TryUpdateContent(reminder.ReminderId, "original", out _));
+        Assert.AreEqual(AltaReminderContentUpdateResult.Conflict,
+            service.TryUpdateContent(reminder.ReminderId, "one", revision!, "ABA lost", out _, out _));
+        Assert.IsTrue(service.TryGetEditSnapshot(reminder.ReminderId, out _, out content, out var latest));
+        Assert.AreEqual("original", content);
+        Assert.AreNotEqual(revision, latest);
+        Assert.IsTrue(service.TryDelete(reminder.ReminderId, out _));
+        Assert.AreEqual(AltaReminderContentUpdateResult.Missing,
+            service.TryUpdateContent(reminder.ReminderId, "one", latest!, "deleted", out _, out _));
+        Assert.IsFalse(service.TryGetEditSnapshot(reminder.ReminderId, out _, out _, out _));
+    }
+
     // One-shot timers only, as used by Task.Delay. Time advances explicitly and callbacks always
     // run outside clock ownership. No wall-clock sleeps, discovery, or background clock worker.
     internal sealed class ManualClock : TimeProvider, IDisposable

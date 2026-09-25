@@ -7,6 +7,7 @@ const reads: Array<{ sessionId: string; resolve: (value: ReminderListResponse) =
 const details: Array<{ request: ReminderDetailRequest; resolve: (value: ReminderDetailResponse) => void; reject: (error: Error) => void }> = [];
 const writes: Array<{ request: unknown; resolve: (value: ReminderMutationResponse) => void; reject: (error: Error) => void }> = [];
 const actions = createReminderActions(request => new Promise((resolve, reject) => writes.push({ request, resolve, reject })),
+  request => new Promise((resolve, reject) => writes.push({ request, resolve, reject })), undefined,
   request => new Promise((resolve, reject) => writes.push({ request, resolve, reject })));
 const readDetail = (request: ReminderDetailRequest) => new Promise<ReminderDetailResponse>((resolve, reject) =>
   details.push({ request, resolve, reject }));

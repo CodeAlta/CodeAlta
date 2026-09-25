@@ -112,7 +112,15 @@ retained reminders per session and 256 per host are accepted; deleting a complet
 Select a schedule to inspect its full stored message, beyond the list preview. **Use as new reminder**
 copies that message, delay and repeat count into the local Create form (with confirmation before
 discarding an edited draft); it does not change the selected schedule or create a new one until
-Create is explicitly submitted. Schedules and results are **in memory, not persisted**:
+Create is explicitly submitted. **Save message** edits only the full message of an active selected
+reminder, using the exact host, owning session, reminder ID and the detail snapshot's edit revision.
+It is separate from Create/Use as new and the exact-ID Delete confirmation. Unsaved edits require
+confirmation before switching reminders or discarding the edit draft; a concurrent edit (including
+one later changed back to the original message), missing reminder or completed schedule refuses Save
+without overwriting it. Save preserves the delay, due time, repeat count and attempt counts: it only
+affects future firing captures, never an already captured or admitted send. Pending or uncertain Save
+admissions remain held for their original host/session, with no automatic retry; refresh observes
+state but cannot certify an uncertain response. Schedules and results are **in memory, not persisted**:
 closing/restarting the host loses them. The host
 owns the timers and attempts one normal owned Send per firing, with the same permission policy
 and host drain as other sends. Busy, unavailable or failed sends count as failed attempts; there

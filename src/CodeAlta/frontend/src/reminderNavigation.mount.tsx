@@ -152,7 +152,7 @@ function App() {
       read={async request => ({ status: "ok", epoch: request.expectedEpoch, sessionId: request.sessionId,
         activeCount: 0, completedCount: 0, reminders: [] })}
       readDetail={async request => ({ status: "missing_reminder", epoch: request.expectedEpoch, sessionId: request.sessionId,
-        reminderId: request.reminderId, content: null, delaySeconds: null, repeatCount: null })} />}
+        reminderId: request.reminderId, content: null, delaySeconds: null, repeatCount: null, editRevision: null })} />}
     {view === "mcp" && <McpServersPanel target={epoch ? { epoch, sessionId: session, projectId: project } : null}
       read={async request => ({ status: "ok", epoch: request.expectedEpoch, sessionId: request.sessionId,
         projectId: project, servers: [], sources: project ? ["Global: read", "Project: read"] : ["Global: read"],

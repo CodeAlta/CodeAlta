@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Runtime;
@@ -67,7 +68,7 @@ internal sealed class ReminderService : IAsyncDisposable, IAltaReminderDelivery
     {
         var sessionId = Identity(request?.SessionId) ? request!.SessionId : null;
         var reminderId = Identity(request?.ReminderId) ? request!.ReminderId : null;
-        ReminderDetailResponse Error(string status) => new(status, _epoch, sessionId, reminderId, null, null, null);
+        ReminderDetailResponse Error(string status) => new(status, _epoch, sessionId, reminderId, null, null, null, null);
         var error = Check(request?.ExpectedEpoch, request?.SessionId);
         if (error is not null || sessionId is null || reminderId is null) return Error(error ?? "invalid_request");
         try
@@ -78,20 +79,52 @@ internal sealed class ReminderService : IAsyncDisposable, IAltaReminderDelivery
             lock (_gate)
             {
                 if (_closed) return Error("closed");
-                // The scheduler's List filter is case-insensitive; the desktop boundary requires ordinal identity.
-                var row = _reminders.List(sessionId, includeCompleted: true).FirstOrDefault(item =>
-                    string.Equals(item.TargetSessionId, sessionId, StringComparison.Ordinal) &&
-                    string.Equals(item.ReminderId, reminderId, StringComparison.Ordinal));
-                if (row is null || !_reminders.TryGetContent(reminderId, out var content)) return Error("missing_reminder");
+                // One shared-state snapshot avoids pairing a descriptor with another edit's content/revision.
+                if (!_reminders.TryGetEditSnapshot(reminderId, out var row, out var content, out var revision) ||
+                    !string.Equals(row!.TargetSessionId, sessionId, StringComparison.Ordinal)) return Error("missing_reminder");
                 if (!Text(content, 4096, multiline: true)) return Error("read_failed");
                 var response = new ReminderDetailResponse("ok", _epoch, sessionId, reminderId, content,
-                    (int)row.Duration.TotalSeconds, row.RepeatCount);
+                    (int)row.Duration.TotalSeconds, row.RepeatCount, revision);
                 return JsonSerializer.SerializeToUtf8Bytes(response, DesktopJsonContext.Default.ReminderDetailResponse).Length <= MaximumDetailResponseBytes
                     ? response : Error("wire_limit");
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception) { return Error("read_failed"); }
+    }
+
+    [NeoRpcMethod("save")]
+    public async Task<ReminderMutationResponse> Save(ReminderSaveRequest request, CancellationToken cancellationToken)
+    {
+        var error = Check(request?.ExpectedEpoch, request?.SessionId);
+        if (error is not null) return new(error, _epoch, Identity(request?.SessionId) ? request!.SessionId : null, null);
+        if (!Identity(request!.ReminderId) || !long.TryParse(request.EditRevision, NumberStyles.None, CultureInfo.InvariantCulture, out var revision) ||
+            revision < 0 || revision.ToString(CultureInfo.InvariantCulture) != request.EditRevision ||
+            !Text(request.Content, 4096, multiline: true) || string.IsNullOrWhiteSpace(request.Content))
+            return new("invalid_request", _epoch, request.SessionId, null);
+        try
+        {
+            if (!await _exists(request.SessionId, cancellationToken).ConfigureAwait(false))
+                return new("missing_session", _epoch, request.SessionId, null);
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_gate)
+            {
+                if (_closed) return new("closed", _epoch, request.SessionId, null);
+                // Owner, id, active state and revision are compared with the replacement under one shared gate.
+                var result = _reminders.TryUpdateContent(request.ReminderId, request.SessionId, request.EditRevision,
+                    request.Content, out _, out _);
+                return result switch
+                {
+                    AltaReminderContentUpdateResult.Updated => new("ok", _epoch, request.SessionId, request.ReminderId),
+                    AltaReminderContentUpdateResult.Missing => new("missing_reminder", _epoch, request.SessionId, null),
+                    AltaReminderContentUpdateResult.Conflict => new("conflict", _epoch, request.SessionId, null),
+                    _ => new("completed", _epoch, request.SessionId, null),
+                };
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        // A committed edit may have lost its response. Never invite an automatic retry.
+        catch (Exception) { return new("unconfirmed", _epoch, request.SessionId, request.ReminderId); }
     }
 
     [NeoRpcMethod("create")]
@@ -203,8 +236,9 @@ internal sealed class ReminderService : IAsyncDisposable, IAltaReminderDelivery
 internal sealed record ReminderListRequest(string ExpectedEpoch, string SessionId);
 internal sealed record ReminderDetailRequest(string ExpectedEpoch, string SessionId, string ReminderId);
 internal sealed record ReminderDetailResponse(string Status, string Epoch, string? SessionId, string? ReminderId,
-    string? Content, int? DelaySeconds, int? RepeatCount);
+    string? Content, int? DelaySeconds, int? RepeatCount, string? EditRevision);
 internal sealed record ReminderCreateRequest(string ExpectedEpoch, string SessionId, string Content, int DelaySeconds, int RepeatCount);
+internal sealed record ReminderSaveRequest(string ExpectedEpoch, string SessionId, string ReminderId, string EditRevision, string Content);
 internal sealed record ReminderDeleteRequest(string ExpectedEpoch, string SessionId, string ReminderId, string Confirmation);
 internal sealed record ReminderMutationResponse(string Status, string Epoch, string? SessionId, string? ReminderId);
 internal sealed record ReminderListResponse(string Status, string Epoch, string? SessionId, IReadOnlyList<ReminderRow> Reminders, int ActiveCount, int CompletedCount);

@@ -39,3 +39,44 @@ test("delete reply must return the exact confirmed reminder identity", async () 
   assert.deepEqual(actions.get(target)?.request, request);
   assert.equal(calls.length, 1);
 });
+
+test("save retains exact pending and uncertain request, never retries or accepts a mismatched reply", async () => {
+  const target = { epoch: "e1", sessionId: "one" };
+  const request = { expectedEpoch: "e1", sessionId: "one", reminderId: "reminder-one", editRevision: "0", content: "whole message" };
+  for (const reply of [
+    { status: "ok", epoch: "e2", sessionId: "one", reminderId: request.reminderId },
+    { status: "ok", epoch: "e1", sessionId: "two", reminderId: request.reminderId },
+    { status: "ok", epoch: "e1", sessionId: "one", reminderId: "other" },
+    { status: "unexpected", epoch: "e1", sessionId: "one", reminderId: null },
+    { status: "conflict", epoch: "e1", sessionId: "one", reminderId: request.reminderId },
+    { status: "unconfirmed", epoch: "e1", sessionId: "one", reminderId: request.reminderId },
+  ]) {
+    let resolve!: (reply: ReminderMutationResponse) => void;
+    let calls = 0;
+    const actions = createReminderActions(() => { throw Error("create"); }, () => { throw Error("delete"); }, undefined,
+      () => { calls++; return new Promise(done => { resolve = done; }); });
+    const pending = actions.submit(target, request, "save");
+    assert.deepEqual(actions.get(target)?.request, request);
+    assert.equal(actions.get(target)?.pending, true);
+    assert.equal(await actions.submit(target, request, "save"), false);
+    resolve(reply);
+    assert.equal(await pending, false);
+    assert.equal(actions.get(target)?.hold, true);
+    assert.deepEqual(actions.get(target)?.request, request);
+    assert.equal(calls, 1);
+  }
+  const actions = createReminderActions(() => { throw Error("create"); }, () => { throw Error("delete"); }, undefined,
+    () => Promise.reject(new Error("private diagnostics")));
+  assert.equal(await actions.submit(target, request, "save"), false);
+  assert.equal(actions.get(target)?.hold, true);
+  assert.doesNotMatch(actions.get(target)!.message, /private diagnostics/);
+});
+
+test("save conflict is definite, not a silent overwrite or retry", async () => {
+  const target = { epoch: "e1", sessionId: "one" };
+  const actions = createReminderActions(() => { throw Error("create"); }, () => { throw Error("delete"); }, undefined,
+    () => Promise.resolve({ status: "conflict", epoch: "e1", sessionId: "one", reminderId: null }));
+  assert.equal(await actions.submit(target, { expectedEpoch: "e1", sessionId: "one", reminderId: "reminder-one", editRevision: "0", content: "edit" }, "save"), false);
+  assert.equal(actions.get(target)?.status, "conflict");
+  assert.equal(actions.get(target)?.hold, false);
+});

@@ -3,6 +3,19 @@ using System.Runtime.ExceptionServices;
 
 namespace CodeAlta.LiveTool;
 
+/// <summary>Outcome of a reminder content edit guarded by exact owner and revision.</summary>
+public enum AltaReminderContentUpdateResult
+{
+    /// <summary>The edit committed.</summary>
+    Updated,
+    /// <summary>The exact reminder or owner was not found.</summary>
+    Missing,
+    /// <summary>Content changed since the snapshot was read.</summary>
+    Conflict,
+    /// <summary>The reminder has finished firing.</summary>
+    Completed,
+}
+
 /// <summary>
 /// Stores and runs in-process delayed prompt reminders for the live-tool command surface.
 /// </summary>
@@ -308,6 +321,34 @@ public sealed class AltaReminderService : IAsyncDisposable
         return false;
     }
 
+    /// <summary>Reads one reminder's descriptor, full content and edit revision atomically.</summary>
+    /// <remarks>The opaque revision changes on every content edit, including a change back to identical text. A deleted reminder is missing.</remarks>
+    /// <param name="reminderId">Exact reminder id.</param>
+    /// <param name="descriptor">Descriptor captured with the content.</param>
+    /// <param name="content">Full content captured with the descriptor.</param>
+    /// <param name="revision">Opaque edit revision for a guarded update.</param>
+    /// <returns>Whether the reminder exists.</returns>
+    /// <exception cref="ArgumentException">The id is missing.</exception>
+    public bool TryGetEditSnapshot(string reminderId, out AltaReminderDescriptor? descriptor, out string? content, out string? revision)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reminderId);
+        lock (_gate)
+        {
+            PruneCompletedWorkersUnderGate();
+            if (_entries.TryGetValue(reminderId, out var entry) &&
+                string.Equals(entry.Descriptor.ReminderId, reminderId, StringComparison.Ordinal))
+            {
+                descriptor = entry.Descriptor;
+                content = entry.Content;
+                revision = entry.ContentRevision.ToString(CultureInfo.InvariantCulture);
+                return true;
+            }
+        }
+        descriptor = null;
+        content = revision = null;
+        return false;
+    }
+
     /// <summary>
     /// Updates the prompt content for a scheduled reminder without changing its due time.
     /// </summary>
@@ -331,9 +372,33 @@ public sealed class AltaReminderService : IAsyncDisposable
     /// <exception cref="ArgumentException">Thrown when <paramref name="reminderId" /> or <paramref name="content" /> is missing.</exception>
     /// <exception cref="ObjectDisposedException">The service has started worker disposal.</exception>
     public bool TryUpdateContent(string reminderId, string content, out AltaReminderDescriptor? descriptor, out AltaReminderNotificationFailure? notificationFailure)
+        => UpdateContent(reminderId, null, null, content, false, out descriptor, out notificationFailure) == AltaReminderContentUpdateResult.Updated;
+
+    /// <summary>Atomically compares the exact owner and edit revision before replacing an active reminder's message.</summary>
+    /// <remarks>Does not change schedule, counts or due time. Only future firing captures use the edit; already captured deliveries cannot be retracted. Unlike the legacy overload, completed reminders are refused.</remarks>
+    /// <param name="reminderId">Exact reminder id.</param>
+    /// <param name="targetSessionId">Exact owning session id.</param>
+    /// <param name="expectedRevision">Opaque revision returned by <see cref="TryGetEditSnapshot" />.</param>
+    /// <param name="content">Full replacement message.</param>
+    /// <param name="descriptor">Updated descriptor on success, otherwise null.</param>
+    /// <param name="notificationFailure">Observer feedback after a committed edit, otherwise null.</param>
+    /// <returns>The result of the atomic guarded edit.</returns>
+    /// <exception cref="ArgumentException">An id, revision or content is missing.</exception>
+    /// <exception cref="ObjectDisposedException">Worker disposal has started.</exception>
+    public AltaReminderContentUpdateResult TryUpdateContent(string reminderId, string targetSessionId, string expectedRevision,
+        string content, out AltaReminderDescriptor? descriptor, out AltaReminderNotificationFailure? notificationFailure)
+        => UpdateContent(reminderId, targetSessionId, expectedRevision, content, true, out descriptor, out notificationFailure);
+
+    private AltaReminderContentUpdateResult UpdateContent(string reminderId, string? targetSessionId, string? expectedRevision,
+        string content, bool guarded, out AltaReminderDescriptor? descriptor, out AltaReminderNotificationFailure? notificationFailure)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reminderId);
         ArgumentException.ThrowIfNullOrWhiteSpace(content);
+        if (guarded)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(targetSessionId);
+            ArgumentException.ThrowIfNullOrWhiteSpace(expectedRevision);
+        }
         notificationFailure = null;
         NotificationContext context;
         lock (_gate)
@@ -343,10 +408,29 @@ public sealed class AltaReminderService : IAsyncDisposable
             if (!_entries.TryGetValue(reminderId, out var entry))
             {
                 descriptor = null;
-                return false;
+                return AltaReminderContentUpdateResult.Missing;
             }
 
+            if (guarded && (!string.Equals(entry.Descriptor.ReminderId, reminderId, StringComparison.Ordinal) ||
+                !string.Equals(entry.Descriptor.TargetSessionId, targetSessionId, StringComparison.Ordinal)))
+            {
+                descriptor = null;
+                return AltaReminderContentUpdateResult.Missing;
+            }
+            if (guarded && entry.Descriptor.State != AltaReminderStates.Active)
+            {
+                descriptor = null;
+                return AltaReminderContentUpdateResult.Completed;
+            }
+            if (guarded && !string.Equals(entry.ContentRevision.ToString(CultureInfo.InvariantCulture), expectedRevision, StringComparison.Ordinal))
+            {
+                descriptor = null;
+                return AltaReminderContentUpdateResult.Conflict;
+            }
+
+            var nextRevision = checked(entry.ContentRevision + 1);
             entry.Content = content;
+            entry.ContentRevision = nextRevision;
             descriptor = entry.Descriptor with
             {
                 ContentPreview = CreatePreview(content),
@@ -356,7 +440,7 @@ public sealed class AltaReminderService : IAsyncDisposable
         }
 
         notificationFailure = OnChanged(context);
-        return true;
+        return AltaReminderContentUpdateResult.Updated;
     }
 
     private async Task RunReminderAsync(ReminderEntry entry)
@@ -988,6 +1072,8 @@ public sealed class AltaReminderService : IAsyncDisposable
         public AltaReminderDescriptor Descriptor { get; set; }
 
         public string Content { get; set; }
+
+        public long ContentRevision { get; set; }
 
         public Task? Original { get; set; }
 

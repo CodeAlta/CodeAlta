@@ -100,7 +100,7 @@ function App() {
   const [reminderActions] = useState(() => createReminderActions(reminder.create, reminder.delete, (target, reply) => {
     const capability = reminderCapability.current;
     if (capability?.canSubmit({ expectedEpoch: target.epoch })) capability.observe(reply);
-  }));
+  }, reminder.save));
   const [providerProbeHolds] = useState(() => new Set<string>());
   const [draftIndicators] = useState(createDraftIndicators);
   const [nextSendSelections] = useState(() => createNextSendSelectionStore(

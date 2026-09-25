@@ -72,6 +72,7 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 [JsonSerializable(typeof(ReminderDetailRequest))]
 [JsonSerializable(typeof(ReminderDetailResponse))]
 [JsonSerializable(typeof(ReminderCreateRequest))]
+[JsonSerializable(typeof(ReminderSaveRequest))]
 [JsonSerializable(typeof(ReminderDeleteRequest))]
 [JsonSerializable(typeof(ReminderMutationResponse))]
 [JsonSerializable(typeof(ReminderListResponse))]

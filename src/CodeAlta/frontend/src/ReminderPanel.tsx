@@ -22,6 +22,10 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
   const [detail, setDetail] = useState<ReminderDetailResponse>();
   const [detailError, setDetailError] = useState("");
   const [confirmLoad, setConfirmLoad] = useState<string | null>(null);
+  const [editor, setEditor] = useState<{ base: ReminderDetailResponse; text: string }>();
+  const [confirmSelection, setConfirmSelection] = useState<string | null>(null);
+  const [confirmDiscardEdit, setConfirmDiscardEdit] = useState(false);
+  const selectionVersion = useRef(0);
   const [reload, setReload] = useState(0);
   const latest = useRef(target);
   latest.current = target;
@@ -30,7 +34,9 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
     return () => { latest.current = null; };
   }, [target?.epoch, target?.sessionId]);
   useEffect(() => {
+    selectionVersion.current++;
     setPage(undefined); setError(""); setSelected(null); setConfirmation(""); setContent(""); setConfirmLoad(null);
+    setEditor(undefined); setConfirmSelection(null); setConfirmDiscardEdit(false);
   }, [target?.epoch, target?.sessionId]);
   useEffect(() => {
     if (!target) return;
@@ -68,6 +74,7 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
       if (controller.signal.aborted) return;
       if (value.epoch !== target.epoch || value.sessionId !== target.sessionId || value.reminderId !== row.id ||
         value.status !== "ok" || typeof value.content !== "string" || !value.content.trim() || value.content.length > 4096 ||
+        typeof value.editRevision !== "string" || !/^(0|[1-9]\d{0,18})$/.test(value.editRevision) ||
         value.delaySeconds !== row.delaySeconds || value.repeatCount !== row.repeatCount) {
         setDetailError(value.status === "stale_epoch" || value.epoch !== target.epoch ? "Host identity changed. Reload required."
           : value.status === "missing_reminder" ? "Reminder is unavailable or was deleted. Refresh the list."
@@ -76,6 +83,8 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
         return;
       }
       setDetail(value);
+      setEditor(previous => previous && previous.base.reminderId === row.id && previous.text !== previous.base.content
+        ? previous : { base: value, text: value.content! });
     }).catch(() => { if (!controller.signal.aborted) setDetailError("Reminder detail could not be read. Refresh the list to try again."); });
     return () => controller.abort();
   }, [target?.epoch, target?.sessionId, row?.id, active, readDetail, mutationAllowed]);
@@ -86,6 +95,14 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
   const validRepeat = /^[1-9]\d*$/.test(repeat) && Number(repeat) <= 20;
   const full = target && actions.isFull(target);
   const blocked = !mutationAllowed || !!operation?.pending || !!operation?.hold || !!full;
+  const dirtyEdit = !!editor && editor.text !== editor.base.content;
+  function choose(id: string, discard = false) {
+    if (id === selected) return;
+    if (dirtyEdit && !discard) { setConfirmSelection(id); return; }
+    selectionVersion.current++;
+    setSelected(id); setConfirmation(""); setConfirmLoad(null); setDetail(undefined); setDetailError("");
+    setEditor(undefined); setConfirmSelection(null); setConfirmDiscardEdit(false);
+  }
   function useAsNew(discard: boolean) {
     if (!target || !row || !shownDetail || !canMutate() || blocked ||
       actions.get(target)?.pending || actions.get(target)?.hold || actions.isFull(target) ||
@@ -111,6 +128,23 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
       setConfirmation(""); setReload(n => n + 1);
     }
   }
+  async function save() {
+    if (!target || !canMutate() || !row || !shownDetail || row.state !== "active" || !editor ||
+      editor.base.editRevision !== shownDetail.editRevision || editor.base.reminderId !== row.id ||
+      !dirtyEdit || !editor.text.trim() || editor.text.length > 4096 || blocked) return;
+    const captured = target;
+    const version = selectionVersion.current;
+    const id = row.id;
+    const result = await actions.submit(captured, { expectedEpoch: captured.epoch, sessionId: captured.sessionId,
+      reminderId: id, editRevision: editor.base.editRevision!, content: editor.text }, "save");
+    if (latest.current?.epoch !== captured.epoch || latest.current.sessionId !== captured.sessionId ||
+      version !== selectionVersion.current) return;
+    if (result) { setEditor(undefined); setDetail(undefined); setReload(n => n + 1); }
+    else if (["conflict", "missing_reminder", "completed"].includes(actions.get(captured)?.status ?? "")) {
+      setDetail(undefined);
+      setDetailError("Reminder changed, finished or was deleted. Refresh before saving again; your edit draft is retained.");
+    }
+  }
   return <main className="configuration-page reminder-page" aria-label="Reminders">
     <header className="page-heading"><span className="eyebrow">Desktop / Reminders</span><h1>Reminders</h1>
       <p>Delayed prompts for the selected session. Schedules are in memory only and are lost when the host stops.
@@ -125,10 +159,12 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
         <h2>Schedules</h2><p role="status">As of refresh: {active.activeCount} active, {active.completedCount} completed.</p>
         {active.reminders.length === 0 && <p>No reminders for this session.</p>}
         {active.reminders.map(item => <button type="button" key={item.id} aria-pressed={selected === item.id}
-          onClick={() => { if (selected === item.id) return;
-            setSelected(item.id); setConfirmation(""); setConfirmLoad(null); setDetail(undefined); setDetailError(""); }}>
+          onClick={() => choose(item.id)}>
           <strong>Preview: {item.preview}</strong><small>{item.state} · {item.firedCount}/{item.repeatCount} attempts · {item.id}</small>
         </button>)}
+        {confirmSelection && <p role="alert">Discard the unsaved reminder message draft to switch selection?
+          <button type="button" onClick={() => choose(confirmSelection, true)}>Discard edit and switch</button>{" "}
+          <button type="button" onClick={() => setConfirmSelection(null)}>Keep edit draft</button></p>}
       </section><section className="model-catalog-results" aria-label="Reminder details and creation">
         <h2>Create reminder</h2><label htmlFor="reminder-content">Prompt to send</label>
         <textarea id="reminder-content" value={content} maxLength={4096} onChange={event => { setContent(event.target.value); setConfirmLoad(null); }} />
@@ -149,6 +185,17 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
           {detailError && <p role="alert">{detailError}</p>}
           {shownDetail && <><h4>Full scheduled message</h4>
             <p aria-label="Full reminder message" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{shownDetail.content}</p>
+            <label htmlFor="reminder-edit">Edit full reminder message (active schedule only)</label>
+            <textarea id="reminder-edit" maxLength={4096} value={editor?.text ?? ""}
+              disabled={blocked || row.state !== "active"} onChange={event => { setEditor(previous => previous && { ...previous, text: event.target.value }); setConfirmDiscardEdit(false); }} />
+            <button type="button" disabled={blocked || row.state !== "active" || !dirtyEdit || !editor?.text.trim() ||
+              editor.text.length > 4096 || editor.base.editRevision !== shownDetail.editRevision}
+              onClick={() => void save()}>Save message</button>
+            {dirtyEdit && <><button type="button" disabled={blocked} onClick={() => setConfirmDiscardEdit(true)}>Discard edit draft</button>
+              {confirmDiscardEdit && <p role="alert">Discard unsaved message changes?
+                <button type="button" disabled={blocked} onClick={() => { setEditor({ base: shownDetail, text: shownDetail.content! }); setConfirmDiscardEdit(false); }}>Confirm discard edit</button>{" "}
+                <button type="button" onClick={() => setConfirmDiscardEdit(false)}>Keep edit draft</button></p>}</>}
+            <p>Saved edits affect only future captured deliveries, not already-admitted sends. Saving does not change the delay, repeat count, due time or attempts. Completed reminders cannot be edited.</p>
             <button type="button" disabled={blocked} onClick={() => useAsNew(false)}>Use as new reminder</button>
             {confirmLoad === row.id && <p role="alert">The Create form has edits. Discard them to load this reminder without changing its schedule.
               <button type="button" disabled={blocked} onClick={() => useAsNew(true)}>Discard draft and use reminder</button>{" "}
