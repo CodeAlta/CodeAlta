@@ -62,10 +62,14 @@ test("mounted persisted tool details wrap without changing follow, older anchor 
       else if(Date.now()>end)resolve(document.body.innerText.slice(0,350));else setTimeout(check,30)}check()})`);
     const click = (selector: string) => evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     const pointer = async (selector: string) => {
-      const bounds = await evaluate(`(() => { const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
-        return { x:r.left+r.width/2, y:r.top+r.height/2 }; })()`) as {x:number;y:number};
-      await command("Input.dispatchMouseEvent", { type: "mousePressed", ...bounds, button: "left", clickCount: 1 });
-      await command("Input.dispatchMouseEvent", { type: "mouseReleased", ...bounds, button: "left", clickCount: 1 });
+      const bounds = await evaluate(`(() => { const target=document.querySelector(${JSON.stringify(selector)});
+        const r=target.getBoundingClientRect(), x=r.left+r.width/2, y=r.top+r.height/2;
+        return { x, y, hit:target===document.elementFromPoint(x,y),
+          at:document.elementFromPoint(x,y)?.outerHTML.slice(0,110), top:document.querySelector('.timeline-scroll').scrollTop,
+          following:document.querySelector('.timeline-scroll').dataset.following }; })()`) as {x:number;y:number;hit:boolean;at:string;top:number;following:string};
+      assert.equal(bounds.hit, true, `pointer target obscured: ${selector} ${JSON.stringify(bounds)}`);
+      await command("Input.dispatchMouseEvent", { type: "mousePressed", x: bounds.x, y: bounds.y, button: "left", clickCount: 1 });
+      await command("Input.dispatchMouseEvent", { type: "mouseReleased", x: bounds.x, y: bounds.y, button: "left", clickCount: 1 });
     };
     const press = async (key: string, code: string, virtual: number) => {
       await command("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: virtual });
@@ -135,7 +139,30 @@ test("mounted persisted tool details wrap without changing follow, older anchor 
     await click(`${latest} .copy-markdown`);
     assert.equal(await wait("window.toolFixture.copied.length===2"), true);
     assert.equal(await evaluate("window.toolFixture.copied[1]"), originalCopy);
-    await evaluate("(() => { const s=document.querySelector('.timeline-scroll');s.scrollTop=600;s.dispatchEvent(new Event('scroll',{bubbles:true})); })()");
+    await evaluate(`(() => { const s=document.querySelector('.timeline-scroll'),p=document.querySelector('${pre}');
+      p.scrollTop=40;p.dispatchEvent(new WheelEvent('wheel',{deltaY:-600,bubbles:true}));
+      document.querySelector('.deferred-layout').style.height='220px';s.dispatchEvent(new Event('scroll',{bubbles:true})); })()`);
+    assert.equal(await wait(`${distance}<3 && document.querySelector('.timeline-scroll').dataset.following==='true'`), true);
+    await evaluate("(() => { const s=document.querySelector('.timeline-scroll');document.querySelector('.deferred-layout').style.height='400px';s.dispatchEvent(new WheelEvent('wheel',{deltaY:100,bubbles:true}));s.scrollTop+=20;s.dispatchEvent(new Event('scroll',{bubbles:true})); })()");
+    assert.equal(await wait(`${distance}<3 && document.querySelector('.timeline-scroll').dataset.following==='true'`), true);
+    await evaluate(`(() => {const s=document.querySelector('.timeline-scroll'),input=document.querySelector('${details} input');
+      input.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerType:'mouse',pointerId:10}));
+      input.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerType:'mouse',pointerId:10}));
+      input.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerType:'touch',pointerId:9,clientY:100}));
+      input.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerType:'touch',pointerId:9,clientY:100}));
+      document.querySelector('.deferred-layout').style.height='460px';s.dispatchEvent(new Event('scroll',{bubbles:true})); })()`);
+    assert.equal(await wait(`${distance}<3 && document.querySelector('.timeline-scroll').dataset.following==='true'`), true);
+    await evaluate(`new Promise(resolve => { const s=document.querySelector('.timeline-scroll');
+      document.querySelector('.deferred-layout').style.height='500px';requestAnimationFrame(()=>{
+        s.scrollTop=s.scrollHeight;s.dispatchEvent(new Event('scroll',{bubbles:true}));requestAnimationFrame(()=>{
+          s.scrollTop=s.scrollHeight-s.clientHeight-410;s.dispatchEvent(new Event('scroll',{bubbles:true}));resolve(null);
+        });
+      });
+    })`);
+    assert.equal(await wait(`${distance}<3 && document.querySelector('.timeline-scroll').dataset.following==='true'`), true);
+    // A reader scroll can arrive after layout growth but before ResizeObserver settles it.
+    // Explicit wheel intent must win over following in that ordering.
+    await evaluate("(() => { const s=document.querySelector('.timeline-scroll'); document.querySelector('.deferred-layout').style.height='540px'; s.dispatchEvent(new WheelEvent('wheel',{deltaY:-600,bubbles:true})); s.scrollTop=600;s.dispatchEvent(new Event('scroll',{bubbles:true})); })()");
     assert.equal(await wait("document.querySelector('.timeline-scroll').dataset.following==='false'"), true);
     const unfollowed = Number(await evaluate("document.querySelector('.timeline-scroll').scrollTop"));
     await click(`${details} input`);
@@ -164,7 +191,25 @@ test("mounted persisted tool details wrap without changing follow, older anchor 
     await evaluate("window.toolFixture.release()");
     assert.equal(await wait("document.querySelector('.navigation-notice').textContent.includes('following visible content') && document.querySelector('.history').dataset.windowReady==='true'"), true);
     assert.equal(await wait(`${distance}<3 && document.querySelector('.timeline-scroll').dataset.following==='true'`), true);
-    await evaluate("document.querySelector('.timeline-scroll').scrollTop=600");
+    await evaluate("(() => { const s=document.querySelector('.timeline-scroll');s.tabIndex=0;s.focus({preventScroll:true}); document.querySelector('.deferred-layout').style.height='720px';s.dispatchEvent(new KeyboardEvent('keydown',{key:'PageUp',bubbles:true}));s.scrollTop=600;s.dispatchEvent(new Event('scroll',{bubbles:true})); })()");
+    assert.equal(await wait("document.querySelector('.timeline-scroll').dataset.following==='false'"), true);
+    await evaluate("(() => {const s=document.querySelector('.timeline-scroll');s.scrollTop=s.scrollHeight;s.dispatchEvent(new Event('scroll',{bubbles:true}))})()");
+    assert.equal(await wait(`${distance}<3 && document.querySelector('.timeline-scroll').dataset.following==='true'`), true);
+    await evaluate("document.querySelector('.timeline-scroll').focus({preventScroll:true})");
+    await press("PageUp", "PageUp", 33);
+    assert.equal(await wait("document.querySelector('.timeline-scroll').dataset.following==='false'"), true);
+    await evaluate("(() => {const s=document.querySelector('.timeline-scroll');s.scrollTop=s.scrollHeight;s.dispatchEvent(new Event('scroll',{bubbles:true}))})()");
+    assert.equal(await wait(`${distance}<3 && document.querySelector('.timeline-scroll').dataset.following==='true'`), true);
+    await evaluate("(() => { const s=document.querySelector('.timeline-scroll'); document.querySelector('.deferred-layout').style.height='790px'; const x=s.getBoundingClientRect().left+s.clientWidth+2; s.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerType:'mouse',pointerId:7,clientX:x}));s.scrollTop=600;s.dispatchEvent(new Event('scroll',{bubbles:true}));s.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerType:'mouse',pointerId:7})); })()");
+    assert.equal(await wait("document.querySelector('.timeline-scroll').dataset.following==='false'"), true);
+    await evaluate("(() => {const s=document.querySelector('.timeline-scroll');s.scrollTop=s.scrollHeight;s.dispatchEvent(new Event('scroll',{bubbles:true}))})()");
+    assert.equal(await wait(`${distance}<3 && document.querySelector('.timeline-scroll').dataset.following==='true'`), true);
+    await evaluate("(() => { const s=document.querySelector('.timeline-scroll');document.querySelector('.deferred-layout').style.height='860px';s.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerType:'touch',pointerId:8,clientY:200}));s.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerType:'touch',pointerId:8,clientY:300}));s.scrollTop=600;s.dispatchEvent(new Event('scroll',{bubbles:true}));s.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerType:'touch',pointerId:8})); })()");
+    assert.equal(await wait("document.querySelector('.timeline-scroll').dataset.following==='false'"), true);
+    await evaluate("(() => {const s=document.querySelector('.timeline-scroll');s.scrollTop=s.scrollHeight;s.dispatchEvent(new Event('scroll',{bubbles:true}))})()");
+    assert.equal(await wait(`${distance}<3 && document.querySelector('.timeline-scroll').dataset.following==='true'`), true);
+    await evaluate("document.querySelector('.timeline-scroll').focus({preventScroll:true})");
+    await press("PageUp", "PageUp", 33);
     assert.equal(await wait("document.querySelector('.timeline-scroll').dataset.following==='false'"), true);
     await evaluate("window.toolFixture.hold();document.querySelector('.keyboard-target').focus();document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'F4',ctrlKey:true,bubbles:true,cancelable:true}))");
     assert.equal(await wait("document.querySelector('.navigation-notice').textContent.includes('Refreshing')"), true);
@@ -175,9 +220,16 @@ test("mounted persisted tool details wrap without changing follow, older anchor 
     assert.equal(await evaluate("!!document.querySelector('.timeline-message:last-child .tool-detail-wrap')"), false);
     assert.equal(await evaluate("document.querySelectorAll('.timeline-message')[1].textContent.includes('Additional diagnostic details were omitted')"), true);
     assert.equal(await evaluate("!!document.querySelectorAll('.timeline-message')[1].querySelector('.tool-detail-wrap')"), false);
-    await evaluate("document.querySelector('.timeline-scroll').scrollTop=0");
+    assert.equal(await wait(`${distance}<3 && document.querySelector('.timeline-scroll').dataset.following==='true'`), true);
+    await evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+    await evaluate("document.querySelector('.timeline-scroll').addEventListener('wheel',e=>window.toolFixture.lastWheel={y:e.deltaY,top:e.currentTarget.scrollTop,target:e.target?.tagName})");
+    const viewport = await evaluate("(() => { const s=document.querySelector('.timeline-scroll'),r=s.getBoundingClientRect(); return {x:r.left+s.clientWidth-12,y:r.top+s.clientHeight/2}; })()") as {x:number;y:number};
+    await command("Input.dispatchMouseEvent", { type: "mouseWheel", ...viewport, deltaX: 0, deltaY: -600 });
+    assert.equal(await wait("document.querySelector('.timeline-scroll').dataset.following==='false' && document.querySelector('.timeline-scroll').scrollTop===0"), true,
+      String(await evaluate("JSON.stringify((s=>({top:s.scrollTop,height:s.scrollHeight,client:s.clientHeight,following:s.dataset.following,wheel:window.toolFixture.lastWheel}))(document.querySelector('.timeline-scroll')))")+JSON.stringify(viewport)));
     await pointer(".timeline-message:first-child .event-details summary");
     assert.equal(await wait("document.querySelector('.timeline-message:first-child .event-details').open"), true);
+    assert.equal(await evaluate("document.querySelector('.timeline-scroll').dataset.following"), "false");
     await evaluate("document.querySelector('.timeline-scroll').scrollTop=0");
     await pointer(".timeline-message:first-child .event-details summary");
     assert.equal(await wait("!document.querySelector('.timeline-message:first-child .event-details').open"), true);

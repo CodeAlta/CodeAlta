@@ -291,8 +291,10 @@ disclosure. Inside it, **Wrap lines** is on by default and can be switched per c
 turning it off scrolls long lines inside the detail pane. This only changes how the already loaded plain text
 is displayed: Markdown and copied content remain unchanged, and omitted or shortened details remain marked.
 There is no request for missing output, additional history, or live provider data when opening or wrapping a card.
-Following the loaded timeline stays at the latest visible bottom across these layout changes; an explicitly
-unfollowed reader is not moved to the newest journal window. This is not full TUI tool-output or timeline parity.
+Following the loaded timeline stays at the latest visible bottom across layout-only changes. Wheel, scroll-key,
+scrollbar and touch-drag navigation can still unfollow when it coincides with a detail layout change; merely
+clicking a disclosure/Wrap control or scrolling inside its detail text does not opt out. An explicitly unfollowed
+reader is not moved to the newest journal window. This is not full TUI tool-output or timeline parity.
 
 In the focused session workspace, `F3`/`F4` move among **persisted user and assistant
 messages in the currently retained window** (not tool/status cards); `Ctrl+F3` moves

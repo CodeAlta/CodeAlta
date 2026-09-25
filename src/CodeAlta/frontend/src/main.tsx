@@ -1236,7 +1236,9 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
       : <>
         <div className="timeline-scroll" ref={timeline.elementRef}
           onScroll={event => { newest.onScroll(); if (!newest.pending()) timeline.scroll(event.currentTarget); }}
-          onWheel={newest.cancel} onPointerDown={newest.cancel}>
+          onWheel={event => { newest.cancel(); timeline.wheel(event); }} onKeyDown={timeline.keyDown}
+          onPointerDown={event => { newest.cancel(); timeline.pointerDown(event); }}
+          onPointerMove={timeline.pointerMove} onPointerUp={timeline.pointerEnd} onPointerCancel={timeline.pointerEnd}>
         <History sessionId={session.id} onNotesChange={onNotesChange} onSettled={() => {
           timeline.settled(); if (!newest.pending()) timeline.pauseIfUnfollowed();
         }}

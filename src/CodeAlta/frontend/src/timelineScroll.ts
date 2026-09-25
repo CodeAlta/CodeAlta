@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState,
+  type KeyboardEvent, type PointerEvent, type WheelEvent } from "react";
 import type { NewestHistoryRequest, NewestHistoryResult } from "./HistoryPanel";
 import { historyMessage } from "./history";
 
@@ -92,6 +93,9 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
   const [following, setFollowing] = useState(selection.following);
   const restoreFrame = useRef(0);
   const observedHeight = useRef<number | null>(null);
+  const layoutUntil = useRef(0);
+  const scrollIntent = useRef<{ top: number; direction: -1 | 0 | 1; until: number } | null>(null);
+  const touchStart = useRef<{ id: number; y: number } | null>(null);
   const prependMetrics = useRef<{ metrics: ScrollMetrics; anchor: HTMLElement | null; top: number } | null>(null);
   const messageAnchor = useRef<{ row: HTMLElement; top: number } | null>(null);
   const resetMessageNavigation = useCallback(() => { messageAnchor.current = null; }, []);
@@ -107,12 +111,10 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     let frame = 0;
     const scrollBottom = () => {
       if (!selection.following()) return;
+      layoutUntil.current = performance.now() + 120; // Native scroll anchoring can settle after the first resize frame.
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        if (selection.following()) {
-          element.scrollTop = bottomScrollTop(element);
-          observedHeight.current = element.scrollHeight;
-        }
+        if (selection.following()) element.scrollTop = bottomScrollTop(element);
       });
     };
     // DOM mutations do not report layout growth from images, fonts or CSS. Observe the
@@ -138,9 +140,18 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     restoreFrame.current = requestAnimationFrame(() => selection.finishRestore());
   }
   function scroll(element: HTMLDivElement) {
-    if (observedHeight.current !== null && observedHeight.current !== element.scrollHeight) {
+    const intent = scrollIntent.current;
+    const moved = !!intent && performance.now() <= intent.until && element.scrollTop !== intent.top &&
+      (intent.direction === 0 || (element.scrollTop - intent.top) * intent.direction > 0);
+    if (moved) scrollIntent.current = null;
+    const movingAway = moved && intent?.direction !== 1;
+    const geometryChanged = observedHeight.current !== null && observedHeight.current !== element.scrollHeight;
+    const layoutScroll = selection.following() && !movingAway && performance.now() <= layoutUntil.current;
+    if (layoutScroll || geometryChanged && (!selection.following() || !movingAway)) {
       // Detail/layout changes can emit a browser scroll before ResizeObserver follows the new bottom.
-      // Do not infer a reader's change of follow preference from the changing geometry alone.
+      // Do not infer a reader's change of follow preference from geometry alone. Explicit
+      // movement away wins; moving toward a growing tail must not opt a follower out.
+      // An unfollowed reader's preference is never replaced by a simultaneous layout change.
       observedHeight.current = element.scrollHeight;
       if (selection.following()) element.scrollTop = bottomScrollTop(element);
       else selection.pauseAt(element.scrollTop);
@@ -148,6 +159,39 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     }
     observedHeight.current = element.scrollHeight;
     setFollowing(selection.scroll(element));
+  }
+  function markScrollIntent(direction: -1 | 0 | 1) {
+    const element = elementRef.current;
+    if (element) scrollIntent.current = { top: element.scrollTop, direction, until: performance.now() + 500 };
+  }
+  function wheel(event: WheelEvent<HTMLDivElement>) {
+    if (event.defaultPrevented || event.ctrlKey || event.deltaY === 0 ||
+      (event.target as Element).closest(".event-details pre")) return;
+    markScrollIntent(event.deltaY > 0 ? 1 : -1);
+  }
+  function keyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey ||
+      (event.target as Element).closest("input, select, textarea, [contenteditable], .event-details pre")) return;
+    if (event.key === " " && (event.target as Element).closest("button, summary, a")) return;
+    if (["ArrowUp", "PageUp", "Home"].includes(event.key) || event.key === " " && event.shiftKey) markScrollIntent(-1);
+    else if (["ArrowDown", "PageDown", "End"].includes(event.key) || event.key === " " && !event.shiftKey) markScrollIntent(1);
+  }
+  function pointerDown(event: PointerEvent<HTMLDivElement>) {
+    if (event.pointerType === "touch") {
+      touchStart.current = (event.target as Element).closest(".event-details pre") ? null : { id: event.pointerId, y: event.clientY };
+      return;
+    }
+    const element = event.currentTarget;
+    if (event.target === element && event.clientX >= element.getBoundingClientRect().left + element.clientWidth)
+      markScrollIntent(0); // Only the scrollbar gutter, not a detail or Wrap control.
+  }
+  function pointerMove(event: PointerEvent<HTMLDivElement>) {
+    const start = touchStart.current;
+    if (event.pointerType === "touch" && start?.id === event.pointerId && Math.abs(event.clientY - start.y) > 3)
+      markScrollIntent(event.clientY < start.y ? 1 : -1);
+  }
+  function pointerEnd(event: PointerEvent<HTMLDivElement>) {
+    if (touchStart.current?.id === event.pointerId) touchStart.current = null;
   }
   function beforeOlderPage() {
     const element = elementRef.current;
@@ -173,6 +217,9 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
   function jump() {
     const element = elementRef.current;
     if (element) {
+      scrollIntent.current = null;
+      touchStart.current = null;
+      layoutUntil.current = 0;
       selection.jump(element);
       element.scrollTop = bottomScrollTop(element);
       observedHeight.current = element.scrollHeight;
@@ -212,7 +259,8 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     setFollowing(false);
     return { status: "moved", label: row.querySelector(".message-body")?.textContent?.trim().slice(0, 120) };
   }
-  return { elementRef, following, settled, scroll, jump, pause, beforeOlderPage, afterOlderPage,
+  return { elementRef, following, settled, scroll, wheel, keyDown, pointerDown, pointerMove, pointerEnd,
+    jump, pause, beforeOlderPage, afterOlderPage,
     messageReady, navigateMessage, resetMessageNavigation, pauseIfUnfollowed };
 }
 

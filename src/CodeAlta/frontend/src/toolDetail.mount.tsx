@@ -1,4 +1,5 @@
-import { createElement, useCallback, useLayoutEffect, useRef, useState, type UIEvent } from "react";
+import { createElement, useCallback, useLayoutEffect, useRef, useState,
+  type PointerEvent, type UIEvent, type WheelEvent } from "react";
 import { createRoot } from "react-dom/client";
 import type { HistoryRequest, HistoryResponse } from "#neoastra";
 import { History } from "./HistoryPanel";
@@ -66,7 +67,10 @@ function createFixture() {
       createElement("button", { className: "keyboard-target", type: "button" }, "Timeline keyboard target"),
       createElement("div", { className: "timeline-scroll", ref: position.elementRef, "data-following": position.following,
         onScroll: (event: UIEvent<HTMLDivElement>) => { newest.onScroll(); if (!newest.pending()) position.scroll(event.currentTarget); },
-        onWheel: newest.cancel, onPointerDown: newest.cancel,
+        onWheel: (event: WheelEvent<HTMLDivElement>) => { newest.cancel(); position.wheel(event); },
+        onKeyDown: position.keyDown,
+        onPointerDown: (event: PointerEvent<HTMLDivElement>) => { newest.cancel(); position.pointerDown(event); },
+        onPointerMove: position.pointerMove, onPointerUp: position.pointerEnd, onPointerCancel: position.pointerEnd,
         style: { height: "260px", overflowY: "scroll", width: "100%" } },
         createElement(History, { sessionId, read, live: null, onNotesChange: () => {},
           onSettled: () => { position.settled(); if (!newest.pending()) position.pauseIfUnfollowed(); },
