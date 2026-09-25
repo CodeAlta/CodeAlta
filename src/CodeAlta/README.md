@@ -186,9 +186,13 @@ can also navigate saved projects read-only. Missing, changed, duplicated, omitte
 entries cannot be opened from a stale list. The separate absolute-folder field still requires an
 owned host, preview and explicit trust confirmation to import an arbitrary existing directory.
 If Refresh projects fails, saved selection pauses until a successful refresh.
-During an import and after an uncertain import attempt, saved selection is unavailable until the
-dialog is closed; refresh only observes the catalog and never retries the import. This is not
-directory completion, archive mutation or full project-management parity.
+During an admitted import, its original host epoch, requested/verified paths and pending or
+uncertain outcome remain visible when Open project is closed and reopened. Saved selection and
+new folder requests remain blocked across dialog remount and project-list refresh; refresh only
+observes the catalog and never retries the import. A definite refusal unlocks the dialog; a
+confirmed import only navigates after exact catalog verification without changing the selected
+project in the meantime. An uncertain outcome requires app reload after external inspection.
+This is not directory completion, archive mutation or full project-management parity.
 The shared catalog caches its snapshot, and closing/reloading the document is not a refresh
 or run-abort contract. Relaunch with a fresh browser data directory to load another snapshot.
 Canceling an RPC waiter does not stop the shared catalog's background load. Existing RPC

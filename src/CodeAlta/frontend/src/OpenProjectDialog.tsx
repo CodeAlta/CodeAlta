@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { WorkspaceSnapshot } from "#neoastra";
 import type { createMutationCapability } from "./sessionOperations";
 import { canImportCheckedFolder, projectOpeningMessage, type createProjectOpening } from "./projectOpening";
@@ -23,10 +23,10 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, capabil
   const [notice, setNotice] = useState("");
   const [refreshFailed, setRefreshFailed] = useState(false);
   const [, notifyCapability] = useState(0);
+  const importEvidence = useSyncExternalStore(opening.subscribe, opening.getSnapshot);
   const canImport = !!epoch && !!capability?.canMutate();
   const alive = useRef(true);
   const origin = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
-  const importAttempted = useRef(false);
   const busyNow = useRef(false);
   const results = useRef<HTMLDivElement>(null);
   const followUp = useRef(new AbortController());
@@ -62,7 +62,7 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, capabil
   });
   function choose(project: SavedProjectIdentity) {
     if (!alive.current) return;
-    if (busyNow.current || busy || refreshFailed || importAttempted.current || !snapshot?.configured
+    if (busyNow.current || busy || refreshFailed || opening.getSnapshot() || !snapshot?.configured
       || getCurrentSnapshot() !== snapshot || !savedProjectSelection(project, getCurrentSnapshot())) {
       setMessage("The saved project is no longer verified in this list. Refresh and select its current entry.");
       return;
@@ -71,7 +71,7 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, capabil
     else setMessage("The saved project changed before navigation. Refresh and select its current entry.");
   }
   function savedKeys(event: ReactKeyboardEvent<HTMLElement>) {
-    if (event.defaultPrevented || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+    if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !event.ctrlKey && !event.altKey && !event.metaKey) {
       event.preventDefault();
       if (matches.length) setActive((index + (event.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length);
@@ -80,7 +80,7 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, capabil
     }
   }
   async function checkPath() {
-    if (busyNow.current || busy || importAttempted.current || !canImport) return;
+    if (busyNow.current || busy || opening.getSnapshot() || !canImport) return;
     const requested = query.trim();
     busyNow.current = true;
     setBusy(true);
@@ -96,8 +96,7 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, capabil
     else setMessage(projectOpeningMessage(result.kind === "error" ? result.code : "invalid_response"));
   }
   async function importPath() {
-    if (busyNow.current || importAttempted.current || !canImportCheckedFolder(preview, confirmed, busy, canImport) || !preview) return;
-    importAttempted.current = true;
+    if (busyNow.current || opening.getSnapshot() || !canImportCheckedFolder(preview, confirmed, busy, canImport) || !preview) return;
     busyNow.current = true;
     setBusy(true);
     setMessage("");
@@ -106,14 +105,13 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, capabil
     if (!alive.current) return;
     busyNow.current = false;
     if (result.kind === "imported") {
-      if (await onImported(result.id, result.path, followUp.current.signal)) { if (alive.current) close(); return; }
+      if (await onImported(result.id, result.path, followUp.current.signal)) {
+        if (alive.current && opening.confirmOpened(epoch!, result.path, result.id)) close();
+        return;
+      }
       if (!alive.current) return;
-      setMessage("The project may have been imported, but the refreshed catalog did not show it. Inspect the project list before retrying.");
-    } else {
-      if (result.kind === "error" && ["unconfigured", "invalid_request", "missing_directory", "stale_epoch", "busy", "closed"].includes(result.code))
-        importAttempted.current = false; // A definitive refusal did not leave an uncertain import to preserve.
-      setMessage(projectOpeningMessage(result.kind === "error" ? result.code : "import_unconfirmed"));
-    }
+      setMessage("The project may have been imported, but the refreshed catalog did not show it. Inspect the project list; this captured request cannot be retried in this window.");
+    } else setMessage(projectOpeningMessage(result.kind === "error" ? result.code : "import_unconfirmed"));
     setPreview(undefined);
     setConfirmed(false);
     setBusy(false);
@@ -127,8 +125,10 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, capabil
     busyNow.current = false;
     setBusy(false);
     setRefreshFailed(!fresh);
-    if (fresh) { if (!importAttempted.current) setMessage(""); setNotice("Project list refreshed. Check the entries before requesting another import."); }
-    else if (importAttempted.current) setNotice("Could not refresh the project list. The import outcome remains unconfirmed.");
+    if (fresh) { if (!opening.getSnapshot()) setMessage(""); setNotice(opening.getSnapshot()
+      ? "Project list refreshed for inspection. The captured import remains locked; no request was retried."
+      : "Project list refreshed. Check the entries before requesting another import."); }
+    else if (opening.getSnapshot()) setNotice("Could not refresh the project list. The captured import remains retained.");
     else setMessage("Could not refresh the project list. No import was requested.");
   }
   return <div className="dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}>
@@ -155,7 +155,7 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, capabil
           onKeyDown={event => { if (event.key === "Enter" && !event.repeat && !event.defaultPrevented && !event.nativeEvent.isComposing
             && event.nativeEvent.keyCode !== 229 && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
             event.preventDefault(); choose(project); } }}
-          disabled={busy || refreshFailed || importAttempted.current}>
+          disabled={busy || refreshFailed || !!importEvidence}>
           <span className="project-icon">{project.name.slice(0, 1).toUpperCase()}</span><span><strong>{project.name}{project.archived ? " (archived, read-only)" : ""}</strong><small title={project.path}>{project.path}</small></span>
         </button>)}
         {matches.length === 0 && <p role="status">{filter.trim() ? "No saved projects match this name or path." : "No saved projects in this snapshot."}</p>}
@@ -163,19 +163,24 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, capabil
       {snapshot?.projectsTruncated && <p role="status" className="muted-text">Saved project snapshot is truncated; omitted projects cannot be searched here. Refresh to inspect the current bounded list.</p>}
       {!snapshot && <p role="alert">The saved project list is unavailable. Refresh projects before selecting.</p>}
       {refreshFailed && <p role="alert">Saved selection is paused after a failed refresh. Retry Refresh projects before selecting.</p>}
-      {importAttempted.current && <p role="status">Saved selection and new folder requests are unavailable after an import attempt in this dialog. Close and inspect the project list before selecting.</p>}
+      {importEvidence && <p role={importEvidence.kind === "pending" ? "status" : "alert"}>
+        Captured import {importEvidence.kind} for host <code>{importEvidence.epoch}</code>, requested <code>{importEvidence.requestedPath}</code>,
+        verified folder <code>{importEvidence.path}</code>{importEvidence.projectId && <>, project ID <code>{importEvidence.projectId}</code></>}.
+        {importEvidence.kind === "pending" ? " Wait for the original request. No saved selection or new folder request is available."
+          : " Inspect the catalog; no navigation, new request or retry will run in this window. Reload the app only after resolving this exact outcome."}
+      </p>}
       {!canImport && <p className="muted-text">Adding a folder requires an owned host. Catalog-only browsing never changes the project list.</p>}
       {canImport && <div className="project-import">
         <label htmlFor="project-folder-path">Add a different existing folder (requires trust confirmation)</label>
-        <input id="project-folder-path" aria-label="Absolute folder path to check" value={query} disabled={busy || importAttempted.current}
+        <input id="project-folder-path" aria-label="Absolute folder path to check" value={query} disabled={busy || !!importEvidence}
           onChange={event => { setQuery(event.target.value); setPreview(undefined); setConfirmed(false); setMessage(""); setNotice(""); }}
           onKeyDown={event => { if (event.key === "Enter" && !event.defaultPrevented && !event.nativeEvent.isComposing
             && event.nativeEvent.keyCode !== 229 && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
             event.preventDefault(); void checkPath(); } }} placeholder="Absolute folder path" />
-        <button type="button" className="quiet-button" disabled={busy || importAttempted.current || !query.trim()} onClick={() => void checkPath()}>Check folder</button>
+        <button type="button" className="quiet-button" disabled={busy || !!importEvidence || !query.trim()} onClick={() => void checkPath()}>Check folder</button>
         {preview && <><p>Existing folder: <code>{preview.path}</code></p>
-          <label><input type="checkbox" checked={confirmed} disabled={busy || importAttempted.current} onChange={event => setConfirmed(event.target.checked)} /> I trust this folder and want to add it to the active project catalog.</label>
-          <button type="button" className="quiet-button" disabled={importAttempted.current || !canImportCheckedFolder(preview, confirmed, busy, canImport)} onClick={() => void importPath()}>Import and open folder</button></>}
+          <label><input type="checkbox" checked={confirmed} disabled={busy || !!importEvidence} onChange={event => setConfirmed(event.target.checked)} /> I trust this folder and want to add it to the active project catalog.</label>
+          <button type="button" className="quiet-button" disabled={!!importEvidence || !canImportCheckedFolder(preview, confirmed, busy, canImport)} onClick={() => void importPath()}>Import and open folder</button></>}
       </div>}
       {busy && <p role="status">Checking or importing the folder…</p>}
       {notice && <p role="status">{notice}</p>}

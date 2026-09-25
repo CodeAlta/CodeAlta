@@ -1081,16 +1081,25 @@ function App() {
       epoch={owned ? status?.hostEpoch : undefined}
       capability={owned ? mutation?.capability : undefined} opening={projectOpening}
       onOpen={shown => {
-        if (currentSnapshot.current !== snapshot || !savedProjectSelection(shown, currentSnapshot.current)) return false;
+        if (projectOpening.getSnapshot() || currentSnapshot.current !== snapshot || !savedProjectSelection(shown, currentSnapshot.current)) return false;
         selectProject(shown.id); setDialog(null); return true;
       }} onRefresh={refreshProjects}
       onImported={async (id, path, signal) => {
+        const original = projectOpening.getSnapshot();
+        const previousScope = selectedScope.current;
+        const previousSession = selectedSessionId.current;
+        if (original?.kind !== "imported" || original.epoch !== currentHostEpoch.current ||
+          original.path !== path || original.projectId !== id) return false;
         const fresh = await refreshProjects(signal);
-        if (!fresh?.configured || signal.aborted || !mutation?.capability.canMutate()
+        if (!fresh?.configured || signal.aborted || !mutation?.capability.canMutate() ||
+          currentHostEpoch.current !== original.epoch || selectedScope.current !== previousScope ||
+          selectedSessionId.current !== previousSession || projectOpening.getSnapshot() !== original
           || !fresh.projects.some(project => project.id === id && project.path === path)) return false;
         selectedScope.current = id;
         setProjectId(id);
-        setSessionId(sessionsForProject(fresh, id)[0]?.id ?? null);
+        const nextSession = sessionsForProject(fresh, id)[0]?.id ?? null;
+        selectedSessionId.current = nextSession;
+        setSessionId(nextSession);
         navigate("workspace");
         return true;
       }} onClose={() => setDialog(null)} />}

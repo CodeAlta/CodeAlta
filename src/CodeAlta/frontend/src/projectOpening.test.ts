@@ -90,3 +90,41 @@ test("lost, mismatched and concurrent import responses retain uncertainty withou
   assert.deepEqual(await lost.import(epoch, ready, capability), { kind: "error", code: "import_unconfirmed" });
   assert.match(projectOpeningMessage("import_unconfirmed"), /no automatic retry/i);
 });
+
+test("app-owned confirmed import evidence survives observers and blocks remounted requests until exact verification", async () => {
+  const capability = createMutationCapability(epoch);
+  const ready = { requestedPath: path, path };
+  let resolve!: (reply: ReturnType<typeof response>) => void;
+  let calls = 0; let notifications = 0;
+  const opening = createProjectOpening(async () => { calls++; return new Promise(done => { resolve = done; }); });
+  const unsubscribe = opening.subscribe(() => notifications++);
+  const first = opening.import(epoch, ready, capability);
+  assert.deepEqual(opening.getSnapshot(), { kind: "pending", epoch, requestedPath: path, path });
+  assert.deepEqual(await opening.import(other, { requestedPath: "C:\\other", path: "C:\\other" }, capability), { kind: "error", code: "busy" });
+  assert.deepEqual(await opening.preview(epoch, path, capability), { kind: "error", code: "busy" });
+  resolve(response("ok", path, path, "persisted-id"));
+  assert.deepEqual(await first, { kind: "imported", path, id: "persisted-id" });
+  assert.deepEqual(opening.getSnapshot(), { kind: "imported", epoch, requestedPath: path, path, projectId: "persisted-id" });
+  assert.equal(opening.confirmOpened(other, path, "persisted-id"), false);
+  assert.equal(opening.confirmOpened(epoch, "C:\\other", "persisted-id"), false);
+  assert.equal(opening.confirmOpened(epoch, path, "other-id"), false);
+  assert.equal(calls, 1);
+  assert.equal(opening.confirmOpened(epoch, path, "persisted-id"), true);
+  assert.equal(opening.getSnapshot(), null);
+  assert.equal(notifications, 3);
+  unsubscribe();
+});
+
+test("uncertain import retains original epoch and paths; only a proved refusal unlocks", async () => {
+  const ready = { requestedPath: path, path: "C:\\normalized" };
+  let calls = 0;
+  const uncertain = createProjectOpening(async () => { calls++; throw new Error("response lost"); });
+  assert.deepEqual(await uncertain.import(epoch, ready, createMutationCapability(epoch)), { kind: "error", code: "import_unconfirmed" });
+  assert.deepEqual(uncertain.getSnapshot(), { kind: "uncertain", epoch, ...ready });
+  assert.deepEqual(await uncertain.import(epoch, ready, createMutationCapability(epoch)), { kind: "error", code: "busy" });
+  assert.equal(uncertain.confirmOpened(epoch, ready.path, "guessed-id"), false);
+  assert.equal(calls, 1);
+  const refused = createProjectOpening(async () => response("missing_directory", path, null));
+  assert.deepEqual(await refused.import(epoch, ready, createMutationCapability(epoch)), { kind: "error", code: "missing_directory" });
+  assert.equal(refused.getSnapshot(), null);
+});

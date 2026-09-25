@@ -4,6 +4,8 @@ import type { createMutationCapability } from "./sessionOperations";
 type Capability = ReturnType<typeof createMutationCapability>;
 type Result = { kind: "ready"; requestedPath: string; path: string } | { kind: "imported"; path: string; id: string }
   | { kind: "error"; code: string };
+export type ImportEvidence = Readonly<{ kind: "pending" | "uncertain" | "imported"; epoch: string;
+  requestedPath: string; path: string; projectId?: string }>;
 type Invoke = (request: WorkspaceOpenProjectRequest, options: { timeoutMilliseconds: number }) => Promise<WorkspaceOpenProjectResponse>;
 
 export function canImportCheckedFolder(ready: { requestedPath: string; path: string } | undefined,
@@ -23,6 +25,12 @@ function text(value: unknown, maximum: number): value is string {
 
 export function createProjectOpening(invoke: Invoke) {
   let active = false;
+  let evidence: ImportEvidence | null = null;
+  const listeners = new Set<() => void>();
+  function publish(value: ImportEvidence | null) {
+    evidence = value;
+    for (const listener of listeners) listener();
+  }
   async function call(epoch: string | undefined, path: string, confirmed: boolean, capability: Capability | undefined,
     expectedPath?: string): Promise<Result> {
     if (!epoch || !capability?.canMutate()) return { kind: "error", code: "unconfigured" };
@@ -36,8 +44,10 @@ export function createProjectOpening(invoke: Invoke) {
       capability.observe({ status: result.status, epoch: result.hostEpoch });
       if (!capability.canMutate() || result.hostEpoch !== epoch) return { kind: "error", code: "stale_epoch" };
       if (result.status === "stale_epoch") return { kind: "error", code: "stale_epoch" };
+      if (confirmed && ["missing_directory", "invalid_request", "closed", "busy"].includes(result.status)
+        && result.requestedPath === path && result.projectId === null) return { kind: "error", code: result.status };
       if (result.requestedPath !== path || !text(result.projectPath, 4096)) {
-        return { kind: "error", code: result.status === "ok" && confirmed ? "import_unconfirmed" : result.status === "confirmation_required" ? "invalid_response" : result.status };
+        return { kind: "error", code: confirmed ? "import_unconfirmed" : result.status === "confirmation_required" ? "invalid_response" : result.status };
       }
       if (!confirmed && result.status === "confirmation_required" && result.projectId === null)
         return { kind: "ready", requestedPath: path, path: result.projectPath };
@@ -50,11 +60,28 @@ export function createProjectOpening(invoke: Invoke) {
     } finally { active = false; }
   }
   return {
+    subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    getSnapshot: () => evidence,
+    confirmOpened(epoch: string, path: string, id: string): boolean {
+      if (evidence?.kind !== "imported" || evidence.epoch !== epoch || evidence.path !== path || evidence.projectId !== id) return false;
+      publish(null); return true;
+    },
     preview(epoch: string | undefined, path: string, capability: Capability | undefined): Promise<Result> {
+      if (evidence) return Promise.resolve({ kind: "error", code: "busy" });
       return call(epoch, path, false, capability);
     },
-    import(epoch: string | undefined, ready: { requestedPath: string; path: string }, capability: Capability | undefined): Promise<Result> {
-      return call(epoch, ready.requestedPath, true, capability, ready.path);
+    async import(epoch: string | undefined, ready: { requestedPath: string; path: string }, capability: Capability | undefined): Promise<Result> {
+      if (evidence) return { kind: "error", code: "busy" };
+      if (!epoch || !capability?.canMutate()) return { kind: "error", code: "unconfigured" };
+      if (!ready || !text(ready.requestedPath, 4096) || ready.requestedPath !== ready.requestedPath.trim()
+        || !text(ready.path, 4096) || active) return { kind: "error", code: active ? "busy" : "invalid_request" };
+      const target = { epoch, requestedPath: ready.requestedPath, path: ready.path };
+      publish({ ...target, kind: "pending" }); // Retained by the app instance, not by the dialog lifetime.
+      const result = await call(epoch, ready.requestedPath, true, capability, ready.path);
+      if (result.kind === "imported") publish({ ...target, kind: "imported", projectId: result.id });
+      else if (result.kind === "error" && ["unconfigured", "invalid_request", "missing_directory", "closed", "busy"].includes(result.code)) publish(null);
+      else publish({ ...target, kind: "uncertain" });
+      return result;
     },
   };
 }
