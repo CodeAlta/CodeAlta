@@ -11,7 +11,7 @@ import { CommandPermissionPanel } from "./CommandPermissionPanel";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { AppIcon } from "./AppIcon";
 import { promptEditorHeight, showContextAction } from "./workspacePresentation";
-import { changeSelection } from "./sessionSelection";
+import { changeSelection, validSelection } from "./sessionSelection";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { dispatchComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
@@ -58,22 +58,31 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
   const [selection, setSelection] = useState<SessionSelection | null>(null);
   const [choicesNotice, setChoicesNotice] = useState("Loading session choices…");
   const [choicesRevision, setChoicesRevision] = useState(0);
+  const selectionRevision = useRef(0);
+  useEffect(() => selections.subscribe(value => {
+    if (value.epoch !== epoch || value.sessionId !== sessionId || !capability.canMutate()) return;
+    selectionRevision.current++;
+    setChoices(value.choices);
+    setSelection(value.selection);
+    setChoicesNotice("Selections apply on Send; active runs and queued text are unchanged.");
+  }), [epoch, sessionId, capability, selections]);
   useEffect(() => {
     const controller = new AbortController();
+    const revision = selectionRevision.current;
     setChoices(undefined);
     setSelection(null);
     setChoicesNotice("Loading session choices…");
     void sessions.choices({ expectedEpoch: epoch, sessionId }, { signal: controller.signal, timeoutMilliseconds: 15000 })
       .then(value => {
         capability.observe(value);
-        if (controller.signal.aborted || value.sessionId !== sessionId) return;
+        if (controller.signal.aborted || revision !== selectionRevision.current || value.sessionId !== sessionId) return;
         if (value.status !== "ok" || value.epoch !== epoch || !value.current) {
           setChoicesNotice(`Session choices unavailable (${value.status}).`); return;
         }
         setChoices(value);
         setSelection(selections.get(epoch, sessionId, value));
         setChoicesNotice("Selections apply on Send; active runs and queued text are unchanged.");
-      }).catch(() => { if (!controller.signal.aborted) setChoicesNotice("Session choices could not be loaded. Retry to refresh the provider catalog."); });
+      }).catch(() => { if (!controller.signal.aborted && revision === selectionRevision.current) setChoicesNotice("Session choices could not be loaded. Retry to refresh the provider catalog."); });
     return () => controller.abort();
   }, [epoch, sessionId, capability, selections, choicesRevision]);
   const [steerText, setSteerText] = useState("");
@@ -211,7 +220,13 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
     if (!signal || signal.aborted || !capability.canMutate()) return;
     const retained = submissions.pending(sessionId);
     if (retained?.inFlight) return;
-    const request = retained?.request ?? captureSubmission(epoch, sessionId, text, crypto.randomUUID(), selection);
+    const latest = selections.current(epoch, sessionId);
+    if (!retained && (latest || selection) && (!choices || choices.status !== "ok" || choices.epoch !== epoch || choices.sessionId !== sessionId
+      || !validSelection(choices, latest ?? selection!) || latest && selection !== latest)) {
+      setMessage("Next Send choices changed. Wait for the mounted composer to show the validated selection before sending.");
+      return;
+    }
+    const request = retained?.request ?? captureSubmission(epoch, sessionId, text, crypto.randomUUID(), latest ?? selection);
     if (!request || !capability.canSubmit(request)) return;
     draftIndicators.clear(sessionId);
     setMessage("Submission admission pending…");

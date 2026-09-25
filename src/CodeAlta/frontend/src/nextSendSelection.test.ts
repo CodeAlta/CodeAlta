@@ -72,6 +72,26 @@ test("instance-owned selection survives a denied storage write but never revives
   assert.equal(store.get("new-epoch", "one", { ...choices, epoch: "new-epoch" }), null);
 });
 
+test("mounted selection notifications isolate throwing listeners and refuse a changed catalog after restore", async () => {
+  const saved = JSON.stringify({ ...current, modelId: "new", reasoningEffort: "Low" });
+  const store = createNextSendSelectionStore(() => saved, () => { throw Error("storage denied"); });
+  const notifications: SessionSelection[] = [];
+  store.subscribe(() => { throw Error("disconnected view"); });
+  const unsubscribe = store.subscribe(value => notifications.push(value.selection));
+  assert.deepEqual(store.get("epoch", "one", choices), JSON.parse(saved));
+  const different = { ...choices, models: [choices.models[0]] };
+  const admission = () => ({ epoch: "epoch", sessionId: "one", active: true, canMutate: true, pending: false });
+  assert.equal(await applyCatalogNextSend({ ...target, modelId: "old" }, admission, async () => different, store), "selection_changed");
+  assert.equal(await applyPromptNextSend({ epoch: "epoch", sessionId: "one", promptId: "default" }, admission,
+    async () => different, store), "selection_changed");
+  assert.deepEqual(notifications, []);
+  assert.equal(store.set("epoch", "one", choices, current), true);
+  assert.deepEqual(notifications, [current]);
+  unsubscribe();
+  assert.equal(store.set("epoch", "one", choices, current), true);
+  assert.deepEqual(notifications, [current]);
+});
+
 test("prompt handoff retains model/effort and refuses changed session, epoch, unavailable or pending exact Send", async () => {
   const store = createNextSendSelectionStore(() => null, () => {});
   const promptTarget = { epoch: "epoch", sessionId: "one", promptId: "default" };
