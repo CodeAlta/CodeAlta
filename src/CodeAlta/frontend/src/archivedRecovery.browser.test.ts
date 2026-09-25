@@ -84,9 +84,14 @@ test("production archived composer/reminder gates retain exact owner evidence wi
     assert.deepEqual(await evaluate("window.archivedRecoveryFixture.calls.map(x=>x.kind).join(',')"), "send,save,steer,queue,compact,cancel,abort,cancelQueue,save,steer");
     await evaluate("void window.archivedRecoveryFixture.ask('one','answer'); void window.archivedRecoveryFixture.ask('two','cancel'); window.archivedRecoveryFixture.input('one','resolve'); window.archivedRecoveryFixture.permission(); true");
     assert.equal(await wait("window.archivedRecoveryFixture.calls.length===14"), "ready");
+    assert.equal(await wait(`!!document.querySelector('.retained-intent-row[data-kind="Queue"]') &&
+      !!document.querySelector('.retained-intent-row[data-kind="Steer"]')`), "ready",
+      "the mounted owned composer projects the two exact retained intents");
     assert.equal(await evaluate("[...window.archivedRecoveryFixture.reads].sort().join(',')"), "input:one,permission:one");
     await evaluate("window.archivedRecoveryFixture.archive(true)");
     assert.equal(await wait("!!document.querySelector('.catalog-composer #catalog-prompt')"), "ready");
+    assert.equal(await evaluate("!!document.querySelector('.retained-intent-strip')"), false,
+      "archival replaces the owned strip with the existing read-only recovery gate");
     assert.equal(await evaluate("!!document.querySelector('[data-reminder-count]')"), false,
       "archived read-only composer never exposes an owned reminder observation");
     assert.equal(await evaluate("document.querySelector('.catalog-composer').innerText.includes('Archived project; this session is read-only.')"), true);

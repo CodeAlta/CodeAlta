@@ -23,6 +23,7 @@ let attachment = 12;
 const originalRuntime = "11111111-1111-4111-8111-111111111111";
 let runtime = originalRuntime;
 let hasEntry = false;
+let runtimeReadFails = false;
 let retiring = false;
 let transitioning = false;
 let draining = false;
@@ -72,6 +73,7 @@ const counts = { refreshes: 0, catalogOpens: 0, abortCalls: [] as SessionAbortRu
   queueCalls: [] as SessionQueueRequest[],
   queueMode(value: typeof queueMode) { queueMode = value; },
   queuePending(id = currentSession) { return props.queue.pending(id); },
+  queueDraft() { return props.queue.draft(props.epoch, currentSession); },
   settleQueue(reply: "matching" | "mismatched" | "malformed" = "matching") {
     const request = counts.queueCalls.at(-1)!;
     settleQueue?.({ status: "accepted", epoch: request.expectedEpoch,
@@ -93,6 +95,7 @@ const counts = { refreshes: 0, catalogOpens: 0, abortCalls: [] as SessionAbortRu
   observe(run: string | null, generation = 12, instance = originalRuntime) {
     observedRun = run; attachment = generation; runtime = instance; hasEntry = true;
   },
+  failRuntimeRead(value: boolean) { runtimeReadFails = value; },
   flags(value: { retiring?: boolean; transitioning?: boolean; draining?: boolean }) {
     retiring = !!value.retiring; transitioning = !!value.transitioning; draining = !!value.draining;
   },
@@ -115,6 +118,7 @@ const counts = { refreshes: 0, catalogOpens: 0, abortCalls: [] as SessionAbortRu
     settleAbort = undefined;
   },
   switchSession(id: string) { currentSession = id; shortcutSelection = { epoch, sessionId: id, projectId: null }; root.render(panel(id)); },
+  switchEpoch(value: string) { props.epoch = value; props.capability = createMutationCapability(value); root.render(panel(currentSession)); },
   shortcutSelection(value: ShortcutSession | null) { shortcutSelection = value; },
   workspaceActive(value: boolean) { workspaceActive = value; },
   async retainSend(text: string) {
@@ -165,6 +169,7 @@ const props = {
   selections: createNextSendSelectionStore(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value)),
   runtimeReader: createRuntimeStateReader(async request => {
     counts.refreshes++;
+    if (runtimeReadFails) throw new Error("Fixture runtime read failed");
     return { status: "ok", hostEpoch: request.expectedHostEpoch, sessionId: request.sessionId,
       entry: hasEntry ? { attachmentGeneration: String(attachment), activeRunId: observedRun,
         isRetiring: retiring, isTerminated: false, queueDrainInProgress: draining,

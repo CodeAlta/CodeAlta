@@ -394,6 +394,17 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .context-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; border-top: 1px solid var(--line); }
 .context-actions > div { flex: 1 1 230px; min-width: 0; }
 .context-actions textarea { min-height: 50px; max-height: 120px; }
+.retained-intent-strip { min-width: 0; margin-top: 8px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); font-size: 11px; }
+.retained-intent-strip > .detail { margin: 0 0 4px; }
+.retained-intent-row { min-width: 0; border-top: 1px solid var(--line); }
+.retained-intent-heading { display: flex; align-items: start; gap: 8px; min-width: 0; }
+.retained-intent-heading details { flex: 1; min-width: 0; }
+.retained-intent-heading summary { padding: 6px 0; cursor: pointer; overflow-wrap: anywhere; }
+.retained-intent-heading button { flex: 0 0 auto; font-size: 11px; }
+.retained-intent-evidence { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 8px; margin: 6px 0; }
+.retained-intent-evidence dd { margin: 0; }
+.retained-intent-evidence code { overflow-wrap: anywhere; }
+.retained-intent-row pre { max-height: 170px; overflow: auto; padding: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ask-refresh { margin: 8px 18px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--panel); cursor: pointer; font-size: 11px; }
 .composer-hint { flex: 1; color: var(--muted); font-size: 11px; }
 .owned-session .primary-button { border-color: var(--accent-strong); color: white; background: var(--accent-strong); }

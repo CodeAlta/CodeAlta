@@ -18,6 +18,7 @@ import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import type { createReminderActions } from "./reminderActions";
 import { validReminderList } from "./reminderListObservation";
 import { SessionUsageInspector } from "./SessionUsageInspector";
+import { RetainedRequestStrip } from "./RetainedRequestStrip";
 import type { UsageTarget } from "./sessionUsage";
 
 export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount }: {
@@ -478,6 +479,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     {(compactMessage !== "Refresh runtime state explicitly before attempting idle compaction." || pendingAbortRun) && <p className="composer-notice" role="status">{compactMessage !== "Refresh runtime state explicitly before attempting idle compaction." && compactMessage} {pendingAbortRun && abortRunMessage}</p>}
     {pendingCompact && <p className="composer-notice">Manual exact compaction retry only: epoch {pendingCompact.request.expectedEpoch} · session {pendingCompact.request.sessionId} · runtime {pendingCompact.request.expectedRuntimeInstanceId} · attachment {pendingCompact.request.expectedAttachmentGeneration} · request {pendingCompact.request.clientRequestId}. Refresh never retargets this intent.</p>}
     {pendingAbortRun && <p className="composer-notice">Manual exact cancellation retry only: epoch {pendingAbortRun.request.expectedEpoch} · session {pendingAbortRun.request.sessionId} · runtime {pendingAbortRun.request.expectedRuntimeInstanceId} · attachment {pendingAbortRun.request.expectedAttachmentGeneration} · run {pendingAbortRun.request.expectedRunId} · request {pendingAbortRun.request.clientRequestId}. Refresh never retargets this intent.</p>}
+    <RetainedRequestStrip epoch={epoch} sessionId={sessionId} queue={queue} steering={steering} />
     {(showSteering || showQueue) && <div className="context-actions">
       {showSteering && <div><label>Steer observed run {pendingSteer?.request.expectedRunId ?? observedTarget?.entry?.activeRunId}<textarea maxLength={32768} value={pendingSteer?.request.text ?? steerText} disabled={!!pendingSteer} onChange={event => setSteerText(event.target.value)} /></label>
         {pendingSteer && <p className="detail">Retained run {pendingSteer.request.expectedRunId} · attachment {pendingSteer.request.expectedAttachmentGeneration} · request {pendingSteer.request.clientRequestId}; refresh never retargets this request.</p>}

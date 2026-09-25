@@ -595,6 +595,16 @@ returns unchanged. A successful direct secondary-editor submission clears only t
 submitted draft if it has not been edited since capture, never a distinct later edit. These drafts
 are not persisted across document reload or host-owner replacement. Refresh receipts manually to
 inspect distinct phases.
+The regular owned composer shows a compact **Retained requests** strip only while this app's
+current host epoch/session has an exact queue or steering owner intent. Expand each request to
+inspect its full retained text and original epoch, session, runtime, attachment, request key and
+(for steering) run; **Copy text** copies the exact retained text to the clipboard or reports
+unavailable/failed access without editing either draft. Pending means an exact-request waiter is still active; outcome unknown/manual recovery
+means it did not establish a definite result.
+The strip is not an authoritative host queue or receipt list and cannot establish insertion,
+durability, execution or run completion. Opening or copying does not refresh, admit, retry,
+clear or acknowledge anything. Use the existing explicit advanced receipt/recovery controls
+to investigate uncertainty; archived sessions retain their separate read-only recovery view.
 **Cancel this queued operation** uses `sessions.cancelQueue` with the original operation ID,
 never a later/current run.
 Cancellation signalling is not rollback or target cleanup completion. Uncertain queue/cancel intents
