@@ -62,6 +62,7 @@ import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from
 import { useWindowPreferences } from "./windowPreferences";
 import { GeneralSettings } from "./GeneralSettings";
 import { ApplicationLogsPanel } from "./ApplicationLogsPanel";
+import { createApplicationLogClearActions } from "./applicationLogClear";
 import { SessionInfoDialog } from "./SessionInfoDialog";
 import { restoreSessionInfoFocus, selectedSessionInfoAvailable, selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
 import { CommandPalette } from "./CommandPalette";
@@ -77,6 +78,7 @@ type View = "workspace" | "configuration" | "providers" | "models" | "prompts" |
 const paneLayoutStorageKey = "codealta.desktop.panes.v1";
 
 function App() {
+  const [logClearActions] = useState(() => createApplicationLogClearActions(applicationLogs.clear));
   const [status, setStatus] = useState<BootStatus>();
   const [error, setError] = useState<string>();
   const [workspaceState, setWorkspaceState] = useState<WorkspaceState>({ kind: "loading" });
@@ -864,8 +866,8 @@ function App() {
       ? <ConfigurationPanel status={status} selectedSession={selectedSession} configurationState={configurationState}
           preferences={{ theme, setTheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices }}
           onOpenProviders={() => navigate("providers")} onOpenModels={() => navigate("models")} onOpenPrompts={() => navigate("prompts")} onOpenLogs={() => navigate("logs")} />
-      : view === "logs" ? <ApplicationLogsPanel read={demoMode
-          ? async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0 }) : applicationLogs.read} />
+      : view === "logs" ? <ApplicationLogsPanel clearActions={logClearActions} read={demoMode
+          ? async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }) : applicationLogs.read} />
       : view === "providers" ? <ProvidersPanel epoch={owned ? status!.hostEpoch : null}
           read={modelCatalog.providers} probe={modelCatalog.probe} catalogProviders={configurationState.snapshot?.providers} holds={providerProbeHolds}
           onOpenModels={() => navigate("models")} />

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using XenoAtom.Logging;
 
@@ -10,9 +11,13 @@ internal sealed class DesktopLogCapture
     internal const int MaximumStoredBytes = 128 * 1024;
     internal const int MaximumTextChars = 2048;
     private readonly object _gate = new();
-    private readonly Queue<DesktopLogLine> _rows = new();
+    private readonly Queue<(long Sequence, DesktopLogLine Line)> _rows = new();
+    private readonly Queue<(string Token, long Boundary)> _grants = new();
+    internal string CaptureId { get; } = Guid.NewGuid().ToString("D");
     private int _bytes;
-    private long _omitted;
+    private long _sequence;
+    private long _evictedThrough;
+    private long _clearedThrough;
 
     internal void Append(string timestamp, string level, string logger, ReadOnlySpan<char> text)
     {
@@ -25,17 +30,51 @@ internal sealed class DesktopLogCapture
             while (_rows.Count >= MaximumRows || _bytes + bytes > MaximumStoredBytes)
             {
                 var removed = _rows.Dequeue();
-                _bytes -= Size(removed);
-                _omitted++;
+                _bytes -= Size(removed.Line);
+                _evictedThrough = removed.Sequence;
             }
-            _rows.Enqueue(line);
+            _rows.Enqueue((++_sequence, line));
             _bytes += bytes;
         }
     }
 
     internal (DesktopLogLine[] Rows, long Omitted) Snapshot()
     {
-        lock (_gate) return (_rows.ToArray(), _omitted);
+        lock (_gate) return (_rows.Select(row => row.Line).ToArray(), Math.Max(0, _evictedThrough - _clearedThrough));
+    }
+
+    internal (DesktopLogLine[] Rows, long Omitted, string Boundary, string Grant) IssueSnapshot()
+    {
+        lock (_gate)
+        {
+            var token = Guid.NewGuid().ToString("D");
+            if (_grants.Count == 32) _grants.Dequeue();
+            _grants.Enqueue((token, _sequence));
+            return (_rows.Select(row => row.Line).ToArray(), Math.Max(0, _evictedThrough - _clearedThrough),
+                _sequence.ToString(CultureInfo.InvariantCulture), token);
+        }
+    }
+
+    internal (string Status, int ClearedRows, long CoveredOmitted) Clear(string captureId, string boundary, string grant, string confirmation)
+    {
+        lock (_gate)
+        {
+            if (!string.Equals(captureId, CaptureId, StringComparison.Ordinal) || confirmation != "CLEAR CAPTURED LOGS"
+                || !long.TryParse(boundary, NumberStyles.None, CultureInfo.InvariantCulture, out var end)
+                || end <= 0 || boundary != end.ToString(CultureInfo.InvariantCulture)
+                || !_grants.Any(item => item.Token == grant && item.Boundary == end)) return ("invalid_request", 0, 0);
+            if (end <= _clearedThrough || end > _sequence) return ("stale_snapshot", 0, 0);
+            var coveredOmitted = Math.Max(0, Math.Min(_evictedThrough, end) - _clearedThrough);
+            var removed = 0;
+            while (_rows.TryPeek(out var row) && row.Sequence <= end)
+            {
+                _rows.Dequeue();
+                _bytes -= Size(row.Line);
+                removed++;
+            }
+            _clearedThrough = end;
+            return ("cleared", removed, coveredOmitted);
+        }
     }
 
     private static int Size(DesktopLogLine line) => Encoding.UTF8.GetByteCount(line.Text) + Encoding.UTF8.GetByteCount(line.Logger)

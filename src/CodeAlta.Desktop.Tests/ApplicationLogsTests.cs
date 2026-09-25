@@ -10,6 +10,87 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class ApplicationLogsTests
 {
     [TestMethod]
+    public void ConfirmedClear_UsesObservedBoundaryAndPreservesNewerAppends()
+    {
+        var capture = new DesktopLogCapture();
+        var rpc = new ApplicationLogsService(capture);
+        capture.Append("t", "Info", "test", "before");
+        var observed = rpc.Read(new());
+        capture.Append("t", "Info", "test", "after");
+        var result = rpc.Clear(new(observed.CaptureId!, observed.Boundary, observed.Grant, "CLEAR CAPTURED LOGS"));
+        Assert.AreEqual("cleared", result.Status);
+        Assert.AreEqual(1, result.ClearedRows);
+        Assert.AreEqual("0", result.CoveredOmitted);
+        CollectionAssert.AreEqual(new[] { "after" }, rpc.Read(new()).Rows.Select(row => row.Text).ToArray());
+        Assert.AreEqual("stale_snapshot", rpc.Clear(new(observed.CaptureId!, observed.Boundary, observed.Grant, "CLEAR CAPTURED LOGS")).Status);
+    }
+
+    [TestMethod]
+    public void Clear_RejectsFabricatedBoundaryIdentityAndConfirmation_AccountsForOnlyActualEvictions()
+    {
+        var capture = new DesktopLogCapture();
+        var rpc = new ApplicationLogsService(capture);
+        for (var i = 0; i < 200; i++) capture.Append("t", "Warn", "test", $"before {i}");
+        var observed = rpc.Read(new());
+        capture.Append("t", "Warn", "test", "newer");
+        Assert.AreEqual("invalid_request", rpc.Clear(new(Guid.NewGuid().ToString("D"), observed.Boundary, observed.Grant, "CLEAR CAPTURED LOGS")).Status);
+        Assert.AreEqual("invalid_request", rpc.Clear(new(observed.CaptureId!, "999999", observed.Grant, "CLEAR CAPTURED LOGS")).Status);
+        Assert.AreEqual("invalid_request", rpc.Clear(new(observed.CaptureId!, "0" + observed.Boundary, observed.Grant, "CLEAR CAPTURED LOGS")).Status);
+        Assert.AreEqual("invalid_request", rpc.Clear(new(observed.CaptureId!, observed.Boundary, observed.Grant, "confirm")).Status);
+        Assert.AreEqual("invalid_request", rpc.Clear(new(observed.CaptureId!, observed.Boundary, "unissued", "CLEAR CAPTURED LOGS")).Status);
+        var cleared = rpc.Clear(new(observed.CaptureId!, observed.Boundary, observed.Grant, "CLEAR CAPTURED LOGS"));
+        Assert.AreEqual("cleared", cleared.Status);
+        Assert.AreEqual(64, observed.Rows.Count);
+        Assert.AreEqual(64, observed.ReadOmitted);
+        Assert.AreEqual(127, cleared.ClearedRows); // 64 read-omitted rows remain real captured rows, not capacity loss.
+        Assert.AreEqual(long.Parse(observed.CaptureOmitted) + 1, long.Parse(cleared.CoveredOmitted)); // Evicted after read, still covered by boundary.
+        var next = rpc.Read(new());
+        Assert.AreEqual("0", next.CaptureOmitted);
+        Assert.AreEqual("newer", next.Rows.Single().Text);
+        Assert.AreEqual("unavailable", new ApplicationLogsService(null).Clear(new(observed.CaptureId!, observed.Boundary, observed.Grant, "CLEAR CAPTURED LOGS")).Status);
+    }
+
+    [TestMethod]
+    public void Clear_RejectsExpiredAndZeroBoundaryGrantsWithoutTouchingRows()
+    {
+        var capture = new DesktopLogCapture();
+        var rpc = new ApplicationLogsService(capture);
+        var empty = rpc.Read(new());
+        Assert.AreEqual("invalid_request", rpc.Clear(new(empty.CaptureId!, empty.Boundary, empty.Grant, "CLEAR CAPTURED LOGS")).Status);
+        capture.Append("t", "Info", "test", "retained");
+        var expired = rpc.Read(new());
+        for (var i = 0; i < 32; i++) rpc.Read(new());
+        Assert.AreEqual("invalid_request", rpc.Clear(new(expired.CaptureId!, expired.Boundary, expired.Grant, "CLEAR CAPTURED LOGS")).Status);
+        Assert.AreEqual("retained", capture.Snapshot().Rows.Single().Text);
+    }
+
+    [TestMethod]
+    public void Clear_NeverDeletesTestOwnedRollingWriterContent_AndBoundsTheResponse()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "CodeAlta-clear-capture-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var capture = DesktopLogging.Initialize(root)!;
+            LogManager.GetLogger("CodeAlta.Desktop.Test").Info("literal disposable root log entry");
+            Assert.IsTrue(SpinWait.SpinUntil(() => capture.Snapshot().Rows.Length > 0, TimeSpan.FromSeconds(5)));
+            var rpc = new ApplicationLogsService(capture);
+            var observed = rpc.Read(new());
+            var cleared = rpc.Clear(new(observed.CaptureId!, observed.Boundary, observed.Grant, "CLEAR CAPTURED LOGS"));
+            Assert.AreEqual("cleared", cleared.Status);
+            Assert.AreEqual(1, cleared.ClearedRows);
+            Assert.IsTrue(JsonSerializer.SerializeToUtf8Bytes(cleared, DesktopJsonContext.Default.ApplicationLogsClearResponse).Length < 1024);
+            Assert.AreEqual(0, capture.Snapshot().Rows.Length);
+            LogManager.Shutdown(); // Flush only this disposable test writer.
+            Assert.IsTrue(Directory.GetFiles(Path.Combine(root, "logs")).Any(path =>
+                File.ReadAllText(path).Contains("literal disposable root log entry", StringComparison.Ordinal)));
+        }
+        finally
+        {
+            LogManager.Shutdown();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+    [TestMethod]
     public void Capture_BoundsUnicodeRowsBytesAndReportsEvictionsWithoutDiskReads()
     {
         var capture = new DesktopLogCapture();

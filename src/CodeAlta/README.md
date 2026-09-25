@@ -54,9 +54,22 @@ long messages are marked truncated. Logging keeps its existing file writer, leve
 rotation and lifetime, but this screen **never opens log files**: it cannot show earlier
 processes, all file records, or exception attachments/structured properties. If another
 owner initialized logging first, in-memory capture is unavailable and no attempt is made
-to replace that logger; the browser demo also has no desktop capture. No automatic polling, Clear, export, deletion or logging-policy
-controls are provided. Logs may contain sensitive content; this screen renders them as
-inert text locally, without link activation or external requests.
+to replace that logger; the browser demo also has no desktop capture. An available,
+nonempty snapshot offers **Clear captured messages…** with a typed confirmation.
+The request is tied to this capture's identity and that explicit snapshot's high-water
+boundary; it removes only captured in-memory messages through that boundary, including
+older entries already omitted by capacity or the bounded read. Newer messages appended
+after the snapshot survive. Confirmed counts report remaining captured rows removed
+and older capacity-omitted entries covered separately; read omissions are not counted
+as lost messages. Refresh remains read-only, and Wrap lines is unaffected. Pending or
+uncertain clear requests retain their original identity and boundary across screen
+switches; a failed/mismatched reply cannot be retried or unlocked by Refresh. The
+application must be restarted to discard uncertain in-process evidence. Clear never
+alters persisted log files, the rolling writer, configuration, or logging lifetime;
+it cannot clear another process's capture or an unavailable/external logger. No
+automatic polling, export, file deletion or logging-policy controls are provided.
+Logs may contain sensitive content; this screen renders them as inert text locally,
+without link activation or external requests.
 
 For the real local desktop, build from `src` (the frontend dependency/build switches are shown for
 repeat builds that already have generated contracts and `node_modules`):
