@@ -406,6 +406,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .retained-intent-evidence code { overflow-wrap: anywhere; }
 .retained-intent-row pre { max-height: 170px; overflow: auto; padding: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ask-refresh { margin: 8px 18px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--panel); cursor: pointer; font-size: 11px; }
+.ask-draft-recovery { min-width: 0; margin: 8px 0; padding: 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel-2); overflow-wrap: anywhere; }
+.ask-draft-recovery pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .composer-hint { flex: 1; color: var(--muted); font-size: 11px; }
 .owned-session .primary-button { border-color: var(--accent-strong); color: white; background: var(--accent-strong); }
 .prompt-options { display: grid; grid-template-columns: repeat(3, minmax(88px, 1fr)) repeat(2, minmax(72px, auto)); gap: 2px; padding: 4px 6px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 65%, transparent); }

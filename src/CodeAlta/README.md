@@ -433,6 +433,18 @@ read the original retained head, then **Answer original ask** or **Cancel origin
 starts a new normal text submission to the original session with the original AskId. Cancel removes
 only an unclaimed pending ask; it does not stop the producer run or an admitted answer. A committed
 ask can outlive its producer. Requests and answers each have an aggregate 8,192 UTF-16-unit text limit.
+Unsubmitted text and selected-choice drafts survive explicit refreshes of the same validated
+pending head, including edits made while its read is in flight. The editor compares the full
+handle and all validated question, choice and freeform fields, not just AskId; answer/cancel
+remain disabled while a refresh is pending. A missing, failed, malformed or replaced head leaves
+its former unsent draft visible only as local read-only recovery, never as an answer for another
+head (even if an earlier shape returns). A two-step **Discard local draft** removes only that
+local copy, not a captured backend action. At most eight drafts are kept by the mounted panel;
+discard recovery to free capacity. These drafts are **component-lifetime only**: navigating
+away, archival or closing the window unmounts the panel and loses unsubmitted drafts. A different
+host epoch/session cannot see another scope's local recovery. This adds no reads beyond the
+existing mount/selection read and explicit Refresh; it adds no persistence, retry, rebind or
+submission route.
 
 Original actions survive selection changes and panel remounts. An eight-second timeout permanently
 marks the original transport result uncertain and prevents competing actions; it is not proof of
