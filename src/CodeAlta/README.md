@@ -108,8 +108,12 @@ runtime lifecycle are not implemented. No MCP inventory is available in catalog-
 The **Reminders** tab is available only with a selected owned session. It lists that session's
 active and completed attempts, lets you create a delayed Markdown prompt (whole seconds 1–86400,
 1–20 attempts), refresh the list, and delete only after typing the exact reminder ID. At most 32
-retained reminders per session and 256 per host are accepted; deleting a completed entry frees a slot. Schedules
-and results are **in memory, not persisted**: closing/restarting the host loses them. The host
+retained reminders per session and 256 per host are accepted; deleting a completed entry frees a slot.
+Select a schedule to inspect its full stored message, beyond the list preview. **Use as new reminder**
+copies that message, delay and repeat count into the local Create form (with confirmation before
+discarding an edited draft); it does not change the selected schedule or create a new one until
+Create is explicitly submitted. Schedules and results are **in memory, not persisted**:
+closing/restarting the host loses them. The host
 owns the timers and attempts one normal owned Send per firing, with the same permission policy
 and host drain as other sends. Busy, unavailable or failed sends count as failed attempts; there
 is no automatic retry beyond the requested repeats. A completed reminder means all attempts

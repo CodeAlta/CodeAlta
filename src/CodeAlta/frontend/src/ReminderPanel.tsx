@@ -125,7 +125,8 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
         <h2>Schedules</h2><p role="status">As of refresh: {active.activeCount} active, {active.completedCount} completed.</p>
         {active.reminders.length === 0 && <p>No reminders for this session.</p>}
         {active.reminders.map(item => <button type="button" key={item.id} aria-pressed={selected === item.id}
-          onClick={() => { setSelected(item.id); setConfirmation(""); setConfirmLoad(null); setDetail(undefined); setDetailError(""); }}>
+          onClick={() => { if (selected === item.id) return;
+            setSelected(item.id); setConfirmation(""); setConfirmLoad(null); setDetail(undefined); setDetailError(""); }}>
           <strong>Preview: {item.preview}</strong><small>{item.state} · {item.firedCount}/{item.repeatCount} attempts · {item.id}</small>
         </button>)}
       </section><section className="model-catalog-results" aria-label="Reminder details and creation">

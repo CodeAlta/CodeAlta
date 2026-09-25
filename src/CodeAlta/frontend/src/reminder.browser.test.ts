@@ -65,11 +65,21 @@ test("mounted reminders show exact detail, load a guarded new Create, and fence 
       socket!.addEventListener("message", listener);
     });
     await command("Page.navigate", { url: pathToFileURL(page).href }); await loaded;
+    await command("Emulation.setFocusEmulationEnabled", { enabled: true });
     const evaluate = async (expression: string) => (await command("Runtime.evaluate", { expression, returnByValue: true,
       awaitPromise: true })).result?.value;
     const wait = async (condition: string) => evaluate(`new Promise(resolve => { const end = Date.now() + 7000; const check = () => {
       if (${condition}) resolve('ready'); else if (Date.now() > end) resolve(document.body.innerText.slice(0, 500));
       else setTimeout(check, 20); }; check(); })`);
+    const activateSelectedWithEnter = async () => {
+      await evaluate(`(() => { const button = document.querySelector('[aria-label="Reminder list"] button[aria-pressed="true"]');
+        button.focus(); button.dataset.activations = '0';
+        button.addEventListener('click', () => button.dataset.activations = '1', { once: true }); })()`);
+      assert.equal(await evaluate(`document.activeElement?.getAttribute('aria-pressed')`), "true");
+      await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+      await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+      assert.equal(await wait(`document.querySelector('[aria-label="Reminder list"] button[aria-pressed="true"]')?.dataset.activations === '1'`), "ready");
+    };
     const list = (sessionId: string, reminders: string) => `({status:'ok',epoch:'e1',sessionId:'${sessionId}',reminders:[${reminders}],activeCount:${reminders ? 1 : 0},completedCount:0})`;
     const row = "{id:'reminder-1',state:'active',preview:'original',delaySeconds:60,repeatCount:1,firedCount:0,dueAt:null,lastExitCode:null,lastError:null}";
     assert.equal(await wait("window.reminderFixture?.reads.length === 1"), "ready");
@@ -91,9 +101,18 @@ test("mounted reminders show exact detail, load a guarded new Create, and fence 
     await evaluate(`document.querySelector('[aria-label="Reminder list"] button').click()`);
     assert.equal(await wait("window.reminderFixture.details.length === 1"), "ready");
     assert.equal(await evaluate("window.reminderFixture.details[0].request.reminderId"), "reminder-1");
+    await evaluate(`document.querySelector('[aria-label="Reminder list"] button').click()`);
+    await activateSelectedWithEnter();
+    assert.equal(await evaluate("window.reminderFixture.details.length"), 1);
+    assert.equal(await evaluate("document.body.innerText.includes('Loading full reminder message.')"), true);
     await evaluate(`window.reminderFixture.details[0].resolve({status:'ok',epoch:'e1',sessionId:'one',reminderId:'reminder-1',
       content:'full 😀\\nsecond line',delaySeconds:60,repeatCount:1})`);
     assert.equal(await wait("document.querySelector('[aria-label=\"Full reminder message\"]')?.textContent === 'full 😀\\nsecond line'"), "ready");
+    await evaluate(`document.querySelector('[aria-label="Reminder list"] button').click()`);
+    await activateSelectedWithEnter();
+    assert.equal(await evaluate("window.reminderFixture.details.length"), 1);
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"Full reminder message\"]')?.textContent"), "full 😀\nsecond line");
+    assert.equal(await evaluate("document.body.innerText.includes('Loading full reminder message.')"), false);
     await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent==='Use as new reminder').click()`);
     assert.equal(await wait("document.querySelector('#reminder-content')?.value === 'full 😀\\nsecond line'"), "ready");
     assert.equal(await evaluate("document.querySelector('#reminder-delay').value"), "60");
@@ -196,6 +215,12 @@ test("mounted reminders show exact detail, load a guarded new Create, and fence 
     await evaluate("window.reminderFixture.details.at(-1).reject(new Error('private path'))");
     assert.equal(await wait("document.body.innerText.includes('detail could not be read')"), "ready");
     assert.doesNotMatch((await evaluate("document.body.innerText"))!, /private path/);
+    const failedDetailCount = Number(await evaluate("window.reminderFixture.details.length"));
+    await evaluate(`document.querySelector('[aria-label="Reminder list"] button').click()`);
+    await activateSelectedWithEnter();
+    assert.equal(await evaluate("window.reminderFixture.details.length"), failedDetailCount);
+    assert.equal(await evaluate("document.body.innerText.includes('detail could not be read')"), true);
+    assert.equal(await evaluate("document.body.innerText.includes('Loading full reminder message.')"), false);
     const beforeRowSwitch = Number(await evaluate("window.reminderFixture.details.length"));
     await evaluate("document.querySelector('.reminder-page > button').click()");
     assert.equal(await wait(`window.reminderFixture.reads.length > ${refreshReads + 1}`), "ready");
