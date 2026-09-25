@@ -81,6 +81,10 @@ test("mounted reminder shortcuts stay panel-scoped, guarded and never bypass con
     const synthetic = async (selector: string, key: string, extras = "") => evaluate(`(() => {
       const event=new KeyboardEvent('keydown',{key:${JSON.stringify(key)},code:'Key${key.toUpperCase()}',ctrlKey:true,bubbles:true,cancelable:true,${extras}});
       document.querySelector('${selector}').dispatchEvent(event); return event.defaultPrevented; })()`);
+    const createKey = async (selector: string, extras = "") => evaluate(`(() => {
+      const source=document.querySelector(${JSON.stringify(selector)}); source.focus();
+      const event=new KeyboardEvent('keydown',{key:'Enter',code:'Enter',ctrlKey:true,bubbles:true,cancelable:true,${extras}});
+      source.dispatchEvent(event); return event.defaultPrevented; })()`);
     const row = "{id:'reminder-1',state:'active',preview:'original',delaySeconds:60,repeatCount:1,firedCount:0,dueAt:null,lastExitCode:null,lastError:null}";
     const list = (session: string, epoch = "e1") => `({status:'ok',epoch:'${epoch}',sessionId:'${session}',reminders:[${row}],activeCount:1,completedCount:0})`;
     await evaluate("window.shellEvents=0; window.addEventListener('keydown',()=>window.shellEvents++)");
@@ -124,7 +128,7 @@ test("mounted reminder shortcuts stay panel-scoped, guarded and never bypass con
     await edit("#reminder-delay", "0");
     assert.equal(await wait("[...document.querySelectorAll('button')].find(b=>b.textContent==='Create reminder').disabled"), "ready");
     assert.equal(await synthetic("#reminder-content", "s"), false);
-    assert.equal(await synthetic("#reminder-content", "Enter"), false); // Ctrl+Enter is not advertised or implemented here.
+    assert.equal(await createKey("#reminder-content"), false); // Disabled Create is not handled.
     await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Use as new reminder').click()");
     assert.equal(await wait("document.body.innerText.includes('The Create form has edits')"), "ready");
     assert.equal(await synthetic("[aria-label=\"Reminder list\"] button", "s"), false);
@@ -157,6 +161,9 @@ test("mounted reminder shortcuts stay panel-scoped, guarded and never bypass con
     await press("s", "KeyS", 83, true);
     assert.equal(await wait("window.reminderFixture.writes.length === 1"), "ready");
     assert.equal(await evaluate("window.shellEvents"), beforeSave);
+    await edit("#reminder-delay", "60");
+    assert.equal(await createKey("#reminder-content"), false, "pending Save blocks Create");
+    assert.equal(await evaluate("window.reminderFixture.writes.length"), 1);
     assert.equal(await evaluate("JSON.stringify(window.reminderFixture.writes[0].request)"),
       JSON.stringify({ expectedEpoch: "e1", sessionId: "one", reminderId: "reminder-1", editRevision: "0", content: "new full message" }));
     await evaluate("document.querySelector('[aria-label=\"Reminder list\"] button').focus()");
@@ -181,6 +188,7 @@ test("mounted reminder shortcuts stay panel-scoped, guarded and never bypass con
     assert.equal(await wait("!!document.querySelector('[aria-label=\"Retained reminder Save\"]')"), "ready");
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Retained reminder Save\"] pre')?.textContent"), "new full message");
     assert.equal(await synthetic("[aria-label=\"Retained reminder Save\"] pre", "s"), false);
+    assert.equal(await evaluate("!!document.querySelector('#reminder-content')"), false, "list failure hides the Create form while Save is uncertain");
     assert.equal(await evaluate("window.reminderFixture.writes.length"), 1);
     await evaluate("document.querySelector('.reminder-page > button').focus()");
     await press("r", "KeyR", 82, true);
@@ -196,6 +204,150 @@ test("mounted reminder shortcuts stay panel-scoped, guarded and never bypass con
     assert.equal(await synthetic("body", "s"), false);
     assert.equal(await evaluate("window.shellEvents"), Number(outside) + 1);
     assert.equal(await evaluate("window.reminderFixture.writes.length"), 1);
+    // The next host has independent admission authority. Only the four current Create controls own Ctrl+Enter.
+    await evaluate(`window.reminderFixture.reads[6].resolve(${list("one", "e2")})`);
+    assert.equal(await wait("!!document.querySelector('[aria-label=\"Reminder list\"] button')"), "ready");
+    await evaluate("document.querySelector('[aria-label=\"Reminder list\"] button').click()");
+    assert.equal(await wait("window.reminderFixture.details.length === 3"), "ready");
+    await evaluate("window.reminderFixture.details[2].resolve({status:'ok',epoch:'e2',sessionId:'one',reminderId:'reminder-1',content:'original',delaySeconds:60,repeatCount:1,editRevision:'0'})");
+    assert.equal(await wait("!!document.querySelector('#reminder-edit')"), "ready");
+    await edit("#reminder-content", "first line\nsecond line");
+    assert.equal(await wait("document.querySelector('#reminder-content')?.value === 'first line\\nsecond line'"), "ready");
+    await edit("#reminder-delay", "bad");
+    assert.equal(await createKey("#reminder-content"), false);
+    await edit("#reminder-delay", "00:01:00");
+    await edit("#reminder-repeat", "0");
+    assert.equal(await createKey("#reminder-repeat"), false);
+    await edit("#reminder-repeat", "2");
+    await edit("#reminder-content", "   ");
+    assert.equal(await createKey("#reminder-delay"), false);
+    await edit("#reminder-content", "first line\nsecond line");
+    const createButton = "[...document.querySelectorAll('button')].find(b=>b.textContent==='Create reminder')";
+    assert.equal(await createKey('[aria-label="Reminder list"] button'), false);
+    assert.equal(await createKey('.reminder-page > button'), false);
+    assert.equal(await createKey('#reminder-confirm'), false);
+    await edit("#reminder-edit", "separate Save draft");
+    assert.equal(await wait("![...document.querySelectorAll('button')].find(b=>b.textContent==='Save message').disabled"), "ready");
+    assert.equal(await createKey('#reminder-edit'), false);
+    assert.equal(await createKey('body'), false);
+    await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Use as new reminder').click()");
+    assert.equal(await wait("document.body.innerText.includes('The Create form has edits')"), "ready");
+    assert.equal(await createKey('#reminder-content'), false, "inline confirmation owns the panel");
+    await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Keep draft').click()");
+    for (const guard of ["repeat:true", "isComposing:true", "altKey:true", "shiftKey:true", "metaKey:true", "ctrlKey:false"]) {
+      assert.equal(await createKey("#reminder-content", guard), false, guard);
+    }
+    assert.equal(await evaluate(`(() => { const e=new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,bubbles:true,cancelable:true});
+      Object.defineProperty(e,'keyCode',{value:229}); document.querySelector('#reminder-content').dispatchEvent(e); return e.defaultPrevented; })()`), false);
+    assert.equal(await evaluate(`(() => { const e=new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,bubbles:true,cancelable:true});
+      e.preventDefault(); document.querySelector('#reminder-content').dispatchEvent(e); return e.defaultPrevented; })()`), true);
+    await evaluate("window.reminderFixture.allowed=false");
+    assert.equal(await createKey("#reminder-content"), false);
+    await evaluate("window.reminderFixture.allowed=true; document.body.insertAdjacentHTML('beforeend','<div role=dialog aria-modal=true>Modal</div>')");
+    assert.equal(await createKey("#reminder-content"), false);
+    await evaluate("document.querySelector('[role=dialog]').remove(); window.reminderFixture.archive(true)");
+    assert.equal(await wait("document.body.innerText.includes('Archived project is read-only')"), "ready");
+    assert.equal(await createKey("#reminder-content"), false);
+    await evaluate("window.reminderFixture.archive(false)");
+    assert.equal(await wait("!document.body.innerText.includes('Archived project is read-only')"), "ready");
+    await evaluate(`${createButton}.dataset.epoch='wrong'`);
+    assert.equal(await createKey("#reminder-content"), false);
+    await evaluate(`${createButton}.dataset.epoch='e2'; ${createButton}.dataset.sessionId='two'`);
+    assert.equal(await createKey("#reminder-delay"), false);
+    await evaluate(`${createButton}.dataset.sessionId='one'; ${createButton}.disabled=true`);
+    assert.equal(await createKey("#reminder-repeat"), false);
+    await evaluate(`${createButton}.disabled=false; window.createButton=${createButton}; window.createParent=window.createButton.parentNode;
+      window.createNext=window.createButton.nextSibling; window.createButton.remove()`);
+    assert.equal(await createKey("#reminder-content"), false);
+    assert.equal(await evaluate("JSON.stringify([!!window.createParent,!!window.createButton,window.createButton?.isConnected,window.createNext?.parentNode===window.createParent])"),
+      JSON.stringify([true, true, false, true]));
+    await evaluate("window.createParent.insertBefore(window.createButton,window.createNext); true");
+    await evaluate("document.querySelector('#reminder-content').focus(); document.querySelector('#reminder-content').setSelectionRange(22,22)");
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    assert.equal(await evaluate("document.querySelector('#reminder-content').value"), "first line\nsecond line\n");
+    assert.equal(await evaluate("window.reminderFixture.writes.length"), 1, "ordinary Enter only edits the message");
+    await edit("#reminder-content", "first line\nsecond line");
+    await command("Emulation.setDeviceMetricsOverride", { width: 375, height: 700, deviceScaleFactor: 1, mobile: false });
+    for (const theme of ["light", "dark"]) {
+      await evaluate(`document.documentElement.dataset.theme='${theme}'`);
+      assert.equal(await evaluate(`(() => { const hint=[...document.querySelectorAll('.reminder-page p')]
+        .find(p=>p.textContent.includes('Ctrl+Enter creates only')); const box=hint?.getBoundingClientRect();
+        return !!box && box.width>100 && box.left>=0 && box.right<=innerWidth && document.documentElement.scrollWidth<=innerWidth; })()`),
+      true, `${theme} narrow Create hint stays within the panel`);
+    }
+    assert.equal(await evaluate("window.reminderFixture.writes.length"), 1);
+    const beforeCreate = await evaluate("window.shellEvents");
+    assert.equal(await createKey("#reminder-content"), true);
+    assert.equal(await wait("window.reminderFixture.writes.length === 2"), "ready");
+    assert.equal(await evaluate("window.shellEvents"), beforeCreate);
+    assert.equal(await evaluate("document.activeElement?.id"), "reminder-content");
+    assert.equal(await evaluate("document.querySelector('#reminder-content').value"), "first line\nsecond line");
+    assert.equal(await evaluate("JSON.stringify(window.reminderFixture.writes[1].request)"),
+      JSON.stringify({ expectedEpoch: "e2", sessionId: "one", content: "first line\nsecond line", delaySeconds: 60, repeatCount: 2 }));
+    assert.equal(await createKey("#reminder-delay"), false, "pending Create is not replayed");
+    await evaluate("document.querySelector('.reminder-page > button').click()");
+    assert.equal(await wait("window.reminderFixture.reads.length === 8"), "ready");
+    await evaluate(`window.reminderFixture.reads[7].resolve(${list("one", "e2")})`);
+    await evaluate("window.reminderFixture.leave()");
+    assert.equal(await wait("document.body.innerText.includes('Other screen')"), "ready");
+    await evaluate("window.reminderFixture.open()");
+    assert.equal(await wait("window.reminderFixture.reads.length === 9"), "ready");
+    await evaluate(`window.reminderFixture.reads[8].resolve(${list("one", "e2")})`);
+    assert.equal(await wait("!!document.querySelector('#reminder-content')"), "ready");
+    await edit("#reminder-content", "not retried");
+    assert.equal(await createKey("#reminder-content"), false);
+    await evaluate("window.reminderFixture.writes[1].reject(new Error('lost Create reply'))");
+    assert.equal(await wait("document.body.innerText.includes('Admission response was lost')"), "ready");
+    assert.equal(await createKey("#reminder-content"), false, "uncertain Create stays locked");
+    assert.equal(await createKey('[aria-label="Reminder list"] button'), false);
+    assert.equal(await evaluate("window.reminderFixture.writes.length"), 2);
+    await evaluate("window.oldCreate=window.createButton; window.reminderFixture.host('e3')");
+    assert.equal(await wait("window.reminderFixture.reads.length === 10"), "ready");
+    await evaluate(`window.reminderFixture.reads[9].resolve(${list("one", "e3")})`);
+    assert.equal(await wait("!!document.querySelector('[aria-label=\"Reminder list\"] button')"), "ready");
+    assert.equal(await evaluate("window.oldCreate.isConnected"), false);
+    assert.equal(await evaluate("(() => { const e=new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,bubbles:true,cancelable:true}); window.oldCreate.dispatchEvent(e); return e.defaultPrevented; })()"), false);
+    await edit("#reminder-content", "next target");
+    assert.equal(await wait("document.querySelector('#reminder-content').value === 'next target'"), "ready");
+    await evaluate("document.querySelector('#reminder-delay').focus()");
+    await press("Enter", "Enter", 13, true);
+    assert.equal(await wait("window.reminderFixture.writes.length === 3"), "ready");
+    assert.equal(await evaluate("document.activeElement?.id"), "reminder-delay");
+    assert.equal(await evaluate("JSON.stringify(window.reminderFixture.writes[2].request)"),
+      JSON.stringify({ expectedEpoch: "e3", sessionId: "one", content: "next target", delaySeconds: 300, repeatCount: 1 }));
+    await evaluate("window.reminderFixture.writes[2].resolve({status:'invalid_request',epoch:'e3',sessionId:'one',reminderId:null})");
+    assert.equal(await wait("document.body.innerText.includes('create was not accepted')"), "ready");
+    await evaluate("document.querySelector('#reminder-repeat').focus()");
+    await press("Enter", "Enter", 13, true);
+    assert.equal(await wait("window.reminderFixture.writes.length === 4"), "ready");
+    await evaluate("window.reminderFixture.writes[3].resolve({status:'invalid_request',epoch:'e3',sessionId:'one',reminderId:null})");
+    assert.equal(await wait("!document.body.innerText.includes('create admission pending')"), "ready");
+    await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Create reminder').focus()");
+    await press("Enter", "Enter", 13, true);
+    assert.equal(await wait("window.reminderFixture.writes.length === 5"), "ready", "Create button Enter shares the owner latch");
+    await evaluate("window.reminderFixture.writes[4].resolve({status:'invalid_request',epoch:'e3',sessionId:'one',reminderId:null})");
+    assert.equal(await wait("!document.body.innerText.includes('create admission pending')"), "ready");
+    await evaluate("document.querySelector('[aria-label=\"Reminder list\"] button').click()");
+    await edit("#reminder-confirm", "reminder-1");
+    await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Delete confirmed reminder').click()");
+    assert.equal(await wait("window.reminderFixture.writes.length === 6"), "ready");
+    assert.equal(await createKey("#reminder-content"), false, "pending Delete blocks Create");
+    await evaluate("document.querySelector('.reminder-page > button').click()");
+    assert.equal(await wait("window.reminderFixture.reads.length === 11"), "ready");
+    await evaluate(`window.reminderFixture.reads[10].resolve(${list("one", "e3")})`);
+    await evaluate("window.reminderFixture.leave()");
+    assert.equal(await wait("document.body.innerText.includes('Other screen')"), "ready");
+    await evaluate("window.reminderFixture.open()");
+    assert.equal(await wait("window.reminderFixture.reads.length === 12"), "ready");
+    await evaluate(`window.reminderFixture.reads[11].resolve(${list("one", "e3")})`);
+    assert.equal(await wait("!!document.querySelector('#reminder-content')"), "ready");
+    await edit("#reminder-content", "still blocked");
+    assert.equal(await createKey("#reminder-content"), false);
+    await evaluate("window.reminderFixture.writes[5].reject(new Error('lost Delete reply'))");
+    assert.equal(await wait("document.body.innerText.includes('Admission response was lost')"), "ready");
+    assert.equal(await createKey("#reminder-content"), false, "uncertain Delete cannot create");
+    assert.equal(await evaluate("window.reminderFixture.writes.length"), 6);
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }

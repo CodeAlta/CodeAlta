@@ -1476,7 +1476,7 @@ function ShortcutHelp({ onClose }: { onClose: () => void }) {
     ["Ctrl+F3", "First retained message (not journal first)"],
     ["Ctrl+F4", "Refresh newest persisted history, then follow on success"],
     ["Ctrl+F11", "Attempt compaction of the observed idle attachment (selected owned session only)"],
-    ["F6", "Expand prompt (owned session)"], ["Ctrl+Enter", "Steer in regular prompt; close in expanded editor"],
+    ["F6", "Expand prompt (owned session)"], ["Ctrl+Enter", "Steer in regular prompt; close in expanded editor; Create only inside the Reminders Create form"],
   ];
   return <div className="dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
     <section className="app-dialog shortcut-dialog" role="dialog" aria-modal="true" aria-labelledby="shortcut-title">

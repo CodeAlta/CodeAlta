@@ -28,6 +28,10 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
   const [confirmSelection, setConfirmSelection] = useState<string | null>(null);
   const [confirmDiscardEdit, setConfirmDiscardEdit] = useState(false);
   const panelRef = useRef<HTMLElement>(null);
+  const contentRef = useRef<HTMLTextAreaElement>(null);
+  const delayRef = useRef<HTMLInputElement>(null);
+  const repeatRef = useRef<HTMLInputElement>(null);
+  const createTrigger = useRef<HTMLButtonElement>(null);
   const refreshTrigger = useRef<HTMLButtonElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const saveTrigger = useRef<HTMLButtonElement>(null);
@@ -159,8 +163,12 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
     const ctrl = event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
     const matchesTarget = (element: HTMLElement | null) => !!element?.isConnected && panelRef.current?.contains(element) === true &&
       element.dataset.epoch === target.epoch && element.dataset.sessionId === target.sessionId;
+    const inCreateForm = [contentRef.current, delayRef.current, repeatRef.current, createTrigger.current]
+      .some(control => control === source && control.isConnected && !control.disabled);
     let handled = false;
-    if (ctrl && key === "r" && !editing && matchesTarget(refreshTrigger.current) && !refreshTrigger.current!.disabled) {
+    if (ctrl && key === "enter" && inCreateForm && !blocked && matchesTarget(createTrigger.current) && !createTrigger.current!.disabled) {
+      createTrigger.current!.click(); handled = true;
+    } else if (ctrl && key === "r" && !editing && matchesTarget(refreshTrigger.current) && !refreshTrigger.current!.disabled) {
       refreshTrigger.current!.click(); handled = true;
     } else if (ctrl && key === "e" && !editing && row?.state === "active" && shownDetail && !blocked &&
       matchesTarget(editorRef.current) && editorRef.current!.dataset.reminderId === row.id && !editorRef.current!.disabled) {
@@ -222,15 +230,18 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
           <button type="button" onClick={() => choose(confirmSelection, true)}>Discard edit and switch</button>{" "}
           <button type="button" onClick={() => setConfirmSelection(null)}>Keep edit draft</button></p>}
       </section><section className="model-catalog-results" aria-label="Reminder details and creation">
-        <h2>Create reminder</h2><label htmlFor="reminder-content">Prompt to send</label>
-        <textarea id="reminder-content" value={content} maxLength={4096} onChange={event => { setContent(event.target.value); setConfirmLoad(null); }} />
+        <h2>Create reminder</h2><p>Ctrl+Enter creates only from the Create message, delay, repeat or button; Enter in the message inserts a line.</p>
+        <label htmlFor="reminder-content">Prompt to send</label>
+        <textarea ref={contentRef} id="reminder-content" value={content} maxLength={4096} onChange={event => { setContent(event.target.value); setConfirmLoad(null); }} />
         <label htmlFor="reminder-delay">Delay: whole seconds (1–86400) or invariant HH:mm:ss / d.HH:mm:ss</label>
-        <input id="reminder-delay" type="text" maxLength={24} value={delay} onChange={event => { setDelay(event.target.value); setConfirmLoad(null); }} />
+        <input ref={delayRef} id="reminder-delay" type="text" maxLength={24} value={delay} onChange={event => { setDelay(event.target.value); setConfirmLoad(null); }} />
         <label htmlFor="reminder-repeat">Total attempts (1–20)</label>
-        <input id="reminder-repeat" type="number" min="1" max="20" step="1" value={repeat} onChange={event => { setRepeat(event.target.value); setConfirmLoad(null); }} />
+        <input ref={repeatRef} id="reminder-repeat" type="number" min="1" max="20" step="1" value={repeat} onChange={event => { setRepeat(event.target.value); setConfirmLoad(null); }} />
         {delaySeconds === null && <p role="alert">Enter 1–86400 whole seconds or HH:mm:ss (00–23 hours), optionally prefixed with d. (e.g. 1.00:00:00). Fractions are not accepted.</p>}
         {!validRepeat && <p role="alert">Enter a whole repeat count between 1 and 20.</p>}
-        <button type="button" disabled={blocked || !content.trim() || delaySeconds === null || !validRepeat} onClick={() => void create()}>Create reminder</button>
+        <button ref={createTrigger} type="button" data-epoch={target.epoch} data-session-id={target.sessionId}
+          disabled={blocked || !content.trim() || content.length > 4096 || delaySeconds === null || !validRepeat}
+          onClick={() => void create()}>Create reminder</button>
         {row && <section aria-label="Selected reminder"><h3>Selected reminder</h3>
           <p><code>{row.id}</code> · {row.state} · {row.firedCount}/{row.repeatCount} attempts · every {row.delaySeconds} seconds.</p>
           <p>Next due: {row.dueAt ?? "None"}. Last send exit code: {row.lastExitCode ?? "None"}.
