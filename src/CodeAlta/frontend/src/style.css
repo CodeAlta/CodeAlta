@@ -219,12 +219,17 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .timeline-summary { overflow-wrap: anywhere; color: var(--muted) !important; font-size: 12px; }
 .timeline-primary-code { display: block; width: fit-content; max-width: 100%; margin-top: 5px; padding: 3px 6px; overflow: hidden; border-radius: 5px; background: var(--panel-3); font: 11px/1.45 "Cascadia Code", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .event-details { margin-top: 6px; color: var(--muted); font-size: 10px; }
+.message-tool .event-details, .message-file .event-details { min-width: 0; }
 .event-details summary { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; list-style: none; }
 .event-details summary::-webkit-details-marker { display: none; }
 .event-details summary svg { transition: transform .12s ease; }
 .event-details[open] summary svg { transform: rotate(180deg); }
 .event-detail-body { margin-top: 6px; padding: 7px 9px; border-left: 2px solid var(--line); }
+.message-tool .event-detail-body, .message-file .event-detail-body { min-width: 0; }
+.tool-detail-wrap { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; font-size: 11px; }
 .event-details pre { max-height: 320px; padding: 8px; overflow: auto; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); font: 10px/1.45 "Cascadia Code", Consolas, monospace; white-space: pre; }
+.message-tool .event-details pre, .message-file .event-details pre { width: 100%; min-width: 0; }
+.event-details pre.tool-detail-pre-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
 .event-meta-inline { display: flex; flex-wrap: wrap; gap: 3px 11px; margin: 8px 0 0; padding: 7px 0 0; border-top: 1px solid var(--line); color: color-mix(in srgb, var(--muted) 70%, transparent); list-style: none; }
 .composer { flex: 0 0 auto; position: relative; margin: 10px 4px 0; border: 1px solid var(--line-strong); border-radius: 14px; background: color-mix(in srgb, var(--panel-2) 96%, transparent); box-shadow: var(--shadow); overflow: hidden; }
 .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 65%, var(--line)); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow); }

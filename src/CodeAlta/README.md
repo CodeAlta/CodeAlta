@@ -286,6 +286,14 @@ internal raw persistence records duplicated by typed events are hidden rather th
 Permissions and other stored requests are historical records, not actionable approvals. Previews can be
 shortened explicitly; arbitrary provider payloads are not sent to the frontend.
 
+Tool and file cards keep available persisted diagnostic/output detail text behind their collapsed **Details**
+disclosure. Inside it, **Wrap lines** is on by default and can be switched per card with a pointer or keyboard;
+turning it off scrolls long lines inside the detail pane. This only changes how the already loaded plain text
+is displayed: Markdown and copied content remain unchanged, and omitted or shortened details remain marked.
+There is no request for missing output, additional history, or live provider data when opening or wrapping a card.
+Following the loaded timeline stays at the latest visible bottom across these layout changes; an explicitly
+unfollowed reader is not moved to the newest journal window. This is not full TUI tool-output or timeline parity.
+
 In the focused session workspace, `F3`/`F4` move among **persisted user and assistant
 messages in the currently retained window** (not tool/status cards); `Ctrl+F3` moves
 to its first retained message, which may not be the journal's first message. These

@@ -1,0 +1,89 @@
+import { createElement, useCallback, useLayoutEffect, useRef, useState, type UIEvent } from "react";
+import { createRoot } from "react-dom/client";
+import type { HistoryRequest, HistoryResponse } from "#neoastra";
+import { History } from "./HistoryPanel";
+import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePosition } from "./timelineScroll";
+import { dispatchWorkspaceShortcut, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
+
+function createFixture() {
+  const memory = createTimelineScrollMemory();
+  const calls: string[] = [];
+  const longLine = "tool-diagnostic-" + "X".repeat(1200);
+  let hold = false;
+  let release: (() => void) | undefined;
+  function row(index: number, session: string): HistoryResponse["entries"][number] {
+    const omitted = session === "B" && index === 1;
+    const tool = index === 0 || index === 1204 || omitted;
+    return { offset: `${index * 200}`, eventType: tool ? "activity" : "contentCompleted", providerId: "fixture", sessionId: session,
+      runId: "test-run", timestamp: "2026-01-01T00:00:00Z", kind: tool ? "ToolCall" : "Assistant", phase: tool ? "failed" : null,
+      contentId: tool ? null : `${index}`, activityId: tool ? `tool-${index}` : null, parentActivityId: null, interactionId: null,
+      name: tool ? "fixture_tool" : null, text: omitted ? null : tool ? "**Failed** `literal code stays as Markdown`" : `turn-${index}`,
+      details: tool && !omitted ? JSON.stringify({ command: longLine, result: { output: `${longLine}\n${longLine}\n<img src=x onerror=alert(1)>` } }) : null,
+      textTruncated: false, detailsTruncated: tool && !omitted, bodyOmitted: tool };
+  }
+  async function read(request: HistoryRequest): Promise<HistoryResponse> {
+    calls.push(`${request.sessionId}:${request.cursor?.offset ?? "tail"}`);
+    if (hold) { hold = false; await new Promise<void>(resolve => { release = resolve; }); }
+    const total = request.sessionId === "A" ? 1205 : 3;
+    const end = request.cursor ? Number(request.cursor.offset) / 200 : total;
+    const start = Math.max(0, end - 100);
+    return { status: "ok", entries: Array.from({ length: end - start }, (_, i) => row(start + i, request.sessionId)),
+      next: start ? { version: 2, sessionId: request.sessionId, length: `${total * 200}`,
+        lastWriteUtcTicks: "7", offset: `${start * 200}` } : null, tailOmitted: false };
+  }
+  function Mounted({ sessionId }: { sessionId: string }) {
+    const position = useTimelinePosition(sessionId, memory);
+    const shell = useRef<HTMLDivElement>(null);
+    const chord = useRef<WorkspaceShortcutState>({ chordPending: false, sessionInfoPrefix: null, reminderPrefix: null });
+    const [notice, setNotice] = useState("");
+    const [deferredHeight, setDeferredHeight] = useState(0);
+    const newest = useExplicitNewestHistory(sessionId, null, "fixture-epoch", position, setNotice);
+    const reset = useCallback((generation: number, explicitNewest: boolean) => {
+      position.resetMessageNavigation();
+      if (!newest.onTarget(generation)) {
+        if (explicitNewest) position.pauseIfUnfollowed();
+        setNotice("");
+      }
+    }, [position.resetMessageNavigation, position.pauseIfUnfollowed, newest.onTarget]);
+    useLayoutEffect(() => {
+      const fixture = Object.assign((window as Window & { toolFixture?: object }).toolFixture ?? {}, {
+        select: (id: string) => window.dispatchEvent(new CustomEvent("tool-select", { detail: id })),
+        grow: setDeferredHeight, calls, hold: () => { hold = true; }, release: () => { release?.(); release = undefined; } });
+      Object.assign(window, { toolFixture: fixture });
+    }, []);
+    useLayoutEffect(() => {
+      const keyDown = (event: KeyboardEvent) => {
+        dispatchWorkspaceShortcut(event, chord.current, { workspaceActive: true, workspaceShell: shell.current,
+          modalOpen: false, selectedProjectFocused: false, infoTrigger: null, reminderTrigger: null,
+          infoSelection: { sessionId, projectId: null }, selection: null,
+          messageAvailable: position.messageReady(), latestAvailable: newest.available(),
+          run: action => { if (action === "messageLatest") newest.latest(); }, });
+      };
+      window.addEventListener("keydown", keyDown);
+      return () => window.removeEventListener("keydown", keyDown);
+    });
+    return createElement("div", { className: "fixture-workspace", ref: shell, style: { width: "100%", minWidth: 0, overflow: "hidden" } },
+      createElement("button", { className: "keyboard-target", type: "button" }, "Timeline keyboard target"),
+      createElement("div", { className: "timeline-scroll", ref: position.elementRef, "data-following": position.following,
+        onScroll: (event: UIEvent<HTMLDivElement>) => { newest.onScroll(); if (!newest.pending()) position.scroll(event.currentTarget); },
+        onWheel: newest.cancel, onPointerDown: newest.cancel,
+        style: { height: "260px", overflowY: "scroll", width: "100%" } },
+        createElement(History, { sessionId, read, live: null, onNotesChange: () => {},
+          onSettled: () => { position.settled(); if (!newest.pending()) position.pauseIfUnfollowed(); },
+          onBeforeOlder: position.beforeOlderPage, onAfterOlder: position.afterOlderPage,
+          onNavigationReset: reset, newestRequest: newest.requestRef, onNewestResult: newest.onResult }),
+        createElement("div", { className: "deferred-layout", style: { height: deferredHeight } })),
+      createElement("p", { role: "status", className: "navigation-notice" }, notice));
+  }
+  function Fixture() {
+    const [session, setSession] = useState("A");
+    useLayoutEffect(() => {
+      const select = (event: Event) => setSession((event as CustomEvent<string>).detail);
+      window.addEventListener("tool-select", select);
+      return () => window.removeEventListener("tool-select", select);
+    }, []);
+    return createElement(Mounted, { key: session, sessionId: session });
+  }
+  return Fixture;
+}
+createRoot(document.getElementById("app")!).render(createElement(createFixture()));

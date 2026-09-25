@@ -91,6 +91,7 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
   const [selection] = useState(() => memory.open(sessionId));
   const [following, setFollowing] = useState(selection.following);
   const restoreFrame = useRef(0);
+  const observedHeight = useRef<number | null>(null);
   const prependMetrics = useRef<{ metrics: ScrollMetrics; anchor: HTMLElement | null; top: number } | null>(null);
   const messageAnchor = useRef<{ row: HTMLElement; top: number } | null>(null);
   const resetMessageNavigation = useCallback(() => { messageAnchor.current = null; }, []);
@@ -107,7 +108,12 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     const scrollBottom = () => {
       if (!selection.following()) return;
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => { if (selection.following()) element.scrollTop = bottomScrollTop(element); });
+      frame = requestAnimationFrame(() => {
+        if (selection.following()) {
+          element.scrollTop = bottomScrollTop(element);
+          observedHeight.current = element.scrollHeight;
+        }
+      });
     };
     // DOM mutations do not report layout growth from images, fonts or CSS. Observe the
     // scroller's own viewport and each direct panel, including panels mounted later.
@@ -128,9 +134,21 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     const top = selection.settle(element);
     if (top === null) return;
     element.scrollTop = top;
+    observedHeight.current = element.scrollHeight;
     restoreFrame.current = requestAnimationFrame(() => selection.finishRestore());
   }
-  function scroll(element: HTMLDivElement) { setFollowing(selection.scroll(element)); }
+  function scroll(element: HTMLDivElement) {
+    if (observedHeight.current !== null && observedHeight.current !== element.scrollHeight) {
+      // Detail/layout changes can emit a browser scroll before ResizeObserver follows the new bottom.
+      // Do not infer a reader's change of follow preference from the changing geometry alone.
+      observedHeight.current = element.scrollHeight;
+      if (selection.following()) element.scrollTop = bottomScrollTop(element);
+      else selection.pauseAt(element.scrollTop);
+      return;
+    }
+    observedHeight.current = element.scrollHeight;
+    setFollowing(selection.scroll(element));
+  }
   function beforeOlderPage() {
     const element = elementRef.current;
     if (!element) return;
@@ -157,6 +175,7 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     if (element) {
       selection.jump(element);
       element.scrollTop = bottomScrollTop(element);
+      observedHeight.current = element.scrollHeight;
     }
     setFollowing(true);
   }

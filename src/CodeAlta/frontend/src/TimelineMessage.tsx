@@ -5,6 +5,7 @@ import { writeMarkdown, type TimelineItem } from "./timeline";
 
 export function TimelineMessage({ item }: { item: TimelineItem }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const [wrapDetails, setWrapDetails] = useState(true);
   const reset = useRef<number | undefined>(undefined);
   async function copy() {
     if (!item.copyMarkdown) return;
@@ -14,6 +15,7 @@ export function TimelineMessage({ item }: { item: TimelineItem }) {
     reset.current = window.setTimeout(() => setCopyState("idle"), 1600);
   }
   const hasDetails = !!(item.detailMarkdown || item.details || item.metadata.length);
+  const hasToolDetails = (item.category === "tool" || item.category === "file") && !!item.details;
   const copyLabel = copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : `Copy ${item.title} as Markdown`;
   return <article className={`message timeline-message message-${item.category}`}>
     <div className="avatar"><AppIcon name={item.icon} size={17} /></div>
@@ -31,11 +33,13 @@ export function TimelineMessage({ item }: { item: TimelineItem }) {
       {hasDetails && <details className="event-details"><summary><AppIcon name="chevronDown" size={14} />{item.detailsLabel}</summary>
         <div className="event-detail-body">
           {item.detailMarkdown && item.detailMarkdown !== item.markdown && <MarkdownContent source={item.detailMarkdown} />}
-          {item.details && <pre>{item.details}</pre>}
+          {item.details && <pre className={hasToolDetails && wrapDetails ? "tool-detail-pre-wrap" : undefined}>{item.details}</pre>}
+          {hasToolDetails && <label className="tool-detail-wrap"><input type="checkbox" checked={wrapDetails}
+            onChange={event => setWrapDetails(event.target.checked)} />Wrap lines</label>}
           <ul className="event-meta-inline">{item.metadata.map(value => <li key={value}>{value}</li>)}</ul>
         </div>
       </details>}
-      {!item.markdown && !item.summary && !hasDetails && item.bodyOmitted && <p className="muted-text">Additional diagnostic details were omitted.</p>}
+      {!item.markdown && !item.summary && !item.detailMarkdown && !item.details && item.bodyOmitted && <p className="muted-text">Additional diagnostic details were omitted.</p>}
       {item.truncated && <p className="muted-text">Some details were shortened to fit the desktop history window.</p>}
     </div>
   </article>;
