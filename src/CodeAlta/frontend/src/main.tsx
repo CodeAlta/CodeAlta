@@ -4,6 +4,7 @@ import {
   boot, configuration, modelCatalog, promptCatalog, mcpInventory, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionUserInput, type BootStatus,
   type ReminderListRequest,
+  type ReminderDetailRequest,
   type ConfigurationSnapshot, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
 } from "#neoastra";
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
@@ -165,6 +166,8 @@ function App() {
   useSyncExternalStore(subscribeReminderCapability, () => mutation?.capability.canMutate() ?? false);
   const readReminders = useCallback((request: ReminderListRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) =>
     reminder.list(request, options).then(value => { mutation?.capability.observe(value); return value; }), [mutation?.capability]);
+  const readReminderDetail = useCallback((request: ReminderDetailRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) =>
+    reminder.detail(request, options).then(value => { mutation?.capability.observe(value); return value; }), [mutation?.capability]);
   const workspaceShell = useRef<HTMLDivElement>(null);
   const projectRail = useRef<HTMLElement>(null);
   const projectRailToggle = useRef<HTMLButtonElement>(null);
@@ -769,7 +772,7 @@ function App() {
           ? JSON.stringify([status!.hostEpoch, selectedSession.id]) : "none"}
           target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
           ? { sessionId: selectedSession.id, epoch: status!.hostEpoch! } : null}
-          read={readReminders} actions={reminderActions} mutationAllowed={!!mutation?.capability.canMutate()}
+          read={readReminders} readDetail={readReminderDetail} actions={reminderActions} mutationAllowed={!!mutation?.capability.canMutate()}
           canMutate={() => !!mutation?.capability.canMutate()} />
       : view === "prompts" ? <PromptCatalogPanel epoch={owned ? status!.hostEpoch : null} readPrompts={promptCatalog.list}
           readChoices={sessionOperations.choices} target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId

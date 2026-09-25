@@ -11,10 +11,11 @@ import { build } from "esbuild";
 const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
 
-test("mounted reminders list, create, switch fencing, uncertain hold and confirmed deletion", { skip: !edge, timeout: 60_000 }, async () => {
+test("mounted reminders show exact detail, load a guarded new Create, and fence stale/uncertain work", { skip: !edge, timeout: 60_000 }, async () => {
   const app = readFileSync(fileURLToPath(new URL("./main.tsx", import.meta.url)), "utf8");
   assert.match(app, /view === "reminders" \? <ReminderPanel/);
   assert.match(app, /read=\{readReminders\}/);
+  assert.match(app, /readDetail=\{readReminderDetail\}/);
   const root = await mkdtemp(join(tmpdir(), "codealta-reminder-mounted-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -87,13 +88,40 @@ test("mounted reminders list, create, switch fencing, uncertain hold and confirm
     assert.equal(await wait("window.reminderFixture.reads.length === 4"), "ready");
     await evaluate(`window.reminderFixture.reads[3].resolve(${list("one", row)})`);
     assert.equal(await wait("document.querySelectorAll('[aria-label=\"Reminder list\"] button').length === 1"), "ready");
+    await evaluate(`document.querySelector('[aria-label="Reminder list"] button').click()`);
+    assert.equal(await wait("window.reminderFixture.details.length === 1"), "ready");
+    assert.equal(await evaluate("window.reminderFixture.details[0].request.reminderId"), "reminder-1");
+    await evaluate(`window.reminderFixture.details[0].resolve({status:'ok',epoch:'e1',sessionId:'one',reminderId:'reminder-1',
+      content:'full 😀\\nsecond line',delaySeconds:60,repeatCount:1})`);
+    assert.equal(await wait("document.querySelector('[aria-label=\"Full reminder message\"]')?.textContent === 'full 😀\\nsecond line'"), "ready");
+    await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent==='Use as new reminder').click()`);
+    assert.equal(await wait("document.querySelector('#reminder-content')?.value === 'full 😀\\nsecond line'"), "ready");
+    assert.equal(await evaluate("document.querySelector('#reminder-delay').value"), "60");
+    assert.equal(await evaluate("document.querySelector('#reminder-repeat').value"), "1");
+    assert.equal(await evaluate("window.reminderFixture.writes.length"), 0);
     await evaluate(`(() => { const input=document.querySelector('#reminder-content');
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'check session');
       input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
-    assert.equal(await wait("!document.querySelector('button:last-child')?.disabled && document.querySelector('#reminder-content')?.value === 'check session'"), "ready");
+    await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent==='Use as new reminder').click()`);
+    assert.equal(await wait("!![...document.querySelectorAll('button')].find(b=>b.textContent==='Discard draft and use reminder')"), "ready");
+    assert.equal(await evaluate("document.querySelector('#reminder-content').value"), "check session");
+    await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent==='Discard draft and use reminder').click()`);
+    assert.equal(await wait("document.querySelector('#reminder-content').value === 'full 😀\\nsecond line'"), "ready");
     await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent==='Create reminder').click()`);
     assert.equal(await wait("window.reminderFixture.writes.length === 1"), "ready");
     assert.equal(await evaluate("window.reminderFixture.writes[0].request.sessionId"), "one");
+    assert.equal(await evaluate("window.reminderFixture.writes[0].request.content"), "full 😀\nsecond line");
+    assert.equal(await evaluate("window.reminderFixture.writes[0].request.delaySeconds"), 60);
+    assert.equal(await evaluate("window.reminderFixture.writes[0].request.repeatCount"), 1);
+    await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent==='Use as new reminder').click()`);
+    assert.equal(await evaluate("document.querySelector('#reminder-content').value"), "full 😀\nsecond line");
+    await evaluate(`(() => { const input=document.querySelector('#reminder-content');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'pending draft');
+      input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+    assert.equal(await wait("document.querySelector('#reminder-content').value === 'pending draft'"), "ready");
+    assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Use as new reminder').disabled"), true);
+    assert.equal(await evaluate("document.querySelector('#reminder-content').value"), "pending draft");
+    assert.equal(await evaluate("window.reminderFixture.writes[0].request.content"), "full 😀\nsecond line");
     await evaluate("window.reminderFixture.writes[0].resolve({status:'ok',epoch:'e1',sessionId:'one',reminderId:'reminder-2'})");
     assert.equal(await wait("window.reminderFixture.reads.length === 5"), "ready");
     await evaluate(`window.reminderFixture.reads[4].resolve(${list("one", row)})`);
@@ -123,12 +151,67 @@ test("mounted reminders list, create, switch fencing, uncertain hold and confirm
     assert.equal(await wait("document.body.innerText.includes('no automatic retry')"), "ready");
     assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Create reminder').disabled"), true);
     assert.equal(await evaluate("window.reminderFixture.writes.length"), 3);
+    const detailCount = Number(await evaluate("window.reminderFixture.details.length"));
+    await evaluate(`document.querySelector('[aria-label="Reminder list"] button').click()`);
+    assert.equal(await wait(`window.reminderFixture.details.length > ${detailCount}`), "ready");
+    await evaluate(`window.reminderFixture.details.at(-1).resolve({status:'ok',epoch:'e1',sessionId:'one',reminderId:'reminder-1',
+      content:'full message',delaySeconds:60,repeatCount:1})`);
+    assert.equal(await wait("!!document.querySelector('[aria-label=\"Full reminder message\"]')"), "ready");
+    assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Use as new reminder').disabled"), true);
+    assert.equal(await evaluate("window.reminderFixture.writes.length"), 3);
     await evaluate("window.reminderFixture.host('e2')");
     assert.equal(await wait("window.reminderFixture.reads.length === 9"), "ready");
     await evaluate(`window.reminderFixture.reads[8].resolve(${list("one", row)})`);
     assert.equal(await wait("document.body.innerText.includes('Reload required')"), "ready");
     await evaluate("window.reminderFixture.host(null)");
     assert.equal(await wait("document.body.innerText.includes('Select an owned session')"), "ready");
+    const priorReads = Number(await evaluate("window.reminderFixture.reads.length"));
+    const priorDetails = Number(await evaluate("window.reminderFixture.details.length"));
+    await evaluate("window.reminderFixture.host('e1')");
+    assert.equal(await wait(`window.reminderFixture.reads.length > ${priorReads}`), "ready");
+    await evaluate(`window.reminderFixture.reads.at(-1).resolve(${list("one", row)})`);
+    assert.equal(await wait("!!document.querySelector('[aria-label=\"Reminder list\"] button')"), "ready");
+    await evaluate(`document.querySelector('[aria-label="Reminder list"] button').click()`);
+    assert.equal(await wait(`window.reminderFixture.details.length > ${priorDetails}`), "ready");
+    await evaluate("window.reminderFixture.host('e2')");
+    assert.equal(await wait(`window.reminderFixture.reads.length > ${priorReads + 1}`), "ready");
+    await evaluate(`window.reminderFixture.reads.at(-1).resolve(${list("one", row).replace("epoch:'e1'", "epoch:'e2'")})`);
+    assert.equal(await wait("!!document.querySelector('#reminder-content')"), "ready");
+    await evaluate(`window.reminderFixture.details[${priorDetails}].resolve({status:'ok',epoch:'e1',sessionId:'one',reminderId:'reminder-1',
+      content:'stale private text',delaySeconds:60,repeatCount:1})`);
+    assert.equal(await evaluate("document.querySelector('#reminder-content').value"), "");
+    assert.equal(await evaluate("!!document.querySelector('[aria-label=\"Full reminder message\"]')"), false);
+    assert.equal(await evaluate("window.reminderFixture.writes.length"), 3);
+    const currentDetails = Number(await evaluate("window.reminderFixture.details.length"));
+    await evaluate(`document.querySelector('[aria-label="Reminder list"] button').click()`);
+    assert.equal(await wait(`window.reminderFixture.details.length > ${currentDetails}`), "ready");
+    await evaluate(`window.reminderFixture.details.at(-1).resolve({status:'missing_reminder',epoch:'e2',sessionId:'one',
+      reminderId:'reminder-1',content:null,delaySeconds:null,repeatCount:null})`);
+    assert.equal(await wait("document.body.innerText.includes('unavailable or was deleted')"), "ready");
+    const refreshReads = Number(await evaluate("window.reminderFixture.reads.length"));
+    await evaluate("document.querySelector('.reminder-page > button').click()");
+    assert.equal(await wait(`window.reminderFixture.reads.length > ${refreshReads}`), "ready");
+    await evaluate(`window.reminderFixture.reads.at(-1).resolve(${list("one", row).replace("epoch:'e1'", "epoch:'e2'")})`);
+    assert.equal(await wait(`window.reminderFixture.details.length > ${currentDetails + 1}`), "ready");
+    await evaluate("window.reminderFixture.details.at(-1).reject(new Error('private path'))");
+    assert.equal(await wait("document.body.innerText.includes('detail could not be read')"), "ready");
+    assert.doesNotMatch((await evaluate("document.body.innerText"))!, /private path/);
+    const beforeRowSwitch = Number(await evaluate("window.reminderFixture.details.length"));
+    await evaluate("document.querySelector('.reminder-page > button').click()");
+    assert.equal(await wait(`window.reminderFixture.reads.length > ${refreshReads + 1}`), "ready");
+    await evaluate(`window.reminderFixture.reads.at(-1).resolve({status:'ok',epoch:'e2',sessionId:'one',
+      reminders:[${row},${row.replace("reminder-1", "reminder-2").replace("original", "second")}],activeCount:2,completedCount:0})`);
+    assert.equal(await wait(`window.reminderFixture.details.length > ${beforeRowSwitch}`), "ready");
+    await evaluate(`document.querySelectorAll('[aria-label="Reminder list"] button')[1].click()`);
+    assert.equal(await wait(`window.reminderFixture.details.length > ${beforeRowSwitch + 1}`), "ready");
+    await evaluate(`window.reminderFixture.details[${beforeRowSwitch}].resolve({status:'ok',epoch:'e2',sessionId:'one',
+      reminderId:'reminder-1',content:'wrong row private text',delaySeconds:60,repeatCount:1})`);
+    assert.equal(await evaluate("!!document.querySelector('[aria-label=\"Full reminder message\"]')"), false);
+    await evaluate(`window.reminderFixture.details.at(-1).resolve({status:'ok',epoch:'e2',sessionId:'one',
+      reminderId:'reminder-2',content:'selected row full text',delaySeconds:60,repeatCount:1})`);
+    assert.equal(await wait("document.querySelector('[aria-label=\"Full reminder message\"]')?.textContent === 'selected row full text'"), "ready");
+    assert.doesNotMatch((await evaluate("document.body.innerText"))!, /wrong row private text/);
+    assert.equal(await evaluate("window.reminderFixture.writes.length"), 3);
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }

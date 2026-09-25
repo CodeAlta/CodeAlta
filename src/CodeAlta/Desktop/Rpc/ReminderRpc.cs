@@ -1,3 +1,4 @@
+using System.Text.Json;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
@@ -9,6 +10,7 @@ namespace CodeAlta.Desktop.Rpc;
 [NeoRpcService("reminders", Version = 1)]
 internal sealed class ReminderService : IAsyncDisposable, IAltaReminderDelivery
 {
+    internal const int MaximumDetailResponseBytes = 96 * 1024;
     private readonly object _gate = new();
     private readonly string _epoch;
     private readonly Func<string, CancellationToken, Task<bool>> _exists;
@@ -58,6 +60,38 @@ internal sealed class ReminderService : IAsyncDisposable, IAltaReminderDelivery
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception) { return new("read_failed", _epoch, request!.SessionId, [], 0, 0); }
+    }
+
+    [NeoRpcMethod("detail")]
+    public async Task<ReminderDetailResponse> Detail(ReminderDetailRequest request, CancellationToken cancellationToken)
+    {
+        var sessionId = Identity(request?.SessionId) ? request!.SessionId : null;
+        var reminderId = Identity(request?.ReminderId) ? request!.ReminderId : null;
+        ReminderDetailResponse Error(string status) => new(status, _epoch, sessionId, reminderId, null, null, null);
+        var error = Check(request?.ExpectedEpoch, request?.SessionId);
+        if (error is not null || sessionId is null || reminderId is null) return Error(error ?? "invalid_request");
+        try
+        {
+            lock (_gate) if (_closed) return Error("closed");
+            if (!await _exists(sessionId, cancellationToken).ConfigureAwait(false)) return Error("missing_session");
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_gate)
+            {
+                if (_closed) return Error("closed");
+                // The scheduler's List filter is case-insensitive; the desktop boundary requires ordinal identity.
+                var row = _reminders.List(sessionId, includeCompleted: true).FirstOrDefault(item =>
+                    string.Equals(item.TargetSessionId, sessionId, StringComparison.Ordinal) &&
+                    string.Equals(item.ReminderId, reminderId, StringComparison.Ordinal));
+                if (row is null || !_reminders.TryGetContent(reminderId, out var content)) return Error("missing_reminder");
+                if (!Text(content, 4096, multiline: true)) return Error("read_failed");
+                var response = new ReminderDetailResponse("ok", _epoch, sessionId, reminderId, content,
+                    (int)row.Duration.TotalSeconds, row.RepeatCount);
+                return JsonSerializer.SerializeToUtf8Bytes(response, DesktopJsonContext.Default.ReminderDetailResponse).Length <= MaximumDetailResponseBytes
+                    ? response : Error("wire_limit");
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return Error("read_failed"); }
     }
 
     [NeoRpcMethod("create")]
@@ -167,6 +201,9 @@ internal sealed class ReminderService : IAsyncDisposable, IAltaReminderDelivery
 }
 
 internal sealed record ReminderListRequest(string ExpectedEpoch, string SessionId);
+internal sealed record ReminderDetailRequest(string ExpectedEpoch, string SessionId, string ReminderId);
+internal sealed record ReminderDetailResponse(string Status, string Epoch, string? SessionId, string? ReminderId,
+    string? Content, int? DelaySeconds, int? RepeatCount);
 internal sealed record ReminderCreateRequest(string ExpectedEpoch, string SessionId, string Content, int DelaySeconds, int RepeatCount);
 internal sealed record ReminderDeleteRequest(string ExpectedEpoch, string SessionId, string ReminderId, string Confirmation);
 internal sealed record ReminderMutationResponse(string Status, string Epoch, string? SessionId, string? ReminderId);

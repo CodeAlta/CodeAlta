@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Threading.Channels;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.Orchestration.Runtime;
@@ -7,6 +8,65 @@ namespace CodeAlta.Desktop.Tests;
 [TestClass]
 public sealed class ReminderRpcTests
 {
+    [TestMethod]
+    public async Task DetailReadsExactRetainedMessageWithoutChangingDeliveryOrSchedule()
+    {
+        using var clock = new LiteralClock();
+        var sends = new List<OwnedTextSendRequest>();
+        await using var service = new ReminderService("epoch", (id, _) => Task.FromResult(id is "one" or "two" or "ONE"), request =>
+        {
+            sends.Add(request);
+            return new(OwnedSessionCommandAdmissionKind.Busy);
+        }, clock);
+        var content = "First 😀\r\nSecond\t" + new string('\\', 2000) + new string('"', 2000);
+        var created = await service.Create(new("epoch", "one", content, 60, 1), default);
+        Assert.AreEqual("ok", created.Status);
+        var id = created.ReminderId!;
+        Assert.AreEqual("stale_epoch", (await service.Detail(new("wrong", "one", id), default)).Status);
+        Assert.AreEqual("invalid_request", (await service.Detail(new("epoch", "one", "bad\n"), default)).Status);
+        Assert.AreEqual("missing_session", (await service.Detail(new("epoch", "absent", id), default)).Status);
+        Assert.AreEqual("missing_reminder", (await service.Detail(new("epoch", "two", id), default)).Status);
+        Assert.AreEqual("missing_reminder", (await service.Detail(new("epoch", "ONE", id), default)).Status);
+        var detail = await service.Detail(new("epoch", "one", id), default);
+        Assert.AreEqual("ok", detail.Status);
+        Assert.AreEqual("one", detail.SessionId);
+        Assert.AreEqual(id, detail.ReminderId);
+        Assert.AreEqual(content, detail.Content);
+        Assert.AreEqual(60, detail.DelaySeconds);
+        Assert.AreEqual(1, detail.RepeatCount);
+        Assert.IsTrue(JsonSerializer.SerializeToUtf8Bytes(detail, DesktopJsonContext.Default.ReminderDetailResponse).Length <= ReminderService.MaximumDetailResponseBytes);
+        var beforeFiring = (await service.List(new("epoch", "one"), default)).Reminders.Single();
+        Assert.AreEqual(0, beforeFiring.FiredCount);
+        Assert.AreEqual(60, beforeFiring.DelaySeconds);
+        Assert.AreEqual(1, beforeFiring.RepeatCount);
+        Assert.IsNotNull(beforeFiring.DueAt);
+        await clock.TimerCreated();
+        clock.Advance(TimeSpan.FromSeconds(60));
+        for (var attempt = 0; attempt < 200; attempt++)
+        {
+            if ((await service.List(new("epoch", "one"), default)).CompletedCount == 1) break;
+            await Task.Yield();
+        }
+        Assert.AreEqual(content, (await service.Detail(new("epoch", "one", id), default)).Content);
+        Assert.HasCount(1, sends);
+        Assert.AreEqual(content, sends[0].Text);
+        Assert.AreEqual("ok", service.Delete(new("epoch", "one", id, id), default).Status);
+        Assert.AreEqual("missing_reminder", (await service.Detail(new("epoch", "one", id), default)).Status);
+        service.CloseAdmission();
+        Assert.AreEqual("closed", (await service.Detail(new("epoch", "one", id), default)).Status);
+    }
+
+    [TestMethod]
+    public async Task DetailReadFailureDoesNotReflectPrivateDiagnostics()
+    {
+        await using var service = new ReminderService("epoch", (_, _) => throw new InvalidOperationException("private path"),
+            _ => throw new AssertFailedException("No provider may be called."));
+        var result = await service.Detail(new("epoch", "one", "reminder"), default);
+        Assert.AreEqual("read_failed", result.Status);
+        Assert.IsNull(result.Content);
+        Assert.IsFalse(JsonSerializer.Serialize(result, DesktopJsonContext.Default.ReminderDetailResponse).Contains("private path", StringComparison.Ordinal));
+    }
+
     [TestMethod]
     public async Task ExactSessionEpochValidationConfirmationAndCloseGateMutations()
     {

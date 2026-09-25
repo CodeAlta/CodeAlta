@@ -107,7 +107,9 @@ function App() {
       target={epoch ? { epoch, sessionId: session } : null} actions={actions}
       mutationAllowed={capability.canMutate()} canMutate={capability.canMutate}
       read={async request => ({ status: "ok", epoch: request.expectedEpoch, sessionId: request.sessionId,
-        activeCount: 0, completedCount: 0, reminders: [] })} />}
+        activeCount: 0, completedCount: 0, reminders: [] })}
+      readDetail={async request => ({ status: "missing_reminder", epoch: request.expectedEpoch, sessionId: request.sessionId,
+        reminderId: request.reminderId, content: null, delaySeconds: null, repeatCount: null })} />}
   </div>;
 }
 createRoot(document.getElementById("app")!).render(<App />);
