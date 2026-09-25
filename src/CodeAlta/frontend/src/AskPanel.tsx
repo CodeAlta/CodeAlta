@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { flushSync } from "react-dom";
 import { sessionAsks } from "#neoastra";
 import { askWireHandle, captureAskAction, type AskHandle, type AskPage, type AskQuestion, type createAskActions } from "./sessionAsks";
 import type { createMutationCapability } from "./sessionOperations";
@@ -28,7 +29,6 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
   const nextDraft = useRef(0);
   const readVersion = useRef(0);
   const sourceAuthority = useRef<string | null>(null);
-  const focusGeneration = useRef(0);
   const scope = JSON.stringify([epoch, sessionId]);
   const previousScope = useRef(scope);
   useEffect(() => {
@@ -36,7 +36,6 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
     const old = previousScope.current;
     previousScope.current = scope;
     readVersion.current++;
-    focusGeneration.current++;
     sourceAuthority.current = null;
     setQuestionSelection(null);
     setPage(undefined);
@@ -56,7 +55,6 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
         () => !controller.signal.aborted && version === readVersion.current && scope === previousScope.current,
         () => { capability.observe({ status: "stale_epoch", epoch }); });
       if (!next) return;
-      focusGeneration.current++;
       setReadPending(current => current?.epoch === epoch && current.sessionId === sessionId && current.version === version ? null : current);
       const source = next.head?.state === "pending" ? draftSource(epoch, sessionId, next.head) : null;
       if (sourceAuthority.current !== source) setQuestionSelection(null);
@@ -66,14 +64,13 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
       setPage({ epoch, sessionId, version, page: next });
       setNotice(next.head ? "Answer or cancel the original pending ask." : "No pending head reported. Absence is not acknowledgment.");
     }).catch(() => { if (!controller.signal.aborted && version === readVersion.current && scope === previousScope.current) {
-      focusGeneration.current++;
       setQuestionSelection(null);
       setReadPending(current => current?.epoch === epoch && current.sessionId === sessionId && current.version === version ? null : current);
       sourceAuthority.current = null;
       setDrafts(current => current.map(d => !d.detached && d.epoch === epoch && d.sessionId === sessionId ? { ...d, detached: true } : d));
       setPage(undefined); setNotice("Ask read failed; no action outcome can be inferred.");
     } });
-    return () => { focusGeneration.current++; controller.abort(); void observer; };
+    return () => { controller.abort(); void observer; };
   }, [epoch, sessionId, revision, actions, capability, scope]);
   const page = pageState?.epoch === epoch && pageState.sessionId === sessionId ? pageState.page : undefined;
   const head = page?.head;
@@ -86,23 +83,42 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
     || (!active && drafts.length >= maximumDrafts);
   const reading = readPending?.epoch === epoch && readPending.sessionId === sessionId && readPending.version === readVersion.current;
   const pageUsable = pageState?.epoch === epoch && pageState.sessionId === sessionId && pageState.version === readVersion.current;
-  const navigate = (direction: -1 | 1, event: ReactMouseEvent<HTMLButtonElement>) => {
-    if (blocked || !head || !source || sourceAuthority.current !== source || event.defaultPrevented) return;
+  const navigate = (direction: -1 | 1, origin: HTMLElement): boolean => {
+    if (blocked || !head || !source || sourceAuthority.current !== source || scope !== previousScope.current
+      || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return false;
     const next = Math.max(0, Math.min(questionIndex + direction, head.request.questions.length - 1));
-    if (next === questionIndex) return;
-    const button = event.currentTarget;
-    const focus = document.activeElement === button;
+    if (next === questionIndex) return false;
+    const fieldset = origin.closest("fieldset");
+    if (!fieldset?.isConnected) return false;
+    const focus = document.activeElement === origin;
     const version = readVersion.current;
-    const generation = ++focusGeneration.current;
-    setQuestionSelection({ source, index: next });
-    if (!focus) return;
-    requestAnimationFrame(() => {
-      if (generation !== focusGeneration.current || version !== readVersion.current || scope !== previousScope.current
-        || sourceAuthority.current !== source || !button.isConnected || document.activeElement !== button
-        || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
-      const input = button.closest("fieldset")?.querySelector<HTMLElement>(`[data-ask-question="${next}"] input, [data-ask-question="${next}"] textarea`);
+    // Commit the selected question before restoring focus: an input in the old question unmounts.
+    // Doing both within this explicit event leaves no deferred callback to steal newer focus.
+    flushSync(() => setQuestionSelection({ source, index: next }));
+    if (version !== readVersion.current || scope !== previousScope.current || sourceAuthority.current !== source
+      || !fieldset.isConnected || !fieldset.querySelector(`[data-ask-question="${next}"]`)) return false;
+    if (focus && document.activeElement === (origin.isConnected ? origin : document.body)
+      && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) {
+      const input = fieldset.querySelector<HTMLElement>(`[data-ask-question="${next}"] input, [data-ask-question="${next}"] textarea`);
       if (input?.isConnected && !input.matches(":disabled")) input.focus();
-    });
+    }
+    return true;
+  };
+  const questionChord = (event: ReactKeyboardEvent<HTMLFieldSetElement>) => {
+    if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
+      || !event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+    const direction = event.key.toLowerCase() === "n" ? 1 : event.key.toLowerCase() === "p" ? -1 : null;
+    if (!direction || !head || head.request.questions.length < 2) return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || document.activeElement !== target || target.matches(":disabled")) return;
+    const question = event.currentTarget.querySelector(`[data-ask-question="${questionIndex}"]`);
+    const questionInput = question?.contains(target) && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement);
+    const navigationButton = target instanceof HTMLButtonElement && target.closest('[aria-label="Ask question navigation"]')
+      && event.currentTarget.contains(target);
+    if (!questionInput && !navigationButton) return;
+    const button = event.currentTarget.querySelector<HTMLButtonElement>(`[data-ask-direction="${direction}"]`);
+    if (!button?.isConnected || button.matches(":disabled") || !navigate(direction, target)) return;
+    event.preventDefault(); event.stopPropagation();
   };
   const edit = (update: (draft: Draft) => Draft) => {
     if (blocked || !head || !source || sourceAuthority.current !== source) return;
@@ -133,7 +149,7 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
     } catch { setNotice("The answer is invalid or exceeds the 8,192-character aggregate limit."); }
   };
   const retained = actions.forSession(sessionId).filter(entry => entry.request.expectedHostEpoch === epoch);
-  const refresh = () => { focusGeneration.current++; const version = ++readVersion.current; setReadPending({ epoch, sessionId, version }); setRevision(value => value + 1); };
+  const refresh = () => { const version = ++readVersion.current; setReadPending({ epoch, sessionId, version }); setRevision(value => value + 1); };
   const visible = recovery.length > 0 || showAskDetails(page, retained.length, notice.startsWith("Ask read failed"), !canMutate);
   if (!visible) return <button type="button" className="ask-refresh" onClick={refresh}>Check asks</button>;
   return <section aria-label="Owned asks">
@@ -161,16 +177,17 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
         : <button type="button" onClick={() => setDiscard(d.id)}>Discard local draft…</button>}
     </div>)}
     {page?.hasMore && <p>Additional retained asks or dispositions are omitted from this bounded view.</p>}
-    {head && <fieldset disabled={blocked}>
+    {head && <fieldset disabled={blocked} onKeyDown={questionChord}>
       <legend>Original ask {head.handle.askId} · {head.state}</legend>
       {head.request.questions.length > 1 && <div className="ask-question-navigation" role="group" aria-label="Ask question navigation">
         <p aria-label="Ask question position">Question {questionIndex + 1} of {head.request.questions.length}: {head.request.questions[questionIndex].title}</p>
-        <button type="button" disabled={questionIndex === 0} onKeyDown={event => {
+        <p className="detail">Ctrl+N/P moves between questions only while the current question input or these navigation buttons have focus. Browser shortcuts are unchanged elsewhere.</p>
+        <button type="button" data-ask-direction="-1" disabled={questionIndex === 0} onKeyDown={event => {
           if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.repeat) event.preventDefault();
-        }} onClick={event => navigate(-1, event)}>Previous question</button>
-        <button type="button" disabled={questionIndex === head.request.questions.length - 1} onKeyDown={event => {
+        }} onClick={event => { if (!event.defaultPrevented) navigate(-1, event.currentTarget); }}>Previous question</button>
+        <button type="button" data-ask-direction="1" disabled={questionIndex === head.request.questions.length - 1} onKeyDown={event => {
           if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.repeat) event.preventDefault();
-        }} onClick={event => navigate(1, event)}>Next question</button>
+        }} onClick={event => { if (!event.defaultPrevented) navigate(1, event.currentTarget); }}>Next question</button>
       </div>}
       {head.request.questions.map((question, index) => index !== questionIndex ? null : <div key={index} data-ask-question={index}>
         <h4>{question.title}</h4><p>{question.question}</p>{question.description && <p>{question.description}</p>}

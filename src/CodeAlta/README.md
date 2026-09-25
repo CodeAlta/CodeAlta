@@ -440,9 +440,12 @@ For a validated multi-question head, **Previous question** and **Next question**
 position/title and move between questions without wrapping. The panel retains every question's
 local choices and text when switching and on same-head refresh; only an explicit **Answer original
 ask** submits all question indexes, including unvisited/empty answers under existing validation.
-Navigation never submits, reads or acknowledges an action, and does not implement the TUI's
-SubmitOrAdvance or Ctrl+N/P commands. A changed head resets the visible question rather than
-rebinding an old draft; single-question asks keep the original simple editor.
+With focus in the current question's input or the question-navigation buttons, Ctrl+N/P moves
+through available questions using those same guarded controls; at boundaries, for single-question
+asks, and everywhere else (including Answer/Cancel, Refresh, dialogs and the composer), browser
+shortcuts retain their defaults. Navigation never submits, reads or acknowledges an action, and
+does not implement the TUI's SubmitOrAdvance command. A changed head resets the visible question
+rather than rebinding an old draft; single-question asks keep the original simple editor.
 Unsubmitted text and selected-choice drafts survive explicit refreshes of the same validated
 pending head, including edits made while its read is in flight. The editor compares the full
 handle and all validated question, choice and freeform fields, not just AskId; answer/cancel

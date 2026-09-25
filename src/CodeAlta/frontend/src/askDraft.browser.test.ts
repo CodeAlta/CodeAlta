@@ -81,6 +81,13 @@ test("mounted production ask editor retains only exact validated drafts through 
     assert.equal(ready, "ready");
     const waitFor = (condition: string) => evaluate(`new Promise(resolve => { const end = Date.now() + 4000; const check = () => {
       if (${condition}) resolve('ready'); else if (Date.now() > end) resolve('timed out'); else setTimeout(check, 25); }; check(); })`);
+    const chordProbe = (selector: string, key: string, options: Record<string, unknown> = {}, prevent = false, focus = true) =>
+      evaluate(`(() => { const target=document.querySelector(${JSON.stringify(selector)});
+        if (${focus}) target.focus();
+        const event=new KeyboardEvent('keydown',{key:${JSON.stringify(key)},ctrlKey:true,bubbles:true,cancelable:true,...${JSON.stringify(options)}});
+        if (${options.keyCode === 229}) Object.defineProperty(event,'keyCode',{value:229});
+        if (${prevent}) event.preventDefault();
+        target.dispatchEvent(event); return event.defaultPrevented; })()`);
     const handle = {operationId:'11111111-1111-4111-8111-111111111111', runtimeInstanceId:'22222222-2222-4222-8222-222222222222',
       attachmentGeneration:'12', providerId:'fixture-provider', sessionId:'session-one', runId:'run-one',
       askId:'33333333-3333-4333-8333-333333333333', responseGeneration:'0'};
@@ -92,6 +99,8 @@ test("mounted production ask editor retains only exact validated drafts through 
     assert.equal(await waitFor(`!!document.querySelector('[aria-label="Owned asks"] textarea')`), 'ready');
     assert.equal(await evaluate(`!!document.querySelector('[aria-label="Ask question navigation"]')`), false,
       'single-question ask keeps its original simple editor');
+    assert.equal(await chordProbe('[aria-label="Owned asks"] textarea', 'n'), false,
+      'single-question input does not consume browser Ctrl+N');
     await evaluate(`(() => {const el=document.querySelector('[aria-label="Owned asks"] textarea');
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,${JSON.stringify('Exact unsent text 😀\nline two')});
       el.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[aria-label="Owned asks"] input[type=checkbox]').click();
@@ -324,6 +333,27 @@ test("mounted production ask editor retains only exact validated drafts through 
     const position = () => evaluate(`document.querySelector('[aria-label="Ask question position"]')?.textContent`);
     const nav = (label: string) => evaluate(`[...document.querySelectorAll('[aria-label="Ask question navigation"] button')]
       .find(el=>el.textContent===${JSON.stringify(label)})?.click()`);
+    const textarea = '[data-ask-question="0"] textarea';
+    assert.equal(await chordProbe(textarea, 'p'), false, 'boundary leaves Ctrl+P to the browser');
+    assert.equal(await chordProbe('[aria-label="Owned asks"] button', 'n'), false, 'Refresh does not own ask chords');
+    assert.equal(await chordProbe('[aria-label="Owned asks"] fieldset > button:nth-last-child(2)', 'n'), false,
+      'Answer does not own ask chords');
+    assert.equal(await chordProbe('[aria-label="Owned asks"] fieldset > button:last-child', 'n'), false,
+      'Cancel does not own ask chords');
+    await evaluate(`(() => {const other=document.createElement('textarea');other.id='other-composer';document.body.append(other);})()`);
+    assert.equal(await chordProbe('#other-composer', 'n'), false, 'ordinary composer retains browser default');
+    for (const options of [{repeat:true},{isComposing:true},{keyCode:229},{shiftKey:true},{altKey:true},{metaKey:true},{ctrlKey:false}]) {
+      assert.equal(await chordProbe(textarea, 'n', options), false, `unsupported chord ${JSON.stringify(options)} retains default`);
+    }
+    assert.equal(await chordProbe(textarea, 'n', {}, true), true, 'an already prevented event cannot navigate');
+    await evaluate(`(() => {const dialog=document.createElement('div');dialog.setAttribute('role','dialog');
+      dialog.setAttribute('aria-modal','true');dialog.id='ask-test-modal';document.body.append(dialog);})()`);
+    assert.equal(await chordProbe(textarea, 'n'), false, 'top-layer modal retains keyboard ownership');
+    await evaluate(`document.querySelector('#ask-test-modal').remove()`);
+    await evaluate(`document.querySelector(${JSON.stringify(textarea)}).focus()`);
+    assert.equal(await chordProbe('[data-ask-direction="1"]', 'n', {}, false, false), false,
+      'dispatching on an unfocused navigation button cannot steal input focus');
+    assert.equal(await position(), 'Question 1 of 3: Choice and text');
     assert.equal(await evaluate(`JSON.stringify([...document.querySelectorAll('[aria-label="Ask question navigation"] button')]
       .map(el=>el.disabled))`), '[true,false]');
     assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Owned asks"] fieldset h4').length`), 1);
@@ -331,6 +361,24 @@ test("mounted production ask editor retains only exact validated drafts through 
     assert.equal(await position(), 'Question 1 of 3: Choice and text', 'previous clamps without wrapping');
     await write('First answer 😀');
     await evaluate(`document.querySelector('[aria-label="Owned asks"] input[type=checkbox]').click()`);
+    await evaluate(`document.querySelector('[data-ask-question="0"] textarea').focus()`);
+    await command('Page.bringToFront');
+    await command('Input.dispatchKeyEvent',{type:'keyDown',key:'n',code:'KeyN',windowsVirtualKeyCode:78,modifiers:2});
+    await command('Input.dispatchKeyEvent',{type:'keyUp',key:'n',code:'KeyN',windowsVirtualKeyCode:78,modifiers:2});
+    assert.equal(await position(), 'Question 2 of 3: Options only', 'local Ctrl+N advances from the actual focused ask input');
+    assert.equal(await waitFor(`document.activeElement?.matches('[data-ask-question="1"] input')`), 'ready');
+    await command('Input.dispatchKeyEvent',{type:'keyDown',key:'p',code:'KeyP',windowsVirtualKeyCode:80,modifiers:2});
+    await command('Input.dispatchKeyEvent',{type:'keyUp',key:'p',code:'KeyP',windowsVirtualKeyCode:80,modifiers:2});
+    assert.equal(await position(), 'Question 1 of 3: Choice and text');
+    await evaluate(`document.querySelector('[data-ask-direction="1"]').focus()`);
+    await command('Input.dispatchKeyEvent',{type:'keyDown',key:'n',code:'KeyN',windowsVirtualKeyCode:78,modifiers:2});
+    await command('Input.dispatchKeyEvent',{type:'keyUp',key:'n',code:'KeyN',windowsVirtualKeyCode:78,modifiers:2});
+    assert.equal(await position(), 'Question 2 of 3: Options only', 'focused Next button also owns Ctrl+N');
+    assert.equal(await evaluate(`document.activeElement?.matches('[data-ask-question="1"] input')`), true);
+    await evaluate(`document.querySelector('[data-ask-direction="-1"]').focus()`);
+    await command('Input.dispatchKeyEvent',{type:'keyDown',key:'p',code:'KeyP',windowsVirtualKeyCode:80,modifiers:2});
+    await command('Input.dispatchKeyEvent',{type:'keyUp',key:'p',code:'KeyP',windowsVirtualKeyCode:80,modifiers:2});
+    assert.equal(await position(), 'Question 1 of 3: Choice and text', 'focused Previous button also owns Ctrl+P');
     await evaluate(`[...document.querySelectorAll('[aria-label="Ask question navigation"] button')]
       .find(el=>el.textContent==='Next question').focus()`);
     await evaluate(`(() => {const button=document.activeElement;
@@ -356,14 +404,18 @@ test("mounted production ask editor retains only exact validated drafts through 
     await nav('Next question');
     assert.equal(await position(), 'Question 3 of 3: Text only', 'next clamps without wrapping');
     await write('Third answer\nline two');
+    assert.equal(await chordProbe('[data-ask-question="2"] textarea', 'n'), false,
+      'last-question boundary preserves browser Ctrl+N');
     assert.equal(await evaluate(`window.askFixture.answers.length+window.askFixture.cancellations.length+window.askFixture.requests.length`), 1,
       'navigation is local: no submission, cancel, observation or read');
     await click('Refresh asks');
     assert.equal(await waitFor(`window.askFixture.requests.length===2`), 'ready');
-    await nav('Previous question');
+    assert.equal(await chordProbe('[data-ask-question="2"] textarea', 'p'), true,
+      'same-head in-flight read still permits local keyboard navigation');
     assert.equal(await position(), 'Question 2 of 3: Options only');
     assert.equal(await evaluate(`document.querySelectorAll('[data-ask-question="1"] input[type=checkbox]')[1].checked`), true);
-    await nav('Previous question');
+    assert.equal(await chordProbe('[data-ask-question="1"] input[type=checkbox]', 'p'), true,
+      'the actual current choice input owns the local chord');
     assert.equal(await evaluate(`document.querySelector('[data-ask-question="0"] textarea').value`), 'First answer 😀');
     await write('Edited while same-head read pending');
     await click('Answer original ask');
@@ -376,12 +428,18 @@ test("mounted production ask editor retains only exact validated drafts through 
     assert.equal(await evaluate(`!!document.querySelector('[data-ask-question="2"] input')`), false);
     const revisedMulti = {...multi, request:{questions:[multi.request.questions[0],
       {...multi.request.questions[1],description:'Different immutable question shape'},multi.request.questions[2]]}};
+    await evaluate(`window.__oldAskInput=document.querySelector('[data-ask-question="2"] textarea');true`);
     await click('Refresh asks');
     assert.equal(await waitFor(`window.askFixture.requests.length===3`), 'ready');
     await evaluate(`window.askFixture.page(${JSON.stringify(revisedMulti)})`);
     assert.equal(await waitFor(`document.querySelectorAll('.ask-draft-recovery').length===1`), 'ready');
     assert.equal(await position(), 'Question 1 of 3: Choice and text', 'changed question shape resets selection');
     assert.equal(await evaluate(`document.querySelector('.ask-draft-recovery').textContent.includes('Third answer')`), true);
+    assert.equal(await evaluate(`(() => {const event=new KeyboardEvent('keydown',{key:'p',ctrlKey:true,bubbles:true,cancelable:true});
+      window.__oldAskInput.dispatchEvent(event);return event.defaultPrevented;})()`), false,
+    'a detached old-shape input cannot navigate or consume browser Ctrl+P');
+    assert.equal(await chordProbe('.ask-draft-recovery button', 'n'), false,
+      'recovery controls do not own ask chords');
     await nav('Next question');
     assert.equal(await evaluate(`document.querySelector('[data-ask-question="1"] input').checked`), false);
     await click('Refresh asks');
@@ -440,7 +498,7 @@ test("mounted production ask editor retains only exact validated drafts through 
       document.querySelector('[aria-label="Owned asks"] > button').focus(); })()`);
     assert.equal(await waitFor(`document.querySelector('[aria-label="Ask question position"]')?.textContent.includes('Question 2 of 3')`), 'ready');
     assert.equal(await evaluate(`document.activeElement?.textContent`), 'Refresh asks',
-      'deferred question focus never steals a newer user focus');
+      'explicit question focus never steals a newer user focus');
     await evaluate(`document.querySelectorAll('[data-ask-question="1"] input[type=checkbox]')[1].click()`);
     await nav('Next question');
     await write('Final third answer\n😀');
@@ -450,6 +508,8 @@ test("mounted production ask editor retains only exact validated drafts through 
     assert.equal(await evaluate(`document.querySelector('[data-ask-question="0"] textarea').value`), 'Final first answer');
     await click('Answer original ask');
     assert.equal(await waitFor(`window.askFixture.answers.length===1`), 'ready');
+    assert.equal(await chordProbe('[data-ask-question="0"] textarea', 'n'), false,
+      'admitted action blocks further keyboard navigation');
     assert.equal(await evaluate(`JSON.stringify(window.askFixture.answers[0].action.answers)`), JSON.stringify([
       {questionIndex:0,selectedChoiceIndexes:[0],freeformText:'Final first answer'},
       {questionIndex:1,selectedChoiceIndexes:[1],freeformText:null},
@@ -460,6 +520,8 @@ test("mounted production ask editor retains only exact validated drafts through 
     assert.equal(await evaluate(`window.askFixture.answers.length+window.askFixture.cancellations.length`), 1);
     await evaluate(`window.askFixture.failAnswer()`);
     assert.equal(await waitFor(`document.querySelector('[aria-label="Captured original ask answer"]')?.textContent.includes('Transport uncertain')`), 'ready');
+    assert.equal(await chordProbe('[data-ask-question="0"] textarea', 'n'), false,
+      'uncertain action cannot reopen question navigation');
     await click('Discard local draft…'); await click('Confirm discard local draft');
     assert.equal(await evaluate(`document.querySelector('[aria-label="Captured original ask answer"]').textContent.includes('Final first answer')`), true,
       'draft discard does not erase independent submitted evidence');
@@ -487,6 +549,16 @@ test("mounted production ask editor retains only exact validated drafts through 
       {questionIndex:1,selectedChoiceIndexes:[],freeformText:null},
       {questionIndex:2,selectedChoiceIndexes:[],freeformText:null}
     ]), 'unvisited questions are still represented exactly under existing validation');
+    await evaluate(`window.__oldAskInput=document.querySelector('[data-ask-question="0"] textarea');window.askFixture.scope('session-other')`);
+    assert.equal(await waitFor(`window.askFixture.requests.length===15`), 'ready');
+    assert.equal(await evaluate(`(() => {const event=new KeyboardEvent('keydown',{key:'n',ctrlKey:true,bubbles:true,cancelable:true});
+      window.__oldAskInput.dispatchEvent(event);return event.defaultPrevented;})()`), false,
+    'old-session editor cannot consume Ctrl+N');
+    await evaluate(`window.askFixture.page(null);window.askFixture.scope('session-one','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')`);
+    assert.equal(await waitFor(`window.askFixture.requests.length===16`), 'ready');
+    assert.equal(await evaluate(`(() => {const event=new KeyboardEvent('keydown',{key:'p',ctrlKey:true,bubbles:true,cancelable:true});
+      window.__oldAskInput.dispatchEvent(event);return event.defaultPrevented;})()`), false,
+    'old-epoch editor cannot consume Ctrl+P');
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }
