@@ -31,6 +31,20 @@ switch themes. Demo messages disappear on refresh. `npm run build:demo` produces
 as static files under `dist/`; `npm run build` builds the production NeoAstra-connected frontend.
 The packaged desktop uses the generated bridge and never includes the demo backend.
 
+**Configuration → General → Appearance & navigator** manages the local dark/light theme,
+project sorting and desktop project-rail collapse. The rail's Sort projects selector and
+Show/Hide projects button use the same live preferences; changes apply immediately and are
+saved only to this WebView's local storage (theme, projectSort and projectRail v1 keys).
+If storage is invalid or unavailable, the screen reports the fallback; if a write fails,
+the change applies in this window but is **not** reported as saved. Recent visible updates
+uses only verified saved session timestamps in the visible snapshot, **not** the TUI's
+complete last-active order: missing, unverified or truncated evidence cannot establish
+recency, and undated projects follow name/ID order. Narrow-screen Show projects is a
+temporary reveal independent of the desktop collapse preference. These controls do not
+change the selected project/session, draft, requests, pane widths or timeline position.
+The TUI's recent-session count, language and command approval policy are **not** configurable
+from this desktop screen; this is not full General/Navigator parity.
+
 For the real local desktop, build from `src` (the frontend dependency/build switches are shown for
 repeat builds that already have generated contracts and `node_modules`):
 

@@ -55,10 +55,12 @@ import { createProjectRename, projectNameVisible, projectRenameMessage, projectR
 import { sessionHierarchy } from "./sessionHierarchy";
 import { SessionActionMenu } from "./SessionActionMenu";
 import { isSessionContextKey, restoreSessionMenuFocus, sessionActionAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
-import { persistProjectSort, projectRailProjection, projectSortStorageKey, restoreProjectSort, type ProjectSort } from "./projectRail";
+import { projectRailProjection, type ProjectSort } from "./projectRail";
 import { ProjectRailRows } from "./ProjectRailRows";
 import { ProjectRailToggle } from "./ProjectRailToggle";
-import { focusVisibleProject, persistProjectRailCollapsed, projectRailVisibilityKey, projectRailVisible, resetNarrowRail, restoreProjectRailCollapsed, restoreProjectRailFocus, toggleProjectRail } from "./projectRailVisibility";
+import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./projectRailVisibility";
+import { useWindowPreferences } from "./windowPreferences";
+import { GeneralSettings } from "./GeneralSettings";
 import { SessionInfoDialog } from "./SessionInfoDialog";
 import { restoreSessionInfoFocus, selectedSessionInfoAvailable, selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
 import { CommandPalette } from "./CommandPalette";
@@ -71,7 +73,6 @@ type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; e
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 type View = "workspace" | "configuration" | "providers" | "models" | "prompts" | "reminders" | "mcp";
-type Theme = "dark" | "light";
 const paneLayoutStorageKey = "codealta.desktop.panes.v1";
 
 function App() {
@@ -91,8 +92,7 @@ function App() {
   function navigate(next: View) { currentView.current = next; setView(next); }
   const [search, setSearch] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
-  const [projectSort, setProjectSort] = useState<ProjectSort>(() => restoreProjectSort(() => localStorage.getItem(projectSortStorageKey)));
-  const [theme, setTheme] = useState<Theme>("dark");
+  const { projectSort, setProjectSort, theme, setTheme, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices } = useWindowPreferences();
   const [notesVisible, setNotesVisible] = useState(true);
   const [notesHeight, setNotesHeight] = useState(() => restoreNotesHeight(() => localStorage.getItem(notesHeightKey)));
   const [historyNotes, setHistoryNotes] = useState<{ sessionId: string | null; markdown: string }>({ sessionId: null, markdown: "" });
@@ -202,9 +202,6 @@ function App() {
   const [paneLayout, setPaneLayout] = useState(() => restorePaneLayout(() => localStorage.getItem(paneLayoutStorageKey), window.innerWidth));
   const [workspaceWidth, setWorkspaceWidth] = useState(window.innerWidth);
   const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 875px)").matches);
-  const [railState, setRailState] = useState(() => ({
-    desktopCollapsed: restoreProjectRailCollapsed(() => localStorage.getItem(projectRailVisibilityKey)), narrowOpen: false,
-  }));
   const railVisible = projectRailVisible(railState, narrow);
   const visiblePaneLayout = constrainPaneLayout(paneLayout, workspaceWidth);
   const visibleSessionWidth = !narrow && railState.desktopCollapsed
@@ -225,8 +222,6 @@ function App() {
   }, [paneLayout]);
 
   useEffect(() => { persistNotesHeight(value => localStorage.setItem(notesHeightKey, value), notesHeight); }, [notesHeight]);
-  useEffect(() => { persistProjectSort(value => localStorage.setItem(projectSortStorageKey, value), projectSort); }, [projectSort]);
-  useEffect(() => { persistProjectRailCollapsed(value => localStorage.setItem(projectRailVisibilityKey, value), railState.desktopCollapsed); }, [railState.desktopCollapsed]);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 875px)");
@@ -235,7 +230,7 @@ function App() {
       if (next || railState.desktopCollapsed)
         restoreProjectRailFocus(projectRail.current, document.activeElement, projectRailToggle.current);
       focusProjectPending.current = false;
-      setRailState(resetNarrowRail);
+      closeNarrowRail();
       setNarrow(next);
     };
     media.addEventListener("change", changed);
@@ -485,7 +480,7 @@ function App() {
       focusProjectPending.current = false;
       restoreProjectRailFocus(projectRail.current, document.activeElement, projectRailToggle.current);
     } else focusProjectPending.current = true;
-    setRailState(current => toggleProjectRail(current, narrow));
+    toggleRail(narrow);
   }
 
   function selectProject(nextProjectId: string | null) {
@@ -865,7 +860,9 @@ function App() {
     </header>
 
     {view === "configuration"
-      ? <ConfigurationPanel status={status} selectedSession={selectedSession} configurationState={configurationState} theme={theme} setTheme={setTheme} onOpenProviders={() => navigate("providers")} onOpenModels={() => navigate("models")} onOpenPrompts={() => navigate("prompts")} />
+      ? <ConfigurationPanel status={status} selectedSession={selectedSession} configurationState={configurationState}
+          preferences={{ theme, setTheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices }}
+          onOpenProviders={() => navigate("providers")} onOpenModels={() => navigate("models")} onOpenPrompts={() => navigate("prompts")} />
       : view === "providers" ? <ProvidersPanel epoch={owned ? status!.hostEpoch : null}
           read={modelCatalog.providers} probe={modelCatalog.probe} catalogProviders={configurationState.snapshot?.providers} holds={providerProbeHolds}
           onOpenModels={() => navigate("models")} />
@@ -1251,12 +1248,11 @@ function DemoConversation({ session }: { session: WorkspaceSession }) {
   </section>;
 }
 
-function ConfigurationPanel({ status, selectedSession, configurationState, theme, setTheme, onOpenProviders, onOpenModels, onOpenPrompts }: {
+function ConfigurationPanel({ status, selectedSession, configurationState, preferences, onOpenProviders, onOpenModels, onOpenPrompts }: {
   status: BootStatus | undefined;
   selectedSession: WorkspaceSession | undefined;
   configurationState: { snapshot?: ConfigurationSnapshot; error?: string };
-  theme: Theme;
-  setTheme: (theme: Theme) => void;
+  preferences: Parameters<typeof GeneralSettings>[0];
   onOpenModels: () => void;
   onOpenProviders: () => void;
   onOpenPrompts: () => void;
@@ -1277,10 +1273,7 @@ function ConfigurationPanel({ status, selectedSession, configurationState, theme
         <p>Configuration is read-only unless a card explicitly offers an editable control.</p>
       </aside>
       <div className="settings-grid">
-      {visible.has("appearance") && <section className="settings-card"><div className="settings-icon">◐</div><div><h2>Appearance</h2><p>Applied immediately to this window.</p><div className="segmented">
-        <button type="button" aria-pressed={theme === "dark"} onClick={() => setTheme("dark")}>Dark</button>
-        <button type="button" aria-pressed={theme === "light"} onClick={() => setTheme("light")}>Light</button>
-      </div></div></section>}
+      {visible.has("appearance") && <GeneralSettings {...preferences} />}
       {visible.has("providers") && <section className="settings-card"><div className="settings-icon"><AppIcon name="model" size={19} /></div><div><h2>Providers</h2><p>Current session provider: <strong>{selectedSession?.providerKey ?? "not recorded"}</strong>.</p>
         <button type="button" className="quiet-button" onClick={onOpenProviders}>Open provider management</button>
         {configurationState.error && <p className="error-text">{configurationState.error}</p>}

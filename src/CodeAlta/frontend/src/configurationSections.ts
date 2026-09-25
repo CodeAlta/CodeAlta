@@ -8,7 +8,7 @@ type ConfigurationSection = Readonly<{
 }>;
 
 const sections: readonly ConfigurationSection[] = [
-  { id: "appearance", scope: "general", searchText: "appearance theme dark light display" },
+  { id: "appearance", scope: "general", searchText: "appearance theme dark light display navigator project sort recent name desktop rail collapse visibility" },
   { id: "providers", scope: "general", searchText: "providers accounts models enabled default reasoning" },
   { id: "prompts", scope: "agent", searchText: "agent prompts instructions system" },
   { id: "skills", scope: "agent", searchText: "skills project global activation" },
