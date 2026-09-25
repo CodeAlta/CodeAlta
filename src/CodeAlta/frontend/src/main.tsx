@@ -45,6 +45,7 @@ import { createDraftIndicators } from "./promptDraft";
 import { SessionDraftBadge } from "./SessionDraftBadge";
 import { collapsedSessionWidth, constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizeCollapsedSessionPane, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
 import { visibleConfigurationSections, type ConfigurationScope } from "./configurationSections";
+import { composerBounds, composerSizeKey, rememberComposerHeight, resizeComposerHeight } from "./composerHeight";
 import { AppIcon } from "./AppIcon";
 import { sessionTime } from "./sessionTime";
 import { createProjectOpening } from "./projectOpening";
@@ -101,6 +102,7 @@ function App() {
   }
   const [projectId, setProjectId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [composerHeights, setComposerHeights] = useState<ReadonlyMap<string, number>>(() => new Map());
   const [view, setView] = useState<View>("workspace");
   const currentView = useRef<View>(view);
   currentView.current = view;
@@ -1111,6 +1113,9 @@ function App() {
           {!selectedSession
             ? <EmptyWorkspace workspaceState={workspaceState} />
             : <SessionWorkspace key={JSON.stringify([projectId, selectedSession.id])} session={selectedSession} snapshot={snapshot!} selectedProjectId={projectId} infoTrigger={sessionInfoTrigger} remindersTrigger={remindersTrigger}
+                preferredComposerHeight={composerHeights.get(composerSizeKey(status?.hostEpoch ?? null, projectId, selectedSession.id))}
+                onComposerHeight={height => { if (selectedScope.current !== projectId || selectedSessionId.current !== selectedSession.id) return;
+                  setComposerHeights(sizes => rememberComposerHeight(sizes, composerSizeKey(status?.hostEpoch ?? null, projectId, selectedSession.id), height)); }}
                 onOpenReminders={openSelectedReminders} onOpenHelp={openHelp} onOpenPalette={openPalette} readReminders={readReminders} reminderActions={reminderActions} compactTrigger={compactTrigger} status={status} mutation={mutation}
                 submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} draftIndicators={draftIndicators}
                  askActions={askActions} display={display} scrollMemory={scrollMemory} runtimeReader={runtimeReader}
@@ -1246,10 +1251,12 @@ function SettingsOverlay({ section, onSection, onClose, onAbout, children }: {
   </dialog>;
 }
 
-function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, selections, timelineCommand }: {
+function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, selections, timelineCommand }: {
   session: WorkspaceSession;
   snapshot: WorkspaceSnapshot;
   selectedProjectId: string | null;
+  preferredComposerHeight: number | undefined;
+  onComposerHeight: (height: number | undefined) => void;
   infoTrigger: RefObject<HTMLButtonElement | null>;
   remindersTrigger: RefObject<HTMLButtonElement | null>;
   onOpenReminders: (sessionId: string, epoch: string, projectId: string | null) => void;
@@ -1295,6 +1302,39 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
       () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
   }
   const timeline = useTimelinePosition(session.id, scrollMemory);
+  const workspaceElement = useRef<HTMLDivElement>(null);
+  const resizeBar = useRef<HTMLDivElement>(null);
+  const composerRegion = useRef<HTMLDivElement>(null);
+  const [layout, setLayout] = useState({ available: 0, rendered: 0 });
+  useLayoutEffect(() => {
+    const workspace = workspaceElement.current;
+    const scroller = timeline.elementRef.current;
+    const bar = resizeBar.current;
+    const region = composerRegion.current;
+    if (!workspace || !scroller || !bar || !region) return;
+    const measure = () => {
+      const available = Math.max(0, Math.floor(workspace.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top
+        - (bar.getBoundingClientRect().top - scroller.getBoundingClientRect().bottom) - bar.getBoundingClientRect().height
+        - parseFloat(getComputedStyle(workspace).paddingBottom)));
+      const rendered = Math.round(region.getBoundingClientRect().height);
+      setLayout(old => old.available === available && old.rendered === rendered ? old : { available, rendered });
+    };
+    const observer = new ResizeObserver(measure);
+    for (const element of [workspace, scroller, bar, region]) observer.observe(element);
+    measure();
+    return () => observer.disconnect();
+  }, [timeline.elementRef]);
+  const bounds = composerBounds(layout.available);
+  const visibleComposerHeight = preferredComposerHeight === undefined ? undefined : resizeComposerHeight(preferredComposerHeight, 0, bounds);
+  const pendingComposerHeight = useRef<number | null>(null);
+  useLayoutEffect(() => { pendingComposerHeight.current = null; }, [preferredComposerHeight]);
+  const resizeComposer = (delta: number) => {
+    const base = pendingComposerHeight.current ?? (preferredComposerHeight === undefined
+      ? composerRegion.current?.getBoundingClientRect().height ?? layout.rendered : visibleComposerHeight!);
+    const next = resizeComposerHeight(base, delta, bounds);
+    pendingComposerHeight.current = next;
+    onComposerHeight(next);
+  };
   const [messageNotice, setMessageNotice] = useState("");
   const [newerOmitted, setNewerOmitted] = useState(false);
   const newest = useExplicitNewestHistory(session.id, selectedProjectId, status?.hostEpoch ?? null, timeline, setMessageNotice);
@@ -1331,7 +1371,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
   const infoControl = <button ref={infoTrigger} type="button" className="composer-icon-button session-info-trigger"
     aria-label="Session info" title="Session info (Ctrl+G, Ctrl+T)" aria-haspopup="dialog" aria-expanded={infoOpen}
     onClick={openInfo}><AppIcon name="info" size={16} /></button>;
-  return <div className="session-workspace">
+  return <div className="session-workspace" ref={workspaceElement}>
     <header className="session-header">
       <div><span className="eyebrow">Session</span><h1 title={session.title}>{session.title}</h1></div>
       <div className="session-chips"><span>{session.providerKey ?? "Provider not recorded"}</span>
@@ -1364,6 +1404,16 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
         </div>
         {!timeline.following && <button type="button" className="timeline-bottom-button" onClick={() => { newest.cancel(); timeline.jump(); }}><AppIcon name="arrowDown" size={14} />{newerOmitted ? "Bottom of retained window (not newest)" : "Jump to latest visible"}</button>}
         {messageNotice && <p role="status" className="detail timeline-navigation-notice">{messageNotice}</p>}
+        <div className="composer-resize-bar" ref={resizeBar}>
+          <ComposerSplitter value={layout.rendered} min={bounds.min} max={bounds.max} automatic={preferredComposerHeight === undefined}
+            onResize={resizeComposer} onReset={() => onComposerHeight(undefined)} />
+          {preferredComposerHeight !== undefined && <button type="button" className="quiet-button" onClick={() => {
+            resizeBar.current?.querySelector<HTMLElement>(".composer-splitter")?.focus(); onComposerHeight(undefined);
+          }}
+            aria-label="Reset composer size to automatic">Auto size</button>}
+        </div>
+        <div ref={composerRegion} className={`composer-region${preferredComposerHeight === undefined ? "" : " resized"}`}
+          style={visibleComposerHeight === undefined ? undefined : { height: visibleComposerHeight }}>
         <SessionComposerGate snapshot={snapshot} projectId={selectedProjectId} session={session}
           epoch={ownedHost ? status!.hostEpoch! : null}
           owned={status?.hostEpoch && mutation ? <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
@@ -1377,6 +1427,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
           recovery={ownedHost ? <ArchivedActionRecovery epoch={status!.hostEpoch!} sessionId={session.id} submissions={submissions}
             steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue}
             asks={askActions} inputs={inputReviewer} permissions={permissionReviewer} /> : null} />
+        </div>
       </>}
   </div>;
 }
@@ -1497,6 +1548,52 @@ function EmptyWorkspace({ workspaceState }: { workspaceState: WorkspaceState }) 
 function SessionTime({ value, now }: { value: string; now: number }) {
   const { label, title, dateTime } = sessionTime(value, now);
   return <time dateTime={dateTime} title={title}>{label}</time>;
+}
+
+function ComposerSplitter({ value, min, max, automatic, onResize, onReset }: {
+  value: number; min: number; max: number; automatic: boolean; onResize: (delta: number) => void; onReset: () => void;
+}) {
+  const handle = useRef<HTMLDivElement>(null);
+  const pointer = useRef<{ id: number; y: number } | null>(null);
+  useEffect(() => {
+    const blur = () => {
+      const id = pointer.current?.id;
+      pointer.current = null;
+      if (id !== undefined && handle.current?.hasPointerCapture(id)) handle.current.releasePointerCapture(id);
+    };
+    window.addEventListener("blur", blur);
+    return () => { window.removeEventListener("blur", blur); blur(); };
+  }, []);
+  function end(event: PointerEvent<HTMLDivElement>) {
+    if (pointer.current?.id !== event.pointerId) return;
+    pointer.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+  return <div ref={handle} className="composer-splitter" role="separator" aria-label="Resize timeline and composer" aria-orientation="horizontal"
+    aria-valuemin={Math.min(min, value)} aria-valuemax={Math.max(max, value)} aria-valuenow={value}
+    aria-valuetext={automatic ? `Automatic, ${value} pixels` : `${value} pixels`}
+    title="Arrow Up enlarges composer; Arrow Down shrinks; Home resets to automatic" tabIndex={0}
+    onKeyDown={event => {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown" && event.key !== "Home") return;
+      event.stopPropagation();
+      if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
+        || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+      event.preventDefault();
+      if (event.key === "Home") onReset(); else onResize(event.key === "ArrowUp" ? 16 : -16);
+    }}
+    onDoubleClick={onReset}
+    onPointerDown={event => {
+      if (!event.isPrimary || event.button !== 0 || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+      pointer.current = { id: event.pointerId, y: event.clientY };
+      event.currentTarget.focus(); event.currentTarget.setPointerCapture(event.pointerId); event.preventDefault();
+    }}
+    onPointerMove={event => {
+      if (pointer.current?.id !== event.pointerId || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+      const delta = pointer.current.y - event.clientY;
+      pointer.current.y = event.clientY;
+      onResize(delta);
+    }} onPointerUp={end} onPointerCancel={end}
+    onLostPointerCapture={() => { pointer.current = null; }}><span /></div>;
 }
 
 function PaneSplitter({ className, hidden, label, value, onResize, onReset }: {

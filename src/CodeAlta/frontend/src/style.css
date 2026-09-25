@@ -181,6 +181,17 @@ dd { margin: 0; overflow-wrap: anywhere; }
 
 .conversation { margin-top: 12px; }
 .timeline-scroll { flex: 1 1 auto; min-width: 0; min-height: 0; overflow-y: scroll; overscroll-behavior: contain; padding: 0 8px 28px 0; }
+.composer-resize-bar { flex: 0 0 auto; display: flex; align-items: center; min-height: 8px; margin: 6px 4px 0; }
+.composer-resize-bar .quiet-button { flex: 0 0 auto; padding: 2px 7px; font-size: 11px; }
+.composer-splitter { flex: 1 1 auto; position: relative; height: 8px; cursor: row-resize; touch-action: none; }
+.composer-splitter::before { content: ""; position: absolute; inset: -3px 0; }
+.composer-splitter span { display: block; width: 38px; height: 4px; margin: 2px auto; border-radius: 4px; background: var(--line-strong); }
+.composer-splitter:hover span, .composer-splitter:focus-visible span { background: var(--accent); }
+.composer-splitter:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.composer-region { flex: 0 1 auto; min-height: 0; min-width: 0; overflow-y: auto; }
+.composer-region.resized { flex: 0 0 auto; display: flex; flex-direction: column; }
+.composer-region.resized .catalog-composer { flex: 1 0 auto; max-height: none; display: flex; flex-direction: column; overflow: visible; }
+.composer-region.resized .prompt-input { flex: 1 0 auto; max-height: none; }
 .timeline-bottom-button { z-index: 3; align-self: center; margin: -45px 0 8px; padding: 7px 12px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--text); background: var(--panel-3); box-shadow: var(--shadow); cursor: pointer; }
 .timeline-navigation-notice { margin: 4px 8px 0; }
 .demo-banner, .banner { display: flex; align-items: center; gap: 12px; margin: 16px 0; padding: 10px 13px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line)); border-radius: 10px; background: var(--accent-soft); color: color-mix(in srgb, var(--accent) 75%, var(--text)); font-size: 12px; }
@@ -352,7 +363,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
 /* Existing owned-runtime controls keep their full semantics while fitting the workspace. */
 .owned-session, .session-workspace > section:not(.conversation):not(.composer):not(.owned-session), .session-workspace > form { margin-top: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .timeline-scroll > section:not(.conversation):not(.live-indicator), .timeline-scroll > form { margin-top: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
-.session-workspace > .owned-session { flex: 0 1 auto; max-height: min(60vh, 680px); margin: 10px 4px 0; overflow-y: auto; box-shadow: var(--shadow); }
+.session-workspace > .composer-region > .owned-session { flex: 0 1 auto; max-height: min(60vh, 680px); margin: 10px 4px 0; overflow-y: auto; box-shadow: var(--shadow); }
+.session-workspace > .composer-region.resized > .owned-session { flex: 1 0 auto; max-height: none; display: flex; flex-direction: column; overflow: visible; }
 .owned-session h3, .owned-session h4 { margin: 22px 0 8px; }
 .owned-session > h3:first-child { margin-top: 0; }
 .owned-session textarea, .owned-session input, .owned-session select, .session-workspace > section textarea, .session-workspace > section input { width: 100%; margin-top: 6px; padding: 10px 11px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); background: var(--panel-2); }
