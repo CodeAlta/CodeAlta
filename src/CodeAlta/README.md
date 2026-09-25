@@ -282,6 +282,9 @@ Delete and panel shortcuts. Neither card sends, retries or retargets an operatio
   and unreadable entries cannot be opened from a stale list. The separate absolute-folder field
   still requires an owned host, preview and explicit trust confirmation to import an arbitrary
   existing directory.
+  Selecting a folder suggestion returns keyboard focus to the absolute-folder field before the
+  focused option disappears, so Escape can close the dialog and cancel its pending suggestion
+  wait. A canceled waiter does not establish that a blocking host enumeration has stopped.
 If Refresh projects fails, saved selection pauses until a successful refresh.
 During an admitted import, its original host epoch, requested/verified paths and pending or
 uncertain outcome remain visible when Open project is closed and reopened. Saved selection and

@@ -127,6 +127,11 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, getCurr
     if (!visibleSuggestions || !visibleSuggestions.paths.includes(path) || !maySuggest() || suggestWork.current
       || editRevision.current !== visibleSuggestions.revision || draftNow.current !== query
       || !sameScope(visibleSuggestions.scope) || getCurrentEpoch() !== visibleSuggestions.request.expectedHostEpoch) return;
+    // The selected option is removed below. Move its focus back inside the modal before unmounting it;
+    // otherwise Escape can target the document body instead of this dialog.
+    if (document.activeElement instanceof HTMLElement && document.activeElement.closest("#folder-suggestions")) {
+      document.getElementById("project-folder-path")?.focus();
+    }
     editRevision.current++;
     draftNow.current = path;
     setQuery(path);

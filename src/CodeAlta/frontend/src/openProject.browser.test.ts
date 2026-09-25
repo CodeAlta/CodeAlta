@@ -72,7 +72,12 @@ test("mounted saved-project dialog preserves exact read-only navigation and isol
       await command("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: virtual, modifiers: ctrl ? 2 : 0 });
     };
     const wait = async (condition: string) => evaluate(`new Promise(resolve => { const end=Date.now()+7000; const check=()=>{
-      if (${condition}) resolve('ready'); else if (Date.now()>end) resolve(document.body.innerText.slice(0,500));
+      if (${condition}) resolve('ready'); else if (Date.now()>end) resolve(JSON.stringify({
+        dialogOpen:!!document.querySelector('.app-dialog'), focusedTag:document.activeElement?.tagName,
+        focusedId:document.activeElement?.id, focusInsideDialog:!!document.querySelector('.app-dialog')?.contains(document.activeElement),
+        pageFocused:document.hasFocus(), pendingCompletion:!!document.querySelector('.project-import [role=status]'),
+        completionAborted:window.openProjectFixture.completionCalls.at(-1)?.signal.aborted ?? null
+      }));
       else setTimeout(check,20); }; check(); })`);
     const edit = (selector: string, value: string) => evaluate(`(() => { const input=document.querySelector('${selector}');
       Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,'value')
@@ -95,6 +100,8 @@ test("mounted saved-project dialog preserves exact read-only navigation and isol
     assert.equal(await wait("document.querySelectorAll('#folder-suggestions [role=option]').length===1"), "ready");
     await evaluate("document.querySelector('#folder-suggestions [role=option]').click()");
     assert.equal(await evaluate("document.querySelector('#project-folder-path').value"), "C:\\Work\\Alpha");
+    assert.equal(await evaluate("document.activeElement?.id"), "saved-project-filter",
+      "programmatic selection must not steal focus from another live dialog control");
     assert.equal(await evaluate("window.openProjectFixture.calls.length"), 0);
     assert.equal(await evaluate("window.shellEvents"), 0);
     assert.equal(await evaluate("[...document.querySelectorAll('#saved-project-results [role=option] strong')].map(x=>x.textContent).join(',')"), "Alpha,Beta,Legacy (archived, read-only)");
@@ -319,6 +326,8 @@ test("mounted saved-project dialog preserves exact read-only navigation and isol
     assert.equal(await evaluate("document.activeElement?.textContent"), "C:\\Work\\Alpine");
     await press("Enter", "Enter", 13);
     assert.equal(await evaluate("document.querySelector('#project-folder-path').value"), "C:\\Work\\Alpine");
+    assert.equal(await evaluate("document.activeElement?.id"), "project-folder-path",
+      "inserting a focused suggestion must restore focus inside the dialog before removing its option");
     assert.equal(await evaluate("window.openProjectFixture.calls.length"), 0);
     assert.equal(await evaluate("document.querySelector('#selection').textContent"), "one / session-one");
     await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Check folder').click()");
@@ -353,8 +362,14 @@ test("mounted saved-project dialog preserves exact read-only navigation and isol
     await settle(7, completionResponse(["C:\\Work\\Alpha"]));
     assert.equal(await evaluate("!!document.querySelector('#folder-suggestions')"), false);
     await evaluate("window.openProjectFixture.host(true)");
+    // Previous programmatic .click() calls do not activate a control as a real pointer click would.
+    // Give the native CDP Escape a visible dialog target instead of depending on incidental page focus.
+    await evaluate("document.querySelector('#project-folder-path').focus()");
+    assert.equal(await evaluate("document.activeElement?.id"), "project-folder-path");
     await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').click()");
     assert.equal(await wait("window.openProjectFixture.completionCalls.length===9"), "ready");
+    assert.equal(await evaluate("document.activeElement?.id"), "project-folder-path",
+      "Escape during the pending host read must still target the modal after removing a focused option");
     await press("Escape", "Escape", 27);
     assert.equal(await wait("window.openProjectFixture.completionCalls[8].signal.aborted"), "ready");
     await open();
