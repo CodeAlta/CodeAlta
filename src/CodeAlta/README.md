@@ -222,7 +222,17 @@ and Enter or click a row. It uses deterministic name order, **not** last-active 
 Navigation requires the row's unique, unchanged ID/path/name/archive state in the current bounded
 snapshot. It selects existing sessions without importing, creating a runtime, or discarding their
 drafts. Archived projects are labeled and their sessions open read-only; a catalog-only launch
-can also navigate saved projects read-only. In an owned host, if the *current* project becomes
+can also navigate saved projects read-only. **Details** in the selected project's Sessions
+header opens a read-only modal with only the current bounded catalog's ID, display name,
+full recorded path and archive flag. The global Other sessions root has no project details;
+missing, duplicated or changed ID/path rows cannot open it. A failed/pending catalog refresh
+disables inspection until a successful fresh snapshot, and project, session or host changes
+dismiss stale details. The dialog discloses partial/shortened snapshot evidence; it has no
+authoritative total session count or branch, tags, description or source metadata. Copy ID
+and Copy path are explicit, with success, denied or unavailable clipboard feedback; no
+catalog/filesystem reads, metadata writes or project actions occur on opening.
+
+In an owned host, if the *current* project becomes
 archived after an action was captured, its exact pending/uncertain Send, Steer, host-only Queue,
 compaction, observed-run cancellation and Abort/cancel-Queue intents remain visible in a
 read-only recovery card for the same unique project path, session and host epoch. The Reminders

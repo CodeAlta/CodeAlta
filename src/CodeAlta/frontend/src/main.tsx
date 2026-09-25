@@ -62,6 +62,7 @@ import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from
 import { useWindowPreferences } from "./windowPreferences";
 import { GeneralSettings } from "./GeneralSettings";
 import { ApplicationLogsPanel } from "./ApplicationLogsPanel";
+import { ProjectDetailsEntry, type ProjectDetailsContext } from "./ProjectDetailsEntry";
 import { createApplicationLogClearActions } from "./applicationLogClear";
 import { SessionInfoDialog } from "./SessionInfoDialog";
 import { restoreSessionInfoFocus, selectedSessionInfoAvailable, selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
@@ -83,8 +84,15 @@ function App() {
   const [error, setError] = useState<string>();
   const [workspaceState, setWorkspaceState] = useState<WorkspaceState>({ kind: "loading" });
   const currentSnapshot = useRef<WorkspaceSnapshot | undefined>(undefined);
+  const projectInspection = useRef({ version: 0, ready: false });
+  const [, setProjectInspectionVersion] = useState(0);
+  function markProjectInspection(ready: boolean) {
+    projectInspection.current = { version: projectInspection.current.version + 1, ready };
+    setProjectInspectionVersion(projectInspection.current.version);
+  }
   function publishWorkspaceState(value: WorkspaceState) {
     currentSnapshot.current = value.kind === "ready" ? value.snapshot : undefined;
+    markProjectInspection(value.kind === "ready");
     setWorkspaceState(value);
   }
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -206,6 +214,9 @@ function App() {
   const [workspaceWidth, setWorkspaceWidth] = useState(window.innerWidth);
   const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 875px)").matches);
   const railVisible = projectRailVisible(railState, narrow);
+  const detailsPaneVisible = !(narrow && railVisible);
+  const currentDetailsPaneVisible = useRef(detailsPaneVisible);
+  currentDetailsPaneVisible.current = detailsPaneVisible;
   const visiblePaneLayout = constrainPaneLayout(paneLayout, workspaceWidth);
   const visibleSessionWidth = !narrow && railState.desktopCollapsed
     ? collapsedSessionWidth(paneLayout, workspaceWidth) : visiblePaneLayout.sessions;
@@ -292,6 +303,15 @@ function App() {
   const visibleSessions = visibleSessionRows.map(row => row.session);
   const selectedSession = snapshot?.sessions.find(value => value.id === sessionId);
   const selectedProject = snapshot?.projects.find(value => value.id === projectId);
+  const projectDetailsContext: ProjectDetailsContext = { snapshot, projectId, sessionId, hostEpoch: status?.hostEpoch ?? null,
+    hostAvailable: !!status?.hostAvailable, refreshVersion: projectInspection.current.version,
+    refreshReady: projectInspection.current.ready, active: view === "workspace" && detailsPaneVisible };
+  function currentProjectDetailsContext(): ProjectDetailsContext {
+    return { snapshot: currentSnapshot.current, projectId: selectedScope.current, sessionId: selectedSessionId.current,
+      hostEpoch: currentHostEpoch.current ?? null, hostAvailable: currentHostAvailable.current,
+      refreshVersion: projectInspection.current.version, refreshReady: projectInspection.current.ready,
+      active: currentView.current === "workspace" && currentDetailsPaneVisible.current };
+  }
   const currentProjectWritable = () => projectId === null || !!selectedProject && !selectedProject.archived
     && !!savedProjectSelection(selectedProject, currentSnapshot.current);
   selectedScope.current = projectId;
@@ -323,6 +343,8 @@ function App() {
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
   const currentHostEpoch = useRef(status?.hostEpoch);
   currentHostEpoch.current = status?.hostEpoch;
+  const currentHostAvailable = useRef(!!status?.hostAvailable);
+  currentHostAvailable.current = !!status?.hostAvailable;
 
   function paletteContext(): PaletteContext {
     const selection = selectedSessionInfoSelection(snapshot, selectedSession, projectId,
@@ -563,6 +585,7 @@ function App() {
   }
 
   async function refreshProjects(signal: AbortSignal) {
+    markProjectInspection(false); // A failed or pending read cannot certify old details.
     try {
       const fresh = await workspace.snapshot({}, { signal, timeoutMilliseconds: 30_000 });
       if (signal.aborted) return undefined;
@@ -612,6 +635,7 @@ function App() {
         // The RPC can have committed even if a bridge refresh fails. Never retry this snapshot.
         let fresh: Awaited<ReturnType<typeof workspace.snapshot>> | undefined;
         if (currentHostEpoch.current === target.epoch && capability.canMutate()) {
+          markProjectInspection(false);
           try {
             fresh = await workspace.snapshot({}, { signal: creationRefresh.current.signal, timeoutMilliseconds: 30_000 });
             if (creationAlive.current && currentHostEpoch.current === target.epoch && capability.canMutate() && fresh.configured)
@@ -655,6 +679,7 @@ function App() {
     }
     const generation = projectRenameGeneration.current;
     projectRenameRefreshPending.current = true;
+    markProjectInspection(false);
     try {
       const fresh = await workspace.snapshot({}, { signal: creationRefresh.current.signal, timeoutMilliseconds: 30_000 });
       if (!creationAlive.current || uncertainProjectRename.current !== uncertain || !capability.canMutate()
@@ -968,9 +993,10 @@ function App() {
         <aside className="session-rail" aria-label="Sessions" ref={sessionRail} hidden={narrow && railVisible}>
           <div className="session-rail-header">
             <div><span className="eyebrow">Sessions</span><h2>{selectedProject?.name ?? "Other sessions"}</h2></div>
-            <button type="button" className="icon-button" aria-label="Create session" title="Create session in selected scope"
-              disabled={!owned || !snapshot || !!selectedProject?.archived || projectId !== null && !selectedProject || creatingBusy}
-              onClick={() => { setCreatingVisible(value => !value); setCreatingMessage(""); }}>＋</button>
+            <div className="session-rail-actions"><ProjectDetailsEntry context={projectDetailsContext} getCurrent={currentProjectDetailsContext} />
+              <button type="button" className="icon-button" aria-label="Create session" title="Create session in selected scope"
+                disabled={!owned || !snapshot || !!selectedProject?.archived || projectId !== null && !selectedProject || creatingBusy}
+                onClick={() => { setCreatingVisible(value => !value); setCreatingMessage(""); }}>＋</button></div>
           </div>
           {creatingVisible && <div className="session-create">
             <label>New {selectedProject ? `session in ${selectedProject.name}` : "global session"}

@@ -117,7 +117,10 @@ ul { margin: 0; padding: 0; }
 .quiet-button:hover:not(:disabled), .icon-button:hover:not(:disabled) { color: var(--text); border-color: var(--line-strong); }
 
 .session-rail { display: flex; flex-direction: column; background: color-mix(in srgb, var(--panel) 72%, var(--bg)); }
-.session-rail-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 18px 12px; }
+.session-rail-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 20px 18px 12px; }
+.session-rail-header > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+.session-rail-actions { display: flex; align-items: center; flex: 0 0 auto; gap: 6px; }
+.project-details-trigger { white-space: nowrap; padding: 6px; }
 .eyebrow { display: block; margin-bottom: 4px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
 h1, h2, h3, p { margin-top: 0; }
 .session-rail-header h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
