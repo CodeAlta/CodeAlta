@@ -284,13 +284,13 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
   }
   function messageReady() {
     const element = elementRef.current;
-    return !!element?.querySelector('.history[data-window-ready="true"] .timeline-message.message-user, .history[data-window-ready="true"] .timeline-message.message-assistant');
+    return !!element?.querySelector('.history[data-window-ready="true"] [data-persisted-message="true"]');
   }
   function navigateMessage(action: MessageNavigation): MessageNavigationResult {
     const element = elementRef.current;
     if (!element || !messageReady()) return { status: "unavailable" };
     const rows = Array.from(element.querySelectorAll<HTMLElement>(
-      '.history[data-window-ready="true"] .timeline-message.message-user, .history[data-window-ready="true"] .timeline-message.message-assistant'));
+      '.history[data-window-ready="true"] [data-persisted-message="true"]'));
     const viewport = element.getBoundingClientRect();
     const anchor = messageAnchor.current;
     const anchoredIndex = anchor?.top === element.scrollTop ? rows.indexOf(anchor.row) : -1;

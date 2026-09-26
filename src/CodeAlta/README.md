@@ -395,7 +395,8 @@ clicking a disclosure/Wrap control or scrolling inside its detail text does not 
 reader is not moved to the newest journal window. This is not full TUI tool-output or timeline parity.
 
 In the focused session workspace, `F3`/`F4` move among **persisted user and assistant
-messages in the currently retained window** (not tool/status cards); `Ctrl+F3` moves
+messages in the currently retained window** (not live projection, tool, reasoning,
+unknown-kind or status cards); a live-only window does not enable these keys. `Ctrl+F3` moves
 to its first retained message, which may not be the journal's first message. These
 keys unfollow the timeline and report retained-window boundaries. They do not fetch
 older pages or infer that a running session has finished persisting events. Use
@@ -408,6 +409,12 @@ cancels the pending keyboard follow intent; it does not cancel a completed read 
 automatically retry. The bottom button follows the displayed window only and labels
 older windows accordingly. This is a snapshot of the last successful explicit read,
 not proof that a running provider has finished writing its journal.
+
+Loaded-message navigation keeps keyboard focus and uses the current viewport or
+retained DOM-row anchor. Unlike TUI index navigation, next-at-last remains paused
+at the retained-window boundary; `Ctrl+F4` is an explicit read, not a loaded-last
+jump. Composer/editor and modal shortcuts retain ownership. Browser coverage does
+not qualify native keyboard delivery, screen readers, or full TUI four-key parity.
 
 The shared reader limits page input to 256 KiB, individual records to 128 KiB and work to
 100 physical records, plus bounded framing probes. Blank and metadata-only records count,

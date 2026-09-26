@@ -1,5 +1,6 @@
 // Isolated bridge for mounting the actual main.tsx in a local browser test.
 // No native bridge or user data is touched.
+import type { HistoryRequest, HistoryResponse, SessionDisplayItem, SessionDisplayRequest } from "#neoastra";
 const epoch = "12345678-1234-1234-1234-123456789abc";
 const session = { id: "one", title: "one", fullTitle: "one", fullTitleTruncated: false,
   parentSessionId: null, scopeKind: localStorage.getItem("infoFixtureUnknown") === "true" ? null : "project",
@@ -26,8 +27,22 @@ type CreateRequest = { expectedHostEpoch: string; scope: string; projectId: stri
 const creates: Array<{ request: CreateRequest; resolve: (value: unknown) => void }> = [];
 const snapshots: Array<{ resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
 const snapshotCalls: unknown[] = [];
+const historyCalls: HistoryRequest[] = [];
+const historyReads: Array<() => void> = [];
+function navigationHistory(request: HistoryRequest): HistoryResponse {
+  const mode = localStorage.getItem("navigationFixture");
+  const kinds = mode === "live-only" || mode === "empty" ? [] : ["User", "CommandOutput", "Reasoning", "Unknown", "Status", "Assistant"];
+  return { status: mode === "error" ? "unavailable" : "ok", tailOmitted: false,
+    next: mode === "partial" && !request.cursor ? { version: 2, sessionId: request.sessionId, length: "1000",
+      lastWriteUtcTicks: "7", offset: "1" } : null,
+    entries: kinds.map((kind, index) => ({ offset: `${index + 1}`, eventType: kind === "Status" ? "sessionUpdate" : "contentCompleted", providerId: "fixture",
+      sessionId: request.sessionId, runId: null, timestamp: "2026-09-24T00:00:00Z", kind, phase: null,
+      contentId: `${index}`, activityId: null, parentActivityId: null, interactionId: null, name: null,
+      text: `persisted-${kind}-${request.sessionId}`, details: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false })) };
+}
 Object.assign(window, { settingsShellFixture: { calls, sends, choiceReads, usageReads, probes, clearRequests,
-  renameRequests, deleteRequests, creates, snapshots, snapshotCalls, catalog,
+  renameRequests, deleteRequests, creates, snapshots, snapshotCalls, catalog, historyCalls,
+  releaseHistory() { for (const release of historyReads.splice(0)) release(); },
   releaseCreate(status = "ok") { const original = creates[0]; original.resolve({ status, hostEpoch: epoch,
     scope: original.request.scope, projectId: original.request.projectId, projectPath: original.request.projectPath,
     sessionId: "created", workspacePath: original.request.projectPath ?? "/fixture/global" }); },
@@ -58,6 +73,14 @@ export const workspace = { snapshot: async () => {
   return localStorage.getItem("settingsFixtureFreshSnapshot") === "true"
     ? { ...catalog, sessions: catalog.sessions.map(row => ({ ...row, updatedAt: "2026-09-26T00:00:00Z" })) } : catalog;
 },
+  historyTail: (request: HistoryRequest) => {
+    if (!localStorage.getItem("navigationFixture")) return unavailable();
+    historyCalls.push(request);
+    if (localStorage.getItem("navigationFixture") === "loading" ||
+      (localStorage.getItem("navigationFixture") === "partial" && request.cursor))
+      return new Promise<HistoryResponse>(resolve => historyReads.push(() => resolve(navigationHistory(request))));
+    return Promise.resolve(navigationHistory(request));
+  },
   openProject: unavailable, readProjectName: unavailable,
   renameProject: unavailable, createSession: (request: CreateRequest) => new Promise(resolve => creates.push({ request, resolve })),
   renameSession: (request: unknown) => { renameRequests.push(request); return new Promise(resolve => mutationReplies.push({ kind: "rename", resolve })); },
@@ -82,7 +105,18 @@ export const promptCatalog = { list: async () => ({ status: "ok", epoch, session
   prompts: [{ id: "plan", name: "Plan", description: null, builtIn: true, appended: false, bodyTruncated: false, body: "Plan", scope: "BuiltIn" }] }) };
 export const mcpInventory = { list: unavailable };
 export const reminder = { list: unavailable, detail: unavailable, create: unavailable, delete: unavailable, save: unavailable };
-export const sessionDisplay = { observe: unavailable };
+export const sessionDisplay = { observe: async (request: SessionDisplayRequest) => {
+  if (!localStorage.getItem("navigationFixture")) return unavailable();
+  const item: SessionDisplayItem = { status: "ok", hostEpoch: request.expectedHostEpoch, sessionId: request.sessionId,
+    projectionEpoch: "navigation-fixture", revision: "0", previousRevision: null, isInitial: true, hasGap: false,
+    isClosed: true, isPartial: true, evictedSessions: "0", omittedSessionEvents: "0",
+    session: { sessionId: request.sessionId, revision: "0", lifecycle: null, queuedPromptCount: null, configuration: null,
+      statusKind: null, statusMessage: null, metadataTruncated: false, transportTruncated: false, evictedTextItems: "0",
+      unsupportedEvents: "0", toolActivities: [], evictedToolActivities: "0",
+      text: localStorage.getItem("navigationFixture") === "empty" ? [] : ["User", "Assistant", "Unknown"].map(kind => ({
+        runId: "live-run", contentId: kind, kind, text: `live-${kind}`, isComplete: true, isTruncated: false, startedWithDelta: false })) } };
+  return (async function* () { yield item; })();
+} };
 export const sessionRuntimeState = { current: unavailable };
 export const sessionUsage = { read: (request: unknown) => new Promise((resolve, reject) => usageReads.push({ request, resolve, reject })) };
 export const sessionPermissions = { list: unavailable, resolve: unavailable };

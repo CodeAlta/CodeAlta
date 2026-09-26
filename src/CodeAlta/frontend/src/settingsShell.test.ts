@@ -518,6 +518,91 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await command("Page.reload");
     assert.equal(await wait("document.querySelector('.project-rail .sidebar-empty[role=alert]')?.textContent.includes('No alternate session scan was used')"), true);
     assert.equal(await evaluate("!!document.querySelector('.project-rail .panel-title') && !!document.querySelector('.session-rail-header h2') && !!document.querySelector('.rail-footer button') && !!document.querySelector('.project-rail [aria-label=\"Open project (Ctrl+O)\"]')"), true);
+    // Actual App -> shared dispatcher -> registered command -> mixed History -> scroll hook.
+    // No fixture-owned dispatcher or synthetic message DOM stands in for production wiring.
+    for (const mode of ["live-only", "mixed", "empty", "error", "loading", "partial"]) {
+      await evaluate(`localStorage.clear(); localStorage.setItem('settingsFixtureOwned','true');
+        localStorage.setItem('navigationFixture','${mode}')`);
+      await command("Page.reload");
+      assert.equal(await wait("!!document.querySelector('[aria-label=\"Session info\"]') && window.settingsShellFixture.historyCalls.length>0"), true);
+      if (mode !== "empty") assert.equal(await wait("document.querySelector('.history')?.textContent.includes('live-Assistant')"), true);
+      if (["mixed", "live-only", "empty"].includes(mode))
+        assert.equal(await wait("document.querySelector('.history')?.dataset.windowReady==='true'"), true);
+      if (mode === "error") assert.equal(await wait("!!document.querySelector('.history [role=alert]')"), true);
+      if (mode === "partial") assert.equal(await wait("window.settingsShellFixture.historyCalls.some(call=>call.cursor)"), true);
+      await evaluate(`document.querySelector('[aria-label="Session info"]').focus()`);
+      const key = (key: string, modifiers = {}) => evaluate(`(() => {const e=new KeyboardEvent('keydown',
+        ${JSON.stringify({ key, bubbles: true, cancelable: true, ...modifiers })});
+        document.activeElement.dispatchEvent(e); return e.defaultPrevented;})()`);
+      const before = await evaluate(`JSON.stringify({ reads:window.settingsShellFixture.historyCalls,
+        session:document.querySelector('.session-row > button[aria-pressed=true]')?.textContent,
+        focus:document.activeElement.outerHTML, outer:[window.scrollX,window.scrollY,document.querySelector('.workspace-shell').scrollTop] })`);
+      if (mode === "mixed") {
+        assert.equal(await key("F3", { ctrlKey: true }), true);
+        assert.equal(await wait("document.querySelector('.timeline-navigation-notice')?.textContent.includes('persisted-User-one')"), true);
+        assert.equal(await key("F4"), true);
+        assert.equal(await wait("document.querySelector('.timeline-navigation-notice')?.textContent.includes('persisted-Assistant-one')"), true);
+        assert.equal(await key("F4"), true);
+        assert.equal(await wait("document.querySelector('.timeline-navigation-notice')?.textContent.includes('Last retained message in this window')"), true,
+          "next at the last persisted message must not select a live User/Assistant/Unknown row");
+        assert.equal(await evaluate("!!document.querySelector('.timeline-bottom-button')"), true, "boundary remains unfollowed");
+        assert.equal(await key("F3"), true);
+        assert.equal(await wait("document.querySelector('.timeline-navigation-notice')?.textContent.includes('persisted-User-one')"), true);
+        assert.equal(await key("F3"), true);
+        assert.equal(await wait("document.querySelector('.timeline-navigation-notice')?.textContent.includes('First retained message in this window')"), true);
+      } else {
+        for (const [name, modifiers] of [["F3", {}], ["F4", {}], ["F3", { ctrlKey: true }]] as const)
+          assert.equal(await key(name, modifiers), false, `${mode}: no eligible settled persisted row, leave native key unhandled`);
+        assert.equal(await evaluate("!!document.querySelector('.timeline-navigation-notice')"), false);
+      }
+      assert.equal(await evaluate(`JSON.stringify({ reads:window.settingsShellFixture.historyCalls,
+        session:document.querySelector('.session-row > button[aria-pressed=true]')?.textContent,
+        focus:document.activeElement.outerHTML, outer:[window.scrollX,window.scrollY,document.querySelector('.workspace-shell').scrollTop] })`), before,
+        `${mode}: navigation cannot read/page, change selection, transfer focus or scroll the outer workspace`);
+      if (mode === "mixed") {
+        assert.deepEqual(await evaluate("[...document.querySelectorAll('[data-persisted-message=true]')].map(row=>row.querySelector('.message-body p')?.textContent)"),
+          ["persisted-User-one", "persisted-Assistant-one"], "only persisted user/assistant articles advertise eligibility");
+        const notice = await evaluate("document.querySelector('.timeline-navigation-notice').textContent");
+        const readsBeforeGuards = await evaluate("window.settingsShellFixture.historyCalls.length");
+        for (const modifiers of [{ isComposing: true }, { keyCode: 229 }, { repeat: true },
+          { altKey: true }, { shiftKey: true }, { metaKey: true }]) assert.equal(await key("F3", modifiers), false);
+        await evaluate(`(() => {const e=new KeyboardEvent('keydown',{key:'F4',bubbles:true,cancelable:true});
+          e.preventDefault(); document.activeElement.dispatchEvent(e);})()`);
+        await evaluate("document.querySelector('#session-prompt').focus()");
+        assert.equal(await key("F3", { ctrlKey: true }), false, "composer owns its input");
+        await evaluate("document.querySelector('.session-rail .search input').focus()");
+        assert.equal(await key("F4"), false, "other editors own their input");
+        await evaluate("window.navigationWorkspace=document.querySelector('.session-workspace'); document.querySelector('.rail-footer .icon-label-button').click()");
+        assert.equal(await wait("document.querySelector('.settings-dialog')?.open"), true);
+        assert.equal(await key("F4"), false, "Settings retains modal ownership");
+        assert.equal(await evaluate("window.navigationWorkspace===document.querySelector('.session-workspace')"), true);
+        await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
+        assert.equal(await evaluate("document.querySelector('.timeline-navigation-notice').textContent"), notice);
+        assert.equal(await evaluate("window.settingsShellFixture.historyCalls.length"), readsBeforeGuards, "guards add no history reads");
+
+        await evaluate("[...document.querySelectorAll('.session-row > button:first-child')].find(b=>b.textContent.includes('two')).click()");
+        assert.equal(await wait("document.querySelector('.history')?.dataset.windowReady==='true' && document.querySelector('.history')?.textContent.includes('persisted-User-two')"), true);
+        const readsAfterSelection = await evaluate("window.settingsShellFixture.historyCalls.length") as number;
+        await evaluate("document.querySelector('[aria-label=\"Session info\"]').focus()");
+        assert.equal(await key("F3", { ctrlKey: true }), true);
+        assert.equal(await wait("document.querySelector('.timeline-navigation-notice')?.textContent.includes('persisted-User-two')"), true,
+          "a remounted selected session cannot retain the prior row anchor");
+        // Replace the retained rows through the existing explicit refresh, not navigation.
+        await evaluate(`localStorage.setItem('navigationFixture','live-only'); document.querySelector('.history .section-heading button').click()`);
+        assert.equal(await wait("document.querySelector('.history')?.dataset.windowReady==='true' && !document.querySelector('.history')?.textContent.includes('persisted-User-two')"), true);
+        await evaluate("document.querySelector('[aria-label=\"Session info\"]').focus()");
+        assert.equal(await key("F4"), false, "removed persisted anchors cannot redirect navigation onto retained live rows");
+        assert.equal(await evaluate("!!document.querySelector('.timeline-navigation-notice')"), false, "ordinary refresh does not announce navigation");
+        assert.equal(await evaluate("window.settingsShellFixture.historyCalls.length"), readsAfterSelection + 1, "only explicit refresh adds a read after selection");
+      }
+      // Release only the fixture's original held read, then drain the production History settlement.
+      if (mode === "loading" || mode === "partial") {
+        await evaluate("window.settingsShellFixture.releaseHistory()");
+        assert.equal(await wait("document.querySelector('.history')?.dataset.windowReady==='true'"), true);
+        assert.equal(await key("F3", { ctrlKey: true }), true, "settled original accumulation admits persisted navigation");
+        assert.equal(await wait("document.querySelector('.timeline-navigation-notice')?.textContent.includes('persisted-User-one')"), true);
+      }
+    }
     // Production create handler and navigation wiring, with only transport replies deferred.
     for (const phase of ["reply", "snapshot"]) for (const change of ["session", "aba", "settings", "settings-aba", "scope", "scope-aba", "path", "project-id", "modal-aba", "input", "input-aba", "search", "host", "unmount", "valid", "missing", "error"]) {
       await evaluate(`localStorage.clear(); localStorage.setItem('settingsFixtureOwned','true'); localStorage.setItem('settingsFixtureSecondProject','true')`);

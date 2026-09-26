@@ -54,7 +54,8 @@ export function TimelineMessage({ item }: { item: TimelineItem }) {
   const hasDetails = !!(item.detailMarkdown || item.details || item.metadata.length);
   const hasToolDetails = (item.category === "tool" || item.category === "file") && !!item.details;
   const copyLabel = copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : `Copy ${item.title} as Markdown`;
-  return <article className={`message timeline-message message-${item.category}`}>
+  return <article className={`message timeline-message message-${item.category}`}
+    data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}>
     <div className="avatar"><AppIcon name={item.icon} size={17} /></div>
     <div className="message-body">
       <div className="message-heading">
