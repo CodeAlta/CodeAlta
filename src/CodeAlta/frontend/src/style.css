@@ -170,6 +170,9 @@ h1, h2, h3, p { margin-top: 0; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 
 .content { min-width: 0; min-height: 0; overflow: hidden; background: radial-gradient(circle at 80% 0%, color-mix(in srgb, var(--accent) 5%, transparent), transparent 35%), var(--bg); }
+.workspace-layout { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0;
+  --flexlayout-color-text: var(--text); --flexlayout-color-background: transparent;
+  --flexlayout-color-base: transparent; --flexlayout-color-1: transparent; }
 .session-workspace { width: min(1080px, calc(100% - 32px)); height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; margin: 0 auto; padding: 20px 0 14px; overflow: hidden; }
 .session-header { display: flex; justify-content: space-between; align-items: end; gap: 18px; padding: 0 4px 18px; border-bottom: 1px solid var(--line); }
 .session-header > div:first-child { min-width: 0; }

@@ -16,6 +16,7 @@
     "@neoastra/client": "file:../obj/neoastra/client",
     "@radix-ui/react-dialog": "1.1.23",
     "dompurify": "3.4.14",
+    "flexlayout-react": "0.11.0",
     "lucide-react": "0.511.0",
     "marked": "16.4.2",
     "mermaid": "11.17.2",

@@ -46,7 +46,12 @@ composer draft and timeline remain mounted underneath but cannot be interacted w
 open. Use the overlay's sections and Back to settings control, Escape or Close settings to return;
 at narrow widths it uses viewport margins and scrolls internally. Configuration, Providers,
 Models, Agent prompts, MCP Servers and Logs are **not** workspace tabs. Future session/file tabs
-are separate; no multi-workspace tabbing is implemented here. Reminders remains a guarded
+are separate; no multi-workspace tabbing is implemented here. The workspace content uses a
+single fixed in-document FlexLayout 0.11.0 panel as a layout foundation, not docking or session-tab
+parity. Its private model cannot create, select, close or restore sessions; floating, popouts,
+layout persistence and layout shortcuts are disabled. Project/session rails, notes, application
+action owners and the native Settings modal remain outside the panel. Existing selected-session
+keyed transitions and draft/uncertain-action guards are unchanged. Reminders remains a guarded
 selected-session tool, not a Settings section.
 
 **Settings → Overview → General → Appearance & navigator** manages the local dark/light theme,

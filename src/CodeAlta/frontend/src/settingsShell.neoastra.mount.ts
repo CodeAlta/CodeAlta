@@ -16,6 +16,10 @@ const catalog = { configured: true, projects: [{ id: "project", name: "Project",
 const unavailable = async () => { throw new Error("test bridge unavailable"); };
 const calls: string[] = [];
 const sends: unknown[] = [];
+const sendFailures: Array<() => void> = [];
+const displayCalls: SessionDisplayRequest[] = [];
+const displayCleanup: string[] = [];
+const notesCalls: unknown[] = [];
 const choiceReads: Array<{ request: { expectedEpoch: string; sessionId: string }; resolve: (value: unknown) => void }> = [];
 const usageReads: Array<{ request: unknown; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
 const probes: unknown[] = [];
@@ -42,6 +46,8 @@ function navigationHistory(request: HistoryRequest): HistoryResponse {
 }
 Object.assign(window, { settingsShellFixture: { calls, sends, choiceReads, usageReads, probes, clearRequests,
   renameRequests, deleteRequests, creates, snapshots, snapshotCalls, catalog, historyCalls,
+  displayCalls, displayCleanup, notesCalls,
+  failSend() { sendFailures.shift()?.(); },
   releaseHistory() { for (const release of historyReads.splice(0)) release(); },
   releaseCreate(status = "ok") { const original = creates[0]; original.resolve({ status, hostEpoch: epoch,
     scope: original.request.scope, projectId: original.request.projectId, projectPath: original.request.projectPath,
@@ -105,25 +111,36 @@ export const promptCatalog = { list: async () => ({ status: "ok", epoch, session
   prompts: [{ id: "plan", name: "Plan", description: null, builtIn: true, appended: false, bodyTruncated: false, body: "Plan", scope: "BuiltIn" }] }) };
 export const mcpInventory = { list: unavailable };
 export const reminder = { list: unavailable, detail: unavailable, create: unavailable, delete: unavailable, save: unavailable };
-export const sessionDisplay = { observe: async (request: SessionDisplayRequest) => {
+export const sessionDisplay = { observe: async (request: SessionDisplayRequest, options: { signal: AbortSignal }) => {
+  displayCalls.push(request);
   if (!localStorage.getItem("navigationFixture")) return unavailable();
+  const hold = localStorage.getItem("layoutFixtureLive") === "true";
   const item: SessionDisplayItem = { status: "ok", hostEpoch: request.expectedHostEpoch, sessionId: request.sessionId,
     projectionEpoch: "navigation-fixture", revision: "0", previousRevision: null, isInitial: true, hasGap: false,
-    isClosed: true, isPartial: true, evictedSessions: "0", omittedSessionEvents: "0",
+    isClosed: !hold, isPartial: true, evictedSessions: "0", omittedSessionEvents: "0",
     session: { sessionId: request.sessionId, revision: "0", lifecycle: null, queuedPromptCount: null, configuration: null,
       statusKind: null, statusMessage: null, metadataTruncated: false, transportTruncated: false, evictedTextItems: "0",
       unsupportedEvents: "0", toolActivities: [], evictedToolActivities: "0",
       text: localStorage.getItem("navigationFixture") === "empty" ? [] : ["User", "Assistant", "Unknown"].map(kind => ({
         runId: "live-run", contentId: kind, kind, text: `live-${kind}`, isComplete: true, isTruncated: false, startedWithDelta: false })) } };
-  return (async function* () { yield item; })();
+  return (async function* () {
+    try {
+      yield item;
+      if (hold && !options.signal.aborted) await new Promise<void>(resolve => {
+        options.signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+    } finally { displayCleanup.push(request.sessionId); }
+  })();
 } };
 export const sessionRuntimeState = { current: unavailable };
 export const sessionUsage = { read: (request: unknown) => new Promise((resolve, reject) => usageReads.push({ request, resolve, reject })) };
 export const sessionPermissions = { list: unavailable, resolve: unavailable };
 export const sessionOperations = { choices: (request: { expectedEpoch: string; sessionId: string }) =>
   localStorage.getItem("settingsFixtureHoldChoices") === "true" ? new Promise(resolve => choiceReads.push({ request, resolve })) : Promise.resolve(choices(request)),
-  send: (request: unknown) => { sends.push(request); return new Promise(() => {}); }, abort: unavailable, steer: unavailable,
+  send: (request: unknown) => { sends.push(request); return new Promise((_resolve, reject) => {
+    sendFailures.push(() => reject(new Error("fixture transport uncertainty")));
+  }); }, abort: unavailable, steer: unavailable,
   compact: unavailable, abortRun: unavailable, queue: unavailable, cancelQueue: unavailable };
 export const sessionAsks = { answer: unavailable, cancel: unavailable };
-export const sessionNotes = { current: unavailable, clear: unavailable };
+export const sessionNotes = { current: (request: unknown) => { notesCalls.push(request); return unavailable(); }, clear: unavailable };
 export const sessionUserInput = { list: unavailable, resolve: unavailable, cancel: unavailable };

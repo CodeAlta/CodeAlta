@@ -22,12 +22,16 @@ test("production shell settings overlay keeps the session workspace mounted and 
       define: { "import.meta.env.VITE_DEMO_MODE": '"false"' },
       plugins: [{ name: "isolated-bridge", setup(bundle) {
         bundle.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("./settingsShell.neoastra.mount.ts", import.meta.url)) }));
-        // Expose only root teardown; handler/state/navigation remain the production App.
+        // Expose teardown and existing publication boundaries, not replacement navigation/owners.
         bundle.onLoad({ filter: /[/\\]main\.tsx$/ }, async args => ({ loader: "tsx", contents:
           (await readFile(args.path, "utf8")).replace('createRoot(document.getElementById("root")!).render(',
-            'const fixtureRoot = createRoot(document.getElementById("root")!); Object.assign(window, { unmountShellFixture: () => fixtureRoot.unmount() }); fixtureRoot.render(') }));
+            'const fixtureRoot = createRoot(document.getElementById("root")!); Object.assign(window, { unmountShellFixture: () => fixtureRoot.unmount() }); fixtureRoot.render(')
+            .replace('const [projectId, writeProjectId]',
+              'Object.assign(window, { publishLayoutCatalog: (snapshot: WorkspaceSnapshot) => publishWorkspaceState({ kind: "ready", snapshot }), loseLayoutHost: () => setStatus({ ...status!, hostAvailable: false, hostEpoch: "different-host" }) }); const [projectId, writeProjectId]') }));
       } }] });
-    await writeFile(join(root, "style.css"), readFileSync(fileURLToPath(new URL("./style.css", import.meta.url))));
+    // CSS imports are suppressed in the JS bundle; use the real packaged layout geometry too.
+    await writeFile(join(root, "style.css"), readFileSync(new URL("../node_modules/flexlayout-react/style/light.css", import.meta.url), "utf8") +
+      "\n" + readFileSync(new URL("./style.css", import.meta.url), "utf8"));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
     const profile = join(root, "profile");
@@ -73,6 +77,12 @@ test("production shell settings overlay keeps the session workspace mounted and 
       if (${condition}) resolve(true); else if (Date.now()>end) resolve(document.body.innerText.slice(-1200));
       else setTimeout(tick,20); }; tick(); })`);
     assert.equal(await wait("!!document.querySelector('#catalog-prompt') && !!document.querySelector('.project-rail .icon-label-button')"), true);
+    assert.equal(await evaluate(`(() => {const host=document.querySelector('.workspace-layout');
+      const panel=host?.querySelector('.flexlayout__tab');
+      return !!panel && panel.getBoundingClientRect().height>0 && host.getBoundingClientRect().width>0 &&
+        document.querySelector('.workspace-shell').getBoundingClientRect().width>0 &&
+        !host.querySelector('.flexlayout__splitter, .flexlayout__tab_button, .flexlayout__floating_window');})()`), true,
+      "the actual App must mount one measured, fixed workspace-content Layout without docking controls");
     assert.equal(await evaluate(`(() => {const projects=document.querySelector('.project-rail'); const sessions=document.querySelector('.session-rail');
       const filter=projects.querySelector('#project-filter'); const sort=projects.querySelector('#project-sort');
       return !!projects.querySelector('.panel-title') && !!sessions.querySelector('.session-rail-header h2') &&
@@ -692,6 +702,83 @@ test("production shell settings overlay keeps the session workspace mounted and 
         if (change === "settings") assert.equal(await evaluate("document.querySelector('.settings-dialog')?.open"), true, "late completion must not close Settings");
       }
     }
+    // Fixed Layout lifetime through actual App publications, not a copied component shell.
+    await evaluate(`localStorage.clear(); localStorage.setItem('settingsFixtureOwned','true');
+      localStorage.setItem('navigationFixture','mixed'); localStorage.setItem('layoutFixtureLive','true');
+      localStorage.setItem('settingsFixtureSecondProject','true')`);
+    await command("Page.reload");
+    assert.equal(await wait("document.querySelector('#session-prompt') && document.querySelector('.timeline-scroll')?.textContent.includes('persisted-User-one') && document.querySelector('.timeline-scroll')?.textContent.includes('live-User') && settingsShellFixture.displayCalls.length-settingsShellFixture.displayCleanup.length===1"), true);
+    await evaluate(`window.layoutOpens=0; window.open=()=>{window.layoutOpens++; return null;};
+      window.layoutHost=document.querySelector('.workspace-layout'); window.layoutPanel=document.querySelector('.flexlayout__tab');
+      window.layoutComposer=document.querySelector('#session-prompt'); window.layoutTimeline=document.querySelector('.timeline-scroll');
+      window.layoutReads=JSON.stringify([settingsShellFixture.historyCalls,settingsShellFixture.notesCalls,settingsShellFixture.displayCalls,settingsShellFixture.displayCleanup]);
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(window.layoutComposer,'Original layout draft');
+      window.layoutComposer.dispatchEvent(new Event('input',{bubbles:true}))`);
+    assert.equal(await wait("document.querySelector('#session-prompt').value==='Original layout draft'"), true);
+    for (const width of [390, 1120]) for (const theme of ["light", "dark"]) {
+      await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
+      await evaluate(`document.documentElement.dataset.theme='${theme}';
+        window.publishLayoutCatalog({...settingsShellFixture.catalog,sessions:settingsShellFixture.catalog.sessions.map(row=>({...row,title:'fresh '+row.id}))});
+        document.querySelector('.project-rail .icon-label-button').click()`);
+      assert.equal(await wait("document.querySelector('.settings-dialog')?.open && document.querySelector('.session-header h1')?.textContent==='fresh one'"), true);
+      await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
+      assert.equal(await wait("!document.querySelector('.settings-dialog')"), true);
+      assert.equal(await evaluate(`(() => {const panel=document.querySelector('.flexlayout__tab').getBoundingClientRect();
+        const shell=document.querySelector('.workspace-shell').getBoundingClientRect();
+        return panel.width>0 && panel.height>0 && shell.width>0 && panel.left>=0 && panel.right<=${width}+1 &&
+          panel.bottom<=800 && document.documentElement.scrollWidth<=${width} &&
+          window.layoutHost===document.querySelector('.workspace-layout') && window.layoutPanel===document.querySelector('.flexlayout__tab') &&
+          window.layoutComposer===document.querySelector('#session-prompt') && window.layoutTimeline===document.querySelector('.timeline-scroll') &&
+          window.layoutComposer.value==='Original layout draft' &&
+          getComputedStyle(window.layoutHost).getPropertyValue('--flexlayout-color-text').trim()===getComputedStyle(document.documentElement).getPropertyValue('--text').trim();})()`), true,
+        `${width}/${theme}: real measured panel, fresh props, stable children and bounded geometry`);
+      assert.equal(await evaluate("window.layoutReads===JSON.stringify([settingsShellFixture.historyCalls,settingsShellFixture.notesCalls,settingsShellFixture.displayCalls,settingsShellFixture.displayCleanup])"), true,
+        "unchanged target must not re-read history/notes or reattach live display");
+    }
+    // Layout key bindings and drag gestures have no session/provider or window authority.
+    await evaluate(`window.layoutPanel.focus();
+      for(const key of ['Delete','F2','Escape']) window.layoutPanel.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true,cancelable:true}));
+      window.layoutPanel.dispatchEvent(new KeyboardEvent('keydown',{key:'w',ctrlKey:true,bubbles:true,cancelable:true}));
+      for(const type of ['dragstart','dragover','drop']) window.layoutHost.dispatchEvent(new DragEvent(type,{bubbles:true,cancelable:true,dataTransfer:new DataTransfer()}))`);
+    assert.equal(await evaluate(`window.layoutPanel===document.querySelector('.flexlayout__tab') && document.querySelectorAll('.flexlayout__tab').length===1 &&
+      !window.layoutHost.querySelector('.flexlayout__splitter,.flexlayout__tab_button,.flexlayout__tabset_header,.flexlayout__floating_window') &&
+      window.layoutOpens===0 && settingsShellFixture.sends.length===0 && settingsShellFixture.creates.length===0 &&
+      settingsShellFixture.deleteRequests.length===0 && settingsShellFixture.probes.length===0`), true);
+    await evaluate("document.querySelector('.owned-session .send-button').click()");
+    assert.equal(await wait("settingsShellFixture.sends.length===1"), true);
+    const originalSend = await evaluate("settingsShellFixture.sends[0]");
+    await evaluate("[...document.querySelectorAll('.session-row > button:first-child')].find(x=>x.textContent.includes('two')).click()");
+    assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='fresh two'"), true);
+    assert.equal(await evaluate("window.layoutHost===document.querySelector('.workspace-layout') && window.layoutComposer!==document.querySelector('#session-prompt') && window.layoutTimeline!==document.querySelector('.timeline-scroll')"), true,
+      "session key remounts only the existing session workspace, not Layout");
+    await evaluate(`const otherDraft=document.querySelector('#session-prompt');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(otherDraft,'Other session draft');
+      otherDraft.dispatchEvent(new Event('input',{bubbles:true}));`);
+    await evaluate("settingsShellFixture.failSend()");
+    assert.equal(await wait("document.querySelector('#session-prompt')?.value==='Other session draft' && !document.querySelector('.owned-session')?.textContent.includes('Original layout draft')"), true);
+    await evaluate("[...document.querySelectorAll('.session-row > button:first-child')].find(x=>x.textContent.includes('one')).click()");
+    assert.equal(await wait("document.querySelector('#session-prompt')?.value==='Original layout draft' && document.querySelector('.send-button')?.textContent==='Retry exact request' && !document.querySelector('.send-button').disabled"), true);
+    await evaluate(`window.publishLayoutCatalog({...settingsShellFixture.catalog,projects:settingsShellFixture.catalog.projects.map(row=>({...row,archived:row.id==='project'}))})`);
+    assert.equal(await wait("!!document.querySelector('#catalog-prompt') && document.querySelector('.archived-action-recovery')?.textContent.includes('Original layout draft')"), true,
+      "archive recovery shows original uncertainty without modifying the other session's draft");
+    assert.deepEqual(await evaluate("settingsShellFixture.sends[0]"), originalSend);
+    assert.equal(await evaluate("settingsShellFixture.sends.length"), 1, "no Layout or archive retry");
+    await evaluate("window.archivedTimeline=document.querySelector('.timeline-scroll'); document.querySelector('#project-list button[title=\"/fixture/other\"]').click()");
+    assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='other-session' && !document.querySelector('.archived-action-recovery')"), true);
+    assert.equal(await evaluate("window.layoutHost===document.querySelector('.workspace-layout') && window.archivedTimeline!==document.querySelector('.timeline-scroll')"), true,
+      "project navigation retains Layout but changes the existing keyed workspace");
+    await evaluate("document.querySelector('#project-list button[title=\"/fixture/project\"]').click()");
+    assert.equal(await wait("document.querySelector('.archived-action-recovery')?.textContent.includes('Original layout draft')"), true);
+    await evaluate("window.loseLayoutHost()");
+    assert.equal(await wait("!document.querySelector('.archived-action-recovery')"), true,
+      "host fencing hides another owner's retained original");
+    assert.equal(await evaluate("window.layoutHost===document.querySelector('.workspace-layout') && settingsShellFixture.sends.length===1 && window.layoutOpens===0"), true);
+    await evaluate("window.publishLayoutCatalog({...settingsShellFixture.catalog,sessions:[]})");
+    assert.equal(await wait("document.querySelector('.workspace-layout .empty-workspace h1')?.textContent==='Select a session' && !document.querySelector('.session-workspace')"), true);
+    assert.equal(await evaluate("window.layoutHost===document.querySelector('.workspace-layout') && window.layoutPanel===document.querySelector('.flexlayout__tab')"), true,
+      "empty content is a fresh factory child, not a new Layout model");
+    await evaluate("window.unmountShellFixture()");
+    assert.equal(await wait("document.querySelector('#root').childElementCount===0 && settingsShellFixture.displayCalls.length===settingsShellFixture.displayCleanup.length"), true);
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });
   }

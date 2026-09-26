@@ -10,6 +10,7 @@ import {
 } from "#neoastra";
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
+import { WorkspaceLayout } from "./WorkspaceLayout";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { ReadOnlyComposer } from "./ReadOnlyComposer";
 import { ModelCatalogPanel } from "./ModelCatalogPanel";
@@ -1149,6 +1150,7 @@ function App() {
           onResize={delta => changePane("sessions", delta)} onReset={() => resetPane("sessions")} />
 
         <main className="content">
+          <WorkspaceLayout>
           {error && <div className="banner banner-error" role="alert">{error}</div>}
           {!selectedSession
             ? <EmptyWorkspace workspaceState={workspaceState} />
@@ -1162,6 +1164,7 @@ function App() {
                  permissionReviewer={permissionReviewer} inputReviewer={inputReviewer} configuration={configurationState.snapshot}
                   onNotesChange={updateHistoryNotes} selections={nextSendSelections}
                 timelineCommand={timelineCommand} />}
+          </WorkspaceLayout>
         </main>
       </div>}
     {settingsOpen && <SettingsOverlay section={settingsSection} onSection={navigate} onClose={closeSettings}>

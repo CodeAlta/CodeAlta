@@ -26,7 +26,8 @@ test("production composer info icon retains read-only scope and guarded focus", 
           (await readFile(args.path, "utf8")).replace('const [projectId, writeProjectId]',
             'Object.assign(window, { publishInfoFixtureSnapshot: (snapshot: WorkspaceSnapshot) => publishWorkspaceState({ kind: "ready", snapshot }) }); const [projectId, writeProjectId]') }));
       } }] });
-    await writeFile(join(root, "style.css"), readFileSync(fileURLToPath(new URL("./style.css", import.meta.url))));
+    await writeFile(join(root, "style.css"), readFileSync(new URL("../node_modules/flexlayout-react/style/light.css", import.meta.url), "utf8") +
+      "\n" + readFileSync(new URL("./style.css", import.meta.url), "utf8"));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(edge!, ["--headless=new", "--disable-gpu", "--no-first-run", "--disable-background-networking", "--disable-extensions",
@@ -151,13 +152,22 @@ test("production composer info icon retains read-only scope and guarded focus", 
     for (const width of [390, 1120]) for (const theme of ["dark", "light"]) {
       await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
       await evaluate(`document.documentElement.dataset.theme='${theme}'`);
+      // FlexLayout positions its portal after ResizeObserver measurement, not synchronously
+      // with the CDP viewport command. Require real final geometry before checking controls.
+      assert.equal(await wait(`(() => {const panel=document.querySelector('.flexlayout__tab').getBoundingClientRect();
+        const content=document.querySelector('.content').getBoundingClientRect();
+        return panel.width>0 && panel.height>0 && Math.abs(panel.width-content.width)<1 && Math.abs(panel.height-content.height)<1;})()`), true);
       assert.equal(await evaluate(`(() => {
         const button=document.querySelector('.catalog-composer .history-controls ${trigger}');
         const area=button.closest('.history-controls').getBoundingClientRect();
         const rect=button.getBoundingClientRect();
         return rect.width>=28 && rect.left>=0 && rect.right<=innerWidth+1 && area.right<=innerWidth+1 &&
           getComputedStyle(button).display!=='none'; })()`), true,
-        `${width}px ${theme} catalog info and Send-unavailable controls fit the viewport`);
+        `${width}px ${theme} catalog info and Send-unavailable controls fit the viewport: ${JSON.stringify(await evaluate(`({
+          panel:document.querySelector('.flexlayout__tab').getBoundingClientRect().toJSON(),
+          shell:document.querySelector('.workspace-shell').getBoundingClientRect().toJSON(),
+          content:document.querySelector('.content').getBoundingClientRect().toJSON(),
+          button:document.querySelector('.catalog-composer .history-controls ${trigger}').getBoundingClientRect().toJSON()})`))}`);
     }
     await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
 
@@ -268,6 +278,9 @@ test("production composer info icon retains read-only scope and guarded focus", 
     for (const width of [390, 1120]) for (const theme of ["dark", "light"]) {
       await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
       await evaluate(`document.documentElement.dataset.theme='${theme}'`);
+      assert.equal(await wait(`(() => {const panel=document.querySelector('.flexlayout__tab').getBoundingClientRect();
+        const content=document.querySelector('.content').getBoundingClientRect();
+        return panel.width>0 && panel.height>0 && Math.abs(panel.width-content.width)<1 && Math.abs(panel.height-content.height)<1;})()`), true);
       assert.equal(await evaluate(`(() => {
         const button=document.querySelector('.owned-session .history-controls ${trigger}');
         const toolbar=button.closest('.history-controls');
