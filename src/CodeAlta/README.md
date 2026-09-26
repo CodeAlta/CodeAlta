@@ -268,6 +268,16 @@ authoritative total session count or branch, tags, description or source metadat
 and Copy path are explicit, with success, denied or unavailable clipboard feedback; no
 catalog/filesystem reads, metadata writes or project actions occur on opening.
 
+Owned project/global session creation is effectful even while the new session is labeled
+**Draft**: it starts a provider runtime, creates a provider session and persists its identity,
+without sending a prompt. The host selects its default enabled provider (or first enabled
+descriptor); this is not a provider-free draft or a readiness/reservation guarantee. Creation
+is single-flight: a concurrent request is `busy`, and canceling a caller's wait does not cancel
+the admitted original, which shutdown drains. After settlement, an identical request creates
+another session with a new identity; there is no exact receipt-replay guarantee.
+`create_unconfirmed` does not establish that no effects occurred. Inspect uncertain outcomes;
+neither refresh nor repeating the request proves that an earlier creation did not complete.
+
 In an owned host, if the *current* project becomes
 archived after an action was captured, its exact pending/uncertain Send, Steer, host-only Queue,
 compaction, observed-run cancellation and Abort/cancel-Queue intents remain visible in a

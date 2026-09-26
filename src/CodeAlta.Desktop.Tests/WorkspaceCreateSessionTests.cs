@@ -68,6 +68,83 @@ public sealed class WorkspaceCreateSessionTests
     }
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task EffectfulDraftCreation_IsSingleFlightButSettledIdenticalRequestCreatesAgain(bool projectScope)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-session-create-" + Guid.NewGuid().ToString("N"));
+        if (Directory.Exists(root)) throw new InvalidOperationException("Test root already exists.");
+        Directory.CreateDirectory(root);
+        var activity = new DraftActivity();
+        try
+        {
+            var global = Path.Combine(root, "global"); var projectPath = Path.Combine(root, "project");
+            var home = Path.Combine(root, "home"); var builtin = Path.Combine(root, "builtin");
+            foreach (var path in new[] { global, projectPath, home, builtin }) Directory.CreateDirectory(path);
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(Provider, () => new DraftRuntime(activity)),
+            });
+            var project = projectScope ? await host.ProjectCatalog.UpsertFromPathAsync(projectPath) : null;
+            var request = new WorkspaceCreateSessionRequest(Epoch, projectScope ? "project" : "global",
+                project?.Id, project?.ProjectPath, "Effectful draft");
+            var service = new WorkspaceService(host, Epoch);
+            var startsBefore = Volatile.Read(ref activity.Starts);
+            try
+            {
+                var original = service.CreateSessionAsync(request, CancellationToken.None);
+                await activity.CreateEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+                Assert.IsFalse(original.IsCompleted);
+                Assert.AreEqual(startsBefore + 1, Volatile.Read(ref activity.Starts));
+                Assert.AreEqual(1, Volatile.Read(ref activity.Creates));
+                Assert.AreEqual(0, Volatile.Read(ref activity.Sends));
+                Assert.AreEqual("busy", (await service.CreateSessionAsync(request, CancellationToken.None)).Status);
+                Assert.AreEqual(startsBefore + 1, Volatile.Read(ref activity.Starts));
+                Assert.AreEqual(1, Volatile.Read(ref activity.Creates));
+
+                activity.ReleaseCreate.TrySetResult();
+                var first = await original.WaitAsync(TimeSpan.FromSeconds(30));
+                Assert.AreEqual("ok", first.Status);
+                Assert.IsNotNull(first.SessionId);
+                var firstState = await host.RuntimeService.GetCurrentStateAsync(first.SessionId);
+                Assert.IsNotNull(firstState.Entry);
+                Assert.AreEqual(Provider.ProviderId.Value, firstState.Entry.ProviderId);
+
+                // No receipt key exists: the identical settled request starts a new original.
+                var second = await service.CreateSessionAsync(request, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
+                Assert.AreEqual("ok", second.Status);
+                Assert.IsNotNull(second.SessionId);
+                Assert.AreNotEqual(first.SessionId, second.SessionId);
+                Assert.AreEqual(startsBefore + 2, Volatile.Read(ref activity.Starts));
+                Assert.AreEqual(2, Volatile.Read(ref activity.Creates));
+                Assert.AreEqual(0, Volatile.Read(ref activity.Sends));
+                Assert.AreEqual(0, Volatile.Read(ref activity.Resumes));
+                Assert.AreEqual(firstState, await host.RuntimeService.GetCurrentStateAsync(first.SessionId));
+                var secondState = await host.RuntimeService.GetCurrentStateAsync(second.SessionId);
+                Assert.IsNotNull(secondState.Entry);
+                Assert.AreNotEqual(firstState.Entry.AttachmentGeneration, secondState.Entry.AttachmentGeneration);
+                var snapshot = await service.SnapshotAsync(new(), CancellationToken.None);
+                Assert.HasCount(2, snapshot.Sessions);
+                foreach (var id in new[] { first.SessionId, second.SessionId })
+                    Assert.IsTrue(snapshot.Sessions.Any(session => session.Id == id
+                        && session.WorkspacePath == (project?.ProjectPath ?? global)
+                        && session.ProviderKey == Provider.ProviderId.Value));
+            }
+            finally
+            {
+                // Release the real provider work before draining RPC admission and disposing the host,
+                // including when an assertion fails while creation is held.
+                activity.ReleaseCreate.TrySetResult();
+                await service.CloseSessionsAsync();
+                await service.CloseImportsAsync();
+            }
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
     public async Task InvalidScopeStaleHostAndMissingProjectNeverAdmitCreation()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-session-create-" + Guid.NewGuid().ToString("N"));
@@ -157,21 +234,46 @@ public sealed class WorkspaceCreateSessionTests
         finally { pending.TrySetCanceled(); Directory.Delete(root, recursive: true); }
     }
 
-    private sealed class DraftRuntime : IModelProviderSessionRuntime
+    private sealed class DraftActivity
+    {
+        public int Starts;
+        public int Creates;
+        public int Sends;
+        public int Resumes;
+        public TaskCompletionSource CreateEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseCreate { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    private sealed class DraftRuntime(DraftActivity? activity = null) : IModelProviderSessionRuntime
     {
         public ModelProviderDescriptor Descriptor => Provider;
-        public Task StartAsync(CancellationToken token = default) => Task.CompletedTask;
+        public Task StartAsync(CancellationToken token = default)
+        {
+            if (activity is not null) Interlocked.Increment(ref activity.Starts);
+            return Task.CompletedTask;
+        }
         public Task StopAsync(CancellationToken token = default) => Task.CompletedTask;
         public Task<ModelProviderProbeResult> ProbeAsync(CancellationToken token = default) => throw new NotSupportedException();
         public IModelProviderTurnExecutor CreateTurnExecutor() => throw new NotSupportedException();
-        public Task<IAgentSession> CreateSessionAsync(AgentSessionCreateOptions options, CancellationToken token = default)
-            => Task.FromResult<IAgentSession>(new DraftSession(options.SessionId!, options.WorkingDirectory));
+        public async Task<IAgentSession> CreateSessionAsync(AgentSessionCreateOptions options, CancellationToken token = default)
+        {
+            if (activity is not null)
+            {
+                Interlocked.Increment(ref activity.Creates);
+                activity.CreateEntered.TrySetResult();
+                await activity.ReleaseCreate.Task.WaitAsync(token);
+            }
+            return new DraftSession(options.SessionId!, options.WorkingDirectory, activity);
+        }
         public Task<IAgentSession> ResumeSessionAsync(string id, AgentSessionResumeOptions options, CancellationToken token = default)
-            => Task.FromResult<IAgentSession>(new DraftSession(id, options.WorkingDirectory));
+        {
+            if (activity is not null) Interlocked.Increment(ref activity.Resumes);
+            return Task.FromResult<IAgentSession>(new DraftSession(id, options.WorkingDirectory, activity));
+        }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class DraftSession(string id, string? path) : IAgentSession
+    private sealed class DraftSession(string id, string? path, DraftActivity? activity = null) : IAgentSession
     {
         public ModelProviderId ProviderId => Provider.ProviderId;
         public string SessionId => id;
@@ -179,7 +281,11 @@ public sealed class WorkspaceCreateSessionTests
         public async IAsyncEnumerable<AgentEvent> StreamEventsAsync([EnumeratorCancellation] CancellationToken token = default)
         { await Task.CompletedTask; yield break; }
         public IDisposable Subscribe(Action<AgentEvent> handler) => new Subscription();
-        public Task<AgentRunId> SendAsync(AgentSendOptions options, CancellationToken token = default) => throw new NotSupportedException();
+        public Task<AgentRunId> SendAsync(AgentSendOptions options, CancellationToken token = default)
+        {
+            if (activity is not null) Interlocked.Increment(ref activity.Sends);
+            throw new NotSupportedException();
+        }
         public Task AbortAsync(CancellationToken token = default) => Task.CompletedTask;
         public Task<AgentRunId> SteerAsync(AgentSteerOptions options, CancellationToken token = default) => throw new NotSupportedException();
         public Task CompactAsync(CancellationToken token = default) => throw new NotSupportedException();
