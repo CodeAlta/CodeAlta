@@ -22,8 +22,19 @@ const clearRequests: unknown[] = [];
 const renameRequests: unknown[] = [];
 const deleteRequests: unknown[] = [];
 const mutationReplies: Array<{ kind: "rename" | "delete"; resolve: (value: unknown) => void }> = [];
+type CreateRequest = { expectedHostEpoch: string; scope: string; projectId: string | null; projectPath: string | null; title: string | null };
+const creates: Array<{ request: CreateRequest; resolve: (value: unknown) => void }> = [];
+const snapshots: Array<{ resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
+const snapshotCalls: unknown[] = [];
 Object.assign(window, { settingsShellFixture: { calls, sends, choiceReads, usageReads, probes, clearRequests,
-  renameRequests, deleteRequests,
+  renameRequests, deleteRequests, creates, snapshots, snapshotCalls, catalog,
+  releaseCreate(status = "ok") { const original = creates[0]; original.resolve({ status, hostEpoch: epoch,
+    scope: original.request.scope, projectId: original.request.projectId, projectPath: original.request.projectPath,
+    sessionId: "created", workspacePath: original.request.projectPath ?? "/fixture/global" }); },
+  releaseSnapshot(mode = "ok") { const read = snapshots.shift()!;
+    if (mode === "error") read.reject(new Error("fixture read failed"));
+    else read.resolve({ ...catalog, sessions: [...catalog.sessions, ...(mode === "missing" ? [] :
+      [{ ...session, id: "created", title: "created", fullTitle: "created" }])] }); },
   releaseMutation(kind: "rename" | "delete") { const index = mutationReplies.findIndex(reply => reply.kind === kind);
     if (index >= 0) mutationReplies.splice(index, 1)[0].resolve({}); },
   releaseChoices(mode: "ok" | "stale" | "different" = "ok") { for (const read of choiceReads.splice(0)) {
@@ -40,12 +51,15 @@ const choices = (request: { expectedEpoch: string; sessionId: string }) => ({ st
 export const boot = { status: async () => ({ state: owned() ? "owned" : "catalog", hostAvailable: owned(),
   hostEpoch: owned() ? epoch : null, productName: "CodeAlta", version: "development" }) };
 export const workspace = { snapshot: async () => {
+  snapshotCalls.push({});
+  if (localStorage.getItem("creationFixtureHoldSnapshot") === "true")
+    return new Promise((resolve, reject) => snapshots.push({ resolve, reject }));
   if (localStorage.getItem("settingsFixtureWorkspaceError") === "true") throw new Error("fixture catalog unavailable");
   return localStorage.getItem("settingsFixtureFreshSnapshot") === "true"
     ? { ...catalog, sessions: catalog.sessions.map(row => ({ ...row, updatedAt: "2026-09-26T00:00:00Z" })) } : catalog;
 },
   openProject: unavailable, readProjectName: unavailable,
-  renameProject: unavailable, createSession: unavailable,
+  renameProject: unavailable, createSession: (request: CreateRequest) => new Promise(resolve => creates.push({ request, resolve })),
   renameSession: (request: unknown) => { renameRequests.push(request); return new Promise(resolve => mutationReplies.push({ kind: "rename", resolve })); },
   deleteSession: (request: unknown) => { deleteRequests.push(request); return new Promise(resolve => mutationReplies.push({ kind: "delete", resolve })); } };
 export const configuration = { snapshot: async () => ({ providers: [], plugins: [], pluginRuntimeAvailable: false }) };

@@ -22,6 +22,10 @@ test("production shell settings overlay keeps the session workspace mounted and 
       define: { "import.meta.env.VITE_DEMO_MODE": '"false"' },
       plugins: [{ name: "isolated-bridge", setup(bundle) {
         bundle.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("./settingsShell.neoastra.mount.ts", import.meta.url)) }));
+        // Expose only root teardown; handler/state/navigation remain the production App.
+        bundle.onLoad({ filter: /[/\\]main\.tsx$/ }, async args => ({ loader: "tsx", contents:
+          (await readFile(args.path, "utf8")).replace('createRoot(document.getElementById("root")!).render(',
+            'const fixtureRoot = createRoot(document.getElementById("root")!); Object.assign(window, { unmountShellFixture: () => fixtureRoot.unmount() }); fixtureRoot.render(') }));
       } }] });
     await writeFile(join(root, "style.css"), readFileSync(fileURLToPath(new URL("./style.css", import.meta.url))));
     const page = join(root, "fixture.html");
@@ -45,11 +49,11 @@ test("production shell settings overlay keeps the session workspace mounted and 
       socket!.addEventListener("error", () => reject(new Error("test browser unavailable")), { once: true });
     });
     let sequence = 0;
-    const command = (method: string, params: object = {}) => new Promise<{ result?: { value?: unknown } }>((resolve, reject) => {
+    const command = (method: string, params: object = {}) => new Promise<{ result?: { value?: unknown }; exceptionDetails?: unknown }>((resolve, reject) => {
       const id = ++sequence;
       const timer = setTimeout(() => reject(new Error(`browser ${method} timed out`)), 12_000);
       const reply = (event: MessageEvent) => {
-        const message = JSON.parse(String(event.data)) as { id?: number; result?: { result?: { value?: unknown } }; error?: object };
+        const message = JSON.parse(String(event.data)) as { id?: number; result?: { result?: { value?: unknown }; exceptionDetails?: unknown }; error?: object };
         if (message.id !== id) return;
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         if (message.error) reject(new Error(`browser ${method} failed: ${JSON.stringify(message.error)}`)); else resolve(message.result ?? {});
@@ -62,6 +66,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await command("Page.navigate", { url: pathToFileURL(page).href });
     const evaluate = async (expression: string) => {
       const response = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
+      assert.equal(response.exceptionDetails, undefined, `Browser evaluation failed: ${JSON.stringify(response.exceptionDetails)}`);
       return response.result?.value;
     };
     const wait = (condition: string) => evaluate(`new Promise(resolve => { const end=Date.now()+7000; const tick=()=>{
@@ -513,6 +518,95 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await command("Page.reload");
     assert.equal(await wait("document.querySelector('.project-rail .sidebar-empty[role=alert]')?.textContent.includes('No alternate session scan was used')"), true);
     assert.equal(await evaluate("!!document.querySelector('.project-rail .panel-title') && !!document.querySelector('.session-rail-header h2') && !!document.querySelector('.rail-footer button') && !!document.querySelector('.project-rail [aria-label=\"Open project (Ctrl+O)\"]')"), true);
+    // Production create handler and navigation wiring, with only transport replies deferred.
+    for (const phase of ["reply", "snapshot"]) for (const change of ["session", "aba", "settings", "settings-aba", "scope", "scope-aba", "path", "project-id", "modal-aba", "input", "input-aba", "search", "host", "unmount", "valid", "missing", "error"]) {
+      await evaluate(`localStorage.clear(); localStorage.setItem('settingsFixtureOwned','true'); localStorage.setItem('settingsFixtureSecondProject','true')`);
+      if (change === "host") await evaluate(`localStorage.setItem('settingsFixtureHoldChoices','true')`);
+      await command("Page.reload");
+      assert.equal(await wait("!!document.querySelector('.session-row button[aria-pressed=true]') && !document.querySelector('[aria-label=\"Create session\"]').disabled"), true);
+      const readsBefore = await evaluate("window.settingsShellFixture.snapshotCalls.length") as number;
+      await evaluate(`document.querySelector('[aria-label="Create session"]').click()`);
+      await evaluate(`(() => {const input=document.querySelector('.session-create input');
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Original title');
+        input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+      await evaluate(`document.querySelector('.session-create button').click()`);
+      assert.equal(await wait("window.settingsShellFixture.creates.length===1"), true);
+      assert.equal(await evaluate("document.querySelector('.session-create input').disabled && document.querySelector('[aria-label=\"Create session\"]').disabled"), true,
+        "pending creation still disables ordinary title editing and form toggling");
+      await evaluate(`localStorage.setItem('creationFixtureHoldSnapshot','true')`);
+      if (phase === "snapshot") {
+        await evaluate(`window.settingsShellFixture.releaseCreate()`);
+        assert.equal(await wait("window.settingsShellFixture.snapshots.length===1"), true);
+      }
+      const selectSession = (title: string) => evaluate(`[...document.querySelectorAll('.session-row > button:first-child')].find(b=>b.textContent.includes('${title}')).click()`);
+      if (change === "session" || change === "aba") { await selectSession("two"); if (change === "aba") await selectSession("one"); }
+      if (change === "settings" || change === "settings-aba") {
+        await evaluate(`document.querySelector('.rail-footer .icon-label-button').click()`);
+        assert.equal(await wait("document.querySelector('.settings-dialog')?.open"), true);
+        if (change === "settings-aba") await evaluate(`document.querySelector('[aria-label="Close settings"]').click()`);
+      }
+      if (change === "scope" || change === "scope-aba") {
+        await evaluate(`[...document.querySelectorAll('#project-list button')].find(b=>b.textContent.includes('Other project')).click()`);
+        if (change === "scope-aba") await evaluate(`document.querySelector('#project-list button[title="/fixture/project"]').click()`);
+      }
+      if (change === "path") await evaluate(`window.settingsShellFixture.catalog.projects[0].path='/fixture/changed'`);
+      if (change === "project-id") await evaluate(`window.settingsShellFixture.catalog.projects[0].id='changed-project'`);
+      if (change === "input" || change === "input-aba" || change === "search") {
+        // The UI disables title editing while pending. Scripted input still must not mutate
+        // the captured request or let an old completion clear a newer form lifetime.
+        const selector = change === "search" ? '.session-rail .search input' : '.session-create input';
+        await evaluate(`(() => {const input=document.querySelector('${selector}');
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Newer input');
+          input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+        if (change === "input-aba") await evaluate(`(() => {const input=document.querySelector('.session-create input');
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Original title');
+          input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+      }
+      if (change === "host") {
+        assert.equal(await wait("window.settingsShellFixture.choiceReads.length>0"), true);
+        await evaluate(`window.settingsShellFixture.releaseChoices('stale')`);
+      }
+      if (change === "modal-aba") {
+        await evaluate(`document.querySelector('[aria-label="Session info"]').click()`);
+        assert.equal(await wait("!!document.querySelector('.session-info-dialog')"), true);
+        await evaluate(`document.querySelector('[aria-label="Close session info"]').click()`);
+      }
+      if (change === "unmount") await evaluate(`window.unmountShellFixture()`);
+      if (phase === "reply") {
+        await evaluate(`window.settingsShellFixture.releaseCreate()`);
+        if (["valid", "missing", "error"].includes(change)) assert.equal(await wait("window.settingsShellFixture.snapshots.length===1"), true);
+      }
+      if (phase === "snapshot" || ["valid", "missing", "error"].includes(change))
+        await evaluate(`window.settingsShellFixture.releaseSnapshot('${change === "missing" || change === "error" ? change : "ok"}')`);
+      assert.equal(await wait("!document.querySelector('.session-rail')?.textContent.includes('Creating session…') && !document.querySelector('.session-create button')?.disabled"), true);
+      assert.equal(await evaluate("window.settingsShellFixture.creates.length"), 1, change);
+      assert.deepEqual(await evaluate("window.settingsShellFixture.creates[0].request"), {
+        expectedHostEpoch: "12345678-1234-1234-1234-123456789abc", scope: "project", projectId: "project",
+        projectPath: "/fixture/project", title: "Original title",
+      }, `${phase}/${change}: original request never changes or retries`);
+      assert.equal(await evaluate("window.settingsShellFixture.snapshotCalls.length"),
+        readsBefore + (phase === "snapshot" || ["valid", "missing", "error"].includes(change) ? 1 : 0), `${phase}/${change}: no extra read`);
+      if (change === "unmount") {
+        assert.equal(await evaluate("document.querySelector('#root').childElementCount"), 0);
+      } else if (change === "valid") {
+        assert.equal(await wait("document.querySelector('.session-row > button[aria-pressed=true]')?.textContent.includes('created')"), true);
+        assert.equal(await evaluate("!!document.querySelector('.session-create')"), false);
+      } else {
+        assert.equal(await evaluate("document.querySelector('.session-row > button[aria-pressed=true]')?.textContent.includes('created') ?? false"), false, `${change}: late create must not select its session`);
+        if (!["path", "project-id", "search"].includes(change))
+          assert.equal(await evaluate("document.querySelector('.session-row > button[aria-pressed=true] .session-title')?.textContent"),
+            change === "session" ? "two" : change === "scope" ? "other-session" : "one", `${phase}/${change}: preserve newer selection`);
+        assert.equal(await evaluate("document.querySelector('.session-rail [role=alert]')?.textContent.includes('completed')"), true, `${change}: keep truthful completion evidence`);
+        assert.equal(await evaluate("!![...document.querySelectorAll('.session-row .session-title')].find(x=>x.textContent==='created')"), false, `${change}: do not publish stale create refresh`);
+        if (change === "scope" || change === "scope-aba") {
+          assert.equal(await evaluate("!!document.querySelector('.session-create')"), false, "closed form must stay closed");
+          await evaluate(`document.querySelector('[aria-label="Create session"]').click()`);
+        }
+        assert.equal(await evaluate("document.querySelector('.session-create input')?.value"), change === "input" ? "Newer input" : "Original title", `${change}: preserve form input`);
+        if (change === "search") assert.equal(await evaluate("document.querySelector('.session-rail .search input').value"), "Newer input");
+        if (change === "settings") assert.equal(await evaluate("document.querySelector('.settings-dialog')?.open"), true, "late completion must not close Settings");
+      }
+    }
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });
   }

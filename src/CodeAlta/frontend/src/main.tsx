@@ -84,8 +84,12 @@ type SettingsCardPage = Exclude<SettingsSection, "models" | "mcp">;
 const paneLayoutStorageKey = "codealta.desktop.panes.v1";
 
 function App() {
+  // Original create presentation authority only; never a backend receipt or retry grant.
+  const creationGeneration = useRef(0);
+  const invalidateCreation = () => { creationGeneration.current++; };
   const [logClearActions] = useState(() => createApplicationLogClearActions(applicationLogs.clear));
-  const [status, setStatus] = useState<BootStatus>();
+  const [status, writeStatus] = useState<BootStatus>();
+  function setStatus(value: BootStatus) { invalidateCreation(); writeStatus(value); }
   const [error, setError] = useState<string>();
   const [workspaceState, setWorkspaceState] = useState<WorkspaceState>({ kind: "loading" });
   const currentSnapshot = useRef<WorkspaceSnapshot | undefined>(undefined);
@@ -96,12 +100,15 @@ function App() {
     setProjectInspectionVersion(projectInspection.current.version);
   }
   function publishWorkspaceState(value: WorkspaceState) {
+    invalidateCreation();
     currentSnapshot.current = value.kind === "ready" ? value.snapshot : undefined;
     markProjectInspection(value.kind === "ready");
     setWorkspaceState(value);
   }
-  const [projectId, setProjectId] = useState<string | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [projectId, writeProjectId] = useState<string | null>(null);
+  const [sessionId, writeSessionId] = useState<string | null>(null);
+  function setProjectId(value: string | null) { invalidateCreation(); writeProjectId(value); }
+  function setSessionId(value: string | null) { invalidateCreation(); writeSessionId(value); }
   const [composerHeights, setComposerHeights] = useState<ReadonlyMap<string, number>>(() => new Map());
   const [view, setView] = useState<View>("workspace");
   const currentView = useRef<View>(view);
@@ -116,6 +123,7 @@ function App() {
   const [focusRestoration] = useState(createPaletteFocusRestoration);
   useEffect(() => () => focusRestoration.cancel(), [focusRestoration]);
   function closeSettings() {
+    invalidateCreation();
     settingsVisible.current = false;
     setSettingsOpen(false);
     const origin = settingsOrigin.current;
@@ -123,6 +131,7 @@ function App() {
       () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
   }
   function navigate(next: View) {
+    invalidateCreation();
     focusRestoration.cancel();
     if (next === "workspace" || next === "reminders") {
       settingsVisible.current = false;
@@ -140,14 +149,16 @@ function App() {
       setSettingsOpen(true);
     }
   }
-  const [search, setSearch] = useState("");
+  const [search, writeSearch] = useState("");
+  function setSearch(value: string) { invalidateCreation(); writeSearch(value); }
   const [projectFilter, setProjectFilter] = useState("");
   const { projectSort, setProjectSort, theme, setTheme, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices } = useWindowPreferences();
   const [notesVisible, setNotesVisible] = useState(true);
   const [notesHeight, setNotesHeight] = useState(() => restoreNotesHeight(() => localStorage.getItem(notesHeightKey)));
   const [historyNotes, setHistoryNotes] = useState<{ sessionId: string | null; markdown: string }>({ sessionId: null, markdown: "" });
   const updateHistoryNotes = useCallback((markdown: string) => setHistoryNotes({ sessionId, markdown }), [sessionId]);
-  const [dialog, setDialog] = useState<"project" | "help" | "about" | null>(null);
+  const [dialog, writeDialog] = useState<"project" | "help" | "about" | null>(null);
+  function setDialog(value: typeof dialog) { invalidateCreation(); writeDialog(value); }
   const helpOrigin = useRef<{ element: HTMLElement | null; view: View; sessionId: string | null; scope: string | null } | null>(null);
   const aboutOrigin = useRef<{ element: HTMLElement | null; view: View } | null>(null);
   function openAbout(element: HTMLElement | null) {
@@ -162,7 +173,8 @@ function App() {
     focusRestoration.schedule(origin?.element ?? null, () => currentView.current === origin?.view,
       () => !!document.querySelector('dialog[open]:not(.settings-dialog), [role="dialog"][aria-modal="true"]:not(.settings-dialog)'));
   }
-  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteOpen, writePaletteOpen] = useState(false);
+  function setPaletteOpen(value: boolean) { invalidateCreation(); writePaletteOpen(value); }
   const paletteCapture = useRef<PaletteContext | null>(null);
   const paletteOrigin = useRef<HTMLElement | null>(null);
   const palettePending = useRef<{ action: PaletteAction; captured: PaletteContext } | null>(null);
@@ -226,8 +238,10 @@ function App() {
   const menuRef = useRef<HTMLDivElement>(null);
   const menuOrigin = useRef<HTMLButtonElement>(null);
   const focusAction = useRef<"rename" | "delete" | null>(null);
-  const [creatingVisible, setCreatingVisible] = useState(false);
-  const [creatingTitle, setCreatingTitle] = useState("");
+  const [creatingVisible, writeCreatingVisible] = useState(false);
+  const [creatingTitle, writeCreatingTitle] = useState("");
+  function setCreatingVisible(value: boolean | ((previous: boolean) => boolean)) { invalidateCreation(); writeCreatingVisible(value); }
+  function setCreatingTitle(value: string) { invalidateCreation(); writeCreatingTitle(value); }
   const [creatingBusy, setCreatingBusy] = useState(false);
   const [creatingMessage, setCreatingMessage] = useState("");
   const creationPending = useRef(false);
@@ -251,7 +265,14 @@ function App() {
   useEffect(() => {
     creationAlive.current = true;
     creationRefresh.current = new AbortController();
-    return () => { creationAlive.current = false; creationRefresh.current.abort(); };
+    // Child-owned native dialogs (Info, Details, expanded editor) also end the original
+    // presentation lifetime, even if opened and closed before the create reply arrives.
+    const modalTransition = (event: Event) => { if (event.target instanceof HTMLDialogElement) invalidateCreation(); };
+    document.addEventListener("beforetoggle", modalTransition, true);
+    return () => {
+      invalidateCreation(); creationAlive.current = false; creationRefresh.current.abort();
+      document.removeEventListener("beforetoggle", modalTransition, true);
+    };
   }, []);
   const [inputReviewer] = useState(() => createUserInputReviewer(
     request => sessionUserInput.list(request, { timeoutMilliseconds: 8000 }),
@@ -775,22 +796,39 @@ function App() {
 
   async function createSelectedSession() {
     if (creationPending.current || !owned || !snapshot || !mutation?.capability.canMutate() || selectedProject?.archived
-      || projectId !== null && !selectedProject) return;
+      || projectId !== null && !selectedProject || settingsVisible.current || dialog || paletteOpen
+      || currentView.current !== "workspace" || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
     creationPending.current = true;
     const target: SessionTarget = selectedProject
       ? { scope: "project", projectId: selectedProject.id, projectPath: selectedProject.path } : { scope: "global" };
-    const scopeAtAdmission = projectId;
+    const generation = creationGeneration.current;
+    const epoch = status?.hostEpoch;
+    const sessionAtAdmission = sessionId;
     const capability = mutation.capability;
+    const isCurrent = () => creationAlive.current && generation === creationGeneration.current
+      && currentHostEpoch.current === epoch && currentHostAvailable.current && capability.canMutate()
+      && selectedScope.current === (target.scope === "project" ? target.projectId : null)
+      && selectedSessionId.current === sessionAtAdmission && currentView.current === "workspace"
+      && !settingsVisible.current && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')
+      && (target.scope === "global" || currentSnapshot.current?.projects.filter(project => project.id === target.projectId).length === 1
+        && currentSnapshot.current.projects.some(project => project.id === target.projectId && project.path === target.projectPath && !project.archived));
+    const completedElsewhere = "Creation may have completed, but its original view or input lifetime changed or the catalog did not confirm it. Inspect sessions; no retry was sent.";
     setCreatingBusy(true);
     setCreatingMessage("");
     try {
-      const result = await createSession(status?.hostEpoch, target, creatingTitle.trim() || null, capability);
+      const result = await createSession(epoch, target, creatingTitle.trim() || null, capability);
       if (!creationAlive.current) return;
       if (result.kind === "created") {
-        const fresh = await refreshProjects(creationRefresh.current.signal);
+        if (!isCurrent()) { setCreatingMessage(completedElsewhere); return; }
+        // Acquire without publishing: a late create-specific read cannot overwrite a newer
+        // host/catalog/selection. Other explicit refresh callers keep their existing behavior.
+        let fresh: WorkspaceSnapshot | undefined;
+        try { fresh = await workspace.snapshot({}, { signal: creationRefresh.current.signal, timeoutMilliseconds: 30_000 }); }
+        catch { /* A failed read is not evidence that creation had no effects. */ }
         if (!creationAlive.current) return;
         const selection = fresh && createdSessionSelection(fresh, result);
-        if (selection && selectedScope.current === scopeAtAdmission && capability.canMutate()) {
+        if (fresh && selection && isCurrent()) {
+          publishWorkspaceState({ kind: "ready", snapshot: fresh });
           selectedScope.current = selection.projectId;
           setProjectId(selection.projectId);
           setSessionId(selection.sessionId);
@@ -798,8 +836,8 @@ function App() {
           setCreatingVisible(false);
           setCreatingTitle("");
           navigate("workspace");
-        } else setCreatingMessage("Creation may have completed, but the selected scope changed or the refreshed catalog did not show the session. Inspect and refresh sessions before creating another.");
-      } else setCreatingMessage(sessionCreationMessage(result.code));
+        } else setCreatingMessage(completedElsewhere);
+      } else setCreatingMessage(sessionCreationMessage(result.code) + (isCurrent() ? "" : ` ${completedElsewhere}`));
     } finally { creationPending.current = false; if (creationAlive.current) setCreatingBusy(false); }
   }
 

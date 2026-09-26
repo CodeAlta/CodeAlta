@@ -277,6 +277,13 @@ the admitted original, which shutdown drains. After settlement, an identical req
 another session with a new identity; there is no exact receipt-replay guarantee.
 `create_unconfirmed` does not establish that no effects occurred. Inspect uncertain outcomes;
 neither refresh nor repeating the request proves that an earlier creation did not complete.
+Create-and-open completion is bound to its original host, exact scope/path, selection and
+view/input lifetime. Leaving and returning, opening Settings or another modal, changing
+selection/title/search, closing the form, or publishing another catalog snapshot ends that
+navigation authority. A stale completion leaves an inspection notice without clearing newer
+input or closing Settings. Its late catalog read cannot publish over the newer context; an
+unchanged valid completion still opens the confirmed new session. This is presentation fencing,
+not a retained-create receipt, retry permission or proof that an uncertain create had no effects.
 
 In an owned host, if the *current* project becomes
 archived after an action was captured, its exact pending/uncertain Send, Steer, host-only Queue,
