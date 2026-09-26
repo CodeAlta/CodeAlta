@@ -8,7 +8,7 @@ import { SessionInfoDialog } from "./SessionInfoDialog";
 import { copySessionId, dismissSessionInfoOnKey, restoreSessionInfoFocus, selectedSessionInfoAvailable, sessionInfoCopyFeedback, sessionInfoView } from "./sessionInfo";
 
 const session: WorkspaceSession = {
-  id: "session-1", title: "Recorded title", fullTitle: "Recorded title", fullTitleTruncated: false,
+  createdAt: null, id: "session-1", title: "Recorded title", fullTitle: "Recorded title", fullTitleTruncated: false,
   parentSessionId: null, scopeKind: "project", projectId: "p", lineageIssue: null,
   workspacePath: "/exact/p", providerKey: "recorded-provider", updatedAt: "2026-09-23T01:02:03+00:00",
 };
@@ -17,12 +17,30 @@ const snapshot: WorkspaceSnapshot = {
   sessions: [session], projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false,
 };
 
+test("recorded creation preserves supplied offsets, rejects unavailable values and requires the current unique object", () => {
+  for (const createdAt of ["2026-01-02T03:04:05.1234567+14:00", "2026-01-02T03:04:05.1234567-14:00", "2026-01-02T03:04:05Z"]) {
+    const recorded = { ...session, createdAt };
+    const current = { ...snapshot, sessions: [recorded] };
+    assert.equal(sessionInfoView(current, recorded, "p").createdAt, createdAt);
+    assert.equal(sessionInfoView(current, { ...recorded }, "p").createdAt, null);
+    assert.equal(sessionInfoView({ ...current, sessions: [recorded, { ...recorded }] }, recorded, "p").createdAt, null);
+  }
+  for (const value of [null, undefined, "", "invalid", "0001-02-03T00:00:00Z", "2026-02-30T00:00:00Z", "2026-01-02T03:04:05+99:00", 123]) {
+    // Literal malformed/older host wire shapes; no promise of cross-version contract-hash compatibility.
+    const recorded = { ...session, createdAt: value } as WorkspaceSession;
+    if (value === undefined) Reflect.deleteProperty(recorded, "createdAt");
+    const info = sessionInfoView({ ...snapshot, sessions: [recorded] }, recorded, "p");
+    assert.equal(info.createdAt, null);
+    assert.match(renderToStaticMarkup(createElement(SessionInfoDialog, { info, demo: false, onClose: () => {} })), /Recorded creation time<\/dt><dd>Not recorded or unavailable/);
+  }
+});
+
 test("exact selected project identity/path renders only recorded snapshot metadata, not inferred runtime status", () => {
   const info = sessionInfoView(snapshot, session, "p");
   assert.deepEqual(info, {
     id: "session-1", title: "Recorded title", titleTruncated: false, scope: "Project: Recorded project",
     scopeWarning: null, path: "/exact/p", provider: "recorded-provider",
-    updatedAt: "2026-09-23T01:02:03+00:00", canCopyId: true,
+    updatedAt: "2026-09-23T01:02:03+00:00", createdAt: null, canCopyId: true,
   });
   const html = renderToStaticMarkup(createElement(SessionInfoDialog, { info, demo: false, onClose: () => {} }));
   assert.match(html, /<dialog[^>]*aria-labelledby="session-info-title"[^>]*aria-describedby="session-info-description"/);

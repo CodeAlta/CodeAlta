@@ -53,6 +53,7 @@ export function SessionInfoDialog({ info, demo, onClose }: {
       <div><dt>Recorded working directory</dt><dd>{info.path ?? "Not recorded or unverified"}</dd></div>
       <div><dt>Provider</dt><dd>{info.provider ?? "Not recorded or unverified"}</dd></div>
       <div><dt>Saved update</dt><dd>{info.updatedAt ? <time dateTime={info.updatedAt}>{info.updatedAt}</time> : "Not recorded or unverified"}</dd></div>
+      <div><dt>Recorded creation time</dt><dd>{info.createdAt ? <time dateTime={info.createdAt}>{info.createdAt}</time> : "Not recorded or unavailable"}</dd></div>
     </dl>
     <footer><span>{feedback && <span role={feedback === "copied" ? "status" : "alert"}>
       {sessionInfoCopyFeedback(feedback)}

@@ -3,7 +3,7 @@ import test from "node:test";
 import type { ReminderListResponse, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 import { validReminderList, verifiedReminderCountTarget } from "./reminderListObservation";
 
-const session: WorkspaceSession = { id: "one", title: "One", fullTitle: "One", fullTitleTruncated: false,
+const session: WorkspaceSession = { createdAt: null, id: "one", title: "One", fullTitle: "One", fullTitleTruncated: false,
   parentSessionId: null, scopeKind: "project", projectId: "p", lineageIssue: null,
   workspacePath: "/p", providerKey: "fixture", updatedAt: "2026-09-24T00:00:00Z" };
 const snapshot: WorkspaceSnapshot = { configured: true, projects: [{ id: "p", name: "Project", path: "/p", archived: false }],

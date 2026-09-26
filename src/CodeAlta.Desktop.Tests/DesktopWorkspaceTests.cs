@@ -9,6 +9,71 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class DesktopWorkspaceTests
 {
     [TestMethod]
+    public async Task Projection_RecordedCreationUsesOnlyLoadedMetadata()
+    {
+        var created = DateTimeOffset.Parse("2026-01-02T03:04:05.1234567+14:00");
+        var projectReads = 0;
+        var sessionReads = 0;
+        async IAsyncEnumerable<AgentSessionMetadata> Sessions([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken token)
+        {
+            sessionReads++;
+            yield return Session("created") with { CreatedAt = created };
+            yield return Session("default") with { CreatedAt = default };
+            yield return Session("year-one") with { CreatedAt = new DateTimeOffset(1, 2, 3, 0, 0, 0, TimeSpan.Zero) };
+            await Task.CompletedTask;
+        }
+        var result = await WorkspaceService.ReadAsync(_ => { projectReads++; return Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]); }, Sessions, CancellationToken.None);
+        Assert.AreEqual(1, projectReads);
+        Assert.AreEqual(1, sessionReads);
+        Assert.AreNotEqual(created, result.Sessions.Single(row => row.Id == "created").UpdatedAt);
+        var mismatched = WorkspaceService.ProjectSnapshot([], [Session("created") with { CreatedAt = created }],
+            new Dictionary<string, SessionViewJournalHeader> { ["created"] = new() { SessionId = "different", CreatedAt = created.AddDays(1) } });
+        Assert.AreEqual(created, mismatched.Sessions[0].CreatedAt);
+        Assert.IsNull(mismatched.Sessions[0].ScopeKind);
+        using var json = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(result, DesktopJsonContext.Default.WorkspaceSnapshot));
+        foreach (var row in json.RootElement.GetProperty("sessions").EnumerateArray())
+        {
+            Assert.IsTrue(row.TryGetProperty("createdAt", out var value), "Recorded creation must be present independently of header scope.");
+            if (row.GetProperty("id").GetString() == "created") Assert.AreEqual(created, value.GetDateTimeOffset());
+            else Assert.AreEqual(System.Text.Json.JsonValueKind.Null, value.ValueKind);
+        }
+    }
+
+    [TestMethod]
+    public void Projection_CreationSerializationFitsExplicitAllowanceAndEnvelope()
+    {
+        DateTimeOffset[] dates = [default, DateTimeOffset.Parse("2026-01-02T03:04:05.1234567+14:00"),
+            DateTimeOffset.Parse("2026-01-02T03:04:05.1234567-14:00")];
+        foreach (var date in dates)
+        {
+            var sessions = Enumerable.Range(0, 500).Select(i => Session($"s{i}") with
+            {
+                CreatedAt = date, WorkspacePath = new string('\u0001', 4096), ProviderKey = new string('\u0001', 256),
+                Details = new RawApiSessionMetadataDetails(Title: new string('\u0001', 4096)),
+            }).ToArray();
+            var snapshot = WorkspaceService.ProjectSnapshot([], sessions);
+            var bytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(snapshot, DesktopJsonContext.Default.WorkspaceSnapshot);
+            var accounted = 2048 + snapshot.Sessions.Sum(row => 512 + 64 + 6 * (row.Id.Length + row.Title.Length + row.FullTitle.Length
+                + (row.ParentSessionId?.Length ?? 0) + (row.WorkspacePath?.Length ?? 0) + (row.ProviderKey?.Length ?? 0) + (row.ProjectId?.Length ?? 0)));
+            Assert.IsTrue(bytes.Length <= accounted && accounted <= 700 * 1024);
+            Assert.IsTrue(snapshot.SessionsTruncated);
+            using var json = System.Text.Json.JsonDocument.Parse(bytes);
+            foreach (var row in json.RootElement.GetProperty("sessions").EnumerateArray())
+            {
+                var value = row.GetProperty("createdAt");
+                var fieldBytes = System.Text.Encoding.UTF8.GetByteCount(",\"createdAt\":" + value.GetRawText());
+                Assert.IsTrue(fieldBytes <= 64);
+                if (date == default) Assert.AreEqual(System.Text.Json.JsonValueKind.Null, value.ValueKind);
+                else
+                {
+                    Assert.AreEqual(date, value.GetDateTimeOffset());
+                    Assert.AreEqual(date.Offset, value.GetDateTimeOffset().Offset);
+                }
+            }
+        }
+    }
+
+    [TestMethod]
     [DataRow("browser only", true)]
     [DataRow("catalog", true)]
     [DataRow("reordered", true)]

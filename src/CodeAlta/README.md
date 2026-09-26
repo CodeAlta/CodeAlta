@@ -32,6 +32,15 @@ switch themes. Demo messages disappear on refresh. `npm run build:demo` produces
 as static files under `dist/`; `npm run build` builds the production NeoAstra-connected frontend.
 The packaged desktop uses the generated bridge and never includes the demo backend.
 
+Session Info's **Recorded creation time** is the already-loaded catalog summary's
+creation timestamp (possibly cached), not runtime start, elapsed time or last activity.
+Year-1/default values are unavailable; no header, update-time, clock or filesystem
+fallback is used. The dialog preserves the supplied ISO representation, whose offset
+may already be UTC after cache projection. Missing/null/malformed client fields show
+unavailable; this tolerance does not promise cross-version RPC contract compatibility.
+Opening the dialog adds no metadata reads, and Copy remains session ID only. Existing
+snapshot identity/scope checks, catalog freshness and epoch/clipboard limits remain.
+
 Settings opens a modal overlay approximately 80% of the desktop viewport; the selected session,
 composer draft and timeline remain mounted underneath but cannot be interacted with while it is
 open. Use the overlay's sections and Back to settings control, Escape or Close settings to return;

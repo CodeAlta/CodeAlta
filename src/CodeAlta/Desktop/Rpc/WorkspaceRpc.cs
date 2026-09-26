@@ -127,7 +127,9 @@ internal sealed partial class WorkspaceService
         var displayedSessions = new List<WorkspaceSession>();
         var shortened = false;
         // Conservative JSON bound: six bytes per UTF-16 unit, 512 bytes per row for property names,
-        // booleans/timestamps/punctuation, and 2048 reserved for the snapshot/envelope. Below 1 MiB RPC default.
+        // booleans/timestamps/punctuation, and 2048 reserved for the snapshot/envelope. Each session
+        // additionally reserves 64 bytes for createdAt (33 ISO characters, quotes/property/comma,
+        // including a possibly escaped '+' offset). Keep the overall cap below 1 MiB RPC default.
         var remaining = 700 * 1024 - 2048;
         foreach (var project in projects.OrderBy(value => value.DisplayName, StringComparer.OrdinalIgnoreCase)
                      .ThenBy(value => value.Id, StringComparer.Ordinal).ThenBy(value => value.ProjectPath, StringComparer.Ordinal))
@@ -166,12 +168,13 @@ internal sealed partial class WorkspaceService
                     projectId = reference;
                 }
             }
-            var cost = 512 + 6 * (session.SessionId.Length + title.Length + fullTitle.Length + (parent?.Length ?? 0)
+            var cost = 512 + 64 + 6 * (session.SessionId.Length + title.Length + fullTitle.Length + (parent?.Length ?? 0)
                 + (session.WorkspacePath?.Length ?? 0) + (session.ProviderKey?.Length ?? 0) + (projectId?.Length ?? 0));
             if (cost > remaining) break;
             remaining -= cost;
             displayedSessions.Add(new WorkspaceSession(session.SessionId, title, session.WorkspacePath, session.ProviderKey, session.UpdatedAt,
-                fullTitle, sourceTitle.Length > 4096, parent, scopeKind, projectId, lineageIssue));
+                fullTitle, sourceTitle.Length > 4096, parent, scopeKind, projectId, lineageIssue,
+                session.CreatedAt.Year > 1 ? session.CreatedAt : null));
         }
         return new WorkspaceSnapshot(true, displayedProjects.ToArray(), displayedSessions.ToArray(),
             displayedProjects.Count < projects.Count, displayedSessions.Count < sessions.Count, shortened);
@@ -225,4 +228,5 @@ internal sealed record WorkspaceSnapshot(bool Configured, WorkspaceProject[] Pro
     bool ProjectsTruncated, bool SessionsTruncated, bool DisplayTextTruncated);
 internal sealed record WorkspaceProject(string Id, string Name, string Path, bool Archived);
 internal sealed record WorkspaceSession(string Id, string Title, string? WorkspacePath, string? ProviderKey, DateTimeOffset UpdatedAt,
-    string FullTitle, bool FullTitleTruncated, string? ParentSessionId, string? ScopeKind, string? ProjectId, string? LineageIssue);
+    string FullTitle, bool FullTitleTruncated, string? ParentSessionId, string? ScopeKind, string? ProjectId, string? LineageIssue,
+    DateTimeOffset? CreatedAt);

@@ -5,7 +5,7 @@ import { sessionHierarchy } from "./sessionHierarchy";
 
 const date = (day: number) => `2026-01-${String(day).padStart(2, "0")}T00:00:00Z`;
 const row = (id: string, parentSessionId: string | null = null, day = 1, title = id): WorkspaceSession => ({
-  id, title, fullTitle: title, fullTitleTruncated: false, parentSessionId, scopeKind: "project", projectId: "p1",
+  createdAt: null, id, title, fullTitle: title, fullTitleTruncated: false, parentSessionId, scopeKind: "project", projectId: "p1",
   workspacePath: "/p1", lineageIssue: null, providerKey: "fixture", updatedAt: date(day),
 });
 

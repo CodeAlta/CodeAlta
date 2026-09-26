@@ -2,7 +2,7 @@
 // No native bridge or user data is touched.
 import type { HistoryRequest, HistoryResponse, SessionDisplayItem, SessionDisplayRequest } from "#neoastra";
 const epoch = "12345678-1234-1234-1234-123456789abc";
-const session = { id: "one", title: "one", fullTitle: "one", fullTitleTruncated: false,
+const session = { id: "one", title: "one", fullTitle: "one", fullTitleTruncated: false, createdAt: "2026-01-02T03:04:05.1234567+14:00",
   parentSessionId: null, scopeKind: localStorage.getItem("infoFixtureUnknown") === "true" ? null : "project",
   projectId: localStorage.getItem("infoFixtureUnknown") === "true" ? null
     : localStorage.getItem("infoFixtureMismatched") === "true" ? "wrong" : "project", lineageIssue: null,

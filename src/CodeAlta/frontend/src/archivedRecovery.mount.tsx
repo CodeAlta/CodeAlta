@@ -22,7 +22,7 @@ import { createPermissionReviewer, type PermissionReviewState } from "./sessionP
 import type { SessionPermissionCommand, SessionPermissionResolution } from "#neoastra";
 
 const epoch = "12345678-1234-1234-1234-123456789abc";
-const sessions: WorkspaceSession[] = ["one", "two"].map(id => ({ id, title: id, fullTitle: id, fullTitleTruncated: false,
+const sessions: WorkspaceSession[] = ["one", "two"].map(id => ({ createdAt: null, id, title: id, fullTitle: id, fullTitleTruncated: false,
   parentSessionId: null, scopeKind: "project", projectId: "project", lineageIssue: null,
   workspacePath: "/fixture/project", providerKey: "fixture", updatedAt: "2026-09-24T00:00:00Z" }));
 const catalog: WorkspaceSnapshot = { configured: true, projects: [{ id: "project", name: "Project", path: "/fixture/project", archived: false }],

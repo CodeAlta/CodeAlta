@@ -20,6 +20,11 @@ test("production composer info icon retains read-only scope and guarded focus", 
       bundle: true, platform: "browser", format: "iife", loader: { ".css": "empty" },
       define: { "import.meta.env.VITE_DEMO_MODE": '"false"' }, plugins: [{ name: "isolated-bridge", setup(bundle) {
         bundle.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("./settingsShell.neoastra.mount.ts", import.meta.url)) }));
+        // Expose only the actual catalog publisher for a same-key replacement; dialog/selection
+        // remain production App state, without adding a production refresh or fetch path.
+        bundle.onLoad({ filter: /[/\\]main\.tsx$/ }, async args => ({ loader: "tsx", contents:
+          (await readFile(args.path, "utf8")).replace('const [projectId, writeProjectId]',
+            'Object.assign(window, { publishInfoFixtureSnapshot: (snapshot: WorkspaceSnapshot) => publishWorkspaceState({ kind: "ready", snapshot }) }); const [projectId, writeProjectId]') }));
       } }] });
     await writeFile(join(root, "style.css"), readFileSync(fileURLToPath(new URL("./style.css", import.meta.url))));
     const page = join(root, "fixture.html");
@@ -69,6 +74,10 @@ test("production composer info icon retains read-only scope and guarded focus", 
       assert.equal(await wait(`!document.querySelector('${modal}')`), true);
     };
     assert.equal(await wait("!!document.querySelector('#catalog-prompt')"), true);
+    const readCounts = () => evaluate(`JSON.stringify({snapshots:window.settingsShellFixture.snapshotCalls.length,
+      history:window.settingsShellFixture.historyCalls.length, usage:window.settingsShellFixture.usageReads.length,
+      probes:window.settingsShellFixture.probes.length, choices:window.settingsShellFixture.choiceReads.length})`);
+    const initialReads = await readCounts();
     assert.equal(await evaluate(`!!document.querySelector('.catalog-composer .history-controls ${trigger}') && !document.querySelector('.session-header ${trigger}')`), true,
       "one catalog composer info icon replaces the header text control");
     assert.equal(await evaluate(`document.querySelectorAll('${trigger}').length===1 &&
@@ -76,6 +85,21 @@ test("production composer info icon retains read-only scope and guarded focus", 
       !!document.querySelector('${trigger} svg[aria-hidden="true"]')`), true);
     await evaluate(`window.catalogPrompt=document.querySelector('#catalog-prompt'); window.catalogPrompt.focus(); document.querySelector('${trigger}').click()`);
     assert.equal(await wait(`document.querySelector('${modal}')?.matches(':modal')`), true);
+    assert.equal(await evaluate(`document.querySelector('${modal}').textContent.includes('Recorded creation time') &&
+      [...document.querySelectorAll('${modal} time')].some(time=>time.textContent==='2026-01-02T03:04:05.1234567+14:00')`), true,
+      "actual App displays the supplied recorded creation time without converting its offset");
+    await evaluate(`window.copiedInfo=[]; Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.copiedInfo.push(text)}}});
+      document.querySelector('${modal} button:nth-last-child(2)').click()`);
+    assert.equal(await wait(`document.querySelector('${modal}')?.textContent.includes('Session ID copied.')`), true);
+    assert.deepEqual(await evaluate("window.copiedInfo"), ["one"], "Copy remains session ID only");
+    assert.equal(await readCounts(), initialReads, "display and Copy perform no additional reads or provider probes");
+    await evaluate(`window.keptInfoDialog=document.querySelector('${modal}');
+      window.publishInfoFixtureSnapshot({...window.settingsShellFixture.catalog, sessions:window.settingsShellFixture.catalog.sessions.map(row=>({...row,createdAt:'2025-04-03T02:01:00-07:00'}))})`);
+    assert.equal(await wait(`document.querySelector('${modal}')?.textContent.includes('2025-04-03T02:01:00-07:00')`), true);
+    assert.equal(await evaluate(`window.keptInfoDialog===document.querySelector('${modal}')`), true, "same-key publication updates the mounted dialog");
+    await evaluate(`window.publishInfoFixtureSnapshot({...window.settingsShellFixture.catalog, sessions:window.settingsShellFixture.catalog.sessions.map(({createdAt,...row})=>row)})`);
+    assert.equal(await wait(`document.querySelector('${modal}')?.textContent.includes('Not recorded or unavailable') && !document.querySelector('${modal}')?.textContent.includes('2025-04-03')`), true);
+    assert.equal(await readCounts(), initialReads, "same-key metadata publication adds no acquisition");
     assert.equal(await evaluate(`document.querySelector('${modal}').textContent.includes('Project: Project') &&
       document.querySelector('${modal}').textContent.includes('Saved catalog metadata, not live runtime status.') &&
       !document.querySelector('${modal}').textContent.includes('Current tokens') &&
@@ -176,6 +200,7 @@ test("production composer info icon retains read-only scope and guarded focus", 
     await evaluate(`document.querySelector('${trigger}').click()`);
     assert.equal(await wait(`document.querySelector('${modal}')?.open && document.querySelector('${modal}')?.textContent.includes('Project: Project')`), true,
       "archived draft-only composer retains read-only snapshot info");
+    assert.equal(await evaluate(`document.querySelector('${modal}').textContent.includes('2026-01-02T03:04:05.1234567+14:00')`), true);
     await close();
     await evaluate("document.querySelector('#catalog-prompt').focus()");
     await chord();
@@ -230,6 +255,7 @@ test("production composer info icon retains read-only scope and guarded focus", 
     assert.equal(await wait("document.querySelector('#session-prompt').value==='Info draft retained' && localStorage.getItem('codealta.desktop.prompt.one')==='Info draft retained'"), true);
     await evaluate(`document.querySelector('${trigger}').click()`);
     assert.equal(await wait(`document.querySelector('${modal}')?.open && document.querySelector('${modal}')?.textContent.includes('Project: Project')`), true);
+    assert.equal(await evaluate(`document.querySelector('${modal}').textContent.includes('2026-01-02T03:04:05.1234567+14:00')`), true, "owned uses the same recorded value");
     await close();
     assert.equal(await wait(`document.activeElement===document.querySelector('${trigger}')`), true);
     assert.equal(await evaluate("window.keptPrompt===document.querySelector('#session-prompt') && document.querySelector('#session-prompt').value==='Info draft retained' && localStorage.getItem('codealta.desktop.prompt.one')==='Info draft retained' && window.settingsShellFixture.sends.length===0 && window.settingsShellFixture.usageReads.length===0"), true,

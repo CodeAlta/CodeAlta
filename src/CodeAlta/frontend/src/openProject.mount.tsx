@@ -13,7 +13,7 @@ const projects = [
   { id: "old", name: "Legacy", path: "C:/catalog/legacy", archived: true },
 ];
 const sessions = projects.map(project => ({ id: `session-${project.id}`, title: project.name, fullTitle: project.name,
-  fullTitleTruncated: false, parentSessionId: null, lineageIssue: null, scopeKind: "project" as const,
+  createdAt: null, fullTitleTruncated: false, parentSessionId: null, lineageIssue: null, scopeKind: "project" as const,
   projectId: project.id, workspacePath: project.path, providerKey: null, updatedAt: "2026-09-24T00:00:00Z" }));
 const original: WorkspaceSnapshot = { configured: true, projects, sessions,
   projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false };

@@ -3,7 +3,7 @@ import test from "node:test";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { archivedProjectScope, archivedRecoveryTarget } from "./ArchivedScopeGates";
 
-const session = { id: "one", title: "One", fullTitle: "One", fullTitleTruncated: false, parentSessionId: null,
+const session = { createdAt: null, id: "one", title: "One", fullTitle: "One", fullTitleTruncated: false, parentSessionId: null,
   scopeKind: "project" as const, projectId: "project", workspacePath: "/original", providerKey: "fixture",
   updatedAt: "2026-09-24T00:00:00Z", lineageIssue: null };
 const snapshot: WorkspaceSnapshot = { configured: true, projects: [{ id: "project", name: "P", path: "/original", archived: true }],
