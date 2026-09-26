@@ -68,6 +68,33 @@ test("production shell settings overlay keeps the session workspace mounted and 
       if (${condition}) resolve(true); else if (Date.now()>end) resolve(document.body.innerText.slice(-1200));
       else setTimeout(tick,20); }; tick(); })`);
     assert.equal(await wait("!!document.querySelector('#catalog-prompt') && !!document.querySelector('.project-rail .icon-label-button')"), true);
+    assert.equal(await evaluate(`(() => {const projects=document.querySelector('.project-rail'); const sessions=document.querySelector('.session-rail');
+      const filter=projects.querySelector('#project-filter'); const sort=projects.querySelector('#project-sort');
+      return !!projects.querySelector('.panel-title') && !!sessions.querySelector('.session-rail-header h2') &&
+        !projects.querySelector('.project-controls label, .project-controls p') && !sessions.querySelector('.session-rail-header .eyebrow') &&
+        filter.getAttribute('aria-label')==='Filter projects by name or path' && sort.getAttribute('aria-label')==='Sort projects' &&
+        projects.querySelector('.project-controls').getBoundingClientRect().height<92 &&
+        sessions.querySelector('.session-rail-header').getBoundingClientRect().height<64 &&
+        !!projects.querySelector('.rail-footer button') && !!sessions.querySelector('[aria-label="Create session"]');})()`), true,
+      "rail headers and controls stay useful without redundant visible pre-list prose");
+    assert.equal(await evaluate("document.querySelector('.session-rail')?.textContent.includes('Session creation requires an owned host.') && document.querySelector('#project-filter')?.getAttribute('aria-controls')==='project-list' && !!document.querySelector('#project-list')"), true,
+      "catalog-only restrictions and list relationships remain visible/accessible");
+    for (const width of [390, 1120]) for (const theme of ["light", "dark"]) {
+      await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
+      await evaluate(`document.documentElement.dataset.theme='${theme}'`);
+      assert.equal(await wait(`window.innerWidth===${width} && document.querySelector('[aria-controls=project-rail]').getAttribute('aria-expanded')==='${width===390 ? "false" : "true"}'`), true);
+      if (width===390)
+        await evaluate("document.querySelector('[aria-controls=project-rail]').click()");
+      assert.equal(await wait("document.querySelector('#project-rail').getBoundingClientRect().width>0"), true);
+      assert.equal(await evaluate(`(() => {const rail=document.querySelector('#project-rail'); const controls=rail.querySelector('.project-controls');
+        return controls.getBoundingClientRect().height<92 && controls.getBoundingClientRect().height>0 &&
+          rail.querySelector('.nav-list').getBoundingClientRect().top>=controls.getBoundingClientRect().bottom &&
+          rail.querySelector('.rail-footer button').getBoundingClientRect().right<=${width};})()`), true, `compact project rail at ${width}px ${theme}`);
+      if (width===390) await evaluate("document.querySelector('[aria-controls=project-rail]').click()");
+      assert.equal(await wait("document.querySelector('.session-rail').getBoundingClientRect().width>0"), true);
+      assert.equal(await evaluate("document.querySelector('.session-rail-header').getBoundingClientRect().height<64 && document.querySelector('.session-rail-header h2')?.textContent==='Project' && document.querySelector('.session-rail .search input')?.getAttribute('aria-label')==='Search sessions'"), true,
+        `compact session rail at ${width}px ${theme}`);
+    }
     assert.equal(await evaluate("!!document.querySelector('.topnav, #open-provider-configuration')"), false);
     await evaluate(`(() => { const input=document.querySelector('#catalog-prompt'); input.focus();
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'Private local draft');
@@ -473,6 +500,19 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await evaluate("window.settingsShellFixture.releaseMutation('delete')");
     assert.equal(await wait("document.querySelector('.session-rail')?.textContent.includes('unconfirmed') && document.querySelector('.session-actions-menu button:nth-child(3)')?.disabled"), true);
     assert.equal(await evaluate("window.settingsShellFixture.deleteRequests.length===1"), true);
+    await evaluate("localStorage.setItem('usageFixtureTruncated','true')");
+    await command("Page.reload");
+    assert.equal(await wait("!!document.querySelector('#project-sort')"), true);
+    await evaluate(`(() => {const select=document.querySelector('#project-sort'); select.value='recent'; select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+    assert.equal(await wait("document.querySelector('.project-evidence[role=status]')?.textContent.includes('Snapshot is truncated')"), true);
+    await evaluate(`(() => {const input=document.querySelector('#project-filter');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'absent project');
+      input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+    assert.equal(await wait("document.querySelector('.project-rail .sidebar-empty[role=status]')?.textContent.includes('No matching projects')"), true);
+    await evaluate("localStorage.setItem('settingsFixtureWorkspaceError','true')");
+    await command("Page.reload");
+    assert.equal(await wait("document.querySelector('.project-rail .sidebar-empty[role=alert]')?.textContent.includes('No alternate session scan was used')"), true);
+    assert.equal(await evaluate("!!document.querySelector('.project-rail .panel-title') && !!document.querySelector('.session-rail-header h2') && !!document.querySelector('.rail-footer button') && !!document.querySelector('.project-rail [aria-label=\"Open project (Ctrl+O)\"]')"), true);
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });
   }

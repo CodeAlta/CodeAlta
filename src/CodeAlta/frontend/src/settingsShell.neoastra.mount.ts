@@ -39,8 +39,11 @@ const choices = (request: { expectedEpoch: string; sessionId: string }) => ({ st
     ? [{ id: "new", name: "New", efforts: ["High"] }] : [])] });
 export const boot = { status: async () => ({ state: owned() ? "owned" : "catalog", hostAvailable: owned(),
   hostEpoch: owned() ? epoch : null, productName: "CodeAlta", version: "development" }) };
-export const workspace = { snapshot: async () => localStorage.getItem("settingsFixtureFreshSnapshot") === "true"
-  ? { ...catalog, sessions: catalog.sessions.map(row => ({ ...row, updatedAt: "2026-09-26T00:00:00Z" })) } : catalog,
+export const workspace = { snapshot: async () => {
+  if (localStorage.getItem("settingsFixtureWorkspaceError") === "true") throw new Error("fixture catalog unavailable");
+  return localStorage.getItem("settingsFixtureFreshSnapshot") === "true"
+    ? { ...catalog, sessions: catalog.sessions.map(row => ({ ...row, updatedAt: "2026-09-26T00:00:00Z" })) } : catalog;
+},
   openProject: unavailable, readProjectName: unavailable,
   renameProject: unavailable, createSession: unavailable,
   renameSession: (request: unknown) => { renameRequests.push(request); return new Promise(resolve => mutationReplies.push({ kind: "rename", resolve })); },

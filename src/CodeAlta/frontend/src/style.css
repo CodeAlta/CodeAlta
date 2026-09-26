@@ -105,7 +105,6 @@ ul { margin: 0; padding: 0; }
 .project-controls { flex: 0 0 auto; display: grid; gap: 5px; padding: 0 6px 10px; font-size: 11px; color: var(--muted); }
 .project-controls input, .project-controls select { width: 100%; min-width: 0; }
 .project-sort-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px; }
-.project-sort-controls label { grid-column: 1 / -1; }
 .project-sort-controls select { flex: 1 1 auto; }
 .project-sort-controls .quiet-button { flex: 0 0 auto; font-size: 11px; padding: 5px; }
 .project-evidence { flex: 0 0 auto; max-height: 100px; overflow-y: auto; margin: 0 6px 8px; color: var(--muted); font-size: 11px; line-height: 1.4; }

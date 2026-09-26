@@ -968,16 +968,15 @@ function App() {
           "--session-pane-width": `${visibleSessionWidth}px`,
         } as CSSProperties}>
         <aside id="project-rail" className="project-rail" aria-label="Projects" ref={projectRail} hidden={!railVisible}>
-          <div className="panel-title"><span>Projects</span><span><button type="button" className="rail-action" title="Open project (Ctrl+O)" onClick={() => setDialog("project")}>＋</button><span className="count">{snapshot?.projects.length ?? 0}</span></span></div>
+          <div className="panel-title"><span>Projects</span><span><button type="button" className="rail-action" aria-label="Open project (Ctrl+O)" title="Open project (Ctrl+O)" onClick={() => setDialog("project")}>＋</button><span className="count">{snapshot?.projects.length ?? 0}</span></span></div>
           {workspaceState.kind === "loading" && <LoadingRows />}
           {workspaceState.kind === "unconfigured" && <div className="sidebar-empty">No catalog configured. See the launch instructions below.</div>}
           {workspaceState.kind === "error" && <div role="alert" className="sidebar-empty error-text">{workspaceState.message}</div>}
           {snapshot && <div className="project-controls">
-            <label htmlFor="project-filter">Filter projects by name or path</label>
             <input id="project-filter" ref={projectFilterInput} type="search" value={projectFilter} onChange={event => setProjectFilter(event.target.value)}
-              placeholder="Name or path" aria-controls="project-list" />
-            <div className="project-sort-controls"><label htmlFor="project-sort">Sort projects</label>
-              <select id="project-sort" value={projectSort} onChange={event => setProjectSort(event.target.value as ProjectSort)}>
+              placeholder="Name or path" aria-label="Filter projects by name or path" aria-controls="project-list" />
+            <div className="project-sort-controls">
+              <select id="project-sort" aria-label="Sort projects" value={projectSort} onChange={event => setProjectSort(event.target.value as ProjectSort)}>
                 <option value="name">Name</option><option value="recent">Recent visible updates</option>
               </select>
               <button type="button" className="quiet-button" disabled={!projectFilter} onClick={() => { setProjectFilter(""); projectFilterInput.current?.focus(); }}>Clear filter</button>
@@ -1014,7 +1013,7 @@ function App() {
 
         <aside className="session-rail" aria-label="Sessions" ref={sessionRail} hidden={narrow && railVisible}>
           <div className="session-rail-header">
-            <div><span className="eyebrow">Sessions</span><h2>{selectedProject?.name ?? "Other sessions"}</h2></div>
+            <div><h2>{selectedProject?.name ?? "Other sessions"}</h2></div>
             <div className="session-rail-actions"><ProjectDetailsEntry context={projectDetailsContext} getCurrent={currentProjectDetailsContext} />
               <button type="button" className="icon-button" aria-label="Create session" title="Create session in selected scope"
                 disabled={!owned || !snapshot || !!selectedProject?.archived || projectId !== null && !selectedProject || creatingBusy}
@@ -1040,7 +1039,7 @@ function App() {
             <button type="button" className="quiet-button" onClick={() => void refreshDeletedSession()}>Refresh session list</button>
           </div>}
           {!owned && <p className="muted-text">Session creation requires an owned host.</p>}
-          <label className="search"><AppIcon name="search" size={14} /><input ref={searchInput} value={search} onChange={event => setSearch(event.target.value)} placeholder="Search sessions" /></label>
+          <label className="search"><AppIcon name="search" size={14} /><input ref={searchInput} value={search} onChange={event => setSearch(event.target.value)} placeholder="Search sessions" aria-label="Search sessions" /></label>
           {notice && <p role="status" className="notice">{notice}</p>}
           <div className="session-list">
             {visibleSessionRows.map(({ session, depth, diagnostic, tooltip }, index) => {

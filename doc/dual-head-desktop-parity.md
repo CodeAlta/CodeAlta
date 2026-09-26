@@ -2897,6 +2897,17 @@ the connected trigger; Tab and outside dismissal do not restore focus over a new
 This is presentation/entry consolidation, not a new session mutation or native WebView2
 accessibility qualification.
 
+### M6 project/session rail header density — 2026-09-26 (awaiting independent acceptance)
+
+The project rail keeps its Projects heading, Open Project, filter, sort/clear and bottom-left
+Settings controls. The filter and sort retain explicit accessible names without visible label
+lines above their controls. The session rail keeps the selected project/Other sessions heading,
+New Session, search and all existing state notices, but drops the redundant Sessions eyebrow.
+This reclaims list height without hiding catalog-only restrictions, empty/filter results,
+truncation evidence, load errors or pending/uncertain operation recovery. No selection, read,
+write, shortcut or dialog owner changes; mounted-browser layout evidence is not native WebView2
+or screen-reader acceptance.
+
 ### Accumulated persisted timeline paging — 2026-09-22
 
 **2026-09-24 latest-first history:** The shared cached-store history
