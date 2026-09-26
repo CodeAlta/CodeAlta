@@ -2885,6 +2885,18 @@ and page switching retain the existing mounted workspace, draft and exact-target
 This replaces the earlier M6 settings-navigation presentation, not its historical test evidence;
 native WebView2 interaction and full configuration-management parity remain unqualified.
 
+### M6 session-row action entry — 2026-09-26 (awaiting independent acceptance)
+
+Each visible session row has one right-aligned, keyboard-focusable ellipsis icon instead of
+separate Actions, Rename and Delete entry buttons. Its existing menu exposes Open, Rename and
+Delete (with the existing typed-title confirmation). Opening/closing a menu does not select a
+session or admit a write. Explicitly choosing an action selects that exact row; the menu refuses
+action after the original selection, project, host or catalog snapshot changes, and the existing
+scope/capability, busy and uncertain-operation guards remain in force. Escape returns focus to
+the connected trigger; Tab and outside dismissal do not restore focus over a newer target.
+This is presentation/entry consolidation, not a new session mutation or native WebView2
+accessibility qualification.
+
 ### Accumulated persisted timeline paging — 2026-09-22
 
 **2026-09-24 latest-first history:** The shared cached-store history

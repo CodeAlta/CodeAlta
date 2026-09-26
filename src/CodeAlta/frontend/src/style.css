@@ -146,11 +146,12 @@ h1, h2, h3, p { margin-top: 0; }
 .session-list { flex: 1 1 auto; min-height: 80px; overflow-y: scroll; padding: 0 9px 18px; }
 .session-row { position: relative; display: flex; flex-wrap: wrap; align-items: center; }
 .session-row.menu-open { z-index: 8; }
-.session-actions-trigger { flex: 0 0 auto; }
-.session-actions-menu { width: 100%; display: grid; gap: 4px; padding: 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel-3); }
+.session-actions-trigger { flex: 0 0 28px; width: 28px; height: 28px; margin-left: auto; padding: 3px; display: grid; place-items: center; }
+.session-actions-menu { position: absolute; z-index: 9; top: 100%; right: 0; width: min(210px, 100%); display: grid; gap: 4px; padding: 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel-3); box-shadow: var(--shadow); }
 .session-actions-menu button { text-align: left; }
 .session-tooltip { position: absolute; z-index: 5; left: 9px; right: 9px; top: 100%; max-height: min(60vh, 360px); overflow: auto; padding: 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel-3); color: var(--text); font-size: 12px; overflow-wrap: anywhere; visibility: hidden; }
 .session-row:hover .session-tooltip, .session-row:focus-within .session-tooltip { visibility: visible; }
+.session-row.menu-open .session-tooltip { visibility: hidden; }
 .session-row > button:first-child { flex: 1; min-width: 0; display: grid; gap: 8px; padding: 12px 11px; border: 1px solid transparent; border-radius: 10px; background: transparent; text-align: left; cursor: pointer; }
 .session-row > button:first-child:hover { background: var(--panel-2); }
 .session-row > button[aria-pressed="true"] { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); background: var(--accent-soft); }

@@ -354,6 +354,125 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Providers').click()");
     assert.equal(await wait("document.querySelector('.settings-dialog-content .settings-card')?.textContent.includes('Current session provider: other-provider') && document.querySelector('.settings-dialog-navigation [aria-current=page]')?.textContent==='Providers'"), true);
     assert.equal(await evaluate("window.settingsShellFixture.sends.length===0 && window.settingsShellFixture.probes.length===0"), true);
+    await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
+    assert.equal(await wait("!document.querySelector('.settings-dialog')"), true);
+    // The row action entry is a single, right-aligned icon, not three competing buttons.
+    assert.equal(await evaluate(`(() => {const row=document.querySelector('.session-row'); const trigger=row.querySelector('.session-actions-trigger');
+      const title=row.querySelector(':scope > button:first-child'); const r=trigger.getBoundingClientRect();
+      return row.querySelectorAll(':scope > button').length===2 && trigger.querySelector('svg') && !trigger.textContent.trim() &&
+        trigger.getAttribute('aria-label')==='Actions for other-session (ID: other-session)' && r.left>=title.getBoundingClientRect().right-1 && r.width<=32;})()`), true);
+    await evaluate("document.querySelector('.session-actions-trigger').focus()");
+    assert.equal(await evaluate("document.activeElement?.classList.contains('session-actions-trigger')"), true);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space", text: " ", windowsVirtualKeyCode: 32 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space", windowsVirtualKeyCode: 32 });
+    assert.equal(await wait("document.querySelector('.session-actions-menu') && document.activeElement?.textContent==='Open session'"), true);
+    assert.equal(await evaluate("document.querySelector('.session-header h1').textContent==='other-session' && window.settingsShellFixture.renameRequests.length===0 && window.settingsShellFixture.deleteRequests.length===0"), true);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 });
+    assert.equal(await evaluate("document.activeElement?.textContent==='Rename…'"), true);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "End", code: "End", windowsVirtualKeyCode: 35 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "End", code: "End", windowsVirtualKeyCode: 35 });
+    assert.equal(await evaluate("document.activeElement?.textContent.includes('Delete…')"), true);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    assert.equal(await wait("!document.querySelector('.session-actions-menu') && document.activeElement===document.querySelector('.session-actions-trigger')"), true);
+    await evaluate("document.querySelector('.session-actions-trigger').click()");
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "End", code: "End", windowsVirtualKeyCode: 35 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "End", code: "End", windowsVirtualKeyCode: 35 });
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+    assert.equal(await wait("!document.querySelector('.session-actions-menu') && document.activeElement!==document.querySelector('.session-actions-trigger')"), true,
+      "Tab leaves the menu using normal browser focus order without restoring its trigger");
+    await evaluate("document.querySelector('.session-actions-trigger').click()");
+    assert.equal(await wait("!!document.querySelector('.session-actions-menu')"), true);
+    await evaluate("document.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}))");
+    assert.equal(await wait("!document.querySelector('.session-actions-menu')"), true);
+    for (const width of [390, 1120]) for (const theme of ["light", "dark"]) {
+      await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
+      await evaluate(`document.documentElement.dataset.theme='${theme}'; document.querySelector('.session-actions-trigger').click()`);
+      assert.equal(await wait("!!document.querySelector('.session-actions-menu')"), true);
+      assert.equal(await evaluate(`(() => {const row=document.querySelector('.session-row').getBoundingClientRect();
+        const icon=document.querySelector('.session-actions-trigger').getBoundingClientRect();
+        const menu=document.querySelector('.session-actions-menu').getBoundingClientRect();
+        return icon.right<=row.right+1 && icon.width<=32 && menu.right<=${width} && menu.left>=0 && menu.width<=row.width && menu.bottom<=800;
+      })()`), true);
+      await evaluate("document.querySelector('.session-actions-trigger').click()");
+      assert.equal(await wait("!document.querySelector('.session-actions-menu')"), true);
+    }
+    await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
+    await evaluate("document.querySelector('#project-list button[title=\"/fixture/project\"]').click()");
+    assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one'"), true);
+    await evaluate("[...document.querySelectorAll('.session-row')].find(row=>row.textContent.includes('two')).dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}))");
+    assert.equal(await wait("document.querySelector('.session-actions-menu') && document.querySelector('.session-header h1')?.textContent==='one'"), true);
+    await evaluate("document.querySelector('.session-actions-menu').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
+    assert.equal(await wait("!document.querySelector('.session-actions-menu')"), true);
+    await evaluate("[...document.querySelectorAll('.session-row')].find(row=>row.textContent.includes('two')).querySelector('.session-actions-trigger').click()");
+    assert.equal(await wait("document.querySelector('.session-actions-menu') && document.querySelector('.session-header h1')?.textContent==='one'"), true,
+      "opening another row's menu must not change the selection");
+    await evaluate("document.querySelector('.session-actions-menu [role=menuitem]').click()");
+    assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='two' && !document.querySelector('.session-actions-menu')"), true);
+    await evaluate("[...document.querySelectorAll('.session-row')].find(row=>row.textContent.includes('one')).querySelector('.session-actions-trigger').click()");
+    assert.equal(await wait("document.querySelector('.session-actions-menu') && document.querySelector('.session-header h1')?.textContent==='two'"), true);
+    await evaluate("document.querySelector('.session-row:nth-child(1) > button:first-child').click()");
+    assert.equal(await wait("!document.querySelector('.session-actions-menu') && document.querySelector('.session-header h1')?.textContent==='one'"), true,
+      "switching the selected session dismisses a different row's menu without admitting its actions");
+    await evaluate("document.querySelector('.session-row:nth-child(2) > button:first-child').click()");
+    assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='two'"), true);
+    await evaluate("[...document.querySelectorAll('.session-row')].find(row=>row.textContent.includes('one')).querySelector('.session-actions-trigger').click()");
+    await evaluate("[...document.querySelectorAll('.session-actions-menu button')].find(button=>button.textContent==='Rename…').click()");
+    assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one' && document.activeElement===document.querySelector('.session-rename input')"), true);
+    await evaluate("document.querySelector('.session-rename button:last-child').click()");
+    assert.equal(await wait("!document.querySelector('.session-rename') && window.settingsShellFixture.renameRequests.length===0"), true);
+    await evaluate("document.querySelector('.session-actions-trigger').click()");
+    await evaluate("[...document.querySelectorAll('.session-actions-menu button')].find(button=>button.textContent.includes('Delete…')).click()");
+    assert.equal(await wait("!!document.querySelector('.session-delete input') && window.settingsShellFixture.deleteRequests.length===0"), true);
+    assert.equal(await evaluate("document.querySelector('.session-delete button:not(:last-child)').disabled"), true);
+    await evaluate("document.querySelector('.session-delete button:last-child').click()");
+    assert.equal(await wait("!document.querySelector('.session-delete') && window.settingsShellFixture.deleteRequests.length===0"), true);
+    await evaluate("document.querySelector('.session-actions-trigger').click()");
+    await evaluate("[...document.querySelectorAll('.session-actions-menu button')].find(button=>button.textContent==='Rename…').click()");
+    await evaluate(`(() => {const input=document.querySelector('.session-rename input');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Updated title');
+      input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+    await evaluate("[...document.querySelectorAll('.session-rename button')].find(button=>button.textContent==='Save title').click()");
+    assert.equal(await wait("window.settingsShellFixture.renameRequests.length===1"), true);
+    assert.deepEqual(await evaluate("window.settingsShellFixture.renameRequests[0] && ({sessionId:window.settingsShellFixture.renameRequests[0].sessionId,projectId:window.settingsShellFixture.renameRequests[0].projectId})"),
+      { sessionId: "one", projectId: "project" });
+    await evaluate("document.querySelector('.session-actions-trigger').click()");
+    assert.equal(await wait("document.querySelector('.session-actions-menu button:nth-child(2)')?.disabled && document.querySelector('.session-actions-menu button:nth-child(3)')?.disabled"), true);
+    await evaluate("window.settingsShellFixture.releaseMutation('rename')");
+    assert.equal(await wait("document.querySelector('.session-rail')?.textContent.includes('unconfirmed') && document.querySelector('.session-actions-menu button:nth-child(2)')?.disabled"), true);
+    assert.equal(await evaluate("window.settingsShellFixture.renameRequests.length===1 && window.settingsShellFixture.deleteRequests.length===0"), true);
+    await evaluate("localStorage.setItem('settingsFixtureFreshSnapshot','true'); [...document.querySelectorAll('.session-rail button')].find(button=>button.textContent==='Refresh title').click()");
+    assert.equal(await wait("!document.querySelector('.session-actions-menu') && document.querySelector('.session-rail')?.textContent.includes('unconfirmed')"), true,
+      "a refreshed row revision dismisses the captured menu without unlocking uncertainty or stealing focus");
+    assert.equal(await evaluate("window.settingsShellFixture.renameRequests.length"), 1);
+    await evaluate("document.querySelector('.session-actions-trigger').click()");
+    assert.equal(await wait("!!document.querySelector('.session-actions-menu')"), true);
+    await evaluate("document.querySelector('#project-list button[title=\"/fixture/other\"]').click()");
+    assert.equal(await wait("!document.querySelector('.session-actions-menu') && document.querySelector('.session-header h1')?.textContent==='other-session'"), true);
+    await evaluate("document.querySelector('#project-list button[title=\"/fixture/project\"]').click()");
+    assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one' && document.querySelector('.session-rail')?.textContent.includes('unconfirmed')"), true,
+      "switching scope cannot release the original unconfirmed rename");
+    // Fresh isolated owner for the destructive path; the previous uncertain owner was never retried or released.
+    await command("Page.reload");
+    assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one'"), true);
+    await evaluate("document.querySelector('.session-actions-trigger').click()");
+    await evaluate("[...document.querySelectorAll('.session-actions-menu button')].find(button=>button.textContent.includes('Delete…')).click()");
+    assert.equal(await wait("document.activeElement===document.querySelector('.session-delete input') && window.settingsShellFixture.deleteRequests.length===0"), true);
+    await evaluate(`(() => {const input=document.querySelector('.session-delete input');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'one');
+      input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+    assert.equal(await wait("document.querySelector('.session-delete button:not(:last-child)')?.disabled===false"), true);
+    await evaluate("document.querySelector('.session-delete button:not(:last-child)').click()");
+    assert.equal(await wait("window.settingsShellFixture.deleteRequests.length===1"), true);
+    assert.deepEqual(await evaluate("window.settingsShellFixture.deleteRequests[0] && ({sessionId:window.settingsShellFixture.deleteRequests[0].sessionId,projectId:window.settingsShellFixture.deleteRequests[0].projectId,confirmedTitle:window.settingsShellFixture.deleteRequests[0].confirmedTitle})"),
+      { sessionId: "one", projectId: "project", confirmedTitle: "one" });
+    await evaluate("document.querySelector('.session-actions-trigger').click()");
+    assert.equal(await wait("document.querySelector('.session-actions-menu button:nth-child(3)')?.disabled"), true);
+    await evaluate("window.settingsShellFixture.releaseMutation('delete')");
+    assert.equal(await wait("document.querySelector('.session-rail')?.textContent.includes('unconfirmed') && document.querySelector('.session-actions-menu button:nth-child(3)')?.disabled"), true);
+    assert.equal(await evaluate("window.settingsShellFixture.deleteRequests.length===1"), true);
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });
   }

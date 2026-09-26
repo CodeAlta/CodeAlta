@@ -19,7 +19,13 @@ const choiceReads: Array<{ request: { expectedEpoch: string; sessionId: string }
 const usageReads: Array<{ request: unknown; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
 const probes: unknown[] = [];
 const clearRequests: unknown[] = [];
+const renameRequests: unknown[] = [];
+const deleteRequests: unknown[] = [];
+const mutationReplies: Array<{ kind: "rename" | "delete"; resolve: (value: unknown) => void }> = [];
 Object.assign(window, { settingsShellFixture: { calls, sends, choiceReads, usageReads, probes, clearRequests,
+  renameRequests, deleteRequests,
+  releaseMutation(kind: "rename" | "delete") { const index = mutationReplies.findIndex(reply => reply.kind === kind);
+    if (index >= 0) mutationReplies.splice(index, 1)[0].resolve({}); },
   releaseChoices(mode: "ok" | "stale" | "different" = "ok") { for (const read of choiceReads.splice(0)) {
     const value = choices(read.request);
     read.resolve(mode === "stale" ? { ...value, status: "stale_epoch", epoch: "different-host" }
@@ -33,8 +39,12 @@ const choices = (request: { expectedEpoch: string; sessionId: string }) => ({ st
     ? [{ id: "new", name: "New", efforts: ["High"] }] : [])] });
 export const boot = { status: async () => ({ state: owned() ? "owned" : "catalog", hostAvailable: owned(),
   hostEpoch: owned() ? epoch : null, productName: "CodeAlta", version: "development" }) };
-export const workspace = { snapshot: async () => catalog, openProject: unavailable, readProjectName: unavailable,
-  renameProject: unavailable, createSession: unavailable, renameSession: unavailable, deleteSession: unavailable };
+export const workspace = { snapshot: async () => localStorage.getItem("settingsFixtureFreshSnapshot") === "true"
+  ? { ...catalog, sessions: catalog.sessions.map(row => ({ ...row, updatedAt: "2026-09-26T00:00:00Z" })) } : catalog,
+  openProject: unavailable, readProjectName: unavailable,
+  renameProject: unavailable, createSession: unavailable,
+  renameSession: (request: unknown) => { renameRequests.push(request); return new Promise(resolve => mutationReplies.push({ kind: "rename", resolve })); },
+  deleteSession: (request: unknown) => { deleteRequests.push(request); return new Promise(resolve => mutationReplies.push({ kind: "delete", resolve })); } };
 export const configuration = { snapshot: async () => ({ providers: [], plugins: [], pluginRuntimeAvailable: false }) };
 export const applicationLogs = { read: async () => { calls.push("logs"); return localStorage.getItem("settingsFixtureLogsOk") === "true"
   ? { status: "ok", rows: [{ timestamp: "t", level: "Info", logger: "fixture", text: "fixture row", textTruncated: false }],
