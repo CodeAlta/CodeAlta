@@ -412,6 +412,16 @@ Reload permits manual receipt browsing, not reconstruction of lost text/keys. Ab
 settlement is not rollback, decision retraction or run termination. The host's separate shared
 receipt capacity remains 256, paged 64 at a time.
 
+The composer visibly emphasizes **Cancel observed run** when an eligible point-in-time target
+is available, keeping **Send** as a separate secondary button. This is not a live-running indicator.
+A retained original Send keeps **Retry exact request** primary; retained run cancellation instead
+reads **Retry exact cancellation**, preserving its original target and manual recovery. Neither
+presentation changes nor cancellation clear the draft or initiate runtime reads. The two controls
+keep separate identities and handlers: editor Enter still sends, Ctrl+Enter steers, and expanded
+editor Enter closes without sending. Cancellation signalling does not establish run completion.
+On narrow screens the labelled controls wrap rather than clip; exact-target evidence and the
+separate **Abort original Send operation** remain available.
+
 Add **`--review-owned-command-permissions`** to the complete owned-mode command above to opt
 into manual review of supported plain command requests. The selected-session review shows the
 complete command, working directory and optional reason, with **Allow once / Deny / Cancel**.

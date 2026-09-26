@@ -294,18 +294,29 @@ test("mounted composer stays compact and its controls remain legible in both the
         sessionId: "fixture-session", expectedRuntimeInstanceId: "11111111-1111-4111-8111-111111111111", expectedAttachmentGeneration: "12" }));
     assert.equal(await evaluate(`document.querySelector('.prompt-input').value`), "Draft for compaction");
     assert.equal(await evaluate(`document.querySelector('.composer-notice:not([role])')?.textContent.includes('12')`), true);
-    await evaluate(`window.fixture.observe('new-run', 13); document.querySelector('#refresh-session-context').click()`);
+    await evaluate(`window.presentationSend = document.querySelector('.send-button');
+      window.presentationEditor = document.querySelector('#session-prompt');
+      window.presentationSend.focus(); window.fixture.observe('new-run', 13);
+      document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`document.querySelector('.advanced-session-controls dd')?.textContent === '13'`), "ready");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label^="Retry exact compaction"]')?.title.includes('12')`), true);
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), true,
       "a new observed run does not displace the older retained compaction target or cancellation control");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar .primary-button')?.textContent`), "Cancel observed run",
+      "eligible cancellation needs a truthful visible primary label, not an icon beside primary Send");
+    assert.equal(await evaluate(`window.presentationSend === document.querySelector('.send-button') &&
+      document.activeElement === window.presentationSend && window.presentationEditor === document.querySelector('#session-prompt')`), true,
+      "emphasis changes must retain the focused Send node and editor, never turn Send into Abort");
+    assert.equal(await evaluate(`document.querySelector('#session-prompt').value`), "Draft for compaction");
+    assert.equal(await evaluate(`window.fixture.abortCalls.length`), 0, "presentation must not admit cancellation");
+    assert.equal(await evaluate(`window.fixture.sendCalls.length`), 0, "presentation must not admit Send");
     for (const width of [390, 1120]) {
       await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
       for (const theme of ["dark", "light"]) {
         await evaluate(`document.documentElement.dataset.theme = '${theme}'`);
         const layout = await sample();
         assert.ok(layout.pageWidth <= layout.viewWidth + 2 && layout.panelScrollWidth <= layout.panelWidth + 2
-          && layout.toolbar <= (width === 390 ? 100 : 80), `${theme} ${width}px retained compaction plus cancellation toolbar: ${JSON.stringify(layout)}`);
+          && layout.toolbar <= (width === 390 ? 135 : 80), `${theme} ${width}px retained compaction plus labelled cancellation toolbar: ${JSON.stringify(layout)}`);
       }
     }
     await evaluate(`window.fixture.compactMode('hold'); document.querySelector('.composer-toolbar [aria-label^="Retry exact compaction"]').click();
@@ -334,6 +345,26 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await waitFor(`!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), "ready");
     assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), "ready");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar .send-button')?.textContent`), "Send");
+    const presentationReads = Number(await evaluate(`window.fixture.refreshes`));
+    await evaluate(`window.fixture.holdRuntimeRead(); document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`!document.querySelector('.cancel-run-button')`), "ready", "loading cannot retain new cancellation authority");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar .primary-button')?.textContent`), "Send");
+    await evaluate(`window.fixture.settleRuntimeRead()`);
+    assert.equal(await waitFor(`document.querySelector('.cancel-run-button')?.textContent === 'Cancel observed run'`), "ready");
+    await evaluate(`window.fixture.failRuntimeRead(true); document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`!document.querySelector('.cancel-run-button')`), "ready", "failed observation cannot invent a running state");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar .primary-button')?.textContent`), "Send");
+    await evaluate(`window.fixture.failRuntimeRead(false); document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`!!document.querySelector('.cancel-run-button')`), "ready");
+    assert.equal(await evaluate(`window.fixture.refreshes`), presentationReads + 3, "only the three explicit refreshes may read");
+    assert.equal(await evaluate(`window.fixture.abortCalls.length + window.fixture.sendCalls.length`), 0);
+    for (const flag of ['retiring', 'transitioning', 'draining']) {
+      await evaluate(`window.fixture.flags({${flag}:true});document.querySelector('#refresh-session-context').click()`);
+      assert.equal(await waitFor(`!document.querySelector('.cancel-run-button')`), "ready", `${flag} active observations cannot offer cancellation`);
+      assert.equal(await evaluate(`document.querySelector('.composer-toolbar .primary-button')?.textContent`), "Send");
+    }
+    await evaluate(`window.fixture.flags({});document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`!!document.querySelector('.cancel-run-button')`), "ready");
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')`), true);
     const steerButton = '.composer-toolbar [aria-label="Steer current composer to observed run"]';
     const writePrompt = (value: string) => evaluate(`(() => {const el=document.querySelector('#session-prompt');
@@ -359,7 +390,7 @@ test("mounted composer stays compact and its controls remain legible in both the
         assert.ok(icon.title.includes("run-one") && icon.svg && icon.outline === "solid");
         assert.ok(contrast(icon.color, icon.background) >= 4.5, `${width}/${theme} steer contrast: ${JSON.stringify(icon)}`);
         assert.ok(layout.pageWidth <= layout.viewWidth + 2 && layout.panelScrollWidth <= layout.panelWidth + 2
-          && layout.toolbar <= (width === 390 ? 100 : 80), `${width}/${theme} steer controls overflow: ${JSON.stringify(layout)}`);
+          && layout.toolbar <= (width === 390 ? 135 : 80), `${width}/${theme} steer and labelled cancellation controls overflow: ${JSON.stringify(layout)}`);
       }
     }
     const refreshBeforeSteer = await evaluate(`window.fixture.refreshes`);
@@ -418,10 +449,13 @@ test("mounted composer stays compact and its controls remain legible in both the
         const result = await sample();
         assert.ok(result.pageWidth <= result.viewWidth + 2 && result.panelScrollWidth <= result.panelWidth + 2,
           `${theme} ${width}px observed-run controls overflow: ${JSON.stringify(result)}`);
-        assert.ok(result.toolbar <= (width === 390 ? 100 : 80), `${theme} ${width}px observed-run toolbar grew: ${JSON.stringify(result)}`);
+        assert.ok(result.toolbar <= (width === 390 ? 135 : 80), `${theme} ${width}px labelled observed-run toolbar grew: ${JSON.stringify(result)}`);
         await evaluate(`document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]').focus()`);
         assert.equal(await evaluate(`JSON.stringify([document.activeElement?.getAttribute('aria-label'), getComputedStyle(document.activeElement).outlineStyle])`),
           '["Cancel observed run","solid"]');
+        const colors = JSON.parse((await evaluate(`JSON.stringify((() => {const s=getComputedStyle(document.activeElement);
+          return [s.color,s.backgroundColor];})())`))!) as [string, string];
+        assert.ok(contrast(...colors) >= 4.5, `${theme} cancellation label must be legible: ${colors}`);
       }
     }
     await evaluate(`(() => { const el = document.querySelector('.prompt-input');
@@ -435,6 +469,8 @@ test("mounted composer stays compact and its controls remain legible in both the
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
     assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]')`), "ready",
       `keyboard activation: ${await evaluate(`JSON.stringify([window.fixture.abortCalls.length,document.activeElement?.outerHTML?.slice(0,300)])`)}`);
+    assert.equal(await evaluate(`document.querySelector('.cancel-run-button')?.textContent`), "Retry exact cancellation",
+      "retained intent must visibly disclose recovery, not offer a new live-run action");
     assert.equal(await evaluate(`[...document.querySelectorAll('.composer-notice[role="status"]')].some(el=>el.textContent.includes('uncertain'))`), true);
     assert.equal(await evaluate(`[...document.querySelectorAll('.composer-notice:not([role])')].some(el=>el.textContent.includes('run run-one'))`), true);
     assert.equal(await evaluate(`JSON.stringify(window.fixture.abortCalls.map(({expectedEpoch,sessionId,expectedRuntimeInstanceId,expectedAttachmentGeneration,expectedRunId}) =>
@@ -448,11 +484,19 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]')?.getAttribute('aria-label').includes('run-one')`), true);
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]')?.title.includes('12')`), true);
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar .send-button')?.textContent`), "Send");
-    await evaluate(`window.fixture.mode('hold'); document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]').click();
-      document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]').click()`);
+    await evaluate(`window.fixture.mode('hold'); document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]').focus()`);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space", text: " ", windowsVirtualKeyCode: 32 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space", windowsVirtualKeyCode: 32 });
+    await evaluate(`document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]').click()`);
     assert.equal(await evaluate(`window.fixture.abortCalls.length`), 2, "in-flight retry excludes repeated admission");
     assert.equal(await evaluate(`window.fixture.abortCalls[0].clientRequestId === window.fixture.abortCalls[1].clientRequestId &&
       window.fixture.abortCalls[1].expectedRunId === 'run-one'`), true);
+    await evaluate(`window.fixture.failRuntimeRead(true);document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`[...document.querySelectorAll('[role="alert"]')].some(el=>el.textContent.includes('Runtime observation unavailable'))`), "ready");
+    assert.equal(await evaluate(`document.querySelector('.cancel-run-button')?.textContent`), "Retry exact cancellation");
+    assert.equal(await evaluate(`document.querySelector('.cancel-run-button')?.disabled`), true, "failed refresh does not unlock the live original waiter");
+    assert.equal(await evaluate(`document.querySelector('.cancel-run-button')?.title.includes('run-one')`), true);
+    await evaluate(`window.fixture.failRuntimeRead(false)`);
     await evaluate(`window.fixture.switchSession('fixture-other')`);
     assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), "ready");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]') === null`), true);
@@ -512,7 +556,7 @@ test("mounted composer stays compact and its controls remain legible in both the
         assert.ok(icon.title.includes('attachment 13') && icon.description.includes('never targets a run') && icon.svg && icon.outline === "solid");
         assert.ok(contrast(icon.color, icon.background) >= 4.5, `${width}/${theme} queue contrast: ${JSON.stringify(icon)}`);
         assert.ok(layout.pageWidth <= layout.viewWidth + 2 && layout.panelScrollWidth <= layout.panelWidth + 2
-          && layout.toolbar <= (width === 390 ? 100 : 80), `${width}/${theme} queue toolbar overflow: ${JSON.stringify(layout)}`);
+          && layout.toolbar <= (width === 390 ? 135 : 80), `${width}/${theme} queue and labelled cancellation toolbar overflow: ${JSON.stringify(layout)}`);
       }
     }
     const queueReads = await evaluate(`window.fixture.refreshes`);
@@ -631,10 +675,74 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await evaluate(`document.querySelector('#session-prompt').value`), "Newer independent queue draft");
     await evaluate(`window.fixture.observe('run-two',14);document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), "ready");
-    await evaluate(`window.fixture.retainSend('Pending exact Send text')`);
+    await evaluate(`window.fixture.mode('uncertain'); document.querySelector('.cancel-run-button').click()`);
+    assert.equal(await waitFor(`document.querySelector('.cancel-run-button')?.textContent === 'Retry exact cancellation'`), "ready");
+    await writePrompt('Pending exact Send text');
+    await evaluate(`window.fixtureChoicesFail=false; [...document.querySelectorAll('.advanced-session-controls button')]
+      .find(button=>button.textContent.includes('Refresh choices')).click()`);
+    assert.equal(await waitFor(`!document.querySelector('select[aria-label="Reasoning"]').disabled`), "ready");
+    await evaluate(`(() => {const select=document.querySelector('select[aria-label="Reasoning"]');select.value='high';
+      select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+    assert.equal(await waitFor(`document.querySelector('select[aria-label="Reasoning"]').value === 'high'`), "ready");
+    // Enter still owns Send even while cancellation is visually primary. Excluded keys stay editor input.
+    for (const extra of ["shiftKey:true", "altKey:true", "metaKey:true", "repeat:true", "isComposing:true", "keyCode:229"]) {
+      assert.equal(await evaluate(`(() => {const event=new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true,${extra}});
+        document.querySelector('#session-prompt').dispatchEvent(event);return event.defaultPrevented;})()`), false);
+    }
+    assert.equal(await evaluate(`window.fixture.sendCalls.length`), 0);
+    // The existing expanded modal owns Enter; it must close without dispatching either primary action.
+    await evaluate(`document.querySelector('#expand-session-prompt').click()`);
+    assert.equal(await waitFor(`!!document.querySelector('dialog[open]')`), "ready");
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", text: "\r", windowsVirtualKeyCode: 13 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    assert.equal(await waitFor(`!document.querySelector('dialog[open]')`), "ready");
+    assert.equal(await evaluate(`window.fixture.sendCalls.length`), 0);
+    assert.equal(await evaluate(`window.fixture.abortCalls.length`), 4);
+    await evaluate(`window.recoverySend=document.querySelector('.send-button');window.recoveryEditor=document.querySelector('#session-prompt');
+      window.recoveryCancel=document.querySelector('.cancel-run-button');document.querySelector('#session-prompt').focus();window.fixture.holdSend()`);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", text: "\r", windowsVirtualKeyCode: 13 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
     assert.equal(await waitFor(`document.querySelector('.composer-toolbar .send-button')?.textContent === 'Retry exact request'`), "ready");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar .primary-button')?.textContent`), "Retry exact request",
+      "original Send recovery takes primary precedence over cancellation");
+    assert.equal(await evaluate(`document.querySelector('.cancel-run-button')?.classList.contains('primary-button')`), false);
+    assert.equal(await evaluate(`window.recoverySend===document.querySelector('.send-button') && window.recoveryEditor===document.querySelector('#session-prompt') &&
+      window.recoveryCancel===document.querySelector('.cancel-run-button')`), true);
+    assert.equal(await evaluate(`window.fixture.sendCalls.length`), 1);
+    assert.equal(await evaluate(`document.querySelector('.send-button').disabled`), true, "primary recovery stays disabled during the original waiter");
+    await evaluate(`document.querySelector('.send-button').click()`);
+    assert.equal(await evaluate(`window.fixture.sendCalls.length`), 1);
+    await evaluate(`window.fixture.settleSend()`);
+    assert.equal(await waitFor(`!document.querySelector('.send-button').disabled`), "ready");
+    assert.equal(await evaluate(`JSON.stringify(window.fixture.sendCalls[0].selection)`),
+      JSON.stringify({providerKey:'fixture-provider',agentPromptId:'default',modelId:'fixture-model',reasoningEffort:'high'}));
+    await evaluate(`document.querySelector('.send-button').focus()`);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space", text: " ", windowsVirtualKeyCode: 32 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space", windowsVirtualKeyCode: 32 });
+    assert.equal(await waitFor(`window.fixture.sendCalls.length === 2`), "ready");
+    assert.equal(await evaluate(`window.fixture.sendCalls[0]===window.fixture.sendCalls[1] &&
+      window.fixture.sendCalls[1].text==='Pending exact Send text'`), true, "retry preserves immutable text, key and selection");
+    for (const width of [390,1120]) {
+      await command("Emulation.setDeviceMetricsOverride", {width,height:800,deviceScaleFactor:1,mobile:false});
+      for (const theme of ['dark','light']) {
+        await evaluate(`document.documentElement.dataset.theme='${theme}'`);
+        const layout=await sample();
+        assert.ok(layout.pageWidth<=layout.viewWidth+2 && layout.panelScrollWidth<=layout.panelWidth+2 && layout.toolbar<=(width===390 ? 135 : 80),
+          `${width}/${theme} simultaneous exact recovery must wrap without clipping: ${JSON.stringify(layout)}`);
+        assert.equal(await evaluate(`document.querySelector('.cancel-run-button')?.textContent`), 'Retry exact cancellation');
+      }
+    }
     assert.equal(await evaluate(`document.querySelector('.prompt-input').value`), "Pending exact Send text");
-    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), true,
+    await evaluate(`window.fixtureReceiptRows=[{kind:'Send',clientRequestId:'older-send',sessionId:'fixture-session',
+      operationId:'55555555-5555-4555-8555-555555555555',targetOperationId:null,state:'pending',outcome:null,code:null,runId:null,queueInsertion:null}];
+      [...document.querySelectorAll('.owned-session button')].find(b=>b.textContent==='Refresh receipts').click()`);
+    assert.equal(await waitFor(`[...document.querySelectorAll('button')].some(b=>b.textContent==='Abort original Send operation')`), "ready");
+    await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent==='Abort original Send operation').click()`);
+    assert.equal(await evaluate(`window.fixture.submissionAbortCalls[0]?.targetOperationId`), '55555555-5555-4555-8555-555555555555');
+    assert.equal(await evaluate(`window.fixture.abortCalls.length`), 4, "operation-targeted Abort must not dispatch run cancellation");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar .primary-button')?.textContent`), 'Retry exact request');
+    assert.equal(await evaluate(`document.querySelector('.prompt-input').value`), 'Pending exact Send text');
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]')`), true,
       "pending exact Send recovery does not disappear when observed-run cancellation is available");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')?.disabled`), true,
       "the retained Send text shown in a disabled editor is not an editable steering draft");
@@ -663,7 +771,10 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await compactKey('.project-rename input'), false);
     assert.equal(await compactKey('.composer-toolbar .send-button'), false);
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar .send-button')?.disabled`), true);
-    assert.equal(await evaluate(`window.fixture.abortCalls.length`), 3);
+    assert.equal(await evaluate(`document.querySelector('.cancel-run-button')?.disabled`), true);
+    await evaluate(`document.querySelector('.cancel-run-button').click();document.querySelector('.send-button').click()`);
+    assert.equal(await evaluate(`window.fixture.sendCalls.length`), 2);
+    assert.equal(await evaluate(`window.fixture.abortCalls.length`), 4);
     await evaluate(`document.querySelector('.owned-session').remove()`);
     assert.equal(await evaluate(`!!document.querySelector('#open-provider-configuration')`), false,
       "catalog-only composer has no redundant visible configuration launcher");

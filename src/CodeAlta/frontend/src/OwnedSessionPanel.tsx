@@ -195,6 +195,9 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   const observedSteerRun = captureSteering(epoch, sessionId, observedTarget, "x", "availability");
   const availableCompact = captureCompaction(epoch, sessionId, observedTarget, "availability");
   const availableAbortRun = captureAbortRun(epoch, sessionId, observedTarget, "availability");
+  // Emphasis only: original Send recovery wins; observations never become live-running state.
+  const cancellationPrimary = !pending && !invalidEpoch && (pendingAbortRun
+    ? capability.canSubmit(pendingAbortRun.request) : !!availableAbortRun && capability.canSubmit(availableAbortRun));
   const canCaptureQueue = captureQueue(epoch, sessionId, observedTarget, queueText, "availability") !== null;
   const availableComposerQueue = captureQueue(epoch, sessionId, observedTarget, text, "availability");
   const observedQueueAttachment = captureQueue(epoch, sessionId, observedTarget, "x", "availability");
@@ -453,15 +456,15 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
         title={pendingCompact ? `Manual retry of exact compaction: epoch ${pendingCompact.request.expectedEpoch}, session ${pendingCompact.request.sessionId}, runtime ${pendingCompact.request.expectedRuntimeInstanceId}, attachment ${pendingCompact.request.expectedAttachmentGeneration}, request ${pendingCompact.request.clientRequestId}`
           : `Compact observed idle attachment (Ctrl+F11; point-in-time idle observation permits only an attempt; provider must prove idle)`}>
         <AppIcon name="compact" size={16} /></button>}
-      {(availableAbortRun || pendingAbortRun) && <button type="button" className="composer-icon-button" onClick={abortRun}
+      {(availableAbortRun || pendingAbortRun) && <button type="button" className={`cancel-run-button${cancellationPrimary ? " primary-button" : ""}`} onClick={abortRun}
         disabled={invalidEpoch || !!pendingAbortRun?.inFlight || (pendingAbortRun
           ? !capability.canSubmit(pendingAbortRun.request) : !availableAbortRun || !capability.canSubmit(availableAbortRun))}
         aria-label={pendingAbortRun ? `Retry exact cancellation request for observed run ${pendingAbortRun.request.expectedRunId}` : "Cancel observed run"}
         aria-describedby="observed-run-cancellation-help"
         title={pendingAbortRun ? `Manual retry of exact cancellation: epoch ${pendingAbortRun.request.expectedEpoch}, session ${pendingAbortRun.request.sessionId}, runtime ${pendingAbortRun.request.expectedRuntimeInstanceId}, attachment ${pendingAbortRun.request.expectedAttachmentGeneration}, run ${pendingAbortRun.request.expectedRunId}, request ${pendingAbortRun.request.clientRequestId}`
           : `Cancel observed run ${availableAbortRun?.expectedRunId} (point-in-time runtime observation, not original Send Abort; signalling does not confirm completion)`}>
-        <AppIcon name="stop" size={16} /></button>}
-      <button type="button" className="primary-button send-button" disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : captureSubmission(epoch, sessionId, text, "availability") === null)} onClick={submit}>{pending ? "Retry exact request" : <><span>Send</span><AppIcon name="send" size={14} /></>}</button>
+        <AppIcon name="stop" size={16} /><span>{pendingAbortRun ? "Retry exact cancellation" : "Cancel observed run"}</span></button>}
+      <button type="button" className={`send-button${cancellationPrimary ? "" : " primary-button"}`} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : captureSubmission(epoch, sessionId, text, "availability") === null)} onClick={submit}>{pending ? "Retry exact request" : <><span>Send</span><AppIcon name="send" size={14} /></>}</button>
     </div>
     </div>
     <span id="observed-run-cancellation-help" className="sr-only">Targets a point-in-time observed run, not the original Send receipt. Cancellation signalled does not confirm run completion. Retained requests are only retried manually against their original target after the previous wait settles.</span>

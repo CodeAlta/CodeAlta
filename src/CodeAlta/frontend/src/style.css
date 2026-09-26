@@ -372,7 +372,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .history-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 5px 0 0; }
 .owned-session { padding: 11px 12px; }
 .owned-session .composer-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 5px; margin-top: 6px; }
-.owned-session .history-controls { flex: 0 0 auto; flex-wrap: nowrap; gap: 3px; margin: 0; }
+.owned-session .history-controls { flex: 0 1 auto; flex-wrap: wrap; gap: 3px; margin: 0; min-width: 0; }
 .owned-session .history-controls button { min-height: 30px; margin: 0; padding: 5px 8px; }
 .owned-session .history-controls .composer-icon-button { display: grid; place-items: center; width: 30px; padding: 4px; }
 .owned-session .history-controls [data-reminder-count] { display: inline-flex; align-items: center; gap: 2px; width: auto; }
@@ -407,6 +407,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .ask-question-navigation p { flex-basis: 100%; margin: 0; font-weight: 600; }
 .composer-hint { flex: 1; color: var(--muted); font-size: 11px; }
 .owned-session .primary-button { border-color: var(--accent-strong); color: white; background: var(--accent-strong); }
+.owned-session .cancel-run-button { display: inline-flex; align-items: center; gap: 6px; }
+.owned-session .cancel-run-button.primary-button { border-color: var(--red); color: var(--panel); background: var(--red); }
 .prompt-options { display: grid; grid-template-columns: repeat(3, minmax(88px, 1fr)) repeat(2, minmax(72px, auto)); gap: 2px; padding: 4px 6px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 65%, transparent); }
 .owned-session .prompt-options { margin: 5px -5px 7px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
 .prompt-options label, .prompt-state { min-width: 0; display: flex; align-items: center; gap: 5px; margin: 0; padding: 2px 5px; border: 0; color: var(--muted); background: transparent; text-align: left; font-size: 8px; text-transform: uppercase; letter-spacing: .05em; }
