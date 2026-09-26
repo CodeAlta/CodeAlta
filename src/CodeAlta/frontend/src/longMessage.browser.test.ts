@@ -135,9 +135,62 @@ test("mounted long persisted messages preserve copy, identity, follow and older 
     assert.equal(await evaluate("document.querySelector('.message-assistant .long-message-toggle').getAttribute('aria-expanded')"), "false", "same offset in a new session cannot reuse disclosure state");
     await click(".message-assistant .long-message-toggle");
     assert.equal(await wait("document.querySelector('.message-assistant .long-message-toggle').getAttribute('aria-expanded')==='true'"), true);
+    // The B-700 row keeps its History key across a same-revision refresh, but its copy source changes.
+    await evaluate(`(() => {
+      const savedSet=window.setTimeout.bind(window),savedClear=window.clearTimeout.bind(window);
+      window.toolFixture.copyResets=[];window.toolFixture.pendingCopies=[];
+      window.toolFixture.restoreTimers=()=>{window.setTimeout=savedSet;window.clearTimeout=savedClear};
+      window.setTimeout=(fn,ms,...args)=>{if(ms!==1600)return savedSet(fn,ms,...args);
+        const id=savedSet(()=>{},60000);window.toolFixture.copyResets.push({id,fn,cleared:false});return id};
+      window.clearTimeout=id=>{const reset=window.toolFixture.copyResets.find(v=>v.id===id);
+        if(reset)reset.cleared=true;savedClear(id)};
+      Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:text=>new Promise((resolve,reject)=>{
+        window.toolFixture.pendingCopies.push({text,resolve,reject})})}});
+      window.toolFixture.copyNode=document.querySelector('.message-assistant:has(.long-message-toggle) .copy-markdown');
+    })()`);
+    const copyButton = ".message-assistant:has(.long-message-toggle) .copy-markdown";
+    await click(copyButton);
+    assert.equal(await wait("window.toolFixture.pendingCopies.length===1"), true);
+    assert.match(String(await evaluate("window.toolFixture.pendingCopies[0].text")), /B-700$/);
     await evaluate("window.toolFixture.changeBody();document.querySelector('.history .section-heading button').click()");
     assert.equal(await wait("document.querySelector('.history').dataset.windowReady==='true' && document.querySelector('.message-assistant .long-message-toggle').getAttribute('aria-expanded')==='false'"), true,
       "a changed body at the same journal offset cannot inherit disclosure");
+    assert.equal(await evaluate(`window.toolFixture.copyNode===document.querySelector(${JSON.stringify(copyButton)})`), true,
+      "the production History owner reuses the row at the same key and revision");
+    await click(copyButton);
+    assert.equal(await wait("window.toolFixture.pendingCopies.length===2"), true);
+    assert.match(String(await evaluate("window.toolFixture.pendingCopies[1].text")), /changed B-700$/);
+    await evaluate("window.toolFixture.pendingCopies[1].resolve()");
+    assert.equal(await wait("window.toolFixture.copyResets.length===1 && window.toolFixture.copyNode.getAttribute('aria-label')==='Copied'"), true);
+    await evaluate("window.toolFixture.pendingCopies[0].reject(Error('stale private clipboard failure'))");
+    await evaluate("new Promise(resolve=>setTimeout(resolve,0))");
+    assert.equal(await evaluate("window.toolFixture.copyNode.getAttribute('aria-label')"), "Copied",
+      "a stale pre-refresh failure cannot replace newer feedback");
+    await click(copyButton);
+    assert.equal(await wait("window.toolFixture.pendingCopies.length===3"), true);
+    await evaluate("window.toolFixture.pendingCopies[2].resolve()");
+    assert.equal(await wait("window.toolFixture.copyResets.length===2 && window.toolFixture.copyNode.getAttribute('aria-label')==='Copied'"), true);
+    assert.equal(await evaluate("window.toolFixture.copyResets[0].cleared"), true);
+    await evaluate("window.toolFixture.copyResets[0].fn()"); // Deliver a queued callback despite clearTimeout.
+    assert.equal(await evaluate("window.toolFixture.copyNode.getAttribute('aria-label')"), "Copied",
+      "a canceled older reset cannot clear newer feedback");
+    await evaluate("window.toolFixture.select('A')");
+    assert.equal(await wait("document.querySelector('.history').dataset.windowReady==='true' && document.querySelector('.message-user .long-message-toggle')"), true);
+    assert.equal(await evaluate("window.toolFixture.copyResets[1].cleared"), true, "unmount clears its live timer");
+    await evaluate("window.toolFixture.select('B')");
+    assert.equal(await wait("document.querySelector('.history').dataset.windowReady==='true' && document.querySelector('.message-assistant .long-message-toggle')"), true);
+    assert.equal(await evaluate("document.querySelector('.message-assistant:has(.long-message-toggle) .copy-markdown').getAttribute('aria-label')"), "Copy CodeAlta as Markdown");
+    await click(copyButton);
+    assert.equal(await wait("window.toolFixture.pendingCopies.length===4"), true);
+    await evaluate("window.toolFixture.select('A')");
+    assert.equal(await wait("document.querySelector('.history').dataset.windowReady==='true' && document.querySelector('.message-user .long-message-toggle')"), true);
+    await evaluate("window.toolFixture.select('B')");
+    assert.equal(await wait("document.querySelector('.history').dataset.windowReady==='true' && document.querySelector('.message-assistant .long-message-toggle')"), true);
+    await evaluate("window.toolFixture.pendingCopies[3].resolve();window.toolFixture.copyResets[1].fn()");
+    await evaluate("new Promise(resolve=>setTimeout(resolve,0))");
+    assert.equal(await evaluate("document.querySelector('.message-assistant:has(.long-message-toggle) .copy-markdown').getAttribute('aria-label')"),
+      "Copy CodeAlta as Markdown", "an unmounted callback cannot publish on the remounted source");
+    await evaluate("window.toolFixture.restoreTimers()");
     await evaluate("Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:text=>{window.toolFixture.copied.push(text);return Promise.resolve()}}})");
     await click(".message-assistant:has(.long-message-toggle) .copy-markdown");
     assert.equal(await wait("window.toolFixture.copied.length===2"), true);

@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { AppIcon } from "./AppIcon";
 import { MarkdownContent } from "./MarkdownContent";
 import { writeMarkdown, type TimelineItem } from "./timeline";
@@ -16,12 +16,33 @@ export function TimelineMessage({ item }: { item: TimelineItem }) {
   const longBody = (item.category === "user" || item.category === "assistant") && (body?.length ?? 0) > longBodyThreshold;
   const expanded = longBody && disclosure?.source === body && disclosure.expanded;
   const reset = useRef<number | undefined>(undefined);
+  const active = useRef(false);
+  const copySequence = useRef(0);
+  useLayoutEffect(() => {
+    active.current = true;
+    setCopyState("idle");
+    return () => {
+      active.current = false;
+      copySequence.current++;
+      if (reset.current !== undefined) window.clearTimeout(reset.current);
+      reset.current = undefined;
+    };
+  }, [item.key, item.eventType, item.category, item.title, item.timestamp, item.copyMarkdown, item.truncated, item.bodyOmitted]);
   async function copy() {
-    if (!item.copyMarkdown) return;
-    const state = await writeMarkdown(text => navigator.clipboard.writeText(text), item.copyMarkdown);
-    setCopyState(state);
+    const text = item.copyMarkdown;
+    if (!text || !active.current) return;
+    const sequence = ++copySequence.current;
     if (reset.current !== undefined) window.clearTimeout(reset.current);
-    reset.current = window.setTimeout(() => setCopyState("idle"), 1600);
+    reset.current = undefined;
+    setCopyState("idle");
+    const state = await writeMarkdown(value => navigator.clipboard.writeText(value), text);
+    if (!active.current || sequence !== copySequence.current) return;
+    setCopyState(state);
+    reset.current = window.setTimeout(() => {
+      if (!active.current || sequence !== copySequence.current) return;
+      reset.current = undefined;
+      setCopyState("idle");
+    }, 1600);
   }
   const hasDetails = !!(item.detailMarkdown || item.details || item.metadata.length);
   const hasToolDetails = (item.category === "tool" || item.category === "file") && !!item.details;
