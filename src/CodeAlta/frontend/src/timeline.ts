@@ -124,7 +124,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     markdown = tool.status;
     // Retain the bounded supplied message without treating it as output or an outcome.
     if (normalizedKind === "toolcall" && !markdown && entry.text) detailMarkdown = entry.text;
-    detailsLabel = tool.detailsLabel;
+    detailsLabel = normalizedKind === "filechange" ? "File change record details" : tool.detailsLabel;
   } else if (entry.eventType === "system_prompt") {
     category = "prompt"; icon = "prompt";
     title = promptTitle(entry.text);

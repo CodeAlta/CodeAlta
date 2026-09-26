@@ -20,6 +20,8 @@ function createFixture() {
   const codeMarkdown = `\`\`\`ts\n${codeText}\n\`\`\`\n\n${codeText.split("\n").map(line => `    ${line}`).join("\n")}\n\n<script>window.codeInjected=true</script>`;
   let codeSuffix = "";
   let toolMessage = `  Supplied message\r\n\n${codeMarkdown}\n\n<img src=x onerror="window.messageInjected=true">\n  MESSAGE END  `;
+  let fileDetails = JSON.stringify({ command: longLine, files: ["../literal.cs", "C:\\supplied\\only.cs"],
+    diagnostic: '<img src=x onerror="window.fileInjected=true"><a href="file:///not-a-target">literal</a>' });
   let release: (() => void) | undefined;
   function row(index: number, session: string): HistoryResponse["entries"][number] {
     const omitted = session === "B" && index === 1;
@@ -37,13 +39,14 @@ function createFixture() {
       textTruncated: longUser, detailsTruncated: tool && !omitted, bodyOmitted: tool || longUser,
       ...(longAssistant ? assistantOverride : {}),
       ...(session === "D" ? { phase: "Canceled", text: toolMessage, textTruncated: true } : {}),
+      ...(session === "E" ? { kind: "FileChange", phase: "Started", text: "Supplied file record", details: fileDetails } : {}),
       ...(session === "C" && index > 0 ? { text: index === 1 ? "```\nshort\n```" : codeMarkdown + (index === 2 ? codeSuffix : ""),
         ...(index === 3 ? { eventType: "system_prompt" } : {}) } : {}) };
   }
   async function read(request: HistoryRequest): Promise<HistoryResponse> {
     calls.push(`${request.sessionId}:${request.cursor?.offset ?? "tail"}`);
     if (hold) { hold = false; await new Promise<void>(resolve => { release = resolve; }); }
-    const total = request.sessionId === "D" ? 1 : request.sessionId === "C" ? 4 : request.sessionId === "A" || longBodies ? 1205 : 3;
+    const total = request.sessionId === "D" || request.sessionId === "E" ? 1 : request.sessionId === "C" ? 4 : request.sessionId === "A" || longBodies ? 1205 : 3;
     const end = request.cursor ? Number(request.cursor.offset) / 200 : total;
     const start = Math.max(0, end - 100);
     return { status: "ok", entries: Array.from({ length: end - start }, (_, i) => row(start + i, request.sessionId)),
@@ -72,6 +75,8 @@ function createFixture() {
         replaceAssistant: (value: typeof assistantOverride) => { assistantOverride = value; },
         codeText, codeMarkdown, changeCode: () => { codeSuffix = "\nChanged source"; },
         toolMessage, replaceToolMessage: (value: string) => { toolMessage = value; },
+        fileCopy: `\`\`\`\n${longLine}\n\`\`\`\n\n${JSON.stringify(JSON.parse(fileDetails), null, 2)}`,
+        replaceFileDetails: () => { fileDetails = '{"command":"replacement literal","files":["../replacement.cs"]}'; },
         rerender: () => rerender(value => value + 1),
         hold: () => { hold = true; }, release: () => { release?.(); release = undefined; } });
       Object.assign(window, { toolFixture: fixture });

@@ -159,6 +159,45 @@ test("timeline preserves bounded details and identifiers behind disclosure", () 
   assert.ok(item.metadata.includes("Activity: activity"));
 });
 
+for (const details of ['{"files":["literal.cs"]}', '{"command":"literal command"}']) {
+  test(`FileChange disclosure identifies the record with ${details}`, () => {
+    const [item] = buildTimelineItems([entry({ eventType: "activity", kind: "FileChange", details })]);
+    assert.equal(item.detailsLabel, "File change record details");
+  });
+}
+
+test("FileChange label preserves every other field, bounds and provider/run isolation", () => {
+  for (const phase of ["Started", "Completed", "Failed", "Canceled"]) {
+    for (const details of [null, '{"path":"cut', '{"files":["../literal.cs"]}', '{"command":"literal command"}']) {
+      const inputs = ["FileChange", "filechange", "FILECHANGE"].map((kind, i) => entry({
+        eventType: "activity", kind, phase, details, offset: String(i), activityId: "same", name: "fixture",
+        providerId: i === 1 ? "other-provider" : "provider", runId: i === 2 ? "other-run" : "run",
+        text: `supplied ${i}`, textTruncated: true, detailsTruncated: true, bodyOmitted: true,
+      }));
+      const items = buildTimelineItems(inputs);
+      assert.equal(items.length, inputs.length);
+      items.forEach((item, i) => {
+        // CommandExecution shares the pre-existing generic activity presentation, without
+        // ToolCall's distinct supplied-message retention. Only file classification/label differ.
+        const [generic] = buildTimelineItems([{ ...inputs[i], kind: "CommandExecution" }]);
+        const kindLabel = inputs[i].kind === "FileChange" ? "File Change" : inputs[i].kind === "filechange" ? "Filechange" : "FILECHANGE";
+        assert.deepEqual(item, { ...generic, category: "file", icon: "file",
+          subtitle: `${phase} · ${kindLabel}`, detailsLabel: "File change record details" });
+      });
+    }
+  }
+  for (const kind of ["ToolCall", "CommandExecution", "WebSearch"]) {
+    for (const details of [null, '{"command":"literal command"}']) {
+      const [item] = buildTimelineItems([entry({ eventType: "activity", kind, details })]);
+      assert.equal(item.detailsLabel, details ? "Command and result" : "Tool details");
+    }
+  }
+  for (const input of [entry({ kind: "FileChangeOutput" }),
+    entry({ eventType: "sessionUpdate", kind: "DiffUpdated" }), entry({ kind: "FileChange" })]) {
+    assert.equal(buildTimelineItems([input])[0].detailsLabel, "Details");
+  }
+});
+
 test("notes use the latest set or clear event", () => {
   assert.equal(latestNotes([
     entry({ eventType: "notes", kind: "Set", text: "# First" }),

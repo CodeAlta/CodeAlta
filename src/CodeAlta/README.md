@@ -356,6 +356,8 @@ disclosure. Inside it, **Wrap lines** is on by default and can be switched per c
 turning it off scrolls long lines inside the detail pane. This only changes how the already loaded plain text
 is displayed: Markdown and copied content remain unchanged, and omitted or shortened details remain marked.
 There is no request for missing output, additional history, or live provider data when opening or wrapping a card.
+Persisted FileChange activities label this disclosure **File change record details**, regardless of phase
+or command presence. This identifies the supplied record, not applied changes, a complete diff or file-navigation authority.
 Persisted ToolCall messages hidden by a primary command/query/path/prompt summary remain available inside
 that disclosure as **Supplied activity message**, and in full retained-source Copy. The exact bounded message
 is not interpreted as an output or verified outcome; existing phase labels and omission/shortening warnings
