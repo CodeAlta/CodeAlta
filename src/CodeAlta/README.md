@@ -380,6 +380,49 @@ Equivalent refreshes and retained older-page records preserve intentional expans
 displayed record identity or omission evidence clears it, including a short-body interlude or A→B→A
 replacement; returning to an earlier source does not restore its previous expansion.
 
+### Markdown and useful HTML boundary
+
+Timeline, live text and Notes use markdown-it **15.0.2** with the CommonMark preset,
+raw HTML enabled, explicit pipe-table/strikethrough/linkify rules and hard line breaks.
+This is not full GFM or a CommonMark-conformance claim. Task markers remain literal;
+strike renders as `s` rather than `del`. Grid tables, footnotes, task-list plugins,
+Prism highlighting/autoload and Mermaid rendering are not implemented. Footnote-like
+syntax may parse as an ordinary reference link instead. Mixed inline HTML/Markdown
+renders; Markdown inside block HTML follows CommonMark blank-line boundaries, not
+arbitrary nested Markdown interpretation.
+
+The browser-independent parser returns **untrusted HTML**, never directly injected.
+Each mounted `MarkdownContent` owns its parser and DOMPurify **3.4.14** instance/hooks.
+The explicit boundary retains paragraphs, breaks, headings, blockquotes, lists and
+definition lists, pre/code, ordinary text formatting, links, span/div, authored
+tables/captions/sections/cells, and details/summary. The precise tag list is
+`p br hr h1 h2 h3 h4 h5 h6 blockquote pre code ul ol li dl dt dd strong em s del b i u
+sub sup kbd samp var abbr a span div table caption thead tbody tfoot tr th td details summary`.
+Attributes are limited to title, safe anchor href, bounded code language class,
+details open, th scope, cell alignment/spans (1–100), and bounded list start/value/reversed.
+Table alignment uses `align`, never authored CSS. Authored IDs, app classes, handlers,
+ARIA/data/role/tabindex authority, scripts, styles, forms, frames, objects, embeds,
+images/media and SVG/MathML are not accepted. Sanitized pre/code can receive only the
+renderer-owned harmless timeline region attributes; no markup can create app controls.
+
+Markdown images become **escaped alt text**; authored image/fetch nodes are removed.
+Only credential-free absolute HTTP(S) anchor href survives; relative, mailto, custom,
+executable and credentialed URLs do not. Fuzzy www/email/IP linkification is disabled.
+Trusted container click, auxiliary-click and Enter handling suppresses link navigation;
+there is no external opener or bridge action. Native context-menu and custom-origin
+behavior remain separate qualification gates, not a promise that every native gesture
+is suppressed. Raw source Copy, including CRLF and fences, remains independent of the
+rendered display. Parser/sanitizer errors display inert original source, never exception
+details. Equivalent source preserves rendered DOM/focus/selection/inner scroll.
+
+Production CSP is unchanged and **`base-uri 'none'` remains required**: hostile base
+markup can produce blocked base-assignment diagnostics during parsing/removal even
+when final DOM is clean. Mounted production-component tests use fake in-memory HTTPS
+assets, pre-navigation interception and 600 ms deferred observation; unexpected requests,
+navigation or execution fail even if intercepted. This finite browser evidence is not
+a security audit or equivalence to `app://codealta`/native WebView2. No CSP relaxation,
+iframe workaround or blanket HTML escaping is used.
+
 Code blocks in persisted timeline Markdown (including Markdown details) wrap within the card and
 use at most 14 rendered text lines plus padding/border; short blocks keep their natural height.
 All retained code remains selectable. Tab enters the labelled code region; arrows, Page Up/Down,

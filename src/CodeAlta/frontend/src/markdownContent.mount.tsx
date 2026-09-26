@@ -1,0 +1,87 @@
+import { createElement } from "react";
+import { flushSync } from "react-dom";
+import { createRoot } from "react-dom/client";
+import { MarkdownContent } from "./MarkdownContent";
+import { TimelineMessage } from "./TimelineMessage";
+import type { TimelineItem } from "./timeline";
+import MarkdownIt from "markdown-it";
+
+// Literal fixtures only; no application host, clipboard or bridge.
+const root = createRoot(document.getElementById("app")!);
+const state = { phase: "ready", executed: 0, opens: [] as string[], copies: [] as string[],
+  policies: [] as { directive: string; uri: string; phase: string }[], parses: 0, parsedBases: [] as string[] };
+window.open = ((url?: string | URL) => { state.opens.push(String(url)); return null; }) as typeof window.open;
+Object.defineProperty(navigator, "clipboard", { value: { writeText: async (text: string) => { state.copies.push(text); } } });
+document.addEventListener("securitypolicyviolation", e => state.policies.push({ directive: e.effectiveDirective, uri: e.blockedURI, phase: state.phase }));
+const nativeParse = DOMParser.prototype.parseFromString;
+DOMParser.prototype.parseFromString = function (text, type) {
+  state.phase = "dom-parse"; state.parses++;
+  const doc = nativeParse.call(this, text, type);
+  state.parsedBases.push(doc.baseURI);
+  state.phase = "sanitize";
+  return doc;
+};
+const cases = [
+  { id: "useful", source: '<div><b>bold</b><kbd>key</kbd><details open><summary>Inspect</summary><p>detail</p></details><table><caption>Values</caption><tr><th scope="col">A</th><td colspan="2">42</td></tr></table></div>', selectors: "b,kbd,details[open] summary,table caption,th[scope=col],td[colspan='2']" },
+  { id: "mixed", source: 'Inline <span>**mixed**</span>\nnext\n\n<div>\n\n*blank boundary*\n\n</div>\n\n| A | B |\n| :- | -: |\n| 1 | 2 |', selectors: 'span strong,br,div em,th[align=left],td[align=right]' },
+  { id: "code", source: '```unknown-tool\r\n<a>&\r\n```\r\n\r\n    indented\r\n\r\n<pre id="session-prompt" class="copy-markdown" tabindex="3" role="button" aria-label="spoof"><code class="language-ts">raw &lt;b&gt;</code></pre>', selectors: 'pre.timeline-code[tabindex="0"][role=region] code.language-unknown-tool' },
+  { id: "links", source: '[safe](https://remote.invalid/safe) [relative](/path) [mail](mailto:x@y.invalid) [creds](https://u:p@remote.invalid/) <a href="jav&#x61;script:window.markdownFixture.state.executed++">bad</a> www.example.invalid x@y.invalid', selectors: 'a[href="https://remote.invalid/safe"]' },
+  { id: "self-import", source: '<div><style>@import url("https://markdown-production.invalid/import.css");</style></div>' },
+  { id: "remote-import", source: '<div><style>@import url("https://remote.invalid/import.css");</style></div>' },
+  { id: "css-url", source: '<div style="background:url(https://markdown-production.invalid/image)">text</div><div style="background:url(https://remote.invalid/image)">text</div>' },
+  { id: "images", source: '![alt <b>](https://markdown-production.invalid/md.png)\n\n<img src="https://markdown-production.invalid/raw.png" onerror="window.markdownFixture.state.executed++"><picture><source srcset="https://remote.invalid/source"><img srcset="https://markdown-production.invalid/one 1x, https://remote.invalid/two 2x"></picture>' },
+  { id: "media", source: '<video autoplay src="https://markdown-production.invalid/video" poster="https://remote.invalid/poster"><track src="https://markdown-production.invalid/track"></video><audio src="https://remote.invalid/audio"></audio>' },
+  { id: "links-frames", source: '<div><link rel=stylesheet href="https://markdown-production.invalid/style"><link rel=stylesheet href="https://remote.invalid/style"><iframe src="https://markdown-production.invalid/frame"></iframe><iframe src="https://remote.invalid/frame"></iframe></div>' },
+  { id: "data", source: '<img src="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 onload=%22parent.markdownFixture.state.executed++%22%3E%3C/svg%3E"><iframe src="data:text/html,%3Cscript%3Eparent.markdownFixture.state.executed++%3C/script%3E"></iframe>' },
+  { id: "base", source: '<div><base href="https://remote.invalid/base/"><meta http-equiv=refresh content="0;url=https://markdown-production.invalid/navigation"></div>' },
+  { id: "foreign", source: '<svg><a xlink:href="jav&#x61;script:window.markdownFixture.state.executed++">x</a><foreignObject><iframe src="https://markdown-production.invalid/foreign"></iframe></foreignObject></svg><math><mtext><table><mglyph><style><!--</style><img title="--><img src=https://markdown-production.invalid/malformed onerror=window.markdownFixture.state.executed++>">' },
+  { id: "authority", source: '<div id="session-prompt" class="timeline-code copy-markdown" data-persisted-message="true" tabindex="0" role="button" aria-label="Send"><button>Run</button><form action="https://markdown-production.invalid/post"><input name="neoastra"></form><object data="https://markdown-production.invalid/object"></object><embed src="https://remote.invalid/embed"><script>window.markdownFixture.state.executed++</script><span onclick="window.open(\'https://remote.invalid\')">text</span></div>' },
+];
+function item(source: string): TimelineItem {
+  return { key: "literal", eventType: "contentCompleted", category: "assistant", title: "Assistant", icon: "assistant",
+    timestamp: "2026-01-01T00:00:00Z", subtitle: null, summary: null, summaryIsCode: false, detailMarkdown: null, details: null,
+    markdown: source, copyMarkdown: source, metadata: [], detailsLabel: "Details", truncated: false, bodyOmitted: false };
+}
+function render(source: string, timeline = true) {
+  state.phase = "render";
+  flushSync(() => root.render(timeline ? createElement(TimelineMessage, { item: item(source) }) : createElement(MarkdownContent, { source })));
+  state.phase = "insert-deferred";
+}
+function snapshot() {
+  const content = document.querySelector(".markdown-content")!;
+  return { ...state, html: content?.innerHTML, text: content?.textContent, location: location.href, base: document.baseURI, frames: frames.length,
+    prohibited: content ? Array.from(content.querySelectorAll("script,style,img,picture,source,video,audio,track,iframe,link,base,meta,object,embed,svg,math,form,input,button,textarea,select")).map(e => e.outerHTML) : [],
+    attributes: content ? Array.from(content.querySelectorAll("*")).flatMap(e => Array.from(e.attributes).filter(a => /^on|^(style|id|name|data-.*|src|srcset|srcdoc|target|download|ping|action|formaction)$/i.test(a.name)
+      || /^(role|tabindex|aria-.*)$/.test(a.name) && !(e.tagName === "PRE" && e.className === "timeline-code"
+        && (a.name === "role" && a.value === "region" || a.name === "tabindex" && a.value === "0" || a.name === "aria-label" && a.value === "Code block"))
+      || a.name === "class" && !(e.tagName === "PRE" && a.value === "timeline-code" || e.tagName === "CODE" && /^language-[a-zA-Z0-9_-]{1,32}$/.test(a.value))).map(a => `${e.tagName}:${a.name}=${a.value}`)) : [] };
+}
+Object.assign(window, { markdownFixture: { state, cases, render, snapshot,
+  run(index: number) { render(cases[index].source); return (cases[index].selectors?.split(",") ?? []).every(s => document.querySelector(`.markdown-content ${s}`)); },
+  linkRect() { const a = document.querySelector<HTMLAnchorElement>(".markdown-content a[href]")!; a.focus(); return a.getBoundingClientRect().toJSON(); },
+  codeCheck() {
+    const texts = Array.from(document.querySelectorAll(".markdown-content pre code")).map(e => e.textContent);
+    (document.querySelector(".copy-markdown") as HTMLButtonElement).click();
+    return texts;
+  },
+  memoCheck() {
+    const source = '```txt\n' + 'line\n'.repeat(45) + '```'; render(source);
+    const toggle = document.querySelector<HTMLButtonElement>(".long-message-toggle"); if (toggle) flushSync(() => toggle.click());
+    const pre = document.querySelector<HTMLElement>("pre.timeline-code")!;
+    pre.style.height = "40px"; pre.style.overflow = "auto"; pre.focus(); pre.scrollTop = 30;
+    const text = pre.querySelector("code")!.firstChild!; const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 4);
+    const selection = getSelection()!; selection.removeAllRanges(); selection.addRange(range);
+    const parses = state.parses; render(source);
+    return { identity: document.querySelector("pre") === pre, focused: document.activeElement === pre, selection: selection.toString(), scroll: pre.scrollTop, reparsed: state.parses !== parses };
+  },
+  fallback(kind: "parser" | "sanitizer") {
+    const source = '<img src="https://markdown-production.invalid/fallback" onerror="window.markdownFixture.state.executed++"> original';
+    const parse = MarkdownIt.prototype.render, fragment = Document.prototype.createDocumentFragment;
+    try {
+      if (kind === "parser") MarkdownIt.prototype.render = () => { throw new Error("private parser detail"); };
+      else Document.prototype.createDocumentFragment = () => { throw new Error("private sanitizer detail"); };
+      flushSync(() => root.render(createElement(MarkdownContent, { key: kind, source, timelineCodeBlocks: true })));
+      return { source, ...snapshot() };
+    } finally { MarkdownIt.prototype.render = parse; Document.prototype.createDocumentFragment = fragment; }
+  },
+} });

@@ -1,12 +1,9 @@
-import DOMPurify from "dompurify";
 import { useMemo, type KeyboardEvent } from "react";
-import { renderMarkdownHtml } from "./markdown";
+import { createMarkdownRenderer } from "./markdownBoundary";
 
 export function MarkdownContent({ source, timelineCodeBlocks = false }: { source: string; timelineCodeBlocks?: boolean }) {
-  const html = useMemo(() => DOMPurify.sanitize(renderMarkdownHtml(source, timelineCodeBlocks), {
-    FORBID_ATTR: ["style"],
-    FORBID_TAGS: ["button", "form", "input", "option", "select", "style", "textarea"],
-  }), [source, timelineCodeBlocks]);
+  const render = useMemo(() => createMarkdownRenderer(window), []);
+  const html = useMemo(() => render(source, timelineCodeBlocks), [render, source, timelineCodeBlocks]);
   // React compares this prop by identity. Equivalent persisted refreshes must not
   // replace focused code DOM, its selection or its inner scroll position.
   const codeMarkup = useMemo(() => ({ __html: html }), [html]);
@@ -35,6 +32,12 @@ export function MarkdownContent({ source, timelineCodeBlocks = false }: { source
     code.scrollTop = Math.max(0, Math.min(maximum, top));
   }
 
-  return <div className="markdown-content" onKeyDown={timelineCodeBlocks ? scrollCode : undefined}
-    dangerouslySetInnerHTML={timelineCodeBlocks ? codeMarkup : { __html: html }} />;
+  function suppressLink(event: { target: EventTarget; preventDefault(): void }) {
+    if ((event.target as Element).closest("a")) event.preventDefault();
+  }
+  return <div className="markdown-content" onClick={suppressLink} onAuxClick={suppressLink}
+    onKeyDown={event => {
+      if (event.key === "Enter") suppressLink(event);
+      if (timelineCodeBlocks) scrollCode(event);
+    }} dangerouslySetInnerHTML={codeMarkup} />;
 }
