@@ -6,7 +6,7 @@ import { History } from "./HistoryPanel";
 import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePosition } from "./timelineScroll";
 import { dispatchWorkspaceShortcut, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
 import { MarkdownContent } from "./MarkdownContent";
-import { LiveTextMessage } from "./LiveSessionPanel";
+import { LiveTextMessage, LiveToolMessage } from "./LiveSessionPanel";
 
 function createFixture() {
   const memory = createTimelineScrollMemory();
@@ -19,6 +19,7 @@ function createFixture() {
   const codeText = Array.from({ length: 35 }, (_, i) => `line-${i + 1} ${"界🙂".repeat(12)}`).join("\n") + "\n" + "界🙂".repeat(90);
   const codeMarkdown = `\`\`\`ts\n${codeText}\n\`\`\`\n\n${codeText.split("\n").map(line => `    ${line}`).join("\n")}\n\n<script>window.codeInjected=true</script>`;
   let codeSuffix = "";
+  let toolMessage = `  Supplied message\r\n\n${codeMarkdown}\n\n<img src=x onerror="window.messageInjected=true">\n  MESSAGE END  `;
   let release: (() => void) | undefined;
   function row(index: number, session: string): HistoryResponse["entries"][number] {
     const omitted = session === "B" && index === 1;
@@ -35,13 +36,14 @@ function createFixture() {
       details: tool && !omitted ? JSON.stringify({ command: longLine, result: { output: `${longLine}\n${longLine}\n<img src=x onerror=alert(1)>` } }) : null,
       textTruncated: longUser, detailsTruncated: tool && !omitted, bodyOmitted: tool || longUser,
       ...(longAssistant ? assistantOverride : {}),
+      ...(session === "D" ? { phase: "Canceled", text: toolMessage, textTruncated: true } : {}),
       ...(session === "C" && index > 0 ? { text: index === 1 ? "```\nshort\n```" : codeMarkdown + (index === 2 ? codeSuffix : ""),
         ...(index === 3 ? { eventType: "system_prompt" } : {}) } : {}) };
   }
   async function read(request: HistoryRequest): Promise<HistoryResponse> {
     calls.push(`${request.sessionId}:${request.cursor?.offset ?? "tail"}`);
     if (hold) { hold = false; await new Promise<void>(resolve => { release = resolve; }); }
-    const total = request.sessionId === "C" ? 4 : request.sessionId === "A" || longBodies ? 1205 : 3;
+    const total = request.sessionId === "D" ? 1 : request.sessionId === "C" ? 4 : request.sessionId === "A" || longBodies ? 1205 : 3;
     const end = request.cursor ? Number(request.cursor.offset) / 200 : total;
     const start = Math.max(0, end - 100);
     return { status: "ok", entries: Array.from({ length: end - start }, (_, i) => row(start + i, request.sessionId)),
@@ -69,6 +71,7 @@ function createFixture() {
         grow: setDeferredHeight, calls, enableLong: () => { longBodies = true; }, changeBody: () => { changedBody = true; },
         replaceAssistant: (value: typeof assistantOverride) => { assistantOverride = value; },
         codeText, codeMarkdown, changeCode: () => { codeSuffix = "\nChanged source"; },
+        toolMessage, replaceToolMessage: (value: string) => { toolMessage = value; },
         rerender: () => rerender(value => value + 1),
         hold: () => { hold = true; }, release: () => { release?.(); release = undefined; } });
       Object.assign(window, { toolFixture: fixture });
@@ -99,6 +102,9 @@ function createFixture() {
           onNavigationReset: reset, newestRequest: newest.requestRef, onNewestResult: newest.onResult }),
         createElement("div", { className: "deferred-layout", style: { height: deferredHeight } })),
       createElement("p", { role: "status", className: "navigation-notice" }, notice),
+      sessionId === "D" && createElement("div", { className: "unchanged-live-tool" },
+        createElement(LiveToolMessage, { row: { providerId: "literal-provider", runId: null, activityId: "tool-0",
+          phase: "Completed", name: "Literal name", isNameTruncated: true } })),
       sessionId === "C" && createElement("div", { className: "unchanged-markdown" },
         createElement(MarkdownContent, { source: codeMarkdown }),
         createElement(LiveTextMessage, { row: { runId: "literal", contentId: "code", kind: "Assistant", text: codeMarkdown,

@@ -356,6 +356,11 @@ disclosure. Inside it, **Wrap lines** is on by default and can be switched per c
 turning it off scrolls long lines inside the detail pane. This only changes how the already loaded plain text
 is displayed: Markdown and copied content remain unchanged, and omitted or shortened details remain marked.
 There is no request for missing output, additional history, or live provider data when opening or wrapping a card.
+Persisted ToolCall messages hidden by a primary command/query/path/prompt summary remain available inside
+that disclosure as **Supplied activity message**, and in full retained-source Copy. The exact bounded message
+is not interpreted as an output or verified outcome; existing phase labels and omission/shortening warnings
+remain unchanged. Failed/no-summary messages still appear in the body without duplication. Live tool cards
+continue to show only their supplied name, reported phase and identity.
 Following the loaded timeline stays at the latest visible bottom across layout-only changes. Wheel, scroll-key,
 scrollbar (including a held drag after a pause) and touch-drag navigation can still unfollow when it coincides
 with a detail layout change; merely

@@ -399,6 +399,44 @@ test("mounted persisted details and code retain access, follow, older anchors an
     assert.equal(await evaluate(`document.querySelector('${codeRow} .long-message-toggle').getAttribute('aria-expanded')`), "false", "changed source does not retain a hidden code region");
     await click(`${codeRow} .long-message-toggle`);
     assert.equal(await evaluate(`document.querySelector('${code}').textContent.trimEnd()===window.toolFixture.codeText`), true);
+    // A supplied persisted ToolCall message is retained, not promoted to an outcome/body.
+    await evaluate("window.toolFixture.select('D')");
+    assert.equal(await wait("document.querySelector('.history').dataset.windowReady==='true' && document.querySelectorAll('.history .timeline-message').length===1"), true);
+    const supplied = ".history .timeline-message";
+    const suppliedDetails = `${supplied} .event-details`;
+    const suppliedCode = `${suppliedDetails} .markdown-content pre`;
+    assert.equal(await evaluate(`document.querySelector('${suppliedDetails}').open`), false);
+    assert.equal(await evaluate(`document.querySelector('${supplied} .message-body > .markdown-content')===null`), true);
+    assert.equal(await evaluate(`document.querySelector('${supplied} .message-heading small').textContent`), "Canceled · Tool Call");
+    assert.equal(await evaluate(`document.querySelector('${suppliedDetails}').textContent.includes('Supplied activity message')`), true);
+    const messageReads = await evaluate("window.toolFixture.calls.length");
+    await evaluate(`document.querySelector('${suppliedDetails} summary').focus()`);
+    await press(" ", "Space", 32);
+    assert.equal(await wait(`document.querySelector('${suppliedDetails}').open`), true);
+    assert.equal(await evaluate(`!!document.querySelector('${suppliedDetails} .markdown-content script, ${suppliedDetails} .markdown-content [onerror]') || !!window.messageInjected || !!window.codeInjected`), false);
+    assert.equal(await evaluate(`(() => {const p=document.querySelector('${suppliedCode}');return p.tabIndex===0 && !!p.getAttribute('aria-label') && p.scrollHeight>p.clientHeight && p.clientHeight<400})()`), true);
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('${suppliedDetails} .event-detail-body > pre')).whiteSpace`), "pre-wrap");
+    await click(`${suppliedDetails} .tool-detail-wrap input`);
+    assert.equal(await evaluate(`document.querySelector('${suppliedDetails} .tool-detail-wrap input').checked`), false);
+    await evaluate("window.toolFixture.copied=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:text=>{window.toolFixture.copied.push(text);return Promise.resolve()}}})");
+    await click(`${supplied} .copy-markdown`);
+    assert.equal(await wait("window.toolFixture.copied.length===1"), true);
+    assert.equal(await evaluate("window.toolFixture.copied[0].includes(window.toolFixture.toolMessage) && window.toolFixture.copied[0].includes('tool-diagnostic-')"), true);
+    assert.equal(await evaluate(`document.querySelector('${supplied}').textContent.includes('Some details were shortened') && document.querySelector('${supplied}').textContent.includes('Additional diagnostic details were omitted')`), true);
+    assert.equal(await evaluate("window.toolFixture.calls.length"), messageReads, "disclosure, Wrap and Copy acquire no new history");
+    await evaluate(`window.savedMessageCode=document.querySelector('${suppliedCode}')`);
+    await click(".history .section-heading button");
+    assert.equal(await wait("document.querySelector('.history').dataset.windowReady==='true'"), true);
+    assert.equal(await evaluate(`window.savedMessageCode===document.querySelector('${suppliedCode}') && document.querySelector('${suppliedDetails}').open`), true);
+    await evaluate("window.toolFixture.replaceToolMessage('Replacement supplied message')");
+    await click(".history .section-heading button");
+    assert.equal(await wait(`document.querySelector('${suppliedDetails}').textContent.includes('Replacement supplied message')`), true);
+    assert.equal(await evaluate(`document.querySelector('${suppliedDetails}').textContent.includes('MESSAGE END') || window.savedMessageCode.isConnected`), false);
+    await click(`${supplied} .copy-markdown`);
+    assert.equal(await wait("window.toolFixture.copied.length===2"), true);
+    assert.equal(await evaluate("window.toolFixture.copied[1].includes('Replacement supplied message') && !window.toolFixture.copied[1].includes('MESSAGE END')"), true);
+    assert.equal(await evaluate("document.querySelector('.unchanged-live-tool').textContent"), "Literal name · Reported CompletedName prefix truncated.Live tool identityProvider literal-provider · run not supplied · activity tool-0");
+    assert.equal(await evaluate("window.toolFixture.network"), 0);
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }

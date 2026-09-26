@@ -122,6 +122,8 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     summary = tool.primary;
     summaryIsCode = tool.primaryIsCode;
     markdown = tool.status;
+    // Retain the bounded supplied message without treating it as output or an outcome.
+    if (normalizedKind === "toolcall" && !markdown && entry.text) detailMarkdown = entry.text;
     detailsLabel = tool.detailsLabel;
   } else if (entry.eventType === "system_prompt") {
     category = "prompt"; icon = "prompt";

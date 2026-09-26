@@ -77,6 +77,61 @@ test("tool activities expose the tool and first command while folding duplicate 
   assert.match(items[0].details!, /"command": "dotnet test/);
 });
 
+test("persisted ToolCall retains the exact otherwise-hidden Canceled message in details and Copy", () => {
+  const text = "  Supplied cancellation message\r\nnot an inferred outcome  ";
+  const details = JSON.stringify({ command: "echo fixture", result: { success: true } });
+  const [item] = buildTimelineItems([entry({ eventType: "activity", kind: "ToolCall", phase: "Canceled",
+    name: "shell_command", text, details })]);
+  assert.equal(item.title, "shell_command");
+  assert.equal(item.subtitle, "Canceled · Tool Call");
+  assert.equal(item.summary, "echo fixture");
+  assert.equal(item.markdown, null);
+  assert.deepEqual({ detail: item.detailMarkdown, copy: item.copyMarkdown }, {
+    detail: text, copy: `\`\`\`\necho fixture\n\`\`\`\n\n${text}\n\n${formatDetails(details)}`,
+  });
+});
+
+test("supplied tool messages preserve phase, bounds, branches and provider/run separation", () => {
+  const base = entry({ eventType: "activity", kind: "ToolCall", activityId: "same", name: "fixture",
+    details: JSON.stringify({ command: "literal command", result: { output: "DO NOT PROJECT", success: true } }) });
+  const inputs = ["Started", "Progressed", "Completed"].map((phase, i) => ({ ...base, phase, offset: String(i),
+    providerId: i === 1 ? "other" : "provider", runId: i === 2 ? "other-run" : "run",
+    text: `  supplied ${phase}\r\n\t`, textTruncated: true, detailsTruncated: true, bodyOmitted: true }));
+  const items = buildTimelineItems(inputs);
+  assert.equal(items.length, inputs.length);
+  items.forEach((item, i) => {
+    assert.equal(item.detailMarkdown, inputs[i].text);
+    assert.equal(item.markdown, null);
+    assert.equal(item.subtitle, `${inputs[i].phase} · Tool Call`);
+    assert.equal(item.summary, "literal command");
+    assert.equal(item.truncated, true);
+    assert.equal(item.bodyOmitted, true);
+    assert.ok(item.metadata.includes(`Provider: ${inputs[i].providerId}`));
+    assert.ok(item.metadata.includes(`Run: ${inputs[i].runId}`));
+    inputs.forEach((input, j) => assert.equal(item.copyMarkdown!.includes(input.text), i === j));
+  });
+  for (const text of [null, "", " \r\n "]) {
+    const [item] = buildTimelineItems([{ ...base, phase: "Canceled", text }]);
+    assert.equal(item.detailMarkdown, text || null);
+    assert.equal(item.markdown, null);
+  }
+  for (const overrides of [{ phase: "Failed" }, { details: null }, { details: '{"command":"cut' }]) {
+    const [item] = buildTimelineItems([{ ...base, phase: "Canceled", text: "supplied", ...overrides,
+      detailsTruncated: true, bodyOmitted: true }]);
+    assert.equal(item.markdown, "supplied");
+    assert.equal(item.detailMarkdown, null);
+    assert.equal(item.copyMarkdown!.split("supplied").length - 1, 1);
+    assert.equal(item.truncated, true);
+    assert.equal(item.bodyOmitted, true);
+  }
+  for (const kind of ["FileChange", "CommandExecution", "WebSearch"]) {
+    const [item] = buildTimelineItems([{ ...base, kind, phase: "Canceled", text: "unchanged hidden" }]);
+    assert.equal(item.detailMarkdown, null);
+    assert.equal(item.markdown, null);
+    assert.equal(item.copyMarkdown!.includes("unchanged hidden"), false);
+  }
+});
+
 test("model changes show provider, model, and reasoning without a verbose primary body", () => {
   const [item] = buildTimelineItems([entry({ eventType: "sessionUpdate", kind: "ModelChanged", text: "Model selection changed.",
     details: JSON.stringify({ providerKey: "openai", modelId: "gpt-5", reasoningEffort: "high" }) })]);

@@ -76,7 +76,10 @@ export function TimelineMessage({ item }: { item: TimelineItem }) {
       </> : body && <MarkdownContent source={body} timelineCodeBlocks />}
       {hasDetails && <details className="event-details"><summary><AppIcon name="chevronDown" size={14} />{item.detailsLabel}</summary>
         <div className="event-detail-body">
-          {item.detailMarkdown && item.detailMarkdown !== item.markdown && <MarkdownContent source={item.detailMarkdown} timelineCodeBlocks />}
+          {item.detailMarkdown && item.detailMarkdown !== item.markdown && <>
+            {item.eventType === "activity" && item.category === "tool" && <p className="muted-text">Supplied activity message</p>}
+            <MarkdownContent source={item.detailMarkdown} timelineCodeBlocks />
+          </>}
           {item.details && <pre className={hasToolDetails && wrapDetails ? "tool-detail-pre-wrap" : undefined}>{item.details}</pre>}
           {hasToolDetails && <label className="tool-detail-wrap"><input type="checkbox" checked={wrapDetails}
             onChange={event => setWrapDetails(event.target.checked)} />Wrap lines</label>}
