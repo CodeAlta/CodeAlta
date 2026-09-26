@@ -44,7 +44,6 @@ import { activateContextShortcut } from "./contextShortcut";
 import { createDraftIndicators } from "./promptDraft";
 import { SessionDraftBadge } from "./SessionDraftBadge";
 import { collapsedSessionWidth, constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizeCollapsedSessionPane, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
-import { visibleConfigurationSections, type ConfigurationScope } from "./configurationSections";
 import { composerBounds, composerSizeKey, rememberComposerHeight, resizeComposerHeight } from "./composerHeight";
 import { AppIcon } from "./AppIcon";
 import { sessionTime } from "./sessionTime";
@@ -79,8 +78,9 @@ type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; e
   latestReady: () => boolean; latest: () => void; cancelLatest: () => void }>;
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
-type View = "workspace" | "configuration" | "providers" | "models" | "prompts" | "reminders" | "mcp" | "logs";
+type View = "workspace" | "appearance" | "providers" | "models" | "prompts" | "reminders" | "mcp" | "logs" | "skills" | "plugins" | "about";
 type SettingsSection = Exclude<View, "workspace" | "reminders">;
+type SettingsCardPage = Exclude<SettingsSection, "models" | "mcp">;
 const paneLayoutStorageKey = "codealta.desktop.panes.v1";
 
 function App() {
@@ -108,7 +108,7 @@ function App() {
   currentView.current = view;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsVisible = useRef(false);
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("configuration");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
   const currentSettingsSection = useRef<SettingsSection>(settingsSection);
   currentSettingsSection.current = settingsSection;
   const settingsOrigin = useRef<HTMLElement | null>(null);
@@ -453,12 +453,12 @@ function App() {
     palettePending.current = null;
     if (dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') ||
       !paletteAvailable(action, captured, paletteContext())) return;
-    if (action === "about") { navigate("configuration"); settingsOrigin.current = paletteOrigin.current; aboutOrigin.current = { element: null, view: currentView.current }; setDialog("about"); return; }
+    if (action === "about") { navigate("about"); settingsOrigin.current = paletteOrigin.current; aboutOrigin.current = { element: null, view: currentView.current }; setDialog("about"); return; }
     if (action === "sessionInfo") sessionInfoTrigger.current?.click();
     else if (action === "reminders") navigate("reminders");
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
     else if (action === "focusSearch") searchInput.current?.focus();
-    else { navigate(action === "settings" ? "configuration" : action); settingsOrigin.current = paletteOrigin.current; }
+    else { navigate(action === "settings" ? "appearance" : action); settingsOrigin.current = paletteOrigin.current; }
   });
 
   useEffect(() => {
@@ -534,7 +534,7 @@ function App() {
     else if (action === "models") navigate("models");
     else if (action === "prompts") navigate("prompts");
     else if (action === "providers") navigate("providers");
-    else if (action === "settings" || action === "plugins") navigate(action === "plugins" ? "mcp" : "configuration");
+    else if (action === "settings" || action === "plugins") navigate(action === "plugins" ? "mcp" : "appearance");
     else if (action === "toggleNotes") setNotesVisible(value => !value);
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
     else if (action === "focusSearch") searchInput.current?.focus();
@@ -560,7 +560,7 @@ function App() {
       setSessionId(next);
     } else if (action === "context") {
       if (workspaceShell.current?.querySelector(".owned-session #refresh-session-context")) activateContextShortcut(workspaceShell.current);
-      else navigate("configuration");
+      else navigate("appearance");
     }
   }
 
@@ -939,6 +939,10 @@ function App() {
     setPaneLayout(current => ({ ...current, [pane]: defaultPaneLayout[pane] }));
   }
 
+  const settingsCard = (page: SettingsCardPage) => <ConfigurationPanel page={page} status={status}
+    selectedSession={selectedSession} configurationState={configurationState}
+    preferences={{ theme, setTheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices }}
+    onOpenAbout={openAbout} />;
   return <div className="app-shell">
     <header className="topbar">
       <div className="brand"><span className="brand-mark">A</span><span>CodeAlta</span><small>{demoMode ? "interactive preview" : "desktop"}</small>
@@ -998,7 +1002,7 @@ function App() {
           {projectRenameNotice && <p role="alert" className="notice error-text">{projectRenameNotice}</p>}
           {projectRenameLocked && <button type="button" className="quiet-button" onClick={() => void refreshProjectRename()}>Refresh project name (no retry)</button>}
           <div className="rail-footer">
-            <button type="button" className="quiet-button icon-label-button" onClick={() => navigate("configuration")}><AppIcon name="settings" size={14} />Settings &amp; extensions</button>
+            <button type="button" className="quiet-button icon-label-button" onClick={() => navigate("appearance")}><AppIcon name="settings" size={14} />Settings &amp; extensions</button>
           </div>
         </aside>
 
@@ -1124,21 +1128,21 @@ function App() {
                 timelineCommand={timelineCommand} />}
         </main>
       </div>}
-    {settingsOpen && <SettingsOverlay section={settingsSection} onSection={navigate}
-      onClose={closeSettings} onAbout={openAbout}>
-      {settingsSection === "configuration" ? <ConfigurationPanel status={status} selectedSession={selectedSession} configurationState={configurationState}
-        preferences={{ theme, setTheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices }}
-        onOpenProviders={() => navigate("providers")} onOpenModels={() => navigate("models")} onOpenPrompts={() => navigate("prompts")} onOpenLogs={() => navigate("logs")}
-        onOpenAbout={openAbout} />
-      : settingsSection === "logs" ? <ApplicationLogsPanel clearActions={logClearActions} read={demoMode
-        ? async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }) : applicationLogs.read} />
-      : settingsSection === "providers" ? <ProvidersPanel epoch={owned ? status!.hostEpoch : null}
+    {settingsOpen && <SettingsOverlay section={settingsSection} onSection={navigate} onClose={closeSettings}>
+      {settingsSection === "appearance" || settingsSection === "skills" || settingsSection === "plugins" || settingsSection === "about"
+        ? settingsCard(settingsSection)
+      : settingsSection === "logs" ? <>{settingsCard("logs")}
+        <ApplicationLogsPanel clearActions={logClearActions} read={demoMode
+          ? async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }) : applicationLogs.read} /></>
+      : settingsSection === "providers" ? <>{settingsCard("providers")}
+        <ProvidersPanel epoch={owned ? status!.hostEpoch : null}
         read={modelCatalog.providers} probe={modelCatalog.probe} catalogProviders={configurationState.snapshot?.providers} holds={providerProbeHolds}
-        onOpenModels={() => navigate("models")} />
+        onOpenModels={() => navigate("models")} /></>
       : settingsSection === "mcp" ? <McpServersPanel target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
         ? { sessionId: selectedSession.id, epoch: status!.hostEpoch!, projectId: selectedSession.projectId ?? null } : null}
         read={mcpInventory.list} />
-      : settingsSection === "prompts" ? <PromptCatalogPanel epoch={owned ? status!.hostEpoch : null} readPrompts={promptCatalog.list}
+      : settingsSection === "prompts" ? <>{settingsCard("prompts")}
+        <PromptCatalogPanel epoch={owned ? status!.hostEpoch : null} readPrompts={promptCatalog.list}
         readChoices={sessionOperations.choices} target={owned && currentProjectWritable() && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
           ? { sessionId: selectedSession.id, epoch: status!.hostEpoch! } : null}
         selections={nextSendSelections} pendingSend={!!(selectedSession && submissions.pending(selectedSession.id))}
@@ -1155,7 +1159,7 @@ function App() {
           }, nextSendSelections);
           if (result === "applied" && !signal.aborted) closeSettings();
           return result;
-        }} />
+        }} /></>
       : <ModelCatalogPanel epoch={owned ? status!.hostEpoch : null}
         readProviders={modelCatalog.providers} readModels={modelCatalog.models} readChoices={sessionOperations.choices}
         target={owned && currentProjectWritable() && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
@@ -1215,9 +1219,9 @@ function App() {
 
 // Native modal matches the other shell dialogs: showModal supplies inert background,
 // browser-managed focus trapping and nested native About dialog top-layer ordering.
-function SettingsOverlay({ section, onSection, onClose, onAbout, children }: {
+function SettingsOverlay({ section, onSection, onClose, children }: {
   section: SettingsSection; onSection: (section: SettingsSection) => void;
-  onClose: () => void; onAbout: (origin: HTMLElement | null) => void; children: ReactNode;
+  onClose: () => void; children: ReactNode;
 }) {
   const modal = useRef<HTMLDialogElement>(null);
   const composingEscape = useRef(false);
@@ -1226,9 +1230,11 @@ function SettingsOverlay({ section, onSection, onClose, onAbout, children }: {
     element?.showModal();
     return () => { if (element?.open) element.close(); };
   }, []);
-  const destinations: readonly [SettingsSection, string][] = [
-    ["configuration", "Overview"], ["providers", "Providers"], ["models", "Models"],
-    ["prompts", "Agent prompts"], ["mcp", "MCP Servers"], ["logs", "Logs"],
+  const destinations: readonly [string, readonly [SettingsSection, string][]][] = [
+    ["Personalization", [["appearance", "Appearance"]]],
+    ["Agent & models", [["providers", "Providers"], ["models", "Models"], ["prompts", "Agent prompts"], ["skills", "Skills"]]],
+    ["Extensions", [["plugins", "Plugins & MCP"], ["mcp", "MCP Servers"]]],
+    ["Diagnostics", [["logs", "Application Logs"], ["about", "About"]]],
   ];
   return <dialog ref={modal} className="settings-dialog" aria-modal="true" aria-labelledby="settings-title"
     onKeyDown={event => {
@@ -1240,14 +1246,17 @@ function SettingsOverlay({ section, onSection, onClose, onAbout, children }: {
     }} onKeyUp={() => { composingEscape.current = false; }} onCompositionEnd={() => { composingEscape.current = false; }}
     onCancel={event => { event.preventDefault(); if (!composingEscape.current) onClose(); }}>
     <header className="settings-dialog-header"><h2 id="settings-title">Settings</h2>
-      <div>{section !== "configuration" && <button type="button" className="quiet-button" onClick={() => onSection("configuration")}>Back to settings</button>}
-        <button type="button" className="icon-button" aria-label="Close settings" onClick={onClose}><AppIcon name="close" size={16} /></button></div></header>
-    <nav className="settings-dialog-navigation" aria-label="Settings sections">
-      {destinations.map(([value, label]) => <button key={value} type="button" aria-current={section === value ? "page" : undefined}
-        onClick={() => onSection(value)}>{label}</button>)}
-      <button type="button" onClick={event => onAbout(event.currentTarget)}>About</button>
-    </nav>
-    <div className="settings-dialog-content" key={section}>{children}</div>
+      <button type="button" className="icon-button" aria-label="Close settings" onClick={onClose}><AppIcon name="close" size={16} /></button></header>
+    <div className="settings-dialog-body">
+      <nav className="settings-dialog-navigation" aria-label="Settings pages">
+        {destinations.map(([group, pages]) => <div className="settings-dialog-group" key={group}>
+          <h3>{group}</h3>
+          {pages.map(([value, label]) => <button key={value} type="button" aria-current={section === value ? "page" : undefined}
+            onClick={() => onSection(value)}>{label}</button>)}
+        </div>)}
+      </nav>
+      <div className="settings-dialog-content" key={section}>{children}</div>
+    </div>
   </dialog>;
 }
 
@@ -1460,56 +1469,39 @@ function DemoConversation({ session }: { session: WorkspaceSession }) {
   </section>;
 }
 
-function ConfigurationPanel({ status, selectedSession, configurationState, preferences, onOpenProviders, onOpenModels, onOpenPrompts, onOpenLogs, onOpenAbout }: {
+function ConfigurationPanel({ page, status, selectedSession, configurationState, preferences, onOpenAbout }: {
+  page: SettingsCardPage;
   status: BootStatus | undefined;
   selectedSession: WorkspaceSession | undefined;
   configurationState: { snapshot?: ConfigurationSnapshot; error?: string };
   preferences: Parameters<typeof GeneralSettings>[0];
-  onOpenModels: () => void;
-  onOpenProviders: () => void;
-  onOpenPrompts: () => void;
-  onOpenLogs: () => void;
   onOpenAbout: (origin: HTMLElement | null) => void;
 }) {
   const inventory = configurationState.snapshot;
-  const [scope, setScope] = useState<ConfigurationScope>("all");
-  const [query, setQuery] = useState("");
-  const visible = new Set(visibleConfigurationSections(scope, query));
   const mcp = inventory?.plugins.find(plugin => `${plugin.id} ${plugin.name}`.toLowerCase().includes("mcp"));
-  return <main className="configuration-page">
-    <header className="page-heading"><span className="eyebrow">Desktop</span><h1>Configuration</h1><p>Inspect the active desktop environment and personalize this window.</p></header>
-    <div className="settings-layout">
-      <aside className="settings-navigation" aria-label="Configuration sections">
-        <label className="settings-search"><AppIcon name="search" size={14} /><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search settings" /></label>
-        <nav>{([ ["all", "All settings"], ["general", "General"], ["agent", "Agent"], ["extensions", "Extensions"] ] as const).map(([value, label]) =>
-          <button type="button" key={value} aria-pressed={scope === value} onClick={() => setScope(value)}>{label}</button>)}</nav>
-        <button type="button" onClick={onOpenModels}>Open model catalog</button>
-        <p>Configuration is read-only unless a card explicitly offers an editable control.</p>
-      </aside>
-      <div className="settings-grid">
-      {visible.has("appearance") && <GeneralSettings {...preferences} />}
-      {visible.has("logs") && <section className="settings-card"><div className="settings-icon"><AppIcon name="history" size={19} /></div><div><h2>Application Logs</h2><p>Read a bounded snapshot of this process's in-memory desktop logs. No log files are opened.</p><button type="button" className="quiet-button" onClick={onOpenLogs}>Open application logs</button></div></section>}
-      {visible.has("providers") && <section className="settings-card"><div className="settings-icon"><AppIcon name="model" size={19} /></div><div><h2>Providers</h2><p>Current session provider: <strong>{selectedSession?.providerKey ?? "not recorded"}</strong>.</p>
-        <button type="button" className="quiet-button" onClick={onOpenProviders}>Open provider management</button>
+  return <div className="configuration-page settings-card-page">
+    {page === "appearance" && <header className="page-heading"><span className="eyebrow">Desktop</span><h1>Appearance</h1><p>Personalize this window and project navigator.</p></header>}
+    <div className="settings-grid">
+      {page === "appearance" && <GeneralSettings {...preferences} />}
+      {page === "logs" && <section className="settings-card"><div className="settings-icon"><AppIcon name="history" size={19} /></div><div><h2>Application Logs</h2><p>Read a bounded snapshot of this process's in-memory desktop logs. No log files are opened.</p></div></section>}
+      {page === "providers" && <section className="settings-card"><div className="settings-icon"><AppIcon name="model" size={19} /></div><div><h2>Providers</h2><p>Current session provider: <strong>{selectedSession?.providerKey ?? "not recorded"}</strong>.</p>
         {configurationState.error && <p className="error-text">{configurationState.error}</p>}
         {!inventory && !configurationState.error && <p>Loading configured providers…</p>}
         {inventory && inventory.providers.length === 0 && <p>No provider inventory is exposed in this launch mode.</p>}
         {inventory?.providers.map(provider => <div className="inventory-row" key={provider.id}><span><strong>{provider.name}</strong><small>{provider.type} · {provider.defaultModel ?? "No default model"}</small></span><StatusPill label={provider.enabled ? "Enabled" : "Disabled"} /></div>)}
         {inventory?.providersTruncated && <p className="muted-text">Showing the first 32 configured providers.</p>}
       </div></section>}
-      {visible.has("prompts") && <section className="settings-card"><div className="settings-icon"><AppIcon name="prompt" size={19} /></div><div><h2>Agent prompts</h2><p>Inspect effective host prompts for the selected session and choose its next Send prompt.</p><button type="button" className="quiet-button" onClick={onOpenPrompts}>Browse agent prompts</button><StatusPill label={status?.hostAvailable ? "Session state available" : "Catalog history available"} /></div></section>}
-      {visible.has("skills") && <section className="settings-card"><div className="settings-icon"><AppIcon name="tool" size={19} /></div><div><h2>Skills</h2><p>Skills remain project/global filesystem resources and are available to shared agent sessions.</p><StatusPill label="Managed by CodeAlta runtime" /></div></section>}
-      {visible.has("plugins") && <section className="settings-card"><div className="settings-icon">⬡</div><div><h2>Plugins &amp; MCP</h2><p>Configured plugin policy is visible in catalog mode. Active state is shown only when the owned runtime has started that plugin.</p>
+      {page === "prompts" && <section className="settings-card"><div className="settings-icon"><AppIcon name="prompt" size={19} /></div><div><h2>Agent prompts</h2><p>Inspect effective host prompts for the selected session and choose its next Send prompt.</p><StatusPill label={status?.hostAvailable ? "Session state available" : "Catalog history available"} /></div></section>}
+      {page === "skills" && <section className="settings-card"><div className="settings-icon"><AppIcon name="tool" size={19} /></div><div><h2>Skills</h2><p>Skills remain project/global filesystem resources and are available to shared agent sessions.</p><StatusPill label="Managed by CodeAlta runtime" /></div></section>}
+      {page === "plugins" && <section className="settings-card"><div className="settings-icon">⬡</div><div><h2>Plugins &amp; MCP</h2><p>Configured plugin policy is visible in catalog mode. Active state is shown only when the owned runtime has started that plugin.</p>
         <div className="inventory-row"><span><strong>MCP servers</strong><small>Model Context Protocol runtime state</small></span><StatusPill label={mcp ? mcp.state : inventory?.pluginRuntimeAvailable ? "Not configured" : "Runtime not started"} /></div>
         {inventory?.plugins.map(plugin => <div className="inventory-row" key={plugin.id}><span><strong>{plugin.name}</strong><small>{plugin.version ?? "No version"} · {plugin.contributionCount} contributions</small></span><StatusPill label={plugin.state} /></div>)}
         {inventory && inventory.plugins.length === 0 && <StatusPill label={inventory.pluginRuntimeAvailable ? "No active plugins" : "Requires packaged host"} />}
         {inventory?.pluginsTruncated && <p className="muted-text">Showing the first 32 active plugins.</p>}
       </div></section>}
-      {visible.has("about") && <AboutSettingsEntry onOpen={onOpenAbout} />}
-      {visible.size === 0 && <div className="empty-settings"><h2>No matching settings</h2><p>Try a different search or configuration section.</p></div>}
-      </div>
+      {page === "about" && <AboutSettingsEntry onOpen={onOpenAbout} />}
     </div>
-  </main>;
+  </div>;
 }
 
 function StatusPill({ label }: { label: string }) { return <span className="status-pill">{label}</span>; }

@@ -179,6 +179,8 @@ test("production composer usage inspector reads only on intent and fences late/f
     await evaluate("window.requestAnimationFrame=window.usageOriginalFrame; document.querySelector('.project-rail .icon-label-button').click()");
     assert.equal(await wait("document.querySelector('.settings-dialog')?.open"), true);
     await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(button=>button.textContent==='About').click()");
+    assert.equal(await wait("document.querySelector('.settings-dialog-navigation button[aria-current=page]')?.textContent==='About' && !!document.querySelector('.settings-dialog-content .settings-card button')"), true);
+    await evaluate("document.querySelector('.settings-dialog-content .settings-card button').click()");
     assert.equal(await wait("document.querySelector('.about-dialog')?.open"), true);
     assert.equal(await evaluate(`(() => { for(const callback of window.usageCloseFrames) callback(performance.now());
       return document.querySelector('.about-dialog')?.open && document.activeElement?.closest('.about-dialog')!==null; })()`), true,

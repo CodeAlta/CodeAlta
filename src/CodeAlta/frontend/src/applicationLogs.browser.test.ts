@@ -45,8 +45,9 @@ test("clear owner retains uncertain original request and never retries or unlock
 test("mounted production logs screen is explicit, bounded, plain text and fences stale reads", { skip: !edge, timeout: 60_000 }, async () => {
   const app = readFileSync(fileURLToPath(new URL("./main.tsx", import.meta.url)), "utf8");
   assert.match(app, /useState\(\(\) => createApplicationLogClearActions\(applicationLogs\.clear\)\)/);
-  assert.match(app, /settingsSection === "logs" \? <ApplicationLogsPanel clearActions=\{logClearActions\} read=\{demoMode[\s\S]*?: applicationLogs\.read\}/);
-  assert.match(app, /onOpenLogs=\{\(\) => navigate\("logs"\)\}/);
+  assert.match(app, /settingsSection === "logs" \? <>\{settingsCard\("logs"\)\}\s*<ApplicationLogsPanel clearActions=\{logClearActions\} read=\{demoMode[\s\S]*?: applicationLogs\.read\}/);
+  assert.match(app, /\["Diagnostics", \[\["logs", "Application Logs"\], \["about", "About"\]\]\]/);
+  assert.match(app, /<SettingsOverlay section=\{settingsSection\} onSection=\{navigate\}/);
   const root = await mkdtemp(join(tmpdir(), "codealta-app-logs-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;

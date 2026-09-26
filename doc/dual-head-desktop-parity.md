@@ -2871,6 +2871,20 @@ results through the same filtering helper used by React. All **141 frontend beha
 production TypeScript/Vite build pass. Permissions, account/auth and model management, prompt/skill/
 plugin mutation, dirty-state persistence and backend-validated saves remain open M6 work.
 
+### M6 settings sidebar-only navigation — 2026-09-26 (awaiting independent acceptance)
+
+The desktop Settings modal retains its bottom-left-only shell entry, browser-native modal focus/inert
+behavior and approximately 80% viewport size. One vertical, grouped sidebar now selects actual
+Appearance, Providers, Models, Agent prompts, Skills, Plugins & MCP, MCP Servers, Application Logs
+and About pages instead of the earlier horizontal tabs and All Settings aggregate/search scopes.
+The former configuration cards remain on their corresponding pages, with provider/model/prompt/
+log detail panels and their existing read-only, unavailable, pending and uncertain states. About
+still opens its nested dialog from its page. Sidebar navigation does not start a provider, scan
+for skills, retry an uncertain action or alter the selected workspace/session. Modal close/reopen
+and page switching retain the existing mounted workspace, draft and exact-target action guards.
+This replaces the earlier M6 settings-navigation presentation, not its historical test evidence;
+native WebView2 interaction and full configuration-management parity remain unqualified.
+
 ### Accumulated persisted timeline paging — 2026-09-22
 
 **2026-09-24 latest-first history:** The shared cached-store history

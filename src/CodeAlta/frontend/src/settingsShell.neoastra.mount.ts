@@ -6,8 +6,10 @@ const session = { id: "one", title: "one", fullTitle: "one", fullTitleTruncated:
   projectId: localStorage.getItem("infoFixtureUnknown") === "true" ? null
     : localStorage.getItem("infoFixtureMismatched") === "true" ? "wrong" : "project", lineageIssue: null,
   workspacePath: "/fixture/project", providerKey: "fixture", updatedAt: "2026-09-24T00:00:00Z" };
-const catalog = { configured: true, projects: [{ id: "project", name: "Project", path: "/fixture/project", archived: localStorage.getItem("usageFixtureArchived") === "true" }],
+const catalog = { configured: true, projects: [{ id: "project", name: "Project", path: "/fixture/project", archived: localStorage.getItem("usageFixtureArchived") === "true" },
+    ...(localStorage.getItem("settingsFixtureSecondProject") === "true" ? [{ id: "other", name: "Other project", path: "/fixture/other", archived: false }] : [])],
   sessions: [session, { ...session, id: "two", title: "two", fullTitle: "two" },
+    ...(localStorage.getItem("settingsFixtureSecondProject") === "true" ? [{ ...session, id: "other-session", title: "other-session", fullTitle: "other-session", projectId: "other", workspacePath: "/fixture/other", providerKey: "other-provider" }] : []),
     ...(localStorage.getItem("infoFixtureAmbiguous") === "true" ? [{ ...session, title: "duplicate" }] : [])],
   projectsTruncated: localStorage.getItem("usageFixtureTruncated") === "true", sessionsTruncated: false, displayTextTruncated: false };
 const unavailable = async () => { throw new Error("test bridge unavailable"); };

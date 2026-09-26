@@ -14,7 +14,7 @@ const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
 test("mounted About settings and palette inspect only current boot identity", { skip: !edge, timeout: 60_000 }, async () => {
   const app = readFileSync(fileURLToPath(new URL("./main.tsx", import.meta.url)), "utf8");
   assert.match(app, /<AboutSettingsEntry onOpen=\{onOpenAbout\}/);
-  assert.match(app, /action === "about"\) \{ navigate\("configuration"\); settingsOrigin\.current = paletteOrigin\.current;/);
+  assert.match(app, /action === "about"\) \{ navigate\("about"\); settingsOrigin\.current = paletteOrigin\.current;/);
   assert.match(app, /<AboutDialog status=\{status\} bootError=\{!!error\} demo=\{demoMode\} onClose=\{closeAbout\}/);
   const root = await mkdtemp(join(tmpdir(), "codealta-about-"));
   let browser: ReturnType<typeof spawn> | undefined;

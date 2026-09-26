@@ -78,6 +78,29 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await evaluate("document.querySelector('.project-rail .icon-label-button').focus(); document.querySelector('.project-rail .icon-label-button').click()");
     assert.equal(await wait("document.querySelector('.settings-dialog')?.open"), true);
     assert.equal(await evaluate("document.querySelector('.settings-dialog').getBoundingClientRect().width"), 896);
+    assert.equal(await evaluate(`(() => { const dialog = document.querySelector('.settings-dialog');
+      const nav = dialog.querySelector('.settings-dialog-navigation');
+      const titles = [...nav.querySelectorAll('button')].map(button => button.textContent);
+      const buttons = [...nav.querySelectorAll('button')];
+      return !dialog.querySelector('.settings-search, .settings-navigation') &&
+        !titles.some(title => title === 'Overview' || title === 'All settings' || title === 'All Settings') &&
+        ['Appearance', 'Providers', 'Models', 'Agent prompts', 'Skills', 'Plugins & MCP', 'MCP Servers', 'Application Logs', 'About'].every(title => titles.includes(title)) &&
+        buttons[0].getBoundingClientRect().top < buttons[1].getBoundingClientRect().top &&
+        dialog.querySelector('.settings-dialog-content .page-heading h1')?.textContent === 'Appearance'; })()`), true,
+      "Settings must offer only grouped actual pages in a vertical sidebar, not an aggregate/tab strip");
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.settings-dialog-group h3')].map(x=>x.textContent)"),
+      ["Personalization", "Agent & models", "Extensions", "Diagnostics"]);
+    await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Skills').click()");
+    assert.equal(await wait("document.querySelector('.settings-dialog-navigation [aria-current=page]')?.textContent==='Skills' && document.querySelector('.settings-dialog-content .settings-card h2')?.textContent==='Skills'"), true);
+    assert.equal(await evaluate("!!document.querySelector('.settings-dialog-content #settings-project-sort')"), false);
+    await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Plugins & MCP').focus()");
+    assert.equal(await evaluate("document.activeElement?.textContent"), "Plugins & MCP");
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", text: "\r", windowsVirtualKeyCode: 13 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    assert.equal(await wait("document.querySelector('.settings-dialog-navigation [aria-current=page]')?.textContent==='Plugins & MCP' && document.querySelector('.settings-dialog-content .settings-card h2')?.textContent==='Plugins & MCP'"), true);
+    assert.equal(await evaluate("document.activeElement?.closest('.settings-dialog-navigation')!==null"), true);
+    await evaluate("document.querySelector('.settings-dialog-navigation button').click()");
+    assert.equal(await wait("document.querySelector('.settings-dialog-content #settings-project-sort')!==null"), true);
     assert.equal(await evaluate("window.originalComposer===document.querySelector('#catalog-prompt') && window.originalWorkspace===document.querySelector('.workspace-shell') && window.originalTimeline===document.querySelector('.timeline-scroll')"), true);
     assert.equal(await evaluate("document.activeElement.closest('.settings-dialog')!==null"), true);
     assert.equal(await evaluate("document.querySelector('.settings-dialog').matches(':modal')"), true);
@@ -86,15 +109,17 @@ test("production shell settings overlay keeps the session workspace mounted and 
     assert.equal(await evaluate("document.querySelector('.settings-dialog')?.open && document.querySelector('#catalog-prompt').value==='Private local draft'"), true);
     assert.equal(await evaluate("(() => {const d=document.querySelector('.settings-dialog'); d.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape',repeat:true,bubbles:true,cancelable:true})); return d.open})()"), true);
     assert.equal(await evaluate("(() => {const d=document.querySelector('.settings-dialog'); d.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape',isComposing:true,bubbles:true,cancelable:true})); return d.open})()"), true);
-    await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Logs').click()");
-    assert.equal(await wait("document.querySelector('.settings-dialog-navigation [aria-current=\"page\"]')?.textContent==='Logs'"), true);
+    await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Application Logs').click()");
+    assert.equal(await wait("document.querySelector('.settings-dialog-navigation [aria-current=\"page\"]')?.textContent==='Application Logs'"), true);
     assert.equal(await evaluate("window.settingsShellFixture.calls.length"), 0);
     await evaluate("[...document.querySelectorAll('.application-logs button')].find(x=>x.textContent.includes('Refresh logs')).click()");
     assert.equal(await wait("window.settingsShellFixture.calls.length===1 && document.querySelector('.application-logs')?.textContent.includes('No files were read')"), true);
     assert.equal(await evaluate("window.originalComposer===document.querySelector('#catalog-prompt') && document.querySelector('#catalog-prompt').value==='Private local draft'"), true);
-    await evaluate("document.querySelector('.settings-dialog-header .quiet-button').click()");
-    assert.equal(await wait("document.querySelector('.settings-dialog-navigation [aria-current=\"page\"]')?.textContent==='Overview'"), true);
+    await evaluate("document.querySelector('.settings-dialog-navigation button').click()");
+    assert.equal(await wait("document.querySelector('.settings-dialog-navigation [aria-current=\"page\"]')?.textContent==='Appearance'"), true);
     await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='About').click()");
+    assert.equal(await wait("document.querySelector('.settings-dialog-content .settings-card h2')?.textContent==='About' && !document.querySelector('.about-dialog')"), true);
+    await evaluate("document.querySelector('.settings-dialog-content .settings-card button').click()");
     assert.equal(await wait("document.querySelector('.about-dialog')?.open"), true);
     await evaluate("document.querySelector('.about-dialog [aria-label=\"Close About\"]').click()");
     assert.equal(await wait("!document.querySelector('.about-dialog') && document.querySelector('.settings-dialog')?.open"), true);
@@ -128,7 +153,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
       await command("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: value, modifiers: 2 });
       await command("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: value, modifiers: 2 });
     }
-    assert.equal(await wait("document.querySelector('.settings-dialog')?.open && document.querySelector('.settings-dialog-navigation [aria-current=\"page\"]')?.textContent==='Overview'"), true);
+    assert.equal(await wait("document.querySelector('.settings-dialog')?.open && document.querySelector('.settings-dialog-navigation [aria-current=\"page\"]')?.textContent==='Appearance'"), true);
     await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
     assert.equal(await wait("!document.querySelector('.settings-dialog') && document.activeElement===document.querySelector('#catalog-prompt')"), true);
     for (const width of [390, 1120]) for (const theme of ["dark", "light"]) {
@@ -137,6 +162,11 @@ test("production shell settings overlay keeps the session workspace mounted and 
       assert.equal(await wait("document.querySelector('.settings-dialog')?.open"), true);
       assert.equal(await evaluate(`(() => {const r=document.querySelector('.settings-dialog').getBoundingClientRect();
         return r.width<=${width} && r.left>=0 && r.right<=${width} && r.height<=800 && getComputedStyle(document.querySelector('.settings-dialog')).color!=='rgba(0, 0, 0, 0)'})()`), true);
+      assert.equal(await evaluate(`(() => {const dialog=document.querySelector('.settings-dialog');
+        const nav=dialog.querySelector('.settings-dialog-navigation'); const content=dialog.querySelector('.settings-dialog-content');
+        const buttons=[...nav.querySelectorAll('button')]; return nav.getBoundingClientRect().right<=content.getBoundingClientRect().left+1 &&
+          buttons.every((button,index)=>index===0 || button.getBoundingClientRect().top>buttons[index-1].getBoundingClientRect().top) &&
+          dialog.scrollWidth<=dialog.clientWidth; })()`), true, `sidebar should remain vertical at ${width}px`);
       await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
       assert.equal(await wait("!document.querySelector('.settings-dialog')"), true);
     }
@@ -155,6 +185,15 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 2 });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 2 });
     assert.equal(await evaluate("document.querySelector('.settings-dialog')?.open && document.querySelector('#session-prompt').value==='Owned test draft' && window.settingsShellFixture.sends.length===0"), true);
+    // Simulate an external selection change while the native modal makes pointer access to the workspace inert.
+    await evaluate("[...document.querySelectorAll('.session-row > button:first-child')].find(x=>x.textContent.includes('two')).dispatchEvent(new MouseEvent('click',{bubbles:true}))");
+    assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='two' && document.querySelector('.settings-dialog')?.open"), true);
+    await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Providers').click()");
+    assert.equal(await wait("document.querySelector('.settings-dialog-content .settings-card h2')?.textContent==='Providers'"), true);
+    await evaluate("[...document.querySelectorAll('.session-row > button:first-child')].find(x=>x.textContent.includes('one')).dispatchEvent(new MouseEvent('click',{bubbles:true}))");
+    assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one' && document.querySelector('#session-prompt')?.value==='Owned test draft'"), true);
+    await evaluate("window.ownedComposer=document.querySelector('#session-prompt'); true");
+    assert.equal(await evaluate("window.settingsShellFixture.sends.length"), 0);
     await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Models').click()");
     assert.equal(await wait("!!document.querySelector('.model-catalog-providers button')"), true);
     await evaluate("document.querySelector('.model-catalog-providers button').click()");
@@ -215,7 +254,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     assert.equal(await wait("!!document.querySelector('.model-catalog-detail button')"), true);
     await evaluate("document.querySelector('.model-catalog-detail button').click()");
     assert.equal(await wait("window.settingsShellFixture.probes.length===1"), true);
-    await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Logs').click()");
+    await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Application Logs').click()");
     await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Providers').click()");
     assert.equal(await wait("!!document.querySelector('.model-catalog-providers button')"), true);
     await evaluate("document.querySelector('.model-catalog-providers button').click()");
@@ -226,7 +265,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     assert.equal(await wait("!!document.querySelector('.model-catalog-providers button')"), true);
     await evaluate("document.querySelector('.model-catalog-providers button').click()");
     assert.equal(await wait("document.querySelector('.model-catalog-detail button')?.disabled && window.settingsShellFixture.probes.length===1"), true);
-    await evaluate("localStorage.setItem('settingsFixtureLogsOk','true'); [...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Logs').click()");
+    await evaluate("localStorage.setItem('settingsFixtureLogsOk','true'); [...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Application Logs').click()");
     await evaluate("document.querySelector('.logs-toolbar button').click()");
     assert.equal(await wait("!!document.querySelector('.logs-rows')"), true);
     await evaluate("[...document.querySelectorAll('.logs-toolbar button')].find(x=>x.textContent.includes('Clear captured')).click()");
@@ -237,12 +276,12 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await evaluate("document.querySelector('.logs-confirm button[type=submit]').click()");
     assert.equal(await wait("window.settingsShellFixture.clearRequests.length===1"), true);
     await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Providers').click()");
-    await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Logs').click()");
+    await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Application Logs').click()");
     assert.equal(await wait("document.querySelector('.logs-clear-status')?.textContent.includes('pending')"), true);
     assert.equal(await evaluate("window.settingsShellFixture.clearRequests.length"), 1);
     await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
     await evaluate("document.querySelector('.project-rail .icon-label-button').click()");
-    await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Logs').click()");
+    await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Application Logs').click()");
     assert.equal(await wait("document.querySelector('.logs-clear-status')?.textContent.includes('pending') && window.settingsShellFixture.clearRequests.length===1"), true);
     // An in-flight Apply may not commit into a different Settings section, a closed overlay, or another session.
     await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Models').click()");
@@ -302,6 +341,19 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await evaluate("window.settingsShellFixture.releaseChoices('stale')");
     assert.equal(await wait("document.querySelector('.model-catalog-detail [role=alert]')?.textContent.includes('changed')"), true);
     assert.equal(await evaluate("document.querySelector('.owned-session [aria-label=\"Model\"]').value"), "new");
+    // A project selection is an explicit navigation out of Settings, unlike switching pages or sessions.
+    await evaluate("localStorage.setItem('settingsFixtureSecondProject','true')");
+    await command("Page.reload");
+    assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one' && !!document.querySelector('#project-list button[title=\"/fixture/other\"]')"), true);
+    await evaluate("document.querySelector('.project-rail .icon-label-button').click()");
+    assert.equal(await wait("document.querySelector('.settings-dialog')?.open"), true);
+    await evaluate("document.querySelector('#project-list button[title=\"/fixture/other\"]').dispatchEvent(new MouseEvent('click',{bubbles:true}))");
+    assert.equal(await wait("!document.querySelector('.settings-dialog') && document.querySelector('.session-header h1')?.textContent==='other-session'"), true);
+    await evaluate("document.querySelector('.project-rail .icon-label-button').click()");
+    assert.equal(await wait("document.querySelector('.settings-dialog')?.open && document.querySelector('.settings-dialog-navigation [aria-current=page]')?.textContent==='Appearance'"), true);
+    await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Providers').click()");
+    assert.equal(await wait("document.querySelector('.settings-dialog-content .settings-card')?.textContent.includes('Current session provider: other-provider') && document.querySelector('.settings-dialog-navigation [aria-current=page]')?.textContent==='Providers'"), true);
+    assert.equal(await evaluate("window.settingsShellFixture.sends.length===0 && window.settingsShellFixture.probes.length===0"), true);
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });
   }
