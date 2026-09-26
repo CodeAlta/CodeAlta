@@ -11,7 +11,7 @@ import { build } from "esbuild";
 const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
 
-test("mounted persisted tool details wrap without changing follow, older anchor or explicit newest handshake", { skip: !edge, timeout: 70_000 }, async () => {
+test("mounted persisted details and code retain access, follow, older anchors and explicit newest handshake", { skip: !edge, timeout: 110_000 }, async () => {
   const source = readFileSync(fileURLToPath(new URL("./main.tsx", import.meta.url)), "utf8");
   assert.match(source, /read=\{workspace\.historyTail\}/);
   const root = await mkdtemp(join(tmpdir(), "codealta-tool-detail-"));
@@ -276,6 +276,129 @@ test("mounted persisted tool details wrap without changing follow, older anchor 
     assert.equal(await evaluate("window.toolFixture.writes"), 0);
     assert.equal(await evaluate("window.toolFixture.network"), 0);
     assert.ok((await evaluate("window.toolFixture.calls.length") as number) <= 27);
+    await evaluate("window.toolFixture.select('C')");
+    assert.equal(await wait("document.querySelector('.history').dataset.windowReady==='true' && document.querySelectorAll('.history .timeline-message').length===4"), true);
+    const codeReads = await evaluate("window.toolFixture.calls.length");
+    await click(".history .long-message-toggle");
+    const code = ".history .message-assistant:has(.long-message-toggle) .markdown-content pre";
+    const metrics = await evaluate(`(() => { const p=document.querySelector('${code}'),s=getComputedStyle(p);return {height:p.getBoundingClientRect().height,
+      bound:14*parseFloat(s.lineHeight)+parseFloat(s.paddingTop)+parseFloat(s.paddingBottom)+2,
+      tab:p.tabIndex,label:p.getAttribute('aria-label'),text:p.textContent};})()`) as {height:number;bound:number;tab:number;label:string;text:string};
+    assert.ok(metrics.height <= metrics.bound + 1, `long persisted code must be capped: ${JSON.stringify(metrics)}`);
+    assert.equal(metrics.tab, 0, "code has explicit keyboard access");
+    assert.ok(metrics.label);
+    assert.equal(metrics.text.trimEnd(), await evaluate("window.toolFixture.codeText"));
+    assert.equal(await evaluate("document.querySelectorAll('.history .message-assistant:has(.long-message-toggle) pre.timeline-code').length"), 2, "fenced and indented code are both accessible");
+    assert.equal(await evaluate("window.codeInjected===undefined && !document.querySelector('.history .markdown-content script')"), true);
+    assert.equal(await evaluate("document.querySelectorAll('.unchanged-markdown pre.timeline-code').length"), 0, "shared default and live Markdown remain unchanged");
+    assert.equal(await evaluate("[...document.querySelectorAll('.unchanged-markdown pre')].every(p=>getComputedStyle(p).maxHeight==='none' && !p.hasAttribute('tabindex'))"), true);
+    assert.equal(await evaluate("(() => {const p=document.querySelector('.history .message-assistant:not(:has(.long-message-toggle)) pre');return p.clientHeight<80 && p.scrollHeight===p.clientHeight})()"), true, "short code retains natural height");
+    const codeRow = ".history .message-assistant:has(.long-message-toggle)";
+    await evaluate(`(() => {const s=document.querySelector('.timeline-scroll');s.dispatchEvent(new WheelEvent('wheel',{deltaY:-200,bubbles:true}));document.querySelector('${codeRow}').scrollIntoView({block:'start'});s.dispatchEvent(new Event('scroll',{bubbles:true}))})()`);
+    assert.equal(await wait("document.querySelector('.timeline-scroll').dataset.following==='false'"), true);
+    await evaluate(`document.querySelector('${codeRow} .long-message-toggle').focus({preventScroll:true})`);
+    await press("Tab", "Tab", 9);
+    assert.equal(await evaluate(`document.activeElement===document.querySelector('${code}')`), true, "Tab enters the code region");
+    const outerTop = Number(await evaluate("document.querySelector('.timeline-scroll').scrollTop"));
+    for (const [key, virtual] of [["End", 35], ["Home", 36], ["ArrowDown", 40], ["ArrowUp", 38], ["ArrowLeft", 37], ["ArrowRight", 39], ["PageDown", 34], ["PageUp", 33]] as const) {
+      await press(key, key, virtual);
+      assert.equal(await evaluate(`document.activeElement===document.querySelector('${code}')`), true);
+      assert.ok(Math.abs(Number(await evaluate("document.querySelector('.timeline-scroll').scrollTop")) - outerTop) < 3, key);
+      if (key === "End") assert.equal(await evaluate(`(p=>p.scrollHeight-p.clientHeight-p.scrollTop<2)(document.querySelector('${code}'))`), true, "last line reachable");
+      if (key === "Home") assert.equal(await evaluate(`document.querySelector('${code}').scrollTop`), 0, "first line reachable");
+    }
+    await press("Tab", "Tab", 9);
+    assert.equal(await evaluate(`document.activeElement===document.querySelectorAll('${code}')[1]`), true);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, modifiers: 8 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, modifiers: 8 });
+    assert.equal(await evaluate(`document.activeElement===document.querySelector('${code}')`), true, "Shift+Tab exits backward normally");
+    await evaluate(`(() => {const r=document.createRange();r.selectNodeContents(document.querySelector('${code} code'));getSelection().removeAllRanges();getSelection().addRange(r)})()`);
+    assert.equal(await evaluate("getSelection().toString().trimEnd()===window.toolFixture.codeText"), true, "all retained code remains selectable");
+    // Do not dispatch Copy to the real clipboard. Verify modifiers stay uncanceled, and fake the message Copy API.
+    assert.equal(await evaluate(`(() => {const e=new KeyboardEvent('keydown',{key:'c',ctrlKey:true,bubbles:true,cancelable:true});document.querySelector('${code}').dispatchEvent(e);return !e.defaultPrevented})()`), true);
+    await evaluate("getSelection().removeAllRanges();Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:text=>{window.codeCopied=text;return Promise.resolve()}}})");
+    await click(`${codeRow} .copy-markdown`);
+    assert.equal(await wait("window.codeCopied===window.toolFixture.codeMarkdown"), true);
+    for (const width of [390, 1120]) for (const theme of ["light", "dark"]) {
+      await command("Emulation.setDeviceMetricsOverride", { width, height: 720, deviceScaleFactor: 1, mobile: false });
+      await evaluate(`document.documentElement.dataset.theme='${theme}';document.querySelector('${code}').focus({preventScroll:true})`);
+      assert.equal(await evaluate(`(() => {const p=document.querySelector('${code}'),s=getComputedStyle(p);return p.scrollWidth<=p.clientWidth+1 && p.getBoundingClientRect().height<=14*parseFloat(s.lineHeight)+27 && s.outlineStyle==='solid' && document.documentElement.scrollWidth<=${width}+2})()`), true, `${width}/${theme}: wrapping, bound and focus`);
+    }
+    await evaluate("document.querySelector('.history .message-prompt details').open=true;document.querySelector('.timeline-scroll').style.height='600px'");
+    const tailCode = ".history .message-prompt .markdown-content pre:last-of-type";
+    assert.equal(await evaluate(`document.querySelector('${tailCode}').tabIndex`), 0, "Markdown details opt in, unlike raw diagnostics");
+    const follow = async () => {
+      await evaluate("(() => {const s=document.querySelector('.timeline-scroll');s.dispatchEvent(new Event('scroll',{bubbles:true}));s.dispatchEvent(new WheelEvent('wheel',{deltaY:600,bubbles:true}));s.scrollTop=s.scrollHeight;s.dispatchEvent(new Event('scroll',{bubbles:true}))})()");
+      assert.equal(await wait("document.querySelector('.timeline-scroll').dataset.following==='true'"), true);
+      await evaluate("new Promise(resolve=>setTimeout(resolve,160))");
+    };
+    await follow();
+    await evaluate(`document.querySelector('${tailCode}').scrollTop=180`);
+    const point = await evaluate(`(() => {const p=document.querySelector('${tailCode}'),r=p.getBoundingClientRect();return {x:r.left+35,y:r.top+80}})()`) as {x:number;y:number};
+    assert.equal(await evaluate(`document.elementFromPoint(${point.x},${point.y}).closest('pre')===document.querySelector('${tailCode}')`), true);
+    await command("Input.dispatchMouseEvent", { type: "mouseWheel", ...point, deltaX: 0, deltaY: -90 });
+    assert.equal(await wait(`document.querySelector('${tailCode}').scrollTop<180`), true, "real wheel scrolls inside code");
+    assert.equal(await evaluate("document.querySelector('.timeline-scroll').dataset.following"), "true");
+    await evaluate(`document.querySelector('${tailCode}').scrollTop=0`);
+    await command("Input.dispatchMouseEvent", { type: "mouseWheel", ...point, deltaX: 0, deltaY: -400 });
+    assert.equal(await wait("document.querySelector('.timeline-scroll').dataset.following==='false'"), true, "boundary wheel chains to the timeline");
+    await follow();
+    // A real scrollbar click changes the inner viewport without lending intent to the outer scroller.
+    const gutter = await evaluate(`(() => {const p=document.querySelector('${tailCode}'),r=p.getBoundingClientRect();p.scrollTop=0;return {x:r.right-7,y:r.bottom-25}})()`) as {x:number;y:number};
+    await command("Input.dispatchMouseEvent", { type: "mousePressed", ...gutter, button: "left", clickCount: 1 });
+    await command("Input.dispatchMouseEvent", { type: "mouseReleased", ...gutter, button: "left", clickCount: 1 });
+    assert.equal(await wait(`document.querySelector('${tailCode}').scrollTop>0`), true, "native code scrollbar is operable");
+    assert.equal(await evaluate("document.querySelector('.timeline-scroll').dataset.following"), "true");
+    await command("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+    await evaluate("new Promise(resolve=>setTimeout(resolve,400))"); // Finish native scrollbar page animation before the next gesture.
+    await evaluate("window.touchEvidence=[];for(const type of ['pointerdown','pointermove','pointercancel','touchstart','touchmove'])document.addEventListener(type,e=>window.touchEvidence.push([type,e.target.tagName,e.defaultPrevented]),{passive:true});document.querySelector('.timeline-scroll').addEventListener('scroll',e=>window.touchEvidence.push(['outerScroll',e.currentTarget.scrollTop,e.currentTarget.dataset.following]))");
+    const swipeDown = async () => {
+      await evaluate("new Promise(resolve=>setTimeout(resolve,200))"); // Let programmatic setup reach the compositor before native hit testing/latching.
+      const p = await evaluate(`(() => {const r=document.querySelector('${tailCode}').getBoundingClientRect();return {x:r.left+60,y:r.top+70}})()`) as {x:number;y:number};
+      await command("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...p, id: 1 }] });
+      for (let step = 1; step <= 5; step++) {
+        await command("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x:p.x, y:p.y+step*30, id:1 }] });
+        await evaluate("new Promise(resolve=>setTimeout(resolve,30))");
+      }
+      await evaluate("new Promise(resolve=>setTimeout(resolve,200))"); // End without a momentum fling leaking into the next independent gesture.
+      await command("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await evaluate("new Promise(resolve=>setTimeout(resolve,250))");
+    };
+    await evaluate(`document.querySelector('${tailCode}').scrollTop=180`);
+    await swipeDown();
+    assert.equal(await wait(`document.querySelector('${tailCode}').scrollTop<180`), true, String(await evaluate(`JSON.stringify({events:window.touchEvidence,top:document.querySelector('${tailCode}').scrollTop,outer:document.querySelector('.timeline-scroll').scrollTop})`)));
+    assert.equal(await evaluate("document.querySelector('.timeline-scroll').dataset.following"), "true");
+    await evaluate(`document.querySelector('${tailCode}').scrollTop=0`);
+    await swipeDown();
+    const touchBoundary = await evaluate(`({distance:${distance},following:document.querySelector('.timeline-scroll').dataset.following})`) as {distance:number;following:string};
+    assert.equal(touchBoundary.following, touchBoundary.distance > 72 ? "false" : "true", "native touch changes follow only if it actually moves the timeline away");
+    console.log("Emulated boundary touch (native chaining is host-dependent):", touchBoundary);
+    await command("Emulation.setTouchEmulationEnabled", { enabled: false });
+    await follow();
+    // Deterministic boundary ownership even when this headless host does not chain native touch.
+    await evaluate(`(() => {const p=document.querySelector('${tailCode}'),s=document.querySelector('.timeline-scroll');p.scrollTop=0;
+      p.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerType:'touch',pointerId:71,clientY:200}));
+      p.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerType:'touch',pointerId:71,clientY:350}));
+      s.scrollTop-=200;s.dispatchEvent(new Event('scroll',{bubbles:true}));
+      p.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerType:'touch',pointerId:71}));})()`);
+    assert.equal(await wait("document.querySelector('.timeline-scroll').dataset.following==='false'"), true, "actual outer movement with code-boundary touch intent opts out");
+    assert.equal(await evaluate("window.toolFixture.calls.length"), codeReads, "code presentation and gestures add no history reads");
+    assert.equal(await evaluate("window.toolFixture.network"), 0);
+    // Equivalent History refresh preserves expanded content and its actual code DOM.
+    await evaluate(`(() => {window.savedCode=document.querySelector('${code}');window.savedCode.focus({preventScroll:true});window.savedCode.scrollTop=100;
+      const r=document.createRange();r.selectNodeContents(window.savedCode.querySelector('code'));getSelection().removeAllRanges();getSelection().addRange(r)})()`);
+    await click(".history .section-heading button");
+    assert.equal(await wait("document.querySelector('.history').dataset.windowReady==='true'"), true);
+    assert.equal(await evaluate(`window.savedCode===document.querySelector('${code}')`), true);
+    assert.equal(await evaluate("document.activeElement===window.savedCode && window.savedCode.scrollTop===100 && getSelection().toString().trimEnd()===window.toolFixture.codeText"), true,
+      "equivalent refresh preserves code focus, position and selection");
+    await evaluate("getSelection().removeAllRanges()");
+    await evaluate("window.toolFixture.changeCode()");
+    await click(".history .section-heading button");
+    assert.equal(await wait("document.querySelector('.history').dataset.windowReady==='true' && !window.savedCode.isConnected"), true);
+    assert.equal(await evaluate(`document.querySelector('${codeRow} .long-message-toggle').getAttribute('aria-expanded')`), "false", "changed source does not retain a hidden code region");
+    await click(`${codeRow} .long-message-toggle`);
+    assert.equal(await evaluate(`document.querySelector('${code}').textContent.trimEnd()===window.toolFixture.codeText`), true);
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }

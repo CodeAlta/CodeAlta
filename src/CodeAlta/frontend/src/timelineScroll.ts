@@ -7,6 +7,12 @@ export type ScrollMetrics = Readonly<{ scrollTop: number; scrollHeight: number; 
 
 export const timelineFollowThreshold = 72;
 
+// Native inner scrolling consumes this gesture; an outward boundary gesture may chain
+// to the timeline and must still establish genuine outer scroll intent.
+function codeCanScroll(code: HTMLElement, delta: number): boolean {
+  return delta < 0 ? code.scrollTop > 0 : code.scrollTop < code.scrollHeight - code.clientHeight - 1;
+}
+
 export function distanceFromBottom(metrics: ScrollMetrics): number {
   return Math.max(0, metrics.scrollHeight - metrics.clientHeight - metrics.scrollTop);
 }
@@ -96,7 +102,7 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
   const layoutUntil = useRef(0);
   const scrollIntent = useRef<{ top: number; direction: -1 | 0 | 1; until: number } | null>(null);
   const scrollbarDrag = useRef<number | null>(null);
-  const touchStart = useRef<{ id: number; y: number } | null>(null);
+  const touchStart = useRef<{ id: number; y: number; code: HTMLElement | null } | null>(null);
   const prependMetrics = useRef<{ metrics: ScrollMetrics; anchor: HTMLElement | null; top: number } | null>(null);
   const messageAnchor = useRef<{ row: HTMLElement; top: number } | null>(null);
   const resetMessageNavigation = useCallback(() => { messageAnchor.current = null; }, []);
@@ -194,8 +200,10 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     scrollIntent.current = null;
   }
   function wheel(event: WheelEvent<HTMLDivElement>) {
-    if (event.defaultPrevented || event.ctrlKey || event.deltaY === 0 ||
-      (event.target as Element).closest(".event-details pre")) return;
+    if (event.defaultPrevented || event.ctrlKey || event.deltaY === 0) return;
+    const target = event.target as Element;
+    const code = target.closest<HTMLElement>("pre.timeline-code");
+    if (code ? codeCanScroll(code, event.deltaY) : target.closest(".event-details pre")) return;
     markScrollIntent(event.deltaY > 0 ? 1 : -1);
   }
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -207,7 +215,9 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
   }
   function pointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.pointerType === "touch") {
-      touchStart.current = (event.target as Element).closest(".event-details pre") ? null : { id: event.pointerId, y: event.clientY };
+      const target = event.target as Element;
+      const code = target.closest<HTMLElement>("pre.timeline-code");
+      touchStart.current = !code && target.closest(".event-details pre") ? null : { id: event.pointerId, y: event.clientY, code };
       return;
     }
     const element = event.currentTarget;
@@ -223,8 +233,11 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
       else endScrollbarDrag(event.pointerId);
     }
     const start = touchStart.current;
-    if (event.pointerType === "touch" && start?.id === event.pointerId && Math.abs(event.clientY - start.y) > 3)
-      markScrollIntent(event.clientY < start.y ? 1 : -1);
+    if (event.pointerType === "touch" && start?.id === event.pointerId && Math.abs(event.clientY - start.y) > 3) {
+      const delta = start.y - event.clientY;
+      if (!start.code || !codeCanScroll(start.code, delta)) markScrollIntent(delta > 0 ? 1 : -1);
+      if (start.code) start.y = event.clientY;
+    }
   }
   function pointerEnd(event: PointerEvent<HTMLDivElement>) {
     if (touchStart.current?.id === event.pointerId) touchStart.current = null;

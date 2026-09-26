@@ -258,6 +258,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .event-details pre { max-height: 320px; padding: 8px; overflow: auto; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); font: 10px/1.45 "Cascadia Code", Consolas, monospace; white-space: pre; }
 .message-tool .event-details pre, .message-file .event-details pre { width: 100%; min-width: 0; }
 .event-details pre.tool-detail-pre-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+.markdown-content pre.timeline-code { max-height: calc(14lh + 26px); padding: 12px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.65 "Cascadia Code", "SFMono-Regular", Consolas, monospace; }
+.markdown-content pre.timeline-code:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .event-meta-inline { display: flex; flex-wrap: wrap; gap: 3px 11px; margin: 8px 0 0; padding: 7px 0 0; border-top: 1px solid var(--line); color: color-mix(in srgb, var(--muted) 70%, transparent); list-style: none; }
 .composer { flex: 0 0 auto; position: relative; margin: 10px 4px 0; border: 1px solid var(--line-strong); border-radius: 14px; background: color-mix(in srgb, var(--panel-2) 96%, transparent); box-shadow: var(--shadow); overflow: hidden; }
 .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 65%, var(--line)); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow); }

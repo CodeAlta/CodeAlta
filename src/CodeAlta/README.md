@@ -341,6 +341,16 @@ Equivalent refreshes and retained older-page records preserve intentional expans
 displayed record identity or omission evidence clears it, including a short-body interlude or A→B→A
 replacement; returning to an earlier source does not restore its previous expansion.
 
+Code blocks in persisted timeline Markdown (including Markdown details) wrap within the card and
+use at most 14 rendered text lines plus padding/border; short blocks keep their natural height.
+All retained code remains selectable. Tab enters the labelled code region; arrows, Page Up/Down,
+Home and End navigate it, and Tab/Shift+Tab leave it. A visible focus ring identifies the region.
+Wheel/touch input scrolls code while it can move; at a boundary it may scroll the timeline and change
+follow normally. Whole-message Copy still captures the full retained Markdown, not the code viewport.
+Equivalent history refreshes preserve code focus, selection and position. This opt-in does not change
+Notes, live Markdown, or the separate diagnostic Wrap/details control; native accessibility and live
+streaming code-region behavior are not qualified by this slice.
+
 Tool and file cards keep available persisted diagnostic/output detail text behind their collapsed **Details**
 disclosure. Inside it, **Wrap lines** is on by default and can be switched per card with a pointer or keyboard;
 turning it off scrolls long lines inside the detail pane. This only changes how the already loaded plain text

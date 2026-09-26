@@ -5,6 +5,8 @@ import type { HistoryRequest, HistoryResponse } from "#neoastra";
 import { History } from "./HistoryPanel";
 import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePosition } from "./timelineScroll";
 import { dispatchWorkspaceShortcut, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
+import { MarkdownContent } from "./MarkdownContent";
+import { LiveTextMessage } from "./LiveSessionPanel";
 
 function createFixture() {
   const memory = createTimelineScrollMemory();
@@ -14,6 +16,9 @@ function createFixture() {
   let longBodies = false;
   let changedBody = false;
   let assistantOverride: Partial<HistoryResponse["entries"][number]> = {};
+  const codeText = Array.from({ length: 35 }, (_, i) => `line-${i + 1} ${"界🙂".repeat(12)}`).join("\n") + "\n" + "界🙂".repeat(90);
+  const codeMarkdown = `\`\`\`ts\n${codeText}\n\`\`\`\n\n${codeText.split("\n").map(line => `    ${line}`).join("\n")}\n\n<script>window.codeInjected=true</script>`;
+  let codeSuffix = "";
   let release: (() => void) | undefined;
   function row(index: number, session: string): HistoryResponse["entries"][number] {
     const omitted = session === "B" && index === 1;
@@ -29,12 +34,14 @@ function createFixture() {
         longUser || longAssistant ? `${longText} ${changedBody ? "changed " : ""}${session}-${index}` : `turn-${index}`,
       details: tool && !omitted ? JSON.stringify({ command: longLine, result: { output: `${longLine}\n${longLine}\n<img src=x onerror=alert(1)>` } }) : null,
       textTruncated: longUser, detailsTruncated: tool && !omitted, bodyOmitted: tool || longUser,
-      ...(longAssistant ? assistantOverride : {}) };
+      ...(longAssistant ? assistantOverride : {}),
+      ...(session === "C" && index > 0 ? { text: index === 1 ? "```\nshort\n```" : codeMarkdown + (index === 2 ? codeSuffix : ""),
+        ...(index === 3 ? { eventType: "system_prompt" } : {}) } : {}) };
   }
   async function read(request: HistoryRequest): Promise<HistoryResponse> {
     calls.push(`${request.sessionId}:${request.cursor?.offset ?? "tail"}`);
     if (hold) { hold = false; await new Promise<void>(resolve => { release = resolve; }); }
-    const total = request.sessionId === "A" || longBodies ? 1205 : 3;
+    const total = request.sessionId === "C" ? 4 : request.sessionId === "A" || longBodies ? 1205 : 3;
     const end = request.cursor ? Number(request.cursor.offset) / 200 : total;
     const start = Math.max(0, end - 100);
     return { status: "ok", entries: Array.from({ length: end - start }, (_, i) => row(start + i, request.sessionId)),
@@ -61,6 +68,7 @@ function createFixture() {
         select: (id: string) => window.dispatchEvent(new CustomEvent("tool-select", { detail: id })),
         grow: setDeferredHeight, calls, enableLong: () => { longBodies = true; }, changeBody: () => { changedBody = true; },
         replaceAssistant: (value: typeof assistantOverride) => { assistantOverride = value; },
+        codeText, codeMarkdown, changeCode: () => { codeSuffix = "\nChanged source"; },
         rerender: () => rerender(value => value + 1),
         hold: () => { hold = true; }, release: () => { release?.(); release = undefined; } });
       Object.assign(window, { toolFixture: fixture });
@@ -90,7 +98,11 @@ function createFixture() {
           onBeforeOlder: position.beforeOlderPage, onAfterOlder: position.afterOlderPage,
           onNavigationReset: reset, newestRequest: newest.requestRef, onNewestResult: newest.onResult }),
         createElement("div", { className: "deferred-layout", style: { height: deferredHeight } })),
-      createElement("p", { role: "status", className: "navigation-notice" }, notice));
+      createElement("p", { role: "status", className: "navigation-notice" }, notice),
+      sessionId === "C" && createElement("div", { className: "unchanged-markdown" },
+        createElement(MarkdownContent, { source: codeMarkdown }),
+        createElement(LiveTextMessage, { row: { runId: "literal", contentId: "code", kind: "Assistant", text: codeMarkdown,
+          isComplete: false, isTruncated: false, startedWithDelta: false } })));
   }
   function Fixture() {
     const [session, setSession] = useState("A");

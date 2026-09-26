@@ -20,3 +20,12 @@ test("keeps raw Markdown HTML inert for the sanitizer boundary", () => {
   assert.match(html, /&lt;script&gt;/);
   assert.match(html, /&lt;button&gt;/);
 });
+
+test("only explicit timeline code opts into trusted keyboard regions without changing source text", () => {
+  const source = "```ts\n<a> & 界🙂\n```\n\n    indented\n\n<pre tabindex=0 onclick=evil()>raw</pre>";
+  const html = renderMarkdownHtml(source, true);
+  assert.equal((html.match(/class="timeline-code" tabindex="0" role="region" aria-label="Code block"/g) ?? []).length, 2);
+  assert.match(html, /class="language-ts">&lt;a&gt; &amp; 界🙂/);
+  assert.match(html, /&lt;pre tabindex=0 onclick=evil\(\)&gt;/);
+  assert.doesNotMatch(renderMarkdownHtml(source), /class="timeline-code"|role="region"/);
+});
