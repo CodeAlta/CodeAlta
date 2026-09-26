@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createSessionDisplayStore } from "./sessionDisplay";
 import type { SessionDisplayText, SessionDisplayToolActivity } from "#neoastra";
 import type { createMutationCapability } from "./sessionOperations";
@@ -69,11 +69,41 @@ export function LiveToolMessage({ row }: { row: SessionDisplayToolActivity }) {
 }
 
 export function LiveTextMessage({ row }: { row: SessionDisplayText }) {
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const reset = useRef<number | undefined>(undefined);
+  const active = useRef(false);
+  const copySequence = useRef(0);
+  useLayoutEffect(() => {
+    active.current = true;
+    setCopyState("idle");
+    return () => {
+      active.current = false;
+      copySequence.current++;
+      if (reset.current !== undefined) window.clearTimeout(reset.current);
+      reset.current = undefined;
+    };
+  }, [row.runId, row.contentId, row.kind, row.text, row.isComplete, row.isTruncated, row.startedWithDelta]);
+  async function copy() {
+    const text = row.text;
+    if (!active.current) return;
+    const sequence = ++copySequence.current;
+    if (reset.current !== undefined) window.clearTimeout(reset.current);
+    reset.current = undefined;
+    setCopyState("idle");
+    const state = await writeMarkdown(value => navigator.clipboard.writeText(value), text);
+    if (!active.current || sequence !== copySequence.current) return;
+    setCopyState(state);
+    reset.current = window.setTimeout(() => {
+      if (!active.current || sequence !== copySequence.current) return;
+      reset.current = undefined;
+      setCopyState("idle");
+    }, 1600);
+  }
+  const copyLabel = copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : `Copy ${row.kind} as Markdown`;
   return <article className={`message timeline-message message-${row.kind.toLowerCase() === "user" ? "user" : row.kind.toLowerCase().startsWith("reasoning") ? "reasoning" : "assistant"}`}>
     <div className="avatar"><AppIcon name={row.kind.toLowerCase() === "user" ? "user" : row.kind.toLowerCase().startsWith("reasoning") ? "brain" : "assistant"} size={17} /></div><div className="message-body">
       <div className="message-heading"><span><strong>{row.kind}</strong><small>{row.isComplete ? "Complete" : "Streaming"}</small></span><span className="message-actions">
-        <button type="button" className="copy-markdown" aria-label={copied ? "Copied" : `Copy ${row.kind} as Markdown`} title={copied ? "Copied" : "Copy as Markdown"} onClick={() => void writeMarkdown(text => navigator.clipboard.writeText(text), row.text).then(result => { setCopied(result === "copied"); if (result === "copied") window.setTimeout(() => setCopied(false), 1600); })}><AppIcon name={copied ? "checked" : "copy"} size={15} /><span className="sr-only" aria-live="polite">{copied ? "Copied" : ""}</span></button>
+        <button type="button" className={`copy-markdown copy-${copyState}`} aria-label={copyLabel} title={copyLabel} onClick={() => void copy()}><AppIcon name={copyState === "copied" ? "checked" : copyState === "failed" ? "error" : "copy"} size={15} /><span className="sr-only" aria-live="polite">{copyState === "idle" ? "" : copyLabel}</span></button>
       </span></div>
       <MarkdownContent source={row.text} />
       {row.isTruncated && <p className="detail">Text prefix truncated.</p>}

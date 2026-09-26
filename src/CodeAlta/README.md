@@ -562,6 +562,14 @@ renderer detach and cancellation close only the observation, not a run or the ho
 Same-host reload obtains a new baseline of retained partial values only, not omitted history,
 tool results, permission decisions or effects. Host restart restores no prior authority.
 
+Live text **Copy Markdown** captures the full currently retained text at the explicit click,
+including text marked as truncated or missing an earlier prefix; copying does not recover those
+omissions. **Copied** / **Copy failed** feedback belongs only to the latest copy request for the
+current row identity, text and completion/omission flags. Streaming changes and row removal clear
+feedback timers; late clipboard results or queued old resets cannot overwrite newer feedback.
+Failures are announced without exposing clipboard exception details. This fences presentation,
+not the clipboard write itself: an already dispatched write cannot be undone by these guards.
+
 Rapid selection/reconnect requests retain only the latest desired observation. Reopening waits for
 the previous iterator's successful cleanup. If cleanup fails, **Reconnect live display** is blocked
 and the failed owner is retained; renderer reload does not prove that old backend work terminated.
