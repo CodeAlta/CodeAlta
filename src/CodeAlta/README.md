@@ -132,6 +132,14 @@ the selected agent prompt, and cannot change an in-flight/uncertain exact Send; 
 the running turn or queued work. A different provider, missing choices or changed host/session
 cannot apply the selection. Provider authentication and global defaults remain TUI workflows.
 
+The owned Send service independently checks the provider during preparation: a structurally valid
+different-provider request can receive an **accepted** retained receipt, then settle as **Failed** with
+`preparation_failed`. This is not a pre-admission refusal. Fake-provider integration coverage establishes
+that an existing idle source attachment is unchanged and the target is not started/resumed/sent; exact
+retries replay the same receipt, while changed text or selection on that key conflicts. Canceling a waiter
+does not settle preparation or free its occupied slot. Cross-provider switching remains blocked pending
+a host-owned transition/readiness/queue and recoverable-publication contract; this is not switching support.
+
 The **Providers** Settings section (or `Ctrl+G`, then `Ctrl+R`)
 lists at most 32 configured providers with adapter type, enabled/default settings, configured
 default model and **cached** host initialization availability. Opening the section or selecting a row

@@ -92,6 +92,75 @@ public sealed class OwnedSessionCommandServiceTests
     }
 
     [TestMethod]
+    public Task DifferentProviderSelection_IsAdmittedThenFailsPreparationWithoutReplacingSource() => Fixture.RunAsync(async f =>
+    {
+        // This helper completes a real owned Send and commits the fake idle event; it does not compact.
+        await f.PrepareCompact();
+        var before = await f.Observe(f.Host.RuntimeService.GetCurrentStateAsync(f.SessionId));
+        Assert.IsNotNull(before.Entry);
+        Assert.IsNull(before.Entry.ActiveRunId);
+        var sourceCounts = (f.Provider.Creates, f.Provider.Resumes, f.Provider.Sends,
+            f.Provider.Aborts, f.Provider.RuntimeStops, f.Provider.RuntimeDisposals, f.Provider.SessionDisposals);
+        var target = new ControlledProvider("other-fixture");
+        target.ReleaseAll(); // Even an unexpected target invocation must remain drainable on assertion failure.
+        f.Host.ModelProviderRegistry.RegisterOrReplace(target.Descriptor, target.CreateRuntime);
+        f.Provider.ExposeSelectionModels = true;
+        var releaseChoices = f.NewGate();
+        f.Provider.ProbeDependency = releaseChoices.Task;
+        var selection = new OwnedSessionSelection(target.Descriptor.ProviderId.Value, "default", "fixture-model", null);
+        var request = new OwnedTextSendRequest("different-provider", f.SessionId, "  immutable input\r\n ") { Selection = selection };
+        var receipt = f.Accept(f.AdmitSend(request));
+        await f.ObserveReadiness(f.Provider.ProbeStarted.Task, receipt, "current-provider choices");
+        Assert.IsFalse(receipt.Completion.IsCompleted);
+
+        using var waiterCancellation = new CancellationTokenSource();
+        var waiter = CanceledWaiterAsync();
+        waiterCancellation.Cancel();
+        await f.Observe(waiter);
+        Assert.IsFalse(receipt.Completion.IsCompleted, "Canceling observation does not settle preparation or release its slot.");
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Busy,
+            f.AdmitSend(request with { ClientRequestId = "replacement-while-pending" }).Kind);
+        CheckRetainedRequest();
+        await CheckSourceAsync();
+
+        releaseChoices.TrySetResult();
+        var result = await f.Observe(receipt.Completion);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Failed, result.Outcome);
+        Assert.AreEqual("preparation_failed", result.Code, "This is an admitted preparation failure, not a pre-admission refusal.");
+        CheckRetainedRequest();
+        await CheckSourceAsync();
+
+        async Task CanceledWaiterAsync()
+        {
+            try { await receipt.Completion.WaitAsync(waiterCancellation.Token); Assert.Fail("Expected canceled observation."); }
+            catch (OperationCanceledException) when (waiterCancellation.IsCancellationRequested) { }
+        }
+
+        void CheckRetainedRequest()
+        {
+            var replay = f.AdmitSend(request);
+            Assert.AreEqual(OwnedSessionCommandAdmissionKind.Replay, replay.Kind);
+            Assert.AreSame(receipt, replay.Receipt);
+            Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitSend(request with { Text = "changed input" }).Kind);
+            Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict,
+                f.AdmitSend(request with { Selection = selection with { ProviderKey = f.Provider.Descriptor.ProviderId.Value } }).Kind);
+            Assert.AreEqual("different-provider", request.ClientRequestId);
+            Assert.AreEqual("  immutable input\r\n ", request.Text);
+            Assert.AreEqual(selection, request.Selection);
+        }
+
+        async Task CheckSourceAsync()
+        {
+            var current = await f.Observe(f.Host.RuntimeService.GetCurrentStateAsync(f.SessionId));
+            Assert.AreEqual(before, current, "Runtime/attachment identity, transition state and source configuration must remain unchanged.");
+            Assert.AreEqual(sourceCounts, (f.Provider.Creates, f.Provider.Resumes, f.Provider.Sends,
+                f.Provider.Aborts, f.Provider.RuntimeStops, f.Provider.RuntimeDisposals, f.Provider.SessionDisposals));
+            Assert.AreEqual((0, 0, 0, 0, 0, 0, 0, 0), (target.RuntimeStarts, target.Creates, target.Resumes, target.Sends,
+                target.Aborts, target.RuntimeStops, target.RuntimeDisposals, target.SessionDisposals));
+        }
+    });
+
+    [TestMethod]
     public void PluginEnvironment_UsesExplicitSnapshotWithoutAmbientFallback()
     {
         var options = new CodeAltaHostOptions
@@ -1425,6 +1494,9 @@ public sealed class OwnedSessionCommandServiceTests
     private sealed class ControlledProvider
     {
         private int _runtimeStarts, _resumes, _creates, _sends, _aborts, _runtimeDisposals, _earlyDisposals, _active;
+        private int _runtimeStops, _sessionDisposals;
+        internal ControlledProvider(string providerId = "owned-fixture")
+            => Descriptor = new(new ModelProviderId(providerId), "Owned fixture") { DefaultModelId = "fixture-model" };
         internal bool ResumeNotFound { get; set; }
         internal bool FailPreparation { get; set; }
         internal bool FailSend { get; set; }
@@ -1506,6 +1578,8 @@ public sealed class OwnedSessionCommandServiceTests
         internal int Sends => Volatile.Read(ref _sends);
         internal int Aborts => Volatile.Read(ref _aborts);
         internal int RuntimeDisposals => Volatile.Read(ref _runtimeDisposals);
+        internal int RuntimeStops => Volatile.Read(ref _runtimeStops);
+        internal int SessionDisposals => Volatile.Read(ref _sessionDisposals);
         internal int EarlyDisposals => Volatile.Read(ref _earlyDisposals);
         internal string? LastSessionId { get; private set; }
         internal AgentSessionCreateOptions? Options { get; private set; }
@@ -1513,14 +1587,20 @@ public sealed class OwnedSessionCommandServiceTests
         internal CancellationToken SendToken { get; private set; }
         internal AgentPermissionDecisionKind? PermissionDecision { get; private set; }
         internal bool InputCancelled { get; private set; }
-        public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("owned-fixture"), "Owned fixture") { DefaultModelId = "fixture-model" };
+        public ModelProviderDescriptor Descriptor { get; }
         public Task StartAsync(CancellationToken cancellationToken = default) { Interlocked.Increment(ref _runtimeStarts); return Task.CompletedTask; }
-        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task StopAsync(CancellationToken cancellationToken = default) { Interlocked.Increment(ref _runtimeStops); return Task.CompletedTask; }
         internal bool ExposeSelectionModels { get; set; }
-        public Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default) => ExposeSelectionModels
-            ? Task.FromResult(new ModelProviderProbeResult { ProviderId = Descriptor.ProviderId,
-                Models = [new("fixture-model"), new("selected-model", SupportedReasoningEfforts: [AgentReasoningEffort.High])] })
-            : throw new InvalidOperationException("Unexpected provider probe.");
+        internal Task? ProbeDependency { get; set; }
+        internal TaskCompletionSource ProbeStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public async Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default)
+        {
+            if (!ExposeSelectionModels) throw new InvalidOperationException("Unexpected provider probe.");
+            ProbeStarted.TrySetResult();
+            if (ProbeDependency is { } dependency) await dependency.ConfigureAwait(false);
+            return new ModelProviderProbeResult { ProviderId = Descriptor.ProviderId,
+                Models = [new("fixture-model"), new("selected-model", SupportedReasoningEfforts: [AgentReasoningEffort.High])] };
+        }
         public IModelProviderTurnExecutor CreateTurnExecutor() => throw new InvalidOperationException("Unexpected turn-executor route.");
         internal IModelProviderRuntime CreateRuntime() => new Runtime(this);
 
@@ -1697,6 +1777,7 @@ public sealed class OwnedSessionCommandServiceTests
             public Task<IReadOnlyList<AgentEvent>> GetHistoryAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<AgentEvent>>([]);
             public ValueTask DisposeAsync()
             {
+                Interlocked.Increment(ref owner._sessionDisposals);
                 if (Volatile.Read(ref owner._active) != 0) Interlocked.Increment(ref owner._earlyDisposals);
                 return ValueTask.CompletedTask;
             }
