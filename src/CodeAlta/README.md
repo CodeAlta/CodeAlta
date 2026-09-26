@@ -337,6 +337,9 @@ shortening/omission notices stay outside the disclosure. Copy success/failure fe
 current retained record and latest click; changing source or leaving the row clears it. An already dispatched
 clipboard write cannot be undone. This is window-local per-record presentation state,
 not a read for omitted text, a stored preference or a reconstruction of live output.
+Equivalent refreshes and retained older-page records preserve intentional expansion. A changed body,
+displayed record identity or omission evidence clears it, including a short-body interlude or A→B→A
+replacement; returning to an earlier source does not restore its previous expansion.
 
 Tool and file cards keep available persisted diagnostic/output detail text behind their collapsed **Details**
 disclosure. Inside it, **Wrap lines** is on by default and can be switched per card with a pointer or keyboard;

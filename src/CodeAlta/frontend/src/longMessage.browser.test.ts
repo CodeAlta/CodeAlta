@@ -11,7 +11,7 @@ import { build } from "esbuild";
 const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
 
-test("mounted long persisted messages preserve copy, identity, follow and older anchor", { skip: !edge, timeout: 70_000 }, async () => {
+test("mounted long persisted messages preserve copy, identity, follow and older anchor", { skip: !edge, timeout: 150_000 }, async () => {
   const source = readFileSync(fileURLToPath(new URL("./main.tsx", import.meta.url)), "utf8");
   assert.match(source, /read=\{workspace\.historyTail\}/);
   const root = await mkdtemp(join(tmpdir(), "codealta-long-message-"));
@@ -49,7 +49,7 @@ test("mounted long persisted messages preserve copy, identity, follow and older 
         const message = JSON.parse(String(event.data)) as { id?: number; result?: { result?: { value?: unknown } }; error?: object };
         if (message.id !== id) return;
         socket!.removeEventListener("message", reply); clearTimeout(timer);
-        if (message.error) reject(new Error(`browser ${method} failed`)); else resolve(message.result ?? {});
+        if (message.error) reject(new Error(`browser ${method} failed: ${JSON.stringify(message.error)}`)); else resolve(message.result ?? {});
       };
       socket!.addEventListener("message", reply);
       socket!.send(JSON.stringify({ id, method, params }));
@@ -135,6 +135,40 @@ test("mounted long persisted messages preserve copy, identity, follow and older 
     assert.equal(await evaluate("document.querySelector('.message-assistant .long-message-toggle').getAttribute('aria-expanded')"), "false", "same offset in a new session cannot reuse disclosure state");
     await click(".message-assistant .long-message-toggle");
     assert.equal(await wait("document.querySelector('.message-assistant .long-message-toggle').getAttribute('aria-expanded')==='true'"), true);
+    // Refresh through production History with the same session/revision/offset, not a test-only component key.
+    const toggle = ".message-assistant .long-message-toggle";
+    await evaluate("window.disclosureNode=document.querySelector('.message-assistant:has(.long-message-toggle)');window.disclosureToggle=window.disclosureNode.querySelector('.long-message-toggle');void 0");
+    const refreshAssistant = async (replacement: object) => {
+      await evaluate(`window.toolFixture.replaceAssistant(${JSON.stringify(replacement)});document.querySelector('.history .section-heading button').click()`);
+      assert.equal(await wait("document.querySelector('.history').dataset.windowReady==='true'"), true);
+      assert.equal(await evaluate("window.disclosureNode===document.querySelector('.message-assistant:has(.long-message-toggle)') || window.disclosureNode.isConnected && !window.disclosureNode.querySelector('.long-message-toggle')"), true,
+        "same-key replacement retains the production row");
+    };
+    await refreshAssistant({});
+    assert.equal(await evaluate("window.disclosureToggle.getAttribute('aria-expanded')"), "true", "equivalent allocated records retain intentional expansion");
+    await refreshAssistant({ text: "Changed long body ".repeat(100) });
+    assert.equal(await evaluate("window.disclosureToggle.getAttribute('aria-expanded')"), "false");
+    await refreshAssistant({});
+    assert.equal(await evaluate("window.disclosureToggle.getAttribute('aria-expanded')"), "false", "A to B to A must not revive A's expansion");
+    for (const replacement of [{ text: "short body" }, { eventType: "contentDelta" },
+      { providerId: "other-provider" }, { runId: "other-run" }, { timestamp: "2026-01-02T00:00:00Z" },
+      { textTruncated: true }, { bodyOmitted: true }]) {
+      await click(toggle);
+      assert.equal(await evaluate("window.disclosureNode.querySelector('.long-message-toggle').getAttribute('aria-expanded')"), "true");
+      await evaluate("window.disclosureNode.querySelector('.long-message-toggle').focus({preventScroll:true})");
+      await refreshAssistant(replacement);
+      if ("text" in replacement) {
+        assert.equal(await evaluate("window.disclosureNode.querySelector('.long-message-toggle')===null && window.disclosureNode.querySelector('.markdown-content').textContent.trim()==='short body'"), true);
+      } else {
+        assert.equal(await evaluate("window.disclosureNode.querySelector('.long-message-toggle').getAttribute('aria-expanded')"), "false", JSON.stringify(replacement));
+        assert.equal(await evaluate("document.activeElement===window.disclosureNode.querySelector('.long-message-toggle')"), true, "source invalidation preserves the stable toggle's focus");
+        if ("textTruncated" in replacement) assert.equal(await evaluate("window.disclosureNode.textContent.includes('Some details were shortened')"), true);
+        if ("bodyOmitted" in replacement) assert.equal(await evaluate("window.disclosureNode.textContent.includes('Additional message content was omitted')"), true);
+      }
+      await refreshAssistant({});
+      assert.equal(await evaluate("window.disclosureNode.querySelector('.long-message-toggle').getAttribute('aria-expanded')"), "false", "intervening source semantics cannot revive expansion");
+    }
+    await click(toggle);
     // The B-700 row keeps its History key across a same-revision refresh, but its copy source changes.
     await evaluate(`(() => {
       const savedSet=window.setTimeout.bind(window),savedClear=window.clearTimeout.bind(window);

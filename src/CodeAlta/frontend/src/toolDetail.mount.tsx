@@ -13,6 +13,7 @@ function createFixture() {
   let hold = false;
   let longBodies = false;
   let changedBody = false;
+  let assistantOverride: Partial<HistoryResponse["entries"][number]> = {};
   let release: (() => void) | undefined;
   function row(index: number, session: string): HistoryResponse["entries"][number] {
     const omitted = session === "B" && index === 1;
@@ -27,7 +28,8 @@ function createFixture() {
       name: tool ? "fixture_tool" : null, text: omitted ? null : tool ? "**Failed** `literal code stays as Markdown`" :
         longUser || longAssistant ? `${longText} ${changedBody ? "changed " : ""}${session}-${index}` : `turn-${index}`,
       details: tool && !omitted ? JSON.stringify({ command: longLine, result: { output: `${longLine}\n${longLine}\n<img src=x onerror=alert(1)>` } }) : null,
-      textTruncated: longUser, detailsTruncated: tool && !omitted, bodyOmitted: tool || longUser };
+      textTruncated: longUser, detailsTruncated: tool && !omitted, bodyOmitted: tool || longUser,
+      ...(longAssistant ? assistantOverride : {}) };
   }
   async function read(request: HistoryRequest): Promise<HistoryResponse> {
     calls.push(`${request.sessionId}:${request.cursor?.offset ?? "tail"}`);
@@ -58,6 +60,7 @@ function createFixture() {
       const fixture = Object.assign((window as Window & { toolFixture?: object }).toolFixture ?? {}, {
         select: (id: string) => window.dispatchEvent(new CustomEvent("tool-select", { detail: id })),
         grow: setDeferredHeight, calls, enableLong: () => { longBodies = true; }, changeBody: () => { changedBody = true; },
+        replaceAssistant: (value: typeof assistantOverride) => { assistantOverride = value; },
         rerender: () => rerender(value => value + 1),
         hold: () => { hold = true; }, release: () => { release?.(); release = undefined; } });
       Object.assign(window, { toolFixture: fixture });

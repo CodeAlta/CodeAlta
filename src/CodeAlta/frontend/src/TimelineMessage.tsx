@@ -15,6 +15,13 @@ export function TimelineMessage({ item }: { item: TimelineItem }) {
   const body = item.markdown;
   const longBody = (item.category === "user" || item.category === "assistant") && (body?.length ?? 0) > longBodyThreshold;
   const expanded = longBody && disclosure?.source === body && disclosure.expanded;
+  // Invalidate the committed source lifetime, including A -> B -> A. Compare metadata
+  // values, not arrays allocated by each History refresh; retained records keep expansion.
+  const sourceMetadata = JSON.stringify(item.metadata);
+  useLayoutEffect(() => {
+    setDisclosure(null);
+  }, [item.key, item.eventType, item.category, item.title, item.subtitle, item.timestamp,
+    body, sourceMetadata, item.truncated, item.bodyOmitted]);
   const reset = useRef<number | undefined>(undefined);
   const active = useRef(false);
   const copySequence = useRef(0);
