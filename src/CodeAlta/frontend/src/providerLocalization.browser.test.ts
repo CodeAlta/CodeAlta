@@ -10,7 +10,7 @@ import { build } from "esbuild";
 import { locales, translate } from "./localization";
 
 const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
-test("provider presentation preserves literal decisions and input owners across languages and scope ABA", { skip: !edge, timeout: 60_000 }, async () => {
+test("provider presentation preserves literal decisions and input owners across languages and scope ABA", { skip: !edge, timeout: 60_000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), "codealta-provider-language-"));
   let browser: ReturnType<typeof spawn> | undefined; let socket: WebSocket | undefined;
   try {
@@ -39,7 +39,10 @@ test("provider presentation preserves literal decisions and input owners across 
       };
       socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
     });
-    const evaluate = async (expression: string) => (await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true })).result?.value;
+    const evaluate = async (expression: string) => {
+      try { return (await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true })).result?.value; }
+      catch (cause) { throw new Error(`Provider modal expression=${expression}; failure=${cause instanceof Error ? cause.message : String(cause)}`, { cause }); }
+    };
     const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+4000;const check=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(check,20)};check()})`);
     const paint = () => evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))");
     const click = (text: string) => evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent===${JSON.stringify(text)}).click()`);
@@ -47,6 +50,11 @@ test("provider presentation preserves literal decisions and input owners across 
       await evaluate("document.querySelector('[data-permission-review]').focus();document.querySelector('[data-permission-review]').click()");
       assert.equal(await wait("document.querySelector('.permission-review-dialog')?.open"), true);
       assert.equal(await evaluate("document.activeElement===document.querySelector('.permission-review-dialog header button')"), true, "Safe initial focus is Close, never Allow");
+    };
+    const openInput = async () => {
+      await evaluate("document.querySelector('[data-input-review]').focus();document.querySelector('[data-input-review]').click()");
+      assert.equal(await wait("document.querySelector('.provider-input-dialog')?.open && !document.querySelector('.provider-input-dialog fieldset').disabled"), true);
+      assert.equal(await evaluate("document.activeElement===document.querySelector('.provider-input-dialog header button')"), true, "Input initially focuses safe Close");
     };
     const languages = async () => {
       await paint();
@@ -61,6 +69,7 @@ test("provider presentation preserves literal decisions and input owners across 
         assert.equal(await evaluate(`(()=>{const pre=document.querySelector('ol.history-records > li > pre');return !pre||pre.textContent===providerFixture.permissionPage.entries[0].command})()`), true);
         assert.equal(await evaluate(`(()=>{const d=document.querySelector('.permission-review-dialog');return !d||d.querySelector('h2').textContent===${JSON.stringify(translate(locale, "Review command permission"))}&&d.querySelector('[data-permission-command]').textContent===providerFixture.permissionPage.entries[0].command&&d.querySelector('[data-permission-directory]').textContent===providerFixture.permissionPage.entries[0].workingDirectory&&d.querySelector('[data-permission-reason]').textContent===providerFixture.permissionPage.entries[0].reason})()`), true);
         assert.equal(await evaluate(`(()=>{const option=document.querySelector('[aria-pressed]');return !option||option.textContent==='Settings — Complete'})()`), true);
+        assert.equal(await evaluate(`(()=>{const d=document.querySelector('.provider-input-dialog');return !d||d.querySelector('h2').textContent===${JSON.stringify(translate(locale, "Review provider input"))}&&[...d.querySelectorAll('[data-input-question]')].every((p,i)=>p.textContent===providerFixture.inputPage.entries[0].prompts[i].question)})()`), true);
       }
       await evaluate("providerFixture.language('en')"); await paint();
     };
@@ -71,10 +80,34 @@ test("provider presentation preserves literal decisions and input owners across 
     await click("Refresh input"); await click("Refresh pending commands"); await languages();
     assert.equal(await evaluate("providerFixture.inputs.length===1 && providerFixture.permissions.length===1"), true);
     await evaluate("providerFixture.inputs[0].resolve(providerFixture.inputPage);providerFixture.permissions[0].resolve(providerFixture.permissionPage)");
-    assert.equal(await wait("!!document.querySelector('textarea') && !!document.querySelector('.history-controls')"), true);
+    assert.equal(await wait("!!document.querySelector('[data-input-review]') && !!document.querySelector('.history-controls')"), true, "Manually observed input requires deliberate Review, not an inline answer form");
+    assert.equal(await evaluate("!document.querySelector('.provider-input-dialog') && providerFixture.answers.length===0 && providerFixture.cancels.length===0"), true);
+    await openInput();
+    assert.equal(await evaluate("providerFixture.inputs.length===1 && document.querySelector('[data-input-submit]').disabled"), true, "Opening never reads or implicitly answers missing text");
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    assert.equal(await wait("!document.querySelector('.provider-input-dialog') && document.activeElement===document.querySelector('[data-input-review]')"), true);
+    assert.equal(await evaluate("providerFixture.inputs.length===1 && providerFixture.answers.length===0 && providerFixture.cancels.length===0"), true);
+    await openInput();
+    for (const extra of ["isComposing:true", "repeat:true", "keyCode:229"]) {
+      await evaluate(`document.querySelector('.provider-input-dialog header button').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true,${extra}}))`);
+      assert.equal(await evaluate("document.querySelector('.provider-input-dialog').open"), true);
+    }
+    await evaluate("{const e=new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true});e.preventDefault();document.querySelector('.provider-input-dialog header button').dispatchEvent(e)}");
+    assert.equal(await evaluate("document.querySelector('.provider-input-dialog').open"), true);
+    await evaluate("document.querySelector('[aria-pressed]').click()");
+    assert.equal(await evaluate("document.querySelector('[data-input-submit]').disabled"), true, "Missing freeform is not deliberate empty");
+    await click("Deliberately answer with empty text");
+    assert.equal(await evaluate("!document.querySelector('[data-input-submit]').disabled && document.querySelector('textarea').value===''"), true);
     await evaluate(`document.querySelector('[aria-pressed]').click();const field=document.querySelector('textarea');field.focus();Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(field,'  Settings 日本語  ');field.dispatchEvent(new Event('input',{bubbles:true}))`);
     await languages();
     assert.equal(await evaluate("document.querySelector('textarea').value"), "  Settings 日本語  ");
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    assert.equal(await wait("!document.querySelector('.provider-input-dialog')"), true);
+    await openInput();
+    assert.equal(await evaluate("document.querySelector('textarea').value==='  Settings 日本語  ' && document.querySelector('[aria-pressed]').getAttribute('aria-pressed')==='true' && providerFixture.inputs.length===1 && providerFixture.answers.length===0 && providerFixture.cancels.length===0"), true, "Exact current local draft survives dismissal");
+    await evaluate("document.querySelector('textarea').focus()");
     await evaluate("document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,isComposing:true,bubbles:true,cancelable:true}))");
     assert.equal(await evaluate("providerFixture.answers.length"), 0);
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
@@ -84,9 +117,13 @@ test("provider presentation preserves literal decisions and input owners across 
       await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 500, deviceScaleFactor: 1, mobile: false });
       await evaluate(`providerFixture.language('${locale}');document.documentElement.dataset.theme='${theme}'`); await paint();
       assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth+2"), true, `${locale}/${theme}: provider controls fit`);
+      assert.equal(await evaluate("(()=>{const d=document.querySelector('.provider-input-dialog'),r=d.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1&&r.top>=0&&r.bottom<=innerHeight+1&&d.scrollWidth<=d.clientWidth+1})()"), true, `${locale}/${theme}: input modal fits`);
+      await evaluate("document.querySelector('[data-input-cancel]').scrollIntoView({block:'center'})");
+      assert.equal(await evaluate("document.querySelector('[data-input-cancel]').getBoundingClientRect().bottom<=innerHeight"), true);
     }
     await evaluate("providerFixture.language('en')"); await paint();
     await click("Submit literal answers");
+    await evaluate("document.querySelector('.provider-input-dialog header button').click()");
     assert.equal(await evaluate("document.querySelectorAll('[data-permission-review]').length"), 1, "Observed entries require deliberate modal review, not inline decisions");
     await openReview();
     assert.equal(await evaluate("providerFixture.permissions.length===1 && providerFixture.decisions.length===0"), true, "Opening review performs no read or decision");
@@ -127,8 +164,9 @@ test("provider presentation preserves literal decisions and input owners across 
     await click("Observe original locally (no RPC)"); await click("Acknowledge observed terminal original"); await click("Observe retained decision");
     await click("Refresh input"); await click("Refresh pending commands");
     await evaluate("providerFixture.inputs[1].resolve(providerFixture.inputPage);providerFixture.permissions[1].resolve(providerFixture.permissionPage)");
-    assert.equal(await wait("!!document.querySelector('textarea') && !!document.querySelector('.history-controls')"), true);
-    await click("Cancel this attempt only"); await evaluate("document.querySelector('[data-permission-review]').click()"); await click("Deny"); await languages();
+    assert.equal(await wait("!!document.querySelector('[data-input-review]') && !!document.querySelector('.history-controls')"), true);
+    await openInput();
+    await click("Cancel this attempt only"); await evaluate("document.querySelector('.provider-input-dialog header button').click();document.querySelector('[data-permission-review]').click()"); await click("Deny"); await languages();
     await evaluate("providerFixture.select('other')"); await paint(); await evaluate("providerFixture.select('Settings')"); await paint();
     await languages();
     await evaluate("providerFixture.cancels[0].reject(Error('literal uncertain input'));providerFixture.decisions[1].reject(Error('literal uncertain command'))");
@@ -166,5 +204,55 @@ test("provider presentation preserves literal decisions and input owners across 
     await evaluate("providerFixture.inputs[0].resolve({...providerFixture.inputPage,status:'stale_epoch'});providerFixture.permissions[0].resolve({...providerFixture.permissionPage,status:'stale_epoch'})");
     assert.equal(await wait("!providerFixture.capability.canMutate()"), true); await languages();
     assert.equal(await evaluate("providerFixture.inputs.length===1 && providerFixture.permissions.length===1 && providerFixture.decisions.length===0 && providerFixture.answers.length===0"), true);
+    for (const mode of ["replacement", "native-aba", "selection", "capability", "empty", "late", "uncertain"]) {
+      t.diagnostic(`Provider input scenario: ${mode}`);
+      await command("Page.navigate", { url: pathToFileURL(page).href });
+      assert.equal(await wait("!!window.providerFixture && document.querySelectorAll('h3').length===2"), true);
+      await click("Refresh input");
+      await evaluate("providerFixture.inputs[0].resolve(providerFixture.inputPage)");
+      assert.equal(await wait("!!document.querySelector('[data-input-review]')"), true);
+      await openInput();
+      await evaluate("document.querySelector('[aria-pressed]').click()"); await click("Deliberately answer with empty text");
+      await evaluate("void(window.oldInputSubmit=document.querySelector('[data-input-submit]'));void(window.oldInputCancel=document.querySelector('[data-input-cancel]'))");
+      if (mode === "replacement") {
+        await evaluate("document.querySelector('[data-input-refresh]').click();oldInputSubmit.click();oldInputCancel.click()");
+        assert.equal(await evaluate("providerFixture.answers.length===0 && providerFixture.cancels.length===0 && document.querySelector('.provider-input-dialog fieldset').disabled"), true, "Refresh start fences original controls before its reply");
+        await evaluate("providerFixture.inputs[1].resolve(structuredClone(providerFixture.inputPage))"); await paint();
+        await evaluate("oldInputSubmit.click();oldInputCancel.click();document.querySelector('.provider-input-dialog header button').click()");
+        assert.equal(await evaluate("!!document.querySelector('[data-input-draft-lost]')"), true);
+        await openInput();
+        assert.equal(await evaluate("document.querySelector('[data-input-submit]').disabled && document.querySelector('[aria-pressed]').getAttribute('aria-pressed')==='false'"), true, "Same-handle page replacement never rebinds edits");
+      } else if (mode === "native-aba") {
+        await evaluate("const d=document.querySelector('.provider-input-dialog');d.close();d.showModal();oldInputSubmit.click();oldInputCancel.click()");
+        await paint();
+        if (await evaluate("!!document.querySelector('.provider-input-dialog')")) await evaluate("document.querySelector('.provider-input-dialog header button').click()");
+        await openInput();
+        assert.equal(await evaluate("document.querySelector('[data-input-submit]').disabled"), true, "Native ABA discards local answers");
+      } else if (mode === "selection") {
+        await evaluate("providerFixture.select('other')"); await paint(); await evaluate("providerFixture.select('Settings')"); await paint();
+        await evaluate("oldInputSubmit.click();oldInputCancel.click()");
+        assert.equal(await evaluate("!document.querySelector('[data-input-review]') && !document.querySelector('textarea')"), true);
+      } else if (mode === "capability") {
+        await evaluate("providerFixture.capability.observe({status:'stale_epoch',epoch:'22222222-2222-4222-8222-222222222222'});oldInputSubmit.click();oldInputCancel.click()");
+        await languages();
+      } else {
+        await evaluate("oldInputSubmit.click();oldInputCancel.click()");
+        assert.equal(await wait("providerFixture.answers.length===1"), true);
+        assert.deepEqual(await evaluate("providerFixture.answers[0].request"), { expectedHostEpoch: "11111111-1111-4111-8111-111111111111", handle: await evaluate("providerFixture.handle"), answers: [{ promptId: "choice", value: "Settings" }, { promptId: "free", value: "" }] });
+        await evaluate("document.querySelector('.provider-input-dialog header button').click()");
+        assert.equal(await evaluate("providerFixture.input.acknowledge()"), false);
+        if (mode === "late") { await evaluate("providerFixture.select('other')"); await paint(); }
+        await evaluate(mode === "uncertain" ? "providerFixture.answers[0].reject(Error('literal transport failure'))" : "providerFixture.answers[0].resolve({status:'resolved',hostEpoch:providerFixture.epoch,handle:providerFixture.handle})");
+        assert.equal(await wait(`providerFixture.input.readOriginal()?.kind==='${mode === "uncertain" ? "uncertain" : "terminal"}'`), true);
+        assert.equal(await evaluate("providerFixture.input.acknowledge()"), false, "Displaying the result never observes it");
+        await click("Observe original locally (no RPC)");
+        assert.equal(await evaluate("providerFixture.input.acknowledge()"), mode !== "uncertain");
+        if (mode === "uncertain") {
+          await click("Refresh input"); await evaluate("providerFixture.inputs[1].resolve(providerFixture.inputPage)"); await paint();
+          assert.equal(await evaluate("document.querySelector('[data-input-review]').disabled && providerFixture.input.blocked()"), true);
+        }
+      }
+      assert.equal(await evaluate(`providerFixture.answers.length===${["empty", "late", "uncertain"].includes(mode) ? 1 : 0} && providerFixture.cancels.length===0`), true, mode);
+    }
   } finally { socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 }); }
 });

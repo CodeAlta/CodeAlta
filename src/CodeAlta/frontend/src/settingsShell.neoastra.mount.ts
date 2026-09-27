@@ -2,6 +2,7 @@
 // No native bridge or user data is touched.
 import type { HistoryRequest, HistoryResponse, SessionDisplayItem, SessionDisplayRequest, ReminderListRequest, ReminderListResponse, WorkspaceArchiveProjectRequest, SessionRuntimeScopedRequest, SkillsScanRequest, SkillsScanResponse } from "#neoastra";
 import type { SessionPermissionsRequest, SessionPermissionResolveRequest } from "#neoastra";
+import type { createUserInputReviewer } from "./sessionUserInput";
 const epoch = "12345678-1234-1234-1234-123456789abc";
 const session = { id: "one", title: "one", fullTitle: "one", fullTitleTruncated: false, createdAt: "2026-01-02T03:04:05.1234567+14:00",
   parentSessionId: null, scopeKind: localStorage.getItem("infoFixtureUnknown") === "true" ? null : "project",
@@ -17,9 +18,17 @@ const catalog = { configured: true, projects: [{ id: "project", name: "Project",
 const unavailable = async () => { throw new Error("test bridge unavailable"); };
 const permissionReads: Array<{ request: SessionPermissionsRequest; resolve: (value: unknown) => void }> = [];
 const permissionDecisions: Array<{ request: SessionPermissionResolveRequest; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
+type InputRequest = Parameters<Parameters<typeof createUserInputReviewer>[1]>[0];
+const inputReads: Array<{ request: { expectedHostEpoch: string; sessionId: string }; resolve: (value: unknown) => void }> = [];
+const inputAnswers: Array<{ request: InputRequest; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
+const inputCancels: Array<{ request: Omit<InputRequest, "answers">; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
 const permissionEntry = { handle: { operationId: epoch, runtimeInstanceId: epoch, attachmentGeneration: "7", sessionId: "one",
   runId: "literal-run", interactionId: "literal-interaction", attemptId: epoch }, providerId: "fixture",
   command: "  inert original command\n<script>not markup</script>  " + "literal ".repeat(350), workingDirectory: "/fixture/project", reason: "literal permission reason" };
+const inputEntry = { handle: { ...permissionEntry.handle }, providerId: "literal-input-provider", prompts: [
+  { id: "choice", header: "literal header", question: "  <script>literal question</script>\n" + "question ".repeat(90), options: [{ label: "literal choice", description: "  literal description\n" }], allowFreeform: false },
+  { id: "text", header: null, question: "literal text question", options: [], allowFreeform: true },
+] };
 const calls: string[] = [];
 const rpcCalls: string[] = [];
 const archives: Array<{ request: WorkspaceArchiveProjectRequest; resolve: (value: unknown) => void }> = [];
@@ -71,6 +80,9 @@ Object.assign(window, { settingsShellFixture: { calls, rpcCalls, sends, choiceRe
   displayCalls, displayCleanup, notesCalls, lateDisplayAttempts, reminderReads, projectNameReads, referenceReads,
   displayEvidence: () => displayAttempts.map(({ signal, ...attempt }) => ({ ...attempt, aborted: signal.aborted })),
   referenceObservations, archives, runtimeReads, skillReads, promptCreates, promptReads, permissionReads, permissionDecisions, permissionEntry,
+  inputReads, inputAnswers, inputCancels, inputEntry,
+  releaseInputs() { const call = inputReads.at(-1)!; call.resolve({ status: "ok", hostEpoch: epoch,
+    sessionId: call.request.sessionId, entries: [{ ...inputEntry, handle: { ...inputEntry.handle, sessionId: call.request.sessionId } }], hasMore: false }); },
   releasePermissions() { const call = permissionReads.at(-1)!; call.resolve({ status: "ok", hostEpoch: epoch,
     sessionId: call.request.sessionId, entries: [{ ...permissionEntry, handle: { ...permissionEntry.handle, sessionId: call.request.sessionId } }], hasMore: false }); },
   releaseSkills(index = skillReads.length - 1, mode = "parsed") {
@@ -147,7 +159,8 @@ const choices = (request: { expectedEpoch: string; sessionId: string }) => ({ st
   models: [{ id: "old", name: "Old", efforts: ["Low"], imageInput: false }, ...(localStorage.getItem("settingsFixtureNewChoices") === "true"
     ? [{ id: "new", name: "New", efforts: ["High"], imageInput: true }] : [])] });
 export const boot = { status: async () => ({ state: owned() ? "owned" : "catalog", hostAvailable: owned(),
-  hostEpoch: owned() ? epoch : null, commandReviewEnabled: localStorage.getItem("permissionFixtureEnabled") === "true", productName: "CodeAlta", version: "development" }) };
+  hostEpoch: owned() ? epoch : null, commandReviewEnabled: localStorage.getItem("permissionFixtureEnabled") === "true",
+  ownedUserInputEnabled: localStorage.getItem("inputFixtureEnabled") === "true", productName: "CodeAlta", version: "development" }) };
 export const workspace = { snapshot: async () => {
   snapshotCalls.push({});
   if (localStorage.getItem("creationFixtureHoldSnapshot") === "true")
@@ -249,7 +262,11 @@ export const sessionOperations = { observeReferences: (request: { text: string }
   compact: unavailable, abortRun: unavailable, queue: unavailable, cancelQueue: unavailable };
 export const sessionAsks = { answer: unavailable, cancel: unavailable };
 export const sessionNotes = { current: (request: unknown) => { notesCalls.push(request); return unavailable(); }, clear: unavailable };
-export const sessionUserInput = { list: unavailable, resolve: unavailable, cancel: unavailable };
+export const sessionUserInput = {
+  list: (request: { expectedHostEpoch: string; sessionId: string }) => new Promise(resolve => inputReads.push({ request, resolve })),
+  resolve: (request: InputRequest) => new Promise((resolve, reject) => inputAnswers.push({ request, resolve, reject })),
+  cancel: (request: Omit<InputRequest, "answers">) => new Promise((resolve, reject) => inputCancels.push({ request, resolve, reject })),
+};
 
 // Observe every fake bridge invocation; language changes must not start backend work.
 for (const [name, service] of Object.entries({ boot, workspace, configuration, applicationLogs, modelCatalog, promptCatalog,

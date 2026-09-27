@@ -607,8 +607,14 @@ Commands remain denied unless independently reviewed. **Never enter passwords, t
 literal answers may persist in provider tool results and history. Unsupported/secret/oversized forms are
 cancelled as a whole; this provides no file review or credential-entry workflow.
 
-Use **Refresh input** to list up to four pending forms. Select an offered option or explicitly enter
-freeform text for every prompt, then **Submit literal answers**, or **Cancel this attempt only**.
+Use **Refresh input** to list up to four pending forms, then deliberately choose **Review provider input**
+for one exact observed form. The native HTML dialog shows complete literal questions/options and handle
+provenance. Select an offered option or explicitly enter freeform text for every prompt, then
+**Submit literal answers**, or **Cancel this attempt only**. Close/Escape dismisses presentation only,
+without reading, answering or cancelling. Local edits survive ordinary close/reopen only for the same
+validated form and lifetime; refresh, another form, scope changes and stale modal controls discard them.
+They are not persisted or retained across sessions. Bounded fake-host/browser qualification passes;
+native WebView2 and real-provider qualification remain open.
 No answer is silently filled in. Answers are limited to 2,048 UTF-16 units each and 8,192 in aggregate.
 An accepted response is an owner decision, not proof of provider continuation or persistence success.
 

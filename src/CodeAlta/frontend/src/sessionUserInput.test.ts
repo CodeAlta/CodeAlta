@@ -182,6 +182,27 @@ test("reload only explicitly lists pending forms; deep copies and unsupported pa
   finally { controller.abort(); await finish(work, owner, primary); }
 });
 
+test("modal answer payloads keep literal bytes, empty versus missing and existing bounds", async () => {
+  const requests: unknown[] = [];
+  const owner = createUserInputReviewer(async () => page, async request => {
+    requests.push(request); return { status: "resolved", hostEpoch: epoch, handle };
+  }, async () => { throw new Error("No cancellation expected"); });
+  const controller = new AbortController();
+  const view = owner.forSelection(epoch, "session", controller.signal, () => {}, () => {});
+  try {
+    await view.refresh();
+    for (const answers of [[], [{ promptId: "q", value: "x".repeat(2049) }], [{ promptId: "q", value: "\0" }]]) {
+      await view.resolve(handle, answers); assert.equal(requests.length, 0);
+    }
+    for (const value of ["", "  literal\r\n日本語 😀  ", "x".repeat(2048)]) {
+      await view.refresh(); await view.resolve(handle, [{ promptId: "q", value }]);
+      assert.deepEqual(requests.at(-1), { expectedHostEpoch: epoch, handle, answers: [{ promptId: "q", value }] });
+      assert.equal(owner.acknowledge(), false); owner.observeOriginal(); assert.equal(owner.acknowledge(), true);
+    }
+    assert.equal(requests.length, 3);
+  } finally { controller.abort(); }
+});
+
 function deferred<T>(work: Promise<unknown>[]) {
   let release!: (value: T) => void;
   const promise = new Promise<T>(resolve => { release = resolve; }); work.push(promise);

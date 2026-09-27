@@ -2506,6 +2506,19 @@ result requires explicit local observation/acknowledgment followed by a fresh li
 replayed, renderer reload recovers only host-pending forms, and list absence/restart does not recover a
 lost decision. No browser ledger, polling or native credential-entry workflow is added.
 
+**2026-09-27 scoped provider-input modal:** deliberate Review opens a native HTML
+dialog for one already manually observed form, with full literal questions/options/descriptions and
+host/handle provenance. Close/Escape is presentation-only. One local draft survives ordinary dismissal
+only while its exact page/entry/scope remains current; refresh/replacement, scope/capability and native
+modal invalidation refuse stale controls and discard reuse. Existing App-owned answer/cancel originals,
+manual observation/acknowledgment, bounds and uncertainty semantics remain unchanged. Static labels
+cover six languages; provider data remains literal. This is not caller asks, permission/credential/file
+review or live action-required timeline authority. Independent parent verification passes all ten
+complete related files (51 tests, zero skips), strict TypeScript and the production build.
+Browser tests cover exact local draft reuse, missing versus empty answers, stale controls,
+literal payloads, retained uncertainty, explicit observation/acknowledgment and App integration.
+Native WebView2, real-provider and native-speaker qualification remain open.
+
 Parent audited sole-writer corrections and independently passed **27 managed methods**: five Agent,
 ten root-free mailbox, three runtime/lifecycle/cleanup, and nine Desktop RPC/source methods. The lifecycle
 method covers 24 combinations. **Seven frontend tests** pass, including 12 retained-page and 32 racing-list

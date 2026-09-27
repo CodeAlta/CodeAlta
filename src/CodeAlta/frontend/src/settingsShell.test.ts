@@ -79,6 +79,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(page).href });
     let permissionModeContext: string | null = null;
+    let inputModeContext: string | null = null;
     const evaluate = async (expression: string) => {
       try {
         const response = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
@@ -86,7 +87,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
         return response.result?.value;
       } catch (cause) {
         // This page contains fixture data only. Keep exact expression/context on transport failures.
-        throw new Error(`Runtime.evaluate permissionMode=${permissionModeContext ?? "outside permission scenarios"}; expression=${expression}; failure=${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+        throw new Error(`Runtime.evaluate permissionMode=${permissionModeContext ?? "outside permission scenarios"}; inputMode=${inputModeContext ?? "outside input scenarios"}; expression=${expression}; failure=${cause instanceof Error ? cause.message : String(cause)}`, { cause });
       }
     };
     const wait = (condition: string) => evaluate(`new Promise(resolve => { const end=Date.now()+7000; const tick=()=>{
@@ -2347,6 +2348,79 @@ test("production shell settings overlay keeps the session workspace mounted and 
       attempts: [{ sessionId: "one", opened: false, settled: true, unavailable: true, aborted: true }],
     }, "Unavailable Display read settles and is aborted; no stream was opened or needs generator cleanup");
     permissionModeContext = null;
+    // New disposable input scenarios follow (never replace) every preexisting teardown.
+    for (const mode of ["answer", "uncertain", "session-aba", "host-aba", "native-aba", "capability", "archived", "catalog", "disabled"]) {
+      inputModeContext = mode; t.diagnostic(`Provider input App scenario: ${mode}`);
+      await evaluate(`unmountShellFixture();localStorage.clear();localStorage.setItem('settingsFixtureOwned','${mode !== "catalog"}');localStorage.setItem('inputFixtureEnabled','${mode !== "disabled"}')`);
+      await command("Page.reload");
+      assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one'"), true);
+      if (["catalog", "disabled"].includes(mode)) {
+        assert.equal(await evaluate("!document.querySelector('.provider-input-panel') && settingsShellFixture.inputReads.length===0"), true);
+        continue;
+      }
+      assert.equal(await wait("!!document.querySelector('[data-input-refresh]')"), true);
+      assert.equal(await evaluate("settingsShellFixture.inputReads.length===0 && !document.querySelector('.provider-input-dialog')"), true);
+      await evaluate("document.querySelector('[data-input-refresh]').click()");
+      assert.equal(await wait("settingsShellFixture.inputReads.length===1"), true);
+      await evaluate("settingsShellFixture.releaseInputs()");
+      assert.equal(await wait("!!document.querySelector('[data-input-review]')"), true);
+      assert.equal(await evaluate("!document.querySelector('.provider-input-dialog')"), true, "Input read never auto-opens");
+      await frames();
+      await evaluate("window.inputRpcCount=settingsShellFixture.rpcCalls.length;document.querySelector('[data-input-review]').focus();document.querySelector('[data-input-review]').click()");
+      assert.equal(await wait("document.querySelector('.provider-input-dialog')?.open && !document.querySelector('.provider-input-dialog fieldset').disabled"), true, "Initial native beforetoggle does not retire input review");
+      assert.equal(await evaluate("settingsShellFixture.rpcCalls.length===inputRpcCount && document.activeElement===document.querySelector('.provider-input-dialog header button') && document.querySelector('[data-input-question]').textContent===settingsShellFixture.inputEntry.prompts[0].question"), true);
+      await evaluate("document.querySelector('.provider-input-dialog [aria-pressed]').click();const field=document.querySelector('.provider-input-dialog textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(field,'  literal 日本語\\nanswer  ');field.dispatchEvent(new Event('input',{bubbles:true}))");
+      await evaluate("void(window.oldInputButton=document.querySelector('[data-input-submit]'));void(window.oldInputCancel=document.querySelector('[data-input-cancel]'))");
+      if (mode === "session-aba") await evaluate("cycleInfoSelection()");
+      if (mode === "host-aba") await evaluate("cycleInfoHost()");
+      if (mode === "native-aba") await evaluate("const d=document.querySelector('.provider-input-dialog');d.close();d.showModal()");
+      if (mode === "capability") await evaluate("readBatchCapability().observe({status:'stale_epoch',epoch:'00000000-0000-0000-0000-000000000002'})");
+      if (mode === "archived") await evaluate("publishLayoutCatalog({...settingsShellFixture.catalog,projects:settingsShellFixture.catalog.projects.map(p=>({...p,archived:true}))})");
+      if (!["answer", "uncertain"].includes(mode)) {
+        await evaluate("oldInputButton.click();oldInputCancel.click()");
+        assert.equal(await evaluate("settingsShellFixture.inputAnswers.length===0 && settingsShellFixture.inputCancels.length===0"), true, mode);
+        if (mode === "archived") assert.equal(await evaluate("!document.querySelector('.provider-input-panel')"), true);
+        continue;
+      }
+      for (const locale of ["en", "es", "fr", "de", "ja", "zh-CN"]) {
+        await evaluate(`workflowLanguage('${locale}')`); await frames();
+        assert.equal(await evaluate("settingsShellFixture.rpcCalls.length===inputRpcCount && document.querySelector('.provider-input-dialog textarea').value==='  literal 日本語\\nanswer  ' && !document.querySelector('.provider-input-dialog fieldset').disabled"), true, `${mode}/${locale}: locale cannot read, retarget or discard edits`);
+      }
+      await evaluate("workflowLanguage('en')"); await frames();
+      await evaluate("document.querySelector('.provider-input-dialog header button').click()");
+      assert.equal(await wait("!document.querySelector('.provider-input-dialog') && document.activeElement===document.querySelector('[data-input-review]')"), true);
+      await evaluate("document.querySelector('[data-input-review]').click()");
+      assert.equal(await wait("document.querySelector('.provider-input-dialog')?.open"), true);
+      assert.equal(await evaluate("document.querySelector('.provider-input-dialog textarea').value==='  literal 日本語\\nanswer  '"), true);
+      await evaluate("oldInputButton.click();oldInputCancel.click()");
+      assert.equal(await evaluate("settingsShellFixture.inputAnswers.length===0 && settingsShellFixture.inputCancels.length===0"), true, "Prior modal controls remain retired after reopen");
+      await evaluate("document.querySelector('[data-input-submit]').click();document.querySelector('[data-input-cancel]').click()");
+      assert.equal(await wait("settingsShellFixture.inputAnswers.length===1"), true);
+      assert.deepEqual(await evaluate("settingsShellFixture.inputAnswers[0].request"), { expectedHostEpoch: "12345678-1234-1234-1234-123456789abc", handle: await evaluate("settingsShellFixture.inputEntry.handle"), answers: [{ promptId: "choice", value: "literal choice" }, { promptId: "text", value: "  literal 日本語\nanswer  " }] });
+      await evaluate("document.querySelector('.provider-input-dialog header button').click();void(window.inputPanel=document.querySelector('.provider-input-panel'));document.querySelector('.rail-footer .icon-label-button').click()");
+      assert.equal(await evaluate("inputPanel.isConnected"), true, "Settings retains original owner/panel");
+      await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
+      await evaluate(mode === "uncertain" ? "settingsShellFixture.inputAnswers[0].reject(Error('literal input transport failure'))"
+        : "settingsShellFixture.inputAnswers[0].resolve({status:'resolved',hostEpoch:settingsShellFixture.inputAnswers[0].request.expectedHostEpoch,handle:settingsShellFixture.inputAnswers[0].request.handle})");
+      await frames();
+      await evaluate("document.querySelector('[data-input-refresh]').click()");
+      assert.equal(await wait("settingsShellFixture.inputReads.length===2"), true);
+      await evaluate("settingsShellFixture.releaseInputs()");
+      assert.equal(await wait("!!document.querySelector('[data-input-review]')"), true);
+      assert.equal(await evaluate("document.querySelector('[data-input-review]').disabled"), true, "Refresh/live result never acknowledges original input");
+      await evaluate("[...document.querySelectorAll('.provider-input-panel button')].find(b=>b.textContent==='Acknowledge observed terminal original').click()");
+      assert.equal(await evaluate("document.querySelector('[data-input-review]').disabled"), true, "Acknowledgment requires explicit observation first");
+      await evaluate("[...document.querySelectorAll('.provider-input-panel button')].find(b=>b.textContent==='Observe original locally (no RPC)').click();[...document.querySelectorAll('.provider-input-panel button')].find(b=>b.textContent==='Acknowledge observed terminal original').click()");
+      assert.equal(await evaluate(mode === "uncertain" ? "document.querySelector('[data-input-review]').disabled" : "!document.querySelector('[data-input-review]')"), true);
+      assert.equal(await evaluate("settingsShellFixture.inputAnswers.length===1 && settingsShellFixture.inputCancels.length===0 && settingsShellFixture.sends.length===0 && settingsShellFixture.creates.length===0"), true);
+    }
+    inputModeContext = "teardown after disabled";
+    await evaluate("window.unmountShellFixture()");
+    assert.equal(await wait("document.querySelector('#root').childElementCount===0"), true);
+    assert.deepEqual(await evaluate("({calls:settingsShellFixture.displayCalls.length,cleanup:settingsShellFixture.displayCleanup.length,attempts:settingsShellFixture.displayEvidence()})"), {
+      calls: 1, cleanup: 0, attempts: [{ sessionId: "one", opened: false, settled: true, unavailable: true, aborted: true }],
+    }, "Unavailable input-fixture Display attempt settles and aborts without inventing stream cleanup");
+    inputModeContext = null;
   } finally {
     socket?.close(); browser?.kill();
     await writeFile(join(root, "session-content-observations.json"), JSON.stringify(layoutObservations, null, 2));
