@@ -5,13 +5,15 @@ import { useShellLanguage } from "./shellLanguage";
 
 export type RuntimeObservationControls = { store: ReturnType<typeof createRuntimeObservations>; enabled: boolean; canObserve: (tab: SessionTab) => boolean; refresh: (tabs: readonly SessionTab[]) => void };
 
-export function RuntimeObservationBadge({ controls, tab }: { controls: RuntimeObservationControls; tab: SessionTab }) {
+export function RuntimeObservationBadge({ controls, tab, compact = false }: { controls: RuntimeObservationControls; tab: SessionTab; compact?: boolean }) {
   const { t } = useShellLanguage();
   const state = useSyncExternalStore(controls.store.subscribe, controls.store.getSnapshot);
   const row = state.rows.get(tabKey(tab));
   const eligible = controls.enabled && controls.canObserve(tab);
-  return <span className="runtime-observation" title={eligible && row ? row.details : t("Not observed; archived/catalog-only/unverified rows are not queried. Never permission to send or abort.")}>
-    {!eligible ? t("Unknown · archived/unverified or unavailable") : row ? `${row.stale ? t("Stale · ") : ""}${row.label}` : t("Unknown · not observed")}
+  const label = !eligible ? t("Unknown · archived/unverified or unavailable") : row ? `${row.stale ? t("Stale · ") : ""}${row.label}` : t("Unknown · not observed");
+  return <span className={`runtime-observation${compact ? " runtime-observation-compact" : ""}`} aria-label={compact ? label : undefined}
+    title={`${label}\n${eligible && row ? row.details : t("Not observed; archived/catalog-only/unverified rows are not queried. Never permission to send or abort.")}`}>
+    {compact ? (eligible && row && !row.stale ? "●" : "○") : label}
   </span>;
 }
 

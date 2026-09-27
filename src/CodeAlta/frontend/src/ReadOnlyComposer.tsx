@@ -49,7 +49,7 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
     return () => { observer.disconnect(); window.removeEventListener("resize", measure); };
   }, [text]);
   return <section className="composer catalog-composer" aria-label={t("Message composer")}>
-    {localDraft && <p className="catalog-diagnostics">{t("@ search requires an owned, verified project. References resolve only on normal Send after creation and transfer; file contents are not uploaded.")}</p>}
+    {localDraft && <details className="composer-reference-help"><summary>@</summary><p className="catalog-diagnostics">{t("@ search requires an owned, verified project. References resolve only on normal Send after creation and transfer; file contents are not uploaded.")}</p></details>}
     {expanded && <ExpandedPromptEditor text={text} onChange={edit} onPaste={refuseImagePaste} onCompositionStart={localImages?.invalidate} attachments={localDraft && localImages ? localImages.attachments : imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>} onClose={() => { localImages?.invalidate(); setExpanded(false); }} />}
     {!expanded && localDraft && localImages && localImages.attachments}
     {!expanded && imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>}
@@ -71,7 +71,7 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
       }} placeholder={t(localDraft ? "Draft a prompt — no session created yet…" : "Draft a prompt for this session…")} />
     {localDraft && !expanded && <ProjectReferencePicker text={text} edit={edit} input={promptInput} />}
     <div className="composer-toolbar">
-      <p id="catalog-draft-status" role="status">{t("Draft only")} — {reason ?? t("No owned desktop host; sending is unavailable. Drafts stay local when storage permits.")}</p>
+      <details><summary>{t("Draft only")}</summary><p id="catalog-draft-status" role="status">{reason ?? t("No owned desktop host; sending is unavailable. Drafts stay local when storage permits.")}</p></details>
       <div className="history-controls">
         {infoControl}
         <button id="expand-session-prompt" type="button" aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => setExpanded(true)}>{t("Expand")}</button>

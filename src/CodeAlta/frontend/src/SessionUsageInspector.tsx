@@ -14,6 +14,7 @@ export function SessionUsageInspector({ target, capability }: {
   const show = (value: string | number | null) => value === null ? t("Unknown") : String(value);
   const trigger = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
   const request = useRef<AbortController | null>(null);
   const [focusRestoration] = useState(createPaletteFocusRestoration);
   const current = useRef(false);
@@ -27,6 +28,10 @@ export function SessionUsageInspector({ target, capability }: {
     if (!open || !allowed) return;
     const element = dialog.current;
     element?.showModal();
+    const button = closeButton.current;
+    if (allowed && current.current && capability.canMutate() && element?.isConnected && element.open && element.matches(":modal") &&
+      button?.isConnected && element.contains(button) && !button.disabled && !element.closest("[inert], [hidden]") &&
+      !Array.from(document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]')).some(other => other !== element)) button.focus();
     return () => { if (element?.open) element.close(); };
   }, [open, allowed]);
   useEffect(() => () => { current.current = false; request.current?.abort(); focusRestoration.cancel(); }, [focusRestoration]);
@@ -82,7 +87,8 @@ export function SessionUsageInspector({ target, capability }: {
   }
   const snapshotRuntime = useRef<string | null>(null);
   function openDialog() {
-    if (!capability.canMutate() || current.current) return;
+    if (!capability.canMutate() || current.current || !trigger.current?.isConnected || trigger.current.disabled ||
+      trigger.current.closest("[inert], [hidden]") || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
     focusRestoration.cancel();
     current.current = true;
     snapshotRuntime.current = null;
@@ -103,7 +109,7 @@ export function SessionUsageInspector({ target, capability }: {
       onCompositionEnd={() => { composingEscape.current = false; }}
       onCancel={event => { event.preventDefault(); if (!composingEscape.current) close(); }}>
       <header><div><span className="eyebrow">{t("Owned session")}</span><h2 id="session-usage-title">{t("Last-observed usage")}</h2></div>
-        <button type="button" className="icon-button" aria-label={t("Close usage inspector")} onClick={close}><AppIcon name="close" size={16} /></button></header>
+        <button ref={closeButton} type="button" className="icon-button" aria-label={t("Close usage inspector")} onClick={close}><AppIcon name="close" size={16} /></button></header>
       <p id="session-usage-description" className="muted-text">{t("One admitted provider event, not a live context measurement, complete history or inferred total. Unknown is not zero.")}</p>
       <p role="status">{typeof status === "string" ? t(status) : status.raw}</p>
       {observation && <dl className="session-info-fields session-usage-fields" tabIndex={0} aria-label={t("Last-observed usage fields")}>

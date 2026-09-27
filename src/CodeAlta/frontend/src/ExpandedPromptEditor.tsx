@@ -35,7 +35,7 @@ export function ExpandedPromptEditor({ text, onChange, onClose, onPaste, attachm
     <textarea ref={editor} aria-label={t("Expanded prompt")} aria-describedby="expanded-prompt-hint" maxLength={32768}
       value={text} onChange={event => onChange(event.target.value)} onPaste={onPaste} onCompositionStart={onCompositionStart} />
     {attachments}
-    <ProjectReferencePicker text={text} edit={onChange} input={editor} />
+    <ProjectReferencePicker text={text} edit={onChange} input={editor} compact={false} />
     <p id="expanded-prompt-hint">{t("Enter / Escape / Ctrl+Enter close · Shift+Enter new line · Draft preserved; nothing is sent.")}</p>
   </dialog>;
 }

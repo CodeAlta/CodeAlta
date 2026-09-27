@@ -190,7 +190,7 @@ test("empty regular composer transient help and palette keep drafts and ownershi
       "an open modal cannot be replaced by a background composer gesture");
     await evaluate("window.originalFrame=requestAnimationFrame; window.helpCloseFrames=[]; window.requestAnimationFrame=callback=>{window.helpCloseFrames.push(callback); return 123456;}; document.querySelector('.shortcut-dialog [aria-label=\"Close\"]').click()");
     assert.equal(await wait("!document.querySelector('.shortcut-dialog')"), true);
-    await evaluate("window.requestAnimationFrame=window.originalFrame; [...document.querySelectorAll('button')].find(button=>button.textContent.includes('Commands') && button.textContent.includes('Ctrl+P')).click()");
+    await evaluate("window.requestAnimationFrame=window.originalFrame; document.querySelector('.activity-rail button[aria-label=\"Open command palette\"]').click()");
     assert.equal(await wait("document.querySelector('.command-palette')?.open"), true);
     assert.equal(await evaluate("(() => { for(const callback of window.helpCloseFrames) callback(performance.now()); return document.activeElement?.closest('.command-palette')!==null; })()"), true,
       "help close must not steal newer palette focus");

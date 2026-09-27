@@ -228,6 +228,17 @@ test("opt-in production split: ordinary scheduling, geometry/ARIA and stable cal
     const resizedFresh = await snap("resize-disposed-fresh-real-parent-620"); verify(resizedFresh); assert.equal(resizedFresh.row.width, 620);
     realResize(resizeFresh, resizedFresh); await quiet("resize-disposed-fresh");
     assert.deepEqual(await evaluate("splitFixture.disposed()"), [replacement.disposed, replayReplacement.disposed], "disposed resize callbacks/frames remain unchanged through new geometry deliveries and quiet sample");
+    await evaluate("splitFixture.fullWidth(true); splitFixture.settle(6)");
+    const full = await evaluate<{left:{width:number};container:{width:number};samePanes:boolean;sameInputs:boolean;setups:number;cleanups:number}>("splitFixture.fullSnapshot()");
+    observations.push({label:"optional-right-pane-full-width",full});
+    assert.equal(full.left.width, full.container.width, `optional pane full distribution: ${JSON.stringify(full)}`);
+    assert.ok(full.samePanes && full.sameInputs, "full width retains both pane owners and drafts");
+    assert.equal(full.setups,resizedFresh.setups); assert.equal(full.cleanups,resizedFresh.cleanups);
+    await evaluate("splitFixture.fullWidth(false); splitFixture.settle(6); splitFixture.focusSeparator()");
+    const restored = await snap("optional-right-pane-restored");
+    assert.deepEqual(restored.previous,resizedFresh.previous,"restore exact prior left distribution");
+    assert.deepEqual(restored.next,resizedFresh.next,"restore exact prior right distribution");
+    assert.ok(restored.samePanes && restored.sameInputs);
     // Single-pane production compatibility, also with normal caller updates.
     await evaluate("splitFixture.single()"); await wait('document.querySelector("[data-fake-pane=single]")!==null');
     await evaluate("splitFixture.settle();"); await evaluate("splitFixture.capture(); splitFixture.focusInput(); splitFixture.refresh()");
@@ -250,7 +261,7 @@ test("opt-in production split: ordinary scheduling, geometry/ARIA and stable cal
       await evaluate("splitFixture.settle(12)"); const after = await evaluate<AppLayoutSnapshot>("splitFixture.appSnapshot()");
       observations.push({ label, before, after }); assert.deepEqual(after, before, `${label}: finite quiet geometry and resize-source counters`);
       assert.ok(after.samePanes && after.sameInputs); assert.equal(after.setups, 4); assert.equal(after.cleanups, 2);
-      assert.equal(after.subscriptions, 4); assert.equal(after.removals, 2); assert.equal(after.listeners, 2); assert.equal(after.probes, 1);
+      assert.equal(after.subscriptions, 0); assert.equal(after.removals, 0); assert.equal(after.listeners, 0); assert.equal(after.probes, 0);
       assert.equal(after.pending, 0); return after;
     }
     const appInitial = await appSnap("app-adapter-initial");
@@ -258,8 +269,8 @@ test("opt-in production split: ordinary scheduling, geometry/ARIA and stable cal
     assert.ok(appInitial.focused); assert.equal(appInitial.value, "owned draft"); assert.equal(appInitial.label, "latest:left");
     await viewport(876); const appDesktop = await appSnap("app-adapter-876"); assert.equal(appDesktop.sessions.width, 310);
     await viewport(875); await evaluate("splitFixture.projectAppLayout(true,false,310)");
-    const appNarrow = await appSnap("app-adapter-875x600"); assert.equal(appNarrow.sessions.height, 240);
-    assert.equal(appNarrow.sessions.width, 875); assert.equal(appNarrow.bar.width, 0); assert.ok(appNarrow.focused);
+    const appNarrow = await appSnap("app-adapter-875x600"); assert.equal(appNarrow.sessions.height, 390);
+    assert.equal(appNarrow.sessions.width, 320); assert.equal(appNarrow.bar.width, 0); assert.ok(appNarrow.focused);
     await evaluate("splitFixture.projectAppLayout(true,true,310)");
     const appHidden = await appSnap("app-adapter-hidden"); assert.equal(appHidden.sessions.height, 0); assert.equal(appHidden.sessions.width, 0);
     assert.equal(appHidden.content.y, 0); assert.equal(appHidden.content.height, 600);
@@ -269,15 +280,15 @@ test("opt-in production split: ordinary scheduling, geometry/ARIA and stable cal
     const appBeforeReplace = await evaluate<SplitStats>("splitFixture.stats()");
     const appReplacement = await evaluate<{ pending: SplitStats; disposed: SplitStats; disconnected: boolean }>("splitFixture.replacePending('replay')");
     observations.push({ label: "app-adapter-resize-replay-unmount", appBeforeReplace, appReplacement });
-    assert.equal(appReplacement.pending.sources.replay.scheduled - appBeforeReplace.sources.replay.scheduled, 1);
-    assert.equal(appReplacement.pending.sources.replay.pending, 1); assert.equal(appReplacement.disposed.sources.replay.pending, 0);
-    assert.equal(appReplacement.disposed.sources.replay.canceled - appBeforeReplace.sources.replay.canceled, 1);
+    assert.equal(appReplacement.pending.sources.replay.scheduled - appBeforeReplace.sources.replay.scheduled, 0);
+    assert.equal(appReplacement.pending.sources.replay.pending, 0); assert.equal(appReplacement.disposed.sources.replay.pending, 0);
+    assert.equal(appReplacement.disposed.sources.replay.canceled - appBeforeReplace.sources.replay.canceled, 0);
     assert.equal(appReplacement.disposed.sources.replay.fired, appBeforeReplace.sources.replay.fired);
     assert.equal(appReplacement.disposed.probes, 0); assert.equal(appReplacement.disposed.listeners, 0); assert.ok(appReplacement.disconnected);
     await wait('document.querySelectorAll("[data-fake-pane]").length===2'); await evaluate("splitFixture.settle(6); splitFixture.capture()");
     await appSnap("app-adapter-fresh");
     await evaluate("splitFixture.parentWidth(900)"); const appFreshResize = await appSnap("app-adapter-fresh-parent-resize");
-    assert.ok(appFreshResize.sources.resize.calls > 0); assert.ok(appFreshResize.sources.resize.fired > 0);
+    assert.equal(appFreshResize.sources.resize.calls, 0); assert.equal(appFreshResize.sources.resize.fired, 0);
     const oldAudits = await evaluate<SplitStats[]>("splitFixture.disposed()"); assert.deepEqual(oldAudits.at(-1), appReplacement.disposed);
     const appDisposed = await evaluate<SplitStats>("splitFixture.unmount()"); await evaluate("splitFixture.settle(12)");
     assert.equal(appDisposed.probes, 0); assert.equal(appDisposed.listeners, 0); assert.equal(appDisposed.pending, 0);

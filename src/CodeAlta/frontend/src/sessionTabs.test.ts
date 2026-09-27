@@ -6,7 +6,7 @@ import { resolveShortcut } from "./shortcuts";
 import { paletteAvailable } from "./paletteActions";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { SessionTabStrip } from "./SessionTabStrip";
+import { SessionTabLabel } from "./SessionTabStrip";
 import { ShellLanguageContext } from "./shellLanguage";
 import { locales, translate } from "./localization";
 
@@ -19,18 +19,18 @@ const catalog: WorkspaceSnapshot = { configured: true, projectsTruncated: false,
 ].map(row => ({ ...row, title: row.id, fullTitle: row.id, fullTitleTruncated: false, createdAt: null,
   updatedAt: "2026-09-26T00:00:00Z", parentSessionId: null, lineageIssue: null, providerKey: null })) };
 
-test("six-locale tab controls keep English-like user titles and identities literal without dispatch", () => {
+test("six-locale Flex tab labels keep English-like user titles and identities literal without dispatch", () => {
   const snapshot = { ...catalog, sessions: catalog.sessions.map(row => ({ ...row, title: "Prompt draft <literal>" })) };
   const state = openSessionTab(emptySessionTabs(), tab("one"));
   const forbidden = () => { assert.fail("rendering localized tabs must not dispatch"); };
   for (const locale of locales) {
     const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider,
-      { value: { locale, choice: locale, setLanguage: forbidden } }, createElement(SessionTabStrip,
-        { state, snapshot, dirty: () => true, select: forbidden, close: forbidden, reopen: forbidden, selectDraft: forbidden })));
-    assert.ok(html.includes("Prompt draft &lt;literal&gt; — Project"));
-    assert.ok(html.includes(translate(locale, "Reopen closed tab")));
-    assert.ok(html.includes(translate(locale, "Draft edited in this window")));
-    assert.ok(html.includes('aria-controls="active-session-content"'));
+      { value: { locale, choice: locale, setLanguage: forbidden } }, createElement(SessionTabLabel,
+        { label: `${snapshot.sessions[0].title} - Project`, path: state.open[0].path, dirty: true })));
+    const diagnostic = `locale=${locale}; html=${html}`;
+    assert.ok(html.includes("Prompt draft &lt;literal&gt; - Project"), diagnostic);
+    assert.ok(html.includes(translate(locale, "Draft edited in this window")), diagnostic);
+    assert.ok(html.includes('/p'), diagnostic);
     assert.equal(state.open[0].sessionId, "one");
   }
 });

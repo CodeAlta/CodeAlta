@@ -2,6 +2,8 @@
 // No native bridge or user data is touched.
 import type { HistoryRequest, HistoryResponse, SessionDisplayItem, SessionDisplayRequest, ReminderListRequest, ReminderListResponse, WorkspaceArchiveProjectRequest, SessionRuntimeScopedRequest, SkillsScanRequest, SkillsScanResponse } from "#neoastra";
 import type { SessionPermissionsRequest, SessionPermissionResolveRequest } from "#neoastra";
+import type { SessionRuntimeStateRequest, SessionRuntimeStateResponse } from "#neoastra";
+import type { SessionReceiptRequest, SessionReceiptPage, SessionCancelQueueRequest, SessionAdmission } from "#neoastra";
 import type { createUserInputReviewer } from "./sessionUserInput";
 const epoch = "12345678-1234-1234-1234-123456789abc";
 const session = { id: "one", title: "one", fullTitle: "one", fullTitleTruncated: false, createdAt: "2026-01-02T03:04:05.1234567+14:00",
@@ -15,6 +17,10 @@ const catalog = { configured: true, projects: [{ id: "project", name: "Project",
     ...(localStorage.getItem("settingsFixtureSecondProject") === "true" ? [{ ...session, id: "other-session", title: "other-session", fullTitle: "other-session", projectId: "other", workspacePath: "/fixture/other", providerKey: "other-provider" }] : []),
     ...(localStorage.getItem("infoFixtureAmbiguous") === "true" ? [{ ...session, title: "duplicate" }] : [])],
   projectsTruncated: localStorage.getItem("usageFixtureTruncated") === "true", sessionsTruncated: false, displayTextTruncated: false };
+if (localStorage.getItem("ideFixtureLongLabels") === "true") {
+  catalog.projects[0].name = "Literal Arbeitsbereich 日本語 <project> " .repeat(6);
+  session.title = session.fullTitle = "Literal Sitzung 日本語 <session> ".repeat(6);
+}
 const unavailable = async () => { throw new Error("test bridge unavailable"); };
 const permissionReads: Array<{ request: SessionPermissionsRequest; resolve: (value: unknown) => void }> = [];
 const permissionDecisions: Array<{ request: SessionPermissionResolveRequest; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
@@ -32,6 +38,19 @@ const inputEntry = { handle: { ...permissionEntry.handle }, providerId: "literal
 const calls: string[] = [];
 const rpcCalls: string[] = [];
 const archives: Array<{ request: WorkspaceArchiveProjectRequest; resolve: (value: unknown) => void }> = [];
+const retainedQueueCalls: Array<{ request: unknown; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
+const queueReceiptReads: Array<{ request: SessionReceiptRequest; resolve: (value: SessionReceiptPage) => void }> = [];
+const retainedCancelCalls: Array<{ request: SessionCancelQueueRequest; resolve: (value: SessionAdmission) => void; reject: (error: Error) => void }> = [];
+const currentReads: Array<{ request: SessionRuntimeStateRequest; signal: AbortSignal; response?: SessionRuntimeStateResponse; resolve: (value: SessionRuntimeStateResponse) => void; reject: (error: Error) => void }> = [];
+let releaseReplacementCurrent = false;
+function releaseCurrentCall(call: typeof currentReads[number], attachmentGeneration = "7") {
+  call.response = { status: "ok", hostEpoch: call.request.expectedHostEpoch, sessionId: call.request.sessionId,
+    runtimeInstanceId: epoch, coordinatorTransitionInProgress: false,
+    entry: { attachmentGeneration, activeRunId: "literal-run", isTerminated: false, isRetiring: false,
+      queueDrainInProgress: false, providerId: "fixture", providerKey: "fixture", modelId: null,
+      reasoningEffort: null, agentPromptId: null, pendingAgentPromptId: null, activity: null } };
+  call.resolve(call.response);
+}
 const runtimeReads: Array<{ request: SessionRuntimeScopedRequest; signal: AbortSignal; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
 const skillReads: Array<{ request: SkillsScanRequest; resolve: (value: SkillsScanResponse) => void; reject: (error: Error) => void }> = [];
 const promptCreates: Array<{ request: unknown; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
@@ -45,6 +64,15 @@ const displayCleanup: string[] = [];
 const displayAttempts: Array<{ sessionId: string; signal: AbortSignal; opened: boolean; settled: boolean; unavailable: boolean }> = [];
 const lateDisplayAttempts: string[] = [];
 const reminderReads: Array<{ request: ReminderListRequest; signal: AbortSignal; resolve: (value: ReminderListResponse) => void }> = [];
+const reminderSaves: Array<{ request: import("#neoastra").ReminderSaveRequest; resolve: (value: import("#neoastra").ReminderMutationResponse) => void; reject: (error: Error) => void }> = [];
+const reminderDetails: import("#neoastra").ReminderDetailRequest[] = [];
+const reminderSaveLists: ReminderListRequest[] = [];
+const reminderTrace: Array<{ kind: string; request: unknown; signal?: AbortSignal; completed: boolean; stack: string }> = [];
+function traceReminder(kind: string, request: unknown, signal?: AbortSignal) {
+  const entry = { kind, request, signal, completed: false, stack: new Error().stack ?? "" };
+  reminderTrace.push(entry);
+  return entry;
+}
 const notesCalls: unknown[] = [];
 const projectNameReads: Array<{ request: { projectId: string; projectPath: string }; resolve: (value: unknown) => void }> = [];
 const referenceReads: Array<{ request: unknown; resolve: (value: unknown) => void }> = [];
@@ -102,9 +130,17 @@ function navigationHistory(request: HistoryRequest): HistoryResponse {
 }
 Object.assign(window, { settingsShellFixture: { calls, rpcCalls, sends, choiceReads, usageReads, probes, clearRequests,
   renameRequests, projectRenames, deleteRequests, creates, snapshots, snapshotCalls, catalog, historyCalls,
-  displayCalls, displayCleanup, notesCalls, lateDisplayAttempts, reminderReads, projectNameReads, referenceReads,
+  displayCalls, displayCleanup, notesCalls, lateDisplayAttempts, reminderReads, reminderSaves, reminderDetails, reminderSaveLists, projectNameReads, referenceReads,
+  reminderEvidence: () => reminderTrace.map(({ signal, ...entry }) => ({ ...entry, aborted: signal?.aborted ?? null })),
   displayEvidence: () => displayAttempts.map(({ signal, ...attempt }) => ({ ...attempt, aborted: signal.aborted })),
-  referenceObservations, archives, runtimeReads, skillReads, promptCreates, promptReads, permissionReads, permissionDecisions, permissionEntry,
+  referenceObservations, archives, retainedQueueCalls, retainedCancelCalls, queueReceiptReads, currentReads, runtimeReads, skillReads, promptCreates, promptReads, permissionReads, permissionDecisions, permissionEntry,
+  releaseCurrent(index = currentReads.length - 1, attachmentGeneration = "7") {
+    const call = currentReads[index];
+    // StrictMode may have detached the original waiter before its queued replacement can start.
+    // Release exactly that successor too, not arbitrary future explicit refreshes.
+    releaseReplacementCurrent = call.signal.aborted;
+    releaseCurrentCall(call, attachmentGeneration);
+  },
   inputReads, inputAnswers, inputCancels, inputEntry, fileDetails, longBodyText,
   releaseInputs() { const call = inputReads.at(-1)!; call.resolve({ status: "ok", hostEpoch: epoch,
     sessionId: call.request.sessionId, entries: [{ ...inputEntry, handle: { ...inputEntry.handle, sessionId: call.request.sessionId } }], hasMore: false }); },
@@ -235,9 +271,22 @@ export const promptCatalog = { list: async () => { promptReads.push({}); return 
   prompts: [{ id: "plan", name: "Plan", description: null, builtIn: true, appended: false, bodyTruncated: false, body: "Plan", scope: "BuiltIn" }] }; } };
 export const mcpInventory = { list: unavailable };
 export const reminder = { list: (request: ReminderListRequest, options: { signal: AbortSignal }) =>
-  localStorage.getItem("layoutFixtureReminders") === "true"
+  localStorage.getItem("layoutFixtureSave") === "true"
+    ? (reminderSaveLists.push(request), traceReminder("list", request, options.signal).completed = true, Promise.resolve({ status: "ok", epoch: request.expectedEpoch, sessionId: request.sessionId,
+      reminders: [{ id: "reminder-1", state: "active", preview: "original", delaySeconds: 60, repeatCount: 1, firedCount: 0, dueAt: null, lastExitCode: null, lastError: null }], activeCount: 1, completedCount: 0 }))
+    : localStorage.getItem("layoutFixtureReminders") === "true"
     ? new Promise<ReminderListResponse>(resolve => reminderReads.push({ request, signal: options.signal, resolve }))
-    : unavailable(), detail: unavailable, create: unavailable, delete: unavailable, save: unavailable };
+    : unavailable(), detail: (request: import("#neoastra").ReminderDetailRequest, options: { signal: AbortSignal }) => {
+      reminderDetails.push(request);
+      traceReminder("detail", request, options.signal).completed = true;
+      return localStorage.getItem("layoutFixtureSave") === "true" ? Promise.resolve({ status: "ok", epoch: request.expectedEpoch,
+        sessionId: request.sessionId, reminderId: request.reminderId, content: "original", delaySeconds: 60, repeatCount: 1, editRevision: "0" }) : unavailable();
+    }, create: unavailable, delete: unavailable,
+    save: (request: import("#neoastra").ReminderSaveRequest) => {
+      const entry = traceReminder("save", request);
+      return new Promise<import("#neoastra").ReminderMutationResponse>((resolve, reject) => reminderSaves.push({ request,
+        resolve: value => { entry.completed = true; resolve(value); }, reject: error => { entry.completed = true; reject(error); } }));
+    } };
 export const sessionDisplay = { observe: async (request: SessionDisplayRequest, options: { signal: AbortSignal }) => {
   displayCalls.push(request);
   const attempt = { sessionId: request.sessionId, signal: options.signal, opened: false, settled: false, unavailable: false };
@@ -273,7 +322,14 @@ export const sessionDisplay = { observe: async (request: SessionDisplayRequest, 
     } finally { attempt.settled = true; displayCleanup.push(request.sessionId); }
   })();
 } };
-export const sessionRuntimeState = { current: unavailable, observe: (request: SessionRuntimeScopedRequest, options: { signal: AbortSignal }) =>
+export const sessionRuntimeState = { current: (request: SessionRuntimeStateRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) =>
+  localStorage.getItem("retainedQueueFixture") === "true"
+    ? new Promise<SessionRuntimeStateResponse>((resolve, reject) => {
+      const call = { request, signal: options.signal, resolve, reject };
+      currentReads.push(call);
+      if (releaseReplacementCurrent) { releaseReplacementCurrent = false; releaseCurrentCall(call); }
+    }) : unavailable(),
+  observe: (request: SessionRuntimeScopedRequest, options: { signal: AbortSignal }) =>
   new Promise((resolve, reject) => runtimeReads.push({ request, signal: options.signal, resolve, reject })) };
 export const sessionUsage = { read: (request: unknown) => new Promise((resolve, reject) => usageReads.push({ request, resolve, reject })) };
 export const sessionPermissions = {
@@ -281,13 +337,20 @@ export const sessionPermissions = {
   resolve: (request: SessionPermissionResolveRequest) => new Promise((resolve, reject) => permissionDecisions.push({ request, resolve, reject })),
 };
 export const sessionOperations = { observeReferences: (request: { text: string }) => new Promise(resolve => referenceObservations.push({ request, resolve })),
+  ...(localStorage.getItem("retainedQueueFixture") === "true" ? {
+    receipts: (request: SessionReceiptRequest) => new Promise<SessionReceiptPage>(resolve => queueReceiptReads.push({ request, resolve })),
+  } : {}),
   searchReferences: (request: unknown) => new Promise(resolve => referenceReads.push({ request, resolve })),
   choices: (request: { expectedEpoch: string; sessionId: string }) =>
   localStorage.getItem("settingsFixtureHoldChoices") === "true" ? new Promise(resolve => choiceReads.push({ request, resolve })) : Promise.resolve(choices(request)),
   send: (request: unknown) => { sends.push(request); return new Promise((_resolve, reject) => {
     sendFailures.push(() => reject(new Error("fixture transport uncertainty")));
   }); }, abort: unavailable, steer: unavailable,
-  compact: unavailable, abortRun: unavailable, queue: unavailable, cancelQueue: unavailable };
+  compact: unavailable, abortRun: unavailable,
+  queue: (request: unknown) => localStorage.getItem("retainedQueueFixture") === "true"
+    ? new Promise((resolve, reject) => retainedQueueCalls.push({ request, resolve, reject })) : unavailable(),
+  cancelQueue: (request: SessionCancelQueueRequest) => localStorage.getItem("retainedQueueFixture") === "true"
+    ? new Promise<SessionAdmission>((resolve, reject) => retainedCancelCalls.push({ request, resolve, reject })) : unavailable() };
 export const sessionAsks = { answer: unavailable, cancel: unavailable };
 export const sessionNotes = { current: (request: unknown) => { notesCalls.push(request); return unavailable(); }, clear: unavailable };
 export const sessionUserInput = {

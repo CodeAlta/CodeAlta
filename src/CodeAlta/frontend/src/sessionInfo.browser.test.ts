@@ -16,6 +16,7 @@ test("production composer info icon retains read-only scope and guarded focus", 
   const root = await mkdtemp(join(tmpdir(), "codealta-composer-info-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
+  let captureFailure: (() => Promise<unknown>) | undefined;
   try {
     await build({ entryPoints: [fileURLToPath(new URL("./main.tsx", import.meta.url))], outfile: join(root, "fixture.js"),
       bundle: true, platform: "browser", format: "iife", loader: { ".css": "empty" },
@@ -51,10 +52,10 @@ test("production composer info icon retains read-only scope and guarded focus", 
       const id = ++sequence;
       const timer = setTimeout(() => reject(new Error(`browser ${method} timed out`)), 12_000);
       const reply = (event: MessageEvent) => {
-        const message = JSON.parse(String(event.data)) as { id?: number; result?: { result?: { value?: unknown } }; error?: object };
+        const message = JSON.parse(String(event.data)) as { id?: number; result?: { result?: { value?: unknown }; exceptionDetails?: object }; error?: object };
         if (message.id !== id) return;
         socket!.removeEventListener("message", reply); clearTimeout(timer);
-        if (message.error) reject(new Error(`browser ${method} failed: ${JSON.stringify(message.error)}`)); else resolve(message.result ?? {});
+        if (message.error || message.result?.exceptionDetails) reject(new Error(`browser ${method} failed: ${JSON.stringify(message.error ?? message.result?.exceptionDetails)}; expression=${JSON.stringify(params)}`)); else resolve(message.result ?? {});
       };
       socket!.addEventListener("message", reply);
       socket!.send(JSON.stringify({ id, method, params }));
@@ -62,8 +63,12 @@ test("production composer info icon retains read-only scope and guarded focus", 
     await command("Page.enable");
     await command("Page.navigate", { url: pathToFileURL(page).href });
     const evaluate = async (expression: string) => (await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true })).result?.value;
-    const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+7000;const tick=()=>{
-      if(${condition}) resolve(true); else if(Date.now()>end) resolve(document.body.innerText.slice(-1000)); else setTimeout(tick,20);};tick();})`);
+    const wait = (condition: string) => evaluate(`new Promise((resolve,reject)=>{const end=Date.now()+7000;const tick=()=>{try{
+      if(${condition}) resolve(true); else if(Date.now()>end) resolve(document.body.innerText.slice(-1000)); else setTimeout(tick,20);}catch(error){reject(error)}};tick();})`);
+    captureFailure = () => evaluate(`({viewport:{width:innerWidth,height:innerHeight},theme:document.documentElement.dataset.theme,
+      active:document.activeElement?.outerHTML,nodes:['.content','.session-content-main-panel','.workspace-shell','.history-controls','.session-info-trigger','.session-info-dialog'].map(selector=>({selector,
+        nodes:[...document.querySelectorAll(selector)].map(node=>({html:node.outerHTML.slice(0,500),connected:node.isConnected,rect:node.getBoundingClientRect().toJSON(),display:getComputedStyle(node).display,
+          ancestors:[node.parentElement,node.parentElement?.parentElement].map(p=>p?{class:p.className,rect:p.getBoundingClientRect().toJSON()}:null)}))}))})`);
     const trigger = '.session-info-trigger';
     const modal = '.session-info-dialog';
     const key = async (value: string, code: string, windowsVirtualKeyCode: number, modifiers = 0) => {
@@ -149,7 +154,7 @@ test("production composer info icon retains read-only scope and guarded focus", 
     assert.equal(await wait(`document.querySelector('${modal}')?.open`), true, "catalog-only prompt chord retains read-only info access");
     await close();
     await evaluate(`document.querySelector('#catalog-prompt').focus();
-      [...document.querySelectorAll('button')].find(button=>button.textContent.includes('Commands') && button.textContent.includes('Ctrl+P')).click()`);
+      document.querySelector('.activity-rail button[aria-label="Open command palette"]').click()`);
     assert.equal(await wait("document.querySelector('.command-palette')?.open && !!document.querySelector('#palette-option-sessionInfo')"), true);
     await evaluate("document.querySelector('#palette-option-sessionInfo').click()");
     assert.equal(await wait(`document.querySelector('${modal}')?.open && !document.querySelector('.command-palette')`), true,
@@ -158,9 +163,9 @@ test("production composer info icon retains read-only scope and guarded focus", 
     for (const width of [390, 1120]) for (const theme of ["dark", "light"]) {
       await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
       await evaluate(`document.documentElement.dataset.theme='${theme}'`);
-      // FlexLayout positions its portal after ResizeObserver measurement, not synchronously
-      // with the CDP viewport command. Require real final geometry before checking controls.
-      assert.equal(await wait(`(() => {const panel=document.querySelector('.content').closest('.flexlayout__tab').getBoundingClientRect();
+      // Require the real stable content slot and final geometry before checking controls.
+      assert.equal(await wait(`(() => {const owner=document.querySelector('.content').closest('.session-content-main-panel');
+        if(!owner) throw new Error('Missing content slot ancestor'); const panel=owner.getBoundingClientRect();
         const content=document.querySelector('.content').getBoundingClientRect();
         return panel.width>0 && panel.height>0 && panel.right<=innerWidth+1 && Math.abs(panel.width-content.width)<1 && Math.abs(panel.height-content.height)<1;})()`), true);
       assert.equal(await evaluate(`(() => {
@@ -170,7 +175,7 @@ test("production composer info icon retains read-only scope and guarded focus", 
         return rect.width>=28 && rect.left>=0 && rect.right<=innerWidth+1 && area.right<=innerWidth+1 &&
           getComputedStyle(button).display!=='none'; })()`), true,
         `${width}px ${theme} catalog info and Send-unavailable controls fit the viewport: ${JSON.stringify(await evaluate(`({
-          panel:document.querySelector('.content').closest('.flexlayout__tab').getBoundingClientRect().toJSON(),
+          panel:document.querySelector('.content').closest('.session-content-main-panel').getBoundingClientRect().toJSON(),
           shell:document.querySelector('.workspace-shell').getBoundingClientRect().toJSON(),
           content:document.querySelector('.content').getBoundingClientRect().toJSON(),
           button:document.querySelector('.catalog-composer .history-controls ${trigger}').getBoundingClientRect().toJSON()})`))}`);
@@ -236,7 +241,7 @@ test("production composer info icon retains read-only scope and guarded focus", 
     await evaluate("document.querySelector('#catalog-prompt').focus()");
     await chord();
     assert.equal(await evaluate(`!document.querySelector('${modal}')`), true, "ambiguous selection cannot enter via chord");
-    await evaluate("[...document.querySelectorAll('button')].find(button=>button.textContent.includes('Commands') && button.textContent.includes('Ctrl+P')).click()");
+    await evaluate("document.querySelector('.activity-rail button[aria-label=\"Open command palette\"]').click()");
     assert.equal(await wait("document.querySelector('.command-palette')?.open"), true);
     assert.equal(await evaluate("!document.querySelector('#palette-option-sessionInfo')"), true);
     await evaluate("document.querySelector('[aria-label=\"Close command palette\"]').click()");
@@ -286,7 +291,8 @@ test("production composer info icon retains read-only scope and guarded focus", 
     for (const width of [390, 1120]) for (const theme of ["dark", "light"]) {
       await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
       await evaluate(`document.documentElement.dataset.theme='${theme}'`);
-      assert.equal(await wait(`(() => {const panel=document.querySelector('.content').closest('.flexlayout__tab').getBoundingClientRect();
+      assert.equal(await wait(`(() => {const owner=document.querySelector('.content').closest('.session-content-main-panel');
+        if(!owner) throw new Error('Missing content slot ancestor'); const panel=owner.getBoundingClientRect();
         const content=document.querySelector('.content').getBoundingClientRect();
         return panel.width>0 && panel.height>0 && panel.right<=innerWidth+1 && Math.abs(panel.width-content.width)<1 && Math.abs(panel.height-content.height)<1;})()`), true);
       assert.equal(await evaluate(`(() => {
@@ -393,6 +399,10 @@ test("production composer info icon retains read-only scope and guarded focus", 
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
     assert.equal(await wait("!document.querySelector('.session-browser')"), true);
+  } catch (error) {
+    try { console.error("Info failure geometry:", JSON.stringify(await captureFailure?.())); }
+    catch (diagnosticError) { console.error("Info diagnostic failed:", diagnosticError); }
+    throw error;
   } finally {
     socket?.close(); browser?.kill();
     await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });

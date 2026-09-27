@@ -21,6 +21,18 @@ permissions and provider input remain denied unless separately enabled through t
 options. Desktop-owned WebView data stays under the platform-local `CodeAlta/desktop` directory, so
 existing terminal versions continue to use the same compatible `.alta` data without a migration.
 
+The current development IDE presentation stacks Projects and Sessions in one Explorer, with
+Settings at the bottom of the activity rail. Explorer width is saved locally; the full-content
+button hides it and can restore it. Secondary composer actions are under **More composer actions**,
+while retained-request recovery remains separate. Reminders opens a modal popup without replacing
+the workspace. Alta notes start closed. This is a runnable development checkpoint, not completed
+visual acceptance: real FlexLayout session tabs are now a functionally/build-verified candidate
+with compact status/close chrome and secondary Reopen/Refresh menus. Mounted-lifetime and
+visual/browser qualification remain deferred. The native @ reference-palette candidate has
+separate bounded query editing and guarded insertion into the original draft; functional/build
+checks pass, but mounted focus/IME qualification remains pending. Provider switching and
+large-history work remain unfinished.
+
 To use an intentionally read-only isolated catalog copy, launch
 `--data-root <new-absolute-browser-directory> --catalog-root <existing-absolute-catalog-copy> --allow-catalog-cache`
 with trusted non-overlapping roots outside `.alta`. The browser shows
@@ -66,6 +78,15 @@ does not prove rollback or completion. Uncertain requests retain exact text, key
 selection changes for manual receipt refresh or deliberate retry. Reload loses local retry intent;
 receipts can still be browsed manually, but text and keys are not reconstructed. Restart recovery is
 not provided. Existing terminal prompt queues are unchanged.
+
+Beside the owned composer, **Review retained intent** opens read-only details for local unresolved
+Queue and cancellation originals. It is not a live queue list. Cancellation-only evidence contains
+the original target/key, not recoverable Queue text. **Copy text** copies the literal retained Queue
+text without editing the current draft or images, sending, refreshing receipts or retrying. Scope,
+input, image, runtime-observation, owner-revision or modal changes retire a stale review; reopen it
+for current evidence. Definitive settlement removes originals rather than creating settled-text
+history. Existing retained-request disclosure and guarded refresh/cancellation/retry controls remain
+available separately.
 
 In owned-host mode, **Refresh runtime state** before using **Steer observed run**. Steering sends
 text only to that recorded runtime, attachment and run; no recorded run means unavailable, and

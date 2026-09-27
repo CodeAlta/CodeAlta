@@ -92,18 +92,18 @@ function Pane({ name, label, owner }: { name: string; label: string; owner: Audi
     <span>{label}:{name}</span><input aria-label={`${name} draft`} defaultValue="draft" />
   </div>;
 }
-let root = createRoot(container), label = "initial", single = false, appLayout = false;
+let root = createRoot(container), label = "initial", single = false, appLayout = false, fullWidth = false;
 let projection = { narrow: false, sessionsHidden: false, sessionWidth: 310 };
 function render() {
   root.render(<StrictMode>{appLayout
-    ? <SessionContentLayout {...projection}
+    ? <div className="ide-shell" style={{height:"100%"}}><div className={`workspace-shell${projection.sessionsHidden ? "" : " project-rail-open"}`} style={{"--explorer-width":`${projection.sessionWidth}px`} as React.CSSProperties}><SessionContentLayout {...projection}
       sessions={<aside className="session-rail" hidden={projection.sessionsHidden}><Pane name="left" label={label} owner={audit} /></aside>}
       content={<main className="content"><Pane name="right" label={label} owner={audit} /></main>}
       splitter={<div className="pane-splitter session-splitter" hidden={projection.narrow} role="separator" tabIndex={0}
-        aria-label="Resize sessions" aria-orientation="vertical" aria-valuenow={projection.sessionWidth} />} />
+        aria-label="Resize sessions" aria-orientation="vertical" aria-valuenow={projection.sessionWidth} />} /></div></div>
     : single
     ? <WorkspaceLayout><Pane name="single" label={label} owner={audit} /></WorkspaceLayout>
-    : <SplitWorkspaceLayout left={<Pane name="left" label={label} owner={audit} />}
+    : <SplitWorkspaceLayout fullWidth={fullWidth} left={<Pane name="left" label={label} owner={audit} />}
       right={<Pane name="right" label={label} owner={audit} />} />}</StrictMode>);
 }
 function separator() { return container.querySelector<HTMLElement>(appLayout ? ".session-splitter" : '[role="separator"]')!; }
@@ -148,6 +148,9 @@ function burst(count: number) {
 const disposed: Audit[] = [];
 const fixture = {
   snapshot, capture, burst, stats,
+  fullWidth(value: boolean) { fullWidth = value; render(); },
+  fullSnapshot() { return { left:rect(container.querySelector('[data-fake-pane="left"]')!), container:rect(container),
+    samePanes:panes.every(p=>p.isConnected), sameInputs:inputs.every(p=>p.isConnected), ...stats() }; },
   refresh() { label = "latest"; render(); },
   focusInput() { inputs[0].focus(); inputs[0].value = "owned draft"; },
   focusSeparator() { separator().focus(); },
@@ -155,7 +158,7 @@ const fixture = {
   replacePending(source: "key" | "replay" = "key") {
     const old = audit, oldNodes = [...inputs, retained];
     if (source === "key") burst(3);
-    else {
+    else if (!appLayout) {
       // Deterministic same-turn cancellation probe, NOT a browser resize delivery.
       // Reuse actual captured callback arguments without changing any geometry/model.
       const callbacks = Array.from(resizeReplays.values());
@@ -176,7 +179,10 @@ const fixture = {
     projection = { narrow, sessionsHidden, sessionWidth }; render();
   },
   appSnapshot() {
+    const slot = container.querySelector('.session-content-rail-slot')!;
+    const slotStyle = getComputedStyle(slot);
     return { sessions: rect(container.querySelector(".session-rail")!), content: rect(container.querySelector(".content")!),
+      slot: rect(slot), slotStyle: {height:slotStyle.height,top:slotStyle.top,bottom:slotStyle.bottom,position:slotStyle.position},
       bar: rect(separator()), aria: separator().getAttribute("aria-valuenow"),
       samePanes: panes.every((p, i) => p === container.querySelectorAll("[data-fake-pane]")[i]),
       sameInputs: inputs.every((p, i) => p === container.querySelectorAll("input")[i]),

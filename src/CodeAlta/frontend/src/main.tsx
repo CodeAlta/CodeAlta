@@ -13,6 +13,8 @@ import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState
 import { History } from "./HistoryPanel";
 import { SessionContentLayout } from "./SessionContentLayout";
 import { SessionTabStrip } from "./SessionTabStrip";
+import { sessionTabPresentation } from "./sessionTabLayout";
+import { createReferencePopupLifetime } from "./referencePopup";
 import { SessionBrowser } from "./SavedSessionBrowser";
 import { ProjectArchiveDialog } from "./ProjectArchiveDialog";
 import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./runtimeObservations";
@@ -33,6 +35,7 @@ import { McpServersPanel } from "./McpServersPanel";
 import { SkillsInspectionPanel } from "./SkillsInspectionPanel";
 import { createSkillsInspection } from "./skillsInspection";
 import { archivedProjectScope, ReminderScopeGate, SessionComposerGate } from "./ArchivedScopeGates";
+import { RemindersDialog } from "./RemindersDialog";
 import { ArchivedActionRecovery } from "./ArchivedActionRecovery";
 import { createReminderActions } from "./reminderActions";
 import { verifiedReminderCountTarget } from "./reminderListObservation";
@@ -78,6 +81,7 @@ import { SessionActionMenu } from "./SessionActionMenu";
 import { isSessionContextKey, restoreSessionMenuFocus, sessionActionAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
 import { projectRailProjection, type ProjectSort } from "./projectRail";
 import { ProjectRailRows } from "./ProjectRailRows";
+import { parseIdeWidth, persistIdeWidth, resizeIdeWidth } from "./ideWidth";
 import { ProjectRailToggle } from "./ProjectRailToggle";
 import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./projectRailVisibility";
 import { useWindowPreferences } from "./windowPreferences";
@@ -93,6 +97,7 @@ import { SessionInfoDialog, type SessionInfoLifetime } from "./SessionInfoDialog
 import { selectedSessionInfoAvailable, selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
 import { CommandPalette } from "./CommandPalette";
 import { commandAccessChord, commandAccessHelp, createPaletteFocusRestoration, paletteAvailable, paletteShortcut, type PaletteAction, type PaletteContext } from "./paletteActions";
+import "flexlayout-react/style/light.css";
 import "./style.css";
 
 type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; epoch: string | null;
@@ -100,8 +105,8 @@ type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; e
   latestReady: () => boolean; latest: () => void; cancelLatest: () => void }>;
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
-type View = "workspace" | "appearance" | "providers" | "models" | "prompts" | "reminders" | "mcp" | "logs" | "skills" | "plugins" | "about";
-type SettingsSection = Exclude<View, "workspace" | "reminders">;
+type View = "workspace" | "appearance" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about";
+type SettingsSection = Exclude<View, "workspace">;
 type SettingsCardPage = Exclude<SettingsSection, "models" | "mcp">;
 const paneLayoutStorageKey = "codealta.desktop.panes.v1";
 
@@ -199,7 +204,7 @@ function App() {
     advanceBrowserRevision();
     invalidateCreation();
     focusRestoration.cancel();
-    if (next === "workspace" || next === "reminders") {
+    if (next === "workspace") {
       settingsVisible.current = false;
       setSettingsOpen(false);
       currentView.current = next;
@@ -220,11 +225,11 @@ function App() {
   const [projectFilter, setProjectFilter] = useState("");
   const { projectSort, setProjectSort, theme, setTheme, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount } = useWindowPreferences();
   const [showAllSessions, setShowAllSessions] = useState(false);
-  const [notesVisible, setNotesVisible] = useState(true);
+  const [notesVisible, setNotesVisible] = useState(false);
   const [notesHeight, setNotesHeight] = useState(() => restoreNotesHeight(() => localStorage.getItem(notesHeightKey)));
   const [historyNotes, setHistoryNotes] = useState<{ sessionId: string | null; markdown: string }>({ sessionId: null, markdown: "" });
   const updateHistoryNotes = useCallback((markdown: string) => setHistoryNotes({ sessionId, markdown }), [sessionId]);
-  const [dialog, writeDialog] = useState<"project" | "help" | "about" | "sessions" | "archive" | null>(null);
+  const [dialog, writeDialog] = useState<"project" | "help" | "about" | "sessions" | "archive" | "reminders" | null>(null);
   function setDialog(value: typeof dialog) { batchDeletion.invalidate(); invalidateCreation(); writeDialog(value); }
   const helpOrigin = useRef<{ element: HTMLElement | null; view: View; sessionId: string | null; scope: string | null } | null>(null);
   const aboutOrigin = useRef<{ element: HTMLElement | null; view: View } | null>(null);
@@ -375,6 +380,7 @@ function App() {
   const sessionRail = useRef<HTMLElement>(null);
   const sessionInfoTrigger = useRef<HTMLButtonElement>(null);
   const remindersTrigger = useRef<HTMLButtonElement>(null);
+  const remindersOrigin = useRef<{ element: HTMLButtonElement; lifetime: SessionInfoLifetime } | null>(null);
   const compactTrigger = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const shortcutState = useRef<WorkspaceShortcutState>({ chordPending: false, sessionInfoPrefix: null, reminderPrefix: null });
@@ -382,7 +388,12 @@ function App() {
   const [paneLayout, setPaneLayout] = useState(() => restorePaneLayout(() => localStorage.getItem(paneLayoutStorageKey), window.innerWidth));
   const [workspaceWidth, setWorkspaceWidth] = useState(window.innerWidth);
   const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 875px)").matches);
-  const railVisible = projectRailVisible(railState, narrow);
+  const [ideWidth, setIdeWidth] = useState(() => {
+    try { return parseIdeWidth(localStorage.getItem("codealta.desktop.ide-width.v1")); } catch { return parseIdeWidth(null); }
+  });
+  const [widthSaved, setWidthSaved] = useState(true);
+  useEffect(() => { setWidthSaved(persistIdeWidth(value => localStorage.setItem("codealta.desktop.ide-width.v1", value), ideWidth)); }, [ideWidth]);
+  const railVisible = projectRailVisible(railState, narrow) && !ideWidth.full;
   const detailsPaneVisible = !(narrow && railVisible);
   const currentDetailsPaneVisible = useRef(detailsPaneVisible);
   currentDetailsPaneVisible.current = detailsPaneVisible;
@@ -496,8 +507,28 @@ function App() {
     else { selectedSessionId.current = target?.sessionId ?? null; setSessionId(target?.sessionId ?? null); }
   }
   function selectSessionTab(tab: SessionTab) {
-    if (!snapshot || !resolveSessionTab(snapshot, tab)) return;
+    if (!snapshot || snapshot !== currentSnapshot.current || !resolveSessionTab(snapshot, tab)) return;
     applyTabState(openSessionTab(reconcileSessionTabs(tabs, snapshot), tab));
+  }
+  function captureTabLifetime() {
+    const revision = browserRevision.current;
+    const epoch = currentHostEpoch.current;
+    const scope = selectedScope.current;
+    const selected = selectedSessionId.current;
+    const generation = creationGeneration.current;
+    return () => revision === browserRevision.current && epoch === currentHostEpoch.current
+      && generation === creationGeneration.current && scope === selectedScope.current && selected === selectedSessionId.current
+      && snapshot === currentSnapshot.current && currentView.current === "workspace" && !settingsVisible.current
+      && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]');
+  }
+  function captureReferenceLifetime() {
+    const catalog = currentSnapshot.current;
+    return createReferencePopupLifetime(() => ({
+      generation: creationGeneration.current, revision: browserRevision.current,
+      key: JSON.stringify([currentHostEpoch.current, selectedScope.current, selectedSessionId.current]),
+      available: creationAlive.current && !!catalog && catalog === currentSnapshot.current
+        && currentView.current === "workspace" && !settingsVisible.current && !!mutation?.capability.canMutate(),
+    }));
   }
   function openSessionBrowser() {
     if (!currentSnapshot.current || view !== "workspace" || settingsVisible.current || dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
@@ -585,7 +616,10 @@ function App() {
     && visibleSessions.some(session => session.id === menuTarget.id)
     && snapshot?.sessions.filter(session => session.id === menuTarget.id).length === 1 ? menuTarget : null;
   useLayoutEffect(() => {
-    if (activeMenu) menuRef.current?.querySelector<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)')?.focus();
+    if (activeMenu) {
+      menuRef.current?.querySelector<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)')?.focus();
+      menuRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
   }, [activeMenu]);
   useLayoutEffect(() => {
     if (menuTarget || !focusAction.current || narrow && railVisible) return;
@@ -673,6 +707,18 @@ function App() {
     setPaletteOpen(false);
   }
 
+  function invokeComposerControl(button: HTMLButtonElement | null | undefined) {
+    const shell = workspaceShell.current;
+    if (!shell?.isConnected || !button?.isConnected || !shell.contains(button) || button.disabled ||
+      button.closest('[inert], [hidden]') || currentView.current !== "workspace" || settingsVisible.current ||
+      dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+    // Deliberate command invocation only, after the caller's target/lifetime checks.
+    // Reveal this workspace's own overflow, not arbitrary ancestors or foreign modals.
+    const menu = button.closest<HTMLDetailsElement>('details.composer-actions-menu');
+    if (menu && shell.contains(menu)) menu.open = true;
+    button.click();
+  }
+
   useLayoutEffect(() => {
     if (paletteOpen || !palettePending.current) return;
     const { action, captured } = palettePending.current;
@@ -680,15 +726,15 @@ function App() {
     if (dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') ||
       !paletteAvailable(action, captured, paletteContext())) return;
     if (action === "about") { navigate("about"); settingsOrigin.current = paletteOrigin.current; aboutOrigin.current = { element: null, view: currentView.current }; setDialog("about"); return; }
-    if (action === "sessionInfo") sessionInfoTrigger.current?.click();
-    else if (action === "chooseModel") workspaceShell.current?.querySelector<HTMLButtonElement>("#next-send-model-chooser")?.click();
-    else if (action === "choosePrompt") workspaceShell.current?.querySelector<HTMLButtonElement>("#next-send-prompt-chooser")?.click();
-    else if (action === "usage") workspaceShell.current?.querySelector<HTMLButtonElement>("#session-usage-trigger")?.click();
+    if (action === "sessionInfo") invokeComposerControl(sessionInfoTrigger.current);
+    else if (action === "chooseModel") invokeComposerControl(workspaceShell.current?.querySelector<HTMLButtonElement>("#next-send-model-chooser"));
+    else if (action === "choosePrompt") invokeComposerControl(workspaceShell.current?.querySelector<HTMLButtonElement>("#next-send-prompt-chooser"));
+    else if (action === "usage") invokeComposerControl(workspaceShell.current?.querySelector<HTMLButtonElement>("#session-usage-trigger"));
     else if (action === "openProject" || action === "help") { paletteOrigin.current?.focus(); runShortcut(action); }
     else if (action === "browseSessions") openSessionBrowser();
     else if (action === "refreshStatuses") runtimeObservationControls().refresh(tabs.open);
     else if (action === "nextTab" || action === "previousTab" || action === "closeTab" || action === "reopenTab") tabCommand(action);
-    else if (action === "reminders") navigate("reminders");
+    else if (action === "reminders") invokeComposerControl(remindersTrigger.current);
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
     else if (action === "focusSearch") searchInput.current?.focus();
     else { navigate(action === "settings" ? "appearance" : action); settingsOrigin.current = paletteOrigin.current; }
@@ -761,8 +807,8 @@ function App() {
         else command.navigate(action);
       }
     }
-    else if (action === "sessionInfo") sessionInfoTrigger.current?.click();
-    else if (action === "reminders") remindersTrigger.current?.click();
+    else if (action === "sessionInfo") invokeComposerControl(sessionInfoTrigger.current);
+    else if (action === "reminders") invokeComposerControl(remindersTrigger.current);
     else if (action === "compact") {
       const selection = selectedSessionInfoSelection(snapshot, selectedSession, projectId,
         selectedSessionId.current, selectedScope.current);
@@ -770,10 +816,10 @@ function App() {
       if (view === "workspace" && owned && currentProjectWritable() && status?.hostEpoch && mutation?.capability.canMutate()
         && selection && trigger?.isConnected && !trigger.disabled
         && trigger.dataset.epoch === status.hostEpoch && trigger.dataset.sessionId === selection.sessionId
-        && trigger.dataset.projectId === (selection.projectId ?? "")) trigger.click();
+        && trigger.dataset.projectId === (selection.projectId ?? "")) invokeComposerControl(trigger);
     }
     else if (action === "expandPrompt") {
-      if (!dialog) document.querySelector<HTMLButtonElement>("#expand-session-prompt")?.click();
+      if (!dialog) invokeComposerControl(workspaceShell.current?.querySelector<HTMLButtonElement>("#expand-session-prompt"));
     }
     else if (action === "openProject") setDialog("project");
     else if (action === "renameProject") void beginProjectRename();
@@ -822,8 +868,25 @@ function App() {
       || !mutation?.capability.canMutate() || selectedSessionId.current !== session || selectedScope.current !== scope
       || selectedSession?.id !== session || projectId !== scope || !currentProjectWritable() ||
       !selectedSessionInfoAvailable(snapshot, selectedSession, scope)) return;
-    navigate("reminders");
+    const element = remindersTrigger.current;
+    if (!element?.isConnected || element.disabled) return;
+    focusRestoration.cancel();
+    remindersOrigin.current = { element, lifetime: captureInfoLifetime() };
+    setDialog("reminders");
   }
+
+  function closeReminders() {
+    const origin = remindersOrigin.current;
+    setDialog(null);
+    focusRestoration.schedule(origin?.element ?? null, () => !!origin && origin.lifetime.current()
+      && remindersTrigger.current === origin.element && origin.element.isConnected && !origin.element.disabled
+      && !origin.element.closest('details:not([open]), [hidden], [inert]'),
+    () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
+  }
+  const remindersCurrent = !!remindersOrigin.current?.lifetime.current();
+  useLayoutEffect(() => {
+    if (dialog === "reminders" && !remindersCurrent) setDialog(null);
+  }, [dialog, remindersCurrent]);
 
   function toggleProjects() {
     if (railVisible) {
@@ -1285,27 +1348,36 @@ function App() {
     selectedSession={selectedSession} configurationState={configurationState}
     preferences={{ theme, setTheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); } }}
     onOpenAbout={openAbout} />;
-  return <ShellLanguageContext.Provider value={language}><div className="app-shell">
+  return <ShellLanguageContext.Provider value={language}><div className="app-shell ide-shell">
     <header className="topbar">
       <div className="brand"><span className="brand-mark">A</span><span>CodeAlta</span><small>{demoMode ? "interactive preview" : "desktop"}</small>
-        {view === "workspace" && <ProjectRailToggle expanded={railVisible} onToggle={toggleProjects} buttonRef={projectRailToggle} />}
-        <button type="button" className="project-rail-toggle" aria-label={t("Open command palette")} aria-haspopup="dialog" onClick={openPalette}>{t("Commands")} <kbd>Ctrl+P</kbd></button>
+        {view === "workspace" && <ProjectRailToggle expanded={railVisible} onToggle={() => { setIdeWidth(value => ({ ...value, full: false })); toggleProjects(); }} buttonRef={projectRailToggle} />}
       </div>
+      <button type="button" className="icon-button timeline-width-toggle" aria-label={t(ideWidth.full ? "Restore Explorer width" : "Use full content width")}
+        title={t(ideWidth.full ? "Restore Explorer width" : "Use full content width")} aria-pressed={ideWidth.full}
+        onClick={() => setIdeWidth(value => ({ ...value, full: !value.full }))}><AppIcon name={ideWidth.full ? "compact" : "expand"} size={16} /></button>
+      {!widthSaved && <span role="status">{t("Width preference could not be saved; current layout stays available.")}</span>}
       <div className={`connection ${error ? "connection-error" : connected ? "connection-live" : "connection-readonly"}`}>
         <span className="connection-dot" />
         {error ? "Bridge unavailable" : demoMode ? "Local demo" : connected ? "Runtime connected" : "Catalog only"}
       </div>
     </header>
 
-    {view === "reminders" ? <div className="reminders-destination"><button type="button" className="quiet-button" onClick={() => navigate("workspace")}>{t("Back to session")}</button><ReminderScopeGate snapshot={snapshot} projectId={projectId}
+    {dialog === "reminders" && remindersCurrent && <RemindersDialog onClose={closeReminders}><ReminderScopeGate snapshot={snapshot} projectId={projectId}
           session={selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId ? selectedSession : undefined}
           epoch={owned && (currentProjectWritable() || !!snapshot && archivedProjectScope(snapshot, projectId)) ? status!.hostEpoch! : null}
           read={readReminders} readDetail={readReminderDetail} actions={reminderActions} mutationAllowed={!!mutation?.capability.canMutate()}
-          canMutate={() => !!mutation?.capability.canMutate()} /></div>
-      : <div className={`workspace-shell${railVisible ? " project-rail-open" : ""}`} ref={workspaceShell} style={{
+          canMutate={() => !!mutation?.capability.canMutate()} /></RemindersDialog>}
+      <div className={`workspace-shell${railVisible ? " project-rail-open" : ""}${ideWidth.full ? " full-content-width" : ""}`} ref={workspaceShell} style={{
+          "--explorer-width": `${ideWidth.width}px`,
           "--project-pane-width": `${visiblePaneLayout.projects}px`,
           "--session-pane-width": `${visibleSessionWidth}px`,
         } as CSSProperties}>
+        <nav className="activity-rail" aria-label={t("Workspace navigation")}>
+          <button type="button" className="icon-button" aria-label={t("Explorer")} title={t("Explorer")} onClick={() => { setIdeWidth(value => ({ ...value, full: false })); toggleProjects(); }}><AppIcon name="file" size={18} /></button>
+          <button type="button" className="icon-button" aria-label={t("Open command palette")} aria-haspopup="dialog" title={`${t("Open command palette")} (Ctrl+P)`} onClick={openPalette}><AppIcon name="search" size={18} /></button>
+          <button type="button" className="icon-button activity-settings" aria-label={t("Settings & extensions")} title={t("Settings & extensions")} onClick={() => navigate("appearance")}><AppIcon name="settings" size={18} /></button>
+        </nav>
         <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}>
           <div className="panel-title"><span>{t("Projects")}</span><span><button type="button" className="rail-action" aria-label={`${t("Open project")} (Ctrl+O)`} title={`${t("Open project")} (Ctrl+O)`} onClick={() => setDialog("project")}>＋</button><span className="count">{snapshot?.projects.length ?? 0}</span></span></div>
           {workspaceState.kind === "loading" && <LoadingRows />}
@@ -1314,12 +1386,14 @@ function App() {
           {snapshot && <div className="project-controls">
             <input id="project-filter" ref={projectFilterInput} type="search" value={projectFilter} onChange={event => setProjectFilter(event.target.value)}
               placeholder={t("Name or path")} aria-label={t("Filter projects by name or path")} aria-controls="project-list" />
-            <div className="project-sort-controls">
+            <details className="project-sort-controls"><summary aria-label={t("Project actions")} title={t("Project actions")}><AppIcon name="ellipsis" size={16} /></summary><div>
               <select id="project-sort" aria-label={t("Sort projects")} value={projectSort} onChange={event => setProjectSort(event.target.value as ProjectSort)}>
                 <option value="name">{t("Name")}</option><option value="recent">{t("Recent visible updates")}</option>
               </select>
               <button type="button" className="quiet-button" disabled={!projectFilter} onClick={() => { setProjectFilter(""); projectFilterInput.current?.focus(); }}>{t("Clear filter")}</button>
-            </div>
+              <button type="button" className="quiet-button" disabled={!selectedProject || !owned || !mutation?.capability.canMutate()}
+                onClick={() => setDialog("archive")}>{t(selectedProject?.archived ? "Unarchive project…" : "Archive project…")}</button>
+            </div></details>
           </div>}
           {snapshot && projectListing?.evidenceNotice && <p className="project-evidence" role="status">{projectListing.evidenceNotice}</p>}
           {snapshot && projectListing?.projects.length === 0 && <p className="sidebar-empty" role="status">
@@ -1335,8 +1409,6 @@ function App() {
               locked: projectRenamePending.current || !!uncertainProjectRename.current || projectRenameLocked
                 || !!projectRenameTarget || projectArchive.locked || !!projectOpening.getSnapshot() }),
               open: selectProject, rename: () => void beginProjectRename(), archive: () => setDialog("archive") }} />}
-          <button type="button" className="quiet-button" disabled={!selectedProject || !owned || !mutation?.capability.canMutate()}
-            onClick={() => setDialog("archive")}>{t(selectedProject?.archived ? "Unarchive project…" : "Archive project…")}</button>
           {projectArchive.records.length > 0 && <button type="button" className="quiet-button" onClick={() => setDialog("archive")}>{t("Archive operation evidence")}</button>}
           {projectRenameTarget && projectId === projectRenameTarget.id && currentHostEpoch.current === projectRenameTarget.epoch &&
             <div className="project-rename" role="group" aria-label={t("Rename project {name}", { name: projectRenameTarget.name })}>
@@ -1352,18 +1424,12 @@ function App() {
             </div>}
           {projectRenameNotice && <p role="alert" className="notice error-text">{workflowNotice(language.locale, projectRenameNotice)}</p>}
           {projectRenameLocked && <button type="button" className="quiet-button" onClick={() => void refreshProjectRename()}>{t("Refresh project name (no retry)")}</button>}
-          <div className="rail-footer">
-            <button type="button" className="quiet-button icon-label-button" onClick={() => navigate("appearance")}><AppIcon name="settings" size={14} />{t("Settings & extensions")}</button>
-          </div>
         </aside>
 
-        <PaneSplitter className="project-splitter" label={t("Resize projects")} value={visiblePaneLayout.projects} hidden={!railVisible}
-          onResize={delta => changePane("projects", delta)} onReset={() => resetPane("projects")} />
-
-        <SessionContentLayout sessionWidth={visibleSessionWidth} narrow={narrow} sessionsHidden={narrow && railVisible}
-          splitter={<PaneSplitter className="session-splitter" label={t("Resize sessions")} value={visibleSessionWidth} hidden={narrow}
-            onResize={delta => changePane("sessions", delta)} onReset={() => resetPane("sessions")} />}
-          sessions={<aside className="session-rail" aria-label={t("Sessions")} ref={sessionRail} hidden={narrow && railVisible}>
+        <SessionContentLayout sessionWidth={ideWidth.width} narrow={narrow} sessionsHidden={!railVisible}
+          splitter={<PaneSplitter className="session-splitter" label={t("Resize Explorer")} value={ideWidth.width} hidden={narrow || !railVisible}
+            onResize={delta => setIdeWidth(value => resizeIdeWidth(value, delta))} onReset={() => setIdeWidth({ width: 272, full: false })} />}
+          sessions={<aside className="session-rail" aria-label={t("Sessions")} ref={sessionRail} hidden={!railVisible}>
           <div className="session-rail-header">
             <div><h2>{selectedProject?.name ?? t("Other sessions")}</h2></div>
             <div className="session-rail-actions"><ProjectDetailsEntry context={projectDetailsContext} getCurrent={currentProjectDetailsContext} />
@@ -1467,14 +1533,19 @@ function App() {
           content={<ProjectReferenceContext.Provider value={owned && mutation?.capability.canMutate() && !settingsOpen && selectedProject && !selectedProject.archived
             && snapshot && (sessionId === null || !!selectedTab(snapshot, projectId, sessionId))
             ? { expectedEpoch: status!.hostEpoch!, projectId: selectedProject.id, projectPath: selectedProject.path, sessionId,
-              lifetime: creationGeneration.current, observe: value => mutation?.capability.observe(value) } : null}><main className="content">
-          <SessionTabStrip state={tabs} snapshot={snapshot} dirty={id => draftIndicators.visible(id, sessionId)} observations={runtimeObservationControls()}
+              lifetime: creationGeneration.current, capturePopup: captureReferenceLifetime,
+              observe: value => mutation?.capability.observe(value) } : null}><main className="content">
+          <SessionTabStrip state={sessionTabPresentation(tabs, snapshot, projectId, sessionId)} snapshot={snapshot}
+            capture={captureTabLifetime} dirty={id => draftIndicators.visible(id, sessionId)} observations={runtimeObservationControls()}
             selectDraft={() => applyTabState({ ...tabs, active: null })}
             select={selectSessionTab} close={tab => {
+              if (!snapshot || snapshot !== currentSnapshot.current || !resolveSessionTab(snapshot, tab)) return;
               const next = closeSessionTab(tabs, tab);
+              advanceBrowserRevision();
+              tabFocusPending.current = true;
               if (tabs.active && tabKey(tabs.active) === tabKey(tab)) applyTabState(next); else setTabs(next);
-            }} reopen={() => tabCommand("reopenTab")} />
-          <div id="active-session-content" className="active-session-content" role="tabpanel" aria-label={t("Selected session")}>
+            }} reopen={() => tabCommand("reopenTab")}>
+          <div id="active-session-content" className="active-session-content">
           {error && <div className="banner banner-error" role="alert">{error}</div>}
           {draftHandoffNotice && <p role="status" className="notice">{draftHandoffNotice}</p>}
           {draftHandoffEvidence.length > 0 && <details className="notice"><summary>{t("Draft creation evidence (this window)")}</summary>
@@ -1507,8 +1578,8 @@ function App() {
                  permissionReviewer={permissionReviewer} inputReviewer={inputReviewer} configuration={configurationState.snapshot}
                   onNotesChange={updateHistoryNotes} selections={nextSendSelections}
                 timelineCommand={timelineCommand} />}
-          </div></main></ProjectReferenceContext.Provider>} />
-      </div>}
+          </div></SessionTabStrip></main></ProjectReferenceContext.Provider>} />
+      </div>
     {settingsOpen && <SettingsOverlay section={settingsSection} onSection={navigate} onClose={closeSettings}>
       {settingsSection === "appearance" || settingsSection === "plugins" || settingsSection === "about"
         ? settingsCard(settingsSection)
@@ -2066,7 +2137,7 @@ function PaneSplitter({ className, hidden, label, value, onResize, onReset }: {
       onReset();
     }
   }
-  return <div className={`pane-splitter ${className}`} hidden={hidden} role="separator" aria-label={label} aria-orientation="vertical" aria-valuenow={value}
+  return <div className={`pane-splitter ${className}`} hidden={hidden} role="separator" aria-label={label} aria-orientation="vertical" aria-valuenow={value} aria-valuemin={220} aria-valuemax={360}
     tabIndex={0} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={pointerEnd}
     onDoubleClick={onReset} onKeyDown={keyDown}><span /></div>;
 }

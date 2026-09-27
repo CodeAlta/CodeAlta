@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Actions, Layout, Model, type ILayoutApi } from "flexlayout-react";
 import "flexlayout-react/style/light.css";
 
 // Opt-in presentation only. Neither this private model nor its IDs represent sessions.
-export function SplitWorkspaceLayout({ left, right }: { left: ReactNode; right: ReactNode }) {
+export function SplitWorkspaceLayout({ left, right, fullWidth = false }: { left: ReactNode; right: ReactNode; fullWidth?: boolean }) {
   const layout = useRef<ILayoutApi>(null);
   const pendingRedraw = useRef<number | undefined>(undefined);
   const scheduleRedraw = useCallback(() => {
@@ -37,6 +37,14 @@ export function SplitWorkspaceLayout({ left, right }: { left: ReactNode; right: 
       ] },
     ] },
   }));
+  useLayoutEffect(() => {
+    // Maximize is a public model action: retain both pane owners and their saved weights.
+    // A hidden right pane is not a new session or permission to reconnect its contents.
+    if (!!model.getMaximizedTabset() !== fullWidth) {
+      model.doAction(Actions.maximizeToggle("split-workspace-left"));
+      scheduleRedraw();
+    }
+  }, [fullWidth, model, scheduleRedraw]);
   useEffect(() => {
     // Container-only resizes can update geometry without refreshing separator ARIA.
     // Use the library's public measured-tab events, not another ResizeObserver.

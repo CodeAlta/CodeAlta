@@ -1,6 +1,6 @@
 # CodeAlta desktop (in development)
 
-`CodeAlta` is the native desktop .NET tool (`alta`), built with published NeoAstra 0.1.0,
+`CodeAlta` is the native desktop .NET tool (`alta`), built with published NeoAstra 0.2.0,
 generated RPC, React/strict TypeScript and packaged local Vite assets. Node/npm is needed
 only to build. The installed application has no UI server or external asset origin.
 
@@ -27,7 +27,7 @@ the next section to generate the typed contracts/client, then return here and ru
 generates build inputs only; it does not launch the native host or read a profile.
 
 Select projects and sessions, send messages in the local composer, open **Settings** from the
-bottom-left project rail (or a supported shortcut/palette action), and
+bottom-left activity rail (or a supported shortcut/palette action), and
 switch themes. Demo messages disappear on refresh. `npm run build:demo` produces the same preview
 as static files under `dist/`; `npm run build` builds the production NeoAstra-connected frontend.
 The packaged desktop uses the generated bridge and never includes the demo backend.
@@ -46,13 +46,30 @@ composer draft and timeline remain mounted underneath but cannot be interacted w
 open. Use the overlay's sections and Back to settings control, Escape or Close settings to return;
 at narrow widths it uses viewport margins and scrolls internally. Configuration, Providers,
 Models, Agent prompts, MCP Servers and Logs are **not** workspace tabs. Future session/file tabs
-are separate; no multi-workspace tabbing is implemented here. The workspace content uses a
-single fixed in-document FlexLayout 0.11.0 panel as a layout foundation, not docking or session-tab
-parity. Its private model cannot create, select, close or restore sessions; floating, popouts,
-layout persistence and layout shortcuts are disabled. Project/session rails, notes, application
-action owners and the native Settings modal remain outside the panel. Existing selected-session
-keyed transitions and draft/uncertain-action guards are unchanged. Reminders remains a guarded
-selected-session tool, not a Settings section.
+are separate; no multi-workspace tabbing is implemented here. The current IDE presentation uses
+stable content slots and one vertical Explorer with Projects above Sessions. Its width is locally
+saved (220–360 pixels); the full-content button hides it without discarding the restore width.
+Settings and the command palette are on the activity rail. The compact composer keeps secondary
+actions under **More composer actions**, with retained-request recovery separate. Alta notes start
+closed and can be opened explicitly. Existing selected-session keyed transitions and
+draft/uncertain-action guards remain in place.
+
+Reminders is a guarded selected-session native-modal popup, not a Settings section or replacement
+workspace. Closing it does not cancel an admitted action or retry an uncertain Save; original
+request evidence remains owned by the application. The underlying workspace stays mounted.
+Real FlexLayout session tabs now project existing bounded identities plus a draft tab, with
+compact status/close chrome and secondary Reopen/Refresh menus. App owns the sole active
+workspace; inactive factories return no live session content. Provider switching and
+large-history work are still unfinished. Visual/browser acceptance is deferred; known browser
+fixture failures are preserved, not reported as fixed. See the
+[current runnable checkpoint and verification gaps](../../doc/desktop-ide-checkpoint.md).
+The session-tab candidate passes 33 scoped functional tests, strict TypeScript and desktop/
+frontend builds. Independent source/functional review passed; mounted-lifetime qualification remains pending.
+The native @ reference-palette candidate replaces inline results with a bounded, separate
+query and literal file/folder paths. Selection revalidates the captured input after native
+close before inserting; nothing is sent or uploaded. Its 20 scoped functional tests, strict
+TypeScript and desktop/frontend builds pass. Independent source/functional review passed;
+mounted focus/IME qualification remains pending. Catalog/global/unverified inputs gain no search authority.
 
 **Settings → Overview → General → Appearance & navigator** manages the local dark/light theme,
 project sorting and desktop project-rail collapse. The rail's Sort projects selector and

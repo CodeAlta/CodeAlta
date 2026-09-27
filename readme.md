@@ -19,6 +19,11 @@ to keep the regular composer and its actions reachable.
 
 > CodeAlta is pre-release software. Configuration, screenshots, and extension APIs may change before `1.0`.
 
+The development desktop has a [runnable IDE presentation checkpoint](doc/desktop-ide-checkpoint.md)
+with a stacked Explorer, compact composer, Reminders and reference-popup candidates, and real
+FlexLayout session tabs. Functional checks and builds are recorded there; mounted popup/tab-lifetime and visual
+acceptance remain unqualified, and the full redesign is unfinished.
+
 > On this development branch, the terminal package is renamed to `CodeAlta.Tui` / `altatui`. Installation commands below describe that package once released. Existing releases used `CodeAlta` / `alta`; the replacement desktop head is still in development. Shared `~/.alta` state and the in-session `alta` tool keep their identities.
 
 The development desktop includes an opt-in [workspace snapshot browser](src/CodeAlta/README.md#browse-a-task-owned-catalog-copy), bounded persisted-event history, and separately consented [existing-session text submission](src/CodeAlta/README.md#explicit-owned-text-submission) with a selected-session live status/text window and two recently reported plain tool activities for trusted task-owned roots. The live window is partial, not a complete transcript; tool reports and submission receipts do not establish permission approval or live-run completion. Full agent workflows and native qualification remain incomplete. This is not shared-profile startup. Continue using `altatui` for normal agent workflows.
@@ -56,6 +61,8 @@ For providers supporting run-bound review, cancellation of that run invalidates 
 
 Owned mode also supports text steering of an explicitly refreshed runtime/run target. Uncertain requests retain their exact key and target for manual receipt reconciliation or deliberate retry; they are never automatically retried or redirected to a later run. This remains experimental, not complete session-command parity.
 The owned Desktop composer displays a compact, read-only strip only for this app's exact retained queue/steering requests. Expand it for original text and target evidence or copy the exact text; it is not a host queued-prompt inventory, insertion/durability/execution proof or steering completion. Existing advanced recovery remains explicit; no disclosure or Copy action sends or retries.
+
+**Review retained intent** beside the owned composer also reviews unresolved Queue and cancellation originals, including cancellation-only evidence. Queue text can be copied literally without changing drafts or images. The review retires when its captured owner, scope, input, images, runtime observation or modal lifetime changes; reopen it for current retained evidence. Settled originals are not reconstructed. Existing receipt refresh, cancellation and exact-retry controls remain the only mutation/recovery routes. See [retained Queue review](doc/retained-queue-review.md) for source limits.
 
 The same experimental mode can compact an explicitly observed attachment only if the supported provider admits it while idle, without waiting or replacing the target. Compaction uses context current at admission; inspect its receipt for success or busy/unsupported/failure outcomes.
 

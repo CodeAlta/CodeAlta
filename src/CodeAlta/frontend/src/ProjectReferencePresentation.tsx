@@ -43,7 +43,7 @@ export function ProjectReferencePresentation({ text, input, scope }: {
     setPage(null); setPending(true);
     const valid = () => !abort.signal.aborted && generation.current === version && input.current === element && element.isConnected && element.value === text;
     try {
-      const { observe, lifetime: _lifetime, ...request } = scope;
+      const { observe, lifetime: _lifetime, capturePopup: _capturePopup, ...request } = scope;
       const value = await sessionOperations.observeReferences({ ...request, text }, { signal: abort.signal, timeoutMilliseconds: 3000 });
       if (!valid()) return;
       observe?.(value);

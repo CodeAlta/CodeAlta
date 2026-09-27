@@ -22,6 +22,8 @@ test("production shell settings overlay keeps the session workspace mounted and 
   const layoutObservations: unknown[] = [];
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
+  let failureProbe: (() => Promise<unknown>) | undefined;
+  let lastExpression = "";
   try {
     await build({ entryPoints: [fileURLToPath(new URL("./main.tsx", import.meta.url))],
       outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife", loader: { ".css": "empty" },
@@ -83,6 +85,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     let fileModeContext: string | null = null;
     let bodyModeContext: string | null = null;
     const evaluate = async (expression: string) => {
+      lastExpression = expression;
       try {
         const response = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
         assert.equal(response.exceptionDetails, undefined, `Browser evaluation failed: ${JSON.stringify(response.exceptionDetails)}`);
@@ -92,16 +95,73 @@ test("production shell settings overlay keeps the session workspace mounted and 
         throw new Error(`Runtime.evaluate permissionMode=${permissionModeContext ?? "outside permission scenarios"}; inputMode=${inputModeContext ?? "outside input scenarios"}; fileMode=${fileModeContext ?? "outside file scenarios"}; bodyMode=${bodyModeContext ?? "outside body scenarios"}; expression=${expression}; failure=${cause instanceof Error ? cause.message : String(cause)}`, { cause });
       }
     };
+    const controlEvidence = `(() => {
+      const describe=n=>{if(!(n instanceof Element))return null;const s=getComputedStyle(n);return {tag:n.tagName,id:n.id,class:n.className,rect:n.getBoundingClientRect().toJSON(),position:s.position,display:s.display,visibility:s.visibility,overflowX:s.overflowX,overflowY:s.overflowY,contentVisibility:s.contentVisibility,contain:s.contain,inert:n.inert,hidden:n.hidden,open:n.open,scrollTop:n.scrollTop,scrollLeft:n.scrollLeft,scrollHeight:n.scrollHeight,clientHeight:n.clientHeight};};
+      const active=document.activeElement,r=active?.getBoundingClientRect(),x=r?r.x+r.width/2:0,y=r?r.y+r.height/2:0,ancestors=[];for(let n=active;n;n=n.parentElement)ancestors.push(describe(n));
+      return {viewport:[innerWidth,innerHeight],active:active?.outerHTML,center:[x,y],hit:describe(document.elementFromPoint(x,y)),hitStack:document.elementsFromPoint(x,y).map(describe),ancestors,
+        controls:[...document.querySelectorAll('.session-row,.session-actions-trigger,.session-actions-menu,.composer-region,.composer-actions-menu,.owned-session details,.session-create,.session-create input,.session-create select,.session-create button,dialog[open]')].map(describe),events:window.sendFocusEvents};
+    })()`;
+    failureProbe = async () => ({lastExpression, state: (await command("Runtime.evaluate", {returnByValue:true,expression:`({viewport:[innerWidth,innerHeight],controlEvidence:${controlEvidence},sendHitEvidence:window.sendHitEvidence,
+      active:document.activeElement?.outerHTML.slice(0,1000),body:document.body.innerText.slice(-12000),usageFocus:window.usageFocusEvidence,usageNow:window.inspectUsageFocus?.('failure'),shortImageGeometry:window.shortImageGeometry,menuEvidence:window.menuEvidence,menuOrder:window.menuOrder,menuAtFailure:window.recordMenuOrder?.('failure'),retainedLayout:['layoutHost','layoutComposer','layoutTimeline','layoutNotes'].map(name=>({name,connected:window[name]?.isConnected,className:window[name]?.className,current:window[name]===document.querySelector({layoutHost:'.workspace-shell',layoutComposer:'#session-prompt',layoutTimeline:'.timeline-scroll',layoutNotes:'.notes-pane'}[name])})),
+      geometry:[...document.querySelectorAll('.workspace-shell,.session-content-main-panel,.session-rail,.project-rail,.composer-region,.composer-actions-menu')].map(n=>({className:n.className,hidden:n.hidden,rect:n.getBoundingClientRect().toJSON()}))})`})).result?.value});
     const wait = (condition: string) => evaluate(`new Promise(resolve => { const end=Date.now()+7000; const tick=()=>{
       if (${condition}) resolve(true); else if (Date.now()>end) resolve(document.body.innerText.slice(-1200));
       else setTimeout(tick,20); }; tick(); })`);
-    assert.equal(await wait("!!document.querySelector('#catalog-prompt') && !!document.querySelector('.project-rail .icon-label-button')"), true);
-    assert.equal(await evaluate(`document.querySelectorAll('.session-content-layout .flexlayout__tab').length===2 &&
-      !!document.querySelector('.session-rail')?.closest('.flexlayout__tab') &&
-      !!document.querySelector('.content')?.closest('.flexlayout__tab') &&
-      !document.querySelector('.project-rail')?.closest('.flexlayout__tab')`), true,
-      "actual App sessions/content share one fixed model, with projects outside");
-    assert.equal(await evaluate(`(() => {const host=document.querySelector('.workspace-layout');
+    const revealComposerActions = async () => {
+      if (await evaluate("!document.querySelector('.composer-actions-menu').open")) {
+        await evaluate("document.querySelector('.composer-actions-menu > summary').focus()");
+        assert.equal(await evaluate("document.activeElement===document.querySelector('.composer-actions-menu > summary')"), true);
+        await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+        await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+      }
+      assert.equal(await wait("document.querySelector('.composer-actions-menu').open"), true);
+    };
+    const focusMovedControl = async (selector: string) => {
+      if (await evaluate(`!!document.querySelector(${JSON.stringify(selector)})?.closest('.composer-actions-menu > div')`)) await revealComposerActions();
+      await evaluate(`document.querySelector(${JSON.stringify(selector)}).focus()`);
+      assert.equal(await evaluate(`(() => {const b=document.querySelector(${JSON.stringify(selector)});return b?.isConnected && document.activeElement===b && !b.closest('[hidden],[inert]') && b.getBoundingClientRect().width>0;})()`), true);
+    };
+    const openCatalogEditor = async () => {
+      assert.equal(await evaluate(`(() => {const b=document.querySelector('.catalog-composer #expand-session-prompt');
+        if (!b || !b.isConnected || b.disabled || b.closest('[hidden],[inert]') || b.closest('.composer-actions-menu')) return false;
+        const r=b.getBoundingClientRect();return b===document.querySelector('#expand-session-prompt') && r.width>0 && r.height>0 &&
+          getComputedStyle(b).visibility==='visible' && document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)===b;})()`), true,
+        "catalog Expand is the directly visible, hit-tested button, not owned overflow");
+      await evaluate("document.querySelector('.catalog-composer #expand-session-prompt').focus()");
+      assert.equal(await evaluate("document.activeElement===document.querySelector('.catalog-composer #expand-session-prompt')"), true);
+      await evaluate("document.querySelector('.catalog-composer #expand-session-prompt').click()");
+    };
+    const readyProjectSelection = async (id: string, path: string) => {
+      const selector = JSON.stringify(`#project-list button[title="${path}"]`);
+      assert.equal(await wait(`!!document.querySelector(${selector}) && !!document.querySelector('#project-rail')`), true,
+        `catalog publishes project ${id} at ${path} before selection`);
+      if (await evaluate("document.querySelector('#project-rail').hidden")) {
+        await evaluate("document.querySelector('[aria-controls=project-rail]').focus()");
+        assert.equal(await evaluate("document.activeElement===document.querySelector('[aria-controls=project-rail]') && document.activeElement.getBoundingClientRect().width>0"), true);
+        await evaluate("document.querySelector('[aria-controls=project-rail]').click()");
+      }
+      const ready = await wait(`(() => {const b=document.querySelector(${selector});if(!b?.isConnected || b.disabled || b.closest('[hidden],[inert]'))return false;
+        const r=b.getBoundingClientRect();return b.closest('li').querySelector('.project-actions-trigger')?.getAttribute('aria-label').endsWith(${JSON.stringify(`(ID: ${id})`)}) &&
+          r.width>0 && r.height>0 && getComputedStyle(b).visibility==='visible' && b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));})()`);
+      assert.equal(ready, true, `visible enabled exact project ${id}/${path}: ${ready}`);
+    };
+    const activatePaletteLauncher = async () => {
+      assert.equal(await evaluate(`(() => {const buttons=document.querySelectorAll('button[aria-label="Open command palette"]');
+        if(buttons.length!==1)return false;const b=buttons[0],r=b.getBoundingClientRect();return b.isConnected&&!b.disabled&&
+          !!b.closest('.activity-rail')&&!b.closest('[hidden],[inert]')&&r.width>0&&r.height>0&&
+          getComputedStyle(b).visibility==='visible'&&b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));})()`), true);
+      await evaluate("document.querySelector('button[aria-label=\"Open command palette\"]').focus()");
+      assert.equal(await evaluate("document.activeElement===document.querySelector('button[aria-label=\"Open command palette\"]')"), true);
+      await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", text: "\r", windowsVirtualKeyCode: 13 });
+      await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    };
+    assert.equal(await wait("!!document.querySelector('#catalog-prompt') && !!document.querySelector('.activity-settings')"), true);
+    assert.equal(await evaluate(`document.querySelectorAll('.session-content-layout').length===1 &&
+      !!document.querySelector('.session-rail')?.closest('.session-content-rail-slot') &&
+      !!document.querySelector('.content')?.closest('.session-content-main-panel') &&
+      !document.querySelector('.project-rail')?.closest('.session-content-layout')`), true,
+      "actual App retains stable session/content slots, with projects outside");
+    assert.equal(await evaluate(`(() => {const host=document.querySelector('.workspace-shell');
       const panel=host?.querySelector('.session-content-main-panel');
       return !!panel && panel.getBoundingClientRect().height>0 && host.getBoundingClientRect().width>0 &&
         document.querySelector('.workspace-shell').getBoundingClientRect().width>0 &&
@@ -114,7 +174,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
         filter.getAttribute('aria-label')==='Filter projects by name or path' && sort.getAttribute('aria-label')==='Sort projects' &&
         projects.querySelector('.project-controls').getBoundingClientRect().height<92 &&
         sessions.querySelector('.session-rail-header').getBoundingClientRect().height<64 &&
-        !!projects.querySelector('.rail-footer button') && !!sessions.querySelector('[aria-label="Create session"]');})()`), true,
+        !!document.querySelector('.activity-settings') && !!sessions.querySelector('[aria-label="Create session"]');})()`), true,
       "rail headers and controls stay useful without redundant visible pre-list prose");
     assert.equal(await evaluate("document.querySelector('.session-rail')?.textContent.includes('Session creation requires an owned host.') && document.querySelector('#project-filter')?.getAttribute('aria-controls')==='project-list' && !!document.querySelector('#project-list')"), true,
       "catalog-only restrictions and list relationships remain visible/accessible");
@@ -128,11 +188,11 @@ test("production shell settings overlay keeps the session workspace mounted and 
       assert.equal(await evaluate(`(() => {const rail=document.querySelector('#project-rail'); const controls=rail.querySelector('.project-controls');
         return controls.getBoundingClientRect().height<92 && controls.getBoundingClientRect().height>0 &&
           rail.querySelector('.nav-list').getBoundingClientRect().top>=controls.getBoundingClientRect().bottom &&
-          rail.querySelector('.rail-footer button').getBoundingClientRect().right<=${width};})()`), true, `compact project rail at ${width}px ${theme}`);
-      if (width===390) await evaluate("document.querySelector('[aria-controls=project-rail]').click()");
+          document.querySelector('.activity-settings').getBoundingClientRect().right<=${width};})()`), true, `compact project rail at ${width}px ${theme}`);
       assert.equal(await wait("document.querySelector('.session-rail').getBoundingClientRect().width>0"), true);
       assert.equal(await evaluate("document.querySelector('.session-rail-header').getBoundingClientRect().height<64 && document.querySelector('.session-rail-header h2')?.textContent==='Project' && document.querySelector('.session-rail .search input')?.getAttribute('aria-label')==='Search sessions'"), true,
         `compact session rail at ${width}px ${theme}`);
+      if (width===390) await evaluate("document.querySelector('[aria-controls=project-rail]').click()");
     }
     assert.equal(await evaluate("!!document.querySelector('.topnav, #open-provider-configuration')"), false);
     await evaluate(`(() => { const input=document.querySelector('#catalog-prompt'); input.focus();
@@ -141,7 +201,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
       window.originalWorkspace=document.querySelector('.workspace-shell');
       window.originalTimeline=document.querySelector('.timeline-scroll'); })()`);
     assert.equal(await wait("document.querySelector('#catalog-prompt').value==='Private local draft'"), true);
-    await evaluate("document.querySelector('.project-rail .icon-label-button').focus(); document.querySelector('.project-rail .icon-label-button').click()");
+    await evaluate("document.querySelector('.activity-settings').focus(); document.querySelector('.activity-settings').click()");
     assert.equal(await wait("document.querySelector('.settings-dialog')?.open"), true);
     assert.equal(await evaluate("document.querySelector('.settings-dialog').getBoundingClientRect().width"), 896);
     assert.equal(await evaluate(`(() => { const dialog = document.querySelector('.settings-dialog');
@@ -193,14 +253,14 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
     assert.equal(await wait("!document.querySelector('.settings-dialog')"), true);
-    assert.equal(await wait("document.activeElement===document.querySelector('.project-rail .icon-label-button') && window.originalComposer===document.querySelector('#catalog-prompt')"), true);
+    assert.equal(await wait("document.activeElement===document.querySelector('.activity-settings') && window.originalComposer===document.querySelector('#catalog-prompt')"), true);
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: ",", code: "Comma", windowsVirtualKeyCode: 188, modifiers: 2 });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: ",", code: "Comma", windowsVirtualKeyCode: 188, modifiers: 2 });
     assert.equal(await wait("document.querySelector('.settings-dialog')?.open"), true);
     assert.equal(await evaluate("document.activeElement.closest('.settings-dialog')!==null"), true);
     await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
     assert.equal(await wait("!document.querySelector('.settings-dialog')"), true);
-    await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent.includes('Commands') && x.textContent.includes('Ctrl+P')).click()");
+    await activatePaletteLauncher();
     assert.equal(await wait("document.querySelector('.command-palette')?.open"), true);
     assert.equal(await evaluate("!document.querySelector('#palette-option-skills') && !document.querySelector('#palette-option-usage')"), true,
       "catalog-only palette cannot advertise owned inspection authority");
@@ -209,7 +269,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     assert.equal(await evaluate("window.originalComposer===document.querySelector('#catalog-prompt') && document.querySelector('#catalog-prompt').value==='Private local draft'"), true);
     await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
     assert.equal(await wait("!document.querySelector('.settings-dialog')"), true);
-    await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent.includes('Commands') && x.textContent.includes('Ctrl+P')).click()");
+    await activatePaletteLauncher();
     assert.equal(await wait("document.querySelector('.command-palette')?.open"), true);
     await evaluate("document.querySelector('#palette-option-about').click()");
     assert.equal(await wait("document.querySelector('.settings-dialog')?.open && document.querySelector('.about-dialog')?.open"), true);
@@ -227,7 +287,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     assert.equal(await wait("!document.querySelector('.settings-dialog') && document.activeElement===document.querySelector('#catalog-prompt')"), true);
     for (const width of [390, 1120]) for (const theme of ["dark", "light"]) {
       await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
-      await evaluate(`document.documentElement.dataset.theme='${theme}'; document.querySelector('.project-rail .icon-label-button').click()`);
+      await evaluate(`document.documentElement.dataset.theme='${theme}'; document.querySelector('.activity-settings').click()`);
       assert.equal(await wait("document.querySelector('.settings-dialog')?.open"), true);
       assert.equal(await evaluate(`(() => {const r=document.querySelector('.settings-dialog').getBoundingClientRect();
         return r.width<=${width} && r.left>=0 && r.right<=${width} && r.height<=800 && getComputedStyle(document.querySelector('.settings-dialog')).color!=='rgba(0, 0, 0, 0)'})()`), true);
@@ -255,17 +315,24 @@ test("production shell settings overlay keeps the session workspace mounted and 
     })()`);
     const usageBefore = Number(await evaluate("settingsShellFixture.usageReads.length"));
     const skillsBefore = Number(await evaluate("settingsShellFixture.skillReads.length"));
+    await evaluate(`window.usageFocusEvidence=[];window.inspectUsageFocus=(stage)=>{const button=document.querySelector('#session-usage-trigger');const menu=button?.closest('details');const style=button&&getComputedStyle(button);
+      return {stage,active:document.activeElement?.id||document.activeElement?.tagName,connected:button?.isConnected,disabled:button?.disabled,
+        rect:button?.getBoundingClientRect().toJSON(),display:style?.display,visibility:style?.visibility,menuOpen:menu?.open,dialogs:[...document.querySelectorAll('dialog[open]')].map(n=>n.className)}};
+      usageFocusEvidence.push(inspectUsageFocus('before-palette'))`);
     await openCommands();
     assert.equal(await evaluate("['skills','usage','openProject','help'].every(id=>!!document.querySelector('#palette-option-'+id))"), true);
     await evaluate("document.querySelector('#palette-option-usage').dispatchEvent(new MouseEvent('mouseenter',{bubbles:true}))");
     assert.equal(await evaluate("settingsShellFixture.usageReads.length"), usageBefore, "search/hover is not an observation");
     await evaluate("document.querySelector('#palette-option-usage').click()");
     assert.equal(await wait("document.querySelector('.session-usage-dialog')?.open"), true);
+    assert.equal(await evaluate("document.querySelector('#session-usage-trigger').closest('details').open && document.querySelector('.session-usage-dialog').contains(document.activeElement)"), true, "palette deliberately reveals the original modal target");
+    await evaluate("usageFocusEvidence.push(inspectUsageFocus('usage-open'))");
     assert.equal(await evaluate("settingsShellFixture.usageReads.length"), usageBefore + 1);
     assert.deepEqual(await evaluate("settingsShellFixture.usageReads.at(-1).request"), {
       expectedHostEpoch: "12345678-1234-1234-1234-123456789abc", sessionId: "one", scope: "project", projectId: "project", expectedProjectPath: "/fixture/project",
     });
     await evaluate("document.querySelector('.session-usage-dialog header button').click()");
+    await evaluate("usageFocusEvidence.push(inspectUsageFocus('after-close'))");
     assert.equal(await wait("!document.querySelector('.session-usage-dialog') && document.activeElement.id==='session-usage-trigger'"), true);
     await evaluate("settingsShellFixture.releaseInfoUsage()");
     assert.equal(await evaluate("!!document.querySelector('.session-usage-dialog')"), false, "held old reply cannot reopen");
@@ -311,6 +378,58 @@ test("production shell settings overlay keeps the session workspace mounted and 
       }
     }
     await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
+    // Overflow presentation is local; only explicit Usage activation may read.
+    const overflowReads = await evaluate("JSON.stringify([settingsShellFixture.usageReads.length,settingsShellFixture.skillReads.length])");
+    for (const method of ["pointer", "keyboard"]) {
+      await evaluate("document.querySelector('.composer-actions-menu').open=false");
+      if (method === "pointer") {
+        const point = await evaluate("(() => {const s=document.querySelector('.composer-actions-menu summary');s.scrollIntoView({block:'center'});const r=s.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()") as { x: number; y: number };
+        await command("Input.dispatchMouseEvent", { type: "mousePressed", ...point, button: "left", clickCount: 1 });
+        await command("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button: "left", clickCount: 1 });
+      } else {
+        await evaluate("document.querySelector('.composer-actions-menu summary').focus()");
+        await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+        await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+      }
+      assert.equal(await wait("document.querySelector('.composer-actions-menu').open"), true, `${method}: overflow reachable`);
+      assert.equal(await evaluate("JSON.stringify([settingsShellFixture.usageReads.length,settingsShellFixture.skillReads.length])"), overflowReads);
+    }
+    for (const method of ["pointer", "keyboard"]) {
+      const before = Number(await evaluate("settingsShellFixture.usageReads.length"));
+      await evaluate("document.querySelector('#session-usage-trigger').scrollIntoView({block:'center'})");
+      if (method === "pointer") {
+        const point = await evaluate("(() => {const r=document.querySelector('#session-usage-trigger').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()") as { x: number; y: number };
+        await command("Input.dispatchMouseEvent", { type: "mousePressed", ...point, button: "left", clickCount: 1 });
+        await command("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button: "left", clickCount: 1 });
+      } else {
+        await evaluate("document.querySelector('#session-usage-trigger').focus()");
+        await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+        await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+      }
+      assert.equal(await wait("document.querySelector('.session-usage-dialog')?.matches(':modal') && document.activeElement===document.querySelector('.session-usage-dialog header button')"), true, `${method}: Usage initially focuses its Close control`);
+      assert.equal(await evaluate("settingsShellFixture.usageReads.length"), before + 1);
+      assert.deepEqual(await evaluate("settingsShellFixture.usageReads.at(-1).request"), {
+        expectedHostEpoch: "12345678-1234-1234-1234-123456789abc", sessionId: "one", scope: "project", projectId: "project", expectedProjectPath: "/fixture/project",
+      });
+      await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+      assert.equal(await wait("!document.querySelector('.session-usage-dialog') && document.activeElement.id==='session-usage-trigger'"), true);
+      await evaluate("settingsShellFixture.releaseInfoUsage()");
+    }
+    const foreignUsageReads = Number(await evaluate("settingsShellFixture.usageReads.length"));
+    await openCommands();
+    await evaluate("document.querySelector('#session-usage-trigger').click()");
+    assert.equal(await evaluate("settingsShellFixture.usageReads.length"), foreignUsageReads, "foreign modal refuses direct Usage admission");
+    assert.equal(await evaluate("!document.querySelector('.session-usage-dialog') && document.querySelector('.command-palette').contains(document.activeElement)"), true);
+    await evaluate("document.querySelector('.command-palette header button').click()");
+    assert.equal(await wait("!document.querySelector('.command-palette')"), true);
+    for (const [action, trigger, modal] of [["chooseModel", "#next-send-model-chooser", ".model-chooser"], ["choosePrompt", "#next-send-prompt-chooser", ".prompt-chooser"]]) {
+      await evaluate("document.querySelector('.composer-actions-menu').open=false");
+      await openCommands();
+      await evaluate(`document.querySelector('#palette-option-${action}').click()`);
+      assert.equal(await wait(`document.querySelector('${modal}')?.open && document.querySelector('${modal}').contains(document.activeElement)`), true);
+      await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+      assert.equal(await wait(`!document.querySelector('${modal}') && document.activeElement===document.querySelector('${trigger}') && document.querySelector('${trigger}').closest('details').open`), true);
+    }
     await openCommands();
     await evaluate("document.querySelector('#palette-option-help').click()");
     assert.equal(await wait("!!document.querySelector('.shortcut-dialog')"), true);
@@ -335,7 +454,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     })()`);
     assert.equal(await wait("document.querySelector('.prompt-image-attachments')?.textContent.includes('Image paste unavailable')"), true);
     assert.equal(await evaluate("document.querySelectorAll('.prompt-image-attachments img').length"), 0);
-    await evaluate("localStorage.setItem('settingsFixtureNewChoices','true'); document.querySelector('.project-rail .icon-label-button').click()");
+    await evaluate("localStorage.setItem('settingsFixtureNewChoices','true'); document.querySelector('.activity-settings').click()");
     assert.equal(await wait("document.querySelector('.settings-dialog')?.matches(':modal')"), true);
     await command("Input.dispatchMouseEvent", { type: "mousePressed", x: 5, y: 5, button: "left", clickCount: 1 });
     await command("Input.dispatchMouseEvent", { type: "mouseReleased", x: 5, y: 5, button: "left", clickCount: 1 });
@@ -366,13 +485,14 @@ test("production shell settings overlay keeps the session workspace mounted and 
     assert.equal(await wait("document.querySelector('.prompt-image-attachments')?.textContent.includes('Image paste refused')"), true);
     await evaluate(`(() => {const file=new File([window.imageFile],'late.png',{type:'image/png'});
       file.arrayBuffer=()=>new Promise(resolve=>window.releaseImage=async()=>resolve(await window.imageFile.arrayBuffer()));
-      window.pasteFixtureImage('#session-prompt',file); document.querySelector('.project-rail .icon-label-button').click(); })()`);
+      window.pasteFixtureImage('#session-prompt',file); document.querySelector('.activity-settings').click(); })()`);
     assert.equal(await wait("!!document.querySelector('[aria-label=\"Close settings\"]')"), true);
     await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
     assert.equal(await wait("!document.querySelector('.settings-dialog')"), true);
     await evaluate("window.releaseImage()");
     await new Promise(resolve => setTimeout(resolve, 100));
     assert.equal(await evaluate("document.querySelectorAll('.prompt-image-attachments img').length"), 0, "Settings ABA fences the original element's delayed read");
+    await revealComposerActions();
     await evaluate("document.querySelector('#expand-session-prompt').click()");
     assert.equal(await wait("!!document.querySelector('.expanded-prompt-dialog textarea')"), true);
     await evaluate(`(() => {const file=new File([window.imageFile],'late.png',{type:'image/png'});
@@ -399,6 +519,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await evaluate("window.editImageTitle('Image 1');window.releaseImage()");
     await new Promise(resolve => setTimeout(resolve, 100));
     assert.equal(await evaluate("document.querySelectorAll('.prompt-image-attachments img').length"), 1, "rename fences delayed paste");
+    await revealComposerActions();
     await evaluate("document.querySelector('#expand-session-prompt').click()");
     assert.equal(await wait("!!document.querySelector('.expanded-prompt-dialog input')"), true);
     await evaluate("window.imageEditCalls=settingsShellFixture.rpcCalls.length;window.editImageTitle('画像');document.querySelector('.expanded-prompt-dialog input').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true}));");
@@ -427,17 +548,29 @@ test("production shell settings overlay keeps the session workspace mounted and 
     assert.equal(await evaluate("document.querySelectorAll('.prompt-image-attachments img').length"), 0, "another session cannot see the draft image");
     await evaluate("[...document.querySelectorAll('.session-row > button:first-child')].find(x=>x.textContent.includes('one')).click()");
     assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one' && document.querySelectorAll('.prompt-image-attachments img').length===1 && document.querySelector('.owned-session [aria-label=Model]')?.value==='new'"), true);
+    await evaluate(`window.sendFocusEvents=[];for(const type of ['focusin','focusout','scroll'])document.addEventListener(type,event=>{if(sendFocusEvents.length<200)sendFocusEvents.push({type,time:performance.now(),target:event.target instanceof Element?event.target.className:'document',active:document.activeElement?.id||document.activeElement?.className,scrollTop:event.target.scrollTop,scrollLeft:event.target.scrollLeft});},true);`);
     await evaluate("window.shortImageEditor=document.querySelector('#session-prompt');window.shortImageDraft=shortImageEditor.value;shortImageEditor.focus();shortImageEditor.setSelectionRange(2,5);true");
     for (const [width, height] of [[750, 485], [1120, 800], [390, 500]]) {
       await command("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
-      assert.equal(await wait(`innerWidth===${width} && innerHeight===${height} && document.querySelector('.active-session-content').clientHeight${width < 875 ? "<350" : ">600"}
-        && ${width < 875 ? `Math.abs(document.querySelector('.content').getBoundingClientRect().width-${width})<2` : "document.querySelector('.content').getBoundingClientRect().width<896"}`), true);
+      assert.equal(await wait(`(() => {
+        const rect = selector => document.querySelector(selector).getBoundingClientRect();
+        const shell=rect('.workspace-shell'), activity=rect('.activity-rail'), pane=rect('.session-content-main-panel'), content=rect('.content'), active=rect('.active-session-content');
+        const slots=[...document.querySelectorAll('.project-rail, .session-content-rail-slot, .session-splitter')].filter(n=>!n.hidden && getComputedStyle(n).position!=='absolute');
+        const reservedRight=Math.max(activity.right,...slots.map(n=>n.getBoundingClientRect().right));
+        window.shortImageGeometry={shell:shell.toJSON(),activity:activity.toJSON(),pane:pane.toJSON(),content:content.toJSON(),active:active.toJSON(),reservedRight};
+        return innerWidth===${width} && innerHeight===${height} && activity.width===40
+          && (${width}>=875 || document.querySelector('.session-content-rail-slot').hidden && document.querySelector('[aria-controls=project-rail]').getAttribute('aria-expanded')==='false')
+          && pane.left===reservedRight && pane.right===shell.right && pane.top===shell.top && pane.bottom===shell.bottom
+          && content.left===pane.left && content.right===pane.right && content.top===pane.top && content.bottom===pane.bottom
+          && active.height>0 && active.left>=content.left && active.right<=content.right && active.top>=content.top && active.bottom===content.bottom
+          && shell.right<=innerWidth && shell.bottom<=innerHeight && document.documentElement.scrollWidth<=innerWidth;
+      })()`), true);
       await evaluate("shortImageEditor.scrollIntoView({block:'center',inline:'nearest'})");
       assert.equal(await evaluate("shortImageEditor===document.querySelector('#session-prompt') && document.activeElement===shortImageEditor && shortImageEditor.value===shortImageDraft && shortImageEditor.selectionStart===2 && shortImageEditor.selectionEnd===5 && document.querySelectorAll('.prompt-image-attachments img').length===1"), true,
         "short/wide transitions preserve the focused editor, native selection and original image draft");
     }
     await evaluate("window.editImageText('');window.editImageTitle('Submitted title');document.querySelector('.owned-session .send-button').focus()");
-    assert.equal(await evaluate("(()=>{const b=document.activeElement,r=b.getBoundingClientRect();return b.matches('.send-button') && document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('button')===b})()"), true,
+    assert.equal(await evaluate(`(()=>{const b=document.activeElement,r=b.getBoundingClientRect();const passed=b.matches('.send-button') && document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('button')===b;if(!passed)window.sendHitEvidence=${controlEvidence};return passed;})()`), true,
       "Send is keyboard-reachable and not clipped in the short narrow workspace");
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", text: "\r", windowsVirtualKeyCode: 13 });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
@@ -451,7 +584,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     assert.equal(await evaluate("settingsShellFixture.sends[0].images.length===1 && document.querySelectorAll('.prompt-image-attachments img').length===1"), true, "late paste cannot edit the admitted original");
     assert.deepEqual(await evaluate("window.settingsShellFixture.sends[0].selection"),
       { providerKey: "fixture", agentPromptId: "default", modelId: "new", reasoningEffort: "High" });
-    await evaluate("document.querySelector('.project-rail .icon-label-button').click()");
+    await evaluate("document.querySelector('.activity-settings').click()");
     // Actual App raw Skills inspector; one explicit original, no scans on open/search/navigation.
     // Production localization while the typed image Send is still pending. Stable control identities,
     // not translated text, select pages; assertions verify actual translated names and visible labels.
@@ -503,7 +636,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
       await evaluate("document.querySelector('#settings-language').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',isComposing:true,bubbles:true}));document.querySelector('.settings-dialog').dispatchEvent(new Event('cancel',{cancelable:true}));");
       assert.equal(await evaluate("document.querySelector('.settings-dialog').open"), true, "IME Escape retains the localized modal");
       await evaluate("document.querySelector('#settings-language').dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));document.querySelector('.settings-dialog-header button').click()");
-      await evaluate("document.querySelector('.project-rail .icon-label-button').focus()");
+      await evaluate("document.querySelector('.activity-settings').focus()");
       await command("Input.dispatchKeyEvent", { type: "keyDown", key: "F1", code: "F1", windowsVirtualKeyCode: 112 });
       assert.equal(await wait(`document.querySelector('#shortcut-title')?.textContent===${JSON.stringify(help)}`), true);
       assert.equal(await evaluate(`document.querySelector('.shortcut-dialog').textContent.includes('Ctrl+F11') && (document.querySelector('.shortcut-dialog dd').textContent==='Browse saved sessions (Ctrl+E remains reserved for TUI Edit File)')===${locale === "en"}`), true);
@@ -534,7 +667,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
       await evaluate("document.querySelector('.session-browser-results [role=option]').click()");
       assert.equal(await wait("!document.querySelector('.session-browser') && languageComposer===document.querySelector('#session-prompt')"), true);
       assert.equal(await evaluate("browseLocaleReads===JSON.stringify([settingsShellFixture.displayCalls.length,settingsShellFixture.probes.length,settingsShellFixture.choiceReads.length]) && settingsShellFixture.sends.length===1 && settingsShellFixture.sends[0]===languageSend"), true, `${locale}: translated browser searches/selects the existing session without attachment/provider work`);
-      await evaluate("document.querySelector('.project-rail .icon-label-button').click()");
+      await evaluate("document.querySelector('.activity-settings').click()");
     }
     // Denied persistence applies only to this window and displays a translated notice.
     await evaluate("window.languageWrite=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key==='codealta.desktop.language.v1')throw Error('denied');return languageWrite.call(this,key,value)}");
@@ -572,7 +705,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await evaluate("document.querySelector('.skills-inspection > button').click()");
     assert.equal(await wait("settingsShellFixture.skillReads.length===2"), true);
     await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
-    await evaluate("document.querySelector('.project-rail .icon-label-button').click()");
+    await evaluate("document.querySelector('.activity-settings').click()");
     await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Skills').click()");
     await chooseSkillRoot();
     assert.equal(await evaluate("document.querySelector('.skills-inspection > button').disabled && settingsShellFixture.skillReads.length===2"), true);
@@ -623,7 +756,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
       const body=panel.querySelector('textarea'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(body,'Create original body'); body.dispatchEvent(new Event('input',{bubbles:true}));
     })()`);
     await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
-    await evaluate("document.querySelector('.project-rail .icon-label-button').click()");
+    await evaluate("document.querySelector('.activity-settings').click()");
     await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Agent prompts').click()");
     assert.equal(await wait("document.querySelector('.prompt-creation textarea')?.value==='Create original body'"), true);
     assert.equal(await evaluate("settingsShellFixture.promptCreates.length"), 0);
@@ -649,7 +782,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await verifyCreationLocaleRetention("Original creation pending");
     await evaluate("window.promptCreateSnapshots=settingsShellFixture.snapshotCalls.length; window.originalPromptCapability=readBatchCapability(); document.querySelector('[aria-label=\"Close settings\"]').click()");
     await evaluate("(() => {const {request,resolve}=settingsShellFixture.promptCreates[0];resolve({status:'created',hostEpoch:'22222222-2222-4222-8222-222222222222',request});})()");
-    await evaluate("document.querySelector('.project-rail .icon-label-button').click()");
+    await evaluate("document.querySelector('.activity-settings').click()");
     await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Agent prompts').click()");
     assert.equal(await wait("document.querySelector('.prompt-creation')?.textContent.includes('Publication outcome uncertain')"), true);
     assert.equal(await evaluate("readBatchCapability()===originalPromptCapability && !originalPromptCapability.canMutate()"), true,
@@ -686,7 +819,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await command("Page.reload"); // Fresh isolated fake instance; the previous retained Send was not retried.
     assert.equal(await wait("document.querySelector('.owned-session [aria-label=\"Model\"]')?.value==='new'"), true);
     await evaluate("window.promptComposer=document.querySelector('#session-prompt'); true");
-    await evaluate("document.querySelector('.project-rail .icon-label-button').click()");
+    await evaluate("document.querySelector('.activity-settings').click()");
     assert.equal(await wait("document.querySelector('[data-diagnostic=invalid]')?.textContent.includes('Language: invalid saved preference')"), true);
     assert.equal(await evaluate("document.documentElement.lang==='en' && localStorage.getItem('codealta.desktop.language.v1')==='malformed-locale'"), true, "malformed saved language is not auto-overwritten");
     await chooseLanguage("en");
@@ -704,7 +837,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await evaluate("(() => {const {request,resolve}=settingsShellFixture.promptCreates[0];resolve({status:'created',hostEpoch:request.expectedHostEpoch,request});})()");
     assert.equal(await evaluate("settingsShellFixture.promptReads.length===window.beforePromptCreationReads && settingsShellFixture.snapshotCalls.length===window.beforePromptCreationSnapshots && window.promptComposer===document.querySelector('#session-prompt') && settingsShellFixture.sends.length===0"), true,
       "late successful creation does not refresh, apply, send or replace the workspace");
-    await evaluate("document.querySelector('.project-rail .icon-label-button').click()");
+    await evaluate("document.querySelector('.activity-settings').click()");
     await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Agent prompts').click()");
     assert.equal(await wait("document.querySelector('.prompt-creation')?.textContent.includes('Created at the original scope')"), true);
     assert.equal(await evaluate("document.querySelector('.prompt-creation textarea').value==='Complete created body' && settingsShellFixture.promptCreates.length===1"), true);
@@ -725,7 +858,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
       { providerKey: "fixture", agentPromptId: "plan", modelId: "new", reasoningEffort: "High" });
     await command("Page.reload");
     assert.equal(await wait("document.querySelector('.owned-session [aria-label=\"Reasoning\"]')?.value==='High'"), true);
-    await evaluate("document.querySelector('.project-rail .icon-label-button').click()");
+    await evaluate("document.querySelector('.activity-settings').click()");
     await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Providers').click()");
     assert.equal(await wait("!!document.querySelector('.model-catalog-providers button')"), true);
     await evaluate("document.querySelector('.model-catalog-providers button').click()");
@@ -738,7 +871,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await evaluate("document.querySelector('.model-catalog-providers button').click()");
     assert.equal(await wait("document.querySelector('.model-catalog-detail button')?.disabled"), true);
     await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
-    await evaluate("document.querySelector('.project-rail .icon-label-button').click()");
+    await evaluate("document.querySelector('.activity-settings').click()");
     await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Providers').click()");
     assert.equal(await wait("!!document.querySelector('.model-catalog-providers button')"), true);
     await evaluate("document.querySelector('.model-catalog-providers button').click()");
@@ -758,7 +891,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     assert.equal(await wait("document.querySelector('.logs-clear-status')?.textContent.includes('pending')"), true);
     assert.equal(await evaluate("window.settingsShellFixture.clearRequests.length"), 1);
     await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
-    await evaluate("document.querySelector('.project-rail .icon-label-button').click()");
+    await evaluate("document.querySelector('.activity-settings').click()");
     await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Application Logs').click()");
     assert.equal(await wait("document.querySelector('.logs-clear-status')?.textContent.includes('pending') && window.settingsShellFixture.clearRequests.length===1"), true);
     // An in-flight Apply may not commit into a different Settings section, a closed overlay, or another session.
@@ -787,7 +920,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
     await evaluate("window.settingsShellFixture.releaseChoices()");
     assert.equal(await evaluate("document.querySelector('.owned-session [aria-label=\"Model\"]').value"), "new");
-    await evaluate("localStorage.removeItem('settingsFixtureHoldChoices'); document.querySelector('.project-rail .icon-label-button').click()");
+    await evaluate("localStorage.removeItem('settingsFixtureHoldChoices'); document.querySelector('.activity-settings').click()");
     await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Models').click()");
     await chooseOld();
     assert.equal(await wait("!![...document.querySelectorAll('.model-catalog-detail button')].find(x=>x.textContent==='Use model for next Send' && !x.disabled)"), true);
@@ -800,7 +933,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     assert.equal(await wait("document.querySelector('.owned-session [aria-label=\"Model\"]')?.value==='old'"), true);
     await evaluate("localStorage.removeItem('settingsFixtureHoldChoices'); [...document.querySelectorAll('.session-row > button:first-child')].find(x=>x.textContent.includes('one')).click()");
     assert.equal(await wait("document.querySelector('.owned-session [aria-label=\"Model\"]')?.value==='new'"), true);
-    await evaluate("document.querySelector('.project-rail .icon-label-button').click()");
+    await evaluate("document.querySelector('.activity-settings').click()");
     await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Models').click()");
     await chooseOld();
     assert.equal(await wait("!![...document.querySelectorAll('.model-catalog-detail button')].find(x=>x.textContent==='Use model for next Send' && !x.disabled)"), true);
@@ -823,11 +956,11 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await evaluate("localStorage.setItem('settingsFixtureSecondProject','true')");
     await command("Page.reload");
     assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one' && !!document.querySelector('#project-list button[title=\"/fixture/other\"]')"), true);
-    await evaluate("document.querySelector('.project-rail .icon-label-button').click()");
+    await evaluate("document.querySelector('.activity-settings').click()");
     assert.equal(await wait("document.querySelector('.settings-dialog')?.open"), true);
     await evaluate("document.querySelector('#project-list button[title=\"/fixture/other\"]').dispatchEvent(new MouseEvent('click',{bubbles:true}))");
     assert.equal(await wait("!document.querySelector('.settings-dialog') && document.querySelector('.session-header h1')?.textContent==='other-session'"), true);
-    await evaluate("document.querySelector('.project-rail .icon-label-button').click()");
+    await evaluate("document.querySelector('.activity-settings').click()");
     assert.equal(await wait("document.querySelector('.settings-dialog')?.open && document.querySelector('.settings-dialog-navigation [aria-current=page]')?.textContent==='Appearance'"), true);
     await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Providers').click()");
     assert.equal(await wait("document.querySelector('.settings-dialog-content .settings-card')?.textContent.includes('Current session provider: other-provider') && document.querySelector('.settings-dialog-navigation [aria-current=page]')?.textContent==='Providers'"), true);
@@ -865,17 +998,57 @@ test("production shell settings overlay keeps the session workspace mounted and 
     assert.equal(await wait("!!document.querySelector('.session-actions-menu')"), true);
     await evaluate("document.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}))");
     assert.equal(await wait("!document.querySelector('.session-actions-menu')"), true);
-    for (const width of [390, 1120]) for (const theme of ["light", "dark"]) {
+    await evaluate(`(() => {window.menuOrder=[];const nodes=new WeakMap();let serial=0;
+      window.recordMenuOrder=stage=>{const menu=document.querySelector('.session-actions-menu');if(menu&&!nodes.has(menu))nodes.set(menu,++serial);const state={stage,time:performance.now(),viewport:[innerWidth,innerHeight],media:matchMedia('(max-width: 875px)').matches,railOpen:document.querySelector('[aria-controls=project-rail]').getAttribute('aria-expanded'),railHidden:document.querySelector('.session-content-rail-slot').hidden,menu:menu?nodes.get(menu):null,focus:document.activeElement?.outerHTML.slice(0,180)};menuOrder.push(state);return state;};
+      matchMedia('(max-width: 875px)').addEventListener('change',()=>{recordMenuOrder('media-change');queueMicrotask(()=>recordMenuOrder('media-microtask'));});
+      new MutationObserver(records=>{if(records.some(r=>r.type==='attributes' && r.target.matches('.workspace-shell,.session-content-rail-slot,[aria-controls=project-rail]') || [...r.addedNodes,...r.removedNodes].some(n=>n instanceof Element && (n.matches('.session-actions-menu') || n.querySelector('.session-actions-menu')))))recordMenuOrder('rail/menu-mutation');}).observe(document.querySelector('.app-shell'),{subtree:true,childList:true,attributes:true,attributeFilter:['hidden','class','aria-expanded']});
+      recordMenuOrder('before-resize');})()`);
+    const prepareMenuViewport = async (width: number) => {
+      const wasNarrow = await evaluate("matchMedia('(max-width: 875px)').matches");
       await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
-      await evaluate(`document.documentElement.dataset.theme='${theme}'; document.querySelector('.session-actions-trigger').click()`);
+      await evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+      assert.equal(await wait(`innerWidth===${width} && innerHeight===800 && matchMedia('(max-width: 875px)').matches===${width <= 875}
+        && (${wasNarrow === (width <= 875) || width > 875} || document.querySelector('.session-content-rail-slot').hidden)`), true);
+      if (await evaluate("document.querySelector('[aria-controls=project-rail]').getAttribute('aria-expanded')==='false'"))
+        await evaluate("document.querySelector('[aria-controls=project-rail]').click()");
+      assert.equal(await wait("document.querySelector('[aria-controls=project-rail]').getAttribute('aria-expanded')==='true' && !document.querySelector('.session-content-rail-slot').hidden && document.querySelector('.session-rail').getBoundingClientRect().height>0"), true);
+    };
+    for (const width of [390, 1120]) for (const theme of ["light", "dark"]) {
+      await prepareMenuViewport(width);
+      await evaluate(`if(typeof window.recordMenuOrder!=='function')throw new Error('Menu trace lost its page lifetime');recordMenuOrder('before-trigger');document.documentElement.dataset.theme='${theme}'; document.querySelector('.session-actions-trigger').click();recordMenuOrder('after-trigger')`);
       assert.equal(await wait("!!document.querySelector('.session-actions-menu')"), true);
       assert.equal(await evaluate(`(() => {const row=document.querySelector('.session-row').getBoundingClientRect();
         const icon=document.querySelector('.session-actions-trigger').getBoundingClientRect();
         const menu=document.querySelector('.session-actions-menu').getBoundingClientRect();
-        return icon.right<=row.right+1 && icon.width<=32 && menu.right<=${width} && menu.left>=0 && menu.width<=row.width && menu.bottom<=800;
+        const checks={iconRight:icon.right<=row.right+1,iconWidth:icon.width<=32,menuRight:menu.right<=${width},menuLeft:menu.left>=0,menuWidth:menu.width<=row.width,menuBottom:menu.bottom<=800};
+        const ancestors=[];for(let n=document.querySelector('.session-actions-menu');n;n=n.parentElement){const s=getComputedStyle(n);ancestors.push({class:n.className,rect:n.getBoundingClientRect().toJSON(),scrollTop:n.scrollTop,scrollLeft:n.scrollLeft,scrollHeight:n.scrollHeight,clientHeight:n.clientHeight,position:s.position,display:s.display,overflowX:s.overflowX,overflowY:s.overflowY,flex:s.flex});}
+        window.menuEvidence={viewport:[innerWidth,innerHeight],row:row.toJSON(),icon:icon.toJSON(),menu:menu.toJSON(),checks,ancestors,focus:document.activeElement?.outerHTML};
+        return Object.values(checks).every(Boolean);
       })()`), true);
       await evaluate("document.querySelector('.session-actions-trigger').click()");
       assert.equal(await wait("!document.querySelector('.session-actions-menu')"), true);
+    }
+    for (const theme of ["light", "dark"]) for (const rowIndex of [0, -1]) for (const method of ["pointer", "contextmenu", "keyboard"]) {
+      await prepareMenuViewport(390);
+      await evaluate(`document.documentElement.dataset.theme='${theme}';window.menuRow=[...document.querySelectorAll('.session-row')].at(${rowIndex});menuRow.scrollIntoView({block:'nearest'});`);
+      if (method === "pointer") {
+        const point = await evaluate("(() => {const r=menuRow.querySelector('.session-actions-trigger').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()") as { x: number; y: number };
+        await command("Input.dispatchMouseEvent", { type: "mousePressed", ...point, button: "left", clickCount: 1 });
+        await command("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button: "left", clickCount: 1 });
+      } else if (method === "contextmenu") await evaluate("menuRow.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}))");
+      else {
+        await evaluate("menuRow.querySelector('.session-actions-trigger').focus()");
+        await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+        await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+      }
+      assert.equal(await wait("!!menuRow.querySelector('.session-actions-menu') && menuRow.querySelector('.session-actions-menu').contains(document.activeElement)"), true, `${theme}/${rowIndex}/${method}: own menu focus`);
+      assert.equal(await evaluate(`(() => {const m=menuRow.querySelector('.session-actions-menu'),r=m.getBoundingClientRect(),rail=document.querySelector('.session-rail').getBoundingClientRect();
+        return r.top>=rail.top && r.bottom<=rail.bottom && r.left>=rail.left && r.right<=rail.right && r.top>=0 && r.bottom<=innerHeight;
+      })()`), true, "top and last row menus fit visible rail");
+      await command("Input.dispatchKeyEvent", { type: "keyDown", key: "End", code: "End", windowsVirtualKeyCode: 35 });
+      assert.equal(await evaluate("(() => {const b=document.activeElement,r=b.getBoundingClientRect();return b.matches('[role=menuitem]') && document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('button')===b})()"), true, "last action is scroll-reachable and hit-tested");
+      await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+      assert.equal(await wait("!document.querySelector('.session-actions-menu') && document.activeElement===menuRow.querySelector('.session-actions-trigger')"), true);
     }
     await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
     await evaluate("document.querySelector('#project-list button[title=\"/fixture/project\"]').click()");
@@ -964,7 +1137,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await evaluate("localStorage.setItem('settingsFixtureWorkspaceError','true')");
     await command("Page.reload");
     assert.equal(await wait("document.querySelector('.project-rail .sidebar-empty[role=alert]')?.textContent.includes('No alternate session scan was used')"), true);
-    assert.equal(await evaluate("!!document.querySelector('.project-rail .panel-title') && !!document.querySelector('.session-rail-header h2') && !!document.querySelector('.rail-footer button') && !!document.querySelector('.project-rail [aria-label=\"Open project (Ctrl+O)\"]')"), true);
+    assert.equal(await evaluate("!!document.querySelector('.project-rail .panel-title') && !!document.querySelector('.session-rail-header h2') && !!document.querySelector('.activity-settings') && !!document.querySelector('.project-rail [aria-label=\"Open project (Ctrl+O)\"]')"), true);
     // Actual App -> shared dispatcher -> registered command -> mixed History -> scroll hook.
     // No fixture-owned dispatcher or synthetic message DOM stands in for production wiring.
     for (const mode of ["live-only", "mixed", "empty", "error", "loading", "partial"]) {
@@ -988,7 +1161,11 @@ test("production shell settings overlay keeps the session workspace mounted and 
           assert.equal(await wait("document.documentElement.lang==='en'"), true);
           if (timeMode === "reading") {
             // Establish a reader through the real registered navigation action, not a scrollTop write.
-            await evaluate("document.querySelector('.session-info-trigger').focus();document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'F3',ctrlKey:true,bubbles:true,cancelable:true}))");
+            // This tests registered timeline navigation, not Info. The visible overflow
+            // summary is an equivalent non-editing workspace origin without opening a modal.
+            await evaluate("document.querySelector('.composer-actions-menu > summary').focus()");
+            assert.equal(await evaluate("document.activeElement===document.querySelector('.composer-actions-menu > summary') && document.activeElement.isConnected"), true);
+            await evaluate("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'F3',ctrlKey:true,bubbles:true,cancelable:true}))");
             assert.equal(await wait("!!document.querySelector('.timeline-bottom-button')"), true);
           } else {
             await evaluate("document.querySelector('.timeline-bottom-button')?.click()");
@@ -1015,7 +1192,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
         assert.equal(await wait("document.documentElement.lang==='en'"), true);
         await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
       }
-      await evaluate(`document.querySelector('[aria-label="Session info"]').focus()`);
+      await focusMovedControl('.composer-actions-menu > summary');
       const key = (key: string, modifiers = {}) => evaluate(`(() => {const e=new KeyboardEvent('keydown',
         ${JSON.stringify({ key, bubbles: true, cancelable: true, ...modifiers })});
         document.activeElement.dispatchEvent(e); return e.defaultPrevented;})()`);
@@ -1057,7 +1234,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
         assert.equal(await key("F3", { ctrlKey: true }), false, "composer owns its input");
         await evaluate("document.querySelector('.session-rail .search input').focus()");
         assert.equal(await key("F4"), false, "other editors own their input");
-        await evaluate("window.navigationWorkspace=document.querySelector('.session-workspace'); document.querySelector('.rail-footer .icon-label-button').click()");
+        await evaluate("window.navigationWorkspace=document.querySelector('.session-workspace'); document.querySelector('.activity-settings').click()");
         assert.equal(await wait("document.querySelector('.settings-dialog')?.open"), true);
         assert.equal(await key("F4"), false, "Settings retains modal ownership");
         assert.equal(await evaluate("window.navigationWorkspace===document.querySelector('.session-workspace')"), true);
@@ -1068,14 +1245,14 @@ test("production shell settings overlay keeps the session workspace mounted and 
         await evaluate("[...document.querySelectorAll('.session-row > button:first-child')].find(b=>b.textContent.includes('two')).click()");
         assert.equal(await wait("document.querySelector('.history')?.dataset.windowReady==='true' && document.querySelector('.history')?.textContent.includes('persisted-User-two')"), true);
         const readsAfterSelection = await evaluate("window.settingsShellFixture.historyCalls.length") as number;
-        await evaluate("document.querySelector('[aria-label=\"Session info\"]').focus()");
+        await focusMovedControl('.composer-actions-menu > summary');
         assert.equal(await key("F3", { ctrlKey: true }), true);
         assert.equal(await wait("document.querySelector('.timeline-navigation-notice')?.textContent.includes('persisted-User-two')"), true,
           "a remounted selected session cannot retain the prior row anchor");
         // Replace the retained rows through the existing explicit refresh, not navigation.
         await evaluate(`localStorage.setItem('navigationFixture','live-only'); document.querySelector('.history .section-heading button').click()`);
         assert.equal(await wait("document.querySelector('.history')?.dataset.windowReady==='true' && !document.querySelector('.history')?.textContent.includes('persisted-User-two')"), true);
-        await evaluate("document.querySelector('[aria-label=\"Session info\"]').focus()");
+        await focusMovedControl('.composer-actions-menu > summary');
         assert.equal(await key("F4"), false, "removed persisted anchors cannot redirect navigation onto retained live rows");
         assert.equal(await evaluate("!!document.querySelector('.timeline-navigation-notice')"), false, "ordinary refresh does not announce navigation");
         assert.equal(await evaluate("window.settingsShellFixture.historyCalls.length"), readsAfterSelection + 1, "only explicit refresh adds a read after selection");
@@ -1108,7 +1285,13 @@ test("production shell settings overlay keeps the session workspace mounted and 
         await workflowLanguages(evaluate, workflowCalls, ".session-create", ".session-create button", "Create and open");
         await workflowLanguages(evaluate, workflowCalls, ".session-create", ".creation-provider label > span", "Provider for new session", "option:not([value=''])");
         await workflowLanguages(evaluate, workflowCalls, ".session-create", ".creation-provider option[value='']", "Default or first enabled provider", "option:not([value=''])");
-        await workflowNarrow(evaluate, command, ".session-create");
+        await workflowNarrow(evaluate, command, ".session-create", async () => {
+          // Unlike modal workflows, this form lives in the responsive Explorer.
+          // Breakpoint handling is settled by workflowNarrow's existing frame boundary.
+          if (await evaluate("document.querySelector('[aria-controls=project-rail]').getAttribute('aria-expanded')==='false'"))
+            await evaluate("document.querySelector('[aria-controls=project-rail]').click()");
+          assert.equal(await wait("!document.querySelector('.session-content-rail-slot').hidden && document.querySelector('.session-create').getBoundingClientRect().height>0"), true);
+        });
         assert.equal(await evaluate("document.querySelector('.session-create select').value"), "alternate");
       }
       await evaluate(`document.querySelector('.session-create button').click()`);
@@ -1124,7 +1307,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
       const selectSession = (title: string) => evaluate(`[...document.querySelectorAll('.session-row > button:first-child')].find(b=>b.textContent.includes('${title}')).click()`);
       if (change === "session" || change === "aba") { await selectSession("two"); if (change === "aba") await selectSession("one"); }
       if (change === "settings" || change === "settings-aba") {
-        await evaluate(`document.querySelector('.rail-footer .icon-label-button').click()`);
+        await evaluate(`document.querySelector('.activity-settings').click()`);
         assert.equal(await wait("document.querySelector('.settings-dialog')?.open"), true);
         if (change === "settings-aba") await evaluate(`document.querySelector('[aria-label="Close settings"]').click()`);
       }
@@ -1152,6 +1335,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
         await evaluate(`window.settingsShellFixture.releaseChoices('stale')`);
       }
       if (change === "modal-aba") {
+        await focusMovedControl('[aria-label="Session info"]');
         await evaluate(`document.querySelector('[aria-label="Session info"]').click()`);
         assert.equal(await wait("!!document.querySelector('.session-info-dialog')"), true);
         await evaluate(`document.querySelector('[aria-label="Close session info"]').click()`);
@@ -1217,14 +1401,100 @@ test("production shell settings overlay keeps the session workspace mounted and 
       assert.equal(await evaluate("settingsShellFixture.creates.length"), 1);
       assert.equal(await evaluate("document.querySelector('.session-header h1').textContent"), "one");
     }
+    // App-owned Save survives popup disposal without acquiring retry/Create authority.
+    const saveMilestone = async (phase: string, counts: { saves: number; details: number; lists: number; sends: number }, mounts: number, cleanups: number) => {
+      const value = await evaluate(`({phase:${JSON.stringify(phase)},counts:{saves:settingsShellFixture.reminderSaves.length,details:settingsShellFixture.reminderDetails.length,
+        lists:settingsShellFixture.reminderSaveLists.length,sends:settingsShellFixture.sends.length},sameInput:window.saveWorkspace===document.querySelector('#session-prompt'),
+        inputConnected:window.saveWorkspace?.isConnected,modalCount:document.querySelectorAll('.reminders-dialog').length,modalMounts:window.saveModalMounts,modalCleanups:window.saveModalCleanups,
+        evidence:settingsShellFixture.reminderEvidence()})`);
+      layoutObservations.push(value);
+      const actual = value as { counts: typeof counts; sameInput: boolean; inputConnected: boolean; modalMounts: number; modalCleanups: number };
+      assert.deepEqual({counts:actual.counts,sameInput:actual.sameInput,inputConnected:actual.inputConnected,mounts:actual.modalMounts,cleanups:actual.modalCleanups},
+        {counts,sameInput:true,inputConnected:true,mounts,cleanups}, `${phase}: exact admissions and retained input`);
+    };
+    await evaluate("localStorage.clear();localStorage.setItem('settingsFixtureOwned','true');localStorage.setItem('layoutFixtureSave','true')");
+    await command("Page.reload");
+    assert.equal(await wait("!!document.querySelector('#session-prompt') && !!document.querySelector('[data-reminder-count]')"), true);
+    await evaluate(`window.saveModalMounts=0;window.saveModalCleanups=0;window.saveModalObserver=new MutationObserver(records=>{for(const record of records){
+      for(const node of record.addedNodes)if(node instanceof Element&&node.matches('.reminders-dialog'))saveModalMounts++;
+      for(const node of record.removedNodes)if(node instanceof Element&&node.matches('.reminders-dialog'))saveModalCleanups++;
+    }});saveModalObserver.observe(document.querySelector('.app-shell'),{childList:true})`);
+    await focusMovedControl('[data-reminder-count]');
+    await evaluate("window.saveWorkspace=document.querySelector('#session-prompt');document.querySelector('[data-reminder-count]').click()");
+    assert.equal(await wait("!!document.querySelector('[aria-label=\"Reminder list\"] button') && document.querySelector('.reminders-dialog')?.matches(':modal')"), true);
+    // Existing count owner contributes two StrictMode calls; each explicit popup mount
+    // contributes its own two. Source and diagnostic stacks identify both owners.
+    await saveMilestone("initial-open", {saves:0,details:0,lists:4,sends:0}, 1, 0);
+    await evaluate("document.querySelector('[aria-label=\"Reminder list\"] button').click()");
+    assert.equal(await wait("!!document.querySelector('#reminder-edit')"), true);
+    await saveMilestone("select", {saves:0,details:1,lists:4,sends:0}, 1, 0);
+    await evaluate(`{const input=document.querySelector('#reminder-edit');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'exact pending popup Save');input.dispatchEvent(new Event('input',{bubbles:true}));}`);
+    await evaluate("[...document.querySelectorAll('.reminders-dialog button')].find(b=>b.textContent==='Save message').click()");
+    assert.equal(await wait("settingsShellFixture.reminderSaves.length===1"), true);
+    await saveMilestone("save", {saves:1,details:1,lists:4,sends:0}, 1, 0);
+    const popupSave = await evaluate("settingsShellFixture.reminderSaves[0].request");
+    assert.deepEqual(popupSave, { expectedEpoch: "12345678-1234-1234-1234-123456789abc", sessionId: "one", reminderId: "reminder-1", editRevision: "0", content: "exact pending popup Save" });
+    await evaluate("document.querySelector('.reminders-dialog header button').click()");
+    assert.equal(await wait("!document.querySelector('.reminders-dialog') && document.activeElement===document.querySelector('[data-reminder-count]')"), true);
+    await saveMilestone("close", {saves:1,details:1,lists:4,sends:0}, 1, 1);
+    assert.deepEqual(await evaluate("settingsShellFixture.reminderEvidence().map(e=>({kind:e.kind,aborted:e.aborted,completed:e.completed}))"), [
+      {kind:"list",aborted:true,completed:true},{kind:"list",aborted:false,completed:true},
+      {kind:"list",aborted:true,completed:true},{kind:"list",aborted:true,completed:true},
+      {kind:"detail",aborted:true,completed:true},{kind:"save",aborted:null,completed:false}]);
+    await evaluate("document.querySelector('[data-reminder-count]').click()");
+    assert.equal(await wait("!!document.querySelector('[aria-label=\"Retained reminder Save\"]')"), true);
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"Retained reminder Save\"] pre').textContent"), "exact pending popup Save");
+    await saveMilestone("reopen", {saves:1,details:1,lists:6,sends:0}, 2, 1);
+    await evaluate("document.querySelector('.reminders-dialog header button').click()");
+    assert.equal(await wait("!document.querySelector('.reminders-dialog')"), true);
+    await evaluate("settingsShellFixture.reminderSaves[0].reject(new Error('lost popup Save response'))");
+    await evaluate("document.querySelector('[data-reminder-count]').click()");
+    assert.equal(await wait("!!document.querySelector('[aria-label=\"Retained reminder Save\"]')"), true);
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"Retained reminder Save\"] pre').textContent"), "exact pending popup Save");
+    assert.deepEqual(await evaluate("settingsShellFixture.reminderSaves[0].request"), popupSave);
+    await saveMilestone("late-uncertainty-reopen", {saves:1,details:1,lists:8,sends:0}, 3, 2);
+    assert.deepEqual(await evaluate("settingsShellFixture.reminderEvidence().filter(e=>e.kind==='save').map(e=>({completed:e.completed,request:e.request}))"), [{completed:true,request:popupSave}]);
+    await evaluate("document.querySelector('.reminders-dialog header button').click()");
+    assert.equal(await wait("!document.querySelector('.reminders-dialog')"), true);
+    await evaluate("[...document.querySelectorAll('.session-row > button:first-child')].find(b=>b.textContent.includes('two')).click()");
+    assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='two'"), true);
+    await focusMovedControl('[data-reminder-count]');
+    await evaluate("document.querySelector('[data-reminder-count]').click()");
+    assert.equal(await wait("document.querySelector('.reminders-dialog')?.matches(':modal') && !!document.querySelector('[aria-label=\"Reminder list\"]')"), true);
+    assert.deepEqual(await evaluate("({retained:!!document.querySelector('[aria-label=\"Retained reminder Save\"]'),saves:settingsShellFixture.reminderSaves.length,sends:settingsShellFixture.sends.length})"), {retained:false,saves:1,sends:0});
+    await evaluate("window.loseLayoutHost()");
+    assert.equal(await wait("!document.querySelector('.reminders-dialog') && !document.querySelector('[aria-label=\"Retained reminder Save\"]')"), true);
+    assert.equal(await evaluate("settingsShellFixture.reminderSaves.length===1 && settingsShellFixture.sends.length===0"), true);
+    await evaluate("saveModalObserver.disconnect()");
     // Fixed Layout lifetime through actual App publications, not a copied component shell.
     await evaluate(`localStorage.clear(); localStorage.setItem('settingsFixtureOwned','true');
       localStorage.setItem('navigationFixture','mixed'); localStorage.setItem('layoutFixtureLive','true');
       localStorage.setItem('settingsFixtureSecondProject','true')`);
     await command("Page.reload");
     assert.equal(await wait("document.querySelector('#session-prompt') && document.querySelector('.timeline-scroll')?.textContent.includes('persisted-User-one') && document.querySelector('.timeline-scroll')?.textContent.includes('live-User') && settingsShellFixture.displayCalls.length-settingsShellFixture.displayCleanup.length===1"), true);
+    // Notes defaults closed. Opening unrelated overlays must not opt into notes reads.
+    assert.equal(await evaluate("document.querySelector('.notes-pane')===null"), true);
+    const closedNotesReads = await evaluate("JSON.stringify(settingsShellFixture.notesCalls)");
+    await evaluate("document.querySelector('.activity-settings').click()");
+    assert.equal(await wait("document.querySelector('.settings-dialog')?.open"), true);
+    assert.equal(await evaluate("document.querySelector('.notes-pane')===null"), true);
+    await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
+    assert.equal(await wait("!document.querySelector('.settings-dialog')"), true);
+    await focusMovedControl('[data-reminder-count]');
+    await evaluate("document.querySelector('[data-reminder-count]').click()");
+    assert.equal(await wait("document.querySelector('.reminders-dialog')?.matches(':modal')"), true);
+    assert.equal(await evaluate("document.querySelector('.notes-pane')===null"), true);
+    await evaluate("document.querySelector('.reminders-dialog header button').click()");
+    assert.equal(await wait("!document.querySelector('.reminders-dialog')"), true);
+    assert.equal(await evaluate("document.querySelector('.notes-pane')===null"), true);
+    assert.equal(await evaluate("JSON.stringify(settingsShellFixture.notesCalls)"), closedNotesReads);
+    // Mount notes deliberately through visible UI before asserting retained identity.
+    await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
+    assert.equal(await wait("document.querySelector('.show-notes')?.getBoundingClientRect().width>0"), true);
+    await evaluate("document.querySelector('.show-notes').click()");
+    assert.equal(await wait("document.querySelector('.notes-pane')?.isConnected && document.querySelector('.notes-pane').getBoundingClientRect().width>0 && document.querySelector('.notes-pane').getBoundingClientRect().height>0 && !document.querySelector('.notes-pane').textContent.includes('Reading notes…')"), true);
     await evaluate(`window.layoutOpens=0; window.open=()=>{window.layoutOpens++; return null;};
-      window.layoutHost=document.querySelector('.workspace-layout'); window.layoutPanel=document.querySelector('.session-content-main-panel');
+      window.layoutHost=document.querySelector('.workspace-shell'); window.layoutPanel=document.querySelector('.session-content-main-panel');
       window.layoutComposer=document.querySelector('#session-prompt'); window.layoutTimeline=document.querySelector('.timeline-scroll');
       window.layoutRail=document.querySelector('.session-rail'); window.layoutNotes=document.querySelector('.notes-pane');
       window.layoutReads=JSON.stringify([settingsShellFixture.historyCalls,settingsShellFixture.notesCalls,settingsShellFixture.displayCalls,settingsShellFixture.displayCleanup]);
@@ -1235,31 +1505,36 @@ test("production shell settings overlay keeps the session workspace mounted and 
     const geometry = () => evaluate(`(() => {const rect=s=>{const r=document.querySelector(s).getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}};
       return {sessions:rect('.session-rail'),content:rect('.content'),projects:rect('.project-rail'),shell:rect('.workspace-shell'),
         control:rect('.session-splitter'),aria:document.querySelector('.session-splitter').getAttribute('aria-valuenow'),
-        preference:localStorage.getItem('codealta.desktop.panes.v1')};})()`);
+        preference:localStorage.getItem('codealta.desktop.ide-width.v1'),legacyPreference:localStorage.getItem('codealta.desktop.panes.v1')};})()`);
     const captureGeometry = async (label: string) => {
       await frames(); const first = await geometry(); await frames(); const second = await geometry();
       layoutObservations.push({ label, first, second }); assert.deepEqual(first, second, `${label}: finite geometry/ARIA samples agree`);
+      const launcher = await evaluate(`(() => {const buttons=Array.from(document.querySelectorAll('button[aria-label="Open command palette"]'));
+        return {count:buttons.length,targets:buttons.map(b=>{const r=b.getBoundingClientRect();return {activity:!!b.closest('.activity-rail'),
+          connected:b.isConnected,enabled:!b.disabled,visible:r.width>0&&r.height>0&&!b.closest('[hidden],[inert]')&&getComputedStyle(b).visibility==='visible',
+          hit:b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)),popup:b.getAttribute('aria-haspopup'),shortcut:b.title.includes('Ctrl+P')};})};})()`);
+      assert.deepEqual(launcher, {count:1,targets:[{activity:true,connected:true,enabled:true,visible:true,hit:true,popup:"dialog",shortcut:true}]}, `${label}: single accessible visible palette launcher`);
     };
-    const originalWidths = await evaluate("localStorage.getItem('codealta.desktop.panes.v1')");
+    const originalWidths = await evaluate("localStorage.getItem('codealta.desktop.ide-width.v1')");
     for (const [width,height] of [[1120,800],[876,601],[875,601],[875,600],[390,800],[390,600],[1120,800]]) {
       await evaluate("window.layoutComposer.focus()");
       await command("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
       await captureGeometry(`${width}x${height}`);
       assert.equal(await evaluate(`window.layoutComposer===document.querySelector('#session-prompt') && document.activeElement===window.layoutComposer &&
         window.layoutTimeline===document.querySelector('.timeline-scroll') && window.layoutRail===document.querySelector('.session-rail') &&
-        window.layoutNotes===document.querySelector('.notes-pane') && window.layoutComposer.value==='Original layout draft'`), true);
-      assert.equal(await evaluate("localStorage.getItem('codealta.desktop.panes.v1')"), originalWidths, "projection never persists widths");
+        window.layoutNotes===document.querySelector('.notes-pane') && window.layoutNotes.isConnected && window.layoutComposer.value==='Original layout draft'`), true);
+      assert.equal(await evaluate("localStorage.getItem('codealta.desktop.ide-width.v1')"), originalWidths, "projection never persists widths");
       assert.equal(await evaluate(`(() => {const s=window.layoutRail.getBoundingClientRect(),c=document.querySelector('.content').getBoundingClientRect(),
         bar=document.querySelector('.session-splitter'),b=bar.getBoundingClientRect();return ${width}>875
-          ? s.width>=220 && s.width<=560 && c.width>=480 && Math.abs(c.left-s.right-8)<1 && b.width===8 && Number(bar.getAttribute('aria-valuenow'))===Math.round(s.width)
-          : Math.abs(s.height-Math.max(${height}<=600?180:340,${height}*(${height}<=600?.4:.45)))<1 && Math.abs(c.top-s.bottom)<1 && s.width===${width} && c.width===${width} && b.width===0;})()`), true);
+          ? s.width>=220 && s.width<=360 && c.width>=480 && Math.abs(c.left-s.right-8)<1 && b.width===8 && Number(bar.getAttribute('aria-valuenow'))===Math.round(s.width)
+          : s.height===0 && s.width===0 && c.width===${width}-40 && c.height>0 && b.width===0;})()`), true);
       if (width <= 875) {
         await evaluate("document.querySelector('[aria-controls=project-rail]').click()"); await captureGeometry(`projects-open-${width}x${height}`);
         assert.equal(await evaluate(`(() => {const p=document.querySelector('.project-rail').getBoundingClientRect(),c=document.querySelector('.content').getBoundingClientRect();
-          const hidden=window.layoutRail.getBoundingClientRect();const input=window.layoutRail.querySelector('input'); input.focus();
-          return hidden.width===0 && hidden.height===0 && window.layoutRail===document.querySelector('.session-rail') &&
-            window.layoutNotes===document.querySelector('.notes-pane') && input!==document.activeElement &&
-            Math.abs(c.top-p.bottom)<1 && c.width===${width} && c.height>0 && document.querySelector('.session-splitter').getClientRects().length===0;})()`), true);
+          const shown=window.layoutRail.getBoundingClientRect();const input=window.layoutRail.querySelector('input'); input.focus();
+          return shown.width===320 && shown.height>0 && shown.bottom<=${height} && window.layoutRail===document.querySelector('.session-rail') &&
+             window.layoutNotes===document.querySelector('.notes-pane') && window.layoutNotes.isConnected && input===document.activeElement &&
+            Math.abs(shown.top-p.bottom)<1 && c.width===${width}-40 && c.height>0 && document.querySelector('.session-splitter').getClientRects().length===0;})()`), true);
         await evaluate("document.querySelector('[aria-controls=project-rail]').click()"); await captureGeometry(`projects-closed-${width}x${height}`);
       }
       assert.equal(await evaluate("window.layoutReads===JSON.stringify([settingsShellFixture.historyCalls,settingsShellFixture.notesCalls,settingsShellFixture.displayCalls,settingsShellFixture.displayCleanup])"), true);
@@ -1269,34 +1544,36 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
     await captureGeometry("arrow-plus16");
-    assert.equal(await evaluate("Math.round(window.layoutRail.getBoundingClientRect().width)"), 326);
+    assert.equal(await evaluate("Math.round(window.layoutRail.getBoundingClientRect().width)"), 288);
+    assert.equal(await evaluate("localStorage.getItem('codealta.desktop.ide-width.v1')"), JSON.stringify({ width: 288, full: false }), "keyboard persists the desktop width");
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 });
     await captureGeometry("arrow-minus16");
-    assert.equal(await evaluate("Math.round(window.layoutRail.getBoundingClientRect().width)"), 310);
-    assert.equal(await evaluate("localStorage.getItem('codealta.desktop.panes.v1')"), originalWidths);
+    assert.equal(await evaluate("Math.round(window.layoutRail.getBoundingClientRect().width)"), 272);
+    assert.equal(await evaluate("localStorage.getItem('codealta.desktop.ide-width.v1')"), originalWidths);
     await evaluate("document.querySelector('.session-splitter').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}))");
     await evaluate("document.querySelector('.session-splitter').dispatchEvent(new KeyboardEvent('keydown',{key:'Home',bubbles:true,cancelable:true}))");
-    await captureGeometry("home-reset"); assert.equal(await evaluate("Math.round(window.layoutRail.getBoundingClientRect().width)"), 310);
+    await captureGeometry("home-reset"); assert.equal(await evaluate("Math.round(window.layoutRail.getBoundingClientRect().width)"), 272);
     const bar = await evaluate("(() => {const r=document.querySelector('.session-splitter').getBoundingClientRect();return {x:r.x+4,y:r.y+40}})()") as { x: number; y: number };
     await command("Input.dispatchMouseEvent", { type: "mousePressed", ...bar, button: "left", buttons: 1, clickCount: 1 });
     await command("Input.dispatchMouseEvent", { type: "mouseMoved", x: bar.x + 24, y: bar.y, button: "left", buttons: 1 });
-    await captureGeometry("live-drag-before-release"); assert.equal(await evaluate("Math.round(window.layoutRail.getBoundingClientRect().width)"), 334);
+    await captureGeometry("live-drag-before-release"); assert.equal(await evaluate("Math.round(window.layoutRail.getBoundingClientRect().width)"), 296);
+    assert.equal(await evaluate("localStorage.getItem('codealta.desktop.ide-width.v1')"), JSON.stringify({ width: 296, full: false }), "pointer persists the desktop width");
     await command("Input.dispatchMouseEvent", { type: "mouseReleased", x: bar.x + 24, y: bar.y, button: "left", buttons: 0, clickCount: 1 });
     await evaluate("document.querySelector('.session-splitter').dispatchEvent(new MouseEvent('dblclick',{bubbles:true}))");
-    await captureGeometry("double-click-reset"); assert.equal(await evaluate("Math.round(window.layoutRail.getBoundingClientRect().width)"), 310);
+    await captureGeometry("double-click-reset"); assert.equal(await evaluate("Math.round(window.layoutRail.getBoundingClientRect().width)"), 272);
     // Collapse projects, then resize only the parent: neither operation persists a constrained width.
     await evaluate("document.querySelector('[aria-controls=project-rail]').click(); document.querySelector('.workspace-shell').style.width='740px'");
     await captureGeometry("collapsed-parent-740");
-    assert.equal(await evaluate("Math.round(window.layoutRail.getBoundingClientRect().width)===252 && document.querySelector('.content').getBoundingClientRect().width>=480"), true);
-    assert.equal(await evaluate("localStorage.getItem('codealta.desktop.panes.v1')"), originalWidths);
+    assert.equal(await evaluate("window.layoutRail.getBoundingClientRect().width===0 && document.querySelector('.content').getBoundingClientRect().width===700"), true);
+    assert.equal(await evaluate("localStorage.getItem('codealta.desktop.ide-width.v1')"), originalWidths);
     await evaluate("document.querySelector('.workspace-shell').style.width=''; document.querySelector('[aria-controls=project-rail]').click()");
-    await captureGeometry("restored-parent"); assert.equal(await evaluate("Math.round(window.layoutRail.getBoundingClientRect().width)"), 310);
+    await captureGeometry("restored-parent"); assert.equal(await evaluate("Math.round(window.layoutRail.getBoundingClientRect().width)"), 272);
     for (const width of [390, 1120]) for (const theme of ["light", "dark"]) {
       await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
       await evaluate(`document.documentElement.dataset.theme='${theme}';
         window.publishLayoutCatalog({...settingsShellFixture.catalog,sessions:settingsShellFixture.catalog.sessions.map(row=>({...row,title:'fresh '+row.id}))});
-        document.querySelector('.project-rail .icon-label-button').click()`);
+        document.querySelector('.activity-settings').click()`);
       assert.equal(await wait("document.querySelector('.settings-dialog')?.open && document.querySelector('.session-header h1')?.textContent==='fresh one'"), true);
       await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
       assert.equal(await wait("!document.querySelector('.settings-dialog')"), true);
@@ -1304,10 +1581,11 @@ test("production shell settings overlay keeps the session workspace mounted and 
         const shell=document.querySelector('.workspace-shell').getBoundingClientRect();
         return panel.width>0 && panel.height>0 && shell.width>0 && panel.left>=0 && panel.right<=${width}+1 &&
           panel.bottom<=800 && document.documentElement.scrollWidth<=${width} &&
-          window.layoutHost===document.querySelector('.workspace-layout') && window.layoutPanel===document.querySelector('.session-content-main-panel') &&
+          window.layoutHost===document.querySelector('.workspace-shell') && window.layoutPanel===document.querySelector('.session-content-main-panel') &&
           window.layoutComposer===document.querySelector('#session-prompt') && window.layoutTimeline===document.querySelector('.timeline-scroll') &&
+          window.layoutNotes===document.querySelector('.notes-pane') && window.layoutNotes.isConnected &&
           window.layoutComposer.value==='Original layout draft' &&
-          getComputedStyle(window.layoutHost).getPropertyValue('--flexlayout-color-text').trim()===getComputedStyle(document.documentElement).getPropertyValue('--text').trim();})()`), true,
+          getComputedStyle(window.layoutHost).getPropertyValue('--text').trim()===getComputedStyle(document.documentElement).getPropertyValue('--text').trim();})()`), true,
         `${width}/${theme}: real measured panel, fresh props, stable children and bounded geometry`);
       assert.equal(await evaluate("window.layoutReads===JSON.stringify([settingsShellFixture.historyCalls,settingsShellFixture.notesCalls,settingsShellFixture.displayCalls,settingsShellFixture.displayCleanup])"), true,
         "unchanged target must not re-read history/notes or reattach live display");
@@ -1316,43 +1594,49 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await evaluate(`window.layoutPanel.focus();
       for(const key of ['Delete','F2','Escape']) window.layoutPanel.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true,cancelable:true}));
       for(const type of ['dragstart','dragover','drop']) window.layoutHost.dispatchEvent(new DragEvent(type,{bubbles:true,cancelable:true,dataTransfer:new DataTransfer()}))`);
-    assert.equal(await evaluate(`window.layoutPanel===document.querySelector('.session-content-main-panel') && document.querySelectorAll('.flexlayout__tab').length===2 &&
+    assert.equal(await evaluate(`window.layoutPanel===document.querySelector('.session-content-main-panel') && document.querySelectorAll('.session-content-main-panel').length===1 &&
       !window.layoutHost.querySelector('.flexlayout__splitter,.flexlayout__tab_button,.flexlayout__tabset_header,.flexlayout__floating_window') &&
       window.layoutOpens===0 && settingsShellFixture.sends.length===0 && settingsShellFixture.creates.length===0 &&
       settingsShellFixture.deleteRequests.length===0 && settingsShellFixture.probes.length===0`), true);
     await evaluate("document.querySelector('.owned-session .send-button').click()");
     assert.equal(await wait("settingsShellFixture.sends.length===1"), true);
     const originalSend = await evaluate("settingsShellFixture.sends[0]");
-    // Reminders intentionally unmounts the workspace, unlike Settings. Pending
-    // requests/drafts belong to App; display and child read effects must detach.
+    // Reminders is a native modal: opening must retain the workspace and its owners.
     const beforeReminders = await evaluate("settingsShellFixture.displayCalls.length") as number;
+    const beforeReminderReads = Number(await evaluate("settingsShellFixture.reminderReads.length"));
+    await focusMovedControl('[data-reminder-count]');
+    await evaluate("window.reminderKept={selection:[layoutComposer.selectionStart,layoutComposer.selectionEnd],scroll:layoutTimeline.scrollTop,calls:JSON.stringify([settingsShellFixture.historyCalls,settingsShellFixture.displayCalls,settingsShellFixture.displayCleanup])}");
     await evaluate(`localStorage.setItem('layoutFixtureReminders','true'); document.querySelector('[data-reminder-count]').click()`);
-    assert.equal(await wait("!!document.querySelector('.reminders-destination') && !document.querySelector('.workspace-shell') && settingsShellFixture.displayCalls.length===settingsShellFixture.displayCleanup.length && settingsShellFixture.reminderReads.length>0"), true);
-    assert.equal(await evaluate("!window.layoutHost.isConnected && !window.layoutComposer.isConnected && !window.layoutTimeline.isConnected && !window.layoutNotes.isConnected"), true);
-    assert.equal(await evaluate("settingsShellFixture.lateDisplayAttempts.includes('one')"), true, "exercise a real late fake-provider yield after abort");
+    assert.equal(await wait("document.querySelector('.reminders-dialog')?.matches(':modal') && document.activeElement===document.querySelector('.reminders-dialog header button') && settingsShellFixture.reminderReads.length>0"), true);
+    assert.equal(await evaluate("layoutHost===document.querySelector('.workspace-shell') && layoutComposer===document.querySelector('#session-prompt') && layoutTimeline===document.querySelector('.timeline-scroll') && layoutNotes===document.querySelector('.notes-pane') && layoutHost.isConnected && layoutComposer.isConnected && layoutTimeline.isConnected && layoutNotes.isConnected && JSON.stringify([settingsShellFixture.historyCalls,settingsShellFixture.displayCalls,settingsShellFixture.displayCleanup])===reminderKept.calls"), true);
+    await evaluate("layoutComposer.focus()");
+    assert.equal(await evaluate("document.querySelector('.reminders-dialog').contains(document.activeElement)"), true, "native modal excludes background focus");
+    await evaluate("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',isComposing:true,bubbles:true,cancelable:true}));document.activeElement.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'F3',ctrlKey:true,bubbles:true,cancelable:true}))");
+    assert.equal(await evaluate("document.querySelector('.reminders-dialog').open && layoutTimeline.scrollTop===reminderKept.scroll && settingsShellFixture.sends.length===1"), true, "IME Escape and workspace shortcuts cannot escape modal ownership");
     const staleReminderReads = await evaluate("settingsShellFixture.reminderReads.length") as number;
     assert.deepEqual(await evaluate("settingsShellFixture.sends[0]"), originalSend);
     assert.equal(await evaluate("settingsShellFixture.sends.length"), 1, "navigation cannot retry a pending Send");
-    await evaluate("document.querySelector('.reminders-destination > button').click()");
+    await evaluate("document.querySelector('.reminders-dialog header button').click()");
     assert.equal(await wait("document.querySelector('#session-prompt')?.value==='Original layout draft' && settingsShellFixture.displayCalls.length-settingsShellFixture.displayCleanup.length===1 && document.querySelector('.timeline-scroll')?.textContent.includes('live-User')"), true);
-    assert.equal(await evaluate("window.layoutHost!==document.querySelector('.workspace-layout') && window.layoutComposer!==document.querySelector('#session-prompt') && window.layoutTimeline!==document.querySelector('.timeline-scroll')"), true,
-      "Back to session intentionally mounts new DOM, not a retained workspace");
-    assert.equal(await evaluate("settingsShellFixture.displayCalls.length"), beforeReminders + 1, "one restored live display attachment");
-    assert.equal(await evaluate(`settingsShellFixture.reminderReads.slice(0,${staleReminderReads}).every(read=>read.signal.aborted)`), true);
-    await evaluate(`for(let i=0;i<${staleReminderReads};i++) settingsShellFixture.releaseReminder(i)`);
+    assert.equal(await evaluate("window.layoutHost===document.querySelector('.workspace-shell') && window.layoutComposer===document.querySelector('#session-prompt') && window.layoutTimeline===document.querySelector('.timeline-scroll') && JSON.stringify([layoutComposer.selectionStart,layoutComposer.selectionEnd])===JSON.stringify(reminderKept.selection) && layoutTimeline.scrollTop===reminderKept.scroll"), true,
+      "closing Reminders retains the workspace, selection and scroll");
+    assert.equal(await wait("document.activeElement===document.querySelector('[data-reminder-count]')"), true);
+    assert.equal(await evaluate("settingsShellFixture.displayCalls.length"), beforeReminders, "no display attachment churn");
+    assert.equal(await evaluate(`settingsShellFixture.reminderReads.slice(${beforeReminderReads},${staleReminderReads}).every(read=>read.signal.aborted)`), true);
+    await evaluate(`for(let i=${beforeReminderReads};i<${staleReminderReads};i++) settingsShellFixture.releaseReminder(i)`);
     await frames();
-    assert.equal(await evaluate("!document.body.textContent.includes('stale-disposed-display') && !document.querySelector('.reminders-destination') && document.querySelector('[data-reminder-count]').getAttribute('aria-label').includes('unknown')"), true,
-      "late disposed display/list results cannot publish into the restored owner");
+    assert.equal(await evaluate("!document.body.textContent.includes('stale-disposed-display') && !document.querySelector('.reminders-dialog') && document.querySelector('[data-reminder-count]').getAttribute('aria-label').includes('unknown')"), true,
+      "late disposed popup list results cannot publish into the retained workspace");
     assert.deepEqual(await evaluate("settingsShellFixture.sends[0]"), originalSend);
     assert.equal(await evaluate("settingsShellFixture.sends.length"), 1);
-    layoutObservations.push({ label: "reminders-unmount-remount", beforeReminders, staleReminderReads,
+    layoutObservations.push({ label: "reminders-modal-retention", beforeReminders, staleReminderReads,
       after: await evaluate("({displays:settingsShellFixture.displayCalls,cleanup:settingsShellFixture.displayCleanup,lateAttempts:settingsShellFixture.lateDisplayAttempts})") });
-    // Subsequent keyed-session/archive/epoch assertions now compare this genuine
-    // replacement workspace, while the original request is still in flight.
-    await evaluate("window.layoutHost=document.querySelector('.workspace-layout'); window.layoutPanel=document.querySelector('.session-content-main-panel'); window.layoutComposer=document.querySelector('#session-prompt'); window.layoutTimeline=document.querySelector('.timeline-scroll'); true");
+    // Genuine keyed-session changes must still detach owners and reject late yields.
+    await evaluate("window.layoutHost=document.querySelector('.workspace-shell'); window.layoutPanel=document.querySelector('.session-content-main-panel'); window.layoutComposer=document.querySelector('#session-prompt'); window.layoutTimeline=document.querySelector('.timeline-scroll'); true");
     await evaluate("[...document.querySelectorAll('.session-row > button:first-child')].find(x=>x.textContent.includes('two')).click()");
     assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='fresh two'"), true);
-    assert.equal(await evaluate("window.layoutHost===document.querySelector('.workspace-layout') && window.layoutComposer!==document.querySelector('#session-prompt') && window.layoutTimeline!==document.querySelector('.timeline-scroll')"), true,
+    assert.equal(await wait("settingsShellFixture.lateDisplayAttempts.includes('one')"), true, "genuine session change exercises late provider yield after abort");
+    assert.equal(await evaluate("window.layoutHost===document.querySelector('.workspace-shell') && window.layoutComposer!==document.querySelector('#session-prompt') && window.layoutTimeline!==document.querySelector('.timeline-scroll')"), true,
       "session key remounts only the existing session workspace, not Layout");
     await evaluate(`const otherDraft=document.querySelector('#session-prompt');
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(otherDraft,'Other session draft');
@@ -1368,39 +1652,66 @@ test("production shell settings overlay keeps the session workspace mounted and 
     assert.equal(await evaluate("settingsShellFixture.sends.length"), 1, "no Layout or archive retry");
     await evaluate("window.archivedTimeline=document.querySelector('.timeline-scroll'); document.querySelector('#project-list button[title=\"/fixture/other\"]').click()");
     assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='other-session' && !document.querySelector('.archived-action-recovery')"), true);
-    assert.equal(await evaluate("window.layoutHost===document.querySelector('.workspace-layout') && window.archivedTimeline!==document.querySelector('.timeline-scroll')"), true,
+    assert.equal(await evaluate("window.layoutHost===document.querySelector('.workspace-shell') && window.archivedTimeline!==document.querySelector('.timeline-scroll')"), true,
       "project navigation retains Layout but changes the existing keyed workspace");
     await evaluate("document.querySelector('#project-list button[title=\"/fixture/project\"]').click()");
     assert.equal(await wait("document.querySelector('.archived-action-recovery')?.textContent.includes('Original layout draft')"), true);
     await evaluate("window.loseLayoutHost()");
     assert.equal(await wait("!document.querySelector('.archived-action-recovery')"), true,
       "host fencing hides another owner's retained original");
-    assert.equal(await evaluate("window.layoutHost===document.querySelector('.workspace-layout') && settingsShellFixture.sends.length===1 && window.layoutOpens===0"), true);
+    assert.equal(await evaluate("window.layoutHost===document.querySelector('.workspace-shell') && settingsShellFixture.sends.length===1 && window.layoutOpens===0"), true);
     await evaluate("window.publishLayoutCatalog({...settingsShellFixture.catalog,sessions:[]})");
     assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='Prompt draft' && !!document.querySelector('#catalog-prompt')"), true);
-    assert.equal(await evaluate("window.layoutHost===document.querySelector('.workspace-layout') && window.layoutPanel===document.querySelector('.session-content-main-panel')"), true,
+    assert.equal(await evaluate("window.layoutHost===document.querySelector('.workspace-shell') && window.layoutPanel===document.querySelector('.session-content-main-panel')"), true,
       "empty content is a fresh factory child, not a new Layout model");
     await evaluate("window.unmountShellFixture()");
     assert.equal(await wait("document.querySelector('#root').childElementCount===0 && settingsShellFixture.displayCalls.length===settingsShellFixture.displayCleanup.length"), true);
-    // Restore a non-default preference on a new actual App, including a load at
-    // constrained desktop width. Projection and remounts must not save constraints.
+    // Current Explorer schema is independent of the preserved legacy pane preference.
     await evaluate(`localStorage.removeItem('layoutFixtureReminders'); localStorage.removeItem('codealta.desktop.sessionTabs.v1'); localStorage.setItem('codealta.desktop.panes.v1',JSON.stringify({projects:280,sessions:420}));
+      localStorage.setItem('codealta.desktop.ide-width.v1',JSON.stringify({width:304,full:false}));
       localStorage.setItem('codealta.desktop.projectRail.v1','expanded')`);
     await command("Emulation.setDeviceMetricsOverride", { width: 876, height: 800, deviceScaleFactor: 1, mobile: false });
     await command("Page.reload");
     assert.equal(await wait("!!document.querySelector('#session-prompt') && settingsShellFixture.displayCalls.length-settingsShellFixture.displayCleanup.length===1"), true);
-    const savedWidths = JSON.stringify({ projects: 280, sessions: 420 });
+    const savedWidths = JSON.stringify({ width: 304, full: false });
+    const legacyWidths = JSON.stringify({ projects: 280, sessions: 420 });
+    const sharedExplorer = (width: number) => `(() => {const p=document.querySelector('.project-rail').getBoundingClientRect(),s=document.querySelector('.session-rail').getBoundingClientRect();return p.width===${width} && s.width===${width} && p.left===s.left && p.height>0 && s.height>0 && Math.abs(p.bottom-s.top)<1;})()`;
     for (const width of [876, 1400, 875, 1400]) {
       await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
       await captureGeometry(`persisted-${width}`);
-      assert.equal(await evaluate("localStorage.getItem('codealta.desktop.panes.v1')"), savedWidths);
-      if (width > 875) assert.equal(await evaluate(`Math.round(document.querySelector('.session-rail').getBoundingClientRect().width)===${width===876?220:420} &&
-        Math.round(document.querySelector('.project-rail').getBoundingClientRect().width)===${width===876?160:280}`), true);
+      assert.equal(await evaluate("localStorage.getItem('codealta.desktop.ide-width.v1')"), savedWidths);
+      assert.equal(await evaluate("localStorage.getItem('codealta.desktop.panes.v1')"), legacyWidths);
+      if (width > 875) assert.equal(await evaluate(sharedExplorer(304)), true);
+      else {
+        assert.equal(await evaluate("document.querySelector('.session-rail').getBoundingClientRect().width===0 && document.querySelector('.project-rail').getBoundingClientRect().width===0"), true);
+        await evaluate("document.querySelector('[aria-controls=project-rail]').click()");
+        assert.equal(await wait(sharedExplorer(320)), true);
+        assert.equal(await evaluate("localStorage.getItem('codealta.desktop.ide-width.v1')"), savedWidths, "narrow overlay never persists its projected 320px width");
+        await evaluate("document.querySelector('[aria-controls=project-rail]').click()");
+      }
     }
     await command("Page.reload");
-    assert.equal(await wait("Math.round(document.querySelector('.session-rail')?.getBoundingClientRect().width)===420 && !!document.querySelector('#session-prompt')"), true);
+    assert.equal(await wait("!!document.querySelector('#session-prompt') && " + sharedExplorer(304)), true);
     await captureGeometry("persisted-second-App-mount");
-    assert.equal(await evaluate("localStorage.getItem('codealta.desktop.panes.v1')"), savedWidths);
+    assert.equal(await evaluate("localStorage.getItem('codealta.desktop.ide-width.v1')"), savedWidths);
+    await evaluate("document.querySelector('.timeline-width-toggle').click()");
+    assert.equal(await wait("document.querySelector('.workspace-shell').classList.contains('full-content-width') && document.querySelector('.session-rail').getBoundingClientRect().width===0"), true);
+    await captureGeometry("full-content-single-palette");
+    assert.equal(await evaluate("localStorage.getItem('codealta.desktop.ide-width.v1')"), JSON.stringify({ width: 304, full: true }));
+    await command("Page.reload");
+    assert.equal(await wait("document.querySelector('.timeline-width-toggle')?.getAttribute('aria-pressed')==='true' && !!document.querySelector('#session-prompt')"), true);
+    await evaluate("document.querySelector('.timeline-width-toggle').click()");
+    assert.equal(await wait(sharedExplorer(304)), true);
+    assert.equal(await evaluate("localStorage.getItem('codealta.desktop.ide-width.v1')"), savedWidths);
+    // Current malformed values are normalized by the existing mount persistence effect;
+    // legacy preferences remain untouched, never treated as Explorer authority.
+    for (const [raw, expected] of [[null,272],['{bad',272],['{"projects":280,"sessions":420}',272],['{"width":900,"full":false}',360],['{"width":12,"full":false}',220]] as const) {
+      await evaluate(raw===null ? "localStorage.removeItem('codealta.desktop.ide-width.v1')" : `localStorage.setItem('codealta.desktop.ide-width.v1',${JSON.stringify(raw)})`);
+      await command("Page.reload");
+      assert.equal(await wait("!!document.querySelector('#session-prompt') && " + sharedExplorer(expected)), true);
+      assert.equal(await evaluate("localStorage.getItem('codealta.desktop.ide-width.v1')"), JSON.stringify({ width: expected, full: false }));
+      assert.equal(await evaluate("localStorage.getItem('codealta.desktop.panes.v1')"), legacyWidths);
+    }
     // Actual App tab navigation: no hidden live SessionWorkspace instances.
     await evaluate(`localStorage.clear(); localStorage.setItem('settingsFixtureOwned','true');
       localStorage.setItem('settingsFixtureSecondProject','true'); localStorage.setItem('layoutFixtureLive','true'); localStorage.setItem('navigationFixture','tabs')`);
@@ -1490,6 +1801,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
         localStorage.setItem('draftTabFixture','true'); localStorage.setItem('layoutFixtureLive','true'); localStorage.setItem('navigationFixture','mixed')`);
       await command("Page.reload");
       assert.equal(await wait("!!document.querySelector('#session-prompt')"), true);
+      await readyProjectSelection("other", "/fixture/other");
       await evaluate("document.querySelector('#project-list button[title=\"/fixture/other\"]').click()");
       assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='other-session'"), true);
       await evaluate("document.querySelector('[aria-label=\"Create session\"]').click(); document.querySelector('[aria-label^=\"Rename project\"]').click()");
@@ -1542,7 +1854,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
       await renameLocal("Local original");
       await evaluate("window.originalLocalImage=document.querySelector('.prompt-image-attachments img').src");
       if (imageMode === "text-images") {
-        await evaluate("document.querySelector('#expand-session-prompt').click()");
+        await openCatalogEditor();
         assert.equal(await wait("document.querySelector('.expanded-prompt-dialog')?.open"), true);
         await evaluate("localPaste('.expanded-prompt-dialog textarea')");
         assert.equal(await wait("document.querySelectorAll('.expanded-prompt-dialog .prompt-image-attachments img').length===2"), true);
@@ -1554,7 +1866,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
         await workflowLanguages(evaluate, workflowCalls, ".expanded-prompt-dialog", ".prompt-image-attachments > p", "Local PNG draft only; images stay in this window. Create and transfer never sends them.", "figcaption");
         await workflowNarrow(evaluate, command, ".expanded-prompt-dialog");
         await evaluate("document.querySelector('.expanded-prompt-dialog header button').click()");
-        await evaluate("document.querySelector('.rail-footer .icon-label-button').click()");
+        await evaluate("document.querySelector('.activity-settings').click()");
         await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
         assert.equal(await evaluate("document.querySelector('.catalog-composer .prompt-image-attachments img').src===originalLocalImage"), true);
       }
@@ -1563,11 +1875,11 @@ test("production shell settings overlay keeps the session workspace mounted and 
         if (imageMode === "late-paste") { await editLocal("changed"); await editLocal("  exact local text  "); }
         if (imageMode === "late-provider") await evaluate("for(const value of ['alternate','']){const select=document.querySelector('.content .creation-provider select');select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));}");
         if (imageMode === "late-settings") {
-          await evaluate("document.querySelector('.rail-footer .icon-label-button').click()");
+          await evaluate("document.querySelector('.activity-settings').click()");
           await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
         }
         if (imageMode === "late-close") {
-          await evaluate("document.querySelector('#expand-session-prompt').click()");
+          await openCatalogEditor();
           await evaluate("document.querySelector('.expanded-prompt-dialog header button').click()");
         }
         if (imageMode === "late-ime") await evaluate("document.querySelector('#catalog-prompt').dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));document.querySelector('#catalog-prompt').dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}))");
@@ -1611,7 +1923,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
         await evaluate("document.querySelector('.session-tabs [role=tab]').click()");
       } else assert.equal(await evaluate("document.querySelector('.session-header h1').textContent"), "Prompt draft", imageMode);
       if (imageMode === "uncertain") {
-        await evaluate("document.querySelector('.rail-footer .icon-label-button').click()");
+        await evaluate("document.querySelector('.activity-settings').click()");
         await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
         assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Create and transfer draft').disabled"), true, "Uncertain image original cannot be retried after close");
       }
@@ -1642,9 +1954,10 @@ test("production shell settings overlay keeps the session workspace mounted and 
         assert.equal(await wait("document.querySelector('#catalog-prompt')?.value==='  Original local prompt\\nexact  '"), true);
         await evaluate("[...document.querySelectorAll('.session-tabs [role=tab]')].find(b=>b.textContent.startsWith('one')).click()");
         assert.equal(await wait("!!document.querySelector('[data-reminder-count]')"), true);
+        await focusMovedControl('[data-reminder-count]');
         await evaluate("localStorage.setItem('layoutFixtureReminders','true'); document.querySelector('[data-reminder-count]').click()");
-        assert.equal(await wait("!!document.querySelector('.reminders-destination') && !document.querySelector('.workspace-shell')"), true);
-        await evaluate("document.querySelector('.reminders-destination > button').click()");
+        assert.equal(await wait("document.querySelector('.reminders-dialog')?.matches(':modal') && !!document.querySelector('.workspace-shell')"), true);
+        await evaluate("document.querySelector('.reminders-dialog header button').click()");
         assert.equal(await wait("!!document.querySelector('.session-tabs')"), true);
         await evaluate("document.querySelector('.session-tabs [role=tab]').click()");
         assert.equal(await wait("document.querySelector('#catalog-prompt')?.value==='  Original local prompt\\nexact  '"), true);
@@ -1653,7 +1966,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
         await evaluate("document.querySelector('.expanded-prompt-dialog button').click()");
         const editingViewport = await evaluate("({width:innerWidth,height:innerHeight})") as { width: number; height: number };
         for (const locale of ["de", "ja", "en"]) {
-          await evaluate("document.querySelector('.project-rail .icon-label-button').click()");
+          await evaluate("document.querySelector('.activity-settings').click()");
           await evaluate("document.querySelector('[data-settings-section=appearance]').click()");
           await chooseLanguage(locale);
           assert.equal(await wait(`document.documentElement.lang===${JSON.stringify(locale)}`), true);
@@ -1691,7 +2004,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
         }
         await command("Emulation.setDeviceMetricsOverride", { ...editingViewport, deviceScaleFactor: 1, mobile: false });
         await editLocal("  Original local prompt\nexact  ");
-        await evaluate("document.querySelector('.rail-footer .icon-label-button').click()");
+        await evaluate("document.querySelector('.activity-settings').click()");
         assert.equal(await wait("document.querySelector('.settings-dialog')?.open"), true);
         await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
       }
@@ -1719,7 +2032,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
           await evaluate("document.querySelector('.session-tabs [role=tab]').click()");
         }
         if (change === "settings-aba") {
-          await evaluate("document.querySelector('.rail-footer .icon-label-button').click()");
+          await evaluate("document.querySelector('.activity-settings').click()");
           assert.equal(await wait("document.querySelector('.settings-dialog')?.open"), true);
           await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
         }
@@ -1738,6 +2051,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
         await evaluate("localStorage.removeItem('creationFixtureHoldSnapshot'); window.unmountShellFixture()");
         await command("Page.reload");
         assert.equal(await wait("!!document.querySelector('#catalog-prompt')"), true);
+        await readyProjectSelection("project", "/fixture/project");
         await evaluate("document.querySelector('#project-list button[title=\"/fixture/project\"]').click()");
         assert.equal(await wait("document.querySelector('#catalog-prompt')?.value==='  Original local prompt\\nexact  '"), true, "scope draft reload restores stored text without a create");
         assert.equal(await evaluate("settingsShellFixture.creates.length"), 0);
@@ -1796,10 +2110,11 @@ test("production shell settings overlay keeps the session workspace mounted and 
         document.querySelector('.project-reference-picker [role=option]').click(); window.requestAnimationFrame=original; })()`);
       await frames();
       if (change === "scope-aba") {
-        await evaluate("document.querySelector('.rail-footer .icon-label-button').click()"); await frames();
+        await evaluate("document.querySelector('.activity-settings').click()"); await frames();
         await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()"); await frames();
       }
       if (change === "replacement") {
+        await revealComposerActions();
         await evaluate("document.querySelector('#expand-session-prompt').click()"); await frames();
         await evaluate("document.querySelector('.expanded-prompt-dialog button').click()"); await frames();
       }
@@ -1815,6 +2130,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     assert.equal(await wait("!!document.querySelector('.reference-presentation .reference-resolved')"), true);
     assert.equal(await evaluate("document.querySelector('.reference-presentation pre').textContent===document.querySelector('#session-prompt').value && document.querySelector('#session-prompt').selectionStart===0"), true, "inline raw preview leaves caret and input unchanged");
     await referenceLanguages();
+    await revealComposerActions();
     await evaluate("document.querySelector('#expand-session-prompt').click()"); await frames();
     await evaluate("document.querySelector('.reference-presentation button').focus()");
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", text: "\r", windowsVirtualKeyCode: 13 });
@@ -1856,6 +2172,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
       await evaluate("window.unmountShellFixture(); localStorage.clear(); localStorage.setItem('settingsFixtureOwned','true'); localStorage.setItem('layoutFixtureLive','true'); localStorage.setItem('navigationFixture','mixed')");
       await command("Page.reload");
       assert.equal(await wait("!!document.querySelector('#session-prompt')"), true);
+      if (trigger !== '.project-details-trigger') await focusMovedControl(trigger);
       await evaluate(`(() => { const input=document.querySelector('#session-prompt'); input.focus();
         Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'@sr');
         input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
@@ -2052,6 +2369,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     const infoUsageStart = Number(await evaluate("settingsShellFixture.usageReads.length"));
     const refreshInfo = () => evaluate("[...document.querySelectorAll('.session-info-dialog button')].find(b=>b.textContent==='Refresh observed details').click()");
     const copyInfo = () => evaluate("[...document.querySelectorAll('.session-info-dialog button')].find(b=>b.textContent==='Copy displayed details').click()");
+    await focusMovedControl('[aria-label="Session info"]');
     await evaluate("document.querySelector('[aria-label=\"Session info\"]').click()"); await frames();
     assert.equal(await evaluate("settingsShellFixture.runtimeReads.length"), 3, "opening Info is recorded-only until explicit refresh");
     await refreshInfo(); assert.equal(await wait("settingsShellFixture.runtimeReads.length===4"), true);
@@ -2140,7 +2458,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     const batchReads = await evaluate("settingsShellFixture.snapshotCalls.length");
     await evaluate("(()=>{const b=[...document.querySelectorAll('.session-batch-delete button')].find(b=>b.textContent==='Delete reviewed sessions');b.click();b.click()})()");
     assert.equal(await wait(`settingsShellFixture.deleteRequests.length===${batchStart + 1}`), true);
-    await evaluate("document.querySelector('.session-browser header button').click();document.querySelector('.project-rail .icon-label-button').click()"); await frames();
+    await evaluate("document.querySelector('.session-browser header button').click();document.querySelector('.activity-settings').click()"); await frames();
     assert.equal(await evaluate("document.querySelector('.settings-dialog').open"), true);
     await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()"); await frames();
     await batchOpen();
@@ -2193,7 +2511,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     assert.equal(await evaluate("[...document.querySelectorAll('.session-actions-menu button')].find(b=>b.textContent.startsWith('Delete')).disabled"), true, "uncertain batch blocks conflicting single deletion");
     await evaluate("document.querySelector('.session-actions-menu').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))"); await frames();
     const countPreservation = await evaluate("JSON.stringify({selection:document.querySelector('.session-header h1').textContent,draft:document.querySelector('#catalog-prompt')?.value,scroll:document.querySelector('.timeline-scroll').scrollTop,tabs:[...document.querySelectorAll('.session-tabs [role=tab]')].map(t=>t.textContent),reads:settingsShellFixture.runtimeReads.length,displays:settingsShellFixture.displayCalls.length})");
-    await evaluate("document.querySelector('.project-rail .icon-label-button').click()");
+    await evaluate("document.querySelector('.activity-settings').click()");
     assert.equal(await wait("!!document.querySelector('#settings-recent-count')"), true);
     await evaluate("(()=>{const s=document.querySelector('#settings-recent-count');s.value='1';s.dispatchEvent(new Event('change',{bubbles:true}))})()"); await frames();
     assert.equal(await evaluate("localStorage.getItem('codealta.desktop.recent-session-count.v1')"), "1");
@@ -2204,7 +2522,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     assert.equal(await evaluate("document.querySelector('.session-browser').textContent.includes('Limit 1;')"), true);
     await evaluate("[...document.querySelectorAll('.session-browser button')].find(b=>b.textContent==='Show all loaded matches').click()"); await frames();
     assert.equal(await evaluate("document.querySelector('.session-browser').textContent.includes('Use recent session limit')"), true);
-    await evaluate("document.querySelector('.session-browser header button').click();document.querySelector('.project-rail .icon-label-button').click()"); await frames();
+    await evaluate("document.querySelector('.session-browser header button').click();document.querySelector('.activity-settings').click()"); await frames();
     await evaluate("(()=>{const s=document.querySelector('#settings-recent-count');s.value='20';s.dispatchEvent(new Event('change',{bubbles:true}))})()");
     await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()"); await frames();
     assert.equal(await evaluate("JSON.stringify(settingsShellFixture.sends[0])"), archiveOriginalSend, "presentation changes preserve the original pending Send");
@@ -2239,7 +2557,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await archiveClose(); await frames();
     await evaluate("document.querySelector('.project-root-list button').click()"); await frames();
     await evaluate("document.querySelector('#project-list button[title=\"/fixture/project\"]').click()"); await frames();
-    await evaluate("document.querySelector('.project-rail .icon-label-button').click()");
+    await evaluate("document.querySelector('.activity-settings').click()");
     assert.equal(await wait("document.querySelector('.settings-dialog')?.open"), true);
     await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()"); await frames();
     await archiveOpen();
@@ -2281,7 +2599,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await evaluate("window.originalBatchCapability=readBatchCapability()");
     await batchOpen(); await batchReview(); await batchConfirm(); await batchButton("Delete reviewed sessions");
     assert.equal(await wait("settingsShellFixture.deleteRequests.length===1"), true);
-    await evaluate("document.querySelector('.session-browser header button').click();cycleInfoHost();document.querySelector('.project-rail .icon-label-button').click()"); await frames();
+    await evaluate("document.querySelector('.session-browser header button').click();cycleInfoHost();document.querySelector('.activity-settings').click()"); await frames();
     await evaluate("settingsShellFixture.releaseExactDelete('stale_epoch','00000000-0000-0000-0000-000000000002')"); await frames();
     assert.equal(await evaluate("originalBatchCapability.canSubmit({expectedEpoch:'12345678-1234-1234-1234-123456789abc'})"), false, "late stale batch response must invalidate shared Send/create authority after dismissal and host ABA");
     assert.equal(await evaluate("readBatchCapability()===originalBatchCapability && !readBatchCapability().canMutate() && settingsShellFixture.deleteRequests.length===1"), true);
@@ -2329,7 +2647,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
       assert.deepEqual(await evaluate("settingsShellFixture.permissionDecisions[0].request"), { expectedHostEpoch: "12345678-1234-1234-1234-123456789abc", handle: await evaluate("settingsShellFixture.permissionEntry.handle"), decision: "deny" });
       await evaluate("document.querySelector('.permission-review-dialog header button').click()");
       assert.equal(await wait("!document.querySelector('.permission-review-dialog') && !!document.querySelector('.command-permission-panel > [role=status]')"), true, "Close keeps the pending outcome visible");
-      await evaluate("document.querySelector('.rail-footer .icon-label-button').click()");
+      await evaluate("document.querySelector('.activity-settings').click()");
       await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
       await evaluate("document.querySelector('[data-permission-refresh]').click()");
       assert.equal(await evaluate("settingsShellFixture.permissionReads.length"), 1, "Pending cannot refresh/unlock after Settings");
@@ -2399,7 +2717,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
       await evaluate("document.querySelector('[data-input-submit]').click();document.querySelector('[data-input-cancel]').click()");
       assert.equal(await wait("settingsShellFixture.inputAnswers.length===1"), true);
       assert.deepEqual(await evaluate("settingsShellFixture.inputAnswers[0].request"), { expectedHostEpoch: "12345678-1234-1234-1234-123456789abc", handle: await evaluate("settingsShellFixture.inputEntry.handle"), answers: [{ promptId: "choice", value: "literal choice" }, { promptId: "text", value: "  literal 日本語\nanswer  " }] });
-      await evaluate("document.querySelector('.provider-input-dialog header button').click();void(window.inputPanel=document.querySelector('.provider-input-panel'));document.querySelector('.rail-footer .icon-label-button').click()");
+      await evaluate("document.querySelector('.provider-input-dialog header button').click();void(window.inputPanel=document.querySelector('.provider-input-panel'));document.querySelector('.activity-settings').click()");
       assert.equal(await evaluate("inputPanel.isConnected"), true, "Settings retains original owner/panel");
       await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
       await evaluate(mode === "uncertain" ? "settingsShellFixture.inputAnswers[0].reject(Error('literal input transport failure'))"
@@ -2445,7 +2763,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
       if (mode === "host-aba") await evaluate("cycleInfoHost()");
       if (mode === "native-aba") await evaluate("{const d=document.createElement('dialog');document.body.append(d);d.showModal();d.close();d.remove()}");
       if (mode === "settings") {
-        await evaluate("document.querySelector('.rail-footer .icon-label-button').click()");
+        await evaluate("document.querySelector('.activity-settings').click()");
         assert.equal(await wait("!!document.querySelector('[aria-label=\"Close settings\"]')"), true);
         await evaluate("fileRecord.click()");
         assert.equal(await evaluate("!document.querySelector('[data-file-record][aria-expanded=true]') && fileRecord.isConnected"), true, "Retained inert workspace cannot inspect behind settings");
@@ -2484,7 +2802,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
       if (mode === "session-aba") await evaluate("cycleInfoSelection()");
       if (mode === "host-aba") await evaluate("cycleInfoHost()");
       if (mode === "settings") {
-        await evaluate("document.querySelector('.rail-footer .icon-label-button').click()");
+        await evaluate("document.querySelector('.activity-settings').click()");
         assert.equal(await wait("!!document.querySelector('[aria-label=\"Close settings\"]')"), true);
         await evaluate("bodyButton.click()");
         assert.equal(await evaluate("bodyButton.isConnected && bodyButton.getAttribute('aria-expanded')==='false'"), true);
@@ -2521,6 +2839,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
         await evaluate("{const canvas=document.createElement('canvas');canvas.width=1;canvas.height=1;window.chooserImage=canvas.toDataURL('image/png').split(',')[1];const owner=readLocalImageOwner();const key=JSON.stringify(['12345678-1234-1234-1234-123456789abc','one','project','/fixture/project']);owner.replace(key,owner.get(key),[{title:'Exact chooser image',mediaType:'image/png',base64:chooserImage}])}");
         assert.equal(await wait("document.querySelector('.prompt-image-attachments input')?.value==='Exact chooser image'"), true);
       }
+      await revealComposerActions();
       await evaluate("window.chooserRpc=settingsShellFixture.rpcCalls.length;void(window.chooserInput=document.querySelector('#session-prompt'));document.querySelector('#next-send-model-chooser').focus();document.querySelector('#next-send-model-chooser').click()");
       assert.equal(await wait("document.querySelector('.model-chooser')?.open"), true);
       assert.equal(await evaluate("document.activeElement===document.querySelector('.model-chooser input')"), true);
@@ -2594,6 +2913,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
         }
       }
       assert.equal(await wait("!!document.querySelector('#next-send-model-chooser:not(:disabled)')"), true);
+      await revealComposerActions();
       await evaluate("window.recoveryCalls=settingsShellFixture.rpcCalls.length;document.querySelector('#next-send-model-chooser').click()");
       assert.equal(await wait("document.querySelector('.model-chooser')?.open"), true);
       assert.equal(await evaluate("settingsShellFixture.rpcCalls.length===recoveryCalls && settingsShellFixture.sends.length===0"), true);
@@ -2615,6 +2935,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
         await evaluate("{const canvas=document.createElement('canvas');canvas.width=1;canvas.height=1;window.promptChooserImage=canvas.toDataURL('image/png').split(',')[1];const owner=readLocalImageOwner();const key=JSON.stringify(['12345678-1234-1234-1234-123456789abc','one','project','/fixture/project']);owner.replace(key,owner.get(key),[{title:'Exact prompt image',mediaType:'image/png',base64:promptChooserImage}])}");
         assert.equal(await wait("document.querySelector('.prompt-image-attachments input')?.value==='Exact prompt image'"), true);
       }
+      await revealComposerActions();
       await evaluate("window.promptChooserRpc=settingsShellFixture.rpcCalls.length;void(window.promptChooserInput=document.querySelector('#session-prompt'));document.querySelector('#next-send-prompt-chooser').focus();document.querySelector('#next-send-prompt-chooser').click()");
       assert.equal(await wait("document.querySelector('.prompt-chooser')?.open"), true);
       assert.equal(await evaluate("document.activeElement===document.querySelector('.prompt-chooser input')"), true);
@@ -2683,6 +3004,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
         else { await evaluate("unmountShellFixture();localStorage.setItem('settingsFixtureOwned','true')"); await command("Page.reload"); }
       }
       assert.equal(await wait("!!document.querySelector('#next-send-prompt-chooser:not(:disabled)')"), true);
+      await revealComposerActions();
       await evaluate("window.promptRecoveryCalls=settingsShellFixture.rpcCalls.length;document.querySelector('#next-send-prompt-chooser').click()");
       assert.equal(await wait("document.querySelector('.prompt-chooser')?.open"), true);
       assert.equal(await evaluate("settingsShellFixture.rpcCalls.length===promptRecoveryCalls && settingsShellFixture.sends.length===0"), true);
@@ -2707,7 +3029,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
       if (mode === "session-aba") await evaluate("cycleInfoSelection()");
       if (mode === "host-aba") await evaluate("cycleInfoHost()");
       if (mode === "settings") {
-        await evaluate("document.querySelector('.rail-footer .icon-label-button').click()");
+        await evaluate("document.querySelector('.activity-settings').click()");
         assert.equal(await wait("!!document.querySelector('[aria-label=\"Close settings\"]')"), true);
         await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
       }
@@ -2896,6 +3218,174 @@ test("production shell settings overlay keeps the session workspace mounted and 
       await evaluate("unmountShellFixture()");
       assert.equal(await wait("document.querySelector('#root').childElementCount===0"), true);
     }
+    // Retained queue-intent review follows all accepted project-row scenarios.
+    for (const mode of ["copy", "uncertain", "session-aba", "host-aba", "modal-aba", "own-aba", "input", "settled"]) {
+      t.diagnostic(`Retained queue review: ${mode}`);
+      await evaluate("localStorage.clear();localStorage.setItem('settingsFixtureOwned','true');localStorage.setItem('retainedQueueFixture','true')");
+      await command("Page.reload");
+      assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one' && settingsShellFixture.currentReads.length>0"), true);
+      assert.equal(await evaluate("!document.querySelector('.queue-intent-compact')"), true);
+      await evaluate("settingsShellFixture.releaseCurrent();{const input=document.querySelector('#session-prompt');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,' literal queue\\ntext ');input.dispatchEvent(new Event('input',{bubbles:true}))}");
+      try {
+        assert.equal(await wait("!!document.querySelector('[aria-label=\"Queue current composer in this host\"]:not(:disabled)')"), true);
+      } catch (error) {
+        t.diagnostic(JSON.stringify(await evaluate(`(() => {
+          const button = document.querySelector('[aria-label="Queue current composer in this host"]');
+          const input = document.querySelector('#session-prompt');
+          return { queueButton: button ? { disabled: button.disabled, title: button.title, html: button.outerHTML } : null,
+            input: input ? { value: input.value, disabled: input.disabled, readOnly: input.readOnly, connected: input.isConnected } : null,
+            current: settingsShellFixture.currentReads.map(c => ({ request: c.request, aborted: c.signal.aborted, response: c.response ?? null })),
+            queueCalls: settingsShellFixture.retainedQueueCalls.length, rpcCalls: settingsShellFixture.rpcCalls,
+            runtimeReads: settingsShellFixture.runtimeReads.length,
+            presentation: document.querySelector('.session-workspace')?.textContent?.slice(0, 18000) };
+        })()`)));
+        throw error;
+      }
+      await focusMovedControl('[aria-label="Queue current composer in this host"]');
+      await evaluate("document.querySelector('[aria-label=\"Queue current composer in this host\"]').click()");
+      assert.equal(await wait("settingsShellFixture.retainedQueueCalls.length===1 && !!document.querySelector('.queue-intent-review-trigger')"), true);
+      await evaluate("window.queueReviewCopies=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>queueReviewCopies.push(text)}});window.queueReviewCalls=JSON.stringify([settingsShellFixture.rpcCalls,settingsShellFixture.retainedQueueCalls,settingsShellFixture.currentReads.length,settingsShellFixture.snapshotCalls.length]);document.querySelector('.queue-intent-review-trigger').click()");
+      assert.equal(await wait("document.querySelector('.queue-intent-dialog')?.open"), true);
+      await evaluate("void(window.queueReviewCopy=document.querySelector('.queue-intent-copy'))");
+      if (mode === "copy") {
+        assert.equal(await evaluate("document.querySelector('.queue-intent-text').textContent===' literal queue\\ntext ' && document.querySelector('#session-prompt').value===' literal queue\\ntext '"), true);
+        await workflowLanguages(evaluate, "[settingsShellFixture.rpcCalls,settingsShellFixture.retainedQueueCalls,settingsShellFixture.currentReads.length]", ".queue-intent-dialog", ".queue-intent-dialog h2", "Retained queue intent", "pre,code");
+        try {
+          await workflowNarrow(evaluate, command, ".queue-intent-dialog");
+        } catch (error) {
+          t.diagnostic(JSON.stringify(await evaluate(`(() => {
+            const d = document.querySelector('.queue-intent-dialog');
+            const measure = n => { const r = n.getBoundingClientRect(), s = getComputedStyle(n); return {
+              tag: n.tagName, className: n.className, rect: r.toJSON(), clientWidth: n.clientWidth, scrollWidth: n.scrollWidth,
+              clientHeight: n.clientHeight, scrollHeight: n.scrollHeight,
+              style: Object.fromEntries(['width','minWidth','maxWidth','height','minHeight','maxHeight','overflow','overflowX','overflowY','boxSizing','display','whiteSpace','overflowWrap','wordBreak','flexShrink','gap','padding'].map(k => [k,s[k]])) }; };
+            const r = d.getBoundingClientRect();
+            return { viewport: { width: innerWidth, height: innerHeight },
+              predicate: r.left>=0&&r.right<=innerWidth+1&&r.height<=innerHeight&&d.scrollWidth<=d.clientWidth+1,
+              dialog: measure(d), descendants: [...d.querySelectorAll('header,footer,h2,dl,dt,dd,code,pre,button')].slice(0,40).map(measure) };
+          })()`)));
+          throw error;
+        }
+        await evaluate("queueReviewCopy.click()"); await frames();
+        assert.deepEqual(await evaluate("queueReviewCopies"), [" literal queue\ntext "]);
+      }
+      if (mode === "uncertain") await evaluate("settingsShellFixture.retainedQueueCalls[0].reject(new Error('lost admission'))");
+      if (mode === "session-aba") await evaluate("cycleInfoSelection()");
+      if (mode === "host-aba") await evaluate("cycleInfoHost()");
+      if (mode === "modal-aba") await evaluate("{const d=document.createElement('dialog');document.body.append(d);d.showModal();d.close();d.remove()}");
+      if (mode === "own-aba") await evaluate("{const d=document.querySelector('.queue-intent-dialog');d.close();d.showModal();queueReviewCopy.click()}");
+      if (mode === "input") await evaluate("{const input=document.querySelector('#session-prompt');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'new draft');input.dispatchEvent(new Event('input',{bubbles:true}))}");
+      if (mode === "settled") await evaluate("settingsShellFixture.retainedQueueCalls[0].resolve({status:'busy',epoch:settingsShellFixture.retainedQueueCalls[0].request.expectedEpoch,receipt:null})");
+      if (mode !== "copy") { await frames(); await evaluate("queueReviewCopy.click()"); assert.deepEqual(await evaluate("queueReviewCopies"), []); }
+      assert.equal(await evaluate("JSON.stringify([settingsShellFixture.rpcCalls,settingsShellFixture.retainedQueueCalls,settingsShellFixture.currentReads.length,settingsShellFixture.snapshotCalls.length])===queueReviewCalls"), true);
+      if (mode === "uncertain") assert.equal(await evaluate("!!document.querySelector('.queue-intent-review-trigger') && settingsShellFixture.retainedQueueCalls.length===1"), true);
+      if (mode === "settled") assert.equal(await evaluate("!document.querySelector('.queue-intent-compact')"), true);
+      await evaluate("unmountShellFixture();queueReviewCopy.click()");
+      assert.equal(await wait("document.querySelector('#root').childElementCount===0"), true);
+    }
+    // Further retained-original qualification uses only flagged fake RPCs and existing UI authority.
+    for (const mode of ["clipboard-failure", "clipboard-late", "keys", "images", "runtime", "cancel-only", "coexisting", "project-scope"]) {
+      t.diagnostic(`Retained queue qualification: ${mode}`);
+      await evaluate("localStorage.clear();localStorage.setItem('settingsFixtureOwned','true');localStorage.setItem('retainedQueueFixture','true')");
+      if (mode === "project-scope") await evaluate("localStorage.setItem('settingsFixtureSecondProject','true')");
+      await command("Page.reload");
+      assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one' && settingsShellFixture.currentReads.length>0"), true);
+      await evaluate("settingsShellFixture.releaseCurrent();{const input=document.querySelector('#session-prompt');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,' literal queue\\ntext ');input.dispatchEvent(new Event('input',{bubbles:true}))}");
+      assert.equal(await wait("!!document.querySelector('[aria-label=\"Queue current composer in this host\"]:not(:disabled)')"), true);
+      await focusMovedControl('[aria-label="Queue current composer in this host"]');
+      if (mode !== "cancel-only") {
+        await evaluate("document.querySelector('[aria-label=\"Queue current composer in this host\"]').click()");
+        assert.equal(await wait("settingsShellFixture.retainedQueueCalls.length===1 && !!document.querySelector('.queue-intent-review-trigger')"), true);
+      }
+      if (["cancel-only", "coexisting"].includes(mode)) {
+        await evaluate("document.querySelector('.advanced-session-controls summary').click();[...document.querySelectorAll('button')].find(b=>b.textContent==='Refresh submissions').click()");
+        assert.equal(await wait("settingsShellFixture.queueReceiptReads.length===1"), true);
+        await evaluate("settingsShellFixture.queueReceiptReads[0].resolve({status:'ok',epoch:'12345678-1234-1234-1234-123456789abc',next:null,rows:[{clientRequestId:'receipt-original-key',sessionId:'one',operationId:'abcdefab-1234-5678-9abc-abcdefabcdef',targetOperationId:null,kind:'Queue',state:'pending',outcome:null,code:null,runId:null,queueInsertion:{state:'pending',accepted:null,code:null}}]})");
+        assert.equal(await wait("[...document.querySelectorAll('button')].some(b=>b.textContent==='Cancel this queued operation'&&!b.disabled)"), true);
+        await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Cancel this queued operation').click()");
+        assert.equal(await wait("settingsShellFixture.retainedCancelCalls.length===1 && !!document.querySelector('.queue-intent-review-trigger')"), true);
+      }
+      await evaluate("window.extraCopies=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>extraCopies.push(text)}});window.extraCalls=JSON.stringify(settingsShellFixture.rpcCalls);window.extraOrigin=document.querySelector('.queue-intent-review-trigger');extraOrigin.click()");
+      assert.equal(await wait("document.querySelector('.queue-intent-dialog')?.open"), true);
+      await evaluate("void(window.extraCopy=document.querySelector('.queue-intent-copy'))");
+      if (["cancel-only", "coexisting"].includes(mode)) {
+        assert.equal(await evaluate("document.querySelector('.queue-intent-dialog').textContent.includes('abcdefab-1234-5678-9abc-abcdefabcdef') && document.querySelector('.queue-intent-dialog').textContent.includes(settingsShellFixture.retainedCancelCalls[0].request.clientRequestId)"), true);
+        assert.equal(await evaluate("!!extraCopy"), mode === "coexisting");
+        await evaluate("settingsShellFixture.retainedCancelCalls[0].reject(new Error('lost cancellation'))"); await frames();
+        assert.equal(await evaluate("!document.querySelector('.queue-intent-dialog') && !!document.querySelector('.queue-intent-review-trigger')"), true);
+        await evaluate("extraCopy?.click();extraOrigin.click()");
+        assert.equal(await wait("document.querySelector('.queue-intent-dialog')?.open"), true);
+        assert.equal(await evaluate("document.querySelector('.queue-intent-dialog').textContent.includes('Outcome unknown')"), true);
+      }
+      if (mode === "clipboard-failure") {
+        await evaluate("Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw new Error('denied')}}});extraCopy.click()"); await frames();
+        assert.equal(await evaluate("document.querySelector('.queue-intent-dialog [role=status]').textContent==='Copy failed; retained text unchanged.'"), true);
+        await evaluate("Object.defineProperty(navigator,'clipboard',{configurable:true,value:{}});extraCopy.click()"); await frames();
+        assert.equal(await evaluate("document.querySelector('.queue-intent-dialog [role=status]').textContent==='Clipboard unavailable; retained text unchanged.'"), true);
+      }
+      if (mode === "clipboard-late") {
+        await evaluate("Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:text=>{extraCopies.push(text);return new Promise(resolve=>window.finishExtraCopy=resolve)}}});extraCopy.click();extraCopy.click();settingsShellFixture.retainedQueueCalls[0].reject(new Error('lost admission'))"); await frames();
+        await evaluate("finishExtraCopy();extraCopy.click()"); await frames();
+        assert.deepEqual(await evaluate("extraCopies"), [" literal queue\ntext "]);
+        assert.equal(await evaluate("!document.querySelector('.queue-intent-dialog')"), true);
+      }
+      if (mode === "keys") {
+        assert.equal(await evaluate("document.activeElement===document.querySelector('.queue-intent-dialog header button')"), true);
+        await evaluate("extraCopy.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',repeat:true,bubbles:true,cancelable:true}));document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',isComposing:true,bubbles:true,cancelable:true}));document.activeElement.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}))");
+        assert.equal(await evaluate("document.querySelector('.queue-intent-dialog').open && extraCopies.length===0"), true);
+        await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+        await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 }); await frames();
+        assert.equal(await evaluate("!document.querySelector('.queue-intent-dialog') && document.activeElement===extraOrigin"), true);
+        await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+        await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+        assert.equal(await wait("document.querySelector('.queue-intent-dialog')?.open"), true);
+      }
+      if (mode === "images") {
+        await evaluate("{const canvas=document.createElement('canvas');canvas.width=1;canvas.height=1;const owner=readLocalImageOwner();window.extraImageKey=JSON.stringify(['12345678-1234-1234-1234-123456789abc','one','project','/fixture/project']);owner.replace(extraImageKey,owner.get(extraImageKey),[{title:'Exact retained image',mediaType:'image/png',base64:canvas.toDataURL('image/png').split(',')[1]}]);window.extraImages=owner.get(extraImageKey)}"); await frames();
+        await evaluate("extraCopy.click()");
+        assert.equal(await evaluate("!document.querySelector('.queue-intent-dialog') && extraCopies.length===0 && readLocalImageOwner().get(extraImageKey)===extraImages"), true);
+        await evaluate("extraOrigin.click()"); assert.equal(await wait("document.querySelector('.queue-intent-dialog')?.open"), true);
+        await evaluate("document.querySelector('.queue-intent-copy').click()"); await frames();
+        assert.equal(await evaluate("readLocalImageOwner().get(extraImageKey)===extraImages"), true);
+      }
+      if (mode === "runtime") {
+        // Existing explicit refresh, not a read introduced by review/Copy.
+        await evaluate("document.querySelector('#refresh-session-context').click()"); await frames();
+        await evaluate("extraCopy.click()");
+        assert.equal(await evaluate("!document.querySelector('.queue-intent-dialog') && extraCopies.length===0"), true);
+        await evaluate("settingsShellFixture.releaseCurrent(settingsShellFixture.currentReads.length-1,'8')"); await frames();
+        assert.equal(await evaluate("document.querySelector('[aria-label=\"Queue current composer in this host\"]').title.includes('attachment 8')"), true);
+        await evaluate("extraCopy.click();extraOrigin.click()");
+        assert.equal(await wait("document.querySelector('.queue-intent-dialog')?.open"), true);
+        assert.equal(await evaluate("[...document.querySelectorAll('.queue-intent-dialog dt')].find(n=>n.textContent==='expectedAttachmentGeneration').nextElementSibling.textContent==='7' && extraCopies.length===0"), true);
+      } else assert.equal(await evaluate("JSON.stringify(settingsShellFixture.rpcCalls)===extraCalls"), true);
+      assert.equal(await evaluate("document.querySelector('#session-prompt').value===' literal queue\\ntext '"), true);
+      if (["cancel-only", "coexisting"].includes(mode)) {
+        // Explicit existing retry authority, after the original cancellation waiter settled.
+        await evaluate("document.querySelector('.queue-intent-dialog header button').click()"); await frames();
+        await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Retry exact queued-operation cancellation').click()");
+        assert.equal(await wait("settingsShellFixture.retainedCancelCalls.length===2"), true);
+        assert.equal(await evaluate("JSON.stringify(settingsShellFixture.retainedCancelCalls[0].request)===JSON.stringify(settingsShellFixture.retainedCancelCalls[1].request)"), true);
+        await evaluate("settingsShellFixture.retainedCancelCalls[1].resolve({status:'unknowntarget',epoch:'12345678-1234-1234-1234-123456789abc',receipt:null})"); await frames();
+        assert.equal(await evaluate("!!document.querySelector('.queue-intent-compact')"), mode === "coexisting");
+        if (mode === "coexisting") {
+          await evaluate("extraOrigin.click()"); assert.equal(await wait("document.querySelector('.queue-intent-dialog')?.open"), true);
+          assert.equal(await evaluate("!document.querySelector('.queue-intent-dialog').textContent.includes('Retained cancellation intent') && document.querySelector('.queue-intent-text').textContent===' literal queue\\ntext '"), true);
+        }
+      }
+      if (mode === "project-scope") {
+        await evaluate("[...document.querySelectorAll('#project-list button')].find(b=>b.textContent.includes('Other project')).click()");
+        assert.equal(await wait("!document.querySelector('.queue-intent-dialog')"), true);
+        await evaluate("extraCopy.click()");
+        assert.deepEqual(await evaluate("extraCopies"), []);
+        assert.equal(await evaluate("!document.querySelector('.queue-intent-compact')"), true);
+      }
+      await evaluate("unmountShellFixture();extraCopy?.click()");
+      assert.equal(await wait("document.querySelector('#root').childElementCount===0"), true);
+    }
+  } catch (error) {
+    if (failureProbe) { const diagnostic=await failureProbe(); t.diagnostic(JSON.stringify(diagnostic)); await writeFile(join(root,"failure-diagnostic.json"),JSON.stringify(diagnostic,null,2)); }
+    throw error;
   } finally {
     socket?.close(); browser?.kill();
     await writeFile(join(root, "session-content-observations.json"), JSON.stringify(layoutObservations, null, 2));

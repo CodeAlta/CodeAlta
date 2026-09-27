@@ -198,7 +198,7 @@ test("production composer usage inspector reads only on intent and fences late/f
       document.querySelector('${modal} button[aria-label="Close usage inspector"]').click()`);
     assert.equal(await wait(`!document.querySelector('${modal}')`), true);
     await evaluate(`window.requestAnimationFrame=window.usageOriginalFrame;
-      [...document.querySelectorAll('button')].find(button=>button.textContent.includes('Commands') && button.textContent.includes('Ctrl+P')).click()`);
+      document.querySelector('.activity-rail button[aria-label="Open command palette"]').click()`);
     assert.equal(await wait("document.querySelector('.command-palette')?.open"), true);
     assert.equal(await evaluate("(() => { for(const callback of window.usageCloseFrames) callback(performance.now()); return document.querySelector('.command-palette')?.open && document.activeElement?.closest('.command-palette')!==null; })()"), true,
       "a deferred usage close may not steal focus from the command palette");
