@@ -534,6 +534,10 @@ separate **Abort original Send operation** remain available.
 Add **`--review-owned-command-permissions`** to the complete owned-mode command above to opt
 into manual review of supported plain command requests. The selected-session review shows the
 complete command, working directory and optional reason, with **Allow once / Deny / Cancel**.
+After a manual refresh, deliberately choose **Review command permission** to open the native
+HTML dialog for that exact observed entry. Opening or dismissing it performs no read or decision;
+Close/Escape dismisses presentation, unlike the explicit **Cancel** permission decision.
+Pending and uncertain original outcomes remain retained when the dialog closes.
 Refresh pending commands manually; this is not a notification stream. Unsupported permission
 payloads remain denied, this review flag alone leaves user input cancelled, and there is no Allow for Session option.
 Approval can execute a command with the host's privileges: discovery roots are not a sandbox.

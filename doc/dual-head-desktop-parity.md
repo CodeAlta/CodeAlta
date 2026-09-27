@@ -361,6 +361,23 @@ loses the record and permits only existing explicit pending review; host restart
 authority. This is not retry, list reconciliation, a completion ledger or durable recovery. Closing
 presentation does not cancel a permission or revoke an accepted decision.
 
+**2026-09-27 scoped command-permission modal:** choosing **Review command permission** for an already observed
+entry opens a native HTML dialog with its original complete command, directory,
+reason and handle provenance. Decisions remain only Allow once / Deny / Cancel via
+the existing reviewer. Closing/Escape is presentation dismissal, not the Cancel
+decision; opening and closing do not read, acknowledge or retry. Manual observation
+and the four-entry bound remain unchanged. There is no session grant or broader
+tool/provider authority. The intended view fences include entry/list identity,
+selection/host/capability and native modal lifetimes; locale is presentation only.
+Initial focus is Close rather than approval. Complete owner, mounted-panel and
+actual-App tests cover literal command preservation, keyboard dismissal, six-language
+presentation, narrow layouts, stale controls, retained uncertainty and explicit
+observation. Independent parent verification passed 33 focused tests, strict
+TypeScript and the production build. The child additionally passed all 50 tests
+in its ten-file bounded suite. This is browser/fake-provider qualification, not
+native WebView2, real-provider or full permission/input parity; no Allow for Session
+policy was added.
+
 **Permission-observation prerequisite verification (2026-09-12):** parent audited the complete reviewer,
 panel and all 523 fixture lines before execution, including all twelve retained/adapted historical
 declarations and six additions. All **18 permission tests + 36 unchanged command-helper regressions**

@@ -78,10 +78,16 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await command("Page.enable");
     await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(page).href });
+    let permissionModeContext: string | null = null;
     const evaluate = async (expression: string) => {
-      const response = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
-      assert.equal(response.exceptionDetails, undefined, `Browser evaluation failed: ${JSON.stringify(response.exceptionDetails)}`);
-      return response.result?.value;
+      try {
+        const response = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
+        assert.equal(response.exceptionDetails, undefined, `Browser evaluation failed: ${JSON.stringify(response.exceptionDetails)}`);
+        return response.result?.value;
+      } catch (cause) {
+        // This page contains fixture data only. Keep exact expression/context on transport failures.
+        throw new Error(`Runtime.evaluate permissionMode=${permissionModeContext ?? "outside permission scenarios"}; expression=${expression}; failure=${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+      }
     };
     const wait = (condition: string) => evaluate(`new Promise(resolve => { const end=Date.now()+7000; const tick=()=>{
       if (${condition}) resolve(true); else if (Date.now()>end) resolve(document.body.innerText.slice(-1200));
@@ -2281,6 +2287,66 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await evaluate("document.querySelector('.session-browser header button').click()");
     await evaluate("window.unmountShellFixture()");
     assert.equal(await wait("document.querySelector('#root').childElementCount===0 && settingsShellFixture.displayCalls.length===settingsShellFixture.displayCleanup.length"), true);
+    // Fresh permission fixtures must not replace the setup/teardown of preceding scenarios.
+    // Exact existing permissions: real App gates/reviewer, deliberate modal only, no new host authority.
+    for (const permissionMode of ["decision", "uncertain", "session-aba", "host-aba", "capability", "archived", "catalog", "disabled"]) {
+      permissionModeContext = permissionMode;
+      t.diagnostic(`Permission scenario: ${permissionMode}`);
+      await evaluate(`unmountShellFixture();localStorage.clear();localStorage.setItem('settingsFixtureOwned','${permissionMode !== "catalog"}');localStorage.setItem('permissionFixtureEnabled','${permissionMode !== "disabled"}')`);
+      await command("Page.reload");
+      assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one'"), true);
+      if (["catalog", "disabled"].includes(permissionMode)) {
+        assert.equal(await evaluate("!document.querySelector('.command-permission-panel') && settingsShellFixture.permissionReads.length===0"), true);
+        continue;
+      }
+      assert.equal(await wait("!!document.querySelector('[data-permission-refresh]')"), true);
+      assert.equal(await evaluate("settingsShellFixture.permissionReads.length===0 && !document.querySelector('.permission-review-dialog')"), true);
+      await evaluate("document.querySelector('[data-permission-refresh]').click()");
+      assert.equal(await wait("settingsShellFixture.permissionReads.length===1"), true);
+      await evaluate("settingsShellFixture.releasePermissions()");
+      assert.equal(await wait("!!document.querySelector('[data-permission-review]')"), true);
+      assert.equal(await evaluate("!document.querySelector('.permission-review-dialog')"), true, "List refresh never opens a modal");
+      await frames();
+      await evaluate("window.permissionRpcCount=settingsShellFixture.rpcCalls.length;document.querySelector('[data-permission-review]').focus();document.querySelector('[data-permission-review]').click()");
+      assert.equal(await wait("document.querySelector('.permission-review-dialog')?.open && !document.querySelector('[data-permission-decision=allow_once]').disabled"), true, "App beforetoggle publication must not invalidate deliberate review itself");
+      assert.equal(await evaluate("settingsShellFixture.rpcCalls.length===permissionRpcCount && document.activeElement===document.querySelector('.permission-review-dialog header button') && document.querySelector('.permission-review-dialog [data-permission-command]').textContent===settingsShellFixture.permissionEntry.command"), true);
+      await evaluate("void(window.oldPermissionButton=document.querySelector('[data-permission-decision=allow_once]'))");
+      if (permissionMode === "session-aba") await evaluate("cycleInfoSelection()");
+      if (permissionMode === "host-aba") await evaluate("cycleInfoHost()");
+      if (permissionMode === "capability") await evaluate("readBatchCapability().observe({status:'stale_epoch',epoch:'00000000-0000-0000-0000-000000000002'})");
+      if (permissionMode === "archived") await evaluate("publishLayoutCatalog({...settingsShellFixture.catalog,projects:settingsShellFixture.catalog.projects.map(p=>({...p,archived:true}))})");
+      if (["session-aba", "host-aba", "capability", "archived"].includes(permissionMode)) {
+        await evaluate("oldPermissionButton.click()");
+        assert.equal(await evaluate("settingsShellFixture.permissionDecisions.length"), 0, permissionMode);
+        if (permissionMode === "archived") assert.equal(await evaluate("!document.querySelector('.command-permission-panel')"), true);
+        continue;
+      }
+      await evaluate("document.querySelector('[data-permission-decision=deny]').click();oldPermissionButton.click()");
+      assert.equal(await wait("settingsShellFixture.permissionDecisions.length===1"), true);
+      assert.deepEqual(await evaluate("settingsShellFixture.permissionDecisions[0].request"), { expectedHostEpoch: "12345678-1234-1234-1234-123456789abc", handle: await evaluate("settingsShellFixture.permissionEntry.handle"), decision: "deny" });
+      await evaluate("document.querySelector('.permission-review-dialog header button').click()");
+      assert.equal(await wait("!document.querySelector('.permission-review-dialog') && !!document.querySelector('.command-permission-panel > [role=status]')"), true, "Close keeps the pending outcome visible");
+      await evaluate("document.querySelector('.rail-footer .icon-label-button').click()");
+      await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
+      await evaluate("document.querySelector('[data-permission-refresh]').click()");
+      assert.equal(await evaluate("settingsShellFixture.permissionReads.length"), 1, "Pending cannot refresh/unlock after Settings");
+      await evaluate(permissionMode === "uncertain" ? "settingsShellFixture.permissionDecisions[0].reject(Error('transport unavailable'))"
+        : "settingsShellFixture.permissionDecisions[0].resolve({status:'resolved',hostEpoch:settingsShellFixture.permissionDecisions[0].request.expectedHostEpoch,handle:settingsShellFixture.permissionDecisions[0].request.handle})");
+      await frames();
+      await evaluate("document.querySelector('[data-permission-refresh]').click()");
+      assert.equal(await evaluate("settingsShellFixture.permissionReads.length"), 1, "Terminal live publication is not acknowledgment");
+      await evaluate("document.querySelector('[data-permission-observe]').click();document.querySelector('[data-permission-refresh]').click()");
+      assert.equal(await evaluate("settingsShellFixture.permissionReads.length"), permissionMode === "uncertain" ? 1 : 2);
+      assert.equal(await evaluate("settingsShellFixture.permissionDecisions.length===1 && settingsShellFixture.sends.length===0 && settingsShellFixture.creates.length===0"), true);
+    }
+    permissionModeContext = "teardown after disabled";
+    await evaluate("window.unmountShellFixture()");
+    assert.equal(await wait("document.querySelector('#root').childElementCount===0"), true, "Permission fixture root unmounts");
+    assert.deepEqual(await evaluate("({navigationFixture:localStorage.getItem('navigationFixture'),calls:settingsShellFixture.displayCalls.length,cleanup:settingsShellFixture.displayCleanup.length,attempts:settingsShellFixture.displayEvidence()})"), {
+      navigationFixture: null, calls: 1, cleanup: 0,
+      attempts: [{ sessionId: "one", opened: false, settled: true, unavailable: true, aborted: true }],
+    }, "Unavailable Display read settles and is aborted; no stream was opened or needs generator cleanup");
+    permissionModeContext = null;
   } finally {
     socket?.close(); browser?.kill();
     await writeFile(join(root, "session-content-observations.json"), JSON.stringify(layoutObservations, null, 2));

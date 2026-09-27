@@ -1,6 +1,7 @@
 // Isolated bridge for mounting the actual main.tsx in a local browser test.
 // No native bridge or user data is touched.
 import type { HistoryRequest, HistoryResponse, SessionDisplayItem, SessionDisplayRequest, ReminderListRequest, ReminderListResponse, WorkspaceArchiveProjectRequest, SessionRuntimeScopedRequest, SkillsScanRequest, SkillsScanResponse } from "#neoastra";
+import type { SessionPermissionsRequest, SessionPermissionResolveRequest } from "#neoastra";
 const epoch = "12345678-1234-1234-1234-123456789abc";
 const session = { id: "one", title: "one", fullTitle: "one", fullTitleTruncated: false, createdAt: "2026-01-02T03:04:05.1234567+14:00",
   parentSessionId: null, scopeKind: localStorage.getItem("infoFixtureUnknown") === "true" ? null : "project",
@@ -14,6 +15,11 @@ const catalog = { configured: true, projects: [{ id: "project", name: "Project",
     ...(localStorage.getItem("infoFixtureAmbiguous") === "true" ? [{ ...session, title: "duplicate" }] : [])],
   projectsTruncated: localStorage.getItem("usageFixtureTruncated") === "true", sessionsTruncated: false, displayTextTruncated: false };
 const unavailable = async () => { throw new Error("test bridge unavailable"); };
+const permissionReads: Array<{ request: SessionPermissionsRequest; resolve: (value: unknown) => void }> = [];
+const permissionDecisions: Array<{ request: SessionPermissionResolveRequest; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
+const permissionEntry = { handle: { operationId: epoch, runtimeInstanceId: epoch, attachmentGeneration: "7", sessionId: "one",
+  runId: "literal-run", interactionId: "literal-interaction", attemptId: epoch }, providerId: "fixture",
+  command: "  inert original command\n<script>not markup</script>  " + "literal ".repeat(350), workingDirectory: "/fixture/project", reason: "literal permission reason" };
 const calls: string[] = [];
 const rpcCalls: string[] = [];
 const archives: Array<{ request: WorkspaceArchiveProjectRequest; resolve: (value: unknown) => void }> = [];
@@ -27,6 +33,7 @@ const sends: unknown[] = [];
 const sendFailures: Array<() => void> = [];
 const displayCalls: SessionDisplayRequest[] = [];
 const displayCleanup: string[] = [];
+const displayAttempts: Array<{ sessionId: string; signal: AbortSignal; opened: boolean; settled: boolean; unavailable: boolean }> = [];
 const lateDisplayAttempts: string[] = [];
 const reminderReads: Array<{ request: ReminderListRequest; signal: AbortSignal; resolve: (value: ReminderListResponse) => void }> = [];
 const notesCalls: unknown[] = [];
@@ -62,7 +69,10 @@ function navigationHistory(request: HistoryRequest): HistoryResponse {
 Object.assign(window, { settingsShellFixture: { calls, rpcCalls, sends, choiceReads, usageReads, probes, clearRequests,
   renameRequests, projectRenames, deleteRequests, creates, snapshots, snapshotCalls, catalog, historyCalls,
   displayCalls, displayCleanup, notesCalls, lateDisplayAttempts, reminderReads, projectNameReads, referenceReads,
-  referenceObservations, archives, runtimeReads, skillReads, promptCreates, promptReads,
+  displayEvidence: () => displayAttempts.map(({ signal, ...attempt }) => ({ ...attempt, aborted: signal.aborted })),
+  referenceObservations, archives, runtimeReads, skillReads, promptCreates, promptReads, permissionReads, permissionDecisions, permissionEntry,
+  releasePermissions() { const call = permissionReads.at(-1)!; call.resolve({ status: "ok", hostEpoch: epoch,
+    sessionId: call.request.sessionId, entries: [{ ...permissionEntry, handle: { ...permissionEntry.handle, sessionId: call.request.sessionId } }], hasMore: false }); },
   releaseSkills(index = skillReads.length - 1, mode = "parsed") {
     const { request, resolve, reject } = skillReads[index];
     if (mode === "error") { reject(new Error("fixture transport error")); return; }
@@ -137,7 +147,7 @@ const choices = (request: { expectedEpoch: string; sessionId: string }) => ({ st
   models: [{ id: "old", name: "Old", efforts: ["Low"], imageInput: false }, ...(localStorage.getItem("settingsFixtureNewChoices") === "true"
     ? [{ id: "new", name: "New", efforts: ["High"], imageInput: true }] : [])] });
 export const boot = { status: async () => ({ state: owned() ? "owned" : "catalog", hostAvailable: owned(),
-  hostEpoch: owned() ? epoch : null, productName: "CodeAlta", version: "development" }) };
+  hostEpoch: owned() ? epoch : null, commandReviewEnabled: localStorage.getItem("permissionFixtureEnabled") === "true", productName: "CodeAlta", version: "development" }) };
 export const workspace = { snapshot: async () => {
   snapshotCalls.push({});
   if (localStorage.getItem("creationFixtureHoldSnapshot") === "true")
@@ -189,7 +199,12 @@ export const reminder = { list: (request: ReminderListRequest, options: { signal
     : unavailable(), detail: unavailable, create: unavailable, delete: unavailable, save: unavailable };
 export const sessionDisplay = { observe: async (request: SessionDisplayRequest, options: { signal: AbortSignal }) => {
   displayCalls.push(request);
-  if (!localStorage.getItem("navigationFixture")) return unavailable();
+  const attempt = { sessionId: request.sessionId, signal: options.signal, opened: false, settled: false, unavailable: false };
+  displayAttempts.push(attempt);
+  if (!localStorage.getItem("navigationFixture")) {
+    attempt.unavailable = true;
+    try { return await unavailable(); } finally { attempt.settled = true; }
+  }
   const hold = localStorage.getItem("layoutFixtureLive") === "true";
   const item: SessionDisplayItem = { status: "ok", hostEpoch: request.expectedHostEpoch, sessionId: request.sessionId,
     projectionEpoch: "navigation-fixture", revision: "0", previousRevision: null, isInitial: true, hasGap: false,
@@ -200,6 +215,7 @@ export const sessionDisplay = { observe: async (request: SessionDisplayRequest, 
       text: localStorage.getItem("navigationFixture") === "empty" ? [] : ["User", "Assistant", "Unknown"].map(kind => ({
         runId: "live-run", contentId: kind, kind, text: `live-${kind}`, isComplete: true, isTruncated: false, startedWithDelta: false })) } };
   return (async function* () {
+    attempt.opened = true;
     try {
       yield item;
       if (hold && !options.signal.aborted) await new Promise<void>(resolve => {
@@ -213,13 +229,16 @@ export const sessionDisplay = { observe: async (request: SessionDisplayRequest, 
           session: { ...item.session!, revision: "1", text: [{ runId: "late", contentId: "late", kind: "User",
             text: "stale-disposed-display", isComplete: true, isTruncated: false, startedWithDelta: false }] } };
       }
-    } finally { displayCleanup.push(request.sessionId); }
+    } finally { attempt.settled = true; displayCleanup.push(request.sessionId); }
   })();
 } };
 export const sessionRuntimeState = { current: unavailable, observe: (request: SessionRuntimeScopedRequest, options: { signal: AbortSignal }) =>
   new Promise((resolve, reject) => runtimeReads.push({ request, signal: options.signal, resolve, reject })) };
 export const sessionUsage = { read: (request: unknown) => new Promise((resolve, reject) => usageReads.push({ request, resolve, reject })) };
-export const sessionPermissions = { list: unavailable, resolve: unavailable };
+export const sessionPermissions = {
+  list: (request: SessionPermissionsRequest) => new Promise(resolve => permissionReads.push({ request, resolve })),
+  resolve: (request: SessionPermissionResolveRequest) => new Promise((resolve, reject) => permissionDecisions.push({ request, resolve, reject })),
+};
 export const sessionOperations = { observeReferences: (request: { text: string }) => new Promise(resolve => referenceObservations.push({ request, resolve })),
   searchReferences: (request: unknown) => new Promise(resolve => referenceReads.push({ request, resolve })),
   choices: (request: { expectedEpoch: string; sessionId: string }) =>

@@ -28,7 +28,7 @@ const inputPage = { status: "ok", hostEpoch: epoch, sessionId: "Settings", hasMo
   { id: "free", header: null, question: "Copy failed", options: [], allowFreeform: true },
 ] }] };
 const permissionPage = { status: "ok", hostEpoch: epoch, sessionId: "Settings", hasMore: false, entries: [{ handle, providerId: "Settings",
-  command: "  echo 'Allow once'\n# 日本語 <script>literal</script>  ", workingDirectory: "Q:\\fixture\\Settings", reason: "Deny" }] };
+  command: "  echo 'Allow once'\n# 日本語 <script>literal</script>  " + "x".repeat(3000), workingDirectory: "Q:\\fixture\\Settings", reason: "Deny" }] };
 function Fixture() {
   const [locale, language] = useState<Locale>("en");
   const [sessionId, select] = useState("Settings");
@@ -37,7 +37,7 @@ function Fixture() {
     permission, input, capability } }); }, []);
   return <ShellLanguageContext value={{ locale, choice: locale, setLanguage: () => {} }}>
     <main className="configuration-page">
-      <CommandPermissionPanel reviewer={permission} epoch={epoch} sessionId={sessionId} />
+      <CommandPermissionPanel reviewer={permission} epoch={epoch} sessionId={sessionId} canReview={() => capability.canMutate()} />
       <UserInputPanel reviewer={input} capability={capability} epoch={epoch} sessionId={sessionId} />
     </main>
   </ShellLanguageContext>;

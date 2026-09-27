@@ -590,7 +590,8 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
         </div>)}
         {queueMessage !== "Refresh runtime state explicitly before queueing text in this host." && <p role="status">{queueMessage}</p>}</div>}
     </div>}
-    {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId} />}
+    {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId}
+      canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} />}
     <details className="advanced-session-controls"><summary>{t("Advanced session controls and diagnostics")}</summary><div>
     <p className="detail">{t("Selections apply on Send; active runs and queued text are unchanged.")}</p>
     <button id="refresh-session-context" type="button" onClick={() => void runtimeScope.current?.refresh()} aria-label={t("Refresh context and runtime configuration")} title={`${t("Refresh context")} · ${runtimeConfiguration?.providerKey ?? t("session provider")}`}><AppIcon name="refresh" size={14} /> {t("Refresh context")}</button>

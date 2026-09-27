@@ -43,6 +43,11 @@ test("provider presentation preserves literal decisions and input owners across 
     const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+4000;const check=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(check,20)};check()})`);
     const paint = () => evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))");
     const click = (text: string) => evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent===${JSON.stringify(text)}).click()`);
+    const openReview = async () => {
+      await evaluate("document.querySelector('[data-permission-review]').focus();document.querySelector('[data-permission-review]').click()");
+      assert.equal(await wait("document.querySelector('.permission-review-dialog')?.open"), true);
+      assert.equal(await evaluate("document.activeElement===document.querySelector('.permission-review-dialog header button')"), true, "Safe initial focus is Close, never Allow");
+    };
     const languages = async () => {
       await paint();
       await evaluate(`void(window.kept={nodes:[...document.querySelectorAll('input,textarea')].map(node=>({node,value:node.value,disabled:node.disabled})),focus:document.activeElement,
@@ -54,6 +59,7 @@ test("provider presentation preserves literal decisions and input owners across 
         assert.equal(await evaluate(`document.querySelector('main > section').getAttribute('aria-label')===${JSON.stringify(translate(locale, "Pending command permissions"))}`), true);
         assert.equal(await evaluate(`kept.calls===JSON.stringify([providerFixture.permissions.length,providerFixture.decisions.length,providerFixture.inputs.length,providerFixture.answers.length,providerFixture.cancels.length]) && kept.original===providerFixture.input.readOriginal()?.request && kept.decision===providerFixture.permission.readOriginal()?.origin && kept.capability===providerFixture.capability.canMutate() && kept.focus===document.activeElement && kept.nodes.every(v=>v.node.isConnected&&v.value===v.node.value&&v.disabled===v.node.disabled)`), true, `${locale}: no reads, grants, owner replacement, reset or focus loss`);
         assert.equal(await evaluate(`(()=>{const pre=document.querySelector('ol.history-records > li > pre');return !pre||pre.textContent===providerFixture.permissionPage.entries[0].command})()`), true);
+        assert.equal(await evaluate(`(()=>{const d=document.querySelector('.permission-review-dialog');return !d||d.querySelector('h2').textContent===${JSON.stringify(translate(locale, "Review command permission"))}&&d.querySelector('[data-permission-command]').textContent===providerFixture.permissionPage.entries[0].command&&d.querySelector('[data-permission-directory]').textContent===providerFixture.permissionPage.entries[0].workingDirectory&&d.querySelector('[data-permission-reason]').textContent===providerFixture.permissionPage.entries[0].reason})()`), true);
         assert.equal(await evaluate(`(()=>{const option=document.querySelector('[aria-pressed]');return !option||option.textContent==='Settings — Complete'})()`), true);
       }
       await evaluate("providerFixture.language('en')"); await paint();
@@ -80,16 +86,49 @@ test("provider presentation preserves literal decisions and input owners across 
       assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth+2"), true, `${locale}/${theme}: provider controls fit`);
     }
     await evaluate("providerFixture.language('en')"); await paint();
-    await click("Submit literal answers"); await click("Allow once"); await languages();
+    await click("Submit literal answers");
+    assert.equal(await evaluate("document.querySelectorAll('[data-permission-review]').length"), 1, "Observed entries require deliberate modal review, not inline decisions");
+    await openReview();
+    assert.equal(await evaluate("providerFixture.permissions.length===1 && providerFixture.decisions.length===0"), true, "Opening review performs no read or decision");
+    // CDP needs the Enter character to generate keypress/native button activation.
+    // The bounded native-control comparison is retained in enter-diagnostic-1.json.
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    assert.equal(await wait("!document.querySelector('.permission-review-dialog')"), true, "Enter on initial Close does not approve");
+    assert.equal(await evaluate("providerFixture.decisions.length"), 0);
+    await openReview();
+    for (const extra of ["isComposing:true", "repeat:true", "keyCode:229"]) {
+      await evaluate(`document.querySelector('.permission-review-dialog header button').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true,${extra}}))`);
+      assert.equal(await evaluate("document.querySelector('.permission-review-dialog').open && providerFixture.decisions.length===0"), true);
+    }
+    await evaluate("const e=new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true});e.preventDefault();document.querySelector('.permission-review-dialog header button').dispatchEvent(e)");
+    assert.equal(await evaluate("document.querySelector('.permission-review-dialog').open"), true);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+    assert.equal(await evaluate("document.querySelector('.permission-review-dialog').contains(document.activeElement)"), true);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    assert.equal(await wait("!document.querySelector('.permission-review-dialog') && document.activeElement===document.querySelector('[data-permission-review]')"), true);
+    await openReview();
+    for (const theme of ["light", "dark"]) {
+      await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 360, deviceScaleFactor: 1, mobile: false });
+      await evaluate(`document.documentElement.dataset.theme='${theme}'`); await paint();
+      assert.equal(await evaluate("(()=>{const d=document.querySelector('.permission-review-dialog'),r=d.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1&&r.top>=0&&r.bottom<=innerHeight+1&&d.scrollWidth<=d.clientWidth+1})()"), true);
+      await evaluate("document.querySelector('[data-permission-decision=cancel]').scrollIntoView({block:'center'})");
+      assert.equal(await evaluate("document.querySelector('[data-permission-decision=cancel]').getBoundingClientRect().bottom<=innerHeight"), true);
+    }
+    await languages();
+    await click("Allow once"); await languages();
     assert.deepEqual(await evaluate("providerFixture.answers[0].request.answers"), [{ promptId: "choice", value: "Settings" }, { promptId: "free", value: "  Settings 日本語  " }]);
     assert.equal(await evaluate("providerFixture.decisions[0].request.decision"), "allow_once");
     await evaluate("providerFixture.answers[0].resolve({status:'rejected',hostEpoch:providerFixture.epoch,handle:providerFixture.handle});providerFixture.decisions[0].resolve({status:'rejected',hostEpoch:providerFixture.epoch,handle:providerFixture.handle})");
     assert.equal(await wait("providerFixture.input.readOriginal()?.kind==='terminal' && providerFixture.permission.readOriginal()?.state==='rejected'"), true);
-    await languages(); await click("Observe original locally (no RPC)"); await click("Acknowledge observed terminal original"); await click("Observe retained decision");
+    await languages(); await evaluate("document.querySelector('.permission-review-dialog header button').click()");
+    await click("Observe original locally (no RPC)"); await click("Acknowledge observed terminal original"); await click("Observe retained decision");
     await click("Refresh input"); await click("Refresh pending commands");
     await evaluate("providerFixture.inputs[1].resolve(providerFixture.inputPage);providerFixture.permissions[1].resolve(providerFixture.permissionPage)");
     assert.equal(await wait("!!document.querySelector('textarea') && !!document.querySelector('.history-controls')"), true);
-    await click("Cancel this attempt only"); await click("Deny"); await languages();
+    await click("Cancel this attempt only"); await evaluate("document.querySelector('[data-permission-review]').click()"); await click("Deny"); await languages();
     await evaluate("providerFixture.select('other')"); await paint(); await evaluate("providerFixture.select('Settings')"); await paint();
     await languages();
     await evaluate("providerFixture.cancels[0].reject(Error('literal uncertain input'));providerFixture.decisions[1].reject(Error('literal uncertain command'))");
@@ -97,6 +136,29 @@ test("provider presentation preserves literal decisions and input owners across 
     await click("Observe retained decision"); await languages();
     assert.equal(await evaluate("providerFixture.input.acknowledge()"), false);
     assert.equal(await evaluate("providerFixture.decisions.length===2 && providerFixture.answers.length===1 && providerFixture.cancels.length===1"), true);
+    // Fresh owners: same-handle replacement and native modal ABA never authorize old controls.
+    await command("Page.navigate", { url: pathToFileURL(page).href }); assert.equal(await wait("!!window.providerFixture && document.querySelectorAll('h3').length===2"), true);
+    await click("Refresh pending commands");
+    await evaluate("providerFixture.permissions[0].resolve(providerFixture.permissionPage)");
+    assert.equal(await wait("!!document.querySelector('[data-permission-review]')"), true);
+    await openReview();
+    await evaluate("window.oldDecision=document.querySelector('[data-permission-decision=allow_once]');document.querySelector('[data-permission-refresh]').click()");
+    await evaluate("providerFixture.permissions[1].resolve(structuredClone(providerFixture.permissionPage))");
+    assert.equal(await wait("document.querySelector('[data-permission-decision=allow_once]').disabled"), true);
+    await evaluate("oldDecision.click()"); assert.equal(await evaluate("providerFixture.decisions.length"), 0);
+    await evaluate("document.querySelector('.permission-review-dialog header button').click()");
+    await openReview();
+    await evaluate("oldDecision.click();const d=document.querySelector('.permission-review-dialog');d.close();d.showModal();document.querySelector('[data-permission-decision=allow_once]').click()");
+    assert.equal(await evaluate("providerFixture.decisions.length"), 0, "Close/open ABA never reactivates old controls");
+    await paint();
+    if (await evaluate("!!document.querySelector('.permission-review-dialog')")) await evaluate("document.querySelector('.permission-review-dialog header button').click()");
+    await openReview();
+    await evaluate("document.querySelector('[data-permission-decision=cancel]').click()");
+    assert.deepEqual(await evaluate("providerFixture.decisions[0].request"), { expectedHostEpoch: "11111111-1111-4111-8111-111111111111", handle: await evaluate("providerFixture.handle"), decision: "cancel" });
+    await evaluate("document.querySelector('.permission-review-dialog header button').click();providerFixture.decisions[0].reject(Error('transport failure'))");
+    assert.equal(await wait("providerFixture.permission.readOriginal()?.state==='error'"), true);
+    await click("Observe retained decision"); await click("Refresh pending commands");
+    assert.equal(await evaluate("providerFixture.permissions.length===2 && providerFixture.decisions.length===1"), true, "Dismissal, error and explicit Observe never unlock uncertainty");
     // Fresh disposable owners: late old-selection reads must still revoke, not regain authority through ABA/locale.
     await command("Page.navigate", { url: pathToFileURL(page).href }); assert.equal(await wait("!!window.providerFixture && document.querySelectorAll('h3').length===2"), true);
     await click("Refresh input"); await click("Refresh pending commands");
