@@ -25,10 +25,10 @@ test("status rows are compact and details are dialog actions, not permanent disc
   assert.match(html, /Context: 48%/);
 });
 
-test("long assistant prose keeps its preview and raw actions have accessible labels", () => {
-  // Short Markdown uses the DOMPurify browser boundary. Exercise the inert long-body
-  // preview here without substituting a fake sanitizer or installing a DOM dependency.
-  const html = renderToStaticMarkup(<TimelineMessage item={{ ...record, category: "assistant", markdown: "Hello **world** " + "text ".repeat(300) }} />);
+test("long supporting diagnostics retain optional previews and accessible raw actions", () => {
+  // Always-visible conversation Markdown is covered at the real sanitizer/browser
+  // boundary by messageContent.browser.test.ts, not a fake Node DOM.
+  const html = renderToStaticMarkup(<TimelineMessage item={{ ...record, category: "error", markdown: "Hello **world** " + "text ".repeat(300) }} />);
   assert.match(html, /Hello \*\*world\*\*/);
   assert.match(html, /long-message-toggle/);
   assert.match(html, /aria-label="Details"/);

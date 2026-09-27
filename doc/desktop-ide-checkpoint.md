@@ -320,6 +320,12 @@ Neither native nor demo launch was performed during this checkpoint verification
 
 ### Screenshot-driven compact presentation follow-up
 
+Conversation visibility correction: supplied user/assistant Markdown is now always rendered,
+regardless of length; the diagnostic-body expander no longer applies to conversation messages.
+An isolated Edge test mounts the production renderer at 390/1280px in both themes and checks
+the message tail, Markdown, sanitization, full Copy and absence of horizontal page overflow.
+This is component-level evidence, not full-App parity acceptance.
+
 Second screenshot iteration: project filtering and session management/search are now on-demand
 disclosures rather than permanent rows between a project and its sessions. Notes start visible,
 including when empty. The composer explicitly overrides the old column-direction rule; selectors

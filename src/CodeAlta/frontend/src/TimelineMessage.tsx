@@ -41,9 +41,9 @@ export function TimelineMessage({ item, canInspect, historySource, onOpenSource 
   const bodyId = useId();
   // A changed record at the same offset must not inherit the previous record's disclosure.
   const body = item.markdown;
-  // Only inline supplied prose gets this control. Detail-only messages keep the
-  // existing Details route; terse outcomes and all summaries/notices stay visible.
-  const longBody = (body?.length ?? 0) > longBodyThreshold;
+  // Conversation messages always render their supplied Markdown. Optional
+  // disclosure is reserved for long supporting diagnostics, never the conversation.
+  const longBody = item.category !== "user" && item.category !== "assistant" && (body?.length ?? 0) > longBodyThreshold;
   // Value identity of the bounded presentation, not original journal bytes. Do
   // not serialize terse/detail-only records that have no inline disclosure.
   const source = longBody ? JSON.stringify(item) : "";
