@@ -1895,7 +1895,8 @@ function EmptyWorkspace({ workspaceState }: { workspaceState: WorkspaceState }) 
   return <div className="empty-workspace"><div className="empty-logo">A</div><h1>{workspaceState.kind === "loading" ? "Loading your sessions…" : "Select a session"}</h1><p>Choose a project and session from the sidebar to inspect its transcript and runtime.</p></div>;
 }
 function SessionTime({ value, now }: { value: string; now: number }) {
-  const { label, title, dateTime } = sessionTime(value, now);
+  const { locale } = useShellLanguage();
+  const { label, title, dateTime } = sessionTime(value, locale, now);
   return <time dateTime={dateTime} title={title}>{label}</time>;
 }
 

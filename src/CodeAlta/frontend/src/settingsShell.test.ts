@@ -10,6 +10,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { translate } from "./localization";
+import { sessionTime } from "./sessionTime";
 
 const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
@@ -32,6 +33,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
           (await readFile(args.path, "utf8")).replace('createRoot(document.getElementById("root")!).render(',
             'const fixtureRoot = createRoot(document.getElementById("root")!); Object.assign(window, { unmountShellFixture: () => fixtureRoot.unmount() }); fixtureRoot.render(')
             .replace('const language = useLanguagePreference();', 'const language = useLanguagePreference(); Object.assign(window, { workflowLanguage: language.setLanguage });')
+            .replace('const [clock, setClock] = useState(Date.now);', 'const [clock, setClock] = useState(Date.now); Object.assign(window, { readSessionTimeClock: () => clock });')
             .replace('const [projectId, writeProjectId]',
                'Object.assign(window, { readBatchCapability: () => mutation?.capability, publishLayoutState: publishWorkspaceState, publishLayoutCatalog: (snapshot: WorkspaceSnapshot) => publishWorkspaceState({ kind: "ready", snapshot }), cycleInfoSelection: () => { setSessionId("two"); setProjectId(null); setProjectId(projectId); setSessionId(sessionId); }, cycleInfoHost: () => { setStatus({ ...status!, hostAvailable: false, hostEpoch: "temporary-host" }); setStatus(status!); }, loseLayoutHost: () => setStatus({ ...status!, hostAvailable: false, hostEpoch: "different-host" }) }); const [projectId, writeProjectId]') }));
       } }] });
@@ -470,15 +472,20 @@ test("production shell settings overlay keeps the session workspace mounted and 
       ["de", "Einstellungen", "Einstellungen schließen", "Sitzungen suchen", "Tastenkombinationen"],
       ["fr", "Paramètres", "Fermer les paramètres", "Rechercher des sessions", "Raccourcis"],
     ]) {
-      await evaluate("window.languageModal=document.querySelector('.settings-dialog'); window.languageRpcCount=settingsShellFixture.rpcCalls.length; window.languageScroll=document.querySelector('.timeline-scroll')?.scrollTop; document.querySelector('#settings-language').focus()");
+      await evaluate("window.languageTimeNodes=[...document.querySelectorAll('.session-meta time,.message-heading time')];window.languageTimeSources=languageTimeNodes.map(node=>[node.title,node.dateTime]);window.languageModal=document.querySelector('.settings-dialog'); window.languageRpcCount=settingsShellFixture.rpcCalls.length; window.languageScroll=document.querySelector('.timeline-scroll')?.scrollTop; document.querySelector('#settings-language').focus()");
       await chooseLanguage(locale);
       assert.equal(await wait(`document.documentElement.lang===${JSON.stringify(locale)}`), true);
+      assert.equal(await evaluate("languageTimeNodes.length>0 && languageTimeNodes.every((node,index)=>node===[...document.querySelectorAll('.session-meta time,.message-heading time')][index] && node.title===languageTimeSources[index][0] && node.dateTime===languageTimeSources[index][1])"), true, `${locale}: timestamp DOM and exact sources retained`);
+      const timeClock = Number(await evaluate("readSessionTimeClock()"));
+      const rowTimes = await evaluate("[...document.querySelectorAll('.session-meta time')].map(node=>({source:node.title,label:node.textContent}))") as { source: string; label: string }[];
+      assert.ok(rowTimes.length > 0);
+      for (const row of rowTimes) assert.equal(row.label, sessionTime(row.source, locale as Parameters<typeof sessionTime>[1], timeClock).label);
       if (process.env.CODEALTA_TIMELINE_GEOMETRY) console.log("APP GEOMETRY", locale, JSON.stringify(await evaluate(timelineGeometryProbe)));
       assert.equal(await evaluate(`document.querySelector('#settings-title').textContent===${JSON.stringify(title)} && document.querySelector('.settings-dialog-header button').getAttribute('aria-label')===${JSON.stringify(close)} && document.querySelector('.session-rail .search input').getAttribute('aria-label')===${JSON.stringify(search)}`), true);
       assert.equal(await evaluate("document.activeElement.id==='settings-language' && languageModal===document.querySelector('.settings-dialog') && languageModal.open && languageWorkspace===document.querySelector('.workspace-shell') && languageComposer===document.querySelector('#session-prompt') && languageSend===settingsShellFixture.sends[0] && settingsShellFixture.sends.length===1 && languageSend.images.length===1 && document.querySelector('#session-prompt').value==='' && document.querySelector('.timeline-scroll')?.scrollTop===languageScroll && settingsShellFixture.rpcCalls.length===languageRpcCount"), true,
         `${locale}: live locale does not remount, lose focus/scroll/original image Send, or invoke any bridge method: ${await evaluate("JSON.stringify({focus:document.activeElement.id,modal:languageModal===document.querySelector('.settings-dialog')&&languageModal.open,workspace:languageWorkspace===document.querySelector('.workspace-shell'),composer:languageComposer===document.querySelector('#session-prompt'),send:languageSend===settingsShellFixture.sends[0],sends:settingsShellFixture.sends.length,images:languageSend.images.length,draft:document.querySelector('#session-prompt').value,scroll:document.querySelector('.timeline-scroll')?.scrollTop,beforeScroll:languageScroll,calls:settingsShellFixture.rpcCalls.length,beforeCalls:languageRpcCount})")}`);
       for (const width of [390, 1120]) for (const theme of ["light", "dark"]) {
-        await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
+        await command("Emulation.setDeviceMetricsOverride", { width, height: width === 390 ? 500 : 800, deviceScaleFactor: 1, mobile: false });
         await evaluate(`document.documentElement.dataset.theme='${theme}'`);
         assert.equal(await evaluate("(()=>{const d=document.querySelector('.settings-dialog');const c=document.querySelector('.settings-dialog-content');return d.getBoundingClientRect().width<=innerWidth && d.getBoundingClientRect().height<=innerHeight && c.scrollWidth<=c.clientWidth+1})()"), true, `${locale} ${width} ${theme}: localized Settings fits`);
       }
@@ -959,6 +966,44 @@ test("production shell settings overlay keeps the session workspace mounted and 
         assert.equal(await wait("document.querySelector('.history')?.dataset.windowReady==='true'"), true);
       if (mode === "error") assert.equal(await wait("!!document.querySelector('.history [role=alert]')"), true);
       if (mode === "partial") assert.equal(await wait("window.settingsShellFixture.historyCalls.some(call=>call.cursor)"), true);
+      if (mode === "mixed") {
+        // This existing phase has real persisted TimelineMessage rows; the earlier Settings
+        // phase intentionally supplies unavailable history and can only qualify session-row times.
+        // The translated live-order notice legitimately wraps taller. Followers retain the
+        // bottom, whereas a reader established through message navigation retains position.
+        for (const theme of ["light", "dark"]) for (const timeMode of ["following", "reading"]) {
+          await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 500, deviceScaleFactor: 1, mobile: false });
+          await evaluate("workflowLanguage('en')");
+          assert.equal(await wait("document.documentElement.lang==='en'"), true);
+          if (timeMode === "reading") {
+            // Establish a reader through the real registered navigation action, not a scrollTop write.
+            await evaluate("document.querySelector('.session-info-trigger').focus();document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'F3',ctrlKey:true,bubbles:true,cancelable:true}))");
+            assert.equal(await wait("!!document.querySelector('.timeline-bottom-button')"), true);
+          } else {
+            await evaluate("document.querySelector('.timeline-bottom-button')?.click()");
+            assert.equal(await wait("!document.querySelector('.timeline-bottom-button') && (()=>{const s=document.querySelector('.timeline-scroll');return s.scrollTop===s.scrollHeight-s.clientHeight})()"), true);
+          }
+          await evaluate(`document.documentElement.dataset.theme='${theme}';document.querySelector('#session-prompt').focus()`);
+          await evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+          await evaluate("window.timeNodes=[...document.querySelectorAll('.message-heading time')];window.timeSources=timeNodes.map(node=>[node.title,node.dateTime]);window.timeDraft=document.querySelector('#session-prompt');window.timeDraftValue=timeDraft.value;window.timeReads=JSON.stringify([settingsShellFixture.rpcCalls,settingsShellFixture.historyCalls,settingsShellFixture.displayCalls,settingsShellFixture.displayCleanup]);window.timeOuter=[scrollX,scrollY,document.querySelector('.active-session-content').scrollTop];window.timeScroll=document.querySelector('.timeline-scroll').scrollTop");
+          for (const locale of ["en", "es", "fr", "de", "ja", "zh-CN"]) {
+            await evaluate(`workflowLanguage('${locale}')`);
+            assert.equal(await wait(`document.documentElement.lang==='${locale}'`), true);
+            assert.equal(await evaluate(`timeNodes.length>0 && timeNodes.every((node,index)=>node===[...document.querySelectorAll('.message-heading time')][index] && node.title===timeSources[index][0] && node.dateTime===timeSources[index][1] && node.textContent===new Intl.DateTimeFormat('${locale}',{dateStyle:'medium',timeStyle:'short'}).format(new Date(node.title)))`), true, `${locale}/${theme}: mounted timeline exact sources and selected-locale dates`);
+            assert.equal(await evaluate("document.activeElement===timeDraft && document.querySelector('#session-prompt')===timeDraft && timeDraft.value===timeDraftValue && JSON.stringify([settingsShellFixture.rpcCalls,settingsShellFixture.historyCalls,settingsShellFixture.displayCalls,settingsShellFixture.displayCleanup])===timeReads"), true, `${locale}/${theme}: no input replacement, draft loss or extra reads`);
+            if (timeMode === "reading") {
+              assert.equal(await evaluate("!!document.querySelector('.timeline-bottom-button')"), true, "locale changes cannot opt a reader into following");
+              assert.equal(await evaluate("JSON.stringify([scrollX,scrollY,document.querySelector('.active-session-content').scrollTop])===JSON.stringify(timeOuter) && document.querySelector('.timeline-scroll').scrollTop===timeScroll && getComputedStyle(document.querySelector('.active-session-content')).overflowAnchor==='none'"), true, `${locale}/${theme}: retained scroll and native outer anchor exclusion: ${await evaluate("JSON.stringify({outer:[scrollX,scrollY,document.querySelector('.active-session-content').scrollTop],beforeOuter:timeOuter,timeline:document.querySelector('.timeline-scroll').scrollTop,beforeTimeline:timeScroll,anchor:getComputedStyle(document.querySelector('.active-session-content')).overflowAnchor})")}`);
+            } else {
+              assert.equal(await evaluate("JSON.stringify([scrollX,scrollY,document.querySelector('.active-session-content').scrollTop])===JSON.stringify(timeOuter) && !document.querySelector('.timeline-bottom-button') && (()=>{const s=document.querySelector('.timeline-scroll');return s.scrollTop===s.scrollHeight-s.clientHeight})() && getComputedStyle(document.querySelector('.active-session-content')).overflowAnchor==='none'"), true, `${locale}/${theme}: following retains the bottom, not an obsolete absolute coordinate`);
+            }
+            assert.equal(await evaluate("timeNodes.every(node=>{const rect=node.getBoundingClientRect(), heading=node.closest('.message-heading').getBoundingClientRect();return rect.height<=22 && rect.right<=heading.right+1 && getComputedStyle(node).whiteSpace==='nowrap'})"), true, `${locale}/${theme}: short/narrow single-line time geometry`);
+          }
+        }
+        await evaluate("workflowLanguage('en')");
+        assert.equal(await wait("document.documentElement.lang==='en'"), true);
+        await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
+      }
       await evaluate(`document.querySelector('[aria-label="Session info"]').focus()`);
       const key = (key: string, modifiers = {}) => evaluate(`(() => {const e=new KeyboardEvent('keydown',
         ${JSON.stringify({ key, bubbles: true, cancelable: true, ...modifiers })});

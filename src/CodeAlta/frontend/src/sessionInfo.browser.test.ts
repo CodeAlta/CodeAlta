@@ -325,6 +325,7 @@ test("production composer info icon retains read-only scope and guarded focus", 
       assert.equal(await wait(`document.querySelector('#session-info-title').textContent===${JSON.stringify(translate(locale, "Session info"))}`), true);
       assert.equal(await evaluate("localeDialog===document.querySelector('.session-info-dialog') && document.activeElement===localeFocus && copies.length===1 && copies[0]===canonicalPayload && settingsShellFixture.runtimeReads.length===0 && settingsShellFixture.usageReads.length===0 && inspectionFixture.canMutate()"), true, `${locale}: pending canonical Copy retains identity and permission without reads`);
       assert.equal(await evaluate("[...document.querySelectorAll('.session-info-fields dd')].some(x=>x.textContent==='Saved metadata') && document.querySelector('.session-info-fields code').textContent==='Unknown'"), true, "English-like title and ID stay literal");
+      assert.equal(await evaluate("(()=>{const times=[...document.querySelectorAll('.session-info-fields time')];return times.length>0 && times.every(node=>node.textContent===node.getAttribute('datetime'))})()"), true, `${locale}: Info timestamps remain exact recorded evidence, not relative labels`);
       for (const theme of ["light", "dark"]) {
         await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 500, deviceScaleFactor: 1, mobile: false });
         await evaluate(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);

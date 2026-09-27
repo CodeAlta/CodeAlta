@@ -59,9 +59,10 @@ Not translated here: remaining management page bodies, other session dialogs
 and operation feedback (including the outer batch-status notice),
 reference-picker/retained-request/advanced diagnostics, controller-produced
 observation/usage outcomes, scope warnings and runtime summaries/details,
-raw retry-request diagnostic tooltips, relative times and other
+raw retry-request diagnostic tooltips and other
 unmigrated tooltips/accessibility labels. User text, file/tool content, paths,
-identities, timestamps and raw backend diagnostic codes are never translated.
+identities and raw backend diagnostic codes are never translated. Exact timestamp
+sources remain literal; the bounded time presentation described below localizes labels only.
 Typed `DELETE N` is always the exact English protocol token, not translated input.
 Prompt mode/scope IDs, authored text, skill metadata and retained request JSON are
 literal. Locale switching neither trims these values nor invalidates review,
@@ -308,3 +309,50 @@ failure remains open. The historical composer issue and 15px scroll observation 
 unresolved and parked. Settings retention, Reminders intentional unmount, backend/API
 contracts and the responsive layout baseline are unchanged. Full/native/native-speaker
 qualification and independent acceptance of this slice remain open.
+
+### Selected-language time presentation (independent review pending)
+
+Session-row relative labels now use the explicit selected `en`, `es`, `fr`, `de`,
+`ja` or `zh-CN` language through `Intl.RelativeTimeFormat` (short, numeric auto).
+Intl owns plural/unit/past/future forms and localized near-now/yesterday/tomorrow
+phrases. The existing elapsed-duration calculation remains: rounded seconds,
+near-now below five seconds, floored counts, 60-second minutes, 60-minute hours,
+24-hour days, seven-day weeks, 30-day months and 365-day years. These are approximate
+duration buckets, not calendar arithmetic or evidence of current activity.
+
+Timeline headings were already absolute local dates, not relative times. They now
+use the selected language with `Intl.DateTimeFormat` (medium date/short time),
+retaining the existing local timezone and date parsing. Both presentations expose
+the exact supplied source string in their tooltip, including its original offset
+and fractional precision; valid machine-readable dates are also available in
+`datetime`. Missing/invalid source strings remain as supplied without an invented
+timestamp. An unusable clock, unavailable Intl API or unsupported selected locale
+falls back to the literal source rather than silently using browser-default language.
+
+Saved-session browser metadata, Info recorded dates, observed activity/usage dates
+and canonical Info Copy remain literal. No CreatedAt/UpdatedAt/observation is promoted
+to authoritative LastActiveAt. Sorting and date parsing authority are unchanged.
+Formatters receive the language explicitly, have no cache or language singleton,
+and introduce no timers or reads. Session rows retain the existing one-minute App
+clock; timeline formatting needs no clock. Locale changes do not change effect keys,
+owners, requests, selections or drafts. Time text is single-line/ellipsized within the
+existing heading geometry; outer native anchor exclusion is untouched.
+
+Initial qualification was **60/61, zero skips**, with a populated-history App assertion
+failing on Spanish at 390×500/light. A bounded two-run correction established that the
+existing live-order notice legitimately wraps from 64px to 82px. Timestamp height
+stays 16.5px and message headings stay 26px. The existing follower correctly advances
+scrollTop 1155→1173 as scrollHeight grows 1183→1201, keeping a zero bottom gap in the
+unchanged 28px viewport. A reader established by the real Ctrl+F3 action remains
+unfollowed at scrollTop 124 across the same transition.
+
+The fixture now distinguishes these contracts: exact coordinates for readers and
+exact bottom retention for followers, both with unchanged outer coordinates/native
+anchor exclusion. It preserves the parent's failure diagnostic and all six languages,
+light/dark, input/DOM/source/Copy/read and timestamp-layout checks. No production CSS,
+content, owner or scrolling algorithm change was warranted by this evidence.
+Final bounded verification is **61/61, zero skips**, with strict TypeScript/build and
+whitespace passing; an independent parent run also passed all 61 tests and the build,
+accepting this bounded presentation/correction scope. Both original failures
+and the parent's reproduction remain retained in `tmp/time-localization-20260927/`.
+See `CORRECTION.md` there for causal measurements, exact commands and scope limits.

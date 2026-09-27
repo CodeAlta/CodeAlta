@@ -3,6 +3,7 @@ import { AppIcon } from "./AppIcon";
 import { MarkdownContent } from "./MarkdownContent";
 import { writeMarkdown, type TimelineItem } from "./timeline";
 import { useShellLanguage } from "./shellLanguage";
+import { timelineTime } from "./sessionTime";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
@@ -10,7 +11,8 @@ const previewLength = 240;
 const detailLabels = Object.freeze(["Details", "File change record details", "Prompt details", "Usage details", "Model details", "Command and result", "Tool details"] as const);
 
 export function TimelineMessage({ item }: { item: TimelineItem }) {
-  const { t } = useShellLanguage();
+  const { t, locale } = useShellLanguage();
+  const timestamp = timelineTime(item.timestamp, locale);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [wrapDetails, setWrapDetails] = useState(true);
   const [disclosure, setDisclosure] = useState<{ source: string; expanded: boolean } | null>(null);
@@ -72,7 +74,7 @@ export function TimelineMessage({ item }: { item: TimelineItem }) {
         <span className="message-actions">
           {item.copyMarkdown && <button type="button" className={`copy-markdown copy-${copyState}`} onClick={() => void copy()}
             aria-label={copyLabel} title={copyLabel}><AppIcon name={copyState === "copied" ? "checked" : copyState === "failed" ? "error" : "copy"} size={15} /><span className="sr-only" aria-live="polite">{copyState === "idle" ? "" : copyLabel}</span></button>}
-          <time>{formatTimestamp(item.timestamp)}</time>
+          <time title={timestamp.title} dateTime={timestamp.dateTime}>{timestamp.label}</time>
         </span>
       </div>
       {item.summary && (item.summaryIsCode ? <code className="timeline-primary-code">{item.summary}</code> : <p className="timeline-summary">{item.summary}</p>)}
@@ -108,9 +110,4 @@ function plainTextPreview(source: string): string {
   const last = source.charCodeAt(previewLength - 1);
   const end = last >= 0xd800 && last <= 0xdbff ? previewLength - 1 : previewLength;
   return source.slice(0, end);
-}
-
-function formatTimestamp(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? value : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }

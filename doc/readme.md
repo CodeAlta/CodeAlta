@@ -19,6 +19,11 @@ Static About/log/reference presentation and its native-modal lifetime publicatio
 correction have scoped independent acceptance, with the split-layout process-exit gap
 retained. Advanced-session/retained-action/archived recovery presentation has bounded
 independent acceptance; see the localization evidence and literal-diagnostic boundary linked there.
+Selected-language relative session times and absolute timeline dates are implemented
+and independently accepted within bounded tests. The narrow App locale-switch check now tests
+reader-position retention separately from follow-to-bottom after legitimate translated
+notice wrapping; bounded verification passes. Exact source tooltips and literal recorded-date/Copy boundaries are documented
+in the same localization guide.
 See [short-window composer layout](responsive-composer.md) for the scroll policy,
 retained-owner guarantees and responsive validation scope.
 

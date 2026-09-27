@@ -291,8 +291,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .message-heading { min-height: 22px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .message-heading > span:first-child { min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: 7px; }
 .message-heading small { color: var(--muted); font-size: 10px; }
-.message-heading time { color: var(--muted); font-size: 11px; }
-.message-actions { display: flex; align-items: center; gap: 8px; }
+.message-heading time { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.message-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .copy-markdown { opacity: 0; pointer-events: none; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--panel-2); cursor: pointer; transition: opacity .12s ease, color .12s ease; }
 .timeline-message:hover .copy-markdown, .timeline-message:focus-within .copy-markdown { opacity: 1; pointer-events: auto; }
 .copy-markdown:hover { color: var(--text); }
