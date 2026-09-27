@@ -83,7 +83,6 @@ import { isSessionContextKey, restoreSessionMenuFocus, sessionActionAccess, type
 import { projectRailProjection, type ProjectSort } from "./projectRail";
 import { ProjectRailRows } from "./ProjectRailRows";
 import { parseIdeWidth, persistIdeWidth, resizeIdeWidth } from "./ideWidth";
-import { ProjectRailToggle } from "./ProjectRailToggle";
 import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./projectRailVisibility";
 import { useWindowPreferences } from "./windowPreferences";
 import { GeneralSettings } from "./GeneralSettings";
@@ -225,7 +224,7 @@ function App() {
   function setSearch(value: string) { invalidateCreation(); writeSearch(value); }
   const [projectFilter, setProjectFilter] = useState("");
   const { projectSort, setProjectSort, theme, setTheme, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount } = useWindowPreferences();
-  const [showAllSessions, setShowAllSessions] = useState(false);
+  const [sessionExpansion, setSessionExpansion] = useState<{ projectId: string | null; search: string; extra: number } | null>(null);
   const [notesVisible, setNotesVisible] = useState(false);
   const [notesHeight, setNotesHeight] = useState(() => restoreNotesHeight(() => localStorage.getItem(notesHeightKey)));
   const [historyNotes, setHistoryNotes] = useState<{ sessionId: string | null; markdown: string }>({ sessionId: null, markdown: "" });
@@ -592,7 +591,9 @@ function App() {
 
   const sessions = snapshot ? sessionsForProject(snapshot, projectId) : [];
   const loadedSessionRows = snapshot ? sessionHierarchy(sessions, snapshot.sessions, search, projectId) : [];
-  const visibleSessionRows = showAllSessions ? loadedSessionRows : limitSessionHierarchy(loadedSessionRows, recentSessionCount, sessionId);
+  useEffect(() => { setSessionExpansion(null); }, [projectId, search]);
+  const extraSessions = sessionExpansion?.projectId === projectId && sessionExpansion.search === search ? sessionExpansion.extra : 0;
+  const visibleSessionRows = limitSessionHierarchy(loadedSessionRows, recentSessionCount + extraSessions, sessionId);
   const visibleSessions = visibleSessionRows.map(row => row.session);
   const selectedSession = snapshot && tabs.active?.sessionId === sessionId && !resolveSessionTab(snapshot, tabs.active)
     ? undefined : snapshot?.sessions.find(value => value.id === sessionId);
@@ -1352,11 +1353,7 @@ function App() {
   return <ShellLanguageContext.Provider value={language}><div className="app-shell ide-shell">
     <header className="topbar">
       <div className="brand"><span className="brand-mark">A</span><span>CodeAlta</span><small>{demoMode ? "interactive preview" : "desktop"}</small>
-        {view === "workspace" && <ProjectRailToggle expanded={railVisible} onToggle={() => { setIdeWidth(value => ({ ...value, full: false })); toggleProjects(); }} buttonRef={projectRailToggle} />}
       </div>
-      <button type="button" className="icon-button timeline-width-toggle" aria-label={t(ideWidth.full ? "Restore Explorer width" : "Use full content width")}
-        title={t(ideWidth.full ? "Restore Explorer width" : "Use full content width")} aria-pressed={ideWidth.full}
-        onClick={() => setIdeWidth(value => ({ ...value, full: !value.full }))}><AppIcon name={ideWidth.full ? "compact" : "expand"} size={16} /></button>
       {!widthSaved && <span role="status">{t("Width preference could not be saved; current layout stays available.")}</span>}
       <div className={`connection ${error ? "connection-error" : connected ? "connection-live" : "connection-readonly"}`}>
         <span className="connection-dot" />
@@ -1375,11 +1372,16 @@ function App() {
           "--session-pane-width": `${visibleSessionWidth}px`,
         } as CSSProperties}>
         <nav className="activity-rail" aria-label={t("Workspace navigation")}>
-          <button type="button" className="icon-button" aria-label={t("Explorer")} title={t("Explorer")} onClick={() => { setIdeWidth(value => ({ ...value, full: false })); toggleProjects(); }}><AppIcon name="file" size={18} /></button>
+          <button ref={projectRailToggle} type="button" className="icon-button" aria-label={t("Explorer")} title={t("Explorer")} aria-expanded={railVisible} aria-controls="project-rail" onClick={() => { setIdeWidth(value => ({ ...value, full: false })); toggleProjects(); }}><AppIcon name="folder" size={18} /></button>
+          <button type="button" className="icon-button timeline-width-toggle" aria-label={t(ideWidth.full ? "Restore Explorer width" : "Use full content width")}
+            title={t(ideWidth.full ? "Restore Explorer width" : "Use full content width")} aria-pressed={ideWidth.full}
+            onClick={() => setIdeWidth(value => ({ ...value, full: !value.full }))}><AppIcon name={ideWidth.full ? "compact" : "expand"} size={16} /></button>
+          <button type="button" className="icon-button" aria-label={t("Alta notes")} title={t("Alta notes")} aria-pressed={notesVisible} onClick={() => { setNotesVisible(value => !value); if (!railVisible) { setIdeWidth(value => ({ ...value, full: false })); toggleProjects(); } }}><AppIcon name="notes" size={18} /></button>
           <button type="button" className="icon-button" aria-label={t("Open command palette")} aria-haspopup="dialog" title={`${t("Open command palette")} (Ctrl+P)`} onClick={openPalette}><AppIcon name="search" size={18} /></button>
           <button type="button" className="icon-button activity-settings" aria-label={t("Settings & extensions")} title={t("Settings & extensions")} onClick={() => navigate("appearance")}><AppIcon name="settings" size={18} /></button>
         </nav>
-        <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}>
+        <SessionContentLayout sessionWidth={ideWidth.width} narrow={narrow} sessionsHidden={!railVisible}
+          projects={sessions => <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}>
           <div className="panel-title"><span>{t("Projects")}</span><span><button type="button" className="rail-action" aria-label={`${t("Open project")} (Ctrl+O)`} title={`${t("Open project")} (Ctrl+O)`} onClick={() => setDialog("project")}>＋</button><span className="count">{snapshot?.projects.length ?? 0}</span></span></div>
           {workspaceState.kind === "loading" && <LoadingRows />}
           {workspaceState.kind === "unconfigured" && <div className="sidebar-empty">{t("No catalog configured. See the launch instructions below.")}</div>}
@@ -1396,12 +1398,12 @@ function App() {
                 onClick={() => setDialog("archive")}>{t(selectedProject?.archived ? "Unarchive project…" : "Archive project…")}</button>
             </div></details>
           </div>}
-          {snapshot && projectListing?.evidenceNotice && <p className="project-evidence" role="status">{projectListing.evidenceNotice}</p>}
+          {snapshot && projectListing?.evidenceNotice && <details className="navigator-evidence"><summary title={projectListing.evidenceNotice} aria-label={t("Details")}><AppIcon name="info" size={14} /></summary><p>{projectListing.evidenceNotice}</p></details>}
           {snapshot && projectListing?.projects.length === 0 && <p className="sidebar-empty" role="status">
             {t(projectFilter.trim() ? "No matching projects. Clear the filter to show them again." : "No projects in this snapshot.")}
             {projectId !== null && ` ${t("The selected project and session remain open.")}`}
           </p>}
-          {snapshot && <ProjectRailRows projects={projectListing?.projects ?? []} selectedId={projectId} onSelect={selectProject}
+          {snapshot && <ProjectRailRows projects={projectListing?.projects ?? []} selectedId={projectId} onSelect={selectProject} children={sessions}
             canRename={owned} renameBusy={projectRenameBusy || !mutation?.capability.canMutate()} onRename={() => void beginProjectRename()}
             actions={{ current: () => ({ ...currentProjectDetailsContext(),
               active: creationAlive.current && currentView.current === "workspace" && !settingsVisible.current && !!projectRail.current && !projectRail.current.hidden,
@@ -1425,9 +1427,12 @@ function App() {
             </div>}
           {projectRenameNotice && <p role="alert" className="notice error-text">{workflowNotice(language.locale, projectRenameNotice)}</p>}
           {projectRenameLocked && <button type="button" className="quiet-button" onClick={() => void refreshProjectRename()}>{t("Refresh project name (no retry)")}</button>}
-        </aside>
-
-        <SessionContentLayout sessionWidth={ideWidth.width} narrow={narrow} sessionsHidden={!railVisible}
+          {notesVisible && <NotesPanel epoch={owned ? status?.hostEpoch : undefined} sessionId={sessionId}
+            reader={owned ? notesReader : undefined} capability={owned ? mutation?.capability : undefined}
+            fallbackMarkdown={historyNotes.sessionId === sessionId ? historyNotes.markdown : ""} onClose={() => setNotesVisible(false)}
+            preferredHeight={notesHeight} onResize={delta => setNotesHeight(height => resizeNotesHeight(height, -delta))}
+            onReset={() => setNotesHeight(defaultNotesHeight)} onCleared={target => { if (target === sessionId) setHistoryNotes({ sessionId: target, markdown: "" }); }} />}
+        </aside>}
           splitter={<PaneSplitter className="session-splitter" label={t("Resize Explorer")} value={ideWidth.width} hidden={narrow || !railVisible}
             onResize={delta => setIdeWidth(value => resizeIdeWidth(value, delta))} onReset={() => setIdeWidth({ width: 272, full: false })} />}
           sessions={<aside className="session-rail" aria-label={t("Sessions")} ref={sessionRail} hidden={!railVisible}>
@@ -1460,12 +1465,12 @@ function App() {
             <button type="button" className="quiet-button" onClick={() => void refreshDeletedSession()}>{t("Refresh session list")}</button>
           </div>}
           {!owned && <p className="muted-text">{t("Session creation requires an owned host.")}</p>}
-          <button type="button" className="browse-sessions-button" disabled={!snapshot} onClick={openSessionBrowser} title={`${t("Browse saved sessions")} (Ctrl+Alt+B ${t("outside text")})`}>{t("Browse saved sessions")}</button>
+          <div className="session-browser-tools"><button type="button" className="icon-button browse-sessions-button" aria-label={t("Browse saved sessions")} disabled={!snapshot} onClick={openSessionBrowser} title={`${t("Browse saved sessions")} (Ctrl+Alt+B ${t("outside text")})`}><AppIcon name="history" size={14} /></button>
           {batchDeletionState.phase !== "idle" && <p role="status">Batch deletion: {batchDeletionState.phase}. {batchDeletionState.items.filter(item => item.outcome === "deleted").length} confirmed deleted; {batchDeletionState.items.filter(item => item.outcome === "uncertain").length} uncertain. Single deletion is blocked. Reopen Browse saved sessions for the retained exact-target report.</p>}
-          <small>{t("{visible} / {loaded} loaded matches · saved-update tree order, not last activity. Limit {limit}; active session and ancestors retained.", { visible: visibleSessionRows.length, loaded: loadedSessionRows.length, limit: recentSessionCount })}</small>
-          <button type="button" onClick={() => setShowAllSessions(value => !value)}>{t(showAllSessions ? "Use recent session limit" : "Show all loaded sessions")}</button>
+          <span className="session-count" title={t("{visible} / {loaded} loaded matches · saved-update tree order, not last activity. Limit {limit}; active session and ancestors retained.", { visible: visibleSessionRows.length, loaded: loadedSessionRows.length, limit: recentSessionCount })}>{visibleSessionRows.length}/{loadedSessionRows.length}</span>
+          </div>
           <label className="search"><AppIcon name="search" size={14} /><input ref={searchInput} value={search} onChange={event => setSearch(event.target.value)} placeholder={t("Search sessions")} aria-label={t("Search sessions")} /></label>
-          {notice && <p role="status" className="notice">{notice}</p>}
+          {notice && <details className="navigator-evidence"><summary aria-label={t("Details")} title={notice}><AppIcon name="info" size={14} /></summary><p>{notice}</p></details>}
           <div className="session-list">
             {visibleSessionRows.map(({ session, depth, diagnostic, tooltip }, index) => {
               const menu = activeMenu?.id === session.id ? activeMenu : null;
@@ -1491,7 +1496,7 @@ function App() {
               <button type="button" aria-pressed={sessionId === session.id} aria-describedby={`session-tooltip-${index}`} title={tooltip}
                 style={{ paddingLeft: 11 + Math.min(depth, 8) * 12 }}
                 onClick={() => { setMenuTarget(null); focusAction.current = null; selectedSessionId.current = session.id; setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); }}>
-                <span className="session-title">{depth > 0 && <span aria-hidden="true">↳ </span>}{diagnostic && <span aria-hidden="true">⚠ </span>}{session.title}</span>
+                <AppIcon name="assistant" size={13} /><span className="session-title">{depth > 0 && <span aria-hidden="true">↳ </span>}{diagnostic && <span aria-hidden="true">⚠ </span>}{session.title}</span>
                 <SessionDraftBadge active={draftIndicators.visible(session.id, sessionId)} />
                 <span className="session-meta"><span>{session.providerKey ?? t("No provider")}</span><SessionTime value={session.updatedAt} now={clock} /></span>
               </button>
@@ -1523,13 +1528,11 @@ function App() {
             </div>;
             })}
             {snapshot && visibleSessions.length === 0 && <div className="sidebar-empty">{t(search ? "No matching sessions." : "No sessions in this project.")}</div>}
+            <div className="session-list-disclosure">
+              {visibleSessionRows.length < loadedSessionRows.length && <button type="button" className="quiet-button" onClick={() => setSessionExpansion({ projectId, search, extra: extraSessions + recentSessionCount })}>{t("Show more…")} <span className="muted-text">({loadedSessionRows.length - visibleSessionRows.length})</span></button>}
+              {extraSessions > 0 && <button type="button" className="quiet-button" onClick={() => setSessionExpansion(null)}>{t("Show fewer")}</button>}
+            </div>
           </div>
-          {notesVisible && <NotesPanel epoch={owned ? status?.hostEpoch : undefined} sessionId={sessionId}
-            reader={owned ? notesReader : undefined} capability={owned ? mutation?.capability : undefined}
-            fallbackMarkdown={historyNotes.sessionId === sessionId ? historyNotes.markdown : ""} onClose={() => setNotesVisible(false)}
-            preferredHeight={notesHeight} onResize={delta => setNotesHeight(height => resizeNotesHeight(height, -delta))}
-            onReset={() => setNotesHeight(defaultNotesHeight)} onCleared={target => { if (target === sessionId) setHistoryNotes({ sessionId: target, markdown: "" }); }} />}
-          {!notesVisible && <button type="button" className="quiet-button icon-label-button show-notes" onClick={() => setNotesVisible(true)}><AppIcon name="notes" size={14} />Show Alta notes</button>}
         </aside>}
           content={<ProjectReferenceContext.Provider value={owned && mutation?.capability.canMutate() && !settingsOpen && selectedProject && !selectedProject.archived
             && snapshot && (sessionId === null || !!selectedTab(snapshot, projectId, sessionId))
@@ -1804,6 +1807,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   const { t, locale: languageLocale } = useShellLanguage();
   const [infoOpen, setInfoOpen] = useState(false);
   const infoActive = useRef(false);
+  const askRefresh = useRef<(() => void) | null>(null);
   const [infoFocusRestoration] = useState(createPaletteFocusRestoration);
   useEffect(() => () => infoFocusRestoration.cancel(), [infoFocusRestoration]);
   function openInfo() {
@@ -1886,9 +1890,11 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   const archivedScope = archivedProjectScope(snapshot, selectedProjectId);
   const ownedHost = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
   const ownedSession = ownedHost && !archivedScope;
-  const infoControl = <button ref={infoTrigger} type="button" className="composer-icon-button session-info-trigger"
+  const infoControl = <><button ref={infoTrigger} type="button" className="composer-icon-button session-info-trigger"
     aria-label={t("Session info")} title={`${t("Session info")} (Ctrl+G, Ctrl+T)`} aria-haspopup="dialog" aria-expanded={infoOpen}
-    onClick={openInfo}><AppIcon name="info" size={16} /></button>;
+    onClick={openInfo}><AppIcon name="info" size={16} /></button>
+    {ownedSession && status?.ownedAsksEnabled && <button type="button" className="composer-icon-button" aria-label={t("Refresh asks")} title={t("Refresh asks")}
+      onClick={() => { if (infoLifetime.current() && !document.querySelector('dialog[open]')) askRefresh.current?.(); }}><AppIcon name="question" size={16} /></button>}</>;
   return <div className="session-workspace" ref={workspaceElement}>
     <header className="session-header">
       <div><span className="eyebrow">Session</span><h1 title={session.title}>{session.title}</h1></div>
@@ -1917,7 +1923,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
         {ownedSession && status?.hostEpoch
         ? <>
           <LiveSessionPanel store={display} hostEpoch={status.hostEpoch} sessionId={session.id} capability={mutation!.capability} />
-          {status.ownedAsksEnabled && <AskPanel epoch={status.hostEpoch} sessionId={session.id} actions={askActions} capability={mutation!.capability} />}
+          {status.ownedAsksEnabled && <AskPanel epoch={status.hostEpoch} sessionId={session.id} actions={askActions} capability={mutation!.capability} refreshTrigger={askRefresh} />}
           {status.ownedUserInputEnabled && <UserInputPanel epoch={status.hostEpoch} sessionId={session.id} reviewer={inputReviewer} capability={mutation!.capability}
             canReview={() => infoLifetime.current()} />}
         </>

@@ -706,9 +706,9 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
   .session-content-top-size { height: max(180px, 40vh); }
 }
 
-/* IDE presentation: stable slots, one Explorer, no side gutters when collapsed. */
+/* IDE presentation: stable workspace slot, one hierarchical Explorer. */
 .ide-shell .topbar { min-height: 34px; padding: 3px 10px; }
-.ide-shell .workspace-shell { position: relative; grid-template-columns: 40px var(--explorer-width, 272px) 8px minmax(0, 1fr); grid-template-rows: minmax(120px, 32%) minmax(0, 1fr); grid-template-areas: "activity projects explorer-resize content" "activity sessions explorer-resize content"; height: 100%; }
+.ide-shell .workspace-shell { position: relative; grid-template-columns: 36px var(--explorer-width, 272px) 5px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); grid-template-areas: "activity sessions explorer-resize content"; height: 100%; }
 .ide-shell .workspace-shell:not(.project-rail-open) { grid-template-columns: 40px 0 0 minmax(0, 1fr); }
 .ide-shell .activity-rail { grid-area: activity; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 2px; border-right: 1px solid var(--line); background: var(--panel); }
 .ide-shell .activity-settings { margin-top: auto; }
@@ -741,13 +741,13 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .session-header { padding: 5px 12px; min-height: 36px; }
 .ide-shell .session-header h1 { font-size: 15px; }
 .ide-shell .composer-region { max-width: none; padding: 4px 8px; }
-.ide-shell .owned-session, .ide-shell .catalog-composer { position: relative; padding: 22px 6px 3px; }
+.ide-shell .owned-session, .ide-shell .catalog-composer { position: relative; padding: 4px 6px; }
 .ide-shell .composer-toolbar { flex-wrap: nowrap; align-items: center; margin-top: 2px; }
 .ide-shell .owned-session .prompt-options { margin: 0; border: 0; background: transparent; }
 .ide-shell .session-workspace > .composer-region > .owned-session { margin-top: 0; }
 .ide-shell .prompt-options { display: flex; flex-wrap: nowrap; gap: 4px; min-width: 0; flex: 1; overflow-x: auto; }
 .ide-shell .prompt-options label { display: flex; align-items: center; min-width: 0; gap: 3px; }
-.ide-shell .prompt-options label > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.ide-shell .prompt-options label > span { font-size: 10px; color: var(--muted); white-space: nowrap; }
 .ide-shell .prompt-options select { min-width: 64px; max-width: 140px; height: 28px; padding: 2px 4px; }
 .ide-shell .current-provider { flex: 0 1 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; align-self: center; font-size: 11px; }
 .ide-shell .composer-toolbar .history-controls { flex-wrap: nowrap; gap: 4px; }
@@ -756,17 +756,128 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .composer-reference-help, .ide-shell .composer-attachments-menu, .ide-shell .composer-selection-evidence, .ide-shell .reference-metadata-disclosure { font-size: 10px; }
 .ide-shell .composer-reference-help { position: absolute; top: 2px; left: 8px; }
 .ide-shell .composer-attachments-menu { position: absolute; top: 2px; left: 38px; }
-.ide-shell .composer-selection-evidence { position: absolute; top: 2px; right: 8px; }
-.ide-shell .reference-metadata-disclosure { position: absolute; top: 2px; left: 68px; }
+.ide-shell .composer-selection-evidence { position: static; }
+.ide-shell .reference-metadata-disclosure { position: static; align-self: flex-end; }
 .ide-shell .composer-reference-help[open], .ide-shell .composer-attachments-menu[open], .ide-shell .composer-selection-evidence[open], .ide-shell .reference-metadata-disclosure[open] { z-index: 21; background: var(--panel); border: 1px solid var(--line); max-width: min(440px, 80vw); max-height: 40vh; overflow: auto; padding: 5px; }
 .ide-shell .owned-session .prompt-input, .ide-shell .catalog-composer .prompt-input { min-height: 40px; padding: 6px 8px; }
 .ide-shell .advanced-session-controls { margin-top: 2px; font-size: 10px; }
 .ide-shell .composer-notice { margin: 2px 0; }
 @media (max-width: 875px) {
   .ide-shell .workspace-shell, .ide-shell .workspace-shell:not(.project-rail-open) { grid-template-columns: 40px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); grid-template-areas: "activity content"; height: 100%; }
-  .ide-shell .project-rail { position: absolute; z-index: 30; top: 0; left: 40px; width: min(320px, calc(100% - 40px)); height: 35%; background: var(--panel); }
-  .ide-shell .session-content-rail-slot { position: absolute; z-index: 30; top: 35%; bottom: 0; height: auto; left: 40px; width: min(320px, calc(100% - 40px)); background: var(--panel); }
-  .ide-shell .session-rail { height: 100%; }
+  .ide-shell .project-rail { position: static; width: 100%; height: 100%; background: var(--panel); }
+  .ide-shell .session-content-rail-slot { position: absolute; z-index: 30; top: 0; bottom: 0; height: auto; left: 40px; width: min(320px, calc(100% - 40px)); background: var(--panel); box-shadow: var(--shadow); }
+  .ide-shell .session-rail { height: auto; }
   .ide-shell .prompt-options { max-width: calc(100vw - 155px); }
   .ide-shell .brand small, .ide-shell .connection { font-size: 10px; }
+}
+
+/* Public FlexLayout theme variables inherit the selected application palette. */
+.ide-shell {
+  --flexlayout-color-text: var(--text); --flexlayout-color-background: var(--bg);
+  --flexlayout-color-base: var(--panel); --flexlayout-color-1: var(--panel);
+  --flexlayout-color-2: var(--panel-2); --flexlayout-color-3: var(--panel-3);
+  --flexlayout-color-4: var(--line); --flexlayout-color-5: var(--line-strong); --flexlayout-color-6: var(--line-strong);
+  --flexlayout-color-tab-selected: var(--text); --flexlayout-color-tab-selected-background: var(--panel-2);
+  --flexlayout-color-tab-unselected: var(--muted); --flexlayout-color-tab-unselected-background: var(--panel);
+  --flexlayout-color-tabset-background: var(--panel); --flexlayout-color-tabset-background-selected: var(--panel);
+  --flexlayout-color-tab-content: var(--bg); --flexlayout-color-icon: var(--muted);
+  --flexlayout-color-focus: var(--accent); --flexlayout-color-overflow: var(--muted);
+  --flexlayout-font-size: 12px;
+}
+.ide-shell .flexlayout__tab_button { padding: 6px 9px; border-right: 1px solid var(--line); }
+.ide-shell .flexlayout__tab_button--selected { box-shadow: inset 0 2px var(--accent); }
+.ide-shell .draft-tab-icon { color: var(--accent); }
+.ide-shell .topbar { min-height: 30px; height: 30px; font-size: 12px; }
+.ide-shell .brand-mark { width: 22px; height: 22px; border-radius: 6px; font-size: 14px; }
+.ide-shell .project-rail { display: flex; flex-direction: column; height: 100%; padding: 4px; }
+.ide-shell .project-list { flex: 1 1 auto; overflow-y: auto; min-height: 0; padding: 0; }
+.ide-shell .nav-list > li { margin: 0; }
+.ide-shell .project-action-row { display: flex; flex-wrap: wrap; align-items: center; }
+.ide-shell .project-action-row > button:first-child, .ide-shell .project-root-list > li > button {
+  display: flex; align-items: center; gap: 5px; min-width: 0; min-height: 28px; padding: 3px 5px; border-radius: 4px; flex: 1; width: auto; font-size: 12px;
+}
+.ide-shell .project-action-row strong, .ide-shell .project-root-list strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-chevron { transform: rotate(-90deg); flex-shrink: 0; color: var(--muted); }
+.tree-chevron.expanded { transform: none; }
+.ide-shell .project-actions-trigger { flex: 0 0 24px; width: 24px; min-height: 24px; height: 24px; opacity: 0; }
+.ide-shell .project-action-row:hover > .project-actions-trigger, .ide-shell .project-action-row:focus-within > .project-actions-trigger { opacity: 1; }
+.ide-shell .project-session-branch { padding: 0 0 4px 12px; border-left: 1px solid var(--line); margin-left: 11px; }
+.ide-shell .project-session-branch[hidden] { display: none; }
+.ide-shell .session-rail { padding: 0; overflow: visible; border: 0; background: transparent; }
+.ide-shell .session-rail-header { min-height: 24px; padding: 0; }
+.ide-shell .session-rail-header h2 { display: none; }
+.ide-shell .session-rail-actions { width: 100%; justify-content: flex-end; gap: 2px; }
+.ide-shell .session-browser-tools { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 10px; }
+.ide-shell .session-browser-tools .browse-sessions-button { width: 24px; }
+.ide-shell .session-rail .search { margin: 2px 0; padding: 3px 5px; border-radius: 4px; font-size: 11px; }
+.ide-shell .session-list { padding: 0; overflow: visible; min-height: 0; }
+.ide-shell .session-row { flex: initial; min-height: 27px; }
+.ide-shell .session-row > button:first-child { display: flex; align-items: center; gap: 5px; padding-block: 3px; border-radius: 4px; height: 27px; font-size: 11px; }
+.ide-shell .session-title { flex: 1; font-weight: 400; }
+.ide-shell .session-meta { flex-shrink: 0; font-size: 9px; }
+.ide-shell .session-meta > span:first-child { display: none; }
+.ide-shell .session-actions-trigger { width: 22px; height: 22px; flex-basis: 22px; opacity: 0; }
+.ide-shell .session-row:hover > .session-actions-trigger, .ide-shell .session-row:focus-within > .session-actions-trigger { opacity: 1; }
+.ide-shell .session-tooltip { display: none; }
+.ide-shell .navigator-evidence { flex: 0 0 auto; font-size: 10px; color: var(--muted); }
+.ide-shell .navigator-evidence summary { list-style: none; cursor: pointer; width: fit-content; padding: 2px 5px; }
+.ide-shell .navigator-evidence p { padding: 6px; background: var(--panel-2); }
+.ide-shell .notes-pane { flex-shrink: 0; min-height: 80px; border-top: 1px solid var(--line); margin-top: auto; }
+.ide-shell .session-header .eyebrow { display: none; }
+.ide-shell .session-header h1 { font-size: 12px; font-weight: 500; }
+.ide-shell .session-header { min-height: 28px; padding: 3px 10px; }
+.ide-shell .session-chips > span { border: 0; padding: 0; font-size: 10px; }
+.ide-shell .composer-toolbar { flex-wrap: wrap; gap: 4px; }
+.ide-shell .prompt-options { flex-wrap: wrap; overflow: visible; max-width: none; }
+.ide-shell .prompt-options > * { flex: initial; }
+.ide-shell .prompt-options label { padding: 0 3px; gap: 4px; }
+.ide-shell .prompt-options select { max-width: 180px; border: 0; background: transparent; font-size: 11px; }
+.ide-shell .current-provider { display: flex; align-items: center; gap: 4px; }
+.ide-shell .composer-toolbar .history-controls { margin-left: auto; flex-wrap: wrap; gap: 2px; }
+.ide-shell .composer-icon-button, .ide-shell .history-controls > button { width: 27px; height: 27px; padding: 4px; border-radius: 4px; }
+.ide-shell .composer-status-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; color: var(--muted); font-size: 11px; }
+.ide-shell .composer-status-line > span { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.ide-shell .composer-status-line > span:first-child { color: var(--green); }
+.ide-shell .composer-integrations { flex-wrap: wrap; justify-content: flex-end; }
+.ide-shell .owned-session { box-shadow: none !important; }
+.ide-shell .reference-metadata-disclosure > summary { list-style: none; cursor: pointer; }
+.ide-shell .messages { gap: 8px; }
+.ide-shell .timeline-message { position: relative; display: flex; gap: 7px; padding: 8px 10px; border: 1px solid var(--line); border-left: 2px solid var(--card-color, var(--muted)); border-radius: 6px; background: color-mix(in srgb, var(--card-color, var(--panel)) 3%, var(--bg)); margin-bottom: 8px; }
+.ide-shell .timeline-message .avatar { width: 18px; height: 22px; flex: 0 0 18px; border: 0; background: none; color: var(--card-color, var(--muted)); border-radius: 0; }
+.ide-shell .message-assistant { --card-color: #619ee8; }
+.ide-shell .message-user { --card-color: var(--accent); }
+.ide-shell .message-reasoning { --card-color: #aa92db; }
+.ide-shell .message-tool { --card-color: #d5a35e; }
+.ide-shell .message-file, .ide-shell .message-plan { --card-color: var(--green); }
+.ide-shell .message-error { --card-color: var(--red); }
+.ide-shell .message-status { --card-color: #6daeb1; }
+.ide-shell .message-heading { min-height: 22px; gap: 8px; margin-bottom: 4px; font-size: 12px; }
+.ide-shell .message-heading strong { color: var(--card-color, var(--text)); }
+.ide-shell .message-heading > span:first-child { display: inline-flex; flex-shrink: 0; gap: 6px; max-width: 45%; overflow: hidden; white-space: nowrap; }
+.ide-shell .message-heading small { font-size: 10px; }
+.ide-shell .message-actions { margin-left: auto; flex-shrink: 0; }
+.ide-shell .message-actions time { font-size: 9px; color: var(--muted); }
+.ide-shell .message-actions > button { opacity: 0; pointer-events: none; padding: 3px; width: 24px; height: 24px; border-radius: 4px; border: 0; background: var(--panel-2); color: var(--muted); }
+.ide-shell .timeline-message:hover .message-actions > button, .ide-shell .timeline-message:focus-within .message-actions > button { opacity: 1; pointer-events: auto; }
+.ide-shell .timeline-compact { padding-block: 4px; }
+.ide-shell .timeline-compact .message-heading { margin: 0; }
+.ide-shell .timeline-inline-preview { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 12px; }
+.ide-shell .message-body { min-width: 0; flex: 1; }
+.ide-shell .message-body .markdown-body { font-size: 13px; line-height: 1.6; }
+.ide-shell .timeline-message .muted-text { font-size: 10px; margin: 2px 0; }
+.timeline-details-dialog, .app-dialog.history-source { width: min(850px, calc(100vw - 32px)); max-height: 80dvh; overflow: auto; }
+.timeline-details-dialog header, .history-source header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.timeline-details-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50dvh; overflow: auto; }
+.ide-shell .session-list-disclosure { display: flex; gap: 6px; }
+.ide-shell .session-list-disclosure button { padding: 3px 6px; font-size: 11px; }
+.ide-shell .file-change-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: 10px; }
+.ide-shell .file-change-inspection ul { list-style: none; padding: 0; margin: 3px 0; }
+.ide-shell .file-change-inspection li { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ide-shell .file-change-inspection li > button { display: flex; align-items: center; gap: 5px; min-width: 0; padding: 3px; border: 0; background: transparent; }
+.ide-shell .file-change-inspection code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.ide-shell .file-change-kind, .ide-shell .file-counts { flex-shrink: 0; font-size: 10px; }
+.ide-shell .file-counts b { color: var(--green); font-weight: normal; }
+.ide-shell .file-counts em { color: var(--red); font-style: normal; }
+@media (hover: none) {
+  .ide-shell .message-actions > button, .ide-shell .session-actions-trigger, .ide-shell .project-actions-trigger { opacity: 1; pointer-events: auto; }
 }

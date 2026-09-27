@@ -117,6 +117,6 @@ export function ProjectDetailsEntry({ context, getCurrent }: { context: ProjectD
       if (!selected || !project || !savedProjectSelection(project, getCurrent().snapshot)) return;
       origin.current = event.currentTarget;
       setOpened({ context, project: { ...selected } });
-    }}>{t("Details")}</button>
+    }} aria-label={t("Details")} title={t("Details")}><AppIcon name="info" size={14} /></button>
     {visible && opened?.context.snapshot && <ProjectDetailsDialog project={opened.project} snapshot={opened.context.snapshot} isCurrent={isCurrent} onClose={close} />}</>;
 }

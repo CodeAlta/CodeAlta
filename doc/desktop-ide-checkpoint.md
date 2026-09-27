@@ -318,6 +318,30 @@ Neither native nor demo launch was performed during this checkpoint verification
 
 ## Verification and known gaps
 
+### Screenshot-driven compact presentation follow-up
+
+The Explorer now nests sessions beneath the selected project in an accordion rather than
+reserving separate vertical project/session panes. Project and session rows are compact single
+lines. Sessions initially use the configured recent-session limit (20 by default); **Show more…**
+adds another limit-sized batch of loaded matches, and **Show fewer** restores the initial limit.
+Project/search changes reset expansion. The active session and verified ancestors remain visible
+even beyond the limit. These controls do not load additional catalog data or change search scope.
+Notes and Explorer controls remain reachable from the activity rail when the Explorer is collapsed.
+
+Timeline status/reasoning/tool rows use compact summaries and category accents; assistant prose
+retains its body/long-message preview. Raw/source, tool and file inspections open dialogs rather
+than expanding raw data inline. Timeline action icons appear on hover or keyboard focus (always
+on non-hover devices). File counts still describe supplied hunks, not disk state or write success.
+The composer has a status/integrations line, icon-labeled selectors and directly available actions;
+idle attachment/ask disclosures no longer occupy space above the prompt. Ask refresh remains an
+icon action rather than an idle “Check asks” strip. FlexLayout inherits the application palette.
+
+This follow-up passed 86 focused frontend checks, strict TypeScript, the production frontend build
+and ordinary Release desktop build. Vite's existing large-bundle advisory remains. The compact
+presentation tests are included in the normal frontend test script. Static-render tests do not
+qualify mounted dialogs, focus restoration, geometry or light/dark visual appearance. No browser
+or native visual qualification, full suite, website work or live-data/provider run was performed.
+
 Prior checkpoint functional owner/unit checks passed for Explorer preferences, Reminder actions/duration/
 list observations, retained Queue evidence and Queue ownership, archived scope gates, composer
 height/keyboard logic, project references, Info observations/presentation, Usage and shortcuts.

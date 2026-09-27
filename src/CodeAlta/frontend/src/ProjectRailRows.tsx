@@ -1,8 +1,10 @@
 import type { WorkspaceProject } from "#neoastra";
+import { Fragment, useState, type ReactNode } from "react";
+import { AppIcon } from "./AppIcon";
 import { useShellLanguage } from "./shellLanguage";
 import { ProjectRowActions, type ProjectRowAuthority } from "./ProjectRowActions";
 
-export function ProjectRailRows({ projects, selectedId, onSelect, canRename, renameBusy, onRename, actions }: {
+export function ProjectRailRows({ projects, selectedId, onSelect, actions, children }: {
   projects: WorkspaceProject[];
   selectedId: string | null;
   onSelect: (id: string | null) => void;
@@ -10,20 +12,28 @@ export function ProjectRailRows({ projects, selectedId, onSelect, canRename, ren
   renameBusy: boolean;
   onRename: () => void;
   actions?: ProjectRowAuthority;
+  children?: ReactNode;
 }) {
   const { t } = useShellLanguage();
+  const [folded, setFolded] = useState<{ id: string | null } | null>(null);
+  const expanded = folded?.id !== selectedId;
+  function select(id: string | null) {
+    if (id === selectedId) setFolded(expanded ? { id } : null);
+    else { setFolded(null); onSelect(id); }
+  }
   return <>
     <ul id="project-list" className="nav-list project-list" aria-label={t("Projects")}>
-      {projects.map(project => <ProjectRowActions key={project.id} project={project} authority={actions}><button type="button" title={project.path} aria-pressed={selectedId === project.id} onClick={() => onSelect(project.id)}>
-        <span className="project-icon">{project.name.slice(0, 1).toUpperCase()}</span><span><strong>{project.name}</strong><small title={project.path}>{project.path}</small>{project.archived && <small>{t("Archived")}</small>}</span>
-      </button>{canRename && selectedId === project.id && !project.archived && <button type="button" className="quiet-button"
-        aria-label={t("Rename project {name} (F2)", { name: project.name })} disabled={renameBusy}
-        onClick={onRename}>{t("Rename project (F2)")}</button>}</ProjectRowActions>)}
+      {projects.map(project => <Fragment key={project.id}><ProjectRowActions project={project} authority={actions}><button type="button" title={`${project.name}\n${project.path}`} aria-pressed={selectedId === project.id}
+        aria-expanded={selectedId === project.id && expanded} onClick={() => select(project.id)}>
+        <AppIcon name="chevronDown" size={12} className={selectedId === project.id && expanded ? "tree-chevron expanded" : "tree-chevron"} />
+        <AppIcon name="folder" size={15} /><strong>{project.name}</strong>{project.archived && <small>{t("Archived")}</small>}
+      </button></ProjectRowActions>{selectedId === project.id && <li className="project-session-branch" hidden={!expanded}>{children}</li>}</Fragment>)}
     </ul>
     <ul className="nav-list project-root-list" aria-label={t("Other sessions")}>
-      <li><button type="button" aria-pressed={selectedId === null} onClick={() => onSelect(null)}>
-        <span className="project-icon muted">◇</span><span><strong>{t("Other sessions")}</strong><small>{t("No matching project")}</small></span>
+      <li><button type="button" aria-pressed={selectedId === null} aria-expanded={selectedId === null && expanded} onClick={() => select(null)}>
+        <AppIcon name="chevronDown" size={12} className={selectedId === null && expanded ? "tree-chevron expanded" : "tree-chevron"} /><AppIcon name="folder" size={15} /><strong>{t("Other sessions")}</strong>
       </button></li>
+      {selectedId === null && <li className="project-session-branch" hidden={!expanded}>{children}</li>}
     </ul>
   </>;
 }

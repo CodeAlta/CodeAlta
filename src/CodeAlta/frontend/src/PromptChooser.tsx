@@ -4,6 +4,7 @@ import { boundedModelChoices } from "./ModelChooser";
 import { changeSelection, validSelection } from "./sessionSelection";
 import { createPaletteFocusRestoration } from "./paletteActions";
 import { useShellLanguage } from "./shellLanguage";
+import { AppIcon } from "./AppIcon";
 
 // No truncation: a partial catalog must never become selection authority.
 export function boundedPromptChoices(choices: SessionChoicesResponse | undefined): choices is SessionChoicesResponse {
@@ -79,7 +80,7 @@ export function PromptChooser({ disabled, capture }: { disabled: boolean; captur
         focus.cancel(); composing.current = false;
         const value = { source, origin: event.currentTarget, valid: true };
         active.current = value; setDraft(source.selection); setQuery(""); setFailed(false); setReview(value);
-      }}>{t("Search agent prompts")}</button>
+      }} title={t("Search agent prompts")}><AppIcon name="prompt" size={16} /><span className="sr-only">{t("Search agent prompts")}</span></button>
     {review && <dialog ref={dialog} className="app-dialog model-chooser prompt-chooser" aria-modal="true" aria-labelledby="prompt-chooser-title"
       onClose={() => { if (active.current === review) close(); }} onCancel={event => { event.preventDefault(); if (!composing.current) close(); }}
       onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { flushSync } from "react-dom";
 import { sessionAsks } from "#neoastra";
 import { askWireHandle, captureAskAction, type AskHandle, type AskPage, type AskQuestion, type createAskActions } from "./sessionAsks";
@@ -16,7 +16,7 @@ const notices = Object.freeze({
   invalid: "The answer is invalid or exceeds the 8,192-character aggregate limit.",
 } satisfies Record<Notice, MessageKey>);
 
-type Props = { epoch: string; sessionId: string; actions: ReturnType<typeof createAskActions>; capability: ReturnType<typeof createMutationCapability> };
+type Props = { epoch: string; sessionId: string; actions: ReturnType<typeof createAskActions>; capability: ReturnType<typeof createMutationCapability>; refreshTrigger?: RefObject<(() => void) | null> };
 type Draft = { id: number; epoch: string; sessionId: string; source: string; handle: AskHandle;
   questions: readonly AskQuestion[]; text: Record<number, string>; choices: Record<number, number[]>; detached: boolean };
 type RetainedAction = ReturnType<ReturnType<typeof createAskActions>["forSession"]>[number];
@@ -28,7 +28,7 @@ function draftSource(epoch: string, sessionId: string, head: NonNullable<AskPage
   return JSON.stringify([epoch, sessionId, askWireHandle(head.handle), head.request.questions]);
 }
 
-export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
+export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger }: Props) {
   const { t } = useShellLanguage();
   const [pageState, setPage] = useState<{ epoch: string; sessionId: string; version: number; page: AskPage }>();
   const [readPending, setReadPending] = useState<{ epoch: string; sessionId: string; version: number } | null>(null);
@@ -162,8 +162,13 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
   };
   const retained = actions.forSession(sessionId).filter(entry => entry.request.expectedHostEpoch === epoch);
   const refresh = () => { const version = ++readVersion.current; setReadPending({ epoch, sessionId, version }); setRevision(value => value + 1); };
+  useLayoutEffect(() => {
+    if (!refreshTrigger) return;
+    refreshTrigger.current = refresh;
+    return () => { refreshTrigger.current = null; };
+  });
   const visible = recovery.length > 0 || showAskDetails(page, retained.length, notice === "failed", !canMutate);
-  if (!visible) return <button type="button" className="ask-refresh" onClick={refresh}>{t("Check asks")}</button>;
+  if (!visible) return null;
   return <section aria-label={t("Owned asks")}>
     <h3>{t("Pending asks")}</h3>
     {(!page?.head || notice === "failed" || notice === "invalid") && <p role={notice === "failed" || notice === "invalid" ? "alert" : "status"}>{t(notices[notice])}</p>}

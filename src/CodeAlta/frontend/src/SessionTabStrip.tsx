@@ -4,6 +4,7 @@ import { useShellLanguage } from "./shellLanguage";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { resolveSessionTab, type SessionTab, type SessionTabs as Tabs } from "./sessionTabs";
 import { RuntimeObservationBadge, type RuntimeObservationControls } from "./RuntimeObservation";
+import { AppIcon } from "./AppIcon";
 import { createSessionTabModel, draftTabId, ownsSessionTabContent, reconcileSessionTabModel, sessionNodeId, sessionTabAction } from "./sessionTabLayout";
 
 export function SessionTabLabel({ label, path, dirty }: { label: string; path: string | null; dirty: boolean }) {
@@ -66,6 +67,7 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
       onRenderTab={(node, values) => {
         const tab = state.open.find(value => sessionNodeId(value) === node.getId());
         values.content = <SessionTabLabel label={label(tab ?? null)} path={tab?.path ?? null} dirty={!!tab && dirty(tab.sessionId)} />;
+        if (node.getId() === draftTabId) values.leading = <AppIcon name="prompt" size={14} className="draft-tab-icon" />;
         if (tab) values.leading = <>
           {observations && <RuntimeObservationBadge controls={observations} tab={tab} compact />}
         </>;

@@ -74,7 +74,7 @@ test("filtered rail renders a fixed accessible Other sessions root, archived lab
     renameBusy: false, onRename: () => {},
   }));
   const archived = render("arch", "arch");
-  assert.match(archived, /title="\/full\/private\/path"/);
+  assert.match(archived, /title="Archived\n\/full\/private\/path"/);
   assert.match(archived, /Archived<\/small>/);
   assert.doesNotMatch(archived, /Rename project/);
   const hidden = render("no-match", "selected");

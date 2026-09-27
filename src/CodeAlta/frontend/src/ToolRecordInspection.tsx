@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { ToolRecord } from "./toolRecords";
 import { createPaletteFocusRestoration } from "./paletteActions";
 import { useShellLanguage } from "./shellLanguage";
+import { AppIcon } from "./AppIcon";
 
 // Parent keys this component by the complete bounded supplied record, not activity ID.
 export function ToolRecordInspection({ record, canInspect }: { record: ToolRecord; canInspect?: () => boolean }) {
@@ -43,7 +44,7 @@ export function ToolRecordInspection({ record, canInspect }: { record: ToolRecor
   }, [review]);
   useLayoutEffect(() => { if (review && (!allowed() || !(review.current?.() ?? true))) close(); });
   return <>
-    <button type="button" className="tool-record-trigger" aria-haspopup="dialog" aria-expanded={!!review} disabled={!allowed()}
+    <button type="button" className="tool-record-trigger" aria-label={t("Inspect supplied tool record")} title={t("Inspect supplied tool record")} aria-haspopup="dialog" aria-expanded={!!review} disabled={!allowed()}
       onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
       onClick={event => {
         if (event.defaultPrevented || !allowed() || active.current || !event.currentTarget.isConnected || event.currentTarget.closest("[inert]")
@@ -51,7 +52,7 @@ export function ToolRecordInspection({ record, canInspect }: { record: ToolRecor
         focus.cancel(); composing.current = false; setCopied(false); setRetired(false);
         const value = { origin: event.currentTarget, current: canInspect, valid: true };
         active.current = value; setReview(value);
-      }}>{t("Inspect supplied tool record")}</button>
+      }}><AppIcon name="tool" size={14} /></button>
     {review && <dialog ref={dialog} className="app-dialog tool-record-dialog" aria-modal="true" aria-labelledby={id}
       onClose={() => { if (active.current === review) close(); }} onCancel={event => { event.preventDefault(); if (!composing.current) close(); }}
       onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}

@@ -4,6 +4,8 @@ function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
   return Object.freeze(Object.fromEntries(Object.entries(rows).map(([key, row]) => [key, Object.freeze(row)]))) as Readonly<T>;
 }
 export const messages = dictionary({
+  "Prompt ready": ["Prompt listo", "Prompt prêt", "Prompt bereit", "入力できます", "提示词就绪"],
+  "Plugins": ["Complementos", "Extensions", "Plugins", "プラグイン", "插件"],
   "Full raw journal record": ["Registro completo sin procesar", "Enregistrement brut complet", "Vollständiger Roheintrag", "完全な生のジャーナル記録", "完整原始日志记录"],
   "Full raw record · UTF-8 JSON source": ["Registro completo · fuente JSON UTF-8", "Enregistrement complet · source JSON UTF-8", "Vollständiger Eintrag · UTF-8-JSON-Quelle", "完全な記録 · UTF-8 JSONソース", "完整记录 · UTF-8 JSON 源文"],
   "Close source": ["Cerrar fuente", "Fermer la source", "Quelle schließen", "ソースを閉じる", "关闭源文"],
@@ -795,6 +797,8 @@ export const messages = dictionary({
   "Back to session": ["Volver a la sesión", "Retour à la session", "Zurück zur Sitzung", "セッションに戻る", "返回会话"],
   "Use recent session limit": ["Limitar a sesiones recientes", "Limiter aux sessions récentes", "Begrenzung aktueller Sitzungen verwenden", "最近のセッション数で制限", "使用最近会话限制"],
   "Show all loaded sessions": ["Mostrar todas las sesiones cargadas", "Afficher toutes les sessions chargées", "Alle geladenen Sitzungen anzeigen", "読み込み済みセッションをすべて表示", "显示全部已加载会话"],
+  "Show more…": ["Mostrar más…", "Afficher plus…", "Mehr anzeigen…", "さらに表示…", "显示更多…"],
+  "Show fewer": ["Mostrar menos", "Afficher moins", "Weniger anzeigen", "表示を減らす", "收起"],
   "{count} session": ["{count} sesión", "{count} session", "{count} Sitzung", "{count} セッション", "{count} 个会话"],
   "{count} sessions": ["{count} sesiones", "{count} sessions", "{count} Sitzungen", "{count} セッション", "{count} 个会话"],
   "Resize projects": ["Cambiar tamaño de proyectos", "Redimensionner les projets", "Projektbereich vergrößern/verkleinern", "プロジェクト欄のサイズ変更", "调整项目栏大小"],

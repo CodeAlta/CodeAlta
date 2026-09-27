@@ -3,6 +3,7 @@ import { workspace, type HistoryRevision, type HistorySourceResponse } from "#ne
 import { loadHistorySource } from "./loadHistorySource";
 import { historyMessage } from "./history";
 import { useShellLanguage } from "./shellLanguage";
+import { AppIcon } from "./AppIcon";
 
 export type HistorySourceTarget = { revision: HistoryRevision; start: string; end: string };
 
@@ -15,13 +16,15 @@ export function HistorySource({ target, canInspect, onClose }: { target: History
   const [retired, setRetired] = useState(false);
   const [copied, setCopied] = useState(false);
   const lifetime = useRef(true);
-  const root = useRef<HTMLElement>(null);
+  const root = useRef<HTMLDialogElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const composing = useRef(false);
   const controller = useRef<AbortController | null>(null);
   const original = useRef(canInspect);
   const latest = useRef(canInspect); latest.current = canInspect;
   const current = () => lifetime.current && (original.current?.() ?? true) && (latest.current?.() ?? true)
     && !!root.current?.isConnected && !root.current.closest("[inert]")
-    && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]');
+    && !Array.from(document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]')).some(element => element !== root.current);
   function retire() { lifetime.current = false; controller.current?.abort(); setRetired(true); }
   function move(next: string) {
     if (!current() || busy) return;
@@ -29,9 +32,18 @@ export function HistorySource({ target, canInspect, onClose }: { target: History
   }
   useLayoutEffect(() => {
     lifetime.current = true;
-    const modal = (event: Event) => { if (event.target instanceof HTMLDialogElement) retire(); };
+    const element = root.current!;
+    const origin = document.activeElement;
+    if (!(original.current?.() ?? true)) { retire(); return; }
+    element.showModal(); closeButton.current?.focus();
+    const modal = (event: Event) => { if (event.target instanceof HTMLDialogElement && event.target !== element) retire(); };
     document.addEventListener("beforetoggle", modal, true);
-    return () => { lifetime.current = false; controller.current?.abort(); document.removeEventListener("beforetoggle", modal, true); };
+    return () => {
+      lifetime.current = false; controller.current?.abort(); document.removeEventListener("beforetoggle", modal, true);
+      if (element.open) element.close();
+      if (origin instanceof HTMLElement && origin.isConnected && !origin.closest('[inert], [hidden]')
+        && (original.current?.() ?? true) && (latest.current?.() ?? true) && !document.querySelector('dialog[open]')) origin.focus();
+    };
   }, []);
   useLayoutEffect(() => { if (lifetime.current && !current()) retire(); });
   useLayoutEffect(() => {
@@ -42,11 +54,14 @@ export function HistorySource({ target, canInspect, onClose }: { target: History
     void loadHistorySource(workspace.historySource, { ...target, offset }, abort.signal, current, value => { setPage(value); setBusy(false); });
     return () => abort.abort();
   }, [offset, target]);
-  return <section ref={root} className="history-source" aria-label={t("Full raw journal record")}
+  return <dialog ref={root} className="app-dialog history-source" aria-label={t("Full raw journal record")} onClose={onClose}
+    onCancel={event => { event.preventDefault(); if (!composing.current) { retire(); onClose(); } }}
+    onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
     onKeyDown={event => {
+      event.stopPropagation();
       if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault();
     }}>
-    <header><strong>{t("Full raw record · UTF-8 JSON source")}</strong> <button type="button" onClick={() => { retire(); onClose(); }}>{t("Close source")}</button></header>
+    <header><strong>{t("Full raw record · UTF-8 JSON source")}</strong> <button ref={closeButton} type="button" aria-label={t("Close source")} title={t("Close source")} onClick={() => { retire(); onClose(); }}><AppIcon name="close" size={18} /></button></header>
     <p>{t("One chunk at a time, at most 16 KiB. Copy copies only the displayed chunk.")}</p>
     <p>{t("Record bytes")}: {target.start}–{target.end}; {t("Chunk offset")}: {offset}</p>
     {retired && <p role="alert">{t("Source review expired. Close and reopen from the history row.")}</p>}
@@ -62,5 +77,5 @@ export function HistorySource({ target, canInspect, onClose }: { target: History
         if (current() && controller.current === read && !read.signal.aborted) setCopied(true);
       }, () => {});
     }}>{t(copied ? "Chunk copied" : "Copy chunk")}</button>
-  </section>;
+  </dialog>;
 }

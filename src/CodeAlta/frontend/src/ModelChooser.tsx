@@ -3,6 +3,7 @@ import type { SessionChoicesResponse, SessionSelection } from "#neoastra";
 import { changeSelection } from "./sessionSelection";
 import { createPaletteFocusRestoration } from "./paletteActions";
 import { useShellLanguage } from "./shellLanguage";
+import { AppIcon } from "./AppIcon";
 
 // Refuse oversized/malformed observations rather than silently offering a partial authority.
 export function boundedModelChoices(choices: SessionChoicesResponse | undefined): choices is SessionChoicesResponse {
@@ -77,7 +78,7 @@ export function ModelChooser({ disabled, capture }: { disabled: boolean; capture
         focus.cancel(); composing.current = false;
         const value = { source, origin: event.currentTarget, valid: true };
         active.current = value; setDraft(source.selection); setQuery(""); setFailed(false); setReview(value);
-      }}>{t("Search models")}</button>
+      }}><AppIcon name="search" size={16} /><span className="sr-only">{t("Search models")}</span></button>
     {review && <dialog ref={dialog} className="app-dialog model-chooser" aria-modal="true" aria-labelledby="model-chooser-title"
       onClose={() => { if (active.current === review) close(); }} onCancel={event => { event.preventDefault(); if (!composing.current) close(); }}
       onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
