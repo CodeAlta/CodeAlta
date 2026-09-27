@@ -14,6 +14,7 @@ import { AppIcon } from "./AppIcon";
 import { promptEditorHeight, showContextAction } from "./workspacePresentation";
 import { changeSelection, validSelection } from "./sessionSelection";
 import { ModelChooser, boundedModelChoices, type ModelChooserCapture } from "./ModelChooser";
+import { PromptChooser, boundedPromptChoices, promptChoicesSignature, type PromptChooserCapture } from "./PromptChooser";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
@@ -424,8 +425,36 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   const activeChoices = choices?.epoch === epoch && choices.sessionId === sessionId && choices.status === "ok" ? choices : undefined;
   const selected = pending?.request.selection ?? (activeChoices ? selection ?? activeChoices.current : null);
   const selectionDisabled = !activeChoices?.current || invalidEpoch || !!pending;
+  const storedPromptSelection = selections.current(epoch, sessionId);
+  // A refreshed catalog cannot silently replace an unavailable saved model/effort
+  // with observed defaults merely because the user intended to change a prompt.
+  const promptSelectionDisabled = selectionDisabled || !boundedPromptChoices(activeChoices) || !selected
+    || !validSelection(activeChoices, selected) || !!storedPromptSelection && storedPromptSelection !== selected;
   const chooserLatest = useRef({ activeChoices, selected, selectionDisabled, epoch, sessionId });
   chooserLatest.current = { activeChoices, selected, selectionDisabled, epoch, sessionId };
+  const promptScopeRevision = useRef(0);
+  useLayoutEffect(() => { promptScopeRevision.current++; }, [epoch, sessionId, projectId]);
+  function capturePromptChooser(): PromptChooserCapture | null {
+    if (promptSelectionDisabled || !activeChoices || !selected) return null;
+    const observed = activeChoices; const original = selected; const signature = promptChoicesSignature(observed);
+    const revision = selectionRevision.current; const input = inputRevision.current; const projectRevision = promptScopeRevision.current;
+    const lifetime = inputLifetime; const signal = scope.current?.signal;
+    const submissionRevision = submissions.getSnapshot(); const stored = selections.current(epoch, sessionId);
+    const available = () => !!signal && !signal.aborted && scope.current?.signal === signal
+      && (!lifetime || lifetime.current()) && capability.canMutate() && promptScopeRevision.current === projectRevision
+      && chooserLatest.current.epoch === epoch && chooserLatest.current.sessionId === sessionId;
+    const current = () => available() && !submissions.pending(sessionId) && submissions.getSnapshot() === submissionRevision
+      && !chooserLatest.current.selectionDisabled && chooserLatest.current.activeChoices === observed
+      && chooserLatest.current.selected === original && selectionRevision.current === revision && inputRevision.current === input
+      && selections.current(epoch, sessionId) === stored && (!stored || stored === original)
+      && boundedPromptChoices(observed) && promptChoicesSignature(observed) === signature;
+    return { choices: observed, selection: original, current, available, apply: next => {
+      if (!current() || next.providerKey !== original.providerKey || next.modelId !== original.modelId
+        || next.reasoningEffort !== original.reasoningEffort) return false;
+      const normalized = changeSelection(observed, original, "agentPromptId", next.agentPromptId);
+      return !!normalized && selections.set(epoch, sessionId, observed, normalized);
+    } };
+  }
   function captureModelChooser(): ModelChooserCapture | null {
     if (selectionDisabled || !activeChoices || !selected || !boundedModelChoices(activeChoices)) return null;
     const observed = activeChoices; const original = selected;
@@ -547,6 +576,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       </select></label>
     </div>
     <div className="history-controls">
+      <PromptChooser disabled={promptSelectionDisabled} capture={capturePromptChooser} />
       <ModelChooser disabled={selectionDisabled || !boundedModelChoices(activeChoices)} capture={captureModelChooser} />
       <span className="sr-only">{t("Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer")}</span>
       {infoControl}
@@ -585,6 +615,11 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       <button type="button" className={`send-button${cancellationPrimary ? "" : " primary-button"}`} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || captureSubmission(epoch, sessionId, text, "availability", images.length ? selected : null, null, images) === null)} onClick={submit}>{pending ? t("Retry exact request") : <><span>{t("Send")}</span><AppIcon name="send" size={14} /></>}</button>
     </div>
     </div>
+    <p className="composer-notice prompt-selection-observation">
+      {t("Observed prompt (choices snapshot, not live execution)")}: <code>{activeChoices?.current?.agentPromptId ?? t("Unknown")}</code>
+      {" · "}{t("Local next-Send prompt")}: <code>{(selection ?? activeChoices?.current)?.agentPromptId ?? t("Unknown")}</code>
+      {pending && <>{" · "}{t("Retained original Send prompt")}: <code>{pending.request.selection?.agentPromptId ?? t("Unknown")}</code></>}
+    </p>
     <span id="observed-run-cancellation-help" className="sr-only">{t("Targets a point-in-time observed run, not the original Send receipt. Cancellation signalled does not confirm run completion. Retained requests are only retried manually against their original target after the previous wait settles.")}</span>
     <span id="observed-steering-help" className="sr-only">{t("Uses current composer text and the point-in-time observed run. Admission is not run completion. Retained steering is reviewed or retried separately, never from this button.")}</span>
     <span id="observed-queue-help" className="sr-only">{t("Uses current editable composer text and the point-in-time observed attachment, including busy or draining attachments; never targets a run. Reservation does not prove host-only insertion, durability or execution. The composer draft is preserved. Retained queue requests are reviewed or retried separately, never from this button.")}</span>

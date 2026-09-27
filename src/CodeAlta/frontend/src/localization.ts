@@ -4,6 +4,12 @@ function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
   return Object.freeze(Object.fromEntries(Object.entries(rows).map(([key, row]) => [key, Object.freeze(row)]))) as Readonly<T>;
 }
 export const messages = dictionary({
+  "Next Send agent prompt selection": ["Selección de agente para el próximo envío", "Sélection de l’agent du prochain envoi", "Agentenauswahl für die nächste Sendung", "次の送信用エージェントプロンプト選択", "选择下次发送的代理提示词"],
+  "Search agent prompts": ["Buscar prompts de agente", "Rechercher des prompts d’agent", "Agentenprompts suchen", "エージェントプロンプトを検索", "搜索代理提示词"],
+  "No agent prompts match this search.": ["Ningún prompt de agente coincide.", "Aucun prompt d’agent ne correspond.", "Keine passenden Agentenprompts.", "一致するエージェントプロンプトはありません。", "没有匹配的代理提示词。"],
+  "Observed prompt (choices snapshot, not live execution)": ["Prompt observado (instantánea de opciones, no ejecución en vivo)", "Prompt observé (instantané des choix, pas l’exécution en direct)", "Beobachteter Prompt (Auswahlmomentaufnahme, keine Live-Ausführung)", "観測済みプロンプト（選択肢のスナップショット、ライブ実行ではありません）", "观测到的提示词（选项快照，并非实时执行状态）"],
+  "Local next-Send prompt": ["Prompt local del próximo envío", "Prompt local du prochain envoi", "Lokaler Prompt für nächste Sendung", "ローカルの次回送信プロンプト", "本地下次发送的提示词"],
+  "Retained original Send prompt": ["Prompt del envío original retenido", "Prompt de l’envoi original conservé", "Beibehaltener Prompt der ursprünglichen Sendung", "保持された元の送信プロンプト", "保留的原始发送提示词"],
   "Choose next Send model (Commands / Ctrl+P)": ["Elegir modelo del próximo envío (Comandos / Ctrl+P)", "Choisir le modèle du prochain envoi (Commandes / Ctrl+P)", "Modell für nächste Sendung wählen (Befehle / Ctrl+P)", "次の送信モデルを選択（コマンド / Ctrl+P）", "选择下次发送模型（命令 / Ctrl+P）"],
   "Cached session choices only. Apply changes only the next Send; Close discards edits.": ["Solo opciones de sesión en caché. Aplicar cambia solo el próximo envío; Cerrar descarta las ediciones.", "Choix de session en cache uniquement. Appliquer modifie seulement le prochain envoi ; Fermer abandonne les modifications.", "Nur zwischengespeicherte Sitzungsauswahl. Anwenden ändert nur die nächste Sendung; Schließen verwirft Änderungen.", "キャッシュ済みのセッション選択肢のみです。適用は次の送信のみを変更し、閉じると編集を破棄します。", "仅使用缓存的会话选项。应用仅更改下次发送；关闭将放弃编辑。"],
   "Supplied file records": ["Registros de archivos suministrados", "Enregistrements de fichiers fournis", "Gelieferte Dateieinträge", "提供されたファイル記録", "提供的文件记录"],

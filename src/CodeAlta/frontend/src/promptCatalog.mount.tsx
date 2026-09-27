@@ -27,7 +27,22 @@ const submissions = createOwnedSubmissions(async request => { sent.push(request)
 const selections = createNextSendSelectionStore(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value));
 const root = createRoot(document.getElementById("app")!);
 const fixture = {
-  reads, sent, choices, choicesReads: 0, hold: false, release: null as (() => void) | null,
+  reads, sent, choices, imageOwner: submissions.imageDrafts, choicesReads: 0, hold: false, release: null as (() => void) | null,
+  lastChoices: null as SessionChoicesResponse | null,
+  publish(promptId: string) {
+    const value = fixture.lastChoices!;
+    selections.set(value.epoch!, value.sessionId!, value, { ...value.current!, agentPromptId: promptId });
+  },
+  repeatSelection() {
+    const value = fixture.lastChoices!;
+    const current = selections.current(value.epoch!, value.sessionId!) ?? value.current!;
+    selections.set(value.epoch!, value.sessionId!, value, current);
+  },
+  selectRemovedModel() {
+    const value = { ...fixture.lastChoices!, models: [...fixture.lastChoices!.models,
+      { id: "removed", name: "Removed", efforts: ["Low"], imageInput: null }] };
+    selections.set(value.epoch!, value.sessionId!, value, { ...value.current!, modelId: "removed", reasoningEffort: "Low" });
+  },
   epoch: "e1" as string | null, sessionId: "one" as string | null, view: "prompts" as "prompts" | "composer",
   show(epoch: string | null) { fixture.epoch = epoch; fixture.view = "prompts"; render(); },
   session(id: string | null) { fixture.sessionId = id; render(); },
@@ -36,7 +51,8 @@ const fixture = {
   async readChoices(epoch: string, sessionId: string): Promise<SessionChoicesResponse> {
     fixture.choicesReads++;
     if (fixture.hold) { fixture.release = null; await new Promise<void>(resolve => { fixture.release = resolve; }); }
-    return { ...choices, epoch, sessionId };
+    fixture.lastChoices = { ...choices, epoch, sessionId };
+    return fixture.lastChoices;
   },
 };
 Object.assign(window, { promptFixture: fixture });

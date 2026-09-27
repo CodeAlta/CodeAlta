@@ -4,6 +4,7 @@
 .model-chooser-list button { display: grid; text-align: start; white-space: normal; overflow-wrap: anywhere; }
 .model-chooser-list button[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: -2px; }
 .model-chooser code, .model-chooser p { overflow-wrap: anywhere; }
+.prompt-selection-observation { overflow-wrap: anywhere; }
 .skills-inspection { min-width: 0; overflow-wrap: anywhere; }
 .skills-inspection label { display: block; margin-block: .75rem; }
 .skills-inspection select, .skills-inspection input { max-width: 100%; }

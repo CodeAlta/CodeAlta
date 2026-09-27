@@ -174,6 +174,106 @@ test("mounted prompt inventory to composer to captured Send rejects stale, pendi
     assert.equal(await wait("document.body.innerText.includes('Invalid prompt inventory')"), "ready");
     await languages();
     assert.equal(await evaluate("document.querySelector('.prompt-catalog-body')"), null);
+    // Cached prompt editing follows every original catalog scenario.
+    await evaluate("promptFixture.choices.prompts=[{id:'default',name:'Default'},{id:'plan',name:'Plan'}];promptFixture.session('chooser');promptFixture.leave()");
+    assert.equal(await wait("document.querySelector('select[aria-label=\"Agent prompt\"]')?.value==='default'"), "ready");
+    assert.equal(await evaluate("!!document.querySelector('#next-send-prompt-chooser:not(:disabled)')"), true,
+      "cached owned choices expose a deliberate prompt chooser without opening Settings");
+    await evaluate("window.promptReads=promptFixture.choicesReads;document.querySelector('#next-send-prompt-chooser').focus();document.querySelector('#next-send-prompt-chooser').click()");
+    assert.equal(await wait("document.querySelector('.prompt-chooser')?.open"), "ready");
+    assert.equal(await evaluate("document.activeElement===document.querySelector('.prompt-chooser input')"), true);
+    await evaluate("{const i=document.querySelector('.prompt-chooser input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(i,'pLaN');i.dispatchEvent(new Event('input',{bubbles:true}))}");
+    assert.equal(await wait("document.querySelectorAll('.prompt-chooser .model-chooser-list button').length===1"), "ready");
+    await evaluate("{const i=document.querySelector('.prompt-chooser input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(i,'.*');i.dispatchEvent(new Event('input',{bubbles:true}))}");
+    assert.equal(await wait("document.querySelector('.prompt-chooser').textContent.includes('No agent prompts match this search.')"), "ready");
+    await evaluate("{const i=document.querySelector('.prompt-chooser input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(i,'Plan');i.dispatchEvent(new Event('input',{bubbles:true}))}");
+    assert.equal(await wait("document.querySelectorAll('.prompt-chooser .model-chooser-list button').length===1"), "ready");
+    await evaluate("document.querySelector('.prompt-chooser .model-chooser-list button').click()");
+    assert.equal(await evaluate("document.querySelector('select[aria-label=\"Agent prompt\"]').value"), "default");
+    await evaluate("document.querySelector('.prompt-chooser header button').click()");
+    assert.equal(await wait("!document.querySelector('.prompt-chooser') && document.activeElement.id==='next-send-prompt-chooser'"), "ready");
+    for (const change of ["same-object", "newer-selection", "observed-current", "input", "modal", "own-modal"]) {
+      await evaluate("promptFixture.publish('default')");
+      await evaluate("document.querySelector('#next-send-prompt-chooser').click()");
+      assert.equal(await wait("document.querySelector('.prompt-chooser')?.open"), "ready");
+      await evaluate("document.querySelectorAll('.prompt-chooser .model-chooser-list button')[1].click();void(window.promptApply=document.querySelector('.prompt-chooser-apply'))");
+      if (change === "same-object") await evaluate("promptFixture.repeatSelection();promptFixture.repeatSelection()");
+      if (change === "newer-selection") await evaluate("promptFixture.publish('plan')");
+      if (change === "observed-current") await evaluate("promptFixture.lastChoices.current={...promptFixture.lastChoices.current,agentPromptId:'plan'}");
+      if (change === "input") await evaluate("{const i=document.querySelector('#session-prompt');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(i,'New draft');i.dispatchEvent(new Event('input',{bubbles:true}))}");
+      if (change === "modal") await evaluate("{const d=document.createElement('dialog');document.body.append(d);d.showModal();d.close();d.remove()}");
+      if (change === "own-modal") await evaluate("{const d=document.querySelector('.prompt-chooser');d.close();d.showModal();promptApply.click()}");
+      await evaluate("promptApply.click()");
+      if (change !== "own-modal") assert.equal(await wait("!!document.querySelector('.prompt-chooser [role=alert]')"), "ready", change);
+      assert.equal(await evaluate("JSON.parse(localStorage.getItem('codealta.desktop.selection.chooser')).agentPromptId"), change === "newer-selection" ? "plan" : "default", change);
+      await evaluate("document.querySelector('.prompt-chooser header button')?.click();promptFixture.lastChoices.current={...promptFixture.lastChoices.current,agentPromptId:'default'}");
+      assert.equal(await wait("!document.querySelector('.prompt-chooser')"), "ready");
+    }
+    await evaluate("document.querySelector('#next-send-prompt-chooser').click()");
+    assert.equal(await wait("document.querySelector('.prompt-chooser')?.open"), "ready");
+    await evaluate("document.querySelectorAll('.prompt-chooser .model-chooser-list button')[1].click()");
+    await evaluate("document.querySelector('.prompt-chooser-apply').click()");
+    assert.equal(await wait("!document.querySelector('.prompt-chooser') && document.querySelector('select[aria-label=\"Agent prompt\"]').value==='plan'"), "ready");
+    assert.equal(await evaluate("document.querySelector('.prompt-selection-observation').textContent.includes('default') && document.querySelector('.prompt-selection-observation').textContent.includes('plan')"), true);
+    assert.deepEqual(JSON.parse((await evaluate("localStorage.getItem('codealta.desktop.selection.chooser')"))!),
+      { providerKey: "beta", agentPromptId: "plan", modelId: "model", reasoningEffort: "High" });
+    assert.equal(await evaluate("promptFixture.choicesReads===promptReads"), true);
+    await evaluate("document.querySelector('.send-button').click()");
+    assert.equal(await wait("promptFixture.sent.length===2 && !document.querySelector('.send-button').disabled"), "ready");
+    assert.equal(await evaluate("document.querySelector('#next-send-prompt-chooser').disabled"), true, "uncertainty does not unlock prompt editing");
+    assert.deepEqual(JSON.parse((await evaluate("JSON.stringify(promptFixture.sent[1].selection)"))!),
+      { providerKey: "beta", agentPromptId: "plan", modelId: "model", reasoningEffort: "High" });
+    assert.equal(await evaluate("promptFixture.sent[1].text"), "New draft");
+    // A refreshed catalog omitting the stored model must not let prompt-only
+    // editing replace that model/effort with observed defaults.
+    await evaluate("promptFixture.session('removed-model')");
+    assert.equal(await wait("!!document.querySelector('#next-send-prompt-chooser:not(:disabled)')"), "ready");
+    await evaluate("promptFixture.selectRemovedModel()");
+    assert.equal(await wait("document.querySelector('select[aria-label=Model]')?.value==='removed'"), "ready");
+    await evaluate("[...document.querySelectorAll('.owned-session button')].find(b=>b.textContent.trim()==='Refresh choices').click()");
+    assert.equal(await wait("document.querySelector('select[aria-label=Model]')?.value==='model' && document.querySelector('#next-send-prompt-chooser').disabled"), "ready");
+    await evaluate("document.querySelector('#next-send-prompt-chooser').click()");
+    assert.equal(await evaluate("!document.querySelector('.prompt-chooser') && JSON.parse(localStorage.getItem('codealta.desktop.selection.removed-model')).modelId==='removed' && JSON.parse(localStorage.getItem('codealta.desktop.selection.removed-model')).reasoningEffort==='Low'"), true);
+    await evaluate("{const model=document.querySelector('select[aria-label=Model]');model.value='model';model.dispatchEvent(new Event('change',{bubbles:true}))}");
+    assert.equal(await wait("!!document.querySelector('#next-send-prompt-chooser:not(:disabled)')"), "ready");
+    // Optional prompt-search limits must not change the shared composer contract.
+    await evaluate("promptFixture.choices.prompts=[{id:'default',name:'Default'},...Array.from({length:128},(_,i)=>({id:'prompt-'+i,name:'Prompt '+i}))];promptFixture.choices.models=[{id:'model',name:'Model',efforts:['High','Low'],imageInput:true},{id:'other',name:'Other',efforts:['Low'],imageInput:true}];promptFixture.session('large-catalog')");
+    assert.equal(await wait("promptFixture.lastChoices.sessionId==='large-catalog'"), "ready");
+    await evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))");
+    assert.equal(await evaluate("document.querySelector('#next-send-prompt-chooser').disabled"), true);
+    assert.equal(await evaluate("[...document.querySelectorAll('.prompt-options select')].length===3 && [...document.querySelectorAll('.prompt-options select')].every(s=>!s.disabled) && !document.querySelector('#next-send-model-chooser').disabled"), true,
+      "129 valid prompts refuse only prompt search, not quick selectors or the accepted model chooser");
+    assert.equal(await evaluate("document.querySelector('select[aria-label=\"Agent prompt\"]').options.length"), 129);
+    await evaluate("{const s=document.querySelector('select[aria-label=\"Agent prompt\"]');s.value='prompt-127';s.dispatchEvent(new Event('change',{bubbles:true}))}");
+    await evaluate("{const s=document.querySelector('select[aria-label=Model]');s.value='other';s.dispatchEvent(new Event('change',{bubbles:true}))}");
+    await evaluate("{const s=document.querySelector('select[aria-label=Reasoning]');s.value='Low';s.dispatchEvent(new Event('change',{bubbles:true}))}");
+    assert.deepEqual(JSON.parse((await evaluate("localStorage.getItem('codealta.desktop.selection.large-catalog')"))!),
+      { providerKey: "beta", agentPromptId: "prompt-127", modelId: "other", reasoningEffort: "Low" });
+    await evaluate("window.largeReads=promptFixture.choicesReads;document.querySelector('#next-send-model-chooser').click()");
+    assert.equal(await wait("document.querySelector('.model-chooser')?.open"), "ready");
+    await evaluate("document.querySelector('.model-chooser-list button').click()");
+    await evaluate("{const s=document.querySelector('.model-chooser select');s.value='High';s.dispatchEvent(new Event('change',{bubbles:true}))}");
+    await evaluate("document.querySelector('.model-chooser-apply').click()");
+    assert.equal(await wait("!document.querySelector('.model-chooser') && document.querySelector('select[aria-label=Model]').value==='model'"), "ready");
+    await evaluate("{const c=document.createElement('canvas');c.width=1;c.height=1;window.largeImage={title:'Large catalog image',mediaType:'image/png',base64:c.toDataURL('image/png').split(',')[1]};const owner=promptFixture.imageOwner;const key=JSON.stringify(['e1','large-catalog',null,null]);owner.replace(key,owner.get(key),[largeImage]);const i=document.querySelector('#session-prompt');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(i,'Large catalog exact Send');i.dispatchEvent(new Event('input',{bubbles:true}))}");
+    assert.equal(await wait("!!document.querySelector('.prompt-image-attachments input') && !document.querySelector('.send-button').disabled"), "ready");
+    assert.equal(await evaluate("promptFixture.choicesReads===largeReads && document.querySelector('#next-send-prompt-chooser').disabled"), true);
+    await evaluate("document.querySelector('.send-button').click()");
+    assert.equal(await wait("promptFixture.sent.length===3"), "ready");
+    assert.deepEqual(JSON.parse((await evaluate("JSON.stringify(promptFixture.sent[2].selection)"))!),
+      { providerKey: "beta", agentPromptId: "prompt-127", modelId: "model", reasoningEffort: "High" });
+    assert.equal(await evaluate("promptFixture.sent[2].expectedEpoch==='e1' && promptFixture.sent[2].sessionId==='large-catalog' && promptFixture.sent[2].text==='Large catalog exact Send' && JSON.stringify(promptFixture.sent[2].images)===JSON.stringify([largeImage])"), true);
+    await evaluate("promptFixture.choices.prompts=[{id:'default',name:'Default'},{id:'plan',name:'Plan'}];promptFixture.session('missing-current')");
+    assert.equal(await wait("!!document.querySelector('#next-send-prompt-chooser:not(:disabled)')"), "ready");
+    await evaluate("promptFixture.choices.prompts=[{id:'plan',name:'Plan'}];[...document.querySelectorAll('.owned-session button')].find(b=>b.textContent.trim()==='Refresh choices').click()");
+    assert.equal(await wait("promptFixture.lastChoices.sessionId==='missing-current' && promptFixture.lastChoices.prompts.length===1 && document.querySelector('#next-send-prompt-chooser').disabled"), "ready");
+    assert.equal(await evaluate("[...document.querySelectorAll('.prompt-options select')].every(s=>!s.disabled) && !document.querySelector('#next-send-model-chooser').disabled && document.querySelector('select[aria-label=\"Agent prompt\"]').value==='default'"), true,
+      "an observed prompt absent from refreshed inventory stays visible and permits explicit quick recovery");
+    await evaluate("{const s=document.querySelector('select[aria-label=\"Agent prompt\"]');s.value='plan';s.dispatchEvent(new Event('change',{bubbles:true}))}");
+    assert.equal(await wait("document.querySelector('select[aria-label=\"Agent prompt\"]').value==='plan'"), "ready");
+    assert.deepEqual(JSON.parse((await evaluate("localStorage.getItem('codealta.desktop.selection.missing-current')"))!),
+      { providerKey: "beta", agentPromptId: "plan", modelId: "model", reasoningEffort: "High" });
+    assert.equal(await evaluate("document.querySelector('#next-send-prompt-chooser').disabled && document.querySelector('.prompt-selection-observation').textContent.includes('default') && document.querySelector('.prompt-selection-observation').textContent.includes('plan')"), true);
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }

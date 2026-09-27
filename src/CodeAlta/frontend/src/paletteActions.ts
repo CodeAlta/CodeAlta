@@ -1,7 +1,7 @@
 import type { SessionInfoSelection } from "./sessionInfo";
 import type { MessageKey } from "./localization";
 
-export type PaletteAction = "chooseModel" | "skills" | "usage" | "openProject" | "help" | "settings" | "about" | "logs" | "providers" | "models" | "prompts" | "mcp" | "reminders" | "sessionInfo" | "focusPrompt" | "focusSearch" | "browseSessions" | "refreshStatuses" | "nextTab" | "previousTab" | "closeTab" | "reopenTab";
+export type PaletteAction = "choosePrompt" | "chooseModel" | "skills" | "usage" | "openProject" | "help" | "settings" | "about" | "logs" | "providers" | "models" | "prompts" | "mcp" | "reminders" | "sessionInfo" | "focusPrompt" | "focusSearch" | "browseSessions" | "refreshStatuses" | "nextTab" | "previousTab" | "closeTab" | "reopenTab";
 export type PaletteContext = Readonly<{
   workspace: boolean;
   selection: SessionInfoSelection | null;
@@ -23,6 +23,8 @@ export type PaletteContext = Readonly<{
   shellReady?: boolean;
   modelChooserReady?: boolean;
   modelChooserTrigger?: HTMLButtonElement | null;
+  promptChooserReady?: boolean;
+  promptChooserTrigger?: HTMLButtonElement | null;
 }>;
 export type PaletteCommand = Readonly<{ id: PaletteAction; label: MessageKey; aliases?: string; shortcut?: string; chord?: "k" | "l" }>;
 
@@ -30,6 +32,7 @@ const commands: readonly PaletteCommand[] = Object.freeze(([
   { id: "settings", label: "Settings" }, { id: "about", label: "About" }, { id: "logs", label: "Application Logs", aliases: "logs show_logs", shortcut: "Ctrl+G, Ctrl+L", chord: "l" }, { id: "providers", label: "Providers" },
   { id: "models", label: "Models" }, { id: "prompts", label: "Agent Prompts" },
   { id: "chooseModel", label: "Next Send model selection", aliases: "model reasoning effort cached chooser" },
+  { id: "choosePrompt", label: "Next Send agent prompt selection", aliases: "agent prompt cached chooser" },
   { id: "mcp", label: "MCP Servers" }, { id: "reminders", label: "Reminders" },
   { id: "sessionInfo", label: "Session Info" }, { id: "focusPrompt", label: "Focus prompt" },
   { id: "focusSearch", label: "Focus session search" },
@@ -68,6 +71,9 @@ export function paletteAvailable(id: PaletteAction, captured: PaletteContext, cu
   if (id === "chooseModel") return captured.workspace && current.workspace && sameSelection
     && !!captured.epoch && captured.epoch === current.epoch && !!captured.modelChooserReady && !!current.modelChooserReady
     && captured.modelChooserTrigger === current.modelChooserTrigger;
+  if (id === "choosePrompt") return captured.workspace && current.workspace && sameSelection
+    && !!captured.epoch && captured.epoch === current.epoch && !!captured.promptChooserReady && !!current.promptChooserReady
+    && captured.promptChooserTrigger === current.promptChooserTrigger;
   if (id === "sessionInfo" || id === "reminders") {
     if (!captured.workspace || !current.workspace || !sameSelection || !captured.infoReady || !current.infoReady) return false;
     return id === "sessionInfo" || !!captured.epoch && captured.epoch === current.epoch;

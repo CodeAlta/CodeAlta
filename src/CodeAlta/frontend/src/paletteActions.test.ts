@@ -5,6 +5,15 @@ import { paletteAvailable, paletteCommands, type PaletteContext } from "./palett
 const catalog: PaletteContext = { workspace: true, selection: { sessionId: "one", projectId: null },
   epoch: null, infoReady: true, promptReady: true, searchReady: true };
 
+test("cached prompt action is distinct from Settings and fails closed on stale scope", () => {
+  const current = { ...catalog, epoch: "original", promptChooserReady: true, commandGeneration: 7 };
+  assert.equal(paletteCommands(current).some(value => value.id === "choosePrompt"), true);
+  assert.equal(paletteAvailable("choosePrompt", current, current), true);
+  for (const changed of [{ ...current, epoch: null }, { ...current, promptChooserReady: false },
+    { ...current, selection: null }, { ...current, commandGeneration: 8 }, { ...current, workspace: false }])
+    assert.equal(paletteAvailable("choosePrompt", current, changed), false);
+  assert.equal(paletteAvailable("choosePrompt", catalog, catalog), false);
+});
 test("cached model command requires an actual enabled exact composer target", () => {
   const trigger = {} as HTMLButtonElement;
   const current = { ...catalog, epoch: "epoch", modelChooserReady: true, modelChooserTrigger: trigger };

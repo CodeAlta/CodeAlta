@@ -108,7 +108,7 @@ function App() {
       !paletteAvailable(action, context, paletteContext())) return;
     if (action === "sessionInfo") infoButton.current?.click();
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
-    else if (action !== "chooseModel" && action !== "skills" && action !== "usage" && action !== "help" && action !== "openProject" && action !== "refreshStatuses" && action !== "browseSessions" && action !== "focusSearch" && action !== "about" && action !== "nextTab" && action !== "previousTab" && action !== "closeTab" && action !== "reopenTab") setView(action === "settings" ? "configuration" : action);
+    else if (action !== "choosePrompt" && action !== "chooseModel" && action !== "skills" && action !== "usage" && action !== "help" && action !== "openProject" && action !== "refreshStatuses" && action !== "browseSessions" && action !== "focusSearch" && action !== "about" && action !== "nextTab" && action !== "previousTab" && action !== "closeTab" && action !== "reopenTab") setView(action === "settings" ? "configuration" : action);
   });
   useLayoutEffect(() => {
     const keyDown = (event: KeyboardEvent) => {
