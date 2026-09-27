@@ -320,6 +320,25 @@ Neither native nor demo launch was performed during this checkpoint verification
 
 ### Screenshot-driven compact presentation follow-up
 
+Second screenshot iteration: project filtering and session management/search are now on-demand
+disclosures rather than permanent rows between a project and its sessions. Notes start visible,
+including when empty. The composer explicitly overrides the old column-direction rule; selectors
+are inline and reference metadata uses `@` rather than an unexplained folder icon. Timeline grid
+tracks are shrinkable, prose/code wraps, and its outer viewport suppresses horizontal overflow.
+Reasoning/status previews use the existing sanitized Markdown renderer, and command previews show
+bounded command identities rather than whole scripts. Idle, shutdown and usage updates are omitted
+from conversation cards, following `ChatMarkdownFormatter.ShouldDisplaySessionUpdate` and the TUI
+history coordinator. Complete supplied aggregate unified diffs now produce per-file hunk summaries.
+
+This iteration passed 77 focused frontend tests, strict TypeScript, the production frontend
+build and the Release desktop build. The TUI presenter/formatter implementations were inspected; no mounted/browser or native
+visual qualification was performed. Remaining data limitations are explicit: truncated aggregate
+diff JSON cannot produce trustworthy file summaries; the host must eventually project these before
+truncation. Desktop model choices use `GetObservedSelectionChoicesAsync`, not the TUI's potentially
+populated provider catalog. Missing observed models are labeled **Unverified**, not falsely declared
+absent from the provider. No catalog activation/probing or provider-switch lifecycle changes were
+introduced. Existing-session provider switching still needs the separately blocked recovery policy.
+
 The Explorer now nests sessions beneath the selected project in an accordion rather than
 reserving separate vertical project/session panes. Project and session rows are compact single
 lines. Sessions initially use the configured recent-session limit (20 by default); **Show more…**

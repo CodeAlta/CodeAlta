@@ -1,15 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
-import { TimelineMessage } from "./TimelineMessage";
+import { TimelineMessage, commandPreview } from "./TimelineMessage";
 import { ProjectRailRows } from "./ProjectRailRows";
 import type { TimelineItem } from "./timeline";
 import { FileChangeInspection } from "./FileChangeInspection";
 
 const record: TimelineItem = { key: "42", eventType: "sessionUpdate", category: "status", icon: "usage",
   title: "Idle", subtitle: null, timestamp: "2026-09-27T10:00:00Z", markdown: "Context: 48%\n\nInput tokens: 94449",
-  summary: null, summaryIsCode: false, detailMarkdown: null, details: '{"literal":"<unsafe>"}', detailsLabel: "Details",
+  summary: "Context: 48% · Input tokens: 94449", summaryIsCode: false, detailMarkdown: null, details: '{"literal":"<unsafe>"}', detailsLabel: "Details",
   metadata: ["Provider: literal"], truncated: false, bodyOmitted: false, copyMarkdown: "original\nbytes" };
+
+test("command cards summarize identity without displaying entire command scripts", () => {
+  assert.equal(commandPreview('git commit -m "long message"; git status --short'), "git commit…");
+  assert.equal(commandPreview("dotnet test -c Release"), "dotnet test…");
+  assert.ok(commandPreview('"' + "x".repeat(500)).length <= 49);
+});
 
 test("status rows are compact and details are dialog actions, not permanent disclosures", () => {
   const html = renderToStaticMarkup(<TimelineMessage item={record} />);

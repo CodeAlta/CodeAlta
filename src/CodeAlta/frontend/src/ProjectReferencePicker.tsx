@@ -172,7 +172,7 @@ export function ProjectReferencePicker({ text, edit, input, compact = true }: {
     // Locale/chrome renders do not refresh a query or reissue metadata reads.
   }, [review, query, failed, interaction]);
   const presentation = <ProjectReferencePresentation text={text} input={input} scope={scope} />;
-  return <>{compact ? <details className="reference-metadata-disclosure"><summary aria-label={t("Project references")} title={t("Project references")}><AppIcon name="folder" size={16} /></summary>{presentation}</details> : presentation}
+  return <>{compact ? <details className="reference-metadata-disclosure"><summary aria-label={t("Project references")} title={t("Project references")}>@</summary>{presentation}</details> : presentation}
     {!scope && !compact && <p role="status">{t("@ search requires an owned, verified project. References resolve only on normal Send after creation and transfer; file contents are not uploaded.")}</p>}
     {review && <dialog ref={dialog} className="app-dialog reference-palette" aria-modal="true" aria-labelledby={`${listId}-title`}
       onClose={() => { if (active.current === review) finish(); }} onCancel={event => { event.preventDefault(); if (!composing.current) finish(); }}

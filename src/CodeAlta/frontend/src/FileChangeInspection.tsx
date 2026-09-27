@@ -36,7 +36,7 @@ export function FileChangeInspection({ changes, canInspect }: { changes: FileCha
   }, [selection]);
   const counted = changes.rows.filter(row => row.counts !== null);
   return <section className="file-change-inspection" aria-label={t("Supplied file records")}>
-    <div className="file-change-summary"><span>{t("Supplied file records: {count}", { count: changes.rows.length })}</span>
+    <div className="file-change-summary"><span>{changes.rows.length ? t("Supplied file records: {count}", { count: changes.rows.length }) : t("Partial or unsupported file data; inspect the original record details.")}</span>
     <span title={t("Recorded data only, not disk state or write success. Counts cover supplied hunks, not complete file or run totals.")}><AppIcon name="info" size={12} /></span>
     {changes.partial && <span title={t("Partial or unsupported file data; inspect the original record details.")} aria-label={t("Partial or unsupported file data; inspect the original record details.")}><AppIcon name="error" size={12} /></span>}
     {counted.length > 0 && <span>{t("Shown counted hunks ({count} records): +{added} / -{removed}", {

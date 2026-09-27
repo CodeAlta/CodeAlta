@@ -4,6 +4,9 @@ function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
   return Object.freeze(Object.fromEntries(Object.entries(rows).map(([key, row]) => [key, Object.freeze(row)]))) as Readonly<T>;
 }
 export const messages = dictionary({
+  "Provider switching is unavailable for existing desktop sessions.": ["El cambio de proveedor no está disponible para sesiones de escritorio existentes.", "Le changement de fournisseur est indisponible pour les sessions de bureau existantes.", "Anbieterwechsel ist für bestehende Desktop-Sitzungen nicht verfügbar.", "既存のデスクトップセッションではプロバイダーを変更できません。", "现有桌面会话无法切换提供商。"],
+  "Saved selection; not verified by this host's observed model catalog.": ["Selección guardada; no verificada por el catálogo observado de este host.", "Sélection enregistrée ; non vérifiée par le catalogue observé de cet hôte.", "Gespeicherte Auswahl; nicht im beobachteten Modellkatalog dieses Hosts verifiziert.", "保存済みの選択です。このホストで観測されたモデル一覧では未確認です。", "已保存的选择；尚未经此主机观测到的模型目录验证。"],
+  "Unverified": ["Sin verificar", "Non vérifié", "Unbestätigt", "未確認", "未验证"],
   "Prompt ready": ["Prompt listo", "Prompt prêt", "Prompt bereit", "入力できます", "提示词就绪"],
   "Plugins": ["Complementos", "Extensions", "Plugins", "プラグイン", "插件"],
   "Full raw journal record": ["Registro completo sin procesar", "Enregistrement brut complet", "Vollständiger Roheintrag", "完全な生のジャーナル記録", "完整原始日志记录"],

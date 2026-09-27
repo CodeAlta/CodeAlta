@@ -5,6 +5,10 @@ import { buildTimelineItems, formatDetails, latestNotes, writeMarkdown } from ".
 
 type Entry = HistoryResponse["entries"][number];
 
+test("TUI status-only updates do not become timeline cards", () => {
+  assert.deepEqual(buildTimelineItems(["Idle", "UsageUpdated", "Shutdown"].map(kind => entry({ eventType: "sessionUpdate", kind }))), []);
+});
+
 test("persisted tool inspection projects only supplied structured fields without changing raw details", () => {
   const details = '{"arguments":{"command":"<literal>\\n"},"result":{"content":"  output\\r\\n","detailedContent":"extra"},"error":{"message":"literal failure"}}';
   const item = buildTimelineItems([entry({ eventType: "activity", kind: "ToolCall", name: "literal_tool", phase: "Started", details })])[0]!;
@@ -144,7 +148,7 @@ test("journal identities containing separators cannot alias another provider/run
   assert.deepEqual(output.map(row => row.key), ["5", "6"]);
 });
 
-test("timeline maps prompts and usage to compact summaries with drill-down content", () => {
+test("timeline keeps prompt drill-down content but leaves usage in the status surface", () => {
   const items = buildTimelineItems([
     entry({ offset: "1", eventType: "system_prompt", kind: "session_start", name: "Default",
       text: "**Reason:** session_start\n\n**Provider mapping:** native · applied\n\n**Approximate tokens:** 14 total (3 system, 11 developer)\n\n**Change:** initial\n\n### System message\n\nLong prompt" }),
@@ -156,9 +160,17 @@ test("timeline maps prompts and usage to compact summaries with drill-down conte
   assert.equal(items[0].summary, "Provider mapping: native · applied");
   assert.equal(items[0].markdown, null);
   assert.match(items[0].detailMarkdown!, /Long prompt/);
-  assert.equal(items[1].title, "Context 6,400 / 128,000 tokens (5%)");
-  assert.equal(items[1].summary, "model-1 · 100 in · 25 out · 0.01 cost");
-  assert.equal(items[1].detailsLabel, "Usage details");
+  assert.equal(items.length, 1);
+});
+
+test("complete aggregate diff projects file rows and validated supplied hunk counts", () => {
+  const details = JSON.stringify({ diff: "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1,2 @@\n-old\n+new\n+line\n" });
+  const item = buildTimelineItems([entry({ eventType: "sessionUpdate", kind: "DiffUpdated", details })])[0];
+  assert.equal(item.category, "file");
+  assert.equal(item.fileChanges?.rows[0].path, "src/a.ts");
+  assert.deepEqual(item.fileChanges?.rows[0].counts, { added: 2, removed: 1 });
+  assert.equal(item.details, formatDetails(details));
+  assert.equal(buildTimelineItems([entry({ eventType: "sessionUpdate", kind: "DiffUpdated", details, detailsTruncated: true })])[0].fileChanges?.rows.length, 0);
 });
 
 test("tool activities expose the tool and first command while folding duplicate lifecycle/output events", () => {

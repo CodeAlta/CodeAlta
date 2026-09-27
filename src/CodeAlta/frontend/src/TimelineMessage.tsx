@@ -12,6 +12,13 @@ import { TimelineDetails } from "./TimelineDetails";
 const longBodyThreshold = 1200;
 const previewLength = 240;
 
+// Display-only command identity, never a command parser or execution target.
+export function commandPreview(source: string): string {
+  const line = source.trim().split(/\r?\n/)[0];
+  const identity = line.match(/^[\w./\\:-]+(?:\s+[\w.-]+)?/)?.[0];
+  return (identity ?? line).slice(0, 48) + ((identity ?? line).length > 48 || identity && identity.length < line.length ? "…" : "");
+}
+
 export function TimelineMessage({ item, canInspect, historySource, onOpenSource }: { item: TimelineItem; canInspect?: () => boolean;
   historySource?: HistorySourceTarget; onOpenSource?: (target: HistorySourceTarget) => void }) {
   const { t, locale } = useShellLanguage();
@@ -88,7 +95,9 @@ export function TimelineMessage({ item, canInspect, historySource, onOpenSource 
   }
   const hasDetails = !!(body || item.detailMarkdown || item.details || item.metadata.length);
   const compact = ["status", "reasoning", "tool", "file", "prompt"].includes(item.category);
-  const excerpt = (item.summary || body || item.detailMarkdown || "").replace(/\s+/g, " ");
+  const excerpt = (item.summary || body || item.detailMarkdown || "").split(/\r?\n\s*\r?\n/)[0];
+  const codePreview = item.category === "tool" && item.summaryIsCode
+    ? commandPreview(excerpt) : null;
   // Categories below have fixed UI titles in toTimelineItem; tool/provider names do not.
   const title = item.category === "user" ? t("You") : item.category === "plan" ? t("Plan")
     : item.category === "notes" ? t("Alta notes") : item.category === "error" ? t("Error")
@@ -100,7 +109,8 @@ export function TimelineMessage({ item, canInspect, historySource, onOpenSource 
     <div className="message-body">
       <div className="message-heading">
         <span><strong>{title}</strong>{item.subtitle && <small>{item.subtitle}</small>}</span>
-        {compact && excerpt && <span className="timeline-inline-preview" title={excerpt}>{excerpt}</span>}
+        {compact && excerpt && <div className="timeline-inline-preview">{codePreview !== null ? <code>{codePreview}</code>
+          : item.summary ? excerpt : <MarkdownContent source={excerpt} />}</div>}
         <span className="message-actions">
           {item.toolRecord && <ToolRecordInspection key={item.toolRecord.source} record={item.toolRecord} canInspect={canInspect} />}
           {hasDetails && <button type="button" className="timeline-detail-trigger" aria-label={t("Details")} title={t("Details")} aria-haspopup="dialog"

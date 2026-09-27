@@ -225,7 +225,7 @@ function App() {
   const [projectFilter, setProjectFilter] = useState("");
   const { projectSort, setProjectSort, theme, setTheme, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount } = useWindowPreferences();
   const [sessionExpansion, setSessionExpansion] = useState<{ projectId: string | null; search: string; extra: number } | null>(null);
-  const [notesVisible, setNotesVisible] = useState(false);
+  const [notesVisible, setNotesVisible] = useState(true);
   const [notesHeight, setNotesHeight] = useState(() => restoreNotesHeight(() => localStorage.getItem(notesHeightKey)));
   const [historyNotes, setHistoryNotes] = useState<{ sessionId: string | null; markdown: string }>({ sessionId: null, markdown: "" });
   const updateHistoryNotes = useCallback((markdown: string) => setHistoryNotes({ sessionId, markdown }), [sessionId]);
@@ -738,7 +738,7 @@ function App() {
     else if (action === "nextTab" || action === "previousTab" || action === "closeTab" || action === "reopenTab") tabCommand(action);
     else if (action === "reminders") invokeComposerControl(remindersTrigger.current);
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
-    else if (action === "focusSearch") searchInput.current?.focus();
+    else if (action === "focusSearch") { const options = searchInput.current?.closest("details"); if (options) options.open = true; searchInput.current?.focus(); }
     else { navigate(action === "settings" ? "appearance" : action); settingsOrigin.current = paletteOrigin.current; }
   });
 
@@ -837,7 +837,7 @@ function App() {
     else if (action === "settings" || action === "plugins") navigate(action === "plugins" ? "mcp" : "appearance");
     else if (action === "toggleNotes") setNotesVisible(value => !value);
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
-    else if (action === "focusSearch") searchInput.current?.focus();
+    else if (action === "focusSearch") { const options = searchInput.current?.closest("details"); if (options) options.open = true; searchInput.current?.focus(); }
     else if (action === "focusProjects") {
       if (!railVisible) toggleProjects();
       else focusVisibleProject(projectRail.current, projectFilterInput.current);
@@ -1382,23 +1382,22 @@ function App() {
         </nav>
         <SessionContentLayout sessionWidth={ideWidth.width} narrow={narrow} sessionsHidden={!railVisible}
           projects={sessions => <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}>
-          <div className="panel-title"><span>{t("Projects")}</span><span><button type="button" className="rail-action" aria-label={`${t("Open project")} (Ctrl+O)`} title={`${t("Open project")} (Ctrl+O)`} onClick={() => setDialog("project")}>＋</button><span className="count">{snapshot?.projects.length ?? 0}</span></span></div>
+          <div className="panel-title"><span title={projectListing?.evidenceNotice ?? undefined}>{t("Projects")}</span><span><button type="button" className="rail-action" aria-label={`${t("Open project")} (Ctrl+O)`} title={`${t("Open project")} (Ctrl+O)`} onClick={() => setDialog("project")}>＋</button><span className="count">{snapshot?.projects.length ?? 0}</span></span></div>
           {workspaceState.kind === "loading" && <LoadingRows />}
           {workspaceState.kind === "unconfigured" && <div className="sidebar-empty">{t("No catalog configured. See the launch instructions below.")}</div>}
           {workspaceState.kind === "error" && <div role="alert" className="sidebar-empty error-text">{workspaceState.message}</div>}
-          {snapshot && <div className="project-controls">
+          {snapshot && <details className="navigator-options"><summary title={t("Project actions")} aria-label={t("Project actions")}><AppIcon name="ellipsis" size={16} /></summary><div className="project-controls">
             <input id="project-filter" ref={projectFilterInput} type="search" value={projectFilter} onChange={event => setProjectFilter(event.target.value)}
               placeholder={t("Name or path")} aria-label={t("Filter projects by name or path")} aria-controls="project-list" />
-            <details className="project-sort-controls"><summary aria-label={t("Project actions")} title={t("Project actions")}><AppIcon name="ellipsis" size={16} /></summary><div>
+            <div className="project-options-fields">
               <select id="project-sort" aria-label={t("Sort projects")} value={projectSort} onChange={event => setProjectSort(event.target.value as ProjectSort)}>
                 <option value="name">{t("Name")}</option><option value="recent">{t("Recent visible updates")}</option>
               </select>
               <button type="button" className="quiet-button" disabled={!projectFilter} onClick={() => { setProjectFilter(""); projectFilterInput.current?.focus(); }}>{t("Clear filter")}</button>
               <button type="button" className="quiet-button" disabled={!selectedProject || !owned || !mutation?.capability.canMutate()}
                 onClick={() => setDialog("archive")}>{t(selectedProject?.archived ? "Unarchive project…" : "Archive project…")}</button>
-            </div></details>
-          </div>}
-          {snapshot && projectListing?.evidenceNotice && <details className="navigator-evidence"><summary title={projectListing.evidenceNotice} aria-label={t("Details")}><AppIcon name="info" size={14} /></summary><p>{projectListing.evidenceNotice}</p></details>}
+            </div>
+          </div></details>}
           {snapshot && projectListing?.projects.length === 0 && <p className="sidebar-empty" role="status">
             {t(projectFilter.trim() ? "No matching projects. Clear the filter to show them again." : "No projects in this snapshot.")}
             {projectId !== null && ` ${t("The selected project and session remain open.")}`}
@@ -1436,13 +1435,16 @@ function App() {
           splitter={<PaneSplitter className="session-splitter" label={t("Resize Explorer")} value={ideWidth.width} hidden={narrow || !railVisible}
             onResize={delta => setIdeWidth(value => resizeIdeWidth(value, delta))} onReset={() => setIdeWidth({ width: 272, full: false })} />}
           sessions={<aside className="session-rail" aria-label={t("Sessions")} ref={sessionRail} hidden={!railVisible}>
-          <div className="session-rail-header">
+          <details className="session-navigation-options"><summary aria-label={t("Sessions")} title={notice || t("Sessions")}><AppIcon name="ellipsis" size={14} /></summary><div className="session-rail-header">
             <div><h2>{selectedProject?.name ?? t("Other sessions")}</h2></div>
             <div className="session-rail-actions"><ProjectDetailsEntry context={projectDetailsContext} getCurrent={currentProjectDetailsContext} />
               <button type="button" className="icon-button" aria-label={t("Create session")} title={t("Create session in selected scope")}
                 disabled={!owned || !snapshot || !!selectedProject?.archived || projectId !== null && !selectedProject || creatingBusy}
                 onClick={() => { setCreatingVisible(value => !value); setCreatingMessage(""); }}>＋</button></div>
           </div>
+          <button type="button" className="quiet-button" disabled={!snapshot} onClick={openSessionBrowser}>{t("Browse saved sessions")}</button>
+          <label className="search"><AppIcon name="search" size={14} /><input ref={searchInput} value={search} onChange={event => setSearch(event.target.value)} placeholder={t("Search sessions")} aria-label={t("Search sessions")} /></label>
+          </details>
           {creatingVisible && <div className="session-create">
             <label>{selectedProject ? t("New session in {name}", { name: selectedProject.name }) : t("New global session")}
               <input value={creatingTitle} maxLength={256} disabled={creatingBusy} placeholder={t("Title (optional)")} onChange={event => setCreatingTitle(event.target.value)} /></label>
@@ -1465,12 +1467,7 @@ function App() {
             <button type="button" className="quiet-button" onClick={() => void refreshDeletedSession()}>{t("Refresh session list")}</button>
           </div>}
           {!owned && <p className="muted-text">{t("Session creation requires an owned host.")}</p>}
-          <div className="session-browser-tools"><button type="button" className="icon-button browse-sessions-button" aria-label={t("Browse saved sessions")} disabled={!snapshot} onClick={openSessionBrowser} title={`${t("Browse saved sessions")} (Ctrl+Alt+B ${t("outside text")})`}><AppIcon name="history" size={14} /></button>
           {batchDeletionState.phase !== "idle" && <p role="status">Batch deletion: {batchDeletionState.phase}. {batchDeletionState.items.filter(item => item.outcome === "deleted").length} confirmed deleted; {batchDeletionState.items.filter(item => item.outcome === "uncertain").length} uncertain. Single deletion is blocked. Reopen Browse saved sessions for the retained exact-target report.</p>}
-          <span className="session-count" title={t("{visible} / {loaded} loaded matches · saved-update tree order, not last activity. Limit {limit}; active session and ancestors retained.", { visible: visibleSessionRows.length, loaded: loadedSessionRows.length, limit: recentSessionCount })}>{visibleSessionRows.length}/{loadedSessionRows.length}</span>
-          </div>
-          <label className="search"><AppIcon name="search" size={14} /><input ref={searchInput} value={search} onChange={event => setSearch(event.target.value)} placeholder={t("Search sessions")} aria-label={t("Search sessions")} /></label>
-          {notice && <details className="navigator-evidence"><summary aria-label={t("Details")} title={notice}><AppIcon name="info" size={14} /></summary><p>{notice}</p></details>}
           <div className="session-list">
             {visibleSessionRows.map(({ session, depth, diagnostic, tooltip }, index) => {
               const menu = activeMenu?.id === session.id ? activeMenu : null;

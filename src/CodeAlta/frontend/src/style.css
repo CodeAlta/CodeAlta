@@ -787,6 +787,28 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .flexlayout__tab_button { padding: 6px 9px; border-right: 1px solid var(--line); }
 .ide-shell .flexlayout__tab_button--selected { box-shadow: inset 0 2px var(--accent); }
 .ide-shell .draft-tab-icon { color: var(--accent); }
+.ide-shell .timeline-scroll, .ide-shell .active-session-content { overflow-x: hidden; min-width: 0; }
+.ide-shell .messages { grid-template-columns: minmax(0, 1fr); }
+.ide-shell .timeline-message { min-width: 0; max-width: 100%; box-sizing: border-box; overflow-wrap: anywhere; }
+.ide-shell .timeline-inline-preview .markdown-content > * { display: inline; margin: 0; font-size: inherit; }
+.ide-shell .timeline-inline-preview .markdown-content { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ide-shell .markdown-content table { width: 100%; table-layout: fixed; overflow-wrap: anywhere; }
+.ide-shell .markdown-content pre { overflow-x: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ide-shell .project-rail { position: relative; overflow-x: hidden; }
+.ide-shell .project-list { overflow-x: hidden; }
+.ide-shell .project-session-branch { position: relative; }
+.ide-shell .navigator-options { position: absolute; top: 8px; right: 62px; z-index: 5; }
+.ide-shell .navigator-options > summary, .ide-shell .session-navigation-options > summary { list-style: none; cursor: pointer; }
+.ide-shell .navigator-options[open] { background: var(--panel); border: 1px solid var(--line); padding: 6px; }
+.ide-shell .navigator-options .project-controls, .ide-shell .project-options-fields { display: grid; gap: 5px; }
+.ide-shell .session-navigation-options { position: absolute; top: -27px; right: 25px; z-index: 4; }
+.ide-shell .session-navigation-options:not([open]) { opacity: 0; }
+.ide-shell .project-session-branch:hover .session-navigation-options, .ide-shell .session-navigation-options:focus-within { opacity: 1; }
+.ide-shell .session-navigation-options[open] { top: 0; right: 0; padding: 6px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.ide-shell .owned-session .prompt-options { display: flex; flex-wrap: nowrap; align-items: center; }
+.ide-shell .owned-session .prompt-options label { flex-direction: row; align-items: center; text-transform: none; white-space: nowrap; flex: 0 1 auto; }
+.ide-shell .owned-session .prompt-options select { width: auto; min-width: 0; flex: 1 1 auto; }
+.ide-shell .composer-toolbar .history-controls { gap: 7px; }
 .ide-shell .topbar { min-height: 30px; height: 30px; font-size: 12px; }
 .ide-shell .brand-mark { width: 22px; height: 22px; border-radius: 6px; font-size: 14px; }
 .ide-shell .project-rail { display: flex; flex-direction: column; height: 100%; padding: 4px; }

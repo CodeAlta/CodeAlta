@@ -570,15 +570,16 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
         {!activeChoices?.prompts.some(p => p.id === selected?.agentPromptId) && <option value={selected?.agentPromptId ?? ""}>{selected?.agentPromptId ?? t("Loading…")}</option>}
         {activeChoices?.prompts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
       </select></label>
-      <span className="current-provider" title="Current configured provider; changing an existing session provider is not available yet."><AppIcon name="assistant" size={14} />{selected?.providerKey ?? t("session provider")}</span>
-      <label><AppIcon name="model" size={14} /><span>{t("Model")}</span><select aria-label={t("Model")} value={selected?.modelId ?? ""} disabled={selectionDisabled} onChange={event => select("modelId", event.target.value)} title={t("Model for the next Send · {provider}", { provider: selected?.providerKey ?? t("session provider") })}>
+      <label><AppIcon name="model" size={14} /><span>{t("Model")}:</span>
+      <span className="current-provider" title={t("Provider switching is unavailable for existing desktop sessions.")}>{selected?.providerKey ?? t("session provider")}</span>
+      <select aria-label={t("Model")} value={selected?.modelId ?? ""} disabled={selectionDisabled} onChange={event => select("modelId", event.target.value)} title={selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) ? t("Saved selection; not verified by this host's observed model catalog.") : t("Model for the next Send · {provider}", { provider: selected?.providerKey ?? t("session provider") })}>
         <option value="">{t("Provider default")}</option>
-        {selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) && <option value={selected.modelId}>{selected.modelId} ({t("not in catalog")})</option>}
+        {selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) && <option value={selected.modelId}>{selected.modelId} · {t("Unverified")}</option>}
         {activeChoices?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
       </select></label>
       <label><AppIcon name="brain" size={14} /><span>{t("Reasoning")}</span><select aria-label={t("Reasoning")} value={selected?.reasoningEffort ?? ""} disabled={selectionDisabled || efforts.length === 0} onChange={event => select("reasoningEffort", event.target.value)} title={t("Supported reasoning effort for the selected model")}>
         <option value="">{t("Model default")}</option>
-        {selected?.reasoningEffort && !efforts.includes(selected.reasoningEffort) && <option value={selected.reasoningEffort}>{selected.reasoningEffort} ({t("not in catalog")})</option>}
+        {selected?.reasoningEffort && !efforts.includes(selected.reasoningEffort) && <option value={selected.reasoningEffort}>{selected.reasoningEffort} · {t("Unverified")}</option>}
         {efforts.map(e => <option key={e} value={e}>{e}</option>)}
       </select></label>
     </div>

@@ -25,10 +25,14 @@ export function resetNarrowRail(state: ProjectRailState): ProjectRailState {
 }
 
 export function focusVisibleProject(rail: Pick<HTMLElement, "querySelector"> | null,
-  filter: Pick<HTMLInputElement, "focus"> | null): boolean {
+  filter: (Pick<HTMLInputElement, "focus"> & Partial<Pick<HTMLInputElement, "closest">>) | null): boolean {
   const selected = rail?.querySelector<HTMLButtonElement>('.project-list button[aria-pressed="true"], .project-root-list button[aria-pressed="true"]');
   const target = selected ?? filter;
   if (!target) return false;
+  if (target === filter) {
+    const disclosure = filter?.closest?.<HTMLDetailsElement>("details");
+    if (disclosure) disclosure.open = true;
+  }
   target.focus();
   return true;
 }

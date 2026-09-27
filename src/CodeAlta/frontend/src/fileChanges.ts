@@ -17,7 +17,8 @@ export function projectFileChanges(entry: HistoryEntry): FileChanges | undefined
   try { value = JSON.parse(entry.details); } catch { return empty; }
   if (!object(value)) return empty;
   // These two explicit shapes match FileChangePresenter's Codex/workspace readers.
-  const candidates = Array.isArray(value.changes) ? value.changes : typeof value.path === "string" ? [value] : null;
+  const candidates = Array.isArray(value.changes) ? value.changes : typeof value.path === "string" ? [value]
+    : typeof value.diff === "string" ? splitSuppliedDiff(value.diff) : null;
   if (!candidates) return empty; // Aggregate-only diffs remain raw; do not guess file boundaries.
   let partial = entry.bodyOmitted || entry.textTruncated || candidates.length > 32;
   const rows: FileChangeRow[] = [];
@@ -32,6 +33,29 @@ export function projectFileChanges(entry: HistoryEntry): FileChanges | undefined
       diff: text(diff, 4096) ? diff : null, counts: text(diff, 4096) ? countSuppliedHunks(diff) : null });
   }
   return { source: rows.length ? JSON.stringify(entry) : "", rows, partial };
+}
+
+// Only complete, bounded unified file sections are projected. Paths remain display data;
+// quoted/ambiguous headers and malformed hunks never become guessed file counts.
+function splitSuppliedDiff(diff: string): Record<string, unknown>[] | null {
+  if (diff.length > 8192) return null;
+  const sections = diff.split(/(?=^diff --git )/m).filter(section => section.trim());
+  if (!sections.length || sections.length > 32) return null;
+  const rows: Record<string, unknown>[] = [];
+  for (const section of sections) {
+    const lines = section.split(/\r?\n/);
+    if (!lines[0].startsWith("diff --git ")) return null;
+    const before = lines.find(line => line.startsWith("--- "))?.slice(4);
+    const after = lines.find(line => line.startsWith("+++ "))?.slice(4);
+    if (!before || !after || !(before === "/dev/null" || before.startsWith("a/"))
+      || !(after === "/dev/null" || after.startsWith("b/"))) return null;
+    const path = after === "/dev/null" ? before.slice(2) : after.slice(2);
+    if (!path || /[\t\r\n]/.test(path)) return null;
+    const hunk = lines.findIndex(line => line.startsWith("@@ "));
+    rows.push({ path, operation: before === "/dev/null" ? "create" : after === "/dev/null" ? "delete" : "update",
+      diff: hunk < 0 ? undefined : lines.slice(hunk).join("\n") });
+  }
+  return rows;
 }
 
 // Counts describe only this supplied per-file hunk text, never whole-file/run totals.
