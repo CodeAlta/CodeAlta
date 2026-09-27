@@ -9,6 +9,29 @@ historically latest activity. The TUI navigator applies `RecentSessionsPerProjec
 to its hierarchy; its settings validate 1–50. WebView presentation uses the same
 range but deliberately does not import that unproven historical interpretation.
 
+### Persisted projection prerequisite
+
+The Desktop workspace snapshot does not load `SessionViewDescriptor` records. Both
+owned and catalog-only reads enumerate `AgentSessionMetadata` and optionally enrich
+at most 500 eligible rows with `SessionViewJournalHeader`. Neither metadata (including
+its cached view state) nor that header contains an independently persisted
+`LastActiveAt`. The SQLite projection orders its stored `UpdatedAt`; that is not a
+separate last-active source.
+
+`SessionViewYamlSerializer` does preserve `last_active_at`, but
+`SessionViewCatalog.LoadInternalAsync` / `SaveInternalAsync` use that representation
+for legacy internal sessions, not the ordinary sessions enumerated by this snapshot.
+Recovery descriptors also assign `LastActiveAt` from `UpdatedAt`; attached-runtime
+descriptors can use the last terminal event or creation time. Thus projecting a
+descriptor property solely because of its name would mix distinct sources.
+
+A persisted last-active feature needs an explicit durable producer and cached
+read contract for the already-enumerated sessions, with missing/legacy values
+remaining unknown. It cannot be implemented by relabelling saved updates, importing
+the legacy internal-session scan, or substituting attachment-local observations.
+Until that prerequisite is authorized, existing saved-update and observed-activity
+presentation remain separate and unchanged.
+
 ## Attachment-local facts
 
 The existing session actor observes matching `AgentEvent.Timestamp` callbacks on
