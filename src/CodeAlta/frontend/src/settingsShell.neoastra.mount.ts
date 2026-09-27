@@ -75,6 +75,15 @@ function fileHistory(request: HistoryRequest): HistoryResponse {
       textTruncated: false, detailsTruncated: false, bodyOmitted: false },
   ] };
 }
+const longBodyText = "**Supplied prose**\n\n" + "literal paragraph\n\n".repeat(110) + '<img src=x onerror="window.bodyInjected=true"> END';
+function bodyHistory(request: HistoryRequest): HistoryResponse {
+  return { status: "ok", next: null, tailOmitted: false, entries: [
+    ["contentCompleted", "Reasoning"], ["planSnapshot", "Updated"], ["notes", "Set"],
+    ["sessionUpdate", "Status"], ["error", "Failure"],
+  ].map(([eventType, kind], index) => ({ ...fileHistory(request).entries[0], offset: String(index + 1), eventType, kind,
+    activityId: null, contentId: String(index), text: index === 4 ? "TERSE FAILURE" : longBodyText, details: null,
+    textTruncated: index === 0, bodyOmitted: index === 0 })) };
+}
 function navigationHistory(request: HistoryRequest): HistoryResponse {
   const mode = localStorage.getItem("navigationFixture");
   const kinds = mode === "live-only" || mode === "empty" ? [] : ["User", "CommandOutput", "Reasoning", "Unknown", "Status", "Assistant"];
@@ -92,7 +101,7 @@ Object.assign(window, { settingsShellFixture: { calls, rpcCalls, sends, choiceRe
   displayCalls, displayCleanup, notesCalls, lateDisplayAttempts, reminderReads, projectNameReads, referenceReads,
   displayEvidence: () => displayAttempts.map(({ signal, ...attempt }) => ({ ...attempt, aborted: signal.aborted })),
   referenceObservations, archives, runtimeReads, skillReads, promptCreates, promptReads, permissionReads, permissionDecisions, permissionEntry,
-  inputReads, inputAnswers, inputCancels, inputEntry, fileDetails,
+  inputReads, inputAnswers, inputCancels, inputEntry, fileDetails, longBodyText,
   releaseInputs() { const call = inputReads.at(-1)!; call.resolve({ status: "ok", hostEpoch: epoch,
     sessionId: call.request.sessionId, entries: [{ ...inputEntry, handle: { ...inputEntry.handle, sessionId: call.request.sessionId } }], hasMore: false }); },
   releasePermissions() { const call = permissionReads.at(-1)!; call.resolve({ status: "ok", hostEpoch: epoch,
@@ -182,6 +191,7 @@ export const workspace = { snapshot: async () => {
     ? { ...catalog, sessions: catalog.sessions.map(row => ({ ...row, updatedAt: "2026-09-26T00:00:00Z" })) } : catalog;
 },
   historyTail: (request: HistoryRequest) => {
+    if (localStorage.getItem("bodyFixtureEnabled") === "true") { historyCalls.push(request); return Promise.resolve(bodyHistory(request)); }
     if (localStorage.getItem("fileFixtureEnabled") === "true") { historyCalls.push(request); return Promise.resolve(fileHistory(request)); }
     if (!localStorage.getItem("navigationFixture")) return unavailable();
     historyCalls.push(request);

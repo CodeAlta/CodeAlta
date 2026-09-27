@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { AppIcon } from "./AppIcon";
 import { MarkdownContent } from "./MarkdownContent";
 import { writeMarkdown, type TimelineItem } from "./timeline";
@@ -16,19 +16,33 @@ export function TimelineMessage({ item, canInspect }: { item: TimelineItem; canI
   const timestamp = timelineTime(item.timestamp, locale);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [wrapDetails, setWrapDetails] = useState(true);
-  const [disclosure, setDisclosure] = useState<{ source: string; expanded: boolean } | null>(null);
+  const [disclosure, setDisclosure] = useState<{ source: string; expanded: boolean; current?: () => boolean } | null>(null);
   const bodyId = useId();
   // A changed record at the same offset must not inherit the previous record's disclosure.
   const body = item.markdown;
-  const longBody = (item.category === "user" || item.category === "assistant") && (body?.length ?? 0) > longBodyThreshold;
-  const expanded = longBody && disclosure?.source === body && disclosure.expanded;
+  // Only inline supplied prose gets this control. Detail-only messages keep the
+  // existing Details route; terse outcomes and all summaries/notices stay visible.
+  const longBody = (body?.length ?? 0) > longBodyThreshold;
+  // Value identity of the bounded presentation, not original journal bytes. Do
+  // not serialize terse/detail-only records that have no inline disclosure.
+  const source = longBody ? JSON.stringify(item) : "";
+  const latest = useRef({ source, canInspect }); latest.current = { source, canInspect };
+  const current = () => latest.current.source === source && (canInspect?.() ?? true) && (latest.current.canInspect?.() ?? true);
+  const expanded = longBody && disclosure?.source === source && disclosure.expanded && (disclosure.current?.() ?? true) && current();
   // Invalidate the committed source lifetime, including A -> B -> A. Compare metadata
   // values, not arrays allocated by each History refresh; retained records keep expansion.
-  const sourceMetadata = JSON.stringify(item.metadata);
   useLayoutEffect(() => {
     setDisclosure(null);
-  }, [item.key, item.eventType, item.category, item.title, item.subtitle, item.timestamp,
-    body, sourceMetadata, item.truncated, item.bodyOmitted]);
+  }, [source]);
+  useLayoutEffect(() => {
+    if (disclosure && (!(disclosure.current?.() ?? true) || !current())) setDisclosure(null);
+  });
+  useEffect(() => {
+    if (!longBody) return;
+    const retire = (event: Event) => { if (event.target instanceof HTMLDialogElement) setDisclosure(null); };
+    document.addEventListener("beforetoggle", retire, true);
+    return () => document.removeEventListener("beforetoggle", retire, true);
+  }, [longBody]);
   const reset = useRef<number | undefined>(undefined);
   const active = useRef(false);
   const copySequence = useRef(0);
@@ -81,7 +95,13 @@ export function TimelineMessage({ item, canInspect }: { item: TimelineItem; canI
       {item.summary && (item.summaryIsCode ? <code className="timeline-primary-code">{item.summary}</code> : <p className="timeline-summary">{item.summary}</p>)}
       {body && longBody ? <>
         <button type="button" className="quiet-button long-message-toggle" aria-controls={bodyId}
-          aria-expanded={expanded} onClick={() => setDisclosure({ source: body, expanded: !expanded })}>
+          aria-expanded={expanded} disabled={!current()}
+          onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
+          onClick={event => {
+            if (event.defaultPrevented || !active.current || !current() || !event.currentTarget.isConnected || event.currentTarget.closest("[inert]")
+              || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+            setDisclosure({ source, expanded: !expanded, current: canInspect });
+          }}>
           <AppIcon name="chevronDown" size={14} />{t(expanded ? "Collapse message" : "Show full message")}
         </button>
         <div id={bodyId}>{expanded ? <MarkdownContent source={body} timelineCodeBlocks />

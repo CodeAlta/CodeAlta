@@ -12,7 +12,7 @@ import { locales, translate } from "./localization";
 const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
 
-test("mounted long persisted messages preserve copy, identity, follow and older anchor", { skip: !edge, timeout: 150_000 }, async () => {
+test("mounted long persisted messages preserve copy, identity, follow and older anchor", { skip: !edge, timeout: 210_000 }, async () => {
   const source = readFileSync(fileURLToPath(new URL("./main.tsx", import.meta.url)), "utf8");
   assert.match(source, /read=\{workspace\.historyTail\}/);
   const root = await mkdtemp(join(tmpdir(), "codealta-long-message-"));
@@ -43,11 +43,11 @@ test("mounted long persisted messages preserve copy, identity, follow and older 
       socket!.addEventListener("error", () => reject(new Error("test browser unavailable")), { once: true });
     });
     let sequence = 0;
-    const command = (method: string, params: object = {}) => new Promise<{ result?: { value?: unknown } }>((resolve, reject) => {
+    const command = (method: string, params: object = {}) => new Promise<{ result?: { value?: unknown }; exceptionDetails?: unknown }>((resolve, reject) => {
       const id = ++sequence;
       const timer = setTimeout(() => reject(new Error(`browser ${method} timed out`)), 12_000);
       const reply = (event: MessageEvent) => {
-        const message = JSON.parse(String(event.data)) as { id?: number; result?: { result?: { value?: unknown } }; error?: object };
+        const message = JSON.parse(String(event.data)) as { id?: number; result?: { result?: { value?: unknown }; exceptionDetails?: unknown }; error?: object };
         if (message.id !== id) return;
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         if (message.error) reject(new Error(`browser ${method} failed: ${JSON.stringify(message.error)}`)); else resolve(message.result ?? {});
@@ -58,7 +58,13 @@ test("mounted long persisted messages preserve copy, identity, follow and older 
     await command("Page.enable");
     await command("Emulation.setFocusEmulationEnabled", { enabled: true });
     await command("Page.navigate", { url: pathToFileURL(page).href });
-    const evaluate = async (expression: string) => (await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true })).result?.value;
+    const evaluate = async (expression: string) => {
+      try {
+        const response = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
+        assert.equal(response.exceptionDetails, undefined, JSON.stringify(response.exceptionDetails));
+        return response.result?.value;
+      } catch (cause) { throw Error(`expression=${expression}; failure=${cause instanceof Error ? cause.message : String(cause)}`, { cause }); }
+    };
     const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+10000;function check(){if(${condition})resolve(true);
       else if(Date.now()>end)resolve(document.body.innerText.slice(0,350));else setTimeout(check,30)}check()})`);
     const click = (selector: string) => evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
@@ -244,6 +250,32 @@ test("mounted long persisted messages preserve copy, identity, follow and older 
       await evaluate(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);
       const layout = await evaluate("({outer:document.documentElement.scrollWidth,button:document.querySelector('.long-message-toggle').getBoundingClientRect().right,preview:document.querySelector('.long-message-preview').getBoundingClientRect().right})") as {outer:number;button:number;preview:number};
       assert.ok(layout.outer<=width+2 && layout.button<=width+2 && layout.preview<=width+2, `${width}/${theme}: ${JSON.stringify(layout)}`);
+    }
+    // New diagnostic categories run after all preexisting user/assistant assertions.
+    for (const [category, replacement] of [
+      ["reasoning", { kind: "Reasoning" }], ["plan", { eventType: "planSnapshot", kind: "Updated" }],
+      ["notes", { eventType: "notes", kind: "Set" }], ["error", { eventType: "error", kind: "Failure" }],
+      ["status", { eventType: "sessionUpdate", kind: "Status" }],
+    ] as const) {
+      await evaluate(`toolFixture.replaceAssistant(${JSON.stringify(replacement)});document.querySelector('.history .section-heading button').click()`);
+      const diagnostic = `.message-${category}:has(.long-message-toggle)`;
+      assert.equal(await wait(`document.querySelector('.history').dataset.windowReady==='true' && !!document.querySelector('${diagnostic}')`), true, category);
+      await evaluate(`void(window.diagnosticBody=document.querySelector('${diagnostic}'));window.diagnosticReads=toolFixture.calls.length;
+        {const s=document.querySelector('.timeline-scroll');s.scrollTop=s.scrollHeight;s.dispatchEvent(new Event('scroll',{bubbles:true}))}`);
+      assert.equal(await wait(`${distance}<3 && document.querySelector('.timeline-scroll').dataset.following==='true'`), true, category);
+      await click(`${diagnostic} .long-message-toggle`);
+      assert.equal(await wait(`${distance}<3 && diagnosticBody.querySelector('.long-message-toggle').getAttribute('aria-expanded')==='true'`), true, `${category}: following expansion`);
+      assert.equal(await evaluate("toolFixture.calls.length===diagnosticReads"), true);
+      await click(`${diagnostic} .long-message-toggle`);
+      await evaluate("{const s=document.querySelector('.timeline-scroll');s.dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true}));diagnosticBody.querySelector('.long-message-toggle').scrollIntoView({block:'center'});s.dispatchEvent(new Event('scroll',{bubbles:true}))}");
+      assert.equal(await wait("document.querySelector('.timeline-scroll').dataset.following==='false'"), true);
+      await evaluate("window.diagnosticTop=diagnosticBody.getBoundingClientRect().top;window.diagnosticScroll=document.querySelector('.timeline-scroll').scrollTop");
+      await click(`${diagnostic} .long-message-toggle`);
+      await evaluate("new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
+      assert.equal(await evaluate("Math.abs(diagnosticBody.getBoundingClientRect().top-diagnosticTop)<3 && Math.abs(document.querySelector('.timeline-scroll').scrollTop-diagnosticScroll)<3 && document.querySelector('.timeline-scroll').dataset.following==='false' && toolFixture.calls.length===diagnosticReads"), true, `${category}: reading expansion preserves position`);
+      await click(".load-more");
+      assert.equal(await wait("document.querySelector('.history').dataset.windowReady==='true' && toolFixture.calls.length===diagnosticReads+1"), true);
+      assert.equal(await evaluate(`diagnosticBody===document.querySelector('${diagnostic}') && diagnosticBody.querySelector('.long-message-toggle').getAttribute('aria-expanded')==='true' && Math.abs(diagnosticBody.getBoundingClientRect().top-diagnosticTop)<3 && document.querySelector('.timeline-scroll').dataset.following==='false'`), true, `${category}: older paging retains record, expansion and reading anchor`);
     }
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });

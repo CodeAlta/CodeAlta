@@ -16,7 +16,7 @@ const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
 
 // The bundle entry is main.tsx, not a copied shell or reimplemented navigation fixture.
-test("production shell settings overlay keeps the session workspace mounted and inert", { skip: !edge, timeout: 90_000 }, async t => {
+test("production shell settings overlay keeps the session workspace mounted and inert", { skip: !edge, timeout: 120_000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), "codealta-session-content-shell-"));
   t.diagnostic(`Fake-host App evidence retained at ${root}`);
   const layoutObservations: unknown[] = [];
@@ -81,6 +81,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     let permissionModeContext: string | null = null;
     let inputModeContext: string | null = null;
     let fileModeContext: string | null = null;
+    let bodyModeContext: string | null = null;
     const evaluate = async (expression: string) => {
       try {
         const response = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
@@ -88,7 +89,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
         return response.result?.value;
       } catch (cause) {
         // This page contains fixture data only. Keep exact expression/context on transport failures.
-        throw new Error(`Runtime.evaluate permissionMode=${permissionModeContext ?? "outside permission scenarios"}; inputMode=${inputModeContext ?? "outside input scenarios"}; fileMode=${fileModeContext ?? "outside file scenarios"}; expression=${expression}; failure=${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+        throw new Error(`Runtime.evaluate permissionMode=${permissionModeContext ?? "outside permission scenarios"}; inputMode=${inputModeContext ?? "outside input scenarios"}; fileMode=${fileModeContext ?? "outside file scenarios"}; bodyMode=${bodyModeContext ?? "outside body scenarios"}; expression=${expression}; failure=${cause instanceof Error ? cause.message : String(cause)}`, { cause });
       }
     };
     const wait = (condition: string) => evaluate(`new Promise(resolve => { const end=Date.now()+7000; const tick=()=>{
@@ -2460,6 +2461,53 @@ test("production shell settings overlay keeps the session workspace mounted and 
       assert.equal(await wait("document.querySelector('#root').childElementCount===0"), true);
     }
     fileModeContext = null;
+    // App body scenarios follow every accepted file scenario and its unmount.
+    for (const mode of ["session-aba", "host-aba", "settings", "switch"]) {
+      bodyModeContext = mode; t.diagnostic(`Long supplied body App scenario: ${mode}`);
+      await evaluate("localStorage.clear();localStorage.setItem('settingsFixtureOwned','true');localStorage.setItem('bodyFixtureEnabled','true')");
+      await command("Page.reload");
+      assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one' && document.querySelectorAll('.long-message-toggle').length===4"), true);
+      await frames();
+      assert.equal(await evaluate("!document.querySelector('.message-error .long-message-toggle') && document.querySelector('.message-error .markdown-content p').textContent==='TERSE FAILURE' && document.querySelector('.message-reasoning').textContent.includes('omitted') && document.querySelector('.message-reasoning').textContent.includes('shortened')"), true);
+      await evaluate("window.bodyRpcCount=settingsShellFixture.rpcCalls.length;void(window.bodyButton=document.querySelector('.message-reasoning .long-message-toggle'));bodyButton.focus();bodyButton.click()");
+      assert.equal(await wait("bodyButton.getAttribute('aria-expanded')==='true'"), true);
+      assert.equal(await evaluate("document.activeElement===bodyButton && !document.querySelector('.message-reasoning img') && !window.bodyInjected"), true);
+      for (const locale of ["en", "es", "fr", "de", "ja", "zh-CN"]) {
+        await evaluate(`workflowLanguage('${locale}')`); await frames();
+        assert.equal(await evaluate("bodyButton.isConnected && bodyButton.getAttribute('aria-expanded')==='true' && settingsShellFixture.rpcCalls.length===bodyRpcCount"), true, `${mode}/${locale}`);
+      }
+      await evaluate("workflowLanguage('en');bodyButton.click()"); await frames();
+      await evaluate("window.bodyCopies=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{bodyCopies.push(value)}}});document.querySelector('.message-reasoning .copy-markdown').click()");
+      assert.equal(await wait("bodyCopies.length===1"), true);
+      assert.equal(await evaluate("bodyCopies[0]===settingsShellFixture.longBodyText && bodyButton.getAttribute('aria-expanded')==='false'"), true);
+      await evaluate("bodyButton.click()"); await frames();
+      if (mode === "session-aba") await evaluate("cycleInfoSelection()");
+      if (mode === "host-aba") await evaluate("cycleInfoHost()");
+      if (mode === "settings") {
+        await evaluate("document.querySelector('.rail-footer .icon-label-button').click()");
+        assert.equal(await wait("!!document.querySelector('[aria-label=\"Close settings\"]')"), true);
+        await evaluate("bodyButton.click()");
+        assert.equal(await evaluate("bodyButton.isConnected && bodyButton.getAttribute('aria-expanded')==='false'"), true);
+        await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
+      }
+      if (mode === "switch") {
+        await evaluate("[...document.querySelectorAll('.session-row > button:first-child')].find(x=>x.textContent.includes('two')).click()");
+        assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='two' && document.querySelectorAll('.long-message-toggle').length===4"), true);
+        await evaluate("bodyButton.click()");
+        assert.equal(await evaluate("!bodyButton.isConnected && !document.querySelector('.long-message-toggle[aria-expanded=true]')"), true);
+        await evaluate("[...document.querySelectorAll('.session-row > button:first-child')].find(x=>x.textContent.includes('one')).click()");
+        assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one' && document.querySelectorAll('.long-message-toggle').length===4"), true);
+        await frames(); await evaluate("window.bodyRpcCount=settingsShellFixture.rpcCalls.length");
+      }
+      await frames();
+      assert.equal(await evaluate("!document.querySelector('.long-message-toggle[aria-expanded=true]') && settingsShellFixture.rpcCalls.length===bodyRpcCount"), true, mode);
+      await evaluate("document.querySelector('.message-notes .long-message-toggle').click()");
+      assert.equal(await wait("document.querySelector('.message-notes .long-message-toggle').getAttribute('aria-expanded')==='true'"), true);
+      assert.equal(await evaluate("settingsShellFixture.rpcCalls.length===bodyRpcCount && settingsShellFixture.sends.length===0"), true);
+      await evaluate("unmountShellFixture();bodyButton.click()");
+      assert.equal(await wait("document.querySelector('#root').childElementCount===0"), true);
+    }
+    bodyModeContext = null;
   } finally {
     socket?.close(); browser?.kill();
     await writeFile(join(root, "session-content-observations.json"), JSON.stringify(layoutObservations, null, 2));
