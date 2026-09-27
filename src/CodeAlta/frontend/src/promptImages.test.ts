@@ -3,6 +3,28 @@ import assert from "node:assert/strict";
 import { createImageDrafts, freezeImages, pngHeader } from "./promptImages";
 import { captureSubmission } from "./sessionOperations";
 
+test("local handoff reserves capacity before persistence and never consumes source images", () => {
+  const owner = createImageDrafts();
+  const image = { title: "Original", mediaType: "image/png", base64: "AA==" };
+  owner.replace("source", owner.get("source"), [image]);
+  const original = owner.get("source");
+  let writes = 0;
+  assert.equal(owner.copyToEmpty("source", original, "target", () => { writes++; return false; }), false);
+  assert.equal(owner.get("source"), original);
+  assert.equal(owner.get("target").length, 0);
+  assert.equal(owner.copyToEmpty("source", original, "target", () => {
+    writes++;
+    assert.equal(owner.replace("target", owner.get("target"), [image]), false, "reservation excludes reentrant destination writes");
+    return true;
+  }), true);
+  assert.deepEqual(owner.get("target"), original);
+  assert.equal(owner.get("source"), original);
+  assert.equal(owner.copyToEmpty("source", original, "target", () => { writes++; return true; }), false);
+  for (let i = 0; i < 6; i++) owner.replace(`full${i}`, owner.get(`full${i}`), [image]);
+  assert.equal(owner.copyToEmpty("source", original, "overflow", () => { writes++; return true; }), false);
+  assert.equal(writes, 2, "occupied/capacity refusal precedes text storage");
+});
+
 test("image-only capture preserves truly empty text and titles without admitting blank text-only or whitespace", () => {
   const selection = { providerKey: "p", agentPromptId: "default", modelId: "image", reasoningEffort: null };
   const images = [{ title: "Settings / image", mediaType: "image/png", base64: "AA==" }];
@@ -14,6 +36,25 @@ test("image-only capture preserves truly empty text and titles without admitting
   assert.equal(captureSubmission("e", "s", "", "k", selection, null, []), null);
   assert.equal(captureSubmission("e", "s", " \n\t", "k", selection, null, images), null);
   assert.equal(captureSubmission("e", "s", "", "k", null, null, images), null);
+});
+
+test("local image copy rejects source ABA, pending destination reads and storage uncertainty", () => {
+  const owner = createImageDrafts();
+  const image = { title: "original", mediaType: "image/png", base64: "AA==" };
+  owner.replace("source", owner.get("source"), [image]);
+  const captured = owner.get("source");
+  const finish = owner.beginRead("destination")!;
+  assert.equal(owner.copyToEmpty("source", captured, "destination", () => assert.fail("pending read cannot persist text")), false);
+  finish();
+  assert.equal(owner.copyToEmpty("source", captured, "destination", () => {
+    assert.equal(owner.beginRead("destination"), null);
+    throw Error("text storage may have written before throwing");
+  }), false);
+  assert.equal(owner.get("source"), captured);
+  assert.equal(owner.get("destination").length, 0);
+  owner.replace("source", captured, [{ ...image, title: "new" }]);
+  owner.replace("source", owner.get("source"), captured);
+  assert.equal(owner.copyToEmpty("source", captured, "destination", () => assert.fail("stale capture cannot persist")), false);
 });
 
 test("image draft replacement is bounded, immutable and exact-revision fenced", () => {

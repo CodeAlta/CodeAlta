@@ -117,7 +117,9 @@ Object.assign(window, { settingsShellFixture: { calls, rpcCalls, sends, choiceRe
   releaseSnapshot(mode = "ok") { const read = snapshots.shift()!;
     if (mode === "error") read.reject(new Error("fixture read failed"));
     else read.resolve({ ...catalog, sessions: [...catalog.sessions, ...(mode === "missing" ? [] :
-      [{ ...session, id: "created", title: "created", fullTitle: "created", providerKey: mode === "provider" ? "wrong-provider" : creates[0]?.request.providerId ?? session.providerKey }])] }); },
+      [{ ...session, id: "created", title: "created", fullTitle: "created",
+        ...(creates[0]?.request.scope === "global" ? { scopeKind: "global", projectId: null, workspacePath: "/fixture/global" } : {}),
+        providerKey: mode === "provider" ? "wrong-provider" : creates[0]?.request.providerId ?? session.providerKey }])] }); },
   releaseMutation(kind: "rename" | "delete") { const index = mutationReplies.findIndex(reply => reply.kind === kind);
     if (index >= 0) mutationReplies.splice(index, 1)[0].resolve({}); },
   releaseExactDelete(status = "ok", hostEpoch?: string) { const index = mutationReplies.findIndex(reply => reply.kind === "delete");

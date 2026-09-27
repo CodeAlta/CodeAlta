@@ -2,7 +2,7 @@ import type { SessionPromptImage } from "#neoastra";
 import { createOwnerChangeSignal } from "./ownerChangeSignal";
 
 export const imageLimits = Object.freeze({ count: 3, bytes: 65_536, total: 98_304, text: 4096 });
-export const imageHelp = "Paste PNG images: up to 3, 64 KiB each / 96 KiB total; RGB/RGBA 8-bit, non-interlaced, 2048 pixels per side / 4 megapixels. Image Send requires text (up to 4096 characters). Queue, Steer and local draft transfer do not support images.";
+export const imageHelp = "PNG: up to 3 images, 64 KiB each / 96 KiB total, 2048px per side / 4MP; RGB/RGBA 8-bit, non-interlaced. Text: empty or nonblank, up to 4096 characters. Normal Send requires an observed supported model. Queue and Steer refuse images.";
 export function freezeImages(images: readonly SessionPromptImage[] | null | undefined): readonly SessionPromptImage[] {
   return Object.freeze((images ?? []).map(image => Object.freeze({ title: image.title, mediaType: image.mediaType, base64: image.base64 })));
 }
@@ -19,16 +19,31 @@ export function createImageDrafts() {
   const reads = new Set<string>();
   const empty: readonly SessionPromptImage[] = Object.freeze([]);
   const change = createOwnerChangeSignal();
+  let copying = false;
   return {
     subscribe: change.subscribe, getSnapshot: change.getSnapshot,
     get: (key: string) => entries.get(key) ?? empty,
     beginRead(key: string): (() => void) | null {
-      if (reads.has(key) || reads.size >= 8) return null;
+      if (copying || reads.has(key) || reads.size >= 8) return null;
       reads.add(key); return () => { reads.delete(key); };
     },
     replace(key: string, previous: readonly SessionPromptImage[], next: readonly SessionPromptImage[]) {
-      if ((entries.get(key) ?? empty) !== previous || !validImages(next) || next.length && !entries.has(key) && entries.size >= 8) return false;
+      if (copying || (entries.get(key) ?? empty) !== previous || !validImages(next) || next.length && !entries.has(key) && entries.size >= 8) return false;
       if (next.length) entries.set(key, freezeImages(next)); else entries.delete(key);
+      change.changed(); return true;
+    },
+    // Reserve the in-memory destination before synchronous text persistence. No await,
+    // eviction or source consumption; failure can leave storage uncertain, never images lost.
+    copyToEmpty(source: string, original: readonly SessionPromptImage[], destination: string, persist: () => boolean) {
+      if (copying || !original.length || entries.get(source) !== original || source === destination
+        || entries.has(destination) || reads.has(destination) || entries.size >= 8 || !validImages(original)) return false;
+      const copied = freezeImages(original);
+      copying = true;
+      try {
+        if (!persist()) return false;
+        entries.set(destination, copied);
+      } catch { return false; }
+      finally { copying = false; }
       change.changed(); return true;
     },
   };

@@ -3,9 +3,10 @@ import { dispatchExpandedComposerKey } from "./composerKeyboard";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
 import { useShellLanguage } from "./shellLanguage";
 
-export function ExpandedPromptEditor({ text, onChange, onClose, onPaste, attachments }: {
+export function ExpandedPromptEditor({ text, onChange, onClose, onPaste, attachments, onCompositionStart }: {
   text: string; onChange: (text: string) => void; onClose: () => void;
   onPaste?: ClipboardEventHandler<HTMLTextAreaElement>; attachments?: ReactNode;
+  onCompositionStart?: () => void;
 }) {
   const { t } = useShellLanguage();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -32,7 +33,7 @@ export function ExpandedPromptEditor({ text, onChange, onClose, onPaste, attachm
     }}>
     <header><h2 id="expanded-prompt-title">{t("Edit prompt")}</h2><button type="button" onClick={onClose}>{t("Close")}</button></header>
     <textarea ref={editor} aria-label={t("Expanded prompt")} aria-describedby="expanded-prompt-hint" maxLength={32768}
-      value={text} onChange={event => onChange(event.target.value)} onPaste={onPaste} />
+      value={text} onChange={event => onChange(event.target.value)} onPaste={onPaste} onCompositionStart={onCompositionStart} />
     {attachments}
     <ProjectReferencePicker text={text} edit={onChange} input={editor} />
     <p id="expanded-prompt-hint">{t("Enter / Escape / Ctrl+Enter close · Shift+Enter new line · Draft preserved; nothing is sent.")}</p>

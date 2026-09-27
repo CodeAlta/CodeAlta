@@ -1,6 +1,6 @@
 # Desktop provider choice for new owned sessions
 
-The inline new-session form and local text-draft **Create and transfer** action share
+The inline new-session form and owned local draft **Create and transfer** action share
 a provider choice. It applies only to the next deliberately created session, never
 to an existing session or a pending original. The choice is retained in the current
 App window; it does not edit provider configuration or the global default.
@@ -36,7 +36,7 @@ failure is not proof that creation had no effects.
 The immutable renderer request includes the provider choice. Reply correlation
 checks that original choice along with host epoch and project/global scope. An
 explicit-provider result must also match the provider key on a unique newly read
-catalog session before existing navigation/text transfer is allowed. Input/provider,
+catalog session before existing navigation/draft transfer is allowed. Input/provider,
 scope, host, Settings and modal lifetime changes invalidate publication, including
 same-value ABA. Locale alone is presentation, not an operation identity.
 
@@ -45,8 +45,11 @@ including after form closure or changing provider/scope. Only a correlated defin
 refusal or successful fresh matching publication releases it. Manual list refresh
 does not unlock it. This is in-memory uncertainty retention, not durable receipts,
 reload-safe reconciliation or a guarantee that reloading permits a safe retry.
-Local text and image drafts are not discarded: existing text-transfer fences remain;
-local image transfer is still refused. No automatic Send is added.
+Local text and image drafts are not discarded: existing text-transfer fences remain.
+The explicit owned new-session draft now permits [bounded PNG handoff](prompt-images.md)
+only with current immutable input and an empty eligible destination/capacity preflight.
+Storage failure retains the source and reports uncertainty; there is no cross-storage
+transaction or reload-durable image promise. No automatic Send is added.
 
 ## Verification scope
 

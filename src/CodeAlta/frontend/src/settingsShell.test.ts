@@ -32,6 +32,8 @@ test("production shell settings overlay keeps the session workspace mounted and 
         bundle.onLoad({ filter: /[/\\]main\.tsx$/ }, async args => ({ loader: "tsx", contents:
           (await readFile(args.path, "utf8")).replace('createRoot(document.getElementById("root")!).render(',
             'const fixtureRoot = createRoot(document.getElementById("root")!); Object.assign(window, { unmountShellFixture: () => fixtureRoot.unmount() }); fixtureRoot.render(')
+            .replace('const [submissions] = useState(() => createOwnedSubmissions(sessionOperations.send, sessionOperations.abort));',
+              'const [submissions] = useState(() => createOwnedSubmissions(sessionOperations.send, sessionOperations.abort)); Object.assign(window,{readLocalImageOwner:()=>submissions.imageDrafts,readLocalSubmissions:()=>submissions});')
             .replace('const language = useLanguagePreference();', 'const language = useLanguagePreference(); Object.assign(window, { workflowLanguage: language.setLanguage });')
             .replace('const [clock, setClock] = useState(Date.now);', 'const [clock, setClock] = useState(Date.now); Object.assign(window, { readSessionTimeClock: () => clock });')
             .replace('const [projectId, writeProjectId]',
@@ -1515,6 +1517,97 @@ test("production shell settings overlay keeps the session workspace mounted and 
     const editLocal = (text: string) => evaluate(`(() => { const input=document.querySelector('#catalog-prompt');
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,${JSON.stringify(text)});
       input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+    for (const imageMode of ["image-only", "text-images", "global", "image-aba", "input-aba", "provider-aba", "host-aba", "storage", "storage-late", "capacity", "destination", "destination-images", "destination-read", "destination-pending", "uncertain", "reply", "catalog", "late-paste", "late-provider", "late-settings", "late-close", "late-ime"]) {
+      await evaluate("localStorage.clear(); localStorage.setItem('settingsFixtureOwned','true')");
+      await command("Page.reload");
+      assert.equal(await wait("!!document.querySelector('#session-prompt')"), true);
+      await evaluate("document.querySelector('.session-tabs [role=tab]').click()");
+      assert.equal(await wait("!!document.querySelector('#catalog-prompt')"), true);
+      if (imageMode === "global") await evaluate("document.querySelector('.project-root-list button').click()");
+      if (imageMode !== "image-only") await editLocal("  exact local text  ");
+      await evaluate(`(async()=>{const canvas=document.createElement('canvas');canvas.width=1;canvas.height=1;
+        const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));window.localPng=new File([blob],'local.png',{type:'image/png'});
+        window.localPaste=(selector,file=localPng)=>{const data=new DataTransfer();data.items.add(file);document.querySelector(selector).dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:data}));};localPaste('#catalog-prompt');})()`);
+      assert.equal(await wait("document.querySelectorAll('.catalog-composer .prompt-image-attachments img').length===1"), true);
+      const renameLocal = (title: string) => evaluate(`(()=>{const input=document.querySelector('.prompt-image-attachments input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(title)});input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+      await renameLocal("Local original");
+      await evaluate("window.originalLocalImage=document.querySelector('.prompt-image-attachments img').src");
+      if (imageMode === "text-images") {
+        await evaluate("document.querySelector('#expand-session-prompt').click()");
+        assert.equal(await wait("document.querySelector('.expanded-prompt-dialog')?.open"), true);
+        await evaluate("localPaste('.expanded-prompt-dialog textarea')");
+        assert.equal(await wait("document.querySelectorAll('.expanded-prompt-dialog .prompt-image-attachments img').length===2"), true);
+        await evaluate("[...document.querySelectorAll('.expanded-prompt-dialog .prompt-image-attachments button')].at(-1).click()");
+        await evaluate("document.querySelector('.expanded-prompt-dialog .prompt-image-attachments input').focus()");
+        await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+        await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+        assert.equal(await evaluate("document.querySelector('.expanded-prompt-dialog').open && settingsShellFixture.creates.length===0 && settingsShellFixture.sends.length===0"), true);
+        await workflowLanguages(evaluate, workflowCalls, ".expanded-prompt-dialog", ".prompt-image-attachments > p", "Local PNG draft only; images stay in this window. Create and transfer never sends them.", "figcaption");
+        await workflowNarrow(evaluate, command, ".expanded-prompt-dialog");
+        await evaluate("document.querySelector('.expanded-prompt-dialog header button').click()");
+        await evaluate("document.querySelector('.rail-footer .icon-label-button').click()");
+        await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
+        assert.equal(await evaluate("document.querySelector('.catalog-composer .prompt-image-attachments img').src===originalLocalImage"), true);
+      }
+      if (imageMode.startsWith("late-")) {
+        await evaluate("const held=new File([localPng],'held.png',{type:'image/png'});held.arrayBuffer=()=>new Promise(resolve=>window.releaseLocalPng=async()=>resolve(await localPng.arrayBuffer()));localPaste('#catalog-prompt',held)");
+        if (imageMode === "late-paste") { await editLocal("changed"); await editLocal("  exact local text  "); }
+        if (imageMode === "late-provider") await evaluate("for(const value of ['alternate','']){const select=document.querySelector('.content .creation-provider select');select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));}");
+        if (imageMode === "late-settings") {
+          await evaluate("document.querySelector('.rail-footer .icon-label-button').click()");
+          await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
+        }
+        if (imageMode === "late-close") {
+          await evaluate("document.querySelector('#expand-session-prompt').click()");
+          await evaluate("document.querySelector('.expanded-prompt-dialog header button').click()");
+        }
+        if (imageMode === "late-ime") await evaluate("document.querySelector('#catalog-prompt').dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));document.querySelector('#catalog-prompt').dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}))");
+        await evaluate("releaseLocalPng()"); await frames();
+        assert.equal(await evaluate("document.querySelectorAll('.catalog-composer .prompt-image-attachments img').length"), 1);
+      }
+      await evaluate("const select=document.querySelector('.content .creation-provider select');select.value='alternate';select.dispatchEvent(new Event('change',{bubbles:true}));");
+      await evaluate("localStorage.setItem('creationFixtureHoldSnapshot','true');[...document.querySelectorAll('button')].find(b=>b.textContent==='Create and transfer draft').click()");
+      assert.equal(await wait("settingsShellFixture.creates.length===1"), true);
+      if (imageMode === "reply") await evaluate("settingsShellFixture.releaseCreate('ok','wrong-provider')");
+      else if (imageMode === "uncertain") await evaluate("settingsShellFixture.releaseCreate('create_unconfirmed')");
+      else {
+        await evaluate("settingsShellFixture.releaseCreate()");
+        assert.equal(await wait("settingsShellFixture.snapshots.length===1"), true);
+        if (imageMode === "image-aba") { await renameLocal("newer"); await renameLocal("Local original"); }
+        if (imageMode === "input-aba") { await editLocal("changed"); await editLocal("  exact local text  "); }
+        if (imageMode === "provider-aba") await evaluate("for(const value of ['alternate','']){const select=document.querySelector('.content .creation-provider select');select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));}");
+        if (imageMode === "host-aba") await evaluate("cycleInfoHost()");
+        if (imageMode === "capacity") await evaluate("const owner=readLocalImageOwner();for(let i=0;i<7;i++)owner.replace('occupied-'+i,owner.get('occupied-'+i),[{title:'kept',mediaType:'image/png',base64:'AA=='}])");
+        if (imageMode === "destination") await evaluate("localStorage.setItem('codealta.desktop.prompt.created','Occupied')");
+        if (["destination-images", "destination-read"].includes(imageMode)) await evaluate(`const owner=readLocalImageOwner();const key=JSON.stringify([settingsShellFixture.creates[0].request.expectedHostEpoch,'created',settingsShellFixture.catalog.projects[0].id,'/fixture/project']);${imageMode === "destination-images" ? "owner.replace(key,owner.get(key),[{title:'occupied image',mediaType:'image/png',base64:'AA=='}]);" : "owner.beginRead(key);"}`);
+        if (imageMode === "destination-pending") {
+          await evaluate("readLocalSubmissions().submit({expectedEpoch:settingsShellFixture.creates[0].request.expectedHostEpoch,clientRequestId:'preexisting',sessionId:'created',text:'Already pending',selection:null,references:null,images:null},new AbortController().signal,readBatchCapability(),()=>{});true");
+          assert.equal(await evaluate("!!readLocalSubmissions().pending('created')"), true);
+        }
+        if (imageMode.startsWith("storage")) await evaluate(`window.oldSetItem=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key==='codealta.desktop.prompt.created'){${imageMode === "storage-late" ? "oldSetItem.call(this,key,value);" : ""}throw Error('fixture quota');}return oldSetItem.call(this,key,value)}`);
+        await evaluate(`settingsShellFixture.releaseSnapshot('${imageMode === "catalog" ? "provider" : "ok"}')`);
+      }
+      assert.equal(await wait("!document.querySelector('[aria-label=\"Create session\"]').disabled"), true);
+      if (imageMode.startsWith("storage")) await evaluate("Storage.prototype.setItem=oldSetItem");
+      if (imageMode === "storage-late") {
+        assert.equal(await evaluate("localStorage.getItem('codealta.desktop.prompt.created')"), "  exact local text  ");
+        assert.equal(await evaluate("document.body.textContent.includes('Destination text storage may be uncertain')"), true);
+      }
+      const succeeds = ["image-only", "text-images", "global"].includes(imageMode) || imageMode.startsWith("late-");
+      if (succeeds) {
+        assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='created' && document.querySelectorAll('.owned-session .prompt-image-attachments img').length===1"), true);
+        assert.equal(await evaluate("document.querySelector('.owned-session .prompt-image-attachments img').src===originalLocalImage && document.querySelector('.owned-session .prompt-image-attachments input').value==='Local original'"), true);
+        assert.equal(await evaluate("document.querySelector('#session-prompt').value"), imageMode === "image-only" ? "" : "  exact local text  ");
+        assert.equal(await evaluate("document.querySelector('.send-button').disabled"), true, "Unknown image model still refuses Send");
+        await evaluate("document.querySelector('.session-tabs [role=tab]').click()");
+      } else assert.equal(await evaluate("document.querySelector('.session-header h1').textContent"), "Prompt draft", imageMode);
+      if (imageMode === "uncertain") {
+        await evaluate("document.querySelector('.rail-footer .icon-label-button').click()");
+        await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
+        assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Create and transfer draft').disabled"), true, "Uncertain image original cannot be retried after close");
+      }
+      assert.equal(await evaluate(`document.querySelector('.catalog-composer .prompt-image-attachments img').src===originalLocalImage && settingsShellFixture.creates.length===1 && settingsShellFixture.sends.length===${imageMode === "destination-pending" ? 1 : 0}`), true, `${imageMode}: source retained, no Send or retry`);
+    }
     for (const change of ["valid", "edit", "input-aba", "cancel", "cancel-before-reply", "scope-aba", "tab-aba", "settings-aba", "missing", "error", "failure", "duplicate", "destination", "catalog", "archived", "unavailable"]) {
       await evaluate(`window.unmountShellFixture(); localStorage.clear(); localStorage.setItem('settingsFixtureOwned',${JSON.stringify(change !== "catalog" ? "true" : "false")});
         localStorage.setItem('settingsFixtureSecondProject','true'); localStorage.setItem('layoutFixtureLive','true'); localStorage.setItem('navigationFixture','mixed')`);
@@ -1528,6 +1621,8 @@ test("production shell settings overlay keeps the session workspace mounted and 
       if (change === "unavailable") await evaluate("window.publishLayoutState({kind:'error',message:'Unavailable'})");
       if (["catalog", "archived", "unavailable"].includes(change)) {
         assert.equal(await wait("[...document.querySelectorAll('button')].find(b=>b.textContent==='Create and transfer draft')?.disabled"), true);
+        await evaluate("window.readOnlyImageReads=0;const file=new File(['x'],'refused.png',{type:'image/png'});file.arrayBuffer=()=>{readOnlyImageReads++;return Promise.resolve(new ArrayBuffer(1))};const data=new DataTransfer();data.items.add(file);document.querySelector('#catalog-prompt').dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:data}));");
+        assert.equal(await evaluate("readOnlyImageReads"), 0, "Read-only drafts refuse files before reading");
         assert.equal(await evaluate("settingsShellFixture.creates.length"), 0); continue;
       }
       if (change === "valid") {

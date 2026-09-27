@@ -21,6 +21,8 @@ import { browserActivation } from "./sessionBrowser";
 import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { ReadOnlyComposer } from "./ReadOnlyComposer";
+import { useLocalDraftImages } from "./useLocalDraftImages";
+import { imageLimits } from "./promptImages";
 import { ModelCatalogPanel } from "./ModelCatalogPanel";
 import { ProvidersPanel } from "./ProvidersPanel";
 import { PromptCatalogPanel } from "./PromptCatalogPanel";
@@ -55,7 +57,7 @@ import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePositi
 import type { ShortcutAction } from "./shortcuts";
 import { dispatchWorkspaceShortcut, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
 import { activateContextShortcut } from "./contextShortcut";
-import { createDraftIndicators, persistDraft, restoreDraft, transferPromptDraft } from "./promptDraft";
+import { createDraftIndicators, draftStorageKey, persistDraft, restoreDraft, transferPromptDraft } from "./promptDraft";
 import { SessionDraftBadge } from "./SessionDraftBadge";
 import { collapsedSessionWidth, constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizeCollapsedSessionPane, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
 import { composerBounds, composerSizeKey, rememberComposerHeight, resizeComposerHeight } from "./composerHeight";
@@ -154,6 +156,7 @@ function App() {
   const [tabsReady, setTabsReady] = useState(false);
   // Scope-local text is App-owned even when storage is denied or workspace DOM is unmounted.
   const localDrafts = useRef(new Map<string, { text: string; revision: number }>());
+  const localImageGeneration = useRef(0);
   const [, renderLocalDraft] = useState(0);
   const draftScope = `local-draft:${JSON.stringify(projectId)}`;
   const localDraftStorageKey = `codealta.desktop.localPrompt.${JSON.stringify(projectId)}`;
@@ -161,7 +164,7 @@ function App() {
     { text: restoreDraft(() => localStorage.getItem(localDraftStorageKey), draftScope), revision: 0 });
   const localDraft = localDrafts.current.get(draftScope)!;
   const [draftHandoffNotice, setDraftHandoffNotice] = useState("");
-  const [draftHandoffEvidence, setDraftHandoffEvidence] = useState<Array<{ scope: string; text: string; revision: number; epoch: string | undefined; target: SessionTarget; providerId: string | null; outcome: string; result?: string }>>([]);
+  const [draftHandoffEvidence, setDraftHandoffEvidence] = useState<Array<{ scope: string; text: string; revision: number; epoch: string | undefined; target: SessionTarget; providerId: string | null; imageTitles: readonly string[]; outcome: string; result?: string }>>([]);
   function editLocalDraft(text: string) {
     const current = localDrafts.current.get(draftScope)!;
     localDrafts.current.set(draftScope, { text, revision: current.revision + 1 });
@@ -605,6 +608,22 @@ function App() {
   currentHostEpoch.current = status?.hostEpoch;
   const currentHostAvailable = useRef(!!status?.hostAvailable);
   currentHostAvailable.current = !!status?.hostAvailable;
+  const localImageKey = JSON.stringify(["local-draft", status?.hostEpoch ?? null, projectId, selectedProject?.path ?? null]);
+  const localImages = useLocalDraftImages(submissions.imageDrafts, localImageKey, () => {
+    const generation = creationGeneration.current;
+    const imageGeneration = localImageGeneration.current;
+    const textRevision = localDraft.revision;
+    const epoch = status?.hostEpoch;
+    const scope = projectId;
+    const current = () => creationAlive.current && owned && !!snapshot && snapshot.configured
+      && mutation?.capability.canMutate() === true && currentHostAvailable.current && currentHostEpoch.current === epoch
+      && selectedScope.current === scope && selectedSessionId.current === null && currentProjectWritable()
+      && currentView.current === "workspace" && !settingsVisible.current && !creatingBusy
+      && !document.querySelector('dialog[open]:not(.expanded-prompt-dialog), [role="dialog"][aria-modal="true"]')
+      && localImageGeneration.current === imageGeneration && localDrafts.current.get(draftScope)?.revision === textRevision
+      && generation === creationGeneration.current;
+    return current() ? current : null;
+  }, () => { localImageGeneration.current++; }, language.locale);
 
   function paletteContext(): PaletteContext {
     const selection = selectedSessionInfoSelection(snapshot, selectedSession, projectId,
@@ -1021,8 +1040,11 @@ function App() {
     if (creationPending.current || creationHeld.current || !owned || !snapshot || !mutation?.capability.canMutate() || selectedProject?.archived
       || projectId !== null && !selectedProject || settingsVisible.current || dialog || paletteOpen
       || currentView.current !== "workspace" || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
-    if (fromDraft && (sessionId !== null || !localDraft.text.trim())) return;
-    const handoff = fromDraft ? { scope: draftScope, ...localDraft } : null;
+    if (fromDraft && (sessionId !== null || (!localDraft.text.trim() && !localImages.images.length)
+      || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim()))) return;
+    invalidateCreation(); // Deliberate capture fences any outstanding local paste.
+    const handoff = fromDraft ? { scope: draftScope, ...localDraft, imageKey: localImageKey, images: localImages.images,
+      imageGeneration: localImageGeneration.current } : null;
     const evidenceIndex = draftHandoffEvidence.length;
     const recordHandoff = (outcome: string) => {
       if (!handoff) return;
@@ -1037,7 +1059,10 @@ function App() {
       ? { scope: "project", projectId: selectedProject.id, projectPath: selectedProject.path } : { scope: "global" };
     const generation = creationGeneration.current;
     const epoch = status?.hostEpoch;
-    if (handoff) setDraftHandoffEvidence(records => [...records, { ...handoff, epoch, target, providerId, outcome: "Pending; nothing sent." }]);
+    // Do not retain additional binary copies in the unbounded historical text-evidence list.
+    // The shared eight-draft owner retains the source; the one original owns its captured snapshot.
+    if (handoff) setDraftHandoffEvidence(records => [...records, { scope: handoff.scope, text: handoff.text, revision: handoff.revision,
+      imageTitles: handoff.images.map(image => image.title), epoch, target, providerId, outcome: "Pending; nothing sent." }]);
     const sessionAtAdmission = sessionId;
     const capability = mutation.capability;
     const isCurrent = () => creationAlive.current && generation === creationGeneration.current
@@ -1046,6 +1071,8 @@ function App() {
       && selectedSessionId.current === sessionAtAdmission && currentView.current === "workspace"
       && !settingsVisible.current && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')
       && (!handoff || localDrafts.current.get(handoff.scope)?.revision === handoff.revision)
+      && (!handoff || submissions.imageDrafts.get(handoff.imageKey) === handoff.images)
+      && (!handoff || localImageGeneration.current === handoff.imageGeneration)
       && (target.scope === "global" || currentSnapshot.current?.projects.filter(project => project.id === target.projectId).length === 1
         && currentSnapshot.current.projects.some(project => project.id === target.projectId && project.path === target.projectPath && !project.archived));
     const completedElsewhere = "Creation may have completed, but its original view or input lifetime changed or the catalog did not confirm it. Inspect sessions; no retry was sent.";
@@ -1072,8 +1099,14 @@ function App() {
             // Never overwrite a pre-existing session editor. Storage failure cannot
             // certify delivery into the ordinary composer, so leave navigation alone.
             if (snapshot.sessions.some(row => row.id === selection.sessionId) || submissions.pending(selection.sessionId)
-              || !transferPromptDraft(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value), selection.sessionId, handoff.text)) {
-              recordHandoff("Session created, but draft transfer could not be confirmed. Original text retained. Inspect sessions; nothing sent.");
+              || !(handoff.images.length ? submissions.imageDrafts.copyToEmpty(handoff.imageKey, handoff.images,
+                JSON.stringify([epoch, selection.sessionId, selection.projectId, target.scope === "project" ? target.projectPath : null]), () => {
+                  if (!isCurrent() || submissions.pending(selection.sessionId)) return false;
+                  if (handoff.text === "") return !localStorage.getItem(draftStorageKey(selection.sessionId));
+                  return transferPromptDraft(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value), selection.sessionId, handoff.text)
+                    && isCurrent() && !submissions.pending(selection.sessionId);
+                }) : transferPromptDraft(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value), selection.sessionId, handoff.text))) {
+              recordHandoff("Session created, but draft transfer could not be confirmed. Original text and images retained. Destination text storage may be uncertain; inspect sessions. Nothing sent.");
               return;
             }
             recordHandoff("Draft copied to the verified session. Review it and use normal Send. Original local draft retained.");
@@ -1433,17 +1466,20 @@ function App() {
           {draftHandoffNotice && <p role="status" className="notice">{draftHandoffNotice}</p>}
           {draftHandoffEvidence.length > 0 && <details className="notice"><summary>{t("Draft creation evidence (this window)")}</summary>
             {draftHandoffEvidence.map((record, index) => <section key={index}><p>{record.scope} · host {record.epoch} · {record.target.scope === "project" ? record.target.projectPath : "Global"} · {record.providerId ?? t("Default or first enabled provider")} · input revision {record.revision}: {record.outcome}</p>
+              {record.imageTitles.length > 0 && <p>{t("PNG attachments")}: {record.imageTitles.join(" · ")}</p>}
               {record.result && <p>{record.result}</p>}
                <textarea aria-label={t("Original creation draft {number}", { number: index + 1 })} readOnly value={record.text} /></section>)}
           </details>}
           {!selectedSession
             ? <section className="session-workspace"><header className="session-header"><h1>{t("Prompt draft")}</h1></header>
                 <ReadOnlyComposer key={draftScope} sessionId={draftScope} provider={null} draftIndicators={draftIndicators}
+                  localImages={owned && snapshot?.configured && currentProjectWritable() ? localImages : undefined}
                   onOpenHelp={openHelp} onOpenPalette={openPalette}
                   reason={t("Local to this project/global scope. Create and transfer first, then review and Send in the session. Original text is retained; reload restores it only when local storage permits.")}
                   localDraft={{ text: localDraft.text, edit: editLocalDraft, action: <>
                     {creationProviderChoice()}
-                    <button type="button" disabled={creatingBusy || creationLocked || !owned || !mutation?.capability.canMutate() || !snapshot || !!selectedProject?.archived || projectId !== null && !selectedProject || !localDraft.text.trim()}
+                    <button type="button" disabled={creatingBusy || creationLocked || !owned || !mutation?.capability.canMutate() || !snapshot || !!selectedProject?.archived || projectId !== null && !selectedProject || (!localDraft.text.trim() && !localImages.images.length)
+                      || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim())}
                       onClick={() => void createSelectedSession(true)}>{t("Create and transfer draft")}</button>
                     {creatingBusy && <button type="button" onClick={() => { invalidateCreation(); setDraftHandoffNotice("Transfer canceled locally. Creation may still complete; original text retained. Inspect sessions; nothing sent."); }}>{t("Cancel transfer")}</button>}
                   </> }} />

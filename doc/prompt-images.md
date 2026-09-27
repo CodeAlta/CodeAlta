@@ -1,6 +1,6 @@
 # Desktop prompt images (bounded owned Send)
 
-The owned desktop composer accepts **user paste events containing PNG files**. It does not read the OS clipboard on mount, use a file picker, accept renderer paths/URLs, fetch images, or process clipboard HTML. Regular and expanded editors share App-owned attachment drafts. Local/read-only drafts refuse image paste before any create/transfer operation; create/open an owned session first.
+The owned desktop composer accepts **user paste events containing PNG files**. It does not read the OS clipboard on mount, use a file picker, accept renderer paths/URLs, fetch images, or process clipboard HTML. Regular and expanded editors share App-owned attachment drafts. The explicit owned local **new-session draft** also accepts these bounded attachments; archived and catalog-only read-only composers still refuse them.
 
 ## Limits and capability
 
@@ -11,6 +11,16 @@ The owned desktop composer accepts **user paste events containing PNG files**. I
 - Normal Send captures an explicit supported model and checks its choice before dispatch. The original host worker rechecks current non-probing choices/capability before saving or preparing a provider. A stale/unsupported original may therefore have an accepted admission receipt but a `preparation_failed` dispatch outcome. Admission is not run completion. Queue/Steer refuse when the composer contains attachments; they never drop images into a text-only fallback.
 
 ## Ownership and retention
+
+### Owned new-session draft handoff
+
+An eligible owned, writable project/global draft may store PNGs without a selected or observed image-capable model. This grants no Send authority. Deliberate **Create and transfer draft** captures exact text, ordered images/titles and revisions with the original epoch/scope/provider and UI lifetime. Exactly empty text with valid images is allowed; whitespace-only image text is refused. Regular/expanded editors share the same owner entry, and input/title/removal/paste/IME, provider, Settings, close and selection changes fence late reads, including ABA.
+
+Transfer requires the exact confirmed original Create response, a unique fresh matching catalog identity, current input/image/provider/lifetime and writable scope, and an empty destination without a pending Send or image read. The shared eight-draft owner preflights capacity and reserves synchronous image publication before attempting text storage. It never evicts another draft or substitutes text-only transfer when images cannot be admitted. Source text/images remain available even after successful copying. Historical creation evidence retains titles, not additional unbounded binary payloads.
+
+This is **not a transaction across localStorage and window memory**: a text write can have happened before an exception/readback failure. Such failure refuses navigation and image publication, retains the source, and explicitly reports uncertain destination text storage and that creation may already have happened. There is no automatic rollback, retry, Create, activation or Send to repair it. Refresh/close cannot release an uncertain creation original. Images are not reload-durable; text restoration still depends on permitted localStorage. Normal explicit session Send subsequently requires the existing observed supported model and host validation.
+
+### Normal session Send
 
 Each Send freezes exact text (including the empty string), ordered image bytes/base64, media type and display titles with the existing epoch/session/scope/selection/request key. Regular and expanded attachment strips expose editable local titles: nonblank, at most 80 UTF-16 code units, no control characters. Valid edits apply immediately; invalid edits leave the last valid title intact and show a notice. Titles are display metadata, never paths or filename operations. The host snapshots the input list; equality/replay includes every image field and order. Existing receipt replay does not validate/decode/save/resolve/send the original again. Shared host-capability invalidation and existing drain/receipt ownership remain in place.
 
@@ -26,4 +36,4 @@ The Store is a **trusted backend filesystem API, not a renderer sandbox or exter
 
 ## Qualification
 
-Tests use generated tiny PNGs, synthetic clipboard events, fake providers/hosts and disposable roots only. Native clipboard/WebView2, real-provider rendering, full-suite and website qualification are deliberately not performed in this scoped batch. This remains narrower than TUI support: no JPEG/WebP/GIF/DIB conversion or local draft image transfer.
+Tests use generated tiny PNGs, synthetic clipboard events, fake providers/hosts and disposable roots only. Native clipboard/WebView2, real-provider rendering, full-suite and website qualification are deliberately not performed in this scoped batch. This remains narrower than TUI support: no JPEG/WebP/GIF/DIB conversion, Queue/Steer images or general read-only draft image transfer. Owned new-session handoff evidence and exact commands are in `tmp/local-draft-images-20260927/REPORT.md` (ignored).

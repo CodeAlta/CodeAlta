@@ -201,6 +201,8 @@ zero skips, strict TypeScript/build). Full/native/native-speaker qualification r
 
 ### Static project/session workflow presentation (independent review pending)
 
+The owned local new-session PNG editor translates its help, limits, title/removal labels and refusal notice in all six supported languages without translating user titles. Actual-App fake-host checks exercise regular/expanded controls, keyboard focus/Enter, synthetic IME, narrow light/dark layout, immutable handoff and source retention. Raw creation/storage outcome evidence remains literal English; no native IME/clipboard qualification is claimed. See `tmp/local-draft-images-20260927/REPORT.md`.
+
 The [new-session provider choice](new-session-provider.md) also translates its static
 label, default semantics, enabled-not-ready help and uncertainty lock in all six
 locales. Provider IDs remain canonical literal values. Changing locale does not
