@@ -5,6 +5,7 @@ import type { SessionPermissionsRequest, SessionPermissionResolveRequest } from 
 import type { SessionRuntimeStateRequest, SessionRuntimeStateResponse } from "#neoastra";
 import type { SessionReceiptRequest, SessionReceiptPage, SessionCancelQueueRequest, SessionAdmission } from "#neoastra";
 import type { createUserInputReviewer } from "./sessionUserInput";
+import type { TimelineHistoryResponse, HistorySourceResponse } from "#neoastra";
 const epoch = "12345678-1234-1234-1234-123456789abc";
 const session = { id: "one", title: "one", fullTitle: "one", fullTitleTruncated: false, createdAt: "2026-01-02T03:04:05.1234567+14:00",
   parentSessionId: null, scopeKind: localStorage.getItem("infoFixtureUnknown") === "true" ? null : "project",
@@ -241,6 +242,11 @@ export const workspace = { snapshot: async () => {
       return new Promise<HistoryResponse>(resolve => historyReads.push(() => resolve(navigationHistory(request))));
     return Promise.resolve(navigationHistory(request));
   },
+  historyTimeline: async (request: HistoryRequest): Promise<TimelineHistoryResponse> => ({
+    page: await workspace.historyTail(request), revision: null, sources: [],
+  }),
+  // Existing fixtures supply projected events, not physical journal bytes. Never invent full source.
+  historySource: async (): Promise<HistorySourceResponse> => ({ status: "unconfigured", text: null, nextOffset: null }),
   openProject: unavailable, readProjectName: (request: { projectId: string; projectPath: string }) =>
     localStorage.getItem("draftTabFixture") === "true" ? new Promise(resolve => projectNameReads.push({ request, resolve })) : unavailable(),
   archiveProject: (request: WorkspaceArchiveProjectRequest) => request.confirmed ? new Promise(resolve => archives.push({ request, resolve }))

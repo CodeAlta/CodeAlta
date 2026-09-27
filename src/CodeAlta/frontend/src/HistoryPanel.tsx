@@ -7,8 +7,9 @@ import { reconcileTimeline } from "./reconcileTimeline";
 import { latestNotes } from "./timeline";
 import { TimelineMessage } from "./TimelineMessage";
 import { useShellLanguage } from "./shellLanguage";
+import { HistorySource, type HistorySourceTarget } from "./HistorySource";
 
-// The production caller supplies workspace.historyTail. The injection seam lets the mounted
+// The production caller supplies readTimeline (workspace.historyTimeline). The injection seam lets the mounted
 // browser fixture exercise this exact component with an isolated, revisioned test journal.
 export type NewestHistoryResult = Readonly<{ sessionId: string; generation: number; revision: string | null;
   error: string | null }>;
@@ -37,6 +38,7 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
   const [state, setState] = useState<HistoryState>();
   const [window, setWindow] = useState<{ timeline: HistoryTimeline; generation: number; revision: string | null }>();
   const [candidate, setCandidate] = useState<typeof window>();
+  const [sourceTarget, setSourceTarget] = useState<(HistorySourceTarget & { current: () => boolean }) | null>(null);
   const generation = useRef(0);
   const requestedNewest = useRef<number | null>(null);
   const readingRevision = useRef<{ generation: number; revision: string | null } | null>(null);
@@ -54,6 +56,7 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
     }
     const next = ++generation.current;
     requestedNewest.current = keyboard ? next : null;
+    setSourceTarget(null);
     setTarget({ request: { sessionId, cursor: null }, explicitOlder: false, explicitNewest: true, generation: next });
     return next;
   }
@@ -72,7 +75,6 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
         const prior = readingRevision.current;
         if (value.request.cursor && prior?.generation === target.generation && prior.revision !== revision) {
           setState({ kind: "error", request, code: "history_changed" });
-          if (!target.explicitNewest) setWindow(undefined);
           return;
         }
         readingRevision.current = { generation: target.generation, revision };
@@ -86,9 +88,6 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
         });
         if (target.explicitNewest) setCandidate(update);
         else setWindow(update);
-      } else if (value.kind === "error" && !target.explicitNewest &&
-        (value.code === "history_changed" || value.code === "invalid_cursor")) {
-        setWindow(undefined);
       }
     });
     return () => abort.abort();
@@ -102,7 +101,7 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
   useEffect(() => {
     const accumulated = accumulation?.timeline;
     if (current?.kind !== "ready" || accumulation?.generation !== target.generation || !accumulated?.next ||
-        accumulated.sessionId !== sessionId || accumulated.entries.length >= 1000 || target.explicitOlder) return;
+        accumulated.sessionId !== sessionId || accumulated.limitReached || target.explicitOlder) return;
     const timer = globalThis.window.setTimeout(() => setTarget({ request: { sessionId, cursor: accumulated.next },
       explicitOlder: false, explicitNewest: target.explicitNewest, generation: target.generation }), 0);
     return () => globalThis.window.clearTimeout(timer);
@@ -138,8 +137,9 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
     }}><AppIcon name="refresh" size={14} />{t("Refresh newest history")}</button></div>
     {(!current || current.kind === "loading") && <p role="status">{t("Loading the latest persisted history.")}</p>}
     {current?.kind === "error" && <p role="alert" className="error-text">{t(historyMessage(current.code))}</p>}
+    {current?.kind === "error" && !!timeline?.entries.length && <p role="status">{t("Previously loaded history is retained; the window is partial and may be from an older revision. Refresh explicitly to replace it.")}</p>}
     {timeline?.tailOmitted && <div role="status" className="banner">{t("The malformed final journal record was omitted.")}</div>}
-    {timeline?.limitReached && <div role="status" className="banner">{t("Showing at most 1,000 journal events. Loading older history replaces newer visible events; refresh to return to the latest.")}</div>}
+    {timeline?.limitReached && <div role="status" className="banner">{t("History window budget reached (1,000 events, 2 Mi text units or 32 pages). Load older explicitly; newer rows may leave this window.")}</div>}
     {timeline?.newerOmitted && <div role="status" className="banner">{t("Newer journal events are no longer in this older window. Refresh newest history to return to the latest turn.")}</div>}
     {timeline?.next && <button type="button" className="load-more" disabled={current?.kind === "loading" || current?.kind === "error"}
       onClick={() => setTarget({ request: { sessionId, cursor: timeline.next }, explicitOlder: true,
@@ -147,10 +147,18 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
       <AppIcon name="history" size={14} />{t("Load older history")}{timeline.entries.length === 1000 ? t(" (replace newest visible events)") : ""}</button>}
     {items.length === 0 && current?.kind === "ready" && <div className="empty-history">{t("No visible events in this history.")}</div>}
     <div className="messages">
-      {items.map(item => item.source === "history" ? <TimelineMessage key={`${sessionId}:${window?.revision ?? "unversioned"}:${item.key}`} item={item.item} canInspect={canInspect} />
+      {items.map(item => item.source === "history" ? <TimelineMessage key={`${sessionId}:${window?.revision ?? "unversioned"}:${item.key}`} item={item.item} canInspect={canInspect}
+        onOpenSource={value => {
+          const captured = generation.current;
+          setSourceTarget({ ...value, current: () => generation.current === captured && (canInspect?.() ?? true) });
+        }} historySource={timeline?.revision && timeline.sources?.find(source => source.start === item.item.key)
+          ? { revision: timeline.revision, ...timeline.sources.find(source => source.start === item.item.key)! } : undefined} />
         : item.source === "liveText" ? <LiveTextMessage key={item.key} row={item.row} />
         : <LiveToolMessage key={item.key} row={item.row} />)}
     </div>
+    {sourceTarget && sourceTarget.revision.sessionId === sessionId && <HistorySource key={JSON.stringify(sourceTarget)} target={sourceTarget}
+      canInspect={() => sourceTarget.current() && (canInspect?.() ?? true)
+        && JSON.stringify(sourceTarget.revision) === JSON.stringify(timeline?.revision)} onClose={() => setSourceTarget(null)} />}
     {items.some(item => item.source !== "history") && <p className="detail live-order-note">{t("Live rows are recent retained updates, not timestamped journal events; text/tool ordering and missing intervening activity are unknown.")}</p>}
   </section>;
 }

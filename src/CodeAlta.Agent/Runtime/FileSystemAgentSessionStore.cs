@@ -389,6 +389,45 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         AgentJournalHistoryReader.ValidateCursor(sessionId, cursor);
+        return await ReadHistoryStreamAsync(sessionId, (stream, stamp, token) => tail
+            ? AgentJournalHistoryReader.ReadTailAsync(stream, sessionId, cursor, stamp, token)
+            : AgentJournalHistoryReader.ReadAsync(stream, sessionId, cursor, stamp, token), cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Reads a reverse timeline page, admitting one record up to 8 MiB through bounded incremental reads.</summary>
+    /// <param name="sessionId">Selected catalog identity.</param><param name="cursor">Exclusive older boundary.</param>
+    /// <param name="cancellationToken">Cancels lookup, lock admission and reading.</param>
+    /// <returns>A revisioned page with source ranges; legacy page limits are unchanged.</returns>
+    /// <exception cref="ArgumentException">The session identity is blank.</exception>
+    /// <exception cref="IOException">Lookup, format, size, revision or reading fails.</exception>
+    /// <exception cref="OperationCanceledException">The read is canceled.</exception>
+    public Task<AgentSessionHistoryPage> ReadTimelinePageAsync(string sessionId, AgentSessionHistoryCursor? cursor, CancellationToken cancellationToken)
+    {
+        AgentJournalHistoryReader.ValidateCursor(sessionId, cursor);
+        return ReadHistoryStreamAsync(sessionId, (stream, stamp, token) =>
+            AgentJournalHistoryReader.ReadTimelineAsync(stream, sessionId, cursor, stamp, token), cancellationToken);
+    }
+
+    /// <summary>Reads at most 16 KiB of UTF-8 source from a selected revision/range, without modifying the journal.</summary>
+    /// <param name="revision">Expected journal identity and revision.</param><param name="start">Record start.</param>
+    /// <param name="end">Exclusive source end.</param><param name="offset">Next UTF-8 byte boundary.</param>
+    /// <param name="cancellationToken">Cancels lookup, lock admission and reading.</param>
+    /// <returns>The literal chunk and next position; no unbounded accumulation.</returns>
+    /// <exception cref="ArgumentNullException">Revision is null.</exception>
+    /// <exception cref="ArgumentException">Session identity is blank.</exception>
+    /// <exception cref="IOException">Lookup, range, revision, encoding or reading fails.</exception>
+    /// <exception cref="OperationCanceledException">The read is canceled.</exception>
+    public Task<AgentHistorySourceChunk> ReadHistorySourceAsync(AgentHistoryRevision revision, long start, long end, long offset, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(revision);
+        return ReadHistoryStreamAsync(revision.SessionId, (stream, stamp, token) =>
+            AgentJournalHistoryReader.ReadSourceAsync(stream, revision, start, end, offset, stamp, token), cancellationToken);
+    }
+
+    private async Task<T> ReadHistoryStreamAsync<T>(string sessionId,
+        Func<Stream, Func<AgentJournalHistoryReader.Stamp>, CancellationToken, Task<T>> read, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         var path = await TryGetSessionFilePathAsync(sessionId, cancellationToken).ConfigureAwait(false);
         if (path is null) throw new AgentSessionHistoryException("missing_session");
         return await AgentJournalHistoryReader.OpenContainedAsync(_layout.SessionsRootPath, path, (containedPath, token) =>
@@ -401,8 +440,7 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
                     return stamp is null ? throw new AgentSessionHistoryException("history_changed")
                         : new AgentJournalHistoryReader.Stamp(stamp.Value.Length, stamp.Value.LastWriteTimeUtc.Ticks);
                 }
-                return await (tail ? AgentJournalHistoryReader.ReadTailAsync(stream, sessionId, cursor, Stamp, token)
-                    : AgentJournalHistoryReader.ReadAsync(stream, sessionId, cursor, Stamp, token)).ConfigureAwait(false);
+                return await read(stream, Stamp, token).ConfigureAwait(false);
             }, token), cancellationToken).ConfigureAwait(false);
     }
 

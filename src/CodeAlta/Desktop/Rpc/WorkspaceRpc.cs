@@ -23,6 +23,8 @@ internal sealed partial class WorkspaceService
         ArgumentNullException.ThrowIfNull(reads);
         _readHistory = reads.ReadHistoryPageAsync;
         _readHistoryTail = reads.ReadHistoryTailPageAsync;
+        _readTimeline = reads.ReadTimelinePageAsync;
+        _readHistorySource = reads.ReadHistorySourceAsync;
         _read = async token =>
         {
             var actual = reads.ReadSnapshotAsync(token);
@@ -42,6 +44,8 @@ internal sealed partial class WorkspaceService
         IAgentSessionCatalog sessions = new AgentSessionCatalog(store);
         _readHistory = store.ReadHistoryPageAsync;
         _readHistoryTail = store.ReadHistoryTailPageAsync;
+        _readTimeline = store.ReadTimelinePageAsync;
+        _readHistorySource = store.ReadHistorySourceAsync;
         _read = cancellationToken => ReadAsync(projects.LoadAsync,
             token => sessions.ListSessionsAsync(filter: null, cancellationToken: token), journals, cancellationToken);
     }

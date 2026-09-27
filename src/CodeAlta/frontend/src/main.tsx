@@ -11,6 +11,7 @@ import {
 } from "#neoastra";
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
+import { readTimeline } from "./readTimeline";
 import { SessionContentLayout } from "./SessionContentLayout";
 import { SessionTabStrip } from "./SessionTabStrip";
 import { sessionTabPresentation } from "./sessionTabLayout";
@@ -1911,7 +1912,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
         }}
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}
           onNavigationReset={resetMessageNotice} newestRequest={newest.requestRef} onNewestResult={newest.onResult}
-          read={workspace.historyTail}
+          read={readTimeline}
           live={ownedSession ? live?.snapshot?.session ?? null : null} />
         {ownedSession && status?.hostEpoch
         ? <>

@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace CodeAlta.Agent.Runtime;
 
 // Mandatory production parser/containment seams. No filesystem acquisition or catalog discovery here.
-internal static class AgentJournalHistoryReader
+internal static partial class AgentJournalHistoryReader
 {
     internal const int PageBytes = 256 * 1024;
     internal const int RecordBytes = 128 * 1024;
@@ -93,7 +93,7 @@ internal static class AgentJournalHistoryReader
                     value = JsonSerializer.Deserialize(text, AgentJsonSerializerContext.Default.AgentEvent)
                         ?? throw new JsonException("Null journal event.");
                 }
-                catch (JsonException)
+                catch (Exception error) when (error is JsonException or NotSupportedException)
                 {
                     if (start + end != stamp.Length) throw Failure("corrupt_record");
                     tailOmitted = true;
@@ -101,7 +101,7 @@ internal static class AgentJournalHistoryReader
                     break;
                 }
                 if (value is not AgentRawEvent { BackendEventType: "local.sessionSummary" or "local.sessionState" or "codealta.sessionHeader" or "codealta.sessionState" })
-                    entries.Add(new(start + position, value));
+                    entries.Add(new(start + position, value) { SourceEnd = start + end });
             }
             physicalRecords++;
             position = end;
@@ -182,14 +182,14 @@ internal static class AgentJournalHistoryReader
             if (string.IsNullOrWhiteSpace(text)) continue;
             AgentEvent value;
             try { value = JsonSerializer.Deserialize(text, AgentJsonSerializerContext.Default.AgentEvent) ?? throw new JsonException("Null journal event."); }
-            catch (JsonException)
+            catch (Exception error) when (error is JsonException or NotSupportedException)
             {
                 if (start + recordEnd != stamp.Length) throw Failure("corrupt_record");
                 tailOmitted = true;
                 continue;
             }
             if (value is not AgentRawEvent { BackendEventType: "local.sessionSummary" or "local.sessionState" or "codealta.sessionHeader" or "codealta.sessionState" })
-                entries.Add(new(start + position, value));
+                entries.Add(new(start + position, value) { SourceEnd = start + recordEnd });
         }
         cancellationToken.ThrowIfCancellationRequested();
         if (getStamp() != stamp || stream.Length != stamp.Length) throw Failure("history_changed");

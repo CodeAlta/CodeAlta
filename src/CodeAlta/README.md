@@ -59,8 +59,12 @@ workspace. Closing it does not cancel an admitted action or retry an uncertain S
 request evidence remains owned by the application. The underlying workspace stays mounted.
 Real FlexLayout session tabs now project existing bounded identities plus a draft tab, with
 compact status/close chrome and secondary Reopen/Refresh menus. App owns the sole active
-workspace; inactive factories return no live session content. Provider switching and
-large-history work are still unfinished. Visual/browser acceptance is deferred; known browser
+workspace; inactive factories return no live session content. Provider switching remains blocked
+on failed-switch persistence/recovery semantics. Timeline loading now supports records up to
+8 MiB, with bounded previews and an explicit raw-source inspector showing at most 16 KiB per
+chunk. Previously loaded rows survive later page errors with a partial-state notice. The window
+is bounded to 1,000 events, 2 Mi text units or 32 automatic pages; load older explicitly to continue.
+Larger records produce an explicit error, not a silent skip. Visual/browser acceptance is deferred; known browser
 fixture failures are preserved, not reported as fixed. See the
 [current runnable checkpoint and verification gaps](../../doc/desktop-ide-checkpoint.md).
 The session-tab candidate passes 33 scoped functional tests, strict TypeScript and desktop/

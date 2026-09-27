@@ -32,7 +32,7 @@ internal sealed partial class WorkspaceService
 
     private static async Task<HistoryResponse> ReadHistoryCoreAsync(HistoryRequest request,
         Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>>? read, int version,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, int sourceReserve = 0)
     {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
@@ -51,7 +51,7 @@ internal sealed partial class WorkspaceService
         {
             var page = await read(request.SessionId, cursor, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            return ProjectHistory(page, version);
+            return ProjectHistory(page, version, sourceReserve);
         }
         catch (OperationCanceledException) { throw; }
         catch (AgentSessionHistoryException exception)
@@ -82,14 +82,14 @@ internal sealed partial class WorkspaceService
         return long.Parse(value, NumberStyles.None, CultureInfo.InvariantCulture);
     }
 
-    internal static HistoryResponse ProjectHistory(AgentSessionHistoryPage page, int version = 1)
+    internal static HistoryResponse ProjectHistory(AgentSessionHistoryPage page, int version = 1, int sourceReserve = 0)
     {
         ArgumentNullException.ThrowIfNull(page);
         if (page.Entries.Count > 100) return Failure("wire_limit");
         var rows = new List<HistoryEntry>();
         // Full response accounting: worst-case JSON UTF-16 escaping, fixed per-row/property overhead,
         // and 8 KiB reserved for response/cursor/RPC envelope. Never drop rows then advance their cursor.
-        var remaining = 700 * 1024 - 8192;
+        var remaining = 700 * 1024 - 8192 - sourceReserve;
         foreach (var entry in page.Entries)
         {
             var value = entry.Event;

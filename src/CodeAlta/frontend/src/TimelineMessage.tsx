@@ -6,13 +6,15 @@ import { useShellLanguage } from "./shellLanguage";
 import { timelineTime } from "./sessionTime";
 import { FileChangeInspection } from "./FileChangeInspection";
 import { ToolRecordInspection } from "./ToolRecordInspection";
+import type { HistorySourceTarget } from "./HistorySource";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
 // These labels are generated UI chrome in timeline.ts, never provider content.
 const detailLabels = Object.freeze(["Details", "File change record details", "Prompt details", "Usage details", "Model details", "Command and result", "Tool details"] as const);
 
-export function TimelineMessage({ item, canInspect }: { item: TimelineItem; canInspect?: () => boolean }) {
+export function TimelineMessage({ item, canInspect, historySource, onOpenSource }: { item: TimelineItem; canInspect?: () => boolean;
+  historySource?: HistorySourceTarget; onOpenSource?: (target: HistorySourceTarget) => void }) {
   const { t, locale } = useShellLanguage();
   const timestamp = timelineTime(item.timestamp, locale);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
@@ -125,6 +127,12 @@ export function TimelineMessage({ item, canInspect }: { item: TimelineItem; canI
       {item.bodyOmitted && <p className="muted-text">{t(item.category === "user" || item.category === "assistant"
         ? "Additional message content was omitted from this history record." : "Additional diagnostic details were omitted.")}</p>}
       {item.truncated && <p className="muted-text">{t("Some details were shortened to fit the desktop history window.")}</p>}
+      {historySource && <button type="button" className="quiet-button"
+        onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
+        onClick={event => {
+          if (!event.defaultPrevented && event.currentTarget.isConnected && !event.currentTarget.closest("[inert]")
+            && (canInspect?.() ?? true) && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) onOpenSource?.(historySource);
+        }}>{t("Read full raw record (paged)")}</button>}
     </div>
   </article>;
 }

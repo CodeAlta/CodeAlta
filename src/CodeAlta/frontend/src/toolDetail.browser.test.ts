@@ -13,7 +13,7 @@ const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
 
 test("mounted persisted details and code retain access, follow, older anchors and explicit newest handshake", { skip: !edge, timeout: 110_000 }, async () => {
   const source = readFileSync(fileURLToPath(new URL("./main.tsx", import.meta.url)), "utf8");
-  assert.match(source, /read=\{workspace\.historyTail\}/);
+  assert.match(source, /read=\{readTimeline\}/);
   const root = await mkdtemp(join(tmpdir(), "codealta-tool-detail-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;

@@ -30,8 +30,11 @@ visual acceptance: real FlexLayout session tabs are now a functionally/build-ver
 with compact status/close chrome and secondary Reopen/Refresh menus. Mounted-lifetime and
 visual/browser qualification remain deferred. The native @ reference-palette candidate has
 separate bounded query editing and guarded insertion into the original draft; functional/build
-checks pass, but mounted focus/IME qualification remains pending. Provider switching and
-large-history work remain unfinished.
+checks pass, but mounted focus/IME qualification remains pending. Provider switching remains
+blocked on failure/recovery semantics. Timeline loading supports records up to 8 MiB with bounded
+previews and explicit 16 KiB raw-source chunks. Later page errors retain previously loaded rows
+with a partial-history notice. Automatic loading stops at 1,000 events, 2 Mi text units or 32
+pages; load older explicitly to continue. Records above the ceiling are reported, not skipped.
 
 To use an intentionally read-only isolated catalog copy, launch
 `--data-root <new-absolute-browser-directory> --catalog-root <existing-absolute-catalog-copy> --allow-catalog-cache`

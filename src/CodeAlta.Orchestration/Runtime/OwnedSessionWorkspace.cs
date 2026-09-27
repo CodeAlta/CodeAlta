@@ -15,6 +15,8 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     private readonly Func<CancellationToken, IAsyncEnumerable<AgentSessionMetadata>> _sessions;
     private readonly Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>> _history;
     private readonly Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>> _tailHistory;
+    private readonly Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>>? _timelineHistory;
+    private readonly Func<AgentHistoryRevision, long, long, long, CancellationToken, Task<AgentHistorySourceChunk>>? _historySource;
     private readonly SessionViewJournalStore? _journals;
     private readonly Func<string, CancellationToken, Task<string>> _notes = static (_, _) => Task.FromException<string>(new InvalidOperationException("Notes reader not configured."));
     private readonly HashSet<ReadOperation> _active = [];
@@ -33,6 +35,8 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         _sessions = token => store.ListSessionsAsync(filter: null, cancellationToken: token);
         _history = store.ReadHistoryPageAsync;
         _tailHistory = store.ReadHistoryTailPageAsync;
+        _timelineHistory = store.ReadTimelinePageAsync;
+        _historySource = store.ReadHistorySourceAsync;
     }
 
     internal OwnedSessionWorkspace(ProjectCatalog projects, SessionViewJournalStore journals, SessionRuntimeService runtime)
@@ -66,6 +70,19 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(notes);
         _notes = notes;
+    }
+
+    // Literal extended-history test seam; production uses the shared cached store above.
+    internal OwnedSessionWorkspace(
+        Func<CancellationToken, Task<IReadOnlyList<ProjectDescriptor>>> projects,
+        Func<CancellationToken, IAsyncEnumerable<AgentSessionMetadata>> sessions,
+        Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>> timeline,
+        Func<AgentHistoryRevision, long, long, long, CancellationToken, Task<AgentHistorySourceChunk>> source)
+        : this(projects, sessions, timeline)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        _timelineHistory = timeline;
+        _historySource = source;
     }
 
     /// <summary>Reads complete notes through the same eight-actual-read admission and drain.</summary>
@@ -119,6 +136,33 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         return Admit(() => _tailHistory(sessionId, cursor, CancellationToken.None), cancellationToken);
+    }
+
+    /// <summary>Reads an extended timeline page through the shared eight-read admission and actual-work drain.</summary>
+    /// <exception cref="ArgumentException">Session identity is blank.</exception>
+    /// <exception cref="ObjectDisposedException">Admission is closed.</exception>
+    /// <exception cref="InvalidOperationException">Admission is full or the route is not configured.</exception>
+    /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
+    /// <exception cref="Exception">The retained store read fails.</exception>
+    public Task<AgentSessionHistoryPage> ReadTimelinePageAsync(string sessionId, AgentSessionHistoryCursor? cursor, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return Admit(() => (_timelineHistory ?? throw new InvalidOperationException("Timeline reader not configured."))
+            (sessionId, cursor, CancellationToken.None), cancellationToken);
+    }
+
+    /// <summary>Reads a bounded literal source chunk through the same admitted/drained store owner.</summary>
+    /// <exception cref="ArgumentNullException">Revision is null.</exception>
+    /// <exception cref="ObjectDisposedException">Admission is closed.</exception>
+    /// <exception cref="InvalidOperationException">Admission is full or the route is not configured.</exception>
+    /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
+    /// <exception cref="Exception">The retained store read fails.</exception>
+    public Task<AgentHistorySourceChunk> ReadHistorySourceAsync(AgentHistoryRevision revision, long start, long end, long offset, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(revision);
+        ArgumentException.ThrowIfNullOrWhiteSpace(revision.SessionId);
+        return Admit(() => (_historySource ?? throw new InvalidOperationException("Source reader not configured."))
+            (revision, start, end, offset, CancellationToken.None), cancellationToken);
     }
 
     private async Task<OwnedWorkspaceSnapshot> ReadSnapshotCoreAsync()

@@ -17,7 +17,7 @@ const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
 // fixture. It is not native WebView2 acceptance and never opens a real catalog or user profile.
 test("mounted reverse history retains latest, anchors older pages and fences switched/stale reads", { skip: !edge, timeout: 70_000 }, async () => {
   const source = readFileSync(fileURLToPath(new URL("./main.tsx", import.meta.url)), "utf8");
-  assert.match(source, /read=\{workspace\.historyTail\}/, "production must wire the v2 route");
+  assert.match(source, /read=\{readTimeline\}/, "production must wire the bounded timeline route");
   const root = await mkdtemp(join(tmpdir(), "codealta-history-mounted-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
