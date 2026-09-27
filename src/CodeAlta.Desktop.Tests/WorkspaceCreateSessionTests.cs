@@ -18,6 +18,53 @@ public sealed class WorkspaceCreateSessionTests
         { IsDefault = true, DefaultModelId = "fixture-model" };
 
     [TestMethod]
+    public async Task ExplicitProviderIsExactEnabledAndNeverFallsBack()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-provider-create-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = root });
+            await using var reads = new OwnedSessionWorkspace(catalog, new SessionViewJournalStore(catalog.Options));
+            await using var providers = new ModelProviderRegistry();
+            var alternate = new ModelProviderDescriptor(new("alternate"), "Alternate");
+            providers.RegisterOrReplace(Provider, () => throw new AssertFailedException("Descriptor admission must not initialize providers."));
+            providers.RegisterOrReplace(alternate, () => throw new AssertFailedException("Descriptor admission must not initialize providers."));
+            var admitted = new List<ModelProviderDescriptor>();
+            var service = new WorkspaceService(reads, catalog, Epoch, providers, (_, provider, _) =>
+            {
+                admitted.Add(provider);
+                return Task.FromResult(new SessionViewDescriptor { SessionId = "created", Kind = SessionViewKind.GlobalSession,
+                    WorkingDirectory = root });
+            });
+            // Deserialize the new optional wire field so the regression runs against the old implementation.
+            WorkspaceCreateSessionRequest Request(string? id) => JsonSerializer.Deserialize(
+                JsonSerializer.Serialize(new { expectedHostEpoch = Epoch, scope = "global", providerId = id }),
+                DesktopJsonContext.Default.WorkspaceCreateSessionRequest)!;
+            var result = await service.CreateSessionAsync(Request("alternate"), CancellationToken.None);
+            Assert.AreEqual("ok", result.Status);
+            Assert.AreSame(alternate, admitted.Single());
+            foreach (var id in new[] { " alternate", "alternate ", "", "bad\nvalue", new string('x', 257) })
+                Assert.AreEqual("invalid_scope", (await service.CreateSessionAsync(Request(id), CancellationToken.None)).Status, id);
+            foreach (var id in new[] { "Alternate", "absent" })
+                Assert.AreEqual("provider_unavailable", (await service.CreateSessionAsync(Request(id), CancellationToken.None)).Status, id);
+            providers.RegisterOrReplace(alternate with { IsEnabled = false }, () => throw new AssertFailedException());
+            Assert.AreEqual("provider_unavailable", (await service.CreateSessionAsync(Request("alternate"), CancellationToken.None)).Status);
+            providers.Unregister(alternate.ProviderId);
+            Assert.AreEqual("provider_unavailable", (await service.CreateSessionAsync(Request("alternate"), CancellationToken.None)).Status);
+            Assert.HasCount(1, admitted);
+            Assert.AreEqual("ok", (await service.CreateSessionAsync(Request(null), CancellationToken.None)).Status);
+            Assert.AreSame(Provider, admitted[1]);
+            providers.RegisterOrReplace(Provider with { IsEnabled = false }, () => throw new AssertFailedException());
+            providers.RegisterOrReplace(alternate, () => throw new AssertFailedException());
+            Assert.AreEqual("ok", (await service.CreateSessionAsync(Request(null), CancellationToken.None)).Status);
+            Assert.AreSame(alternate, admitted[2], "Without an enabled default the first enabled descriptor remains the default route.");
+            await service.CloseSessionsAsync(); await service.CloseImportsAsync();
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
     public async Task ArchiveAndCreationReserveSameOwnerThroughCanceledWaitAndDrain(bool archiveFirst)
@@ -50,7 +97,7 @@ public sealed class WorkspaceCreateSessionTests
             var evidence = await catalog.ReadArchiveAsync(project.Id, root);
             Assert.IsNotNull(evidence, "Ordinary serializer-produced projects must support archive.");
             var archive = new WorkspaceArchiveProjectRequest(Epoch, project.Id, root, false, true, true, evidence.SourcePath, evidence.Revision.ContentHash);
-            var create = new WorkspaceCreateSessionRequest(Epoch, "project", project.Id, root, null);
+            var create = new WorkspaceCreateSessionRequest(Epoch, "project", project.Id, root, null, Provider.ProviderId.Value);
             using var cancel = new CancellationTokenSource();
             Task original = archiveFirst ? rpc.ArchiveProjectAsync(archive, cancel.Token) : rpc.CreateSessionAsync(create, cancel.Token);
             try
@@ -86,7 +133,9 @@ public sealed class WorkspaceCreateSessionTests
     }
 
     [TestMethod]
-    public async Task RealOwnedHostCreatesProjectAndGlobalSessionsVisibleInActualCatalog()
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task RealOwnedHostCreatesProjectAndGlobalSessionsVisibleInActualCatalog(bool explicitProvider)
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-session-create-" + Guid.NewGuid().ToString("N"));
         if (Directory.Exists(root)) throw new InvalidOperationException("Test root already exists.");
@@ -96,21 +145,30 @@ public sealed class WorkspaceCreateSessionTests
             var global = Path.Combine(root, "global"); var projectPath = Path.Combine(root, "project");
             var home = Path.Combine(root, "home"); var builtin = Path.Combine(root, "builtin");
             foreach (var path in new[] { global, projectPath, home, builtin }) Directory.CreateDirectory(path);
+            var alternate = new ModelProviderDescriptor(new("alternate"), "Alternate");
+            var activity = new DraftActivity();
+            activity.ReleaseCreate.SetResult();
             await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
                 GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
                 PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
-                ConfigureModelProviders = registry => registry.RegisterOrReplace(Provider, () => new DraftRuntime()),
+                ConfigureModelProviders = registry => {
+                    registry.RegisterOrReplace(Provider, () => new DraftRuntime());
+                    registry.RegisterOrReplace(alternate, () => new DraftRuntime(activity, alternate));
+                },
             });
             var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
             var service = new WorkspaceService(host, Epoch);
-            var projectRequest = new WorkspaceCreateSessionRequest(Epoch, "project", project.Id, projectPath, "Project draft");
+            var projectRequest = new WorkspaceCreateSessionRequest(Epoch, "project", project.Id, projectPath, "Project draft",
+                explicitProvider ? alternate.ProviderId.Value : null);
             Assert.AreEqual("project_missing", (await service.CreateSessionAsync(projectRequest with { ProjectPath = global }, CancellationToken.None)).Status);
             Assert.AreEqual(projectRequest, JsonSerializer.Deserialize(
                 JsonSerializer.Serialize(projectRequest, DesktopJsonContext.Default.WorkspaceCreateSessionRequest),
                 DesktopJsonContext.Default.WorkspaceCreateSessionRequest));
             var created = await service.CreateSessionAsync(projectRequest, CancellationToken.None);
             Assert.AreEqual("ok", created.Status);
+            Assert.AreEqual(projectRequest.ProviderId, created.ProviderId);
+            Assert.AreEqual(explicitProvider ? 1 : 0, activity.Creates, "Explicit choice must reach the real runtime creation callback.");
             Assert.IsFalse(string.IsNullOrWhiteSpace(created.SessionId));
             Assert.AreEqual(projectPath, created.WorkspacePath);
             Assert.AreEqual(created, JsonSerializer.Deserialize(
@@ -123,6 +181,8 @@ public sealed class WorkspaceCreateSessionTests
             Assert.AreEqual(global, globalCreated.WorkspacePath);
             var snapshot = await service.SnapshotAsync(new(), CancellationToken.None);
             Assert.IsTrue(snapshot.Sessions.Any(s => s.Id == created.SessionId && s.WorkspacePath == projectPath));
+            Assert.AreEqual(explicitProvider ? alternate.ProviderId.Value : Provider.ProviderId.Value,
+                snapshot.Sessions.Single(s => s.Id == created.SessionId).ProviderKey);
             Assert.IsTrue(snapshot.Sessions.Any(s => s.Id == globalCreated.SessionId && s.WorkspacePath == global));
             Assert.AreEqual(project.Id, (await host.RuntimeService.ResolveOwnedSessionAsync(created.SessionId!, CancellationToken.None))?.ProjectRef);
             Assert.AreEqual(SessionViewKind.GlobalSession,
@@ -282,11 +342,12 @@ public sealed class WorkspaceCreateSessionTests
             providers.RegisterOrReplace(Provider, () => new DraftRuntime());
             var count = 0;
             var rpc = new WorkspaceService(reads, catalog, Epoch, providers, (_, _, _) => { count++; return pending.Task; });
-            var request = new WorkspaceCreateSessionRequest(Epoch, "global", null, null, null);
+            var request = new WorkspaceCreateSessionRequest(Epoch, "global", null, null, null, Provider.ProviderId.Value);
             using var cancel = new CancellationTokenSource();
             var original = rpc.CreateSessionAsync(request, cancel.Token);
             cancel.Cancel();
             await Assert.ThrowsAsync<OperationCanceledException>(async () => await original);
+            providers.RegisterOrReplace(Provider with { IsEnabled = false }, () => throw new AssertFailedException("Replacement must not run."));
             Assert.AreEqual("busy", (await rpc.CreateSessionAsync(request, CancellationToken.None)).Status);
             var close = rpc.CloseSessionsAsync();
             Assert.IsFalse(close.IsCompleted);
@@ -294,6 +355,7 @@ public sealed class WorkspaceCreateSessionTests
             Assert.AreEqual(1, count);
             pending.SetException(new IOException("A journal write may have committed."));
             await close;
+            providers.RegisterOrReplace(Provider, () => new DraftRuntime());
             var uncertain = new WorkspaceService(reads, catalog, Epoch, providers, (_, _, _) =>
                 Task.FromException<SessionViewDescriptor>(new IOException("A write may have committed.")));
             Assert.AreEqual("create_unconfirmed", (await uncertain.CreateSessionAsync(request, CancellationToken.None)).Status);
@@ -312,9 +374,9 @@ public sealed class WorkspaceCreateSessionTests
         public TaskCompletionSource ReleaseCreate { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
-    private sealed class DraftRuntime(DraftActivity? activity = null) : IModelProviderSessionRuntime
+    private sealed class DraftRuntime(DraftActivity? activity = null, ModelProviderDescriptor? descriptor = null) : IModelProviderSessionRuntime
     {
-        public ModelProviderDescriptor Descriptor => Provider;
+        public ModelProviderDescriptor Descriptor => descriptor ?? Provider;
         public Task StartAsync(CancellationToken token = default)
         {
             if (activity is not null) Interlocked.Increment(ref activity.Starts);
@@ -331,19 +393,19 @@ public sealed class WorkspaceCreateSessionTests
                 activity.CreateEntered.TrySetResult();
                 await activity.ReleaseCreate.Task.WaitAsync(token);
             }
-            return new DraftSession(options.SessionId!, options.WorkingDirectory, activity);
+            return new DraftSession(options.SessionId!, options.WorkingDirectory, activity, Descriptor);
         }
         public Task<IAgentSession> ResumeSessionAsync(string id, AgentSessionResumeOptions options, CancellationToken token = default)
         {
             if (activity is not null) Interlocked.Increment(ref activity.Resumes);
-            return Task.FromResult<IAgentSession>(new DraftSession(id, options.WorkingDirectory, activity));
+            return Task.FromResult<IAgentSession>(new DraftSession(id, options.WorkingDirectory, activity, Descriptor));
         }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class DraftSession(string id, string? path, DraftActivity? activity = null) : IAgentSession
+    private sealed class DraftSession(string id, string? path, DraftActivity? activity = null, ModelProviderDescriptor? descriptor = null) : IAgentSession
     {
-        public ModelProviderId ProviderId => Provider.ProviderId;
+        public ModelProviderId ProviderId => (descriptor ?? Provider).ProviderId;
         public string SessionId => id;
         public string? WorkspacePath => path;
         public async IAsyncEnumerable<AgentEvent> StreamEventsAsync([EnumeratorCancellation] CancellationToken token = default)

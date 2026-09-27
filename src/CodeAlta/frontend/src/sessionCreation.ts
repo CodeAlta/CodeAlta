@@ -4,7 +4,7 @@ import { sessionsForProject } from "./workspace";
 
 type Capability = ReturnType<typeof createMutationCapability>;
 export type SessionTarget = { scope: "global" } | { scope: "project"; projectId: string; projectPath: string };
-type Result = { kind: "created"; target: SessionTarget; id: string; path: string } | { kind: "error"; code: string };
+type Result = { kind: "created"; target: SessionTarget; id: string; path: string; providerId: string | null } | { kind: "error"; code: string };
 type Invoke = (request: WorkspaceCreateSessionRequest, options: { timeoutMilliseconds: number }) => Promise<WorkspaceCreateSessionResponse>;
 
 function valid(value: unknown, maximum: number): value is string {
@@ -25,19 +25,20 @@ function absolute(path: string): boolean {
 export function createSessionCreation(invoke: Invoke) {
   let active = false;
   return async function create(epoch: string | undefined, target: SessionTarget, title: string | null,
-    capability: Capability | undefined): Promise<Result> {
+    capability: Capability | undefined, providerId: string | null = null): Promise<Result> {
     if (!epoch || !capability?.canMutate()) return { kind: "error", code: "unconfigured" };
     if (!["global", "project"].includes(target.scope)
       || target.scope === "project" && (!valid(target.projectId, 256)
       || !valid(target.projectPath, 4096) || !absolute(target.projectPath)) || title !== null && !valid(title, 256))
       return { kind: "error", code: "invalid_scope" };
     if (active) return { kind: "error", code: "busy" };
+    if (providerId !== null && !valid(providerId, 256)) return { kind: "error", code: "provider_unavailable" };
     active = true;
     const frozen: SessionTarget = target.scope === "global" ? { scope: "global" }
       : { scope: "project", projectId: target.projectId, projectPath: target.projectPath };
-    const request: WorkspaceCreateSessionRequest = { expectedHostEpoch: epoch, scope: frozen.scope,
+    const request: WorkspaceCreateSessionRequest = Object.freeze({ expectedHostEpoch: epoch, scope: frozen.scope,
       projectId: frozen.scope === "project" ? frozen.projectId : null,
-      projectPath: frozen.scope === "project" ? frozen.projectPath : null, title };
+      projectPath: frozen.scope === "project" ? frozen.projectPath : null, title, providerId });
     try {
       const response = await invoke(request, { timeoutMilliseconds: 10_000 });
       if (!response || !valid(response.status, 64) || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(response.hostEpoch ?? ""))
@@ -46,13 +47,14 @@ export function createSessionCreation(invoke: Invoke) {
       if (!capability.canMutate() || response.hostEpoch !== epoch || response.status === "stale_epoch")
         return { kind: "error", code: "stale_epoch" };
       if (response.status === "invalid_scope") return { kind: "error", code: "invalid_scope" };
-      if (response.scope !== request.scope || response.projectId !== request.projectId || response.projectPath !== request.projectPath)
+      if (response.scope !== request.scope || response.projectId !== request.projectId || response.projectPath !== request.projectPath
+        || response.providerId !== request.providerId)
         return { kind: "error", code: "create_unconfirmed" };
       if (response.status !== "ok") return { kind: "error", code: response.status };
       if (!valid(response.sessionId, 256) || !valid(response.workspacePath, 4096) || !absolute(response.workspacePath)
         || frozen.scope === "project" && response.workspacePath !== frozen.projectPath)
         return { kind: "error", code: "create_unconfirmed" };
-      return { kind: "created", target: frozen, id: response.sessionId, path: response.workspacePath };
+      return { kind: "created", target: frozen, id: response.sessionId, path: response.workspacePath, providerId };
     } catch { return { kind: "error", code: "create_unconfirmed" }; }
     finally { active = false; }
   };
@@ -65,7 +67,9 @@ export function createdSessionSelection(snapshot: WorkspaceSnapshot, result: Ext
     const { projectId: id, projectPath: path } = result.target;
     if (!snapshot.projects.some(project => project.id === id && project.path === path && !project.archived)) return undefined;
   }
-  if (!sessionsForProject(snapshot, projectId).some(session => session.id === result.id && session.workspacePath === result.path)) return undefined;
+  const matches = sessionsForProject(snapshot, projectId).filter(session => session.id === result.id);
+  if (matches.length !== 1 || matches[0].workspacePath !== result.path
+    || result.providerId !== null && matches[0].providerKey !== result.providerId) return undefined;
   return { projectId, sessionId: result.id };
 }
 
@@ -74,7 +78,7 @@ export function sessionCreationMessage(code: string): string {
     case "unconfigured": return "Creating sessions requires an owned host; catalog-only browsing is read-only.";
     case "invalid_scope": return "The selected scope or title is invalid. Choose a catalog project or Global and try again.";
     case "project_missing": return "The project is no longer available or is archived. Refresh the catalog before creating a session.";
-    case "provider_unavailable": return "No enabled provider is available for a new session.";
+    case "provider_unavailable": return "The requested provider is unavailable, or no enabled provider exists. No alternative was selected.";
     case "stale_epoch": return "The host changed. Reload before creating a session.";
     case "busy": return "A session creation is already in progress.";
     case "closed": return "The host is closing; no new creation was admitted.";

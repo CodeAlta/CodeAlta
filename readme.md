@@ -25,6 +25,8 @@ The development desktop includes an opt-in [workspace snapshot browser](src/Code
 
 Shared-runtime [provider-event forwarding ownership](doc/runtime-provider-event-forwarding.md) now retains admitted callback work through queue/parent bookkeeping and shutdown joins. It remains separate from the partial Desktop display window and does not guarantee event replay or shutdown of noncooperative providers.
 
+Owned Desktop new-session and local text-draft creation offer a [bounded cached provider choice](doc/new-session-provider.md). No choice uses the enabled default or first enabled provider; explicit choice never falls back. Selecting is read-only, while deliberate Create remains effectful. This does not switch an existing session or change global defaults.
+
 Owned Desktop Send supports [bounded pasted PNG attachments](doc/prompt-images.md) with previews, editable local display titles, removal and explicitly observed model capability: at most three images, 64 KiB each / 96 KiB total. Image-only normal Send accepts exactly empty text with retained attachments; whitespace-only and empty text-only Send remain refused. Original bytes travel as typed images, not Markdown; Queue/Steer and local draft transfer refuse attachments. This narrow path does not add native clipboard qualification, URL/path access or broader image-format support.
 
 Desktop **Settings → Skills** provides [explicit bounded raw candidate inspection](doc/skills-inspection.md) for verified project/user CodeAlta roots, with local search and metadata details. These are raw files—not loaded, enabled or active skills—and ignored paths may appear. No source/config editing or activation is offered.

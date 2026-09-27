@@ -8,6 +8,22 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class ConfigurationRpcTests
 {
     [TestMethod]
+    public async Task Snapshot_NeverTruncatesProviderIdentityAndRemainsBoundedWithoutFactories()
+    {
+        await using var providers = new ModelProviderRegistry();
+        providers.RegisterOrReplace(new(new(new string('x', 257)), "First"),
+            () => throw new AssertFailedException("Inventory cannot create a runtime."));
+        for (var index = 0; index < 35; index++)
+            providers.RegisterOrReplace(new(new($"provider-{index:00}"), $"Provider {index:00}"),
+                () => throw new AssertFailedException("Inventory cannot create a runtime."));
+        var result = new ConfigurationService(providers).Snapshot(new());
+        Assert.IsTrue(result.ProvidersTruncated);
+        Assert.HasCount(31, result.Providers);
+        Assert.IsFalse(result.Providers.Any(provider => provider.Id == new string('x', 256)));
+        Assert.IsTrue(result.Providers.All(provider => providers.ListProviders().Any(value => value.ProviderId.Value == provider.Id)));
+    }
+
+    [TestMethod]
     public async Task Snapshot_ProjectsConfiguredProvidersWithoutStartingThem()
     {
         await using var providers = new ModelProviderRegistry();

@@ -28,8 +28,10 @@ internal sealed class ConfigurationService(
         var pluginInstances = pluginRuntime?.ActivePlugins ?? [];
         var providers = providerDescriptors
             .Take(32)
+            // Identity must never be truncated into another selectable provider key.
+            .Where(static value => value.ProviderId.Value.Length <= 256)
             .Select(static value => new ConfigurationProvider(
-                Bound(value.ProviderId.Value),
+                value.ProviderId.Value,
                 Bound(value.DisplayName),
                 Bound(value.ProviderType),
                 value.IsEnabled,

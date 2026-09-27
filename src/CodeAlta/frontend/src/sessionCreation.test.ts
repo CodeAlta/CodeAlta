@@ -11,9 +11,21 @@ const global = { scope: "global" as const };
 const reply = (status: string, scope: string | null = "project", projectId: string | null = project.projectId,
   projectPath: string | null = project.projectPath, hostEpoch: string | null = epoch,
   sessionId: string | null = "draft-1", workspacePath: string | null = project.projectPath) =>
-  ({ status, scope, projectId, projectPath, hostEpoch, sessionId, workspacePath });
+  ({ status, scope, projectId, projectPath, hostEpoch, sessionId, workspacePath, providerId: null });
 const empty: WorkspaceSnapshot = { configured: true, projects: [], sessions: [], projectsTruncated: false,
   sessionsTruncated: false, displayTextTruncated: false };
+
+test("explicit provider is frozen and mismatched success cannot certify creation", async () => {
+  let captured: unknown;
+  const create = createSessionCreation(async request => {
+    captured = request;
+    return { ...reply("ok"), providerId: "default" };
+  });
+  const result = await create(epoch, project, "Keep title", createMutationCapability(epoch), "alternate");
+  assert.equal((captured as { providerId: string }).providerId, "alternate");
+  assert.equal(Object.isFrozen(captured), true);
+  assert.deepEqual(result, { kind: "error", code: "create_unconfirmed" });
+});
 
 test("exact selected project and global requests produce switchable persisted catalog sessions", async () => {
   const calls: unknown[] = [];
@@ -29,8 +41,8 @@ test("exact selected project and global requests produce switchable persisted ca
   const globalResult = await create(epoch, global, null, capability);
   assert.equal(globalResult.kind, "created");
   assert.deepEqual(calls, [
-    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: "My draft" },
-    { expectedHostEpoch: epoch, scope: "global", projectId: null, projectPath: null, title: null },
+    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: "My draft", providerId: null },
+    { expectedHostEpoch: epoch, scope: "global", projectId: null, projectPath: null, title: null, providerId: null },
   ]);
   if (projectResult.kind !== "created" || globalResult.kind !== "created") throw new Error("Expected created results");
   const snapshot: WorkspaceSnapshot = { ...empty,
@@ -45,6 +57,9 @@ test("exact selected project and global requests produce switchable persisted ca
   assert.equal(createdSessionSelection({ ...snapshot, sessions: [] }, projectResult), undefined);
   assert.equal(createdSessionSelection({ ...snapshot, projects: [{ ...snapshot.projects[0], archived: true }] }, projectResult), undefined);
   assert.equal(createdSessionSelection({ ...snapshot, sessions: [{ ...snapshot.sessions[0], workspacePath: "C:\\other" }] }, projectResult), undefined);
+  assert.equal(createdSessionSelection(snapshot, { ...projectResult, providerId: "alternate" }), undefined);
+  assert.deepEqual(createdSessionSelection(snapshot, { ...projectResult, providerId: "fixture" }), { projectId: project.projectId, sessionId: "draft-1" });
+  assert.equal(createdSessionSelection({ ...snapshot, sessions: [...snapshot.sessions, snapshot.sessions[0]] }, projectResult), undefined);
 });
 
 test("invalid scope, title, catalog-only authority and stale epoch refuse mutation", async () => {
@@ -57,6 +72,8 @@ test("invalid scope, title, catalog-only authority and stale epoch refuse mutati
   assert.deepEqual(await create(epoch, global, "\ud800", capability), { kind: "error", code: "invalid_scope" });
   assert.deepEqual(await create(epoch, global, "x".repeat(257), capability), { kind: "error", code: "invalid_scope" });
   assert.deepEqual(await create(undefined, global, null, undefined), { kind: "error", code: "unconfigured" });
+  for (const provider of ["", " wrong", "wrong ", "bad\nvalue", "\ud800", "x".repeat(257)])
+    assert.deepEqual(await create(epoch, global, null, capability, provider), { kind: "error", code: "provider_unavailable" });
   assert.equal(calls, 0);
   const stale = createSessionCreation(async () => reply("stale_epoch", "global", null, null, other));
   assert.deepEqual(await stale(epoch, global, null, capability), { kind: "error", code: "stale_epoch" });

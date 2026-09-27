@@ -41,7 +41,7 @@ const renameRequests: unknown[] = [];
 const projectRenames: Array<{ request: { displayName: string }; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
 const deleteRequests: unknown[] = [];
 const mutationReplies: Array<{ kind: "rename" | "delete"; resolve: (value: unknown) => void }> = [];
-type CreateRequest = { expectedHostEpoch: string; scope: string; projectId: string | null; projectPath: string | null; title: string | null };
+type CreateRequest = { expectedHostEpoch: string; scope: string; projectId: string | null; projectPath: string | null; title: string | null; providerId: string | null };
 const creates: Array<{ request: CreateRequest; resolve: (value: unknown) => void }> = [];
 const snapshots: Array<{ resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
 const snapshotCalls: unknown[] = [];
@@ -111,13 +111,13 @@ Object.assign(window, { settingsShellFixture: { calls, rpcCalls, sends, choiceRe
   },
   failSend() { sendFailures.shift()?.(); },
   releaseHistory() { for (const release of historyReads.splice(0)) release(); },
-  releaseCreate(status = "ok") { const original = creates[0]; original.resolve({ status, hostEpoch: epoch,
+  releaseCreate(status = "ok", providerId?: string) { const original = creates[0]; original.resolve({ status, hostEpoch: epoch,
     scope: original.request.scope, projectId: original.request.projectId, projectPath: original.request.projectPath,
-    sessionId: "created", workspacePath: original.request.projectPath ?? "/fixture/global" }); },
+    sessionId: "created", workspacePath: original.request.projectPath ?? "/fixture/global", providerId: providerId ?? original.request.providerId }); },
   releaseSnapshot(mode = "ok") { const read = snapshots.shift()!;
     if (mode === "error") read.reject(new Error("fixture read failed"));
     else read.resolve({ ...catalog, sessions: [...catalog.sessions, ...(mode === "missing" ? [] :
-      [{ ...session, id: "created", title: "created", fullTitle: "created" }])] }); },
+      [{ ...session, id: "created", title: "created", fullTitle: "created", providerKey: mode === "provider" ? "wrong-provider" : creates[0]?.request.providerId ?? session.providerKey }])] }); },
   releaseMutation(kind: "rename" | "delete") { const index = mutationReplies.findIndex(reply => reply.kind === kind);
     if (index >= 0) mutationReplies.splice(index, 1)[0].resolve({}); },
   releaseExactDelete(status = "ok", hostEpoch?: string) { const index = mutationReplies.findIndex(reply => reply.kind === "delete");
@@ -160,7 +160,9 @@ export const workspace = { snapshot: async () => {
   renameProject: (request: { displayName: string }) => new Promise((resolve, reject) => projectRenames.push({ request, resolve, reject })), createSession: (request: CreateRequest) => new Promise(resolve => creates.push({ request, resolve })),
   renameSession: (request: unknown) => { renameRequests.push(request); return new Promise(resolve => mutationReplies.push({ kind: "rename", resolve })); },
   deleteSession: (request: unknown) => { deleteRequests.push(request); return new Promise(resolve => mutationReplies.push({ kind: "delete", resolve })); } };
-export const configuration = { snapshot: async () => ({ providers: [], plugins: [], pluginRuntimeAvailable: false }) };
+export const configuration = { snapshot: async () => ({ providers: [
+  { id: "fixture", name: "Fixture", enabled: true }, { id: "alternate", name: "Alternate", enabled: true },
+  { id: "disabled", name: "Disabled", enabled: false }], providerRuntimeAvailable: owned(), plugins: [], pluginRuntimeAvailable: false }) };
 export const applicationLogs = { read: async () => { calls.push("logs"); return localStorage.getItem("settingsFixtureLogsOk") === "true"
   ? { status: "ok", rows: [{ timestamp: "t", level: "Info", logger: "fixture", text: "fixture row", textTruncated: false }],
     captureOmitted: "0", readOmitted: 0, captureId: "11111111-1111-4111-8111-111111111111", boundary: "1",

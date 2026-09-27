@@ -592,6 +592,10 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .session-create { display: grid; gap: 8px; min-width: 0; min-height: 0; overflow-y: auto; padding: 10px; }
 .session-create label { display: grid; gap: 5px; font-size: 12px; }
 .session-create input { min-width: 0; }
+.creation-provider { display: grid; gap: 5px; min-width: 0; max-width: 100%; }
+.creation-provider label { display: grid; gap: 5px; min-width: 0; }
+.creation-provider select { min-width: 0; max-width: 100%; }
+.creation-provider small { color: var(--muted); white-space: normal; overflow-wrap: anywhere; }
 .app-dialog > footer { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; color: var(--muted); font-size: 11px; }
 kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 4px; background: var(--panel-2); font: inherit; }
 .shortcut-dialog dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; overflow-y: auto; }

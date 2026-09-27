@@ -1078,17 +1078,28 @@ test("production shell settings overlay keeps the session workspace mounted and 
       }
     }
     // Production create handler and navigation wiring, with only transport replies deferred.
-    for (const phase of ["reply", "snapshot"]) for (const change of ["session", "aba", "settings", "settings-aba", "scope", "scope-aba", "path", "project-id", "modal-aba", "input", "input-aba", "search", "host", "unmount", "valid", "missing", "error"]) {
+    for (const phase of ["reply", "snapshot"]) for (const change of ["session", "aba", "settings", "settings-aba", "scope", "scope-aba", "path", "project-id", "modal-aba", "input", "input-aba", "provider-aba", "search", "host", "unmount", "valid", "missing", "error"]) {
       await evaluate(`localStorage.clear(); localStorage.setItem('settingsFixtureOwned','true'); localStorage.setItem('settingsFixtureSecondProject','true')`);
       if (change === "host") await evaluate(`localStorage.setItem('settingsFixtureHoldChoices','true')`);
       await command("Page.reload");
       assert.equal(await wait("!!document.querySelector('.session-row button[aria-pressed=true]') && !document.querySelector('[aria-label=\"Create session\"]').disabled"), true);
       const readsBefore = await evaluate("window.settingsShellFixture.snapshotCalls.length") as number;
       await evaluate(`document.querySelector('[aria-label="Create session"]').click()`);
+      assert.deepEqual(await evaluate("[...document.querySelector('.session-create select').options].map(o=>o.value)"), ["", "fixture", "alternate"]);
+      assert.equal(await evaluate("document.querySelector('.session-create select').labels[0].textContent.includes('Provider for new session')"), true);
+      const callsBeforeChoice = await evaluate(`JSON.stringify(${workflowCalls})`);
+      await evaluate(`const select=document.querySelector('.session-create select'); select.focus(); select.value='alternate'; select.dispatchEvent(new Event('change',{bubbles:true}));`);
+      assert.equal(await evaluate(`JSON.stringify(${workflowCalls})`), callsBeforeChoice, "Provider choice performs no bridge call or probe");
       await evaluate(`(() => {const input=document.querySelector('.session-create input');
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Original title');
         input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
-      if (change === "valid") await workflowLanguages(evaluate, workflowCalls, ".session-create", ".session-create button", "Create and open");
+      if (change === "valid") {
+        await workflowLanguages(evaluate, workflowCalls, ".session-create", ".session-create button", "Create and open");
+        await workflowLanguages(evaluate, workflowCalls, ".session-create", ".creation-provider label > span", "Provider for new session", "option:not([value=''])");
+        await workflowLanguages(evaluate, workflowCalls, ".session-create", ".creation-provider option[value='']", "Default or first enabled provider", "option:not([value=''])");
+        await workflowNarrow(evaluate, command, ".session-create");
+        assert.equal(await evaluate("document.querySelector('.session-create select').value"), "alternate");
+      }
       await evaluate(`document.querySelector('.session-create button').click()`);
       assert.equal(await wait("window.settingsShellFixture.creates.length===1"), true);
       if (change === "valid" || change === "host") await workflowLanguages(evaluate, workflowCalls, ".session-create", ".session-create button", "Create and open", "code", "settingsShellFixture.creates[0].request");
@@ -1123,6 +1134,8 @@ test("production shell settings overlay keeps the session workspace mounted and 
           Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Original title');
           input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
       }
+      if (change === "provider-aba") await evaluate(`for (const id of ['fixture','alternate']) {
+        const select=document.querySelector('.session-create select'); select.value=id; select.dispatchEvent(new Event('change',{bubbles:true})); }`);
       if (change === "host") {
         assert.equal(await wait("window.settingsShellFixture.choiceReads.length>0"), true);
         await evaluate(`window.settingsShellFixture.releaseChoices('stale')`);
@@ -1139,11 +1152,11 @@ test("production shell settings overlay keeps the session workspace mounted and 
       }
       if (phase === "snapshot" || ["valid", "missing", "error"].includes(change))
         await evaluate(`window.settingsShellFixture.releaseSnapshot('${change === "missing" || change === "error" ? change : "ok"}')`);
-      assert.equal(await wait("!document.querySelector('.session-rail')?.textContent.includes('Creating session…') && !document.querySelector('.session-create button')?.disabled"), true);
+      assert.equal(await wait("!document.querySelector('.session-rail')?.textContent.includes('Creating session…')"), true);
       assert.equal(await evaluate("window.settingsShellFixture.creates.length"), 1, change);
       assert.deepEqual(await evaluate("window.settingsShellFixture.creates[0].request"), {
         expectedHostEpoch: "12345678-1234-1234-1234-123456789abc", scope: "project", projectId: "project",
-        projectPath: "/fixture/project", title: "Original title",
+        projectPath: "/fixture/project", title: "Original title", providerId: "alternate",
       }, `${phase}/${change}: original request never changes or retries`);
       assert.equal(await evaluate("window.settingsShellFixture.snapshotCalls.length"),
         readsBefore + (phase === "snapshot" || ["valid", "missing", "error"].includes(change) ? 1 : 0), `${phase}/${change}: no extra read`);
@@ -1164,9 +1177,34 @@ test("production shell settings overlay keeps the session workspace mounted and 
           await evaluate(`document.querySelector('[aria-label="Create session"]').click()`);
         }
         assert.equal(await evaluate("document.querySelector('.session-create input')?.value"), change === "input" ? "Newer input" : "Original title", `${change}: preserve form input`);
+        assert.equal(await evaluate("document.querySelector('.session-create select')?.value"), "alternate", "Retain explicit provider");
+        await evaluate("document.querySelector('.session-create button')?.click()");
+        assert.equal(await evaluate("settingsShellFixture.creates.length"), 1, "Uncertain original forbids another click, even after ABA");
         if (change === "search") assert.equal(await evaluate("document.querySelector('.session-rail .search input').value"), "Newer input");
         if (change === "settings") assert.equal(await evaluate("document.querySelector('.settings-dialog')?.open"), true, "late completion must not close Settings");
       }
+    }
+    for (const mismatch of ["reply", "catalog"]) {
+      await evaluate("localStorage.clear();localStorage.setItem('settingsFixtureOwned','true')");
+      await command("Page.reload");
+      assert.equal(await wait("!!document.querySelector('.session-row button[aria-pressed=true]') && !document.querySelector('[aria-label=\"Create session\"]').disabled"), true);
+      await evaluate("document.querySelector('[aria-label=\"Create session\"]').click()");
+      assert.equal(await wait("!!document.querySelector('.session-create select')"), true);
+      await evaluate("const select=document.querySelector('.session-create select');select.value='alternate';select.dispatchEvent(new Event('change',{bubbles:true}));");
+      await evaluate("document.querySelector('[aria-label=\"Create session\"]').click();document.querySelector('[aria-label=\"Create session\"]').click()");
+      assert.equal(await evaluate("document.querySelector('.session-create select').value"), "alternate", "Dirty close/reopen retains choice");
+      await evaluate("localStorage.setItem('creationFixtureHoldSnapshot','true');document.querySelector('.session-create button').click()");
+      if (mismatch === "reply") await evaluate("settingsShellFixture.releaseCreate('ok','fixture')");
+      else {
+        await evaluate("settingsShellFixture.releaseCreate()");
+        assert.equal(await wait("settingsShellFixture.snapshots.length===1"), true);
+        await evaluate("settingsShellFixture.releaseSnapshot('provider')");
+      }
+      assert.equal(await wait("!document.querySelector('.session-create select').disabled"), true);
+      assert.equal(await evaluate("document.querySelector('.session-create button').disabled"), true);
+      await evaluate("document.querySelector('.session-create button').click()");
+      assert.equal(await evaluate("settingsShellFixture.creates.length"), 1);
+      assert.equal(await evaluate("document.querySelector('.session-header h1').textContent"), "one");
     }
     // Fixed Layout lifetime through actual App publications, not a copied component shell.
     await evaluate(`localStorage.clear(); localStorage.setItem('settingsFixtureOwned','true');
@@ -1553,8 +1591,10 @@ test("production shell settings overlay keeps the session workspace mounted and 
         assert.equal(await wait("document.querySelector('.settings-dialog')?.open"), true);
         await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
       }
+      await evaluate("const choice=document.querySelector('.content .creation-provider select'); choice.value='alternate'; choice.dispatchEvent(new Event('change',{bubbles:true}));");
       await evaluate("localStorage.setItem('creationFixtureHoldSnapshot','true'); const button=[...document.querySelectorAll('button')].find(b=>b.textContent==='Create and transfer draft'); button.click(); button.click()");
       assert.equal(await wait("settingsShellFixture.creates.length===1"), true);
+      assert.equal(await evaluate("settingsShellFixture.creates[0].request.providerId"), "alternate");
       assert.equal(await evaluate("document.querySelector('[aria-label=\"Create session\"]').disabled"), true);
       if (change === "cancel-before-reply") {
         await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Cancel transfer').click(); settingsShellFixture.releaseCreate()");

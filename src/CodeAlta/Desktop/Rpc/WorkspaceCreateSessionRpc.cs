@@ -38,7 +38,7 @@ internal sealed partial class WorkspaceService
     }
 
     /// <summary>Creates an owned global or exact-catalog-project session; never accepts a renderer-supplied project descriptor.</summary>
-    /// <param name="request">Exact scope and expected host epoch.</param>
+    /// <param name="request">Exact scope, expected host epoch and optional canonical enabled provider identity. Null uses the default or first enabled provider.</param>
     /// <param name="cancellationToken">Cancels only the wait after admission, not the creation.</param>
     /// <returns>The created identity, a definite refusal, or an uncertain outcome after admission.</returns>
     /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
@@ -48,9 +48,10 @@ internal sealed partial class WorkspaceService
         WorkspaceCreateSessionResponse Reply(string status, string? id = null, string? workspacePath = null)
             => status is "invalid_scope" or "unconfigured"
                 ? new(status, _importEpoch, null, null, null, null, null)
-                : new(status, _importEpoch, request?.Scope, request?.ProjectId, request?.ProjectPath, id, workspacePath);
+                : new(status, _importEpoch, request?.Scope, request?.ProjectId, request?.ProjectPath, id, workspacePath, request?.ProviderId);
         if (_sessionProviders is null || _importCatalog is null || _importEpoch is null) return Reply("unconfigured");
         if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidTitle(request.Title)
+            || request.ProviderId is not null && !ValidScopeValue(request.ProviderId, 256)
             || request.Scope is not ("global" or "project")
             || request.Scope == "global" && (request.ProjectId is not null || request.ProjectPath is not null)
             || request.Scope == "project" && (!ValidScopeValue(request.ProjectId, 256) || !ValidScopeValue(request.ProjectPath, 4096)))
@@ -69,7 +70,10 @@ internal sealed partial class WorkspaceService
             if (CatalogAdmissionClosed) return Reply("closed");
             if (CatalogAdmissionBusy) return Reply("busy");
             var providers = _sessionProviders.ListProviders();
-            var provider = providers.FirstOrDefault(static value => value.IsDefault) ?? providers.FirstOrDefault();
+            var matches = request.ProviderId is null ? [] : providers.Where(value => value.ProviderId.Value == request.ProviderId).Take(2).ToArray();
+            var provider = request.ProviderId is null
+                ? providers.FirstOrDefault(static value => value.IsDefault) ?? providers.FirstOrDefault()
+                : matches.Length == 1 ? matches[0] : null;
             if (provider is null) return Reply("provider_unavailable");
             var completion = new TaskCompletionSource<WorkspaceCreateSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
             _sessionWork = work = completion.Task;
@@ -93,7 +97,7 @@ internal sealed partial class WorkspaceService
         TaskCompletionSource<WorkspaceCreateSessionResponse> completion)
     {
         WorkspaceCreateSessionResponse Reply(string status, string? id = null, string? workspacePath = null)
-            => new(status, _importEpoch, request.Scope, request.ProjectId, request.ProjectPath, id, workspacePath);
+            => new(status, _importEpoch, request.Scope, request.ProjectId, request.ProjectPath, id, workspacePath, request.ProviderId);
         try
         {
             ProjectDescriptor? project = null;
@@ -106,6 +110,14 @@ internal sealed partial class WorkspaceService
                     completion.TrySetResult(Reply("project_missing"));
                     return;
                 }
+            }
+            // Catalog resolution can yield. Revalidate the original descriptor, not a replacement
+            // carrying the same key or a newly configured default. This read never starts a runtime.
+            if (!_sessionProviders!.TryGetProvider(provider.ProviderId, out var current)
+                || !ReferenceEquals(provider, current) || !current.IsEnabled)
+            {
+                completion.TrySetResult(Reply("provider_unavailable"));
+                return;
             }
             var session = await _createSession!(project, provider, request.Title).ConfigureAwait(false);
             if (!ValidScopeValue(session.SessionId, 256)
@@ -143,6 +155,7 @@ internal sealed partial class WorkspaceService
     }
 }
 
-internal sealed record WorkspaceCreateSessionRequest(string ExpectedHostEpoch, string Scope, string? ProjectId, string? ProjectPath, string? Title);
+internal sealed record WorkspaceCreateSessionRequest(string ExpectedHostEpoch, string Scope, string? ProjectId, string? ProjectPath, string? Title,
+    string? ProviderId = null);
 internal sealed record WorkspaceCreateSessionResponse(string Status, string? HostEpoch, string? Scope, string? ProjectId, string? ProjectPath,
-    string? SessionId, string? WorkspacePath);
+    string? SessionId, string? WorkspacePath, string? ProviderId = null);

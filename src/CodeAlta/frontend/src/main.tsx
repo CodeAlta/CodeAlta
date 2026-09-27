@@ -161,7 +161,7 @@ function App() {
     { text: restoreDraft(() => localStorage.getItem(localDraftStorageKey), draftScope), revision: 0 });
   const localDraft = localDrafts.current.get(draftScope)!;
   const [draftHandoffNotice, setDraftHandoffNotice] = useState("");
-  const [draftHandoffEvidence, setDraftHandoffEvidence] = useState<Array<{ scope: string; text: string; revision: number; epoch: string | undefined; target: SessionTarget; outcome: string; result?: string }>>([]);
+  const [draftHandoffEvidence, setDraftHandoffEvidence] = useState<Array<{ scope: string; text: string; revision: number; epoch: string | undefined; target: SessionTarget; providerId: string | null; outcome: string; result?: string }>>([]);
   function editLocalDraft(text: string) {
     const current = localDrafts.current.get(draftScope)!;
     localDrafts.current.set(draftScope, { text, revision: current.revision + 1 });
@@ -305,9 +305,13 @@ function App() {
   const focusAction = useRef<"rename" | "delete" | null>(null);
   const [creatingVisible, writeCreatingVisible] = useState(false);
   const [creatingTitle, writeCreatingTitle] = useState("");
+  const [creatingProvider, writeCreatingProvider] = useState("");
+  function setCreatingProvider(value: string) { invalidateCreation(); writeCreatingProvider(value); }
   function setCreatingVisible(value: boolean | ((previous: boolean) => boolean)) { invalidateCreation(); writeCreatingVisible(value); }
   function setCreatingTitle(value: string) { invalidateCreation(); writeCreatingTitle(value); }
   const [creatingBusy, setCreatingBusy] = useState(false);
+  const [creationLocked, setCreationLocked] = useState(false);
+  const creationHeld = useRef(false);
   const [creatingMessage, setCreatingMessage] = useState<WorkflowNotice>("");
   const creationPending = useRef(false);
   const creationAlive = useRef(true);
@@ -994,8 +998,27 @@ function App() {
     } finally { projectRenameRefreshPending.current = false; }
   }
 
+  function creationProviderChoice() {
+    const inventory = configurationState.snapshot;
+    const providers = inventory?.providerRuntimeAvailable ? inventory.providers.slice(0, 32).filter(provider => provider.enabled
+      && provider.id.length > 0 && provider.id.length <= 256 && provider.id === provider.id.trim()
+      && !/[\u0000-\u001f\u007f-\u009f\ud800-\udfff]/u.test(provider.id)
+      && inventory.providers.filter(other => other.id === provider.id).length === 1) : [];
+    return <div className="creation-provider">
+      <label><span>{t("Provider for new session")}</span>
+        <select value={creatingProvider} disabled={creatingBusy || !owned} onChange={event => setCreatingProvider(event.target.value)}>
+          <option value="">{t("Default or first enabled provider")}</option>
+          {creatingProvider && !providers.some(provider => provider.id === creatingProvider)
+            && <option value={creatingProvider} disabled>{creatingProvider}</option>}
+          {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.id}</option>)}
+        </select>
+      </label>
+      <small>{t("Cached enabled providers only; enabled does not mean ready or capable. Create may initialize a provider.")}</small>
+    </div>;
+  }
+
   async function createSelectedSession(fromDraft = false) {
-    if (creationPending.current || !owned || !snapshot || !mutation?.capability.canMutate() || selectedProject?.archived
+    if (creationPending.current || creationHeld.current || !owned || !snapshot || !mutation?.capability.canMutate() || selectedProject?.archived
       || projectId !== null && !selectedProject || settingsVisible.current || dialog || paletteOpen
       || currentView.current !== "workspace" || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
     if (fromDraft && (sessionId !== null || !localDraft.text.trim())) return;
@@ -1007,11 +1030,14 @@ function App() {
       setDraftHandoffEvidence(records => records.map((record, index) => index === evidenceIndex ? { ...record, outcome } : record));
     };
     creationPending.current = true;
+    creationHeld.current = true;
+    setCreationLocked(true);
+    const providerId = creatingProvider || null;
     const target: SessionTarget = selectedProject
       ? { scope: "project", projectId: selectedProject.id, projectPath: selectedProject.path } : { scope: "global" };
     const generation = creationGeneration.current;
     const epoch = status?.hostEpoch;
-    if (handoff) setDraftHandoffEvidence(records => [...records, { ...handoff, epoch, target, outcome: "Pending; nothing sent." }]);
+    if (handoff) setDraftHandoffEvidence(records => [...records, { ...handoff, epoch, target, providerId, outcome: "Pending; nothing sent." }]);
     const sessionAtAdmission = sessionId;
     const capability = mutation.capability;
     const isCurrent = () => creationAlive.current && generation === creationGeneration.current
@@ -1027,7 +1053,7 @@ function App() {
     setCreatingMessage("");
     if (handoff) setDraftHandoffNotice("Creation pending. Original draft retained; nothing has been sent.");
     try {
-      const result = await createSession(epoch, target, handoff ? null : creatingTitle.trim() || null, capability);
+      const result = await createSession(epoch, target, handoff ? null : creatingTitle.trim() || null, capability, providerId);
       if (!creationAlive.current) return;
       if (handoff) setDraftHandoffEvidence(records => records.map((record, index) => index === evidenceIndex
         ? { ...record, result: result.kind === "created" ? `Returned session: ${result.id}` : `Create status: ${result.code}` } : record));
@@ -1053,6 +1079,8 @@ function App() {
             recordHandoff("Draft copied to the verified session. Review it and use normal Send. Original local draft retained.");
           }
           publishWorkspaceState({ kind: "ready", snapshot: fresh });
+          creationHeld.current = false;
+          setCreationLocked(false);
           selectedScope.current = selection.projectId;
           setProjectId(selection.projectId);
           setSessionId(selection.sessionId);
@@ -1061,7 +1089,14 @@ function App() {
           setCreatingTitle("");
           navigate("workspace");
         } else { setCreatingMessage(completedElsewhere); recordHandoff(completedElsewhere + " Original draft retained; nothing sent."); }
-      } else { const message = sessionCreationMessage(result.code) + (isCurrent() ? "" : ` ${completedElsewhere}`);
+      } else {
+        // Only a correlated definite refusal releases this App-owned original. Changes
+        // to selection, inventory, settings or host never release an uncertain attempt.
+        if (["invalid_scope", "unconfigured", "project_missing", "provider_unavailable", "busy", "closed"].includes(result.code)) {
+          creationHeld.current = false;
+          setCreationLocked(false);
+        }
+        const message = sessionCreationMessage(result.code) + (isCurrent() ? "" : ` ${completedElsewhere}`);
         setCreatingMessage(message); recordHandoff(message + " Original draft retained; nothing sent."); }
     } finally { creationPending.current = false; if (creationAlive.current) setCreatingBusy(false); }
   }
@@ -1293,9 +1328,11 @@ function App() {
           {creatingVisible && <div className="session-create">
             <label>{selectedProject ? t("New session in {name}", { name: selectedProject.name }) : t("New global session")}
               <input value={creatingTitle} maxLength={256} disabled={creatingBusy} placeholder={t("Title (optional)")} onChange={event => setCreatingTitle(event.target.value)} /></label>
-            <button type="button" className="quiet-button" disabled={creatingBusy} onClick={() => void createSelectedSession()}>{t("Create and open")}</button>
+            {creationProviderChoice()}
+            <button type="button" className="quiet-button" disabled={creatingBusy || creationLocked} onClick={() => void createSelectedSession()}>{t("Create and open")}</button>
           </div>}
           {creatingBusy && <p role="status" className="notice">{t("Creating session…")}</p>}
+          {creationLocked && !creatingBusy && <p role="status" className="notice">{t("An earlier creation is unconfirmed. Inspect sessions; creation is blocked in this window.")}</p>}
           {creatingMessage && <p role="alert" className="notice error-text">{workflowNotice(language.locale, creatingMessage)}</p>}
           {creatingMessage && <button type="button" className="quiet-button" disabled={creatingBusy} onClick={() => {
             void refreshProjects(creationRefresh.current.signal).then(fresh => {
@@ -1395,7 +1432,7 @@ function App() {
           {error && <div className="banner banner-error" role="alert">{error}</div>}
           {draftHandoffNotice && <p role="status" className="notice">{draftHandoffNotice}</p>}
           {draftHandoffEvidence.length > 0 && <details className="notice"><summary>{t("Draft creation evidence (this window)")}</summary>
-            {draftHandoffEvidence.map((record, index) => <section key={index}><p>{record.scope} · host {record.epoch} · {record.target.scope === "project" ? record.target.projectPath : "Global"} · input revision {record.revision}: {record.outcome}</p>
+            {draftHandoffEvidence.map((record, index) => <section key={index}><p>{record.scope} · host {record.epoch} · {record.target.scope === "project" ? record.target.projectPath : "Global"} · {record.providerId ?? t("Default or first enabled provider")} · input revision {record.revision}: {record.outcome}</p>
               {record.result && <p>{record.result}</p>}
                <textarea aria-label={t("Original creation draft {number}", { number: index + 1 })} readOnly value={record.text} /></section>)}
           </details>}
@@ -1405,7 +1442,8 @@ function App() {
                   onOpenHelp={openHelp} onOpenPalette={openPalette}
                   reason={t("Local to this project/global scope. Create and transfer first, then review and Send in the session. Original text is retained; reload restores it only when local storage permits.")}
                   localDraft={{ text: localDraft.text, edit: editLocalDraft, action: <>
-                    <button type="button" disabled={creatingBusy || !owned || !mutation?.capability.canMutate() || !snapshot || !!selectedProject?.archived || projectId !== null && !selectedProject || !localDraft.text.trim()}
+                    {creationProviderChoice()}
+                    <button type="button" disabled={creatingBusy || creationLocked || !owned || !mutation?.capability.canMutate() || !snapshot || !!selectedProject?.archived || projectId !== null && !selectedProject || !localDraft.text.trim()}
                       onClick={() => void createSelectedSession(true)}>{t("Create and transfer draft")}</button>
                     {creatingBusy && <button type="button" onClick={() => { invalidateCreation(); setDraftHandoffNotice("Transfer canceled locally. Creation may still complete; original text retained. Inspect sessions; nothing sent."); }}>{t("Cancel transfer")}</button>}
                   </> }} />

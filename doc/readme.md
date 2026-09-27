@@ -4,6 +4,10 @@ This folder documents the current CodeAlta 1.0 implementation. It is not a backl
 
 ## Reading path
 
+See [new-session provider choice](new-session-provider.md) for cached descriptor-only
+selection, exact enabled-host admission, original uncertainty retention and fresh
+catalog confirmation. Existing-session provider switching remains separate.
+
 See [bounded Desktop command access](command-access.md) for registry-backed Skills,
 logs, usage, Open Project and Help access, exact-original guards, TUI chord conflicts
 and the retained final bounded-test failure. Independent acceptance remains pending.

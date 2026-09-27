@@ -201,6 +201,11 @@ zero skips, strict TypeScript/build). Full/native/native-speaker qualification r
 
 ### Static project/session workflow presentation (independent review pending)
 
+The [new-session provider choice](new-session-provider.md) also translates its static
+label, default semantics, enabled-not-ready help and uncertainty lock in all six
+locales. Provider IDs remain canonical literal values. Changing locale does not
+read inventory, probe a provider, change the original request or release uncertainty.
+
 The six frozen dictionaries now cover project rail labels, project details, opening
 saved projects and importing existing folders, archive/unarchive review, session action
 menus and existing inline session creation/project and session rename/delete controls.
