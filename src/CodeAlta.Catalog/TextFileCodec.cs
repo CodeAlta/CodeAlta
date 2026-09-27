@@ -17,6 +17,60 @@ public sealed class TextFileCodec
 {
     private readonly SemaphoreSlim _saveGate = new(1, 1);
 
+    /// <summary>Publishes new UTF-8 text without reading an existing destination or its revision.</summary>
+    /// <remarks>Uses the same owner gate, staging and non-overwriting move as Missing-revision saves.
+    /// False means an existing destination was observed. This is not a path-swap sandbox.</remarks>
+    /// <exception cref="ArgumentException">The path is invalid.</exception>
+    /// <exception cref="ArgumentNullException">Text is null.</exception>
+    /// <exception cref="EncoderFallbackException">Text contains invalid Unicode.</exception>
+    /// <exception cref="IOException">Staging, publication or cleanup fails.</exception>
+    /// <exception cref="UnauthorizedAccessException">Storage access is denied.</exception>
+    /// <exception cref="OperationCanceledException">Canceled before publication.</exception>
+    public async Task<bool> TryCreateAsync(string fullPath, string text, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fullPath);
+        ArgumentNullException.ThrowIfNull(text);
+        var path = Path.GetFullPath(fullPath); // Never follow the final link to another create target.
+        var bytes = new UTF8Encoding(false, true).GetBytes(text);
+        await _saveGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        string? stagingPath = null;
+        try
+        {
+            if (EntryExists(path)) return false;
+            var directory = Path.GetDirectoryName(path) ?? throw new ArgumentException("A parent directory is required.", nameof(fullPath));
+            Directory.CreateDirectory(directory);
+            var candidate = Path.Combine(directory, $".codealta-save-{Guid.NewGuid():N}.tmp");
+            await using (var stream = CreateStagingFile(candidate, null))
+            {
+                stagingPath = candidate;
+                await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!TryPublishNew(stagingPath, path)) return false;
+            stagingPath = null;
+            return true;
+        }
+        finally
+        {
+            try { if (stagingPath is not null) File.Delete(stagingPath); }
+            finally { _saveGate.Release(); }
+        }
+    }
+
+    private static bool EntryExists(string path)
+    {
+        try { _ = File.GetAttributes(path); return true; }
+        catch (FileNotFoundException) { return false; }
+        catch (DirectoryNotFoundException) { return false; }
+    }
+
+    private static bool TryPublishNew(string stagingPath, string path)
+    {
+        try { File.Move(stagingPath, path); return true; } // Never overwrite a racing creation.
+        catch (IOException) when (EntryExists(path)) { return false; }
+    }
+
     /// <summary>Loads a workflow document through this codec, retaining its backend path policy.</summary>
     /// <exception cref="ArgumentNullException">The document is null.</exception>
     /// <exception cref="IOException">Reading failed or an observed skill path is linked.</exception>
@@ -193,7 +247,7 @@ public sealed class TextFileCodec
             }
             else
             {
-                File.Move(stagingPath, path); // A concurrent creation must never be overwritten.
+                if (!TryPublishNew(stagingPath, path)) throw new IOException("The destination was created before publication.");
             }
 
             stagingPath = null;

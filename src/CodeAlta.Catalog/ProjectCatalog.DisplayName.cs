@@ -104,7 +104,7 @@ public sealed partial class ProjectCatalog
     }
 
     private async Task<(string Path, TextFileSnapshot Snapshot, string Name, int Start, int End)?> ReadNameSourceAsync(
-        ProjectDescriptor project, string projectId, string projectPath, CancellationToken cancellationToken)
+        ProjectDescriptor project, string projectId, string projectPath, CancellationToken cancellationToken, string field = "display_name")
     {
         if (project.SourcePath is null) return null;
         var sourcePath = Path.GetFullPath(project.SourcePath);
@@ -119,13 +119,13 @@ public sealed partial class ProjectCatalog
         var current = _serializer.DeserializeProjectMarkdown(snapshot.Text);
         if (current.Id != projectId || NormalizePath(current.ProjectPath) != projectPath || current.Slug != project.Slug)
             return null;
-        var parsed = ParseName(snapshot.Text);
+        var parsed = ParseName(snapshot.Text, field);
         return parsed is null ? null : (sourcePath, snapshot, parsed.Value.Name, parsed.Value.Start, parsed.Value.End);
     }
 
     // Parse YAML structure before using source marks to replace just one scalar token. Refuse complex
     // keys, duplicates, aliases, tagged/multiline values, and shapes with no explicit display_name.
-    private static (string Name, int Start, int End)? ParseName(string text)
+    private static (string Name, int Start, int End)? ParseName(string text, string field = "display_name")
     {
         var firstEnd = text.IndexOf('\n');
         if (firstEnd < 0 || text.AsSpan(0, firstEnd).TrimEnd('\r') is not "---") return null;
@@ -149,7 +149,7 @@ public sealed partial class ProjectCatalog
         {
             if (entry.Key is not YamlValue key || !string.IsNullOrEmpty(key.Anchor) || !string.IsNullOrEmpty(key.Tag)
                 || !keys.Add(key.Value) || key.Value == "<<") return null;
-            if (key.Value == "display_name") value = entry.Value as YamlValue;
+            if (key.Value == field) value = entry.Value as YamlValue;
         }
         if (value is null || !string.IsNullOrEmpty(value.Anchor) || !string.IsNullOrEmpty(value.Tag)
             || value.Scalar.Style is not (ScalarStyle.Plain or ScalarStyle.SingleQuoted or ScalarStyle.DoubleQuoted)) return null;

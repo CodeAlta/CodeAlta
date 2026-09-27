@@ -160,6 +160,14 @@ public sealed class PromptResourceStore
     public Task<TextFileSaveResult> CreateAsync(PromptResourceIdentity identity, PromptFileContent content, CancellationToken cancellationToken)
         => _textFiles.SaveAsync(new TextFileSaveRequest(CheckedPath(identity, writable: true), PromptFileFormat.Serialize(identity.Kind, content), new UTF8Encoding(false, true), false, TextFileRevision.Missing), cancellationToken);
 
+    /// <summary>Creates without reading collision bytes; false reports an observed existing same-scope destination.</summary>
+    /// <remarks>Unlike revision-returning CreateAsync, this bounded collision path does not hash existing files.
+    /// Uses the shared codec gate and the same non-overwriting staged publication; no overwrite fallback.</remarks>
+    /// <inheritdoc cref="Create(PromptResourceIdentity, PromptFileContent)"/>
+    /// <exception cref="OperationCanceledException">Canceled before publication.</exception>
+    public Task<bool> TryCreateAsync(PromptResourceIdentity identity, PromptFileContent content, CancellationToken cancellationToken)
+        => _textFiles.TryCreateAsync(CheckedPath(identity, writable: true), PromptFileFormat.Serialize(identity.Kind, content), cancellationToken);
+
     /// <summary>Validates an editable path without reading or creating the file.</summary>
     /// <exception cref="ArgumentException">Identity or scope is invalid.</exception>
     /// <exception cref="ArgumentNullException">Identity is null.</exception>
