@@ -1822,7 +1822,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
           onWheel={event => { newest.cancel(); timeline.wheel(event); }} onKeyDown={timeline.keyDown}
           onPointerDown={event => { newest.cancel(); timeline.pointerDown(event); }}
           onPointerMove={timeline.pointerMove} onPointerUp={timeline.pointerEnd} onPointerCancel={timeline.pointerEnd}>
-        <History sessionId={session.id} onNotesChange={onNotesChange} onSettled={() => {
+        <History sessionId={session.id} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onSettled={() => {
           timeline.settled(); if (!newest.pending()) timeline.pauseIfUnfollowed();
         }}
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}

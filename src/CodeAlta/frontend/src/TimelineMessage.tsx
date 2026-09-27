@@ -4,13 +4,14 @@ import { MarkdownContent } from "./MarkdownContent";
 import { writeMarkdown, type TimelineItem } from "./timeline";
 import { useShellLanguage } from "./shellLanguage";
 import { timelineTime } from "./sessionTime";
+import { FileChangeInspection } from "./FileChangeInspection";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
 // These labels are generated UI chrome in timeline.ts, never provider content.
 const detailLabels = Object.freeze(["Details", "File change record details", "Prompt details", "Usage details", "Model details", "Command and result", "Tool details"] as const);
 
-export function TimelineMessage({ item }: { item: TimelineItem }) {
+export function TimelineMessage({ item, canInspect }: { item: TimelineItem; canInspect?: () => boolean }) {
   const { t, locale } = useShellLanguage();
   const timestamp = timelineTime(item.timestamp, locale);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
@@ -86,6 +87,7 @@ export function TimelineMessage({ item }: { item: TimelineItem }) {
         <div id={bodyId}>{expanded ? <MarkdownContent source={body} timelineCodeBlocks />
           : <p className="long-message-preview">{t("Preview (plain text):")} {plainTextPreview(body)}…</p>}</div>
       </> : body && <MarkdownContent source={body} timelineCodeBlocks />}
+      {item.fileChanges && <FileChangeInspection key={item.fileChanges.source} changes={item.fileChanges} canInspect={canInspect} />}
       {hasDetails && <details className="event-details"><summary><AppIcon name="chevronDown" size={14} />{detailLabel ? t(detailLabel) : item.detailsLabel}</summary>
         <div className="event-detail-body">
           {item.detailMarkdown && item.detailMarkdown !== item.markdown && <>

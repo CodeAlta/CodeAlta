@@ -80,6 +80,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await command("Page.navigate", { url: pathToFileURL(page).href });
     let permissionModeContext: string | null = null;
     let inputModeContext: string | null = null;
+    let fileModeContext: string | null = null;
     const evaluate = async (expression: string) => {
       try {
         const response = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
@@ -87,7 +88,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
         return response.result?.value;
       } catch (cause) {
         // This page contains fixture data only. Keep exact expression/context on transport failures.
-        throw new Error(`Runtime.evaluate permissionMode=${permissionModeContext ?? "outside permission scenarios"}; inputMode=${inputModeContext ?? "outside input scenarios"}; expression=${expression}; failure=${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+        throw new Error(`Runtime.evaluate permissionMode=${permissionModeContext ?? "outside permission scenarios"}; inputMode=${inputModeContext ?? "outside input scenarios"}; fileMode=${fileModeContext ?? "outside file scenarios"}; expression=${expression}; failure=${cause instanceof Error ? cause.message : String(cause)}`, { cause });
       }
     };
     const wait = (condition: string) => evaluate(`new Promise(resolve => { const end=Date.now()+7000; const tick=()=>{
@@ -2421,6 +2422,44 @@ test("production shell settings overlay keeps the session workspace mounted and 
       calls: 1, cleanup: 0, attempts: [{ sessionId: "one", opened: false, settled: true, unavailable: true, aborted: true }],
     }, "Unavailable input-fixture Display attempt settles and aborts without inventing stream cleanup");
     inputModeContext = null;
+    // File scenarios are appended after every existing App scenario and teardown.
+    for (const mode of ["session-aba", "host-aba", "native-aba", "settings"]) {
+      fileModeContext = mode; t.diagnostic(`File records App scenario: ${mode}`);
+      await evaluate("localStorage.clear();localStorage.setItem('settingsFixtureOwned','true');localStorage.setItem('fileFixtureEnabled','true')");
+      await command("Page.reload");
+      assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one' && document.querySelectorAll('[data-file-record]').length===2"), true);
+      await frames();
+      await evaluate("window.fileRpcCount=settingsShellFixture.rpcCalls.length;void(window.fileRecord=document.querySelector('[data-file-record]'));fileRecord.focus();fileRecord.click()");
+      assert.equal(await wait("document.querySelector('[data-file-diff]')?.textContent==='@@ -1 +1 @@\\n-old\\n+<b>literal</b>\\n'"), true);
+      assert.equal(await evaluate("document.activeElement===fileRecord && !document.querySelector('.file-change-inspection script,.file-change-inspection b,.file-change-inspection a')"), true);
+      for (const locale of ["en", "es", "fr", "de", "ja", "zh-CN"]) {
+        await evaluate(`workflowLanguage('${locale}')`); await frames();
+        assert.equal(await evaluate("fileRecord.isConnected && fileRecord.getAttribute('aria-expanded')==='true' && settingsShellFixture.rpcCalls.length===fileRpcCount"), true, `${mode}/${locale}: language must not read or retire supplied record`);
+      }
+      await evaluate("workflowLanguage('en')"); await frames();
+      await evaluate("window.fileCopies=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{fileCopies.push(value)}}});document.querySelector('.timeline-message .copy-markdown').click()");
+      assert.equal(await wait("fileCopies.length===1"), true);
+      assert.equal(await evaluate("fileCopies[0]===JSON.stringify(JSON.parse(settingsShellFixture.fileDetails),null,2)"), true);
+      if (mode === "session-aba") await evaluate("cycleInfoSelection()");
+      if (mode === "host-aba") await evaluate("cycleInfoHost()");
+      if (mode === "native-aba") await evaluate("{const d=document.createElement('dialog');document.body.append(d);d.showModal();d.close();d.remove()}");
+      if (mode === "settings") {
+        await evaluate("document.querySelector('.rail-footer .icon-label-button').click()");
+        assert.equal(await wait("!!document.querySelector('[aria-label=\"Close settings\"]')"), true);
+        await evaluate("fileRecord.click()");
+        assert.equal(await evaluate("!document.querySelector('[data-file-record][aria-expanded=true]') && fileRecord.isConnected"), true, "Retained inert workspace cannot inspect behind settings");
+        await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
+      }
+      await frames();
+      assert.equal(await evaluate("!document.querySelector('[data-file-record][aria-expanded=true]') && settingsShellFixture.rpcCalls.length===fileRpcCount"), true, `${mode}: lifetime closure is local`);
+      await evaluate("document.querySelector('[data-file-record=\"1\"]').click()");
+      assert.equal(await wait("document.querySelector('[data-file-diff]')?.textContent==='binary unknown'"), true, `${mode}: fresh intent can inspect second record`);
+      await evaluate("document.querySelector('[data-file-record=\"1\"]').click()"); await frames();
+      assert.equal(await evaluate("!document.querySelector('[data-file-diff]') && settingsShellFixture.rpcCalls.length===fileRpcCount && settingsShellFixture.sends.length===0"), true);
+      await evaluate("unmountShellFixture();fileRecord.click()");
+      assert.equal(await wait("document.querySelector('#root').childElementCount===0"), true);
+    }
+    fileModeContext = null;
   } finally {
     socket?.close(); browser?.kill();
     await writeFile(join(root, "session-content-observations.json"), JSON.stringify(layoutObservations, null, 2));

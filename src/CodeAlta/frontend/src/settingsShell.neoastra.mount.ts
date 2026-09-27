@@ -63,6 +63,18 @@ const snapshots: Array<{ resolve: (value: unknown) => void; reject: (error: Erro
 const snapshotCalls: unknown[] = [];
 const historyCalls: HistoryRequest[] = [];
 const historyReads: Array<() => void> = [];
+const fileDetails = JSON.stringify({ changes: [
+  { path: "<script>literal</script>.ts", kind: { type: "update" }, diff: "@@ -1 +1 @@\n-old\n+<b>literal</b>\n" },
+  { path: "second.ts", operation: "unknown", diff: "binary unknown" },
+] });
+function fileHistory(request: HistoryRequest): HistoryResponse {
+  return { status: "ok", next: null, tailOmitted: false, entries: [
+    { offset: "1", eventType: "activity", kind: "FileChange", providerId: "fixture", sessionId: request.sessionId,
+      runId: "run", timestamp: "2026-09-24T00:00:00Z", phase: "Failed", contentId: null, activityId: "file",
+      parentActivityId: null, interactionId: null, name: null, text: null, details: fileDetails,
+      textTruncated: false, detailsTruncated: false, bodyOmitted: false },
+  ] };
+}
 function navigationHistory(request: HistoryRequest): HistoryResponse {
   const mode = localStorage.getItem("navigationFixture");
   const kinds = mode === "live-only" || mode === "empty" ? [] : ["User", "CommandOutput", "Reasoning", "Unknown", "Status", "Assistant"];
@@ -80,7 +92,7 @@ Object.assign(window, { settingsShellFixture: { calls, rpcCalls, sends, choiceRe
   displayCalls, displayCleanup, notesCalls, lateDisplayAttempts, reminderReads, projectNameReads, referenceReads,
   displayEvidence: () => displayAttempts.map(({ signal, ...attempt }) => ({ ...attempt, aborted: signal.aborted })),
   referenceObservations, archives, runtimeReads, skillReads, promptCreates, promptReads, permissionReads, permissionDecisions, permissionEntry,
-  inputReads, inputAnswers, inputCancels, inputEntry,
+  inputReads, inputAnswers, inputCancels, inputEntry, fileDetails,
   releaseInputs() { const call = inputReads.at(-1)!; call.resolve({ status: "ok", hostEpoch: epoch,
     sessionId: call.request.sessionId, entries: [{ ...inputEntry, handle: { ...inputEntry.handle, sessionId: call.request.sessionId } }], hasMore: false }); },
   releasePermissions() { const call = permissionReads.at(-1)!; call.resolve({ status: "ok", hostEpoch: epoch,
@@ -170,6 +182,7 @@ export const workspace = { snapshot: async () => {
     ? { ...catalog, sessions: catalog.sessions.map(row => ({ ...row, updatedAt: "2026-09-26T00:00:00Z" })) } : catalog;
 },
   historyTail: (request: HistoryRequest) => {
+    if (localStorage.getItem("fileFixtureEnabled") === "true") { historyCalls.push(request); return Promise.resolve(fileHistory(request)); }
     if (!localStorage.getItem("navigationFixture")) return unavailable();
     historyCalls.push(request);
     if (localStorage.getItem("navigationFixture") === "loading" ||

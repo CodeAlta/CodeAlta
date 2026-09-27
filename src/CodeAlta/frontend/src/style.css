@@ -558,6 +558,12 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .provider-input-dialog fieldset { min-width: 0; border: 0; padding: 0; }
 .provider-input-dialog textarea { display: block; width: 100%; box-sizing: border-box; }
 .provider-input-dialog::backdrop { background: rgba(0, 0, 0, .62); }
+.file-change-inspection { min-width: 0; }
+.file-change-inspection ul { padding-left: 18px; }
+.file-change-inspection button { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; }
+.file-change-inspection code, .file-change-kind { white-space: pre-wrap; overflow-wrap: anywhere; }
+.file-change-kind { display: block; }
+.file-change-inspection pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow: auto; }
 .session-info-dialog > * { flex-shrink: 0; }
 .session-info-dialog section h3 { margin: 12px 0 4px; font-size: 14px; }
 .session-info-dialog section p { font-size: 12px; color: var(--muted); }

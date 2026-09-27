@@ -21,7 +21,7 @@ function revisionOf(cursor: HistoryRequest["cursor"]): string | null {
 }
 
 export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, onAfterOlder, onNewerOmitted, onNavigationReset,
-  newestRequest, onNewestResult, live, read }: {
+  newestRequest, onNewestResult, live, read, canInspect }: {
   sessionId: string; onNotesChange: (markdown: string) => void; onSettled: () => void;
   onBeforeOlder: () => void; onAfterOlder: () => void; live: SessionDisplayView | null;
   onNewerOmitted?: (value: boolean) => void;
@@ -29,6 +29,7 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
   newestRequest?: RefObject<NewestHistoryRequest | null>;
   onNewestResult?: (result: NewestHistoryResult) => void;
   read: typeof workspace.historyTail;
+  canInspect?: () => boolean;
 }) {
   const { t } = useShellLanguage();
   const [target, setTarget] = useState<HistoryTarget>(() =>
@@ -146,7 +147,7 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
       <AppIcon name="history" size={14} />{t("Load older history")}{timeline.entries.length === 1000 ? t(" (replace newest visible events)") : ""}</button>}
     {items.length === 0 && current?.kind === "ready" && <div className="empty-history">{t("No visible events in this history.")}</div>}
     <div className="messages">
-      {items.map(item => item.source === "history" ? <TimelineMessage key={`${sessionId}:${window?.revision ?? "unversioned"}:${item.key}`} item={item.item} />
+      {items.map(item => item.source === "history" ? <TimelineMessage key={`${sessionId}:${window?.revision ?? "unversioned"}:${item.key}`} item={item.item} canInspect={canInspect} />
         : item.source === "liveText" ? <LiveTextMessage key={item.key} row={item.row} />
         : <LiveToolMessage key={item.key} row={item.row} />)}
     </div>

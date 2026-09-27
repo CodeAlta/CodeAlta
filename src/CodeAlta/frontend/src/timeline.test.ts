@@ -5,6 +5,18 @@ import { buildTimelineItems, formatDetails, latestNotes, writeMarkdown } from ".
 
 type Entry = HistoryResponse["entries"][number];
 
+test("file changes inspect supplied paths and count only validated per-file hunks without changing raw Copy", () => {
+  const details = JSON.stringify({ changes: [
+    { path: "<script>literal</script>.ts", kind: { type: "update" }, diff: "@@ -1 +1,2 @@\n-old\n+new\n+line\n" },
+    { path: "other.ts", kind: { type: "unknown-provider-kind" } },
+  ] });
+  const item = buildTimelineItems([entry({ eventType: "activity", kind: "FileChange", phase: "Failed", text: null, details })])[0]!;
+  assert.equal(item.fileChanges?.rows.length, 2);
+  assert.deepEqual(item.fileChanges?.rows[0], { index: 0, path: "<script>literal</script>.ts", kind: "update", diff: "@@ -1 +1,2 @@\n-old\n+new\n+line\n", counts: { added: 2, removed: 1 } });
+  assert.equal(item.fileChanges?.rows[1]?.counts, null);
+  assert.equal(item.copyMarkdown, formatDetails(details));
+});
+
 function entry(overrides: Partial<Entry>): Entry {
   return {
     offset: "1", eventType: "contentCompleted", providerId: "provider", sessionId: "session", runId: "run",
@@ -13,6 +25,74 @@ function entry(overrides: Partial<Entry>): Entry {
     textTruncated: false, detailsTruncated: false, bodyOmitted: false, ...overrides,
   };
 }
+
+test("file inspection refuses malformed, oversized and truncated structures without hiding raw details", () => {
+  for (const details of [null, "{", "[]", "{}", JSON.stringify({ diff: "aggregate only" }), " ".repeat(8193), JSON.stringify({ changes: [null, { path: 1 }, { path: "x".repeat(513) }] })]) {
+    const item = buildTimelineItems([entry({ eventType: "activity", kind: "FileChange", details })])[0]!;
+    assert.equal(item.fileChanges?.rows.length, 0); assert.equal(item.fileChanges?.partial, true);
+    assert.equal(item.details, formatDetails(details));
+  }
+  const details = JSON.stringify({ path: " literal path ", operation: "unknown" });
+  const item = buildTimelineItems([entry({ eventType: "sessionUpdate", kind: "DiffUpdated", details, bodyOmitted: true })])[0]!;
+  assert.equal(item.fileChanges?.rows[0]?.path, " literal path "); assert.equal(item.fileChanges?.partial, true);
+  assert.equal(item.fileChanges?.rows[0]?.kind, "unknown"); assert.equal(item.fileChanges?.rows[0]?.counts, null);
+  assert.equal(buildTimelineItems([entry({ eventType: "activity", kind: "FileChange", details, detailsTruncated: true })])[0]?.fileChanges?.rows.length, 0);
+  assert.equal(buildTimelineItems([entry({ details })])[0]?.fileChanges, undefined);
+  const bounded = buildTimelineItems([entry({ eventType: "activity", kind: "FileChange", details: JSON.stringify({ changes: Array.from({ length: 33 }, () => ({ path: "same" })) }) })])[0]!;
+  assert.equal(bounded.fileChanges?.rows.length, 32); assert.equal(bounded.fileChanges?.partial, true);
+  assert.deepEqual(bounded.fileChanges?.rows.map(row => row.index), Array.from({ length: 32 }, (_, i) => i));
+});
+
+test("hunk counts are bounded textual counts and never guess missing or malformed diff totals", () => {
+  for (const diff of ["", "binary content", "@@ -1 +1 @@\n-old", "@@ -1 +1 @@\n-old\n+new\n+extra", "@@ -1,9999 +1 @@\n-old\n+new", "x".repeat(4097), "\n".repeat(513), "@@ -1 +1 @@\n-old\n+new\ndiff --git a/b b/b"]) {
+    const item = buildTimelineItems([entry({ eventType: "activity", kind: "FileChange", details: JSON.stringify({ changes: [{ path: "a", diff }] }) })])[0]!;
+    assert.equal(item.fileChanges?.rows[0]?.counts, null, diff.slice(0, 60));
+  }
+  // The no-newline marker belongs to the final new-side line, not an earlier hunk.
+  const details = JSON.stringify({ changes: [{ path: "a", diff: "--- a/a\r\n+++ b/a\r\n@@ -1,2 +1,2 @@\r\n context\r\n-old\r\n+new\r\n@@ -9,0 +9,1 @@\r\n+next\r\n\\ No newline at end of file\r\n" }] });
+  const make = (sessionId: string, detailsValue = details) => buildTimelineItems([entry({ sessionId, eventType: "activity", kind: "FileChange", details: detailsValue })])[0]!;
+  assert.deepEqual(make("one").fileChanges?.rows[0]?.counts, { added: 2, removed: 1 });
+  assert.notEqual(make("one").fileChanges?.source, make("two").fileChanges?.source);
+  assert.notEqual(make("one").fileChanges?.source, make("one", details.replace('"a"', '"b"')).fileChanges?.source);
+});
+
+test("hunk parser rejects ambiguous preambles, overlapping ranges and misplaced markers", () => {
+  const hunk = "@@ -1 +1 @@\n-old\n+new\n";
+  const counts = (diff: string) => buildTimelineItems([entry({ eventType: "activity", kind: "FileChange",
+    details: JSON.stringify({ changes: [{ path: "a", diff }] }) })])[0].fileChanges?.rows[0]?.counts;
+  for (const diff of [
+    `diff --git a/a b/a\ndiff --git a/b b/b\n${hunk}`,
+    `--- a/a\n+++ b/a\n--- a/b\n+++ b/b\n${hunk}`,
+    `+++ b/a\n--- a/a\n${hunk}`, `--- a/a\n${hunk}`, `index abc..def\n${hunk}`,
+    `${hunk}${hunk}`, `${hunk}@@ -1 +3 @@\n-old\n+new\n`,
+    "@@ -0 +0 @@\n-old\n+new\n", "@@ -1,0 +1,0 @@\n",
+    "@@ -1 +1 @@\n\\ No newline at end of file\n-old\n+new\n",
+    `${hunk}\\ No newline at end of file\n\\ No newline at end of file\n`,
+    `diff --git a/a b/a\nindex abc..def\n${hunk}`,
+  ]) assert.equal(counts(diff), null, JSON.stringify(diff));
+  for (const prefix of ["", "--- a/a\n+++ b/a\n", "diff --git a/a b/a\nindex abc..def 100644\n--- a/a\n+++ b/a\n"]) {
+    assert.deepEqual(counts(prefix + hunk), { added: 1, removed: 1 });
+    assert.deepEqual(counts((prefix + hunk).replaceAll("\n", "\r\n")), { added: 1, removed: 1 });
+  }
+  assert.deepEqual(counts("@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file"), { added: 1, removed: 1 });
+  assert.deepEqual(counts(`${hunk}@@ -3 +3 @@\n-old\n+new`), { added: 2, removed: 2 });
+  assert.deepEqual(counts("@@ -0,0 +1 @@\n+new"), { added: 1, removed: 0 });
+  assert.deepEqual(counts("@@ -1 +0,0 @@\n-old"), { added: 0, removed: 1 });
+});
+
+test("malformed git metadata and premature no-newline markers never certify counts", () => {
+  const hunk = "@@ -1 +1 @@\n-old\n+new\n";
+  for (const diff of [
+    `diff --git malformed\n--- a/a\n+++ b/a\n${hunk}`,
+    `diff --git a/a b/a\nindex garbage\n--- a/a\n+++ b/a\n${hunk}`,
+    "@@ -1,2 +1 @@\n-old\n\\ No newline at end of file\n-more\n+new",
+    "@@ -1 +1,2 @@\n-old\n+new\n\\ No newline at end of file\n+more",
+    `${hunk}\\ No newline at end of file\n@@ -3 +3 @@\n-old\n+new`,
+  ]) {
+    const item = buildTimelineItems([entry({ eventType: "activity", kind: "FileChange", details: JSON.stringify({ path: "a", diff }) })])[0];
+    assert.equal(item.fileChanges?.rows[0]?.counts, null, JSON.stringify(diff));
+  }
+});
 
 test("timeline replaces streamed deltas with completed content and preserves orphan streams", () => {
   const items = buildTimelineItems([
@@ -166,7 +246,7 @@ for (const details of ['{"files":["literal.cs"]}', '{"command":"literal command"
   });
 }
 
-test("FileChange label preserves every other field, bounds and provider/run isolation", () => {
+test("FileChange adds explicit unavailable projection while preserving legacy fields, bounds and provider/run isolation", () => {
   for (const phase of ["Started", "Completed", "Failed", "Canceled"]) {
     for (const details of [null, '{"path":"cut', '{"files":["../literal.cs"]}', '{"command":"literal command"}']) {
       const inputs = ["FileChange", "filechange", "FILECHANGE"].map((kind, i) => entry({
@@ -178,11 +258,13 @@ test("FileChange label preserves every other field, bounds and provider/run isol
       assert.equal(items.length, inputs.length);
       items.forEach((item, i) => {
         // CommandExecution shares the pre-existing generic activity presentation, without
-        // ToolCall's distinct supplied-message retention. Only file classification/label differ.
+        // ToolCall's distinct supplied-message retention. Compare every legacy field,
+        // plus the explicit unavailable projection for these truncated/missing records.
         const [generic] = buildTimelineItems([{ ...inputs[i], kind: "CommandExecution" }]);
         const kindLabel = inputs[i].kind === "FileChange" ? "File Change" : inputs[i].kind === "filechange" ? "Filechange" : "FILECHANGE";
         assert.deepEqual(item, { ...generic, category: "file", icon: "file",
-          subtitle: `${phase} · ${kindLabel}`, detailsLabel: "File change record details" });
+          subtitle: `${phase} · ${kindLabel}`, detailsLabel: "File change record details",
+          fileChanges: { source: "", rows: [], partial: true } });
       });
     }
   }
