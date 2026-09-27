@@ -371,6 +371,30 @@ test("production shell settings overlay keeps the session workspace mounted and 
     assert.equal(await evaluate("document.querySelectorAll('.prompt-image-attachments img').length"), 0, "closing expanded editor fences its delayed paste");
     await evaluate("window.pasteFixtureImage('#session-prompt')");
     assert.equal(await wait("document.querySelectorAll('.prompt-image-attachments img').length===1"), true);
+    await evaluate(`window.editImageTitle=value=>{const input=document.querySelector('.prompt-image-attachments input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));};
+      window.editImageText=value=>{const input=document.querySelector('#session-prompt');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));};
+      window.editImageText('');`);
+    assert.equal(await wait("!document.querySelector('.owned-session .send-button').disabled"), true, "valid retained PNG enables truly empty Send");
+    await evaluate("window.editImageText('  ')");
+    assert.equal(await wait("document.querySelector('.owned-session .send-button').disabled"), true, "whitespace is not image-only text");
+    await evaluate("window.editImageText('');window.editImageTitle('Renamed / local')");
+    assert.equal(await wait("document.querySelector('.prompt-image-attachments img').alt==='Renamed / local'"), true);
+    await evaluate("window.editImageTitle('   ')");
+    assert.equal(await evaluate("document.querySelector('.prompt-image-attachments input').value==='Renamed / local' && settingsShellFixture.sends.length===0"), true);
+    await evaluate(`(() => {const file=new File([window.imageFile],'late.png',{type:'image/png'});
+      file.arrayBuffer=()=>new Promise(resolve=>window.releaseImage=async()=>resolve(await window.imageFile.arrayBuffer()));window.pasteFixtureImage('#session-prompt',file);})()`);
+    await evaluate("window.editImageTitle('Image 1');window.releaseImage()");
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(await evaluate("document.querySelectorAll('.prompt-image-attachments img').length"), 1, "rename fences delayed paste");
+    await evaluate("document.querySelector('#expand-session-prompt').click()");
+    assert.equal(await wait("!!document.querySelector('.expanded-prompt-dialog input')"), true);
+    await evaluate("window.imageEditCalls=settingsShellFixture.rpcCalls.length;window.editImageTitle('画像');document.querySelector('.expanded-prompt-dialog input').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true}));");
+    assert.equal(await evaluate("document.querySelector('.expanded-prompt-dialog').open && document.querySelector('.expanded-prompt-dialog input').value==='画像' && settingsShellFixture.sends.length===0 && settingsShellFixture.rpcCalls.length===imageEditCalls"), true);
+    await evaluate("document.querySelector('.expanded-prompt-dialog input').focus()");
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", text: "\r", windowsVirtualKeyCode: 13 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    assert.equal(await evaluate("document.querySelector('.expanded-prompt-dialog').open && settingsShellFixture.sends.length===0"), true, "title Enter does not invoke editor close or Send");
+    await evaluate("window.editImageTitle('Image 1');document.querySelector('.expanded-prompt-dialog header button').click()");
     for (const theme of ["light", "dark"]) {
       await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 800, deviceScaleFactor: 1, mobile: false });
       await evaluate(`document.documentElement.dataset.theme='${theme}'`);
@@ -380,6 +404,8 @@ test("production shell settings overlay keeps the session workspace mounted and 
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", text: "\r", windowsVirtualKeyCode: 13 });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
     assert.equal(await wait("document.querySelectorAll('.prompt-image-attachments img').length===0"), true);
+    assert.equal(await evaluate("document.querySelector('.owned-session .send-button').disabled"), true, "removing final PNG disables empty Send immediately");
+    await evaluate("window.editImageText('Owned test draft')");
     await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
     await evaluate("window.pasteFixtureImage('#session-prompt')");
     assert.equal(await wait("document.querySelectorAll('.prompt-image-attachments img').length===1"), true);
@@ -397,14 +423,17 @@ test("production shell settings overlay keeps the session workspace mounted and 
       assert.equal(await evaluate("shortImageEditor===document.querySelector('#session-prompt') && document.activeElement===shortImageEditor && shortImageEditor.value===shortImageDraft && shortImageEditor.selectionStart===2 && shortImageEditor.selectionEnd===5 && document.querySelectorAll('.prompt-image-attachments img').length===1"), true,
         "short/wide transitions preserve the focused editor, native selection and original image draft");
     }
-    await evaluate("document.querySelector('.owned-session .send-button').focus()");
+    await evaluate("window.editImageText('');window.editImageTitle('Submitted title');document.querySelector('.owned-session .send-button').focus()");
     assert.equal(await evaluate("(()=>{const b=document.activeElement,r=b.getBoundingClientRect();return b.matches('.send-button') && document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('button')===b})()"), true,
       "Send is keyboard-reachable and not clipped in the short narrow workspace");
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", text: "\r", windowsVirtualKeyCode: 13 });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
     assert.equal(await wait("window.settingsShellFixture.sends.length===1"), true);
-    assert.equal(await evaluate("settingsShellFixture.sends[0].images.length===1 && settingsShellFixture.sends[0].images[0].mediaType==='image/png' && settingsShellFixture.sends[0].images[0].title==='Image 1'"), true);
+    assert.equal(await evaluate("settingsShellFixture.sends[0].text"), "", "actual App sends exactly empty text with typed images");
+    assert.equal(await evaluate("settingsShellFixture.sends[0].images.length===1 && settingsShellFixture.sends[0].images[0].mediaType==='image/png' && settingsShellFixture.sends[0].images[0].title==='Submitted title'"), true);
     assert.equal(await evaluate("Object.isFrozen(settingsShellFixture.sends[0].images) && Object.isFrozen(settingsShellFixture.sends[0].images[0]) && document.querySelector('.prompt-image-attachments figure button').disabled"), true);
+    await evaluate("window.editImageTitle('cannot mutate original')");
+    assert.equal(await evaluate("document.querySelector('.prompt-image-attachments input').disabled && settingsShellFixture.sends[0].images[0].title==='Submitted title'"), true);
     await evaluate("window.pasteFixtureImage('#session-prompt')");
     assert.equal(await evaluate("settingsShellFixture.sends[0].images.length===1 && document.querySelectorAll('.prompt-image-attachments img').length===1"), true, "late paste cannot edit the admitted original");
     assert.deepEqual(await evaluate("window.settingsShellFixture.sends[0].selection"),
@@ -446,7 +475,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
       assert.equal(await wait(`document.documentElement.lang===${JSON.stringify(locale)}`), true);
       if (process.env.CODEALTA_TIMELINE_GEOMETRY) console.log("APP GEOMETRY", locale, JSON.stringify(await evaluate(timelineGeometryProbe)));
       assert.equal(await evaluate(`document.querySelector('#settings-title').textContent===${JSON.stringify(title)} && document.querySelector('.settings-dialog-header button').getAttribute('aria-label')===${JSON.stringify(close)} && document.querySelector('.session-rail .search input').getAttribute('aria-label')===${JSON.stringify(search)}`), true);
-      assert.equal(await evaluate("document.activeElement.id==='settings-language' && languageModal===document.querySelector('.settings-dialog') && languageModal.open && languageWorkspace===document.querySelector('.workspace-shell') && languageComposer===document.querySelector('#session-prompt') && languageSend===settingsShellFixture.sends[0] && settingsShellFixture.sends.length===1 && languageSend.images.length===1 && document.querySelector('#session-prompt').value==='Owned test draft' && document.querySelector('.timeline-scroll')?.scrollTop===languageScroll && settingsShellFixture.rpcCalls.length===languageRpcCount"), true,
+      assert.equal(await evaluate("document.activeElement.id==='settings-language' && languageModal===document.querySelector('.settings-dialog') && languageModal.open && languageWorkspace===document.querySelector('.workspace-shell') && languageComposer===document.querySelector('#session-prompt') && languageSend===settingsShellFixture.sends[0] && settingsShellFixture.sends.length===1 && languageSend.images.length===1 && document.querySelector('#session-prompt').value==='' && document.querySelector('.timeline-scroll')?.scrollTop===languageScroll && settingsShellFixture.rpcCalls.length===languageRpcCount"), true,
         `${locale}: live locale does not remount, lose focus/scroll/original image Send, or invoke any bridge method: ${await evaluate("JSON.stringify({focus:document.activeElement.id,modal:languageModal===document.querySelector('.settings-dialog')&&languageModal.open,workspace:languageWorkspace===document.querySelector('.workspace-shell'),composer:languageComposer===document.querySelector('#session-prompt'),send:languageSend===settingsShellFixture.sends[0],sends:settingsShellFixture.sends.length,images:languageSend.images.length,draft:document.querySelector('#session-prompt').value,scroll:document.querySelector('.timeline-scroll')?.scrollTop,beforeScroll:languageScroll,calls:settingsShellFixture.rpcCalls.length,beforeCalls:languageRpcCount})")}`);
       for (const width of [390, 1120]) for (const theme of ["light", "dark"]) {
         await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
@@ -462,7 +491,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
       assert.equal(await evaluate(`document.querySelector('.shortcut-dialog').textContent.includes('Ctrl+F11') && (document.querySelector('.shortcut-dialog dd').textContent==='Browse saved sessions (Ctrl+E remains reserved for TUI Edit File)')===${locale === "en"}`), true);
       await evaluate("document.querySelector('.shortcut-dialog header button').click()");
       assert.equal(await evaluate(`document.querySelector('.session-tabs [role=tab]').textContent===${JSON.stringify(translate(locale, "Prompt draft"))}`), true);
-      assert.equal(await evaluate(`document.querySelector('.prompt-image-attachments figure button').textContent===${JSON.stringify(translate(locale, "Remove {title}", { title: "Image 1" }))} && document.querySelector('.prompt-image-attachments details').textContent.includes(${JSON.stringify(translate(locale, "{count} image attached", { count: 1 }))})`), true);
+      assert.equal(await evaluate(`document.querySelector('.prompt-image-attachments input').getAttribute('aria-label')===${JSON.stringify(translate(locale, "Image title"))} && document.querySelector('.prompt-image-attachments figure button').textContent===${JSON.stringify(translate(locale, "Remove {title}", { title: "Submitted title" }))} && document.querySelector('.prompt-image-attachments details').textContent.includes(${JSON.stringify(translate(locale, "{count} image attached", { count: 1 }))})`), true);
       await evaluate(`document.querySelector('[aria-label=${JSON.stringify(translate(locale, "Open command palette"))}]').click()`);
       assert.equal(await wait(`document.querySelector('#palette-title')?.textContent===${JSON.stringify(translate(locale, "Command palette"))}`), true);
       for (const [id, label, alias] of [["skills", "Skills", "skill"], ["usage", "Inspect last-observed session usage", "context_usage"],
@@ -550,7 +579,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     }
     await evaluate("document.querySelector('.skills-inspection > button').click(); settingsShellFixture.releaseSkills(undefined,'error')");
     assert.equal(await wait("document.querySelector('.skills-inspection')?.textContent.includes('outcome unknown') && document.querySelector('.skills-inspection > button').disabled"), true);
-    assert.equal(await evaluate("window.skillsWorkspace===document.querySelector('.workspace-shell') && window.skillsComposer===document.querySelector('#session-prompt') && window.skillsSend===settingsShellFixture.sends[0] && settingsShellFixture.sends.length===1 && document.querySelector('#session-prompt').value==='Owned test draft'"), true,
+    assert.equal(await evaluate("window.skillsWorkspace===document.querySelector('.workspace-shell') && window.skillsComposer===document.querySelector('#session-prompt') && window.skillsSend===settingsShellFixture.sends[0] && settingsShellFixture.sends.length===1 && document.querySelector('#session-prompt').value===''"), true,
       "inspection leaves workspace, draft and immutable pending typed Send untouched");
     await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(x=>x.textContent==='Models').click()");
     assert.equal(await wait("!!document.querySelector('.model-catalog-providers button')"), true);
@@ -608,7 +637,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
     assert.equal(await evaluate("readBatchCapability()===originalPromptCapability && !originalPromptCapability.canMutate()"), true,
       "changed responding host disables unrelated old-host mutation authority without certifying publication");
     assert.equal(await evaluate("document.querySelector('.prompt-creation textarea').value==='Create original body' && !document.querySelector('.prompt-creation button') && settingsShellFixture.promptCreates.length===1 && settingsShellFixture.snapshotCalls.length===window.promptCreateSnapshots"), true);
-    assert.equal(await evaluate("window.skillsWorkspace===document.querySelector('.workspace-shell') && window.skillsComposer===document.querySelector('#session-prompt') && window.skillsSend===settingsShellFixture.sends[0] && settingsShellFixture.sends.length===1 && settingsShellFixture.sends[0].images.length===1 && document.querySelector('#session-prompt').value==='Owned test draft'"), true,
+    assert.equal(await evaluate("window.skillsWorkspace===document.querySelector('.workspace-shell') && window.skillsComposer===document.querySelector('#session-prompt') && window.skillsSend===settingsShellFixture.sends[0] && settingsShellFixture.sends.length===1 && settingsShellFixture.sends[0].images.length===1 && document.querySelector('#session-prompt').value===''"), true,
       "create uncertainty preserves workspace DOM, composer and original image Send without apply or refresh");
     await verifyCreationLocaleRetention("Publication outcome uncertain");
     // Inventory bodies inside the actual native App modal, while both original image Send

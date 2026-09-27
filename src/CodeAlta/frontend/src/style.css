@@ -9,6 +9,7 @@
 .prompt-image-attachments details, .prompt-image-attachments > p { flex-basis: 100%; }
 .prompt-image-attachments figure { margin: 0; display: flex; flex-direction: column; gap: 0.25rem; max-width: 10rem; }
 .prompt-image-attachments img { object-fit: contain; }
+.prompt-image-attachments input { width: 100%; min-width: 0; box-sizing: border-box; }
 .runtime-observation { display: block; font-size: .75rem; line-height: 1.5; font-weight: normal; overflow-wrap: anywhere; }
 .observed-activity, .unknown-activity { display: block; overflow-wrap: anywhere; }
 .unknown-activity { border-top: 1px dashed var(--muted); padding-top: .25rem; color: var(--muted); }

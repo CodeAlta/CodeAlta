@@ -52,7 +52,7 @@ function guid(value: unknown): value is string {
 }
 function validSend(request: SessionSendRequest): boolean {
   return !!request && identity(request.expectedEpoch, 64) && identity(request.clientRequestId, 256)
-    && identity(request.sessionId, 256) && identity(request.text, 32768, false) && validImages(request.images)
+    && identity(request.sessionId, 256) && (identity(request.text, 32768, false) || request.text === "" && !!request.images?.length) && validImages(request.images)
     && (!request.images?.length || request.text.length <= 4096 && !!request.selection?.modelId)
     && (request.references == null || identity(request.references.projectId, 256) && identity(request.references.projectPath, 4096))
     && (request.selection == null || identity(request.selection.providerKey, 256) && identity(request.selection.agentPromptId, 256)

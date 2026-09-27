@@ -265,7 +265,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     const revision = ++inputRevision.current;
     const capturedImages = images;
     const request = retained?.request ?? captureSubmission(epoch, sessionId, text, crypto.randomUUID(), sendSelection, references, images);
-    if (!request && images.length) setImageNotice("Image Send requires nonempty text up to 4096 characters and an explicit supported model.");
+    if (!request && images.length) setImageNotice("Image Send requires empty or nonblank text up to 4096 characters and an explicit supported model.");
     if (!request || !capability.canSubmit(request)) return;
     draftIndicators.clear(sessionId);
     setMessage("Submission admission pending…");
@@ -472,6 +472,17 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     {(pending?.request.images ?? images).map((image, index) => <figure key={index}>
       <img src={`data:image/png;base64,${image.base64}`} alt={image.title} width={80} height={80} />
       <figcaption>{image.title}</figcaption>
+      <label>{t("Image title")}<input aria-label={t("Image title")} value={image.title} maxLength={80} disabled={!!pending || invalidEpoch}
+        onCompositionStart={() => { inputRevision.current++; }}
+        onChange={event => {
+          inputRevision.current++;
+          if (!event.currentTarget.isConnected || !scope.current || scope.current.signal.aborted
+            || submissions.pending(sessionId) || !capability.canMutate() || imageOwner.get(imageKey) !== images) return;
+          const title = event.target.value;
+          if (!imageOwner.replace(imageKey, images, images.map((item, i) => i === index ? { ...item, title } : item)))
+            setImageNotice(t("Image titles require 1–80 characters and no control characters."));
+          else setImageNotice("");
+        }} /></label>
       <button type="button" disabled={!!pending} onClick={() => { inputRevision.current++; imageOwner.replace(imageKey, images, images.filter((_, i) => i !== index)); }}>{t("Remove {title}", { title: image.title })}</button>
     </figure>)}
     {imageNotice && <p role="status">{imageNotice}</p>}
@@ -545,7 +556,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
         title={pendingAbortRun ? `${t("Manual retry of exact cancellation:")} ${t("epoch")} ${pendingAbortRun.request.expectedEpoch}, ${t("session")} ${pendingAbortRun.request.sessionId}, ${t("runtime")} ${pendingAbortRun.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingAbortRun.request.expectedAttachmentGeneration}, ${t("run")} ${pendingAbortRun.request.expectedRunId}, ${t("request")} ${pendingAbortRun.request.clientRequestId}`
           : t("Cancel observed run {run} (point-in-time runtime observation, not original Send Abort; signalling does not confirm completion)", { run: availableAbortRun?.expectedRunId ?? "" })}>
         <AppIcon name="stop" size={16} /><span>{t(pendingAbortRun ? "Retry exact cancellation" : "Cancel observed run")}</span></button>}
-      <button type="button" className={`send-button${cancellationPrimary ? "" : " primary-button"}`} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : captureSubmission(epoch, sessionId, text, "availability") === null)} onClick={submit}>{pending ? t("Retry exact request") : <><span>{t("Send")}</span><AppIcon name="send" size={14} /></>}</button>
+      <button type="button" className={`send-button${cancellationPrimary ? "" : " primary-button"}`} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || captureSubmission(epoch, sessionId, text, "availability", images.length ? selected : null, null, images) === null)} onClick={submit}>{pending ? t("Retry exact request") : <><span>{t("Send")}</span><AppIcon name="send" size={14} /></>}</button>
     </div>
     </div>
     <span id="observed-run-cancellation-help" className="sr-only">{t("Targets a point-in-time observed run, not the original Send receipt. Cancellation signalled does not confirm run completion. Retained requests are only retried manually against their original target after the previous wait settles.")}</span>

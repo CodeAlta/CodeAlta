@@ -45,7 +45,7 @@ Read the documents in this order when onboarding or reviewing architecture-sensi
 
 The isolated desktop boot entrypoint and its test-owned native fixtures are described in [desktop native qualification](desktop-native-qualification.md), including preserved M0 evidence and explicit platform gaps.
 
-The scoped [Desktop prompt-image path](prompt-images.md) documents PNG paste/preview/removal, observed capability, typed owned Send and its retention/filesystem limits.
+The scoped [Desktop prompt-image path](prompt-images.md) documents PNG paste/preview/removal, editable local display titles, observed capability, typed owned image-only Send and its retention/filesystem limits.
 
 The [Desktop raw Skills inspector](skills-inspection.md) documents explicit host-derived roots, bounded metadata, omissions and original-read lifetime; it is not effective discovery or activation parity.
 

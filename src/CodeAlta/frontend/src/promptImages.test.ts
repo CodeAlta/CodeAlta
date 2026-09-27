@@ -3,6 +3,19 @@ import assert from "node:assert/strict";
 import { createImageDrafts, freezeImages, pngHeader } from "./promptImages";
 import { captureSubmission } from "./sessionOperations";
 
+test("image-only capture preserves truly empty text and titles without admitting blank text-only or whitespace", () => {
+  const selection = { providerKey: "p", agentPromptId: "default", modelId: "image", reasoningEffort: null };
+  const images = [{ title: "Settings / image", mediaType: "image/png", base64: "AA==" }];
+  const captured = captureSubmission("e", "s", "", "k", selection, null, images);
+  assert.ok(captured);
+  assert.equal(captured.text, "");
+  images[0].title = "changed";
+  assert.equal(captured.images![0].title, "Settings / image");
+  assert.equal(captureSubmission("e", "s", "", "k", selection, null, []), null);
+  assert.equal(captureSubmission("e", "s", " \n\t", "k", selection, null, images), null);
+  assert.equal(captureSubmission("e", "s", "", "k", null, null, images), null);
+});
+
 test("image draft replacement is bounded, immutable and exact-revision fenced", () => {
   const owner = createImageDrafts();
   const empty = owner.get("a");
@@ -31,6 +44,21 @@ test("pending image reads are bounded and cannot overlap the same draft", () => 
   assert.equal(owner.beginRead("0"), null);
   assert.equal(owner.beginRead("overflow"), null);
   releases[0](); assert.ok(owner.beginRead("overflow"));
+});
+
+test("title replacement uses exact snapshots, rejects invalid metadata and fences ABA", () => {
+  const owner = createImageDrafts();
+  const key = "scope";
+  owner.replace(key, owner.get(key), [{ title: "Original", mediaType: "image/png", base64: "AA==" }]);
+  const original = owner.get(key);
+  for (const title of ["", "  ", "x".repeat(81), "bad\nname", "bad\u0085name"])
+    assert.equal(owner.replace(key, original, [{ ...original[0], title }]), false);
+  assert.equal(owner.replace(key, original, [{ ...original[0], title: "日本語 / local" }]), true);
+  assert.equal(original[0].title, "Original");
+  assert.equal(owner.replace(key, owner.get(key), original), true);
+  assert.notEqual(owner.get(key), original, "returning to the same title never revives an old paste snapshot");
+  assert.equal(owner.replace(key, original, []), false);
+  assert.equal(owner.replace("replacement scope", original, []), false);
 });
 
 test("worst-case bounded image request fits the unchanged bridge frame and freezes all fields", () => {

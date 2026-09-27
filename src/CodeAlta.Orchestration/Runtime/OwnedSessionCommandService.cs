@@ -177,7 +177,9 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ClientRequestId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.SessionId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.Text);
+        ArgumentNullException.ThrowIfNull(request.Text);
+        if (request.Text.Length != 0 || request.Images is not { Count: > 0 })
+            ArgumentException.ThrowIfNullOrWhiteSpace(request.Text);
         if (request.Images is { Count: > 0 } images)
         {
             if (images.Count > OwnedPromptImages.MaxCount || request.Selection?.ModelId is null || request.Text.Length > 4096)
@@ -760,6 +762,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 // original receipt/work and never resolve mutable filesystem metadata again.
                 input = _references.Resolve(operation.Request.Text, project.ProjectPath, operation.Execution.Token);
             }
+            // Preserve exact empty request identity without inventing a textual provider prompt.
+            if (operation.Request.Text.Length == 0) input = new AgentInput([]);
             var selection = operation.Request.Selection;
             if (selection is not null)
             {

@@ -17,6 +17,28 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class DesktopOwnedSessionTests
 {
     [TestMethod]
+    public void ImageOnlySend_ForwardsEmptyTextAndExactLocalMetadata()
+    {
+        OwnedTextSendRequest? captured = null;
+        var service = new SessionOperationsService("epoch", request => { captured = request; return new(OwnedSessionCommandAdmissionKind.Busy); },
+            _ => throw new AssertFailedException("Unexpected abort"));
+        var request = new SessionSendRequest("epoch", "key", "session", "")
+        {
+            Selection = new("provider", "default", "image-model", null),
+            Images = [new("Local / title", "image/png", "AA==")],
+        };
+        Assert.AreEqual("busy", service.Send(request, CancellationToken.None).Status);
+        Assert.AreEqual("", captured!.Text);
+        Assert.AreEqual("Local / title", captured.Images![0].Title);
+        Assert.AreEqual("AA==", captured.Images[0].Base64);
+        captured = null;
+        Assert.AreEqual("invalid_request", service.Send(request with { Text = " \r\n" }, CancellationToken.None).Status);
+        Assert.AreEqual("invalid_request", service.Send(request with { Images = [] }, CancellationToken.None).Status);
+        Assert.AreEqual("stale_epoch", service.Send(request with { ExpectedEpoch = "old" }, CancellationToken.None).Status);
+        Assert.IsNull(captured);
+    }
+
+    [TestMethod]
     public async Task ReferenceContractsRefuseUnownedAndStaleAndFreezeExpectedScope()
     {
         OwnedTextSendRequest? captured = null;

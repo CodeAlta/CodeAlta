@@ -117,10 +117,13 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
-    [DataRow("send")]
-    [DataRow("abort")]
-    [DataRow("shutdown")]
-    public Task ImageSend_FreezesBytesAndTitleAndReplaysWithoutSavingAgain(string completion) => Fixture.RunAsync(async f =>
+    [DataRow("send", "describe")]
+    [DataRow("abort", "describe")]
+    [DataRow("shutdown", "describe")]
+    [DataRow("send", "")]
+    [DataRow("abort", "")]
+    [DataRow("shutdown", "")]
+    public Task ImageSend_FreezesBytesAndTitleAndReplaysWithoutSavingAgain(string completion, string text) => Fixture.RunAsync(async f =>
     {
         f.Provider.ExposeSelectionModels = true;
         await f.Observe(f.Host.ModelProviderInitializationService.RefreshProviderAsync(f.Provider.Descriptor.ProviderId));
@@ -129,16 +132,20 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.IsNotNull(project);
         var images = new[] { new OwnedPromptImage("Exact title", "image/png", Convert.ToBase64String(bytes)),
             new OwnedPromptImage("Second title", "image/png", Convert.ToBase64String(OwnedPromptImageTests.Png(2, 1))) };
-        var request = new OwnedTextSendRequest("image-original", f.SessionId, "describe")
+        var request = new OwnedTextSendRequest("image-original", f.SessionId, text)
         {
             Selection = new(f.Provider.Descriptor.ProviderId.Value, "default", "image-model", null), Images = images,
             References = new(project.Id, project.ProjectPath),
         };
+        Assert.ThrowsExactly<ArgumentException>(() => f.AdmitSend(request with { Text = " \r\n\t" }));
+        Assert.ThrowsExactly<ArgumentException>(() => f.AdmitSend(request with { Text = "", Images = [] }));
         var admission = f.AdmitSend(request);
         Assert.IsNotNull(admission.Receipt);
         images[0] = images[0] with { Title = "changed after admission" };
         await f.ObserveReadiness(f.Provider.SendStarted.Task, admission.Receipt, "image send");
         var typedImages = f.Provider.Input!.Items.OfType<AgentInputItem.LocalImage>().ToArray();
+        var typedText = f.Provider.Input.Items.OfType<AgentInputItem.Text>().ToArray();
+        Assert.HasCount(text.Length == 0 ? 0 : 1, typedText, "Image-only inputs must not add dummy or empty text items.");
         Assert.HasCount(2, typedImages);
         Assert.AreEqual("Second title", typedImages[1].DisplayName);
         CollectionAssert.AreEqual(OwnedPromptImageTests.Png(2, 1), await File.ReadAllBytesAsync(typedImages[1].Path));
@@ -151,6 +158,7 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitSend(request with { Images = images.Reverse().ToArray() }).Kind);
         Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitSend(request with { Images = [images[0] with { Base64 = images[1].Base64 }, images[1]] }).Kind);
         Assert.AreSame(admission.Receipt, f.AdmitSend(request).Receipt);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitSend(request with { Text = text.Length == 0 ? "describe" : "" }).Kind);
         Assert.HasCount(2, Directory.GetFiles(Path.GetDirectoryName(input.Path)!));
         var disposal = completion == "shutdown" ? f.BeginDisposal() : null;
         var abort = completion == "abort" ? f.Accept(f.AdmitAbort(new("abort-image-original", admission.Receipt.OperationId))) : null;
@@ -169,10 +177,13 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
-    [DataRow("fixture-model", true)]
-    [DataRow("text-model", true)]
-    [DataRow("image-model", false)]
-    public Task ImageSend_RefusesUnknownUnsupportedAndUnobservedModelsWithoutProbe(string model, bool observeModels) => Fixture.RunAsync(async f =>
+    [DataRow("fixture-model", true, "describe")]
+    [DataRow("text-model", true, "describe")]
+    [DataRow("image-model", false, "describe")]
+    [DataRow("fixture-model", true, "")]
+    [DataRow("text-model", true, "")]
+    [DataRow("image-model", false, "")]
+    public Task ImageSend_RefusesUnknownUnsupportedAndUnobservedModelsWithoutProbe(string model, bool observeModels, string text) => Fixture.RunAsync(async f =>
     {
         if (observeModels)
         {
@@ -181,7 +192,7 @@ public sealed class OwnedSessionCommandServiceTests
         }
         var project = await f.Observe(f.Host.ProjectCatalog.GetByPathAsync(f.ProjectRoot));
         Assert.IsNotNull(project);
-        var request = new OwnedTextSendRequest("image-refused", f.SessionId, "describe")
+        var request = new OwnedTextSendRequest("image-refused", f.SessionId, text)
         {
             Selection = new(f.Provider.Descriptor.ProviderId.Value, "default", model, null),
             References = new(project.Id, project.ProjectPath),

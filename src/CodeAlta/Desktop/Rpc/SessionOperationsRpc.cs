@@ -83,7 +83,8 @@ internal sealed class SessionOperationsService
         {
             var denied = CheckEpoch(request.ExpectedEpoch);
             if (denied is not null) return new(denied, _epoch, null);
-            if (!Identity(request.ClientRequestId, 256) || !Identity(request.SessionId, 256) || !Identity(request.Text, 32768, trim: false))
+            if (!Identity(request.ClientRequestId, 256) || !Identity(request.SessionId, 256)
+                || !(Identity(request.Text, 32768, trim: false) || request.Text == "" && request.Images is { Count: > 0 }))
                 return new("invalid_request", _epoch, null);
             if (request.References is { } references && (!Identity(references.ProjectId, 256) || !Identity(references.ProjectPath, 4096)))
                 return new("invalid_request", _epoch, null);
