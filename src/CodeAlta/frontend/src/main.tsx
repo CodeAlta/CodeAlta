@@ -630,10 +630,12 @@ function App() {
       selectedSessionId.current, selectedScope.current);
     const usage = workspaceShell.current?.querySelector<HTMLButtonElement>("#session-usage-trigger");
     const usageReady = !!usage?.isConnected && !usage.disabled && usage.getAttribute("aria-expanded") === "false";
+    const modelChooser = workspaceShell.current?.querySelector<HTMLButtonElement>("#next-send-model-chooser");
     return { workspace: currentView.current === "workspace", selection,
       commandGeneration: commandGeneration.current,
       accessScope: usage?.dataset.usageTarget,
       usageReady, usageTrigger: usage, skillsReady: usageReady && currentProjectWritable(),
+      modelChooserTrigger: modelChooser, modelChooserReady: !!modelChooser?.isConnected && !modelChooser.disabled && modelChooser.getAttribute("aria-expanded") === "false",
       shellReady: currentView.current === "workspace" && !dialog && !settingsVisible.current,
       epoch: owned && mutation?.capability.canMutate() ? status?.hostEpoch ?? null : null,
       infoReady: !!sessionInfoTrigger.current?.isConnected && !sessionInfoTrigger.current.disabled &&
@@ -677,6 +679,7 @@ function App() {
       !paletteAvailable(action, captured, paletteContext())) return;
     if (action === "about") { navigate("about"); settingsOrigin.current = paletteOrigin.current; aboutOrigin.current = { element: null, view: currentView.current }; setDialog("about"); return; }
     if (action === "sessionInfo") sessionInfoTrigger.current?.click();
+    else if (action === "chooseModel") workspaceShell.current?.querySelector<HTMLButtonElement>("#next-send-model-chooser")?.click();
     else if (action === "usage") workspaceShell.current?.querySelector<HTMLButtonElement>("#session-usage-trigger")?.click();
     else if (action === "openProject" || action === "help") { paletteOrigin.current?.focus(); runShortcut(action); }
     else if (action === "browseSessions") openSessionBrowser();

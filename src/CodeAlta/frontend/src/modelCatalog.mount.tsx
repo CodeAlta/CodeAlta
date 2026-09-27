@@ -28,7 +28,8 @@ const probe: React.ComponentProps<typeof ProvidersPanel>["probe"] = request => n
 const choices: SessionChoicesResponse = { status: "ok", epoch: "epoch-1", sessionId: "one",
   current: { providerKey: "beta", agentPromptId: "plan", modelId: "beta-text", reasoningEffort: "High" },
   prompts: [{ id: "plan", name: "Plan" }, { id: "default", name: "Default" }],
-  models: [{ id: "beta-text", name: "Text model", efforts: ["High"], imageInput: false }, { id: "beta-image", name: "Image model", efforts: ["Low", "Medium"], imageInput: true }] };
+  models: [{ id: "beta-text", name: "Text model", efforts: ["High"], imageInput: false }, { id: "beta-image", name: "Image model", efforts: ["Low", "Medium"], imageInput: true },
+    { id: "beta-unknown", name: "Unknown capabilities", efforts: [], imageInput: null }] };
 const unavailable = async (): Promise<never> => { throw new Error("Fixture must not submit this operation."); };
 const sent: SessionSendRequest[] = [];
 const capability = createMutationCapability("epoch-1");
@@ -36,7 +37,21 @@ const submissions = createOwnedSubmissions(async request => { sent.push(request)
 const selections = createNextSendSelectionStore(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value));
 const root = createRoot(document.getElementById("app")!);
 const providerProbeHolds = new Set<string>();
+let lastChoices: SessionChoicesResponse = choices;
 const fixture = {
+  inputRevision: 0,
+  invalidateInput() { fixture.inputRevision++; },
+  replaceSelection(modelId: string, providerKey = "beta") {
+    const sessionId = fixture.sessionId!;
+    const observed = { ...choices, sessionId, current: { ...choices.current!, providerKey } };
+    lastChoices = observed;
+    selections.set("epoch-1", sessionId, observed, { ...observed.current, modelId, reasoningEffort: null });
+  },
+  repeatSelection() {
+    const current = selections.current("epoch-1", fixture.sessionId!)!;
+    // Same object and same values still announce a newer selection revision.
+    selections.set("epoch-1", fixture.sessionId!, lastChoices, current);
+  },
   providerReads, modelReads, probeRequests, sent, choicesReads: 0, holdChoices: false,
   releaseChoices: null as (() => void) | null,
   epoch: "epoch-1" as string | null, sessionId: null as string | null, view: "models" as "models" | "providers" | "composer",
@@ -48,7 +63,8 @@ const fixture = {
   readChoices: async (epoch: string, sessionId: string): Promise<SessionChoicesResponse> => {
     fixture.choicesReads++;
     if (fixture.holdChoices) { fixture.releaseChoices = null; await new Promise<void>(resolve => { fixture.releaseChoices = resolve; }); }
-    return { ...choices, epoch, sessionId };
+    lastChoices = { ...choices, epoch, sessionId };
+    return lastChoices;
   },
 };
 Object.assign(window, { catalogFixture: fixture });
@@ -62,7 +78,9 @@ function render() {
   const epoch = fixture.epoch;
   const sessionId = fixture.sessionId;
   if (fixture.view === "composer" && epoch && sessionId) {
+    const inputRevision = fixture.inputRevision;
     root.render(<div className="session-workspace"><OwnedSessionPanel epoch={epoch} sessionId={sessionId}
+      inputLifetime={{ current: () => inputRevision === fixture.inputRevision }}
       selections={selections} submissions={submissions} capability={capability} draftIndicators={createDraftIndicators()}
       steering={createSteeringSubmissions(unavailable)} compaction={createCompactionSubmissions(unavailable)}
       abortRuns={createAbortRunSubmissions(unavailable)} queue={createQueueSubmissions(unavailable, unavailable)}

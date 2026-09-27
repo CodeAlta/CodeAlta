@@ -174,7 +174,7 @@ Object.assign(window, { settingsShellFixture: { calls, rpcCalls, sends, choiceRe
       : mode === "different" ? { ...value, models: value.models.filter(model => model.id === "old") } : value);
   } } } });
 const owned = () => localStorage.getItem("settingsFixtureOwned") === "true";
-const choices = (request: { expectedEpoch: string; sessionId: string }) => ({ status: "ok", epoch: request.expectedEpoch, sessionId: request.sessionId,
+const choices = (request: { expectedEpoch: string; sessionId: string }) => ({ status: localStorage.getItem("chooserFixtureDisabled") === "true" ? "disabled" : "ok", epoch: request.expectedEpoch, sessionId: request.sessionId,
   current: { providerKey: "fixture", agentPromptId: "default", modelId: "old", reasoningEffort: "Low" },
   prompts: [{ id: "default", name: "Default" }, { id: "plan", name: "Plan" }],
   models: [{ id: "old", name: "Old", efforts: ["Low"], imageInput: false }, ...(localStorage.getItem("settingsFixtureNewChoices") === "true"

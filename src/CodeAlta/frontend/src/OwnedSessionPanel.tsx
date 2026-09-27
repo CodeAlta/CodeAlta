@@ -13,6 +13,7 @@ import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft
 import { AppIcon } from "./AppIcon";
 import { promptEditorHeight, showContextAction } from "./workspacePresentation";
 import { changeSelection, validSelection } from "./sessionSelection";
+import { ModelChooser, boundedModelChoices, type ModelChooserCapture } from "./ModelChooser";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
@@ -423,6 +424,30 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   const activeChoices = choices?.epoch === epoch && choices.sessionId === sessionId && choices.status === "ok" ? choices : undefined;
   const selected = pending?.request.selection ?? (activeChoices ? selection ?? activeChoices.current : null);
   const selectionDisabled = !activeChoices?.current || invalidEpoch || !!pending;
+  const chooserLatest = useRef({ activeChoices, selected, selectionDisabled, epoch, sessionId });
+  chooserLatest.current = { activeChoices, selected, selectionDisabled, epoch, sessionId };
+  function captureModelChooser(): ModelChooserCapture | null {
+    if (selectionDisabled || !activeChoices || !selected || !boundedModelChoices(activeChoices)) return null;
+    const observed = activeChoices; const original = selected;
+    const revision = selectionRevision.current; const input = inputRevision.current;
+    const lifetime = inputLifetime; const signal = scope.current?.signal;
+    const submissionRevision = submissions.getSnapshot();
+    const stored = selections.current(epoch, sessionId);
+    const available = () => !!signal && !signal.aborted && scope.current?.signal === signal
+      && (!lifetime || lifetime.current()) && capability.canMutate()
+      && chooserLatest.current.epoch === epoch && chooserLatest.current.sessionId === sessionId;
+    const current = () => available() && !submissions.pending(sessionId) && submissions.getSnapshot() === submissionRevision
+      && !chooserLatest.current.selectionDisabled && chooserLatest.current.activeChoices === observed
+      && chooserLatest.current.selected === original && selectionRevision.current === revision && inputRevision.current === input
+      && selections.current(epoch, sessionId) === stored;
+    return { choices: observed, selection: original, current, available, apply: next => {
+      if (!current() || next.providerKey !== original.providerKey || next.agentPromptId !== original.agentPromptId) return false;
+      // Normalize by the existing controls' rules, never by a chooser-specific fallback.
+      const model = next.modelId === original.modelId ? original : changeSelection(observed, original, "modelId", next.modelId ?? "");
+      const normalized = model && changeSelection(observed, model, "reasoningEffort", next.reasoningEffort ?? "");
+      return !!normalized && selections.set(epoch, sessionId, observed, normalized);
+    } };
+  }
   function select(field: "agentPromptId" | "modelId" | "reasoningEffort", value: string) {
     if (!activeChoices || !selected || selectionDisabled) return;
     const next = changeSelection(activeChoices, selected, field, value);
@@ -522,6 +547,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       </select></label>
     </div>
     <div className="history-controls">
+      <ModelChooser disabled={selectionDisabled || !boundedModelChoices(activeChoices)} capture={captureModelChooser} />
       <span className="sr-only">{t("Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer")}</span>
       {infoControl}
       {usageTarget && <SessionUsageInspector key={JSON.stringify(usageTarget)} target={usageTarget} capability={capability} />}

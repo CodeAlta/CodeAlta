@@ -5,6 +5,17 @@ import { paletteAvailable, paletteCommands, type PaletteContext } from "./palett
 const catalog: PaletteContext = { workspace: true, selection: { sessionId: "one", projectId: null },
   epoch: null, infoReady: true, promptReady: true, searchReady: true };
 
+test("cached model command requires an actual enabled exact composer target", () => {
+  const trigger = {} as HTMLButtonElement;
+  const current = { ...catalog, epoch: "epoch", modelChooserReady: true, modelChooserTrigger: trigger };
+  assert.ok(paletteCommands(current).some(command => command.id === "chooseModel"));
+  for (const changed of [{ ...current, epoch: null }, { ...current, modelChooserReady: false },
+    { ...current, modelChooserTrigger: {} as HTMLButtonElement }, { ...current, selection: null }]) {
+    assert.equal(paletteAvailable("chooseModel", current, changed), false);
+  }
+  assert.equal(paletteAvailable("chooseModel", catalog, catalog), false);
+});
+
 test("implemented inspection and shell entries require original generation and scope", () => {
   const current = { ...catalog, epoch: "original", commandGeneration: 7, accessScope: "exact-project-path",
     skillsReady: true, usageReady: true, shellReady: true };

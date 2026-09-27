@@ -16,7 +16,7 @@ const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
 
 // The bundle entry is main.tsx, not a copied shell or reimplemented navigation fixture.
-test("production shell settings overlay keeps the session workspace mounted and inert", { skip: !edge, timeout: 120_000 }, async t => {
+test("production shell settings overlay keeps the session workspace mounted and inert", { skip: !edge, timeout: 180_000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), "codealta-session-content-shell-"));
   t.diagnostic(`Fake-host App evidence retained at ${root}`);
   const layoutObservations: unknown[] = [];
@@ -2508,6 +2508,98 @@ test("production shell settings overlay keeps the session workspace mounted and 
       assert.equal(await wait("document.querySelector('#root').childElementCount===0"), true);
     }
     bodyModeContext = null;
+    // Cached model editing follows every accepted scenario and teardown above.
+    for (const mode of ["apply", "session-aba", "host-aba", "pending", "capability", "modal-aba", "own-modal-aba", "prompt-conflict", "choices-revision"]) {
+      t.diagnostic(`Cached model chooser App scenario: ${mode}`);
+      await evaluate("localStorage.clear();localStorage.setItem('settingsFixtureOwned','true');localStorage.setItem('settingsFixtureNewChoices','true')");
+      await command("Page.reload");
+      assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one' && !!document.querySelector('#next-send-model-chooser:not(:disabled)')"), true);
+      await evaluate(`{const input=document.querySelector('#session-prompt');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'Chooser exact draft');input.dispatchEvent(new Event('input',{bubbles:true}));
+        const prompt=document.querySelector('select[aria-label="Agent prompt"]');prompt.value='plan';prompt.dispatchEvent(new Event('change',{bubbles:true}));}`);
+      await frames();
+      if (mode === "apply") {
+        await evaluate("{const canvas=document.createElement('canvas');canvas.width=1;canvas.height=1;window.chooserImage=canvas.toDataURL('image/png').split(',')[1];const owner=readLocalImageOwner();const key=JSON.stringify(['12345678-1234-1234-1234-123456789abc','one','project','/fixture/project']);owner.replace(key,owner.get(key),[{title:'Exact chooser image',mediaType:'image/png',base64:chooserImage}])}");
+        assert.equal(await wait("document.querySelector('.prompt-image-attachments input')?.value==='Exact chooser image'"), true);
+      }
+      await evaluate("window.chooserRpc=settingsShellFixture.rpcCalls.length;void(window.chooserInput=document.querySelector('#session-prompt'));document.querySelector('#next-send-model-chooser').focus();document.querySelector('#next-send-model-chooser').click()");
+      assert.equal(await wait("document.querySelector('.model-chooser')?.open"), true);
+      assert.equal(await evaluate("document.activeElement===document.querySelector('.model-chooser input')"), true);
+      await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+      await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+      assert.equal(await evaluate("document.querySelector('.model-chooser').open && settingsShellFixture.sends.length===0 && document.querySelector('select[aria-label=Model]').value==='old'"), true);
+      await evaluate("document.querySelectorAll('.model-chooser-list button')[1].click()");
+      await evaluate("document.querySelector('.model-chooser select').value='High';document.querySelector('.model-chooser select').dispatchEvent(new Event('change',{bubbles:true}));void(window.chooserApply=document.querySelector('.model-chooser-apply'))");
+      if (mode === "apply") {
+        await workflowLanguages(evaluate, workflowCalls, ".model-chooser", "#model-chooser-title", "Next Send model selection", "code");
+        await workflowNarrow(evaluate, command, ".model-chooser");
+        assert.equal(await evaluate("settingsShellFixture.rpcCalls.length===chooserRpc"), true);
+        // Escape cancels, then the actual registry reopens the same local editor (not Settings).
+        await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+        await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+        assert.equal(await wait("!document.querySelector('.model-chooser') && document.activeElement.id==='next-send-model-chooser'"), true);
+        assert.equal(await evaluate("document.querySelector('select[aria-label=Model]').value==='old' && document.querySelector('select[aria-label=Reasoning]').value==='Low'"), true);
+        assert.equal(await evaluate("document.querySelectorAll('button[aria-label=\"Open command palette\"]').length===1 && !document.querySelector('button[aria-label=\"Open command palette\"]').disabled"), true);
+        await evaluate("document.querySelector('button[aria-label=\"Open command palette\"]').click()");
+        assert.equal(await wait("document.querySelector('.command-palette')?.open"), true);
+        await evaluate("[...document.querySelectorAll('.command-palette button')].find(x=>x.textContent.includes('Next Send model selection')).click()");
+        assert.equal(await wait("document.querySelector('.model-chooser')?.open && !document.querySelector('.settings-dialog')"), true);
+        await evaluate("document.querySelectorAll('.model-chooser-list button')[1].click()");
+        await evaluate("document.querySelector('.model-chooser select').value='High';document.querySelector('.model-chooser select').dispatchEvent(new Event('change',{bubbles:true}))");
+        await evaluate("document.querySelector('.model-chooser-apply').click()");
+        assert.equal(await wait("!document.querySelector('.model-chooser') && document.querySelector('select[aria-label=Model]').value==='new'"), true);
+        assert.equal(await evaluate("chooserInput===document.querySelector('#session-prompt') && chooserInput.value==='Chooser exact draft' && document.querySelector('select[aria-label=\"Agent prompt\"]').value==='plan' && settingsShellFixture.rpcCalls.length===chooserRpc"), true);
+        await evaluate("document.querySelector('.send-button').click()");
+        assert.equal(await wait("settingsShellFixture.sends.length===1"), true);
+        assert.deepEqual(await evaluate("settingsShellFixture.sends[0].selection"), { providerKey: "fixture", agentPromptId: "plan", modelId: "new", reasoningEffort: "High" });
+        assert.equal(await evaluate("settingsShellFixture.sends[0].text"), "Chooser exact draft");
+        assert.equal(await evaluate("settingsShellFixture.sends[0].images.length===1 && settingsShellFixture.sends[0].images[0].base64===chooserImage && settingsShellFixture.sends[0].images[0].title==='Exact chooser image'"), true);
+        assert.equal(await evaluate("document.querySelector('#next-send-model-chooser').disabled"), true);
+      } else {
+        if (mode === "session-aba") await evaluate("cycleInfoSelection()");
+        if (mode === "host-aba") await evaluate("cycleInfoHost()");
+        if (mode === "capability") await evaluate("readBatchCapability().observe({status:'stale_epoch',epoch:'another-host'})");
+        if (mode === "pending") await evaluate("readLocalSubmissions().submit({expectedEpoch:'12345678-1234-1234-1234-123456789abc',clientRequestId:'chooser-pending',sessionId:'one',text:'Frozen original',selection:null,references:null,images:null},new AbortController().signal,readBatchCapability(),()=>{});true");
+        if (mode === "modal-aba") await evaluate("{const d=document.createElement('dialog');document.body.append(d);d.showModal();d.close();d.remove()}");
+        if (mode === "own-modal-aba") await evaluate("{const d=document.querySelector('.model-chooser');d.close();d.showModal();chooserApply.click()}");
+        if (mode === "prompt-conflict") await evaluate("{const p=document.querySelector('select[aria-label=\"Agent prompt\"]');p.value='default';p.dispatchEvent(new Event('change',{bubbles:true}))}");
+        if (mode === "choices-revision") await evaluate("[...document.querySelectorAll('.owned-session button')].find(b=>b.textContent.trim()==='Refresh choices').click()");
+        await evaluate("chooserApply.click()"); await frames();
+        assert.equal(await evaluate("localStorage.getItem('codealta.desktop.selection.one') && JSON.parse(localStorage.getItem('codealta.desktop.selection.one')).modelId==='old'"), true, mode);
+        assert.equal(await evaluate(`settingsShellFixture.sends.length===${mode === "pending" ? 1 : 0}`), true, mode);
+        if (mode === "pending") assert.equal(await evaluate("settingsShellFixture.sends[0].text==='Frozen original' && settingsShellFixture.sends[0].selection===null"), true);
+        if (mode === "prompt-conflict") assert.equal(await evaluate("JSON.parse(localStorage.getItem('codealta.desktop.selection.one')).agentPromptId==='default'"), true);
+      }
+      await evaluate("unmountShellFixture();chooserApply.click()");
+      assert.equal(await wait("document.querySelector('#root').childElementCount===0"), true);
+    }
+    for (const mode of ["missing", "disabled", "archived", "catalog"]) {
+      t.diagnostic(`Cached model chooser refusal/recovery: ${mode}`);
+      await evaluate(`localStorage.clear();localStorage.setItem('settingsFixtureOwned','${mode !== "catalog"}');localStorage.setItem('settingsFixtureNewChoices','true');
+        localStorage.setItem('settingsFixtureHoldChoices','${mode === "missing"}');localStorage.setItem('chooserFixtureDisabled','${mode === "disabled"}');localStorage.setItem('usageFixtureArchived','${mode === "archived"}')`);
+      await command("Page.reload");
+      assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one'"), true);
+      if (mode === "missing" || mode === "disabled") {
+        assert.equal(await wait("document.querySelector('#next-send-model-chooser')?.disabled"), true);
+        await evaluate("window.refusalCalls=settingsShellFixture.rpcCalls.length;document.querySelector('#next-send-model-chooser').click()");
+        assert.equal(await evaluate("!document.querySelector('.model-chooser') && settingsShellFixture.rpcCalls.length===refusalCalls"), true);
+        await evaluate("localStorage.removeItem('settingsFixtureHoldChoices');localStorage.removeItem('chooserFixtureDisabled')");
+        if (mode === "missing") await evaluate("settingsShellFixture.releaseChoices()");
+        else await evaluate("[...document.querySelectorAll('.owned-session button')].find(b=>b.textContent.trim()==='Refresh choices').click()");
+      } else {
+        assert.equal(await wait("!!document.querySelector('#catalog-prompt') && !document.querySelector('#next-send-model-chooser')"), true);
+        if (mode === "archived") await evaluate("publishLayoutCatalog({...settingsShellFixture.catalog,projects:settingsShellFixture.catalog.projects.map(p=>({...p,archived:false}))})");
+        else {
+          await evaluate("unmountShellFixture();localStorage.setItem('settingsFixtureOwned','true')");
+          await command("Page.reload");
+        }
+      }
+      assert.equal(await wait("!!document.querySelector('#next-send-model-chooser:not(:disabled)')"), true);
+      await evaluate("window.recoveryCalls=settingsShellFixture.rpcCalls.length;document.querySelector('#next-send-model-chooser').click()");
+      assert.equal(await wait("document.querySelector('.model-chooser')?.open"), true);
+      assert.equal(await evaluate("settingsShellFixture.rpcCalls.length===recoveryCalls && settingsShellFixture.sends.length===0"), true);
+      await evaluate("document.querySelector('.model-chooser header button').click();unmountShellFixture()");
+      assert.equal(await wait("document.querySelector('#root').childElementCount===0"), true);
+    }
   } finally {
     socket?.close(); browser?.kill();
     await writeFile(join(root, "session-content-observations.json"), JSON.stringify(layoutObservations, null, 2));
