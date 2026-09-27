@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { InventoryLanguageFixture } from "./inventoryLanguage.mount";
 import { McpServersPanel } from "./McpServersPanel";
 import type { McpInventoryResponse } from "#neoastra";
 
@@ -12,7 +13,7 @@ const fixture = {
 };
 Object.assign(window, { mcpFixture: fixture });
 function render() {
-  root.render(<McpServersPanel target={{ epoch: fixture.epoch, sessionId: fixture.sessionId, projectId: fixture.projectId }}
-    read={request => new Promise((resolve, reject) => pending.push({ sessionId: request.sessionId, resolve, reject }))} />);
+  root.render(<InventoryLanguageFixture><McpServersPanel target={{ epoch: fixture.epoch, sessionId: fixture.sessionId, projectId: fixture.projectId }}
+    read={request => new Promise((resolve, reject) => pending.push({ sessionId: request.sessionId, resolve, reject }))} /></InventoryLanguageFixture>);
 }
 render();

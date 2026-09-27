@@ -9,6 +9,16 @@ const path = "C:\\tasks\\folder";
 const response = (status: string, requestedPath: string | null = path, projectPath: string | null = path,
   projectId: string | null = null, hostEpoch: string | null = epoch) => ({ status, hostEpoch, requestedPath, projectPath, projectId });
 
+test("archived import is a definite refusal directing explicit unarchive, never an implicit restore", async () => {
+  const open = createProjectOpening(async () => response("archived", path, path, "persisted-id"));
+  assert.deepEqual(await open.import(epoch, { requestedPath: path, path }, createMutationCapability(epoch)), { kind: "error", code: "archived" });
+  assert.equal(open.getSnapshot(), null);
+  assert.match(projectOpeningMessage("archived"), /explicitly confirm Unarchive/u);
+  const mismatched = createProjectOpening(async () => response("archived", path, "other", "persisted-id"));
+  assert.deepEqual(await mismatched.import(epoch, { requestedPath: path, path }, createMutationCapability(epoch)), { kind: "error", code: "import_unconfirmed" });
+  assert.equal(mismatched.getSnapshot()?.kind, "uncertain");
+});
+
 test("import control and handler both require a checked preview, permission and no outstanding request", () => {
   const ready = { requestedPath: path, path };
   assert.equal(canImportCheckedFolder(undefined, true, false, true), false);

@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { BootStatus } from "#neoastra";
 import { AboutDialog, AboutSettingsEntry, openAboutPaletteAction } from "./AboutDialog";
+import { InventoryLanguageFixture } from "./inventoryLanguage.mount";
 import { CommandPalette } from "./CommandPalette";
 import { createPaletteFocusRestoration, paletteAvailable, paletteShortcut, type PaletteAction, type PaletteContext } from "./paletteActions";
 
@@ -74,4 +75,4 @@ function Window() {
   </div>;
 }
 
-createRoot(document.getElementById("app")!).render(<Window />);
+createRoot(document.getElementById("app")!).render(<InventoryLanguageFixture><Window /></InventoryLanguageFixture>);

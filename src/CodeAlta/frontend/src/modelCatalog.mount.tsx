@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { InventoryLanguageFixture } from "./inventoryLanguage.mount";
 import { ModelCatalogPanel } from "./ModelCatalogPanel";
 import { ProvidersPanel } from "./ProvidersPanel";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
@@ -27,7 +28,7 @@ const probe: React.ComponentProps<typeof ProvidersPanel>["probe"] = request => n
 const choices: SessionChoicesResponse = { status: "ok", epoch: "epoch-1", sessionId: "one",
   current: { providerKey: "beta", agentPromptId: "plan", modelId: "beta-text", reasoningEffort: "High" },
   prompts: [{ id: "plan", name: "Plan" }, { id: "default", name: "Default" }],
-  models: [{ id: "beta-text", name: "Text model", efforts: ["High"] }, { id: "beta-image", name: "Image model", efforts: ["Low", "Medium"] }] };
+  models: [{ id: "beta-text", name: "Text model", efforts: ["High"], imageInput: false }, { id: "beta-image", name: "Image model", efforts: ["Low", "Medium"], imageInput: true }] };
 const unavailable = async (): Promise<never> => { throw new Error("Fixture must not submit this operation."); };
 const sent: SessionSendRequest[] = [];
 const capability = createMutationCapability("epoch-1");
@@ -67,15 +68,15 @@ function render() {
       abortRuns={createAbortRunSubmissions(unavailable)} queue={createQueueSubmissions(unavailable, unavailable)}
       permissionReviewer={null} runtimeReader={createRuntimeStateReader(async () => ({ status: "ok", hostEpoch: epoch,
         sessionId, entry: null, runtimeInstanceId: "literal-runtime", coordinatorTransitionInProgress: false }))} /></div>);
-  } else if (fixture.view === "providers") root.render(<ProvidersPanel epoch={epoch} read={readProviders} probe={probe}
+  } else if (fixture.view === "providers") root.render(<InventoryLanguageFixture><ProvidersPanel epoch={epoch} read={readProviders} probe={probe}
     holds={providerProbeHolds}
     catalogProviders={[{ id: "configured-only", name: "Configured only", type: "literal", enabled: false, isDefault: true,
       defaultModel: "not-discovered", defaultReasoning: null }]}
-    onOpenModels={() => { fixture.view = "models"; render(); }} />);
-  else root.render(<ModelCatalogPanel epoch={epoch} readProviders={readProviders} readModels={readModels}
+    onOpenModels={() => { fixture.view = "models"; render(); }} /></InventoryLanguageFixture>);
+  else root.render(<InventoryLanguageFixture><ModelCatalogPanel epoch={epoch} readProviders={readProviders} readModels={readModels}
     readChoices={(request) => fixture.readChoices(request.expectedEpoch, request.sessionId)}
     selections={selections} target={epoch && sessionId ? { epoch, sessionId } : null}
     pendingSend={!!(sessionId && submissions.pending(sessionId))}
-    pendingSelection={sessionId ? submissions.pending(sessionId)?.request.selection ?? null : null} onApply={onApply} />);
+    pendingSelection={sessionId ? submissions.pending(sessionId)?.request.selection ?? null : null} onApply={onApply} /></InventoryLanguageFixture>);
 }
 render();

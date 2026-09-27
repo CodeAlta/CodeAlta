@@ -3,8 +3,10 @@ import { createElement, useCallback, useLayoutEffect, useRef, useState, type UIE
 import { createRoot } from "react-dom/client";
 import type { HistoryRequest, HistoryResponse } from "#neoastra";
 import { History } from "./HistoryPanel";
-import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePosition } from "./timelineScroll";
+import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePosition, timelineNotice, type TimelineNotice } from "./timelineScroll";
 import { dispatchWorkspaceShortcut, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
+import { ShellLanguageContext } from "./shellLanguage";
+import type { Locale } from "./localization";
 
 const memory = createTimelineScrollMemory();
 const calls: string[] = [];
@@ -41,7 +43,8 @@ function Mounted({ sessionId, epoch }: { sessionId: string; epoch: string }) {
   const shell = useRef<HTMLDivElement>(null);
   const shortcut = useRef<WorkspaceShortcutState>({ chordPending: false, sessionInfoPrefix: null, reminderPrefix: null });
   const [notice, setNotice] = useState("");
-  const newest = useExplicitNewestHistory(sessionId, null, epoch, position, setNotice);
+  const presentNotice = useCallback((value: TimelineNotice) => setNotice(timelineNotice("en", value)), []);
+  const newest = useExplicitNewestHistory(sessionId, null, epoch, position, presentNotice);
   const resetNotice = useCallback((generation: number, explicitNewest: boolean) => {
     position.resetMessageNavigation();
     if (!newest.onTarget(generation)) {
@@ -89,20 +92,24 @@ function Mounted({ sessionId, epoch }: { sessionId: string; epoch: string }) {
     createElement("textarea", { id: "session-prompt", "aria-label": "Prompt" }));
 }
 function Fixture() {
+  const [locale, language] = useState<Locale>("en");
   const [session, setSession] = useState("A");
   const [epoch, setEpoch] = useState("fixture");
   useLayoutEffect(() => {
-    Object.assign(window, { fixture: { select: setSession, host: setEpoch, calls, failNext: (code: string) => { failCode = code; },
+    Object.assign(window, { fixture: { language, select: setSession, host: setEpoch, calls, failNext: (code: string) => { failCode = code; },
       failCursor: (code: string) => { failCursorCode = code; },
       mismatchCursor: () => { mismatchCursor = true; },
       holdNext: () => { holdNext = true; }, release: () => { release?.(); release = undefined; } } });
   }, []);
-  return createElement("div", { className: "outer-scroll", style: { height: "360px", overflowY: "scroll" } },
+  return createElement(ShellLanguageContext, { value: { locale, choice: locale, setLanguage: () => {} } },
+    // Exercise the production outer access-scroller policy, not an ad-hoc nested scroller.
+    createElement("div", { className: "outer-scroll active-session-content", style: { height: "360px", overflowY: "scroll" } },
     createElement(Mounted, { key: session, sessionId: session, epoch }),
     createElement("button", { type: "button", className: "outside-target" }, "Outside workspace"),
-    createElement("div", { style: { height: "600px" } }, "Outer filler"));
+    createElement("div", { style: { height: "600px" } }, "Outer filler")));
 }
 const style = document.createElement("style");
-style.textContent = ".timeline-message { height: 48px; box-sizing: border-box; overflow: hidden; } .message-body p { margin: 0; }";
+// This isolated fixture has no project/session rails: its shortcut scope is not the App's three-column grid.
+style.textContent = ".outer-scroll > .workspace-shell { display: block; } .timeline-message { height: 48px; box-sizing: border-box; overflow: hidden; } .message-body p { margin: 0; }";
 document.head.append(style);
 createRoot(document.getElementById("app")!).render(createElement(Fixture));

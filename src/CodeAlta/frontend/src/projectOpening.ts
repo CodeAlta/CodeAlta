@@ -53,6 +53,8 @@ export function createProjectOpening(invoke: Invoke) {
         return { kind: "ready", requestedPath: path, path: result.projectPath };
       if (confirmed && result.status === "ok" && result.projectPath === expectedPath && text(result.projectId, 256))
         return { kind: "imported", path: result.projectPath, id: result.projectId };
+      if (confirmed && result.status === "archived")
+        return { kind: "error", code: result.projectPath === expectedPath && text(result.projectId, 256) ? "archived" : "import_unconfirmed" };
       if (result.status === "ok") return { kind: "error", code: confirmed ? "import_unconfirmed" : "invalid_response" };
       return { kind: "error", code: result.status };
     } catch {
@@ -79,7 +81,7 @@ export function createProjectOpening(invoke: Invoke) {
       publish({ ...target, kind: "pending" }); // Retained by the app instance, not by the dialog lifetime.
       const result = await call(epoch, ready.requestedPath, true, capability, ready.path);
       if (result.kind === "imported") publish({ ...target, kind: "imported", projectId: result.id });
-      else if (result.kind === "error" && ["unconfigured", "invalid_request", "missing_directory", "closed", "busy"].includes(result.code)) publish(null);
+      else if (result.kind === "error" && ["unconfigured", "invalid_request", "missing_directory", "closed", "busy", "archived"].includes(result.code)) publish(null);
       else publish({ ...target, kind: "uncertain" });
       return result;
     },
@@ -91,6 +93,7 @@ export function projectOpeningMessage(code: string): string {
     case "unconfigured": return "Import requires an owned host; catalog-only browsing does not change projects.";
     case "invalid_request": return "Enter a full, absolute directory path (not a relative path, ~, or a file).";
     case "missing_directory": return "The directory does not exist or is not accessible. Nothing was imported.";
+    case "archived": return "This project is archived. Nothing was imported or restored. Select the saved project and explicitly confirm Unarchive project.";
     case "stale_epoch": return "The host changed. Reload before importing a directory.";
     case "busy": return "An earlier directory request is still in progress.";
     case "closed": return "The host is closing. Nothing new was imported.";

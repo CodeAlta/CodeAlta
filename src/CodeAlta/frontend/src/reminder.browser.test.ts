@@ -7,6 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
+import { locales, translate } from "./localization";
 
 const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
@@ -72,6 +73,24 @@ test("mounted reminders show exact detail, load a guarded new Create, and fence 
     const wait = async (condition: string) => evaluate(`new Promise(resolve => { const end = Date.now() + 7000; const check = () => {
       if (${condition}) resolve('ready'); else if (Date.now() > end) resolve(document.body.innerText.slice(0, 500));
       else setTimeout(check, 20); }; check(); })`);
+    const languages = async () => {
+      // RPC admission can precede React's disabled-control commit. Capture only after
+      // that action's paint, before changing locale; retain the exact focus/input checks.
+      await evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))`);
+      await evaluate(`void (window.languageKeep={calls:JSON.stringify([reminderFixture.reads.length,reminderFixture.details.length,reminderFixture.writes.map(w=>w.request)]),operation:reminderFixture.operation(),
+        inputs:[...document.querySelectorAll('input,textarea')].map(e=>({node:e,value:e.value,disabled:e.disabled})),focus:document.activeElement})`);
+      for (const locale of locales) {
+        await evaluate(`reminderFixture.language(${JSON.stringify(locale)})`);
+        assert.equal(await wait(`document.querySelector('.reminder-page h1').textContent===${JSON.stringify(translate(locale, "Reminders"))}`), "ready");
+        assert.equal(await evaluate(`languageKeep.calls===JSON.stringify([reminderFixture.reads.length,reminderFixture.details.length,reminderFixture.writes.map(w=>w.request)]) && languageKeep.operation===reminderFixture.operation() &&
+          languageKeep.inputs.every(i=>i.node.isConnected && i.node.value===i.value && i.node.disabled===i.disabled) && document.activeElement===languageKeep.focus`), true,
+          `${locale}: no extra reminder read/action, draft/confirmation/original/focus retained: ${await evaluate(`JSON.stringify({calls:languageKeep.calls===JSON.stringify([reminderFixture.reads.length,reminderFixture.details.length,reminderFixture.writes.map(w=>w.request)]),operation:languageKeep.operation===reminderFixture.operation(),inputs:languageKeep.inputs.map(i=>({connected:i.node.isConnected,value:i.node.value===i.value,disabled:i.node.disabled===i.disabled})),focus:[languageKeep.focus.tagName,languageKeep.focus.textContent,document.activeElement.tagName,document.activeElement.textContent]})`)}`);
+        assert.equal(await evaluate(`(()=>{const selected=document.querySelector('.model-catalog-results > section');return !selected || getComputedStyle(selected).marginTop==='20px'})()`), true,
+          `${locale}: selected-detail styling cannot depend on English ARIA`);
+      }
+      await evaluate(`reminderFixture.language('en')`);
+      assert.equal(await wait(`document.querySelector('.reminder-page h1').textContent==='Reminders'`), "ready");
+    };
     const activateSelectedWithEnter = async () => {
       await evaluate(`(() => { const button = document.querySelector('[aria-label="Reminder list"] button[aria-pressed="true"]');
         button.focus(); button.dataset.activations = '0';
@@ -84,6 +103,7 @@ test("mounted reminders show exact detail, load a guarded new Create, and fence 
     const list = (sessionId: string, reminders: string) => `({status:'ok',epoch:'e1',sessionId:'${sessionId}',reminders:[${reminders}],activeCount:${reminders ? 1 : 0},completedCount:0})`;
     const row = "{id:'reminder-1',state:'active',preview:'original',delaySeconds:60,repeatCount:1,firedCount:0,dueAt:null,lastExitCode:null,lastError:null}";
     assert.equal(await wait("window.reminderFixture?.reads.length === 1"), "ready");
+    await languages();
     await evaluate("window.reminderFixture.session('two')");
     assert.equal(await wait("window.reminderFixture.reads.length === 2"), "ready");
     await evaluate(`window.reminderFixture.reads[0].resolve(${list("one", row)})`);
@@ -102,6 +122,7 @@ test("mounted reminders show exact detail, load a guarded new Create, and fence 
     await evaluate(`document.querySelector('[aria-label="Reminder list"] button').click()`);
     assert.equal(await wait("window.reminderFixture.details.length === 1"), "ready");
     assert.equal(await evaluate("window.reminderFixture.details[0].request.reminderId"), "reminder-1");
+    await languages();
     await evaluate(`document.querySelector('[aria-label="Reminder list"] button').click()`);
     await activateSelectedWithEnter();
     assert.equal(await evaluate("window.reminderFixture.details.length"), 1);
@@ -124,6 +145,7 @@ test("mounted reminders show exact detail, load a guarded new Create, and fence 
       input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
     await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent==='Use as new reminder').click()`);
     assert.equal(await wait("!![...document.querySelectorAll('button')].find(b=>b.textContent==='Discard draft and use reminder')"), "ready");
+    await languages();
     assert.equal(await evaluate("document.querySelector('#reminder-content').value"), "check session");
     await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent==='Discard draft and use reminder').click()`);
     assert.equal(await wait("document.querySelector('#reminder-content').value === 'full 😀\\nsecond line'"), "ready");
@@ -133,6 +155,7 @@ test("mounted reminders show exact detail, load a guarded new Create, and fence 
     assert.equal(await evaluate("window.reminderFixture.writes[0].request.content"), "full 😀\nsecond line");
     assert.equal(await evaluate("window.reminderFixture.writes[0].request.delaySeconds"), 60);
     assert.equal(await evaluate("window.reminderFixture.writes[0].request.repeatCount"), 1);
+    await languages();
     await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent==='Use as new reminder').click()`);
     assert.equal(await evaluate("document.querySelector('#reminder-content').value"), "full 😀\nsecond line");
     await evaluate(`(() => { const input=document.querySelector('#reminder-content');
@@ -151,9 +174,11 @@ test("mounted reminders show exact detail, load a guarded new Create, and fence 
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'reminder-1');
       input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
     assert.equal(await wait("![...document.querySelectorAll('button')].find(b=>b.textContent==='Delete confirmed reminder').disabled"), "ready");
+    await languages();
     await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent==='Delete confirmed reminder').click()`);
     assert.equal(await wait("window.reminderFixture.writes.length === 2"), "ready");
     assert.equal(await evaluate("window.reminderFixture.writes[1].request.confirmation"), "reminder-1");
+    await languages();
     await evaluate("window.reminderFixture.writes[1].resolve({status:'ok',epoch:'e1',sessionId:'one',reminderId:'reminder-1'})");
     assert.equal(await wait("window.reminderFixture.reads.length === 6"), "ready");
     await evaluate(`window.reminderFixture.reads[5].resolve(${list("one", "")})`);
@@ -169,6 +194,7 @@ test("mounted reminders show exact detail, load a guarded new Create, and fence 
     assert.equal(await wait("window.reminderFixture.reads.length === 8"), "ready");
     await evaluate(`window.reminderFixture.reads[7].resolve(${list("one", row)})`);
     assert.equal(await wait("document.body.innerText.includes('no automatic retry')"), "ready");
+    await languages();
     assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Create reminder').disabled"), true);
     assert.equal(await evaluate("window.reminderFixture.writes.length"), 3);
     const detailCount = Number(await evaluate("window.reminderFixture.details.length"));
@@ -185,6 +211,7 @@ test("mounted reminders show exact detail, load a guarded new Create, and fence 
     assert.equal(await wait("document.body.innerText.includes('Reload required')"), "ready");
     await evaluate("window.reminderFixture.host(null)");
     assert.equal(await wait("document.body.innerText.includes('Select an owned session')"), "ready");
+    await languages();
     const priorReads = Number(await evaluate("window.reminderFixture.reads.length"));
     const priorDetails = Number(await evaluate("window.reminderFixture.details.length"));
     await evaluate("window.reminderFixture.host('e1')");
@@ -208,6 +235,7 @@ test("mounted reminders show exact detail, load a guarded new Create, and fence 
     await evaluate(`window.reminderFixture.details.at(-1).resolve({status:'missing_reminder',epoch:'e2',sessionId:'one',
       reminderId:'reminder-1',content:null,delaySeconds:null,repeatCount:null,editRevision:null})`);
     assert.equal(await wait("document.body.innerText.includes('unavailable or was deleted')"), "ready");
+    await languages();
     const refreshReads = Number(await evaluate("window.reminderFixture.reads.length"));
     await evaluate("document.querySelector('.reminder-page > button').click()");
     assert.equal(await wait(`window.reminderFixture.reads.length > ${refreshReads}`), "ready");
@@ -250,8 +278,18 @@ test("mounted reminders show exact detail, load a guarded new Create, and fence 
     await click("Keep edit draft");
     await click("Discard edit draft");
     assert.equal(await wait("document.body.innerText.includes('Discard unsaved message changes?')"), "ready");
+    await languages();
     await click("Keep edit draft");
     assert.equal(await evaluate("document.querySelector('#reminder-edit').value"), "unsaved full message");
+    for (const locale of ["de", "ja"] as const) for (const theme of ["light", "dark"]) {
+      await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 500, deviceScaleFactor: 1, mobile: false });
+      await evaluate(`reminderFixture.language('${locale}');document.documentElement.dataset.theme='${theme}'`);
+      assert.equal(await wait(`document.querySelector('.reminder-page h1').textContent===${JSON.stringify(translate(locale, "Reminders"))}`), "ready");
+      assert.equal(await evaluate(`document.documentElement.scrollWidth<=innerWidth+2 && document.querySelector('.reminder-page').scrollWidth<=document.querySelector('.reminder-page').clientWidth+2`), true, `${locale}/${theme}: short narrow reminder draft and controls fit`);
+    }
+    await evaluate(`reminderFixture.language('en')`);
+    assert.equal(await wait(`document.querySelector('.reminder-page h1').textContent==='Reminders'`), "ready");
+    await command("Emulation.clearDeviceMetricsOverride");
     await evaluate("document.querySelector('#reminder-edit').focus()");
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
@@ -259,6 +297,7 @@ test("mounted reminders show exact detail, load a guarded new Create, and fence 
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
     assert.equal(await wait("window.reminderFixture.writes.length === 4"), "ready");
+    await languages();
     assert.equal(await evaluate("JSON.stringify(window.reminderFixture.writes[3].request)"),
       JSON.stringify({ expectedEpoch: "e2", sessionId: "one", reminderId: "reminder-2", editRevision: "0", content: "unsaved full message" }));
     assert.equal(await evaluate("document.querySelector('#reminder-edit').disabled"), true);
@@ -288,6 +327,7 @@ test("mounted reminders show exact detail, load a guarded new Create, and fence 
     assert.equal(await wait("document.body.innerText.includes('Admission is uncertain')"), "ready");
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Retained reminder Save\"] pre')?.textContent"), "unsaved full message");
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Retained reminder Save\"] h2')?.textContent"), "Uncertain reminder Save");
+    await languages();
     assert.equal(await evaluate("JSON.stringify([...document.querySelectorAll('[aria-label=\"Retained reminder Save\"] code')].map(node=>node.textContent))"),
       JSON.stringify(["e2", "one", "reminder-2", "0"]));
     assert.equal(await evaluate("window.reminderFixture.writes[3].request.content"), "unsaved full message");
@@ -384,6 +424,20 @@ test("mounted reminders show exact detail, load a guarded new Create, and fence 
     await click("Confirm discard edit");
     assert.equal(await wait("!document.querySelector('[aria-label=\"Unsaved reminder edit recovery\"]')"), "ready");
     assert.equal(await evaluate("window.reminderFixture.writes.length"), 7);
+    await command("Page.navigate", { url: pathToFileURL(page).href });
+    assert.equal(await wait("window.reminderFixture?.reads.length===1"), "ready");
+    await evaluate(`reminderFixture.reads[0].resolve(${list("one", row.replace("reminder-1", "Settings").replace("preview:'original'", "preview:'Reminders'"))})`);
+    assert.equal(await wait("!!document.querySelector('[aria-label=\"Reminder list\"] button')"), "ready");
+    await evaluate("document.querySelector('[aria-label=\"Reminder list\"] button').click()");
+    assert.equal(await wait("reminderFixture.details.length===1"), "ready");
+    await evaluate("reminderFixture.details[0].resolve({status:'ok',epoch:'e1',sessionId:'one',reminderId:'Settings',content:'  None 日本語  ',delaySeconds:60,repeatCount:1,editRevision:'0'})");
+    assert.equal(await wait("document.querySelector('#reminder-edit')?.value==='  None 日本語  '"), "ready");
+    await languages();
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"Full reminder message\"]').textContent"), "  None 日本語  ");
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"Reminder list\"] strong').textContent"), "Preview: Reminders");
+    await evaluate("reminderFixture.archive(true)");
+    assert.equal(await wait("document.body.textContent.includes('Archived project is read-only')"), "ready");
+    await languages();
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }

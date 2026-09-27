@@ -5,11 +5,14 @@ import { archivedProjectScope, SessionComposerGate } from "./ArchivedScopeGates"
 import { createAskActions } from "./sessionAsks";
 import { createMutationCapability } from "./sessionOperations";
 import type { WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
+import { ShellLanguageContext } from "./shellLanguage";
+import type { Locale } from "./localization";
 
 const epoch = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 let currentEpoch = epoch;
 let currentSession = "session-one";
 let archived = false;
+let locale: Locale = "en";
 const requests: unknown[] = [];
 const settlers: { resolve: (value: unknown) => void; reject: (error: Error) => void }[] = [];
 (window as Window & { askFixtureList?: (request: unknown) => Promise<unknown> }).askFixtureList = request => {
@@ -18,6 +21,8 @@ const settlers: { resolve: (value: unknown) => void; reject: (error: Error) => v
 };
 const answers: unknown[] = [];
 const cancellations: unknown[] = [];
+const observations: unknown[] = [];
+Object.assign(window, { askFixtureObserve: (request: unknown) => { observations.push(request); return Promise.reject(new Error("Fixture observation unavailable")); } });
 const answerFailures: ((error: Error) => void)[] = [];
 const cancelFailures: ((error: Error) => void)[] = [];
 const actions = createAskActions(async request => { answers.push(request); return new Promise((_, reject) => answerFailures.push(reject)); },
@@ -30,14 +35,17 @@ function render() {
     workspacePath: "/fixture/project", providerKey: "fixture", updatedAt: "2026-09-25T00:00:00Z" };
   const snapshot: WorkspaceSnapshot = { configured: true, projects: [{ id: "project", name: "Project", path: "/fixture/project", archived }],
     sessions: [session], projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false };
-  root.render(createElement("div", null,
+  root.render(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: value => { locale = value as Locale; render(); } } }, createElement("div", null,
     createElement(SessionComposerGate, { snapshot, projectId: "project", session, epoch: currentEpoch,
       owned: createElement("p", { id: "owned-ask-gate" }, "Owned workspace"),
       readOnly: createElement("p", { id: "archived-ask" }, "Read-only archive; ask editor unavailable"), recovery: null }),
-    !archivedProjectScope(snapshot, "project") && createElement(AskPanel, { epoch: currentEpoch, sessionId: currentSession, actions, capability })));
+    !archivedProjectScope(snapshot, "project") && createElement(AskPanel, { epoch: currentEpoch, sessionId: currentSession, actions, capability }))));
 }
 Object.assign(window, { askFixture: {
-  epoch, requests, answers, cancellations,
+  epoch, requests, answers, cancellations, observations,
+  language(value: Locale) { locale = value; render(); },
+  retained() { return actions.forSession(currentSession); },
+  invalidate() { capability.observe({ status: "stale_epoch", epoch }); },
   page(head: unknown, options: { status?: string; sessionId?: string; epoch?: string } = {}) {
     settlers.shift()?.resolve({ status: options.status ?? "ok", hostEpoch: options.epoch ?? currentEpoch,
       sessionId: options.sessionId ?? currentSession, head, latest: null, hasMore: false });

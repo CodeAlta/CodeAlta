@@ -1,6 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDraftIndicators, draftStorageKey, persistDraft, restoreDraft } from "./promptDraft";
+import { createDraftIndicators, draftStorageKey, persistDraft, restoreDraft, transferPromptDraft } from "./promptDraft";
+
+test("explicit draft transfer requires an empty readable destination and exact readback", () => {
+  const values = new Map<string, string>();
+  const read = (key: string) => values.get(key) ?? null;
+  const write = (key: string, text: string) => { values.set(key, text); };
+  assert.equal(transferPromptDraft(read, write, "created", "  exact\ntext  "), true);
+  assert.equal(read(draftStorageKey("created")), "  exact\ntext  ");
+  assert.equal(transferPromptDraft(read, write, "created", "newer"), false);
+  assert.equal(transferPromptDraft(() => { throw Error("denied"); }, write, "unknown", "original"), false);
+  assert.equal(values.has(draftStorageKey("unknown")), false);
+  assert.equal(transferPromptDraft(read, () => { throw Error("quota"); }, "empty", "original"), false);
+  assert.equal(transferPromptDraft(read, () => {}, "empty", "original"), false);
+  assert.equal(transferPromptDraft(read, write, "empty", "x".repeat(32769)), false);
+});
 
 test("prompt drafts are session-scoped, bounded, removable, and tolerate storage failure", () => {
   const values = new Map<string, string>();

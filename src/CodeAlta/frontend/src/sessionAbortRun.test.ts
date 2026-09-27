@@ -7,7 +7,7 @@ import { captureAbortRun, createAbortRunSubmissions } from "./sessionAbortRun";
 const observation: SessionRuntimeStateResponse = {
   status: "ok", hostEpoch: "epoch", sessionId: "session", runtimeInstanceId: "runtime", coordinatorTransitionInProgress: false,
   entry: { attachmentGeneration: "9223372036854775807", activeRunId: "run-A", isTerminated: false, isRetiring: false,
-    queueDrainInProgress: false, providerId: "fake", providerKey: "fake", modelId: null, reasoningEffort: null, agentPromptId: null, pendingAgentPromptId: null },
+    queueDrainInProgress: false, providerId: "fake", providerKey: "fake", modelId: null, reasoningEffort: null, agentPromptId: null, pendingAgentPromptId: null, activity: null },
 };
 function request() { return captureAbortRun("epoch", "session", observation, "key")!; }
 function page(kind = "AbortRun", key = "key"): SessionReceiptPage {

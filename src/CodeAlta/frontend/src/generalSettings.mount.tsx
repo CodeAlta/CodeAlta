@@ -17,7 +17,7 @@ const snapshot: WorkspaceSnapshot = {
 };
 
 function Window() {
-  const { theme, setTheme, projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices } = useWindowPreferences();
+  const { theme, setTheme, projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices, recentSessionCount, setRecentSessionCount } = useWindowPreferences();
   const [settings, setSettings] = useState(true);
   const [narrow, setNarrow] = useState(window.innerWidth <= 875);
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
@@ -31,7 +31,7 @@ function Window() {
     <ProjectRailToggle expanded={visible} onToggle={() => toggleRail(narrow)} buttonRef={null} /></header>
     {settings ? <main className="configuration-page"><div className="settings-grid"><GeneralSettings theme={theme} setTheme={setTheme}
       sort={projectSort} setSort={setProjectSort} desktopCollapsed={railState.desktopCollapsed}
-      setDesktopCollapsed={setDesktopCollapsed} notices={notices} /></div></main>
+      setDesktopCollapsed={setDesktopCollapsed} notices={notices} recentSessionCount={recentSessionCount} setRecentSessionCount={setRecentSessionCount} /></div></main>
       : <main><aside id="project-rail" hidden={!visible} aria-label="Projects"><select id="project-sort" aria-label="Sort projects" value={projectSort}
           onChange={event => setProjectSort(event.target.value as "name" | "recent")}>
           <option value="name">Name</option><option value="recent">Recent visible updates</option></select>

@@ -1,6 +1,7 @@
 export type ShortcutAction =
-  | "openProject" | "focusProjects" | "focusSessions" | "focusPrompt" | "focusSearch"
+  | "openProject" | "focusProjects" | "focusSessions" | "focusPrompt" | "focusSearch" | "browseSessions"
   | "nextProject" | "previousProject" | "nextSession" | "previousSession"
+  | "nextTab" | "previousTab" | "closeTab" | "reopenTab"
   | "settings" | "providers" | "models" | "prompts" | "context" | "plugins"
   | "toggleNotes" | "help" | "escape" | "expandPrompt" | "renameProject" | "sessionInfo" | "reminders"
   | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest" | "compact";
@@ -50,6 +51,17 @@ export function resolveShortcut(event: ShortcutKey, chordPending: boolean, editi
     return action("compact");
 
   if (!editing) {
+    if (event.ctrlKey && event.altKey && !event.metaKey && !event.shiftKey && key === "b") return action("browseSessions");
+    if (event.ctrlKey && event.altKey && !event.metaKey && !event.shiftKey) {
+      if (key === "arrowleft") return action("previousTab");
+      if (key === "arrowright") return action("nextTab");
+    }
+    if (event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (key === "pageup" && !event.shiftKey) return action("previousTab");
+      if (key === "pagedown" && !event.shiftKey) return action("nextTab");
+      if (key === "w" && !event.shiftKey) return action("closeTab");
+      if (key === "t" && event.shiftKey) return action("reopenTab");
+    }
     if (messageAvailable && !event.metaKey && !event.altKey && !event.shiftKey) {
       if (key === "f3") return action(event.ctrlKey ? "messageFirst" : "messagePrevious");
       if (key === "f4" && !event.ctrlKey) return action("messageNext");

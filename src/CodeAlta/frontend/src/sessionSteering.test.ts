@@ -7,7 +7,7 @@ import { captureSteering, createSteeringSubmissions } from "./sessionSteering";
 const observation: SessionRuntimeStateResponse = {
   status: "ok", hostEpoch: "epoch", sessionId: "session", runtimeInstanceId: "runtime", coordinatorTransitionInProgress: false,
   entry: { attachmentGeneration: "9223372036854775807", activeRunId: "run", isTerminated: false, isRetiring: false,
-    queueDrainInProgress: false, providerId: "fake", providerKey: "fake", modelId: null, reasoningEffort: null, agentPromptId: null, pendingAgentPromptId: null },
+    queueDrainInProgress: false, providerId: "fake", providerKey: "fake", modelId: null, reasoningEffort: null, agentPromptId: null, pendingAgentPromptId: null, activity: null },
 };
 const signal = new AbortController().signal;
 function request(key = "key") { return captureSteering("epoch", "session", observation, "  exact\ntext  ", key)!; }

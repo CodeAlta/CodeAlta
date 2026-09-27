@@ -6,6 +6,7 @@ import { LiveTextMessage, LiveToolMessage } from "./LiveSessionPanel";
 import { reconcileTimeline } from "./reconcileTimeline";
 import { latestNotes } from "./timeline";
 import { TimelineMessage } from "./TimelineMessage";
+import { useShellLanguage } from "./shellLanguage";
 
 // The production caller supplies workspace.historyTail. The injection seam lets the mounted
 // browser fixture exercise this exact component with an isolated, revisioned test journal.
@@ -29,6 +30,7 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
   onNewestResult?: (result: NewestHistoryResult) => void;
   read: typeof workspace.historyTail;
 }) {
+  const { t } = useShellLanguage();
   const [target, setTarget] = useState<HistoryTarget>(() =>
     ({ request: { sessionId, cursor: null }, explicitOlder: false, explicitNewest: false, generation: 0 }));
   const [state, setState] = useState<HistoryState>();
@@ -130,24 +132,24 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
   const items = reconcileTimeline(timeline?.entries ?? [], live);
   return <section className="conversation history" aria-labelledby="history-heading"
     data-window-ready={current?.kind === "ready" && window?.generation === target.generation && historySettled(current, timeline)}>
-    <div className="section-heading"><div><span className="eyebrow">Journal + recent live window</span><h2 id="history-heading">Session timeline</h2></div><button type="button" className="quiet-button icon-label-button" onClick={() => {
+    <div className="section-heading"><div><span className="eyebrow">{t("Journal + recent live window")}</span><h2 id="history-heading">{t("Session timeline")}</h2></div><button type="button" className="quiet-button icon-label-button" onClick={() => {
       refreshNewest(false);
-    }}><AppIcon name="refresh" size={14} />Refresh newest history</button></div>
-    {(!current || current.kind === "loading") && <p role="status">Loading the latest persisted history.</p>}
-    {current?.kind === "error" && <p role="alert" className="error-text">{historyMessage(current.code)}</p>}
-    {timeline?.tailOmitted && <div role="status" className="banner">The malformed final journal record was omitted.</div>}
-    {timeline?.limitReached && <div role="status" className="banner">Showing at most 1,000 journal events. Loading older history replaces newer visible events; refresh to return to the latest.</div>}
-    {timeline?.newerOmitted && <div role="status" className="banner">Newer journal events are no longer in this older window. Refresh newest history to return to the latest turn.</div>}
+    }}><AppIcon name="refresh" size={14} />{t("Refresh newest history")}</button></div>
+    {(!current || current.kind === "loading") && <p role="status">{t("Loading the latest persisted history.")}</p>}
+    {current?.kind === "error" && <p role="alert" className="error-text">{t(historyMessage(current.code))}</p>}
+    {timeline?.tailOmitted && <div role="status" className="banner">{t("The malformed final journal record was omitted.")}</div>}
+    {timeline?.limitReached && <div role="status" className="banner">{t("Showing at most 1,000 journal events. Loading older history replaces newer visible events; refresh to return to the latest.")}</div>}
+    {timeline?.newerOmitted && <div role="status" className="banner">{t("Newer journal events are no longer in this older window. Refresh newest history to return to the latest turn.")}</div>}
     {timeline?.next && <button type="button" className="load-more" disabled={current?.kind === "loading" || current?.kind === "error"}
       onClick={() => setTarget({ request: { sessionId, cursor: timeline.next }, explicitOlder: true,
         explicitNewest: false, generation: ++generation.current })}>
-      <AppIcon name="history" size={14} />Load older history{timeline.entries.length === 1000 ? " (replace newest visible events)" : ""}</button>}
-    {items.length === 0 && current?.kind === "ready" && <div className="empty-history">No visible events in this history.</div>}
+      <AppIcon name="history" size={14} />{t("Load older history")}{timeline.entries.length === 1000 ? t(" (replace newest visible events)") : ""}</button>}
+    {items.length === 0 && current?.kind === "ready" && <div className="empty-history">{t("No visible events in this history.")}</div>}
     <div className="messages">
       {items.map(item => item.source === "history" ? <TimelineMessage key={`${sessionId}:${window?.revision ?? "unversioned"}:${item.key}`} item={item.item} />
         : item.source === "liveText" ? <LiveTextMessage key={item.key} row={item.row} />
         : <LiveToolMessage key={item.key} row={item.row} />)}
     </div>
-    {items.some(item => item.source !== "history") && <p className="detail live-order-note">Live rows are recent retained updates, not timestamped journal events; text/tool ordering and missing intervening activity are unknown.</p>}
+    {items.some(item => item.source !== "history") && <p className="detail live-order-note">{t("Live rows are recent retained updates, not timestamped journal events; text/tool ordering and missing intervening activity are unknown.")}</p>}
   </section>;
 }

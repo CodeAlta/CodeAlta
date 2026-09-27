@@ -7,6 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
+import { locales, translate } from "./localization";
 
 const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
@@ -90,6 +91,11 @@ test("production composer info icon retains read-only scope and guarded focus", 
       [...document.querySelectorAll('${modal} time')].some(time=>time.textContent==='2026-01-02T03:04:05.1234567+14:00')`), true,
       "actual App displays the supplied recorded creation time without converting its offset");
     await evaluate(`window.copiedInfo=[]; Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.copiedInfo.push(text)}}});
+      window.canonicalInfoDetails=[...document.querySelectorAll('[data-info-copy]')].map(x=>x.innerText).join('\\n\\n');
+      document.querySelector('${modal} footer button').click();void 0`);
+    assert.equal(await wait("copiedInfo.length===1"), true);
+    assert.equal(await evaluate("copiedInfo[0]===canonicalInfoDetails"), true, "canonical details preserve the original English DOM Copy payload exactly");
+    await evaluate(`window.copiedInfo=[];
       document.querySelector('${modal} button:nth-last-child(2)').click()`);
     assert.equal(await wait(`document.querySelector('${modal}')?.textContent.includes('Session ID copied.')`), true);
     assert.deepEqual(await evaluate("window.copiedInfo"), ["one"], "Copy remains session ID only");
@@ -102,7 +108,7 @@ test("production composer info icon retains read-only scope and guarded focus", 
     assert.equal(await wait(`document.querySelector('${modal}')?.textContent.includes('Not recorded or unavailable') && !document.querySelector('${modal}')?.textContent.includes('2025-04-03')`), true);
     assert.equal(await readCounts(), initialReads, "same-key metadata publication adds no acquisition");
     assert.equal(await evaluate(`document.querySelector('${modal}').textContent.includes('Project: Project') &&
-      document.querySelector('${modal}').textContent.includes('Saved catalog metadata, not live runtime status.') &&
+      document.querySelector('${modal}').textContent.includes('Saved metadata and separate point-in-time observations.') &&
       !document.querySelector('${modal}').textContent.includes('Current tokens') &&
       window.catalogPrompt===document.querySelector('#catalog-prompt') && window.settingsShellFixture.sends.length===0`), true);
     await evaluate("Object.defineProperty(navigator,'clipboard',{configurable:true,value:undefined}); document.querySelector('.session-info-dialog button:nth-last-child(2)').click()");
@@ -154,9 +160,9 @@ test("production composer info icon retains read-only scope and guarded focus", 
       await evaluate(`document.documentElement.dataset.theme='${theme}'`);
       // FlexLayout positions its portal after ResizeObserver measurement, not synchronously
       // with the CDP viewport command. Require real final geometry before checking controls.
-      assert.equal(await wait(`(() => {const panel=document.querySelector('.flexlayout__tab').getBoundingClientRect();
+      assert.equal(await wait(`(() => {const panel=document.querySelector('.content').closest('.flexlayout__tab').getBoundingClientRect();
         const content=document.querySelector('.content').getBoundingClientRect();
-        return panel.width>0 && panel.height>0 && Math.abs(panel.width-content.width)<1 && Math.abs(panel.height-content.height)<1;})()`), true);
+        return panel.width>0 && panel.height>0 && panel.right<=innerWidth+1 && Math.abs(panel.width-content.width)<1 && Math.abs(panel.height-content.height)<1;})()`), true);
       assert.equal(await evaluate(`(() => {
         const button=document.querySelector('.catalog-composer .history-controls ${trigger}');
         const area=button.closest('.history-controls').getBoundingClientRect();
@@ -164,7 +170,7 @@ test("production composer info icon retains read-only scope and guarded focus", 
         return rect.width>=28 && rect.left>=0 && rect.right<=innerWidth+1 && area.right<=innerWidth+1 &&
           getComputedStyle(button).display!=='none'; })()`), true,
         `${width}px ${theme} catalog info and Send-unavailable controls fit the viewport: ${JSON.stringify(await evaluate(`({
-          panel:document.querySelector('.flexlayout__tab').getBoundingClientRect().toJSON(),
+          panel:document.querySelector('.content').closest('.flexlayout__tab').getBoundingClientRect().toJSON(),
           shell:document.querySelector('.workspace-shell').getBoundingClientRect().toJSON(),
           content:document.querySelector('.content').getBoundingClientRect().toJSON(),
           button:document.querySelector('.catalog-composer .history-controls ${trigger}').getBoundingClientRect().toJSON()})`))}`);
@@ -211,6 +217,7 @@ test("production composer info icon retains read-only scope and guarded focus", 
     assert.equal(await wait(`document.querySelector('${modal}')?.open && document.querySelector('${modal}')?.textContent.includes('Project: Project')`), true,
       "archived draft-only composer retains read-only snapshot info");
     assert.equal(await evaluate(`document.querySelector('${modal}').textContent.includes('2026-01-02T03:04:05.1234567+14:00')`), true);
+    assert.equal(await evaluate(`Array.from(document.querySelectorAll('${modal} button')).find(button=>button.textContent==='Refresh observed details').disabled && window.settingsShellFixture.runtimeReads.length===0`), true);
     await close();
     await evaluate("document.querySelector('#catalog-prompt').focus()");
     await chord();
@@ -218,7 +225,7 @@ test("production composer info icon retains read-only scope and guarded focus", 
     await close();
     assert.equal(await evaluate("window.settingsShellFixture.sends.length===0"), true);
 
-    await evaluate("localStorage.removeItem('usageFixtureArchived'); localStorage.setItem('infoFixtureAmbiguous','true')");
+    await evaluate("localStorage.removeItem('usageFixtureArchived'); localStorage.removeItem('codealta.desktop.sessionTabs.v1'); localStorage.setItem('infoFixtureAmbiguous','true')");
     await command("Page.reload");
     assert.equal(await wait(`!!document.querySelector('.catalog-composer ${trigger}')`), true);
     await evaluate(`document.querySelector('${trigger}').click()`);
@@ -235,7 +242,7 @@ test("production composer info icon retains read-only scope and guarded focus", 
     await evaluate("document.querySelector('[aria-label=\"Close command palette\"]').click()");
     assert.equal(await wait("!document.querySelector('.command-palette')"), true);
 
-    await evaluate("localStorage.removeItem('infoFixtureAmbiguous'); localStorage.setItem('infoFixtureUnknown','true')");
+    await evaluate("localStorage.removeItem('infoFixtureAmbiguous'); localStorage.removeItem('codealta.desktop.sessionTabs.v1'); localStorage.setItem('infoFixtureUnknown','true')");
     await command("Page.reload");
     assert.equal(await wait(`!!document.querySelector('.catalog-composer ${trigger}')`), true);
     await evaluate(`document.querySelector('${trigger}').click()`);
@@ -244,17 +251,18 @@ test("production composer info icon retains read-only scope and guarded focus", 
       "unknown scope stays disclosed without inventing missing identity or restricting a unique recorded ID");
     await close();
 
-    await evaluate("localStorage.removeItem('infoFixtureUnknown'); localStorage.setItem('infoFixtureMismatched','true')");
+    await evaluate("localStorage.removeItem('infoFixtureUnknown'); localStorage.removeItem('codealta.desktop.sessionTabs.v1'); localStorage.setItem('infoFixtureMismatched','true')");
     await command("Page.reload");
     assert.equal(await wait("!!document.querySelector('.project-root-list button')"), true);
     await evaluate("document.querySelector('.project-root-list button').click()");
+    await evaluate("[...document.querySelectorAll('.session-row > button:first-child')].find(button=>button.textContent.includes('one'))?.click()");
     assert.equal(await wait(`!!document.querySelector('.catalog-composer ${trigger}') && document.querySelector('.session-header h1')?.textContent==='one'`), true);
     await evaluate(`document.querySelector('${trigger}').click()`);
     assert.equal(await wait(`document.querySelector('${modal}')?.textContent.includes('Unverified / unmatched scope')`), true,
       "wrong project identity is disclosed as unmatched, not inferred from a matching path");
     await close();
 
-    await evaluate("localStorage.removeItem('infoFixtureMismatched'); localStorage.setItem('settingsFixtureOwned','true')");
+    await evaluate("localStorage.removeItem('infoFixtureMismatched'); localStorage.removeItem('codealta.desktop.sessionTabs.v1'); localStorage.setItem('settingsFixtureOwned','true')");
     await command("Page.reload");
     assert.equal(await wait("!!document.querySelector('#session-prompt') && !!document.querySelector('.owned-session .history-controls .session-info-trigger')"), true);
     assert.equal(await evaluate(`document.querySelectorAll('${trigger}').length===1 && !document.querySelector('.session-header ${trigger}') &&
@@ -278,9 +286,9 @@ test("production composer info icon retains read-only scope and guarded focus", 
     for (const width of [390, 1120]) for (const theme of ["dark", "light"]) {
       await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
       await evaluate(`document.documentElement.dataset.theme='${theme}'`);
-      assert.equal(await wait(`(() => {const panel=document.querySelector('.flexlayout__tab').getBoundingClientRect();
+      assert.equal(await wait(`(() => {const panel=document.querySelector('.content').closest('.flexlayout__tab').getBoundingClientRect();
         const content=document.querySelector('.content').getBoundingClientRect();
-        return panel.width>0 && panel.height>0 && Math.abs(panel.width-content.width)<1 && Math.abs(panel.height-content.height)<1;})()`), true);
+        return panel.width>0 && panel.height>0 && panel.right<=innerWidth+1 && Math.abs(panel.width-content.width)<1 && Math.abs(panel.height-content.height)<1;})()`), true);
       assert.equal(await evaluate(`(() => {
         const button=document.querySelector('.owned-session .history-controls ${trigger}');
         const toolbar=button.closest('.history-controls');
@@ -302,6 +310,88 @@ test("production composer info icon retains read-only scope and guarded focus", 
     await close();
     assert.equal(await evaluate("window.settingsShellFixture.sends.length===1 && JSON.stringify(window.settingsShellFixture.sends[0])===window.retainedInfoIntent && document.querySelector('.owned-session .send-button').disabled && document.querySelector('#session-prompt').value==='Info draft retained'"), true,
       "info activation does not retry, replace, or clear an in-flight retained action/draft");
+    // Real controls with a disposable context driver: settings cannot be interacted with
+    // behind a native modal, so drive only this fixture's context to test pending lifetimes.
+    await build({ entryPoints: [fileURLToPath(new URL("./inspectionLocalization.mount.tsx", import.meta.url))], outfile: join(root, "localized.js"),
+      bundle: true, platform: "browser", format: "iife", plugins: [{ name: "isolated-bridge", setup(bundle) {
+        bundle.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("./settingsShell.neoastra.mount.ts", import.meta.url)) }));
+      } }] });
+    await writeFile(join(root, "localized.html"), '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="localized.js"></script></body></html>');
+    await command("Page.navigate", { url: pathToFileURL(join(root, "localized.html")).href });
+    assert.equal(await wait("document.querySelector('.session-info-dialog')?.open"), true);
+    await evaluate("window.localeDialog=document.querySelector('.session-info-dialog');window.canonicalPayload=[...document.querySelectorAll('[data-info-copy]')].map(x=>x.innerText).join('\\n\\n');window.copies=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:text=>{copies.push(text);return new Promise(resolve=>window.releaseLocaleCopy=resolve)}}});document.querySelector('.session-info-dialog footer button').click();document.querySelector('.session-info-dialog header button').focus();window.localeFocus=document.activeElement;void 0");
+    for (const locale of locales) {
+      await evaluate(`inspectionFixture.setLocale(${JSON.stringify(locale)})`);
+      assert.equal(await wait(`document.querySelector('#session-info-title').textContent===${JSON.stringify(translate(locale, "Session info"))}`), true);
+      assert.equal(await evaluate("localeDialog===document.querySelector('.session-info-dialog') && document.activeElement===localeFocus && copies.length===1 && copies[0]===canonicalPayload && settingsShellFixture.runtimeReads.length===0 && settingsShellFixture.usageReads.length===0 && inspectionFixture.canMutate()"), true, `${locale}: pending canonical Copy retains identity and permission without reads`);
+      assert.equal(await evaluate("[...document.querySelectorAll('.session-info-fields dd')].some(x=>x.textContent==='Saved metadata') && document.querySelector('.session-info-fields code').textContent==='Unknown'"), true, "English-like title and ID stay literal");
+      for (const theme of ["light", "dark"]) {
+        await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 500, deviceScaleFactor: 1, mobile: false });
+        await evaluate(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);
+        assert.equal(await evaluate("(()=>{const d=document.querySelector('.session-info-dialog');return d.getBoundingClientRect().width<=innerWidth && d.getBoundingClientRect().height<=innerHeight && d.scrollWidth<=d.clientWidth+1})()"), true, `${locale} ${theme}: Info fits short/narrow`);
+      }
+    }
+    await evaluate("releaseLocaleCopy()");
+    assert.equal(await wait(`document.querySelector('.session-info-dialog footer').textContent.includes(${JSON.stringify(translate("zh-CN", "Displayed details copied."))})`), true);
+    await evaluate("document.querySelector('.session-info-dialog footer button').click()");
+    assert.equal(await wait("copies.length===2 && copies[1]===canonicalPayload"), true, "a new Copy from translated presentation still uses the exact canonical payload");
+    await evaluate("releaseLocaleCopy()");
+    await evaluate("document.querySelector('.session-info-dialog > div > button').click();window.originalInfoRead=settingsShellFixture.runtimeReads[0]");
+    assert.equal(await wait("settingsShellFixture.runtimeReads.length===1"), true);
+    for (const locale of locales) {
+      await evaluate(`inspectionFixture.setLocale(${JSON.stringify(locale)})`);
+      assert.equal(await wait(`document.querySelector('.session-info-dialog [role=status]').textContent===${JSON.stringify(translate(locale, "Reading observed details…"))}`), true);
+      assert.equal(await evaluate("settingsShellFixture.runtimeReads.length===1 && settingsShellFixture.runtimeReads[0]===originalInfoRead && settingsShellFixture.usageReads.length===0 && inspectionFixture.canMutate() && localeDialog===document.querySelector('.session-info-dialog')"), true);
+    }
+    await evaluate("originalInfoRead.reject(new Error('private error'))");
+    assert.equal(await wait(`document.querySelector('.session-info-dialog').textContent.includes(${JSON.stringify(translate("zh-CN", "Error: read failed; no observation established."))})`), true);
+    await evaluate("inspectionFixture.setView('usage')");
+    assert.equal(await wait("!!document.querySelector('[aria-haspopup=dialog]') && !document.querySelector('.session-info-dialog')"), true);
+    await evaluate("document.querySelector('[aria-haspopup=dialog]').click();void 0");
+    assert.equal(await wait("document.querySelector('.session-usage-dialog')?.open && settingsShellFixture.usageReads.length===1"), true);
+    await evaluate("window.localeUsage=document.querySelector('.session-usage-dialog');window.originalUsageRead=settingsShellFixture.usageReads[0]");
+    for (const locale of locales) {
+      await evaluate(`inspectionFixture.setLocale(${JSON.stringify(locale)})`);
+      assert.equal(await wait(`document.querySelector('#session-usage-title').textContent===${JSON.stringify(translate(locale, "Last-observed usage"))}`), true);
+      assert.equal(await evaluate("localeUsage===document.querySelector('.session-usage-dialog') && settingsShellFixture.usageReads.length===1 && settingsShellFixture.usageReads[0]===originalUsageRead && settingsShellFixture.runtimeReads.length===1 && inspectionFixture.canMutate()"), true);
+      for (const theme of ["light", "dark"]) {
+        await evaluate(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);
+        assert.equal(await evaluate("(()=>{const d=document.querySelector('.session-usage-dialog');return d.getBoundingClientRect().width<=innerWidth && d.getBoundingClientRect().height<=innerHeight && d.scrollWidth<=d.clientWidth+1 && document.activeElement.closest('.session-usage-dialog')===d})()"), true, `${locale} ${theme}: pending usage focus and short/narrow bounds`);
+      }
+    }
+    await evaluate("originalUsageRead.resolve({status:'no_observation',hostEpoch:'12345678-1234-1234-1234-123456789abc',sessionId:'Unknown',runtimeInstanceId:'12345678-1234-1234-1234-123456789abe',attachmentGeneration:'7',omittedUsageEvents:'3',observation:null})");
+    assert.equal(await wait("!document.querySelector('.session-usage-dialog footer button').disabled"), true);
+    for (const locale of locales) {
+      await evaluate(`inspectionFixture.setLocale(${JSON.stringify(locale)})`);
+      assert.equal(await wait(`document.querySelector('.session-usage-dialog').textContent.includes(${JSON.stringify(translate(locale, "Attachment {attachment}; no admitted usage event. Mismatched usage callbacks: {count}.", { attachment: "7", count: "3" }))})`), true);
+      assert.equal(await evaluate("settingsShellFixture.usageReads.length===1 && inspectionFixture.canMutate()"), true);
+    }
+    await evaluate("document.querySelector('.session-usage-dialog footer button').click()");
+    assert.equal(await wait("settingsShellFixture.usageReads.length===2"), true);
+    await evaluate("settingsShellFixture.usageReads[1].reject(new Error('private usage error'))");
+    for (const locale of locales) {
+      await evaluate(`inspectionFixture.setLocale(${JSON.stringify(locale)})`);
+      assert.equal(await wait(`document.querySelector('.session-usage-dialog [role=status]').textContent===${JSON.stringify(translate(locale, "Usage read failed; no observation established. Refresh explicitly if needed."))}`), true);
+      assert.equal(await evaluate("settingsShellFixture.usageReads.length===2 && inspectionFixture.canMutate() && !document.body.textContent.includes('private usage error')"), true);
+    }
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    assert.equal(await wait("!document.querySelector('.session-usage-dialog') && document.activeElement===document.querySelector('[aria-haspopup=dialog]')"), true);
+    await evaluate("inspectionFixture.setView('browser')");
+    assert.equal(await wait("document.querySelector('.session-browser')?.open"), true);
+    await evaluate("window.localeBrowser=document.querySelector('.session-browser');inspectionFixture.setStale(true);inspectionFixture.invalidate()");
+    for (const locale of locales) {
+      await evaluate(`inspectionFixture.setLocale(${JSON.stringify(locale)})`);
+      assert.equal(await wait(`document.querySelector('#session-browser-title').textContent===${JSON.stringify(translate(locale, "Browse saved sessions"))}`), true);
+      assert.equal(await evaluate("localeBrowser===document.querySelector('.session-browser') && document.activeElement===document.querySelector('.session-browser input') && document.querySelector('.session-browser-results strong').textContent==='Saved metadata' && document.querySelector('.session-browser-results [role=option]').disabled && settingsShellFixture.usageReads.length===2 && settingsShellFixture.runtimeReads.length===1 && !inspectionFixture.canMutate()"), true, `${locale}: stale browser retains literal title, disabled selection, revoked authority and no reads`);
+      for (const theme of ["light", "dark"]) {
+        await evaluate(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);
+        assert.equal(await evaluate("(()=>{const d=document.querySelector('.session-browser');return d.getBoundingClientRect().width<=innerWidth && d.getBoundingClientRect().height<=innerHeight && d.scrollWidth<=d.clientWidth+1})()"), true, `${locale} ${theme}: browser short/narrow bounds`);
+      }
+    }
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    assert.equal(await wait("!document.querySelector('.session-browser')"), true);
   } finally {
     socket?.close(); browser?.kill();
     await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });

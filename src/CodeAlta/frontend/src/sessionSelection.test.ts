@@ -7,7 +7,7 @@ import type { SessionChoicesResponse, SessionSelection, SessionSendRequest } fro
 const current: SessionSelection = { providerKey: "provider", agentPromptId: "default", modelId: "one", reasoningEffort: "High" };
 const choices: SessionChoicesResponse = { status: "ok", epoch: "epoch", sessionId: "session", current,
   prompts: [{ id: "default", name: "Default" }, { id: "plan", name: "Plan" }],
-  models: [{ id: "one", name: "One", efforts: ["High"] }, { id: "two", name: "Two", efforts: ["Low"] }] };
+  models: [{ id: "one", name: "One", efforts: ["High"], imageInput: null }, { id: "two", name: "Two", efforts: ["Low"], imageInput: null }] };
 
 test("model selection resets reasoning; prompt and supported effort changes are functional", () => {
   const changed = changeSelection(choices, current, "modelId", "two")!;

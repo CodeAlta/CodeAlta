@@ -1,5 +1,6 @@
-import type { SessionAdmission, SessionAbortRequest, SessionReceiptPage, SessionReceiptRequest, SessionReceiptView, SessionSendRequest, SessionSelection } from "#neoastra";
+import type { SessionAdmission, SessionAbortRequest, SessionReceiptPage, SessionReceiptRequest, SessionReceiptView, SessionSendRequest, SessionSelection, SessionReferenceScope } from "#neoastra";
 import { createOwnerChangeSignal } from "./ownerChangeSignal";
+import { createImageDrafts, freezeImages, validImages } from "./promptImages";
 
 type WaitOptions = { signal: AbortSignal; timeoutMilliseconds: number };
 export type SubmissionResult = SessionAdmission | { status: "uncertain"; epoch: string; receipt: null };
@@ -51,14 +52,21 @@ function guid(value: unknown): value is string {
 }
 function validSend(request: SessionSendRequest): boolean {
   return !!request && identity(request.expectedEpoch, 64) && identity(request.clientRequestId, 256)
-    && identity(request.sessionId, 256) && identity(request.text, 32768, false)
+    && identity(request.sessionId, 256) && identity(request.text, 32768, false) && validImages(request.images)
+    && (!request.images?.length || request.text.length <= 4096 && !!request.selection?.modelId)
+    && (request.references == null || identity(request.references.projectId, 256) && identity(request.references.projectPath, 4096))
     && (request.selection == null || identity(request.selection.providerKey, 256) && identity(request.selection.agentPromptId, 256)
       && (request.selection.modelId === null || identity(request.selection.modelId, 256))
       && (request.selection.reasoningEffort === null || identity(request.selection.reasoningEffort, 32)));
 }
-export function captureSubmission(epoch: string, sessionId: string, text: string, key: string, selection: SessionSelection | null = null): Readonly<SessionSendRequest> | null {
-  if (!validSend({ expectedEpoch: epoch, clientRequestId: key, sessionId, text, selection })) return null;
-  return Object.freeze({ expectedEpoch: epoch, clientRequestId: key, sessionId, text, selection: freezeSelection(selection) });
+export function captureSubmission(epoch: string, sessionId: string, text: string, key: string, selection: SessionSelection | null = null,
+  references: SessionReferenceScope | null = null, images: SessionSendRequest["images"] = null): Readonly<SessionSendRequest> | null {
+  if (!validSend({ expectedEpoch: epoch, clientRequestId: key, sessionId, text, selection, references, images })) return null;
+  return Object.freeze({ expectedEpoch: epoch, clientRequestId: key, sessionId, text, selection: freezeSelection(selection), references: freezeReferences(references), images: images?.length ? freezeImages(images) : null });
+}
+
+function freezeReferences(value: SessionReferenceScope | null): Readonly<SessionReferenceScope> | null {
+  return value == null ? null : Object.freeze({ projectId: value.projectId, projectPath: value.projectPath });
 }
 
 function freezeSelection(value: SessionSelection | null): Readonly<SessionSelection> | null {
@@ -134,6 +142,7 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
   const change = createOwnerChangeSignal();
   const sessionKey = (sessionId: string) => sessionId.toLowerCase();
   return {
+    imageDrafts: createImageDrafts(),
     subscribe: change.subscribe, getSnapshot: change.getSnapshot,
     pending(sessionId: string) {
       const entry = sends.get(sessionKey(sessionId));
@@ -171,7 +180,7 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
       if (!entry) {
         if (sends.size + aborts.size >= 256) { publish({ status: "capacity", epoch: request.expectedEpoch, receipt: null }); return; }
         entry = { request: Object.freeze({ expectedEpoch: request.expectedEpoch, clientRequestId: request.clientRequestId,
-          sessionId: request.sessionId, text: request.text, selection: freezeSelection(request.selection) }), inFlight: false };
+          sessionId: request.sessionId, text: request.text, selection: freezeSelection(request.selection), references: freezeReferences(request.references), images: request.images?.length ? freezeImages(request.images) : null }), inFlight: false };
         sends.set(key, entry);
       }
       entry.inFlight = true; // Synchronous ownership precedes transport, not a React render-time guard.

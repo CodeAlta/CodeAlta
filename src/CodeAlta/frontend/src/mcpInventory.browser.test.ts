@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { inventoryLanguages, inventoryNarrow } from "./inventoryLocalizationChecks";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -22,7 +23,8 @@ test("mounted MCP inventory searches, details, read errors and fences session sw
     await build({ entryPoints: [fileURLToPath(new URL("./mcpInventory.mount.tsx", import.meta.url))],
       outfile: join(dir, "fixture.js"), bundle: true, platform: "browser", format: "iife" });
     const page = join(dir, "fixture.html");
-    await writeFile(page, '<!doctype html><html><body><div id="app"></div><script src="fixture.js"></script></body></html>');
+    await writeFile(join(dir, "style.css"), readFileSync(fileURLToPath(new URL("./style.css", import.meta.url))));
+    await writeFile(page, '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><div id="app"></div><script src="fixture.js"></script></body></html>');
     const profile = join(dir, "profile");
     browser = spawn(edge!, ["--headless=new", "--disable-gpu", "--no-first-run", "--disable-background-networking", "--disable-extensions",
       `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", windowsHide: true });
@@ -65,6 +67,8 @@ test("mounted MCP inventory searches, details, read errors and fences session sw
       assert.fail(`UI did not satisfy: ${expression}`);
     };
     await wait("window.mcpFixture?.pending.length === 1");
+    const languages = () => inventoryLanguages(evalJs, "[mcpFixture.pending.length,mcpFixture.sessionId,mcpFixture.projectId]", "MCP Servers");
+    await languages();
     const reply = (sessionId: string, projectId: string | null) => ({ status: "ok", epoch: "e1", sessionId, projectId, omitted: 1,
       sources: ["Global: read", "Project: read_error"], policyReadError: false,
       servers: [{ name: "Alpha", scope: "Global", transport: "Stdio", enabled: true, overridesGlobal: false },
@@ -79,16 +83,34 @@ test("mounted MCP inventory searches, details, read errors and fences session sw
     await evalJs("document.querySelector('section[aria-label=\"Configured MCP servers\"] button').click()");
     await wait("document.body.textContent.includes('Unknown — Desktop plugins are off')");
     assert.equal(await evalJs("document.body.textContent.includes('overrides global definition')"), true);
+    await inventoryNarrow(evalJs, command);
+    await evalJs("document.querySelector('main input').focus();document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true,cancelable:true}))");
+    await languages();
     await evalJs("window.mcpFixture.switchSession('two', null)");
     await wait("window.mcpFixture.pending.length === 2");
     await evalJs("window.mcpFixture.switchSession('three', null)");
     await wait("window.mcpFixture.pending.length === 3");
+    await languages();
     await evalJs(`window.mcpFixture.reply(1, ${JSON.stringify(reply("two", null))})`);
     assert.equal(await evalJs("document.body.textContent.includes('Alpha')"), false);
     await evalJs("window.mcpFixture.fail(2)");
     await wait("document.body.textContent.includes('MCP inventory could not be read')");
     assert.equal(await evalJs("document.body.textContent.includes('Beta')"), false);
     assert.equal(await evalJs("document.body.textContent.includes('SECRET_ERROR')"), false);
+    await languages();
+    await evalJs("mcpFixture.switchSession('three','project-one')");
+    await wait("mcpFixture.pending.length===4");
+    await evalJs(`mcpFixture.reply(3,${JSON.stringify(reply("three", "wrong-project"))})`);
+    await wait("document.body.textContent.includes('No other scope was read')");
+    await languages();
+    await evalJs("mcpFixture.switchSession('four','project-one')");
+    await wait("mcpFixture.pending.length===5");
+    const oversized = reply("four", "project-one");
+    oversized.servers = Array.from({ length: 65 }, (_, i) => ({ name: `Settings-${i}`, scope: "Global", transport: "Stdio", enabled: true, overridesGlobal: false }));
+    await evalJs(`mcpFixture.reply(4,${JSON.stringify(oversized)})`);
+    await wait("document.body.textContent.includes('Invalid MCP inventory')");
+    await languages();
+    assert.equal(await evalJs("document.querySelectorAll('main .model-catalog-detail').length"), 0);
   } finally {
     socket?.close(); browser?.kill();
     await rm(dir, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });

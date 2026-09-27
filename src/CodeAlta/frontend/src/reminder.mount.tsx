@@ -2,6 +2,8 @@ import { createRoot } from "react-dom/client";
 import { ReminderPanel } from "./ReminderPanel";
 import { createReminderActions } from "./reminderActions";
 import type { ReminderDetailRequest, ReminderDetailResponse, ReminderListRequest, ReminderListResponse, ReminderMutationResponse } from "#neoastra";
+import { ShellLanguageContext } from "./shellLanguage";
+import type { Locale } from "./localization";
 
 const reads: Array<{ sessionId: string; resolve: (value: ReminderListResponse) => void; reject: (error: Error) => void }> = [];
 const details: Array<{ request: ReminderDetailRequest; resolve: (value: ReminderDetailResponse) => void; reject: (error: Error) => void }> = [];
@@ -16,6 +18,9 @@ const read = (request: ReminderListRequest) => new Promise<ReminderListResponse>
 const root = createRoot(document.getElementById("app")!);
 const fixture = {
   reads, details, writes, epoch: "e1" as string | null, sessionId: "one" as string | null, mounted: true, allowed: true, archived: false,
+  locale: "en" as Locale,
+  language(value: Locale) { fixture.locale = value; render(); },
+  operation() { return fixture.epoch && fixture.sessionId ? actions.get({ epoch: fixture.epoch, sessionId: fixture.sessionId }) : undefined; },
   session(id: string | null) { fixture.sessionId = id; render(); },
   host(epoch: string | null) { fixture.epoch = epoch; render(); },
   leave() { fixture.mounted = false; render(); },
@@ -25,9 +30,9 @@ const fixture = {
 Object.assign(window, { reminderFixture: fixture });
 function render() {
   if (!fixture.mounted) { root.render(<div>Other screen</div>); return; }
-  root.render(<ReminderPanel key={JSON.stringify([fixture.epoch, fixture.sessionId])}
+  root.render(<ShellLanguageContext.Provider value={{ locale: fixture.locale, choice: fixture.locale, setLanguage: value => fixture.language(value as Locale) }}><ReminderPanel key={JSON.stringify([fixture.epoch, fixture.sessionId])}
     target={fixture.epoch && fixture.sessionId ? { epoch: fixture.epoch, sessionId: fixture.sessionId } : null}
     actions={actions} mutationAllowed={!fixture.archived} readOnly={fixture.archived} canMutate={() => fixture.allowed && !fixture.archived}
-    readDetail={readDetail} read={read} />);
+    readDetail={readDetail} read={read} /></ShellLanguageContext.Provider>);
 }
 render();

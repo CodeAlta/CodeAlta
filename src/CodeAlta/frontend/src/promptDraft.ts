@@ -19,6 +19,19 @@ export function persistDraft(write: (key: string, value: string) => void, remove
   } catch { return false; }
 }
 
+// Explicit create handoff only. Failed reads never certify an empty destination;
+// the original local draft remains authoritative even after a successful copy.
+export function transferPromptDraft(read: (key: string) => string | null, write: (key: string, text: string) => void,
+  sessionId: string, text: string): boolean {
+  if (!text || text.length > maximumDraftUnits) return false;
+  try {
+    const key = draftStorageKey(sessionId);
+    if (read(key)) return false;
+    write(key, text);
+    return read(key) === text;
+  } catch { return false; }
+}
+
 // An indicator describes edits observed by this window, never a restored value or a journal
 // guess. Failed storage leaves only the selected live editor authoritative.
 export function createDraftIndicators() {

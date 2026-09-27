@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ConfigurationProvider, ModelCatalogProbeRequest, ModelCatalogProbeResponse, ModelCatalogProvidersRequest, ModelCatalogProvidersResponse } from "#neoastra";
+import { useShellLanguage } from "./shellLanguage";
+import type { MessageKey } from "./localization";
 
 type Read = (request: ModelCatalogProvidersRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ModelCatalogProvidersResponse>;
 type Probe = (request: ModelCatalogProbeRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ModelCatalogProbeResponse>;
@@ -8,12 +10,13 @@ export function ProvidersPanel({ epoch, read, probe, catalogProviders, holds, on
   epoch: string | null; read: Read; probe: Probe; catalogProviders?: readonly ConfigurationProvider[];
   holds?: Set<string>; onOpenModels: () => void;
 }) {
+  const { t } = useShellLanguage();
   const [inventory, setInventory] = useState<ModelCatalogProvidersResponse>();
-  const [error, setError] = useState("");
+  const [error, setError] = useState<MessageKey | "">("");
   const [providerId, setProviderId] = useState<string | null>(null);
   const [probing, setProbing] = useState(false);
   const [probeResult, setProbeResult] = useState<ModelCatalogProbeResponse>();
-  const [probeError, setProbeError] = useState("");
+  const [probeError, setProbeError] = useState<MessageKey | "">("");
   const active = useRef<AbortController | null>(null);
   const pending = useRef(false);
   const localHolds = useRef<Set<string>>(new Set());
@@ -76,39 +79,39 @@ export function ProvidersPanel({ epoch, read, probe, catalogProviders, holds, on
     } }
     finally { if (active.current === controller) { active.current = null; pending.current = false; setProbing(false); } }
   }
-  return <main className="configuration-page model-catalog-page" aria-label="Provider management">
-    <header className="page-heading"><span className="eyebrow">Desktop / Providers</span><h1>Providers</h1>
-      <p>Configured host providers and cached initialization state. Test only the selected provider; no settings or credentials change here.</p></header>
-    {!epoch ? <section aria-label="Read-only provider configuration"><p role="status">Catalog-only mode: provider configuration is read-only. No runtime test is available.</p>
+  return <main className="configuration-page model-catalog-page" aria-label={t("Provider management")}>
+    <header className="page-heading"><span className="eyebrow">{t("Desktop / Providers")}</span><h1>{t("Providers")}</h1>
+      <p>{t("Configured host providers and cached initialization state. Test only the selected provider; no settings or credentials change here.")}</p></header>
+    {!epoch ? <section aria-label={t("Read-only provider configuration")}><p role="status">{t("Catalog-only mode: provider configuration is read-only. No runtime test is available.")}</p>
         {catalogProviders?.slice(0, 32).map(provider => <p key={provider.id}><strong>{provider.name}</strong> ({provider.id}) · {provider.type} ·
-          {provider.enabled ? " Enabled" : " Disabled"} · {provider.isDefault ? "Configured default" : "Not default"} · model: {provider.defaultModel ?? "Not configured"}</p>)}
-        {!catalogProviders && <p role="status">Configuration inventory is unavailable.</p>}
+          {" "}{t(provider.enabled ? "Enabled" : "Disabled")} · {t(provider.isDefault ? "Configured default" : "Not default")} · {t("model:")} {provider.defaultModel ?? t("Not configured")}</p>)}
+        {!catalogProviders && <p role="status">{t("Configuration inventory is unavailable.")}</p>}
       </section>
       : <div className="model-catalog-layout">
-        <section className="model-catalog-providers" aria-label="Configured providers"><h2>Configured providers</h2>
-          {!inventory && !error && <p role="status">Loading configured providers.</p>}
-          {error && <p role="alert" className="error-text">{error}</p>}
-          {inventory?.providers.length === 0 && <p role="status">No providers registered.</p>}
+        <section className="model-catalog-providers" aria-label={t("Configured providers")}><h2>{t("Configured providers")}</h2>
+          {!inventory && !error && <p role="status">{t("Loading configured providers.")}</p>}
+          {error && <p role="alert" className="error-text">{t(error)}</p>}
+          {inventory?.providers.length === 0 && <p role="status">{t("No providers registered.")}</p>}
           {inventory?.providers.map(provider => <button type="button" key={provider.id} aria-pressed={providerId === provider.id}
-            onClick={() => select(provider.id)}><strong>{provider.name}</strong><small>{provider.id} · {provider.enabled ? provider.availability : "Disabled"}</small></button>)}
-          {inventory?.truncated && <p role="status">Showing 32 providers; others are omitted.</p>}
+            onClick={() => select(provider.id)}><strong>{provider.name}</strong><small>{provider.id} · {provider.enabled ? provider.availability : t("Disabled")}</small></button>)}
+          {inventory?.truncated && <p role="status">{t("Showing 32 providers; others are omitted.")}</p>}
         </section>
-        <section className="model-catalog-results" aria-label="Provider details"><h2>Provider details</h2>
-          {!selected ? <p role="status">Choose a provider to see its cached status. Choosing does not run a test.</p> : <article className="model-catalog-detail">
+        <section className="model-catalog-results" aria-label={t("Provider details")}><h2>{t("Provider details")}</h2>
+          {!selected ? <p role="status">{t("Choose a provider to see its cached status. Choosing does not run a test.")}</p> : <article className="model-catalog-detail">
             <h3>{selected.name}</h3><dl>
-              <dt>ID</dt><dd><code>{selected.id}</code></dd><dt>Adapter type</dt><dd>{selected.type}</dd>
-              <dt>Enabled</dt><dd>{selected.enabled ? "Yes" : "No"}</dd><dt>Configured default provider</dt><dd>{selected.isDefault ? "Yes" : "No"}</dd>
-              <dt>Configured default model</dt><dd>{selected.defaultModel ?? "Not configured (not a discovered model)"}</dd>
-              <dt>Cached availability</dt><dd>{selected.availability}</dd>
-              <dt>Observed</dt><dd>{selected.observedAt ?? "Not probed in this host"}</dd>
+              <dt>{t("ID")}</dt><dd><code>{selected.id}</code></dd><dt>{t("Adapter type")}</dt><dd>{selected.type}</dd>
+              <dt>{t("Enabled")}</dt><dd>{t(selected.enabled ? "Yes" : "No")}</dd><dt>{t("Configured default provider")}</dt><dd>{t(selected.isDefault ? "Yes" : "No")}</dd>
+              <dt>{t("Configured default model")}</dt><dd>{selected.defaultModel ?? t("Not configured (not a discovered model)")}</dd>
+              <dt>{t("Cached availability")}</dt><dd>{selected.availability}</dd>
+              <dt>{t("Observed")}</dt><dd>{selected.observedAt ?? t("Not probed in this host")}</dd>
             </dl>
-            <p>Cached status is not a new test or authentication check. Authentication requirements are not classified by this host projection.</p>
+            <p>{t("Cached status is not a new test or authentication check. Authentication requirements are not classified by this host projection.")}</p>
             <button type="button" disabled={!selected.enabled || probing || held} onClick={() => void testProvider()}>
-              {probing ? "Testing selected provider…" : "Test selected provider"}</button>
-            {held && <p role="status">This provider's probe may still be running. Its outcome cannot be recovered here; no retry is offered for this host.</p>}
-            <button type="button" className="quiet-button" onClick={onOpenModels}>Browse models</button>
-            {probeResult && <p role="status">Completed test for {selected.id}: {probeResult.availability}. This is provider initialization, not an authentication guarantee.</p>}
-            {probeError && <p role="alert" className="error-text">{probeError}</p>}
+              {t(probing ? "Testing selected provider…" : "Test selected provider")}</button>
+            {held && <p role="status">{t("This provider's probe may still be running. Its outcome cannot be recovered here; no retry is offered for this host.")}</p>}
+            <button type="button" className="quiet-button" onClick={onOpenModels}>{t("Browse models")}</button>
+            {probeResult && <p role="status">{t("Completed test for {id}: {availability}. This is provider initialization, not an authentication guarantee.", { id: selected.id, availability: probeResult.availability })}</p>}
+            {probeError && <p role="alert" className="error-text">{t(probeError)}</p>}
           </article>}
         </section>
       </div>}

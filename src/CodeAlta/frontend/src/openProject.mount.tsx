@@ -6,6 +6,7 @@ import { createProjectOpening } from "./projectOpening";
 import { savedProjectSelection } from "./savedProjectSelection";
 import { createMutationCapability } from "./sessionOperations";
 import { sessionsForProject } from "./workspace";
+import { InventoryLanguageFixture } from "./inventoryLanguage.mount";
 
 const projects = [
   { id: "one", name: "Alpha", path: "C:/catalog/alpha", archived: false },
@@ -17,14 +18,14 @@ const sessions = projects.map(project => ({ id: `session-${project.id}`, title: 
   projectId: project.id, workspacePath: project.path, providerKey: null, updatedAt: "2026-09-24T00:00:00Z" }));
 const original: WorkspaceSnapshot = { configured: true, projects, sessions,
   projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false };
-const calls: { confirmed: boolean; path: string; resolve: (reply: WorkspaceOpenProjectResponse) => void;
+const calls: { request: object; confirmed: boolean; path: string; resolve: (reply: WorkspaceOpenProjectResponse) => void;
   reject: (error: Error) => void }[] = [];
 const completionCalls: { request: { expectedHostEpoch: string; directoryPath: string; prefix: string }; signal: AbortSignal;
   resolve: (reply: WorkspaceDirectoryCompletionResponse) => void; reject: (error: Error) => void }[] = [];
 const opening = createProjectOpening(request => new Promise((resolve, reject) =>
-  calls.push({ confirmed: request.confirmed, path: request.directoryPath, resolve, reject })));
+  calls.push({ request, confirmed: request.confirmed, path: request.directoryPath, resolve, reject })));
 const capability = createMutationCapability("12345678-1234-1234-1234-123456789abc");
-const fixture = { calls, completionCalls, current: original as WorkspaceSnapshot | undefined, owned: true, demo: false, failRefresh: false,
+const fixture = { calls, completionCalls, get evidence() { return opening.getSnapshot(); }, current: original as WorkspaceSnapshot | undefined, owned: true, demo: false, failRefresh: false,
   set: (_snapshot: WorkspaceSnapshot | undefined) => {}, stale: (_snapshot: WorkspaceSnapshot | undefined) => {},
   host: (_owned: boolean) => {}, open: () => {}, refresh: () => {}, selected: "one", session: "session-one" };
 Object.assign(window, { openProjectFixture: fixture });
@@ -60,4 +61,4 @@ function App() {
       onImported={async () => false} onClose={() => setOpen(false)} />}
   </div>;
 }
-createRoot(document.getElementById("app")!).render(<App />);
+createRoot(document.getElementById("app")!).render(<InventoryLanguageFixture><App /></InventoryLanguageFixture>);

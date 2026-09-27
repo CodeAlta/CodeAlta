@@ -7,6 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
+import { locales, translate, type MessageKey } from "./localization";
 
 const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
@@ -75,6 +76,55 @@ test("production archived composer/reminder gates retain exact owner evidence wi
     const wait = (condition: string) => evaluate(`new Promise(resolve => { const end=Date.now()+7000; const check=()=>{
       if (${condition}) resolve('ready'); else if (Date.now()>end) resolve(document.body.innerText.slice(0,500));
       else setTimeout(check,20); }; check(); })`);
+    // Keep the actual owners and DOM alive through context-only updates. Compare every
+    // fake request by identity and value, not just operation counts or translated text.
+    const localeCycle = async (key: MessageKey, archived: boolean) => {
+      await evaluate(`(() => {
+        const f=window.archivedRecoveryFixture;
+        window.localeEvidence={requests:f.calls.map(x=>x.request),json:JSON.stringify(f.calls.map(x=>x.request)),
+          reads:JSON.stringify([f.reads,f.runtimeReads,window.fixtureChoiceReads,window.fixtureReceiptReads]),
+          input:document.querySelector('${archived ? "#catalog-prompt" : "#session-prompt"}'),
+          literals:[...document.querySelectorAll('.archived-action-recovery pre, .archived-action-recovery code, .retained-intent-strip pre, .retained-intent-strip code')].map(x=>x.textContent),
+          selections:[...document.querySelectorAll('.composer select')].map(x=>[x,x.value,x.disabled]),
+          buttons:[...document.querySelectorAll('.composer button')].map(x=>[x,x.disabled])};
+        const e=window.localeEvidence,input=e.input;
+        (input.disabled ? document.querySelector('.advanced-session-controls summary') : input).focus(); input.setSelectionRange(1,3);
+        e.text=input.value; e.focus=document.activeElement; e.start=input.selectionStart; e.end=input.selectionEnd;
+      })()`);
+      for (const locale of [...locales, "en"] as const) {
+        await evaluate(`window.archivedRecoveryFixture.language(${JSON.stringify(locale)})`);
+        assert.equal(await wait(`document.querySelector('[data-locale]')?.dataset.locale===${JSON.stringify(locale)}`), "ready");
+        assert.equal(await evaluate(`document.body.textContent.includes(${JSON.stringify(translate(locale, key))})`), true, `${locale}: ${key}`);
+        assert.equal(await evaluate(`(() => {const f=window.archivedRecoveryFixture,e=window.localeEvidence;
+          return JSON.stringify(f.calls.map(x=>x.request))===e.json && f.calls.every((x,i)=>x.request===e.requests[i])
+            && JSON.stringify([f.reads,f.runtimeReads,window.fixtureChoiceReads,window.fixtureReceiptReads])===e.reads
+            && document.activeElement===e.focus && e.input.isConnected && e.input.value===e.text
+            && e.input.selectionStart===e.start && e.input.selectionEnd===e.end
+            && JSON.stringify([...document.querySelectorAll('.archived-action-recovery pre, .archived-action-recovery code, .retained-intent-strip pre, .retained-intent-strip code')].map(x=>x.textContent))===JSON.stringify(e.literals)
+            && e.selections.every(([select,value,disabled])=>select.isConnected && select.value===value && select.disabled===disabled)
+            && e.buttons.every(([button,disabled])=>button.isConnected && button.disabled===disabled);
+        })()`), true, `${locale}: no request, read, remount, unlock, draft or selection change`);
+        if (archived) assert.equal(await evaluate("document.querySelectorAll('.archived-action-recovery button').length"), 0);
+        else {
+          assert.equal(await evaluate(`document.body.textContent.includes(${JSON.stringify(translate(locale, "Captured model"))})`), true);
+          assert.equal(await evaluate(`['Settings / Ready','Unknown','Copy','Send','Abort'].every(value=>
+            [...document.querySelectorAll('.advanced-session-controls dd')].some(x=>x.textContent===value))`), true,
+          "English-like recorded provider/model/reasoning/prompt data remain literal");
+        }
+        if (archived && (locale === "de" || locale === "ja")) {
+          await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 420, deviceScaleFactor: 1, mobile: false });
+          for (const theme of ["light", "dark"]) {
+            await evaluate(`document.documentElement.dataset.theme='${theme}'`);
+            assert.equal(await evaluate(`(() => {const button=document.querySelector('#expand-session-prompt');
+              button.scrollIntoView({block:'center'}); button.focus(); const r=button.getBoundingClientRect();
+              const accessible=document.activeElement===button && r.top>=0 && r.bottom<=innerHeight && r.left>=0 && r.right<=innerWidth;
+              window.localeEvidence.focus.focus(); return accessible; })()`), true, `${locale} ${theme}: archived controls reachable at 390x420`);
+            assert.equal(await evaluate(`document.querySelector('#catalog-prompt').dispatchEvent(new KeyboardEvent('keydown',
+              {key:'Enter',ctrlKey:true,isComposing:true,bubbles:true,cancelable:true}))`), true);
+          }
+        }
+      }
+    };
     assert.equal(await wait("!!document.querySelector('#session-prompt')"), "ready");
     await evaluate(`(() => { const input=document.querySelector('#session-prompt'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'Original Send text'); input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
     await evaluate("document.querySelector('.send-button').click()");
@@ -88,6 +138,24 @@ test("production archived composer/reminder gates retain exact owner evidence wi
       !!document.querySelector('.retained-intent-row[data-kind="Steer"]')`), "ready",
       "the mounted owned composer projects the two exact retained intents");
     assert.equal(await evaluate("[...window.archivedRecoveryFixture.reads].sort().join(',')"), "input:one,permission:one");
+    await evaluate("document.querySelector('.advanced-session-controls').open=true");
+    await localeCycle("Advanced session controls and diagnostics", false);
+    for (const locale of ["de", "ja"] as const) {
+      await evaluate(`window.archivedRecoveryFixture.language('${locale}')`);
+      assert.equal(await wait(`document.querySelector('[data-locale]')?.dataset.locale==='${locale}'`), "ready");
+      await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 420, deviceScaleFactor: 1, mobile: false });
+      for (const theme of ["dark", "light"]) {
+        await evaluate(`document.documentElement.dataset.theme='${theme}'`);
+        assert.equal(await evaluate(`(() => {const button=document.querySelector('#refresh-session-context');
+          button.scrollIntoView({block:'center'}); button.focus(); const r=button.getBoundingClientRect();
+          return r.top>=0 && r.bottom<=innerHeight && r.left>=0 && r.right<=innerWidth && document.activeElement===button;
+        })()`), true, `${locale} ${theme}: advanced refresh is scroll-accessible and focusable at 390x420`);
+        assert.equal(await evaluate(`document.querySelector('#session-prompt').dispatchEvent(new KeyboardEvent('keydown',
+          {key:'Enter',ctrlKey:true,isComposing:true,bubbles:true,cancelable:true}))`), true, "IME Enter remains unconsumed");
+        assert.equal(await evaluate("window.archivedRecoveryFixture.calls.length"), 14);
+      }
+    }
+    await evaluate("window.archivedRecoveryFixture.language('en')");
     await evaluate("window.archivedRecoveryFixture.archive(true)");
     assert.equal(await wait("!!document.querySelector('.catalog-composer #catalog-prompt')"), "ready");
     assert.equal(await evaluate("!!document.querySelector('.retained-intent-strip')"), false,
@@ -111,6 +179,7 @@ test("production archived composer/reminder gates retain exact owner evidence wi
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Archived interaction recovery\"]')?.innerText.includes('allow_once')"), true);
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Archived interaction recovery\"]')?.innerText.includes('input-one')"), true);
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Archived interaction recovery\"]')?.innerText.includes('88888888-8888-8888-8888-888888888888')"), true);
+    await localeCycle("Archived session — retained owner evidence (read-only)", true);
     for (const width of [390, 1120]) {
       await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
       for (const theme of ["dark", "light"]) {
@@ -174,15 +243,22 @@ test("production archived composer/reminder gates retain exact owner evidence wi
     await evaluate("window.archivedRecoveryFixture.calls.find(x=>x.kind==='send').reject(new Error('lost send response'))");
     assert.equal(await wait("document.body.innerText.includes('Send · Outcome uncertain; original waiter settled')"), "ready");
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Retained Send text\"]')?.textContent"), "Original Send text");
+    await evaluate(`(() => {for (const kind of ['steer','queue','cancel','abort','cancelQueue'])
+      window.archivedRecoveryFixture.calls.find(x=>x.kind===kind).reject(new Error('Settings Unknown Ready Copy')); })()`);
+    assert.equal(await wait("document.querySelectorAll('.archived-action-recovery h3').length>=7"), "ready");
+    await localeCycle("Outcome uncertain; original waiter settled", true);
     await evaluate("window.archivedRecoveryFixture.calls.find(x=>x.kind==='compact').resolve({status:'busy',epoch:'12345678-1234-1234-1234-123456789abc',receipt:null})");
     assert.equal(await wait("!document.body.innerText.includes('compact-one')"), "ready");
     assert.equal(await evaluate("document.body.innerText.includes('Original Send text') && document.querySelector('.catalog-composer .send-button')?.disabled"), true);
+    await evaluate("window.archivedRecoveryFixture.revoke()");
+    await localeCycle("Outcome uncertain; original waiter settled", true);
     await evaluate("window.archivedRecoveryFixture.session('two')");
     assert.equal(await wait("document.body.innerText.includes('Steer exact two')"), "ready");
     assert.equal(await evaluate("!document.body.innerText.includes('Original Send text') && !document.body.innerText.includes('Steer exact one')"), true);
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Archived interaction recovery\"]')?.innerText.includes('Original one answer')"), false);
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Archived interaction recovery\"]')?.innerText.includes('99999999-9999-9999-9999-999999999999')"), true);
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Archived interaction recovery\"]')?.innerText.includes('Ask cancel · settled')"), true);
+    await localeCycle("Archived session — retained owner evidence (read-only)", true);
     await evaluate("window.archivedRecoveryFixture.session('one')");
     assert.equal(await wait("document.body.innerText.includes('Original Send text')"), "ready");
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Archived interaction recovery\"]')?.innerText.includes('Original one input')"), true);
@@ -238,6 +314,12 @@ test("production archived composer/reminder gates retain exact owner evidence wi
     await evaluate("window.archivedRecoveryFixture.session('two')");
     assert.equal(await wait("document.querySelector('#catalog-prompt')?.value===''"), "ready");
     assert.equal(await evaluate("window.archivedRecoveryFixture.calls.length"), countAtArchive);
+    // Explicit scope return may mount/read; subsequent locale changes may not. The
+    // previously revoked capability must remain revoked in the replacement scope.
+    await evaluate("window.archivedRecoveryFixture.host('12345678-1234-1234-1234-123456789abc')");
+    assert.equal(await wait("!!document.querySelector('#session-prompt') && document.body.textContent.includes('Captured model')"), "ready");
+    await localeCycle("Advanced session controls and diagnostics", false);
+    assert.equal(await evaluate("document.querySelector('.send-button').disabled"), true);
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }

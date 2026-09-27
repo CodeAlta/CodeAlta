@@ -7,6 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
+import { locales, translate } from "./localization";
 
 const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
@@ -73,6 +74,14 @@ test("mounted live Copy feedback follows source, latest request and row lifetime
       window.originalText=window.liveCopyFixture.text();
     })()`);
     await click();
+    await evaluate("window.localeCopy=document.querySelector('.copy-markdown');window.localeBody=document.querySelector('.markdown-content');window.localeHtml=localeBody.innerHTML;localeCopy.focus()");
+    for (const locale of locales) {
+      await evaluate(`liveCopyFixture.language('${locale}')`);
+      assert.equal(await label(), translate(locale, "Copy {title} as Markdown", { title: "Assistant" }));
+      assert.equal(await evaluate("document.querySelector('.markdown-content pre code').textContent"), "Settings Copy failed Allow once\n");
+      assert.equal(await evaluate("localeCopy===document.querySelector('.copy-markdown') && document.activeElement===localeCopy && localeBody===document.querySelector('.markdown-content') && localeHtml===localeBody.innerHTML && pendingCopies.length===1 && pendingCopies[0].text===originalText && liveCopyFixture.reads()===1"), true, `${locale}: pending Copy keeps literal source, DOM and reads`);
+    }
+    await evaluate("liveCopyFixture.language('en')");
     await evaluate("window.liveCopyFixture.update({text:window.originalText+'\\nSTREAMED NEW END'})");
     assert.equal(await evaluate("window.originalCopyNode===document.querySelector('.copy-markdown')"), true,
       "production History must reuse the actual live row key while its streaming text changes");
@@ -84,6 +93,17 @@ test("mounted live Copy feedback follows source, latest request and row lifetime
     await evaluate("window.pendingCopies[0].reject(Error('private stale failure'))");
     await drain();
     const staleResultLabel = await label();
+    for (const locale of ["de", "ja"] as const) for (const theme of ["light", "dark"]) {
+      await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 500, deviceScaleFactor: 1, mobile: false });
+      await evaluate(`liveCopyFixture.language('${locale}');document.documentElement.dataset.theme='${theme}'`);
+      assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth+2"), true, `${locale}/${theme}: history/live Copy bounds`);
+    }
+    for (const locale of locales) {
+      await evaluate(`liveCopyFixture.language('${locale}')`);
+      assert.equal(await label(), translate(locale, "Copied"));
+      assert.equal(await evaluate("pendingCopies.length===2 && liveCopyFixture.reads()===1"), true);
+    }
+    await evaluate("liveCopyFixture.language('en')");
     await click();
     await evaluate("window.pendingCopies[2].resolve()");
     assert.equal(await wait("window.copyResets.length===2"), true);

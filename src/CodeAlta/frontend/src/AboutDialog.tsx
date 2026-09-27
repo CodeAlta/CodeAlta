@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef } from "react";
 import type { BootStatus } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import type { PaletteAction } from "./paletteActions";
+import { useShellLanguage } from "./shellLanguage";
 
 export function openAboutPaletteAction(action: PaletteAction, origin: HTMLElement | null,
   open: (origin: HTMLElement | null) => void): action is "about" {
@@ -16,15 +17,17 @@ function recordedText(value: unknown, maxLength: number): string | null {
 }
 
 export function AboutSettingsEntry({ onOpen }: { onOpen: (origin: HTMLButtonElement) => void }) {
-  return <section className="settings-card"><div className="settings-icon">i</div><div><h2>About</h2>
-    <p>Inspect the running desktop host identity and its available build information.</p>
-    <button type="button" className="quiet-button" onClick={event => onOpen(event.currentTarget)}>Open About</button>
+  const { t } = useShellLanguage();
+  return <section className="settings-card"><div className="settings-icon">i</div><div><h2>{t("About")}</h2>
+    <p>{t("Inspect the running desktop host identity and its available build information.")}</p>
+    <button type="button" className="quiet-button" onClick={event => onOpen(event.currentTarget)}>{t("Open About")}</button>
   </div></section>;
 }
 
 export function AboutDialog({ status, bootError, demo, onClose }: {
   status: BootStatus | undefined; bootError: boolean; demo: boolean; onClose: () => void;
 }) {
+  const { t } = useShellLanguage();
   const dialog = useRef<HTMLDialogElement>(null);
   const closing = useRef(false);
   const composingEscape = useRef(false);
@@ -58,15 +61,15 @@ export function AboutDialog({ status, bootError, demo, onClose }: {
       else composingEscape.current = true;
     }} onKeyUp={() => { composingEscape.current = false; }} onCompositionEnd={() => { composingEscape.current = false; }}
     onCancel={event => { event.preventDefault(); if (!composingEscape.current) close(); }}>
-    <header><div><span className="eyebrow">Desktop</span><h2 id="about-title">About CodeAlta</h2></div>
-      <button type="button" autoFocus className="icon-button" aria-label="Close About" onClick={close}><AppIcon name="close" size={16} /></button></header>
-    <p id="about-description" className="muted-text">{mode}</p>
-    <dl className="session-info-fields" tabIndex={0} aria-label="Running host build information">
-      <div><dt>Product</dt><dd>{product ?? "Not available from the running host"}</dd></div>
-      <div><dt>Version</dt><dd>{versionKnown ?? "Not available from the running host"}</dd></div>
-      {build && <div><dt>Build metadata</dt><dd>{build}</dd></div>}
+    <header><div><span className="eyebrow">{t("Desktop")}</span><h2 id="about-title">{t("About CodeAlta")}</h2></div>
+      <button type="button" autoFocus className="icon-button" aria-label={t("Close About")} onClick={close}><AppIcon name="close" size={16} /></button></header>
+    <p id="about-description" className="muted-text">{t(mode)}</p>
+    <dl className="session-info-fields" tabIndex={0} aria-label={t("Running host build information")}>
+      <div><dt>{t("Product")}</dt><dd>{product ?? t("Not available from the running host")}</dd></div>
+      <div><dt>{t("Version")}</dt><dd>{versionKnown ?? t("Not available from the running host")}</dd></div>
+      {build && <div><dt>{t("Build metadata")}</dt><dd>{build}</dd></div>}
     </dl>
-    <p className="muted-text">Update checks, downloads and installation are not supported in this desktop view. No update status is known.</p>
-    <footer><button type="button" className="quiet-button" onClick={close}>Close</button></footer>
+    <p className="muted-text">{t("Update checks, downloads and installation are not supported in this desktop view. No update status is known.")}</p>
+    <footer><button type="button" className="quiet-button" onClick={close}>{t("Close")}</button></footer>
   </dialog>;
 }

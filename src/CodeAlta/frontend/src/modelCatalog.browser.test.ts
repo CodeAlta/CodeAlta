@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { inventoryLanguages, inventoryNarrow } from "./inventoryLocalizationChecks";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -85,6 +86,9 @@ test("mounted catalog selects providers, filters models and rejects errors, stal
       providers: window.catalogFixture.providerReads.length, models: window.catalogFixture.modelReads.map(read => read.providerId),
       buttons: Array.from(document.querySelectorAll('.model-catalog-list button')).map(button => button.innerText) })`))!);
     assert.equal(await wait("window.catalogFixture?.providerReads.length === 1"), "ready");
+    const languages = (title: "Model catalog" | "Provider management" = "Model catalog") => inventoryLanguages(evaluate,
+      "[catalogFixture.providerReads.length,catalogFixture.modelReads.length,catalogFixture.probeRequests.length,catalogFixture.choicesReads,catalogFixture.sent,JSON.stringify(localStorage)]", title);
+    await languages();
     assert.match((await snapshot()).text, /Loading providers/);
     assert.equal((await snapshot()).models.length, 0, "no provider probing on initial navigation");
     await evaluate(`window.catalogFixture.providerReads[0].resolve({status:'ok',epoch:'epoch-1',truncated:false,providers:[
@@ -96,11 +100,12 @@ test("mounted catalog selects providers, filters models and rejects errors, stal
     assert.match((await snapshot()).text, /Loading models for alpha/);
     await evaluate(`document.querySelectorAll('.model-catalog-providers button')[1].click()`);
     assert.equal(await wait("window.catalogFixture.modelReads.length === 2"), "ready");
+    await languages();
     await evaluate(`window.catalogFixture.modelReads[0].resolve({status:'ok',epoch:'epoch-1',providerId:'alpha',availability:'Ready',truncated:false,
       models:[{id:'stale-model',name:'Stale model',description:null,efforts:[],defaultEffort:null,contextTokens:null,inputTokens:null,
         outputTokens:null,reasoning:null,tools:null,structuredOutput:null,imageInput:null}]})`);
     await evaluate(`window.catalogFixture.modelReads[1].resolve({status:'ok',epoch:'epoch-1',providerId:'beta',availability:'Ready',truncated:true,
-      models:[{id:'beta-image',name:'Image model',description:'Literal image',efforts:['Low','Medium'],defaultEffort:'Medium',contextTokens:32000,
+      models:[{id:'beta-image',name:'Image model',description:'No description reported.',efforts:['Low','Medium'],defaultEffort:'Medium',contextTokens:32000,
         inputTokens:null,outputTokens:4000,reasoning:true,tools:false,structuredOutput:null,imageInput:true},
       {id:'beta-text',name:'Text model',description:null,efforts:[],defaultEffort:null,contextTokens:null,inputTokens:null,
         outputTokens:null,reasoning:null,tools:null,structuredOutput:null,imageInput:null}]})`);
@@ -111,6 +116,9 @@ test("mounted catalog selects providers, filters models and rejects errors, stal
     assert.equal(await wait("document.querySelector('.model-catalog-detail')?.innerText.includes('32,000') || document.querySelector('.model-catalog-detail')?.innerText.includes('32000')"), "ready");
     assert.match((await snapshot()).text, /Pricing\s+Unknown \(not exposed by the host model inventory\)/);
     assert.match((await snapshot()).text, /Supported efforts\s+Low, Medium/);
+    await inventoryLanguages(evaluate, "[catalogFixture.providerReads.length,catalogFixture.modelReads.length,catalogFixture.choicesReads]", "Model catalog", undefined, ".model-catalog-detail > p:nth-of-type(2)");
+    await inventoryNarrow(evaluate, command);
+    await languages();
     await evaluate(`(() => { const input = document.querySelector('input[type=search]');
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'text');
       input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
@@ -119,10 +127,13 @@ test("mounted catalog selects providers, filters models and rejects errors, stal
     assert.doesNotMatch((await snapshot()).text, /Pricing/, "a filtered-out selection must not retain stale details");
     await evaluate(`document.querySelector('.model-catalog-list button').click()`);
     assert.match((await snapshot()).text, /Context tokens\s+Unknown/);
+    await evaluate("document.querySelector('input[type=search]').focus();document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true,cancelable:true}))");
+    await languages();
     await evaluate(`document.querySelectorAll('.model-catalog-providers button')[0].click()`);
     assert.equal(await wait("window.catalogFixture.modelReads.length === 3"), "ready");
     await evaluate(`window.catalogFixture.modelReads[2].reject(new Error('private provider error'))`);
     assert.equal(await wait("document.querySelector('.model-catalog-results [role=alert]')"), "ready");
+    await languages();
     assert.match((await snapshot()).text, /Model inventory could not be read/);
     assert.doesNotMatch((await snapshot()).text, /private provider error|Text model/);
     await evaluate(`window.catalogFixture.show('epoch-2')`);
@@ -143,6 +154,7 @@ test("mounted catalog selects providers, filters models and rejects errors, stal
     assert.equal(await wait("window.catalogFixture.modelReads.length === 5"), "ready");
     await evaluate(`window.catalogFixture.modelReads[4].resolve({status:'stale_epoch',epoch:'epoch-4',providerId:'alpha',availability:'Unknown',models:[],truncated:false})`);
     assert.equal(await wait("document.querySelector('.model-catalog-results [role=alert]')?.innerText.includes('Reload required')"), "ready");
+    await languages();
     await evaluate(`window.catalogFixture.show('epoch-4')`);
     assert.equal(await wait("window.catalogFixture.providerReads.length === 4"), "ready");
     await evaluate(`window.catalogFixture.providerReads[3].reject(new Error('private configuration details'))`);
@@ -200,6 +212,7 @@ test("mounted catalog selects providers, filters models and rejects errors, stal
     assert.equal(await wait("document.querySelectorAll('.model-catalog-list button').length === 2"), "ready");
     await evaluate(`document.querySelectorAll('.model-catalog-list button')[1].click()`);
     assert.equal(await wait("document.querySelector('.model-catalog-next')?.innerText.includes('Retained exact request')"), "ready");
+    await languages();
     assert.equal(await evaluate(`document.querySelector('.model-catalog-next button').disabled`), true);
     assert.equal((await snapshot()).text.includes("Retained exact request (beta-image)"), true);
     assert.deepEqual(JSON.parse((await evaluate(`JSON.stringify(window.catalogFixture.sent[0])`))!).selection, captured.selection);
@@ -209,6 +222,7 @@ test("mounted catalog selects providers, filters models and rejects errors, stal
     assert.equal(await wait("!document.querySelector('.model-catalog-next')?.innerText.includes('Loading session choices')"), "ready");
     await evaluate(`window.catalogFixture.holdChoices=true; document.querySelector('.model-catalog-next button').click()`);
     assert.equal(await wait("!!window.catalogFixture.releaseChoices"), "ready");
+    await languages();
     await evaluate(`window.catalogFixture.session('three'); window.catalogFixture.holdChoices=false; window.catalogFixture.releaseChoices()`);
     assert.equal(await wait("document.querySelector('.model-catalog-next')?.innerText.includes('Session: three')"), "ready");
     assert.equal(await evaluate(`localStorage.getItem('codealta.desktop.selection.two')`), null,
@@ -258,17 +272,22 @@ test("mounted catalog selects providers, filters models and rejects errors, stal
     // The separate production provider screen reads cached state without probing on navigation or selection.
     await evaluate(`window.catalogFixture.openProviders('epoch-1')`);
     assert.equal(await wait("window.catalogFixture.providerReads.length === 9"), "ready");
+    await languages("Provider management");
     assert.equal(await evaluate(`window.catalogFixture.probeRequests.length`), 0);
     await evaluate(`window.catalogFixture.providerReads[8].resolve({status:'ok',epoch:'epoch-1',truncated:false,providers:[
-      {id:'alpha',name:'Alpha',type:'literal',enabled:true,isDefault:true,defaultModel:'configured-only',availability:'Unknown',observedAt:null},
+      {id:'alpha',name:'Alpha',type:'Settings',enabled:true,isDefault:true,defaultModel:'configured-only',availability:'Unknown',observedAt:null},
       {id:'beta',name:'Beta',type:'literal',enabled:true,isDefault:false,defaultModel:null,availability:'Failed',observedAt:null}]})`);
     assert.equal(await wait("document.querySelectorAll('[aria-label=\"Configured providers\"] button').length === 2"), "ready");
     await evaluate(`document.querySelectorAll('[aria-label="Configured providers"] button')[0].click()`);
     assert.equal(await wait("document.body.innerText.includes('configured-only')"), "ready");
+    await inventoryLanguages(evaluate, "[catalogFixture.providerReads.length,catalogFixture.probeRequests.length]", "Provider management", undefined, ".model-catalog-detail dd:nth-of-type(2),.model-catalog-detail dd:nth-of-type(5),.model-catalog-detail dd:nth-of-type(6)");
+    await inventoryNarrow(evaluate, command);
+    await languages("Provider management");
     assert.match((await snapshot()).text, /Cached availability\s+Unknown/);
     assert.equal(await evaluate(`window.catalogFixture.probeRequests.length`), 0);
     await evaluate(`document.querySelector('[aria-label="Provider details"] button').click()`);
     assert.equal(await wait("window.catalogFixture.probeRequests.length === 1"), "ready");
+    await languages("Provider management");
     assert.equal(await evaluate(`JSON.stringify(window.catalogFixture.probeRequests[0].providerId)`), '"alpha"');
     await evaluate(`document.querySelectorAll('[aria-label="Configured providers"] button')[1].click();
       window.catalogFixture.probeRequests[0].resolve({status:'ok',epoch:'epoch-1',providerId:'alpha',availability:'Ready'})`);
@@ -278,6 +297,7 @@ test("mounted catalog selects providers, filters models and rejects errors, stal
     assert.equal(await wait("window.catalogFixture.probeRequests.length === 2"), "ready");
     await evaluate(`window.catalogFixture.probeRequests[1].reject(new Error('https://secret.invalid/token'))`);
     assert.equal(await wait("document.querySelector('[aria-label=\"Provider details\"] [role=alert]')"), "ready");
+    await languages("Provider management");
     assert.doesNotMatch((await snapshot()).text, /secret.invalid/);
     assert.equal(await evaluate(`document.querySelector('[aria-label="Provider details"] button').disabled`), true);
     await evaluate(`window.catalogFixture.openModels()`);

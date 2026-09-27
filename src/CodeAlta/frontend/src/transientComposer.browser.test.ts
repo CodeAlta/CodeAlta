@@ -54,6 +54,8 @@ test("empty regular composer transient help and palette keep drafts and ownershi
       socket!.send(JSON.stringify({ id, method, params }));
     });
     await command("Page.enable");
+    // Do not edit a fully clipped composer in the headless default 750x485 viewport.
+    await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(page).href });
     const evaluate = async (expression: string) => (await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true })).result?.value;
     const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+7000;const tick=()=>{
@@ -67,6 +69,64 @@ test("empty regular composer transient help and palette keep drafts and ownershi
     };
     const focus = (selector: string) => evaluate(`document.querySelector('${selector}').focus()`);
     const close = async (selector: string) => { await evaluate(`document.querySelector('${selector}').click()`); assert.equal(await wait(`!document.querySelector('${selector}')`), true); };
+    // Intersect with every clipping/scrolling ancestor, not just the textarea's own box.
+    const installEditorProbe = () => evaluate(`window.visibleEditorBox=selector=>{const e=document.querySelector(selector);if(!e)return null;
+      const r=e.getBoundingClientRect();let top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom),left=Math.max(0,r.left),right=Math.min(innerWidth,r.right);
+      for(let p=e.parentElement;p;p=p.parentElement){const s=getComputedStyle(p),b=p.getBoundingClientRect();
+        if(/auto|scroll|hidden|clip/.test(s.overflowY)){top=Math.max(top,b.top);bottom=Math.min(bottom,b.bottom);}
+        if(/auto|scroll|hidden|clip/.test(s.overflowX)){left=Math.max(left,b.left);right=Math.min(right,b.right);}
+        if(p.matches('dialog:modal'))break;}
+      return {height:Math.max(0,bottom-top),width:Math.max(0,right-left)};};true`);
+    const shortEditor = async (selector: string) => {
+      await installEditorProbe();
+      const original = await evaluate(`document.querySelector('${selector}').value`) as string;
+      await evaluate(`window.shortEditorIdentity=document.querySelector('${selector}');true`);
+      for (const [width, height] of [[750, 485], [390, 500], [1120, 800], [750, 485]]) {
+        await command("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+        assert.equal(await wait(`innerWidth===${width} && innerHeight===${height} && ${width < 875
+          ? `Math.abs(document.querySelector('.content').getBoundingClientRect().width-${width})<2 && document.querySelector('.active-session-content').clientHeight<${height * .7}`
+          : `document.querySelector('.content').getBoundingClientRect().width<${width * .8} && document.querySelector('.active-session-content').clientHeight>${height * .7}`}`), true,
+          "wait for the public layout container to adopt the requested viewport before editing");
+        await focus(selector);
+        await evaluate(`document.documentElement.dataset.theme='${width === 390 ? "light" : "dark"}'`);
+        await evaluate(`document.querySelector('${selector}').scrollIntoView({block:'center',inline:'nearest'})`);
+        assert.equal(await wait(`visibleEditorBox('${selector}')?.height>=48 && visibleEditorBox('${selector}')?.width>=80`), true,
+          `${selector} ${width}x${height}: native editor is visibly usable through all scroll ancestors`);
+        assert.equal(await evaluate(`shortEditorIdentity===document.querySelector('${selector}') && document.activeElement===shortEditorIdentity`), true);
+        await evaluate(`shortEditorIdentity.select()`);
+        await command("Input.insertText", { text: "/" }); await key("?");
+        assert.deepEqual(await evaluate(`({value:shortEditorIdentity.value,start:shortEditorIdentity.selectionStart,end:shortEditorIdentity.selectionEnd,modal:!!document.querySelector('dialog[open]')})`),
+          { value: "/?", start: 2, end: 2, modal: false });
+        await evaluate("shortEditorIdentity.setSelectionRange(0,2)"); await key("/");
+        assert.deepEqual(await evaluate("[shortEditorIdentity.value,shortEditorIdentity.selectionStart,shortEditorIdentity.selectionEnd]"), ["/", 1, 1]);
+        if (width === 390 && await evaluate("!!document.querySelector('.composer-splitter')")) {
+          await focus(".composer-splitter");
+          for (let i = 0; i < 32; i++) {
+            await command("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 });
+            await command("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 });
+          }
+          assert.equal(await wait("(()=>{const s=document.querySelector('.composer-splitter');return s.getAttribute('aria-valuenow')===s.getAttribute('aria-valuemin')})()"), true);
+          await focus(selector); await evaluate("shortEditorIdentity.scrollIntoView({block:'center',inline:'nearest'})");
+          assert.equal(await evaluate(`visibleEditorBox('${selector}').height>=48`), true, "minimum manual composer remains scrollably editable");
+          await key("?");
+          assert.deepEqual(await evaluate("[shortEditorIdentity.value,shortEditorIdentity.selectionStart,shortEditorIdentity.selectionEnd]"), ["/?", 2, 2]);
+          await focus(".composer-splitter");
+          await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Home", code: "Home", windowsVirtualKeyCode: 36 });
+          await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Home", code: "Home", windowsVirtualKeyCode: 36 });
+          assert.equal(await wait("!document.querySelector('.composer-region.resized')"), true);
+          await focus(selector);
+        }
+        // Real Tab traversal must reveal the primary editor action, without DOM clicking hidden controls.
+        for (let i = 0; i < 24 && !await evaluate("document.activeElement?.id==='expand-session-prompt'"); i++) {
+          await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+          await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+        }
+        assert.equal(await evaluate("document.activeElement?.id==='expand-session-prompt' && visibleEditorBox('#expand-session-prompt').height>=20"), true,
+          "Tab scrolls the editor action into view");
+      }
+      await focus(selector); await evaluate("shortEditorIdentity.select()");
+      await command("Input.insertText", { text: original });
+    };
 
     assert.equal(await wait("!!document.querySelector('#catalog-prompt')"), true);
     await focus("#catalog-prompt");
@@ -83,16 +143,19 @@ test("empty regular composer transient help and palette keep drafts and ownershi
 
     await command("Input.insertText", { text: "/" });
     assert.equal(await wait("document.querySelector('#catalog-prompt').value==='/'"), true, "paste stays literal");
+    assert.deepEqual(await evaluate("(()=>{const e=document.querySelector('#catalog-prompt');return [e.selectionStart,e.selectionEnd,document.activeElement===e]})()"), [1, 1, true]);
     await key("?");
     assert.equal(await evaluate("document.querySelector('#catalog-prompt').value==='/?' && !document.querySelector('.shortcut-dialog')"), true);
     await evaluate("document.querySelector('#catalog-prompt').setSelectionRange(0,2)");
     await key("/");
     assert.equal(await evaluate("document.querySelector('#catalog-prompt').value==='/' && !document.querySelector('.command-palette')"), true,
       "selection replacement is text, never a command");
+    assert.deepEqual(await evaluate("(()=>{const e=document.querySelector('#catalog-prompt');return [e.selectionStart,e.selectionEnd,document.activeElement===e]})()"), [1, 1, true]);
     await command("Input.insertText", { text: " " });
     await key("/");
     assert.equal(await evaluate("document.querySelector('#catalog-prompt').value==='/ /' && !document.querySelector('.command-palette')"), true,
       "whitespace and existing text cannot invoke transient shortcuts");
+    await shortEditor("#catalog-prompt");
 
     await evaluate("localStorage.setItem('usageFixtureArchived','true'); localStorage.removeItem('codealta.desktop.prompt.one')");
     await command("Page.reload");
@@ -156,9 +219,13 @@ test("empty regular composer transient help and palette keep drafts and ownershi
     await evaluate("document.querySelector('#session-prompt').setSelectionRange(0,2)");
     await key("/");
     assert.equal(await evaluate("document.querySelector('#session-prompt').value==='/' && !document.querySelector('.command-palette')"), true);
+    assert.deepEqual(await evaluate("(()=>{const e=document.querySelector('#session-prompt');return [e.selectionStart,e.selectionEnd,document.activeElement===e]})()"), [1, 1, true]);
+    await shortEditor("#session-prompt");
     await evaluate("document.querySelector('#expand-session-prompt').click()");
     assert.equal(await wait("document.querySelector('.expanded-prompt-dialog')?.open"), true);
     await focus('.expanded-prompt-dialog textarea');
+    assert.equal(await evaluate("visibleEditorBox('.expanded-prompt-dialog textarea').height>=48 && visibleEditorBox('.expanded-prompt-dialog textarea').width>=80"), true,
+      "expanded editor remains visibly editable at 750x485");
     await key("?");
     assert.equal(await evaluate("document.querySelector('.expanded-prompt-dialog textarea').value.includes('?') && !document.querySelector('.shortcut-dialog')"), true,
       "expanded editor does not intercept transient characters");
@@ -196,6 +263,17 @@ test("empty regular composer transient help and palette keep drafts and ownershi
     assert.equal(await wait("!document.querySelector('.shortcut-dialog') && document.activeElement===document.querySelector('#session-prompt')"), true,
       "Escape from help restores the original regular composer");
     assert.equal(await evaluate("window.settingsShellFixture.sends.length===0 && document.querySelector('#session-prompt').value==='' && localStorage.getItem('codealta.desktop.prompt.two')===null"), true);
+    await evaluate("document.querySelector('.session-tabs [role=tab]').click()");
+    assert.equal(await wait("!!document.querySelector('#catalog-prompt') && document.querySelector('.session-header h1')?.textContent==='Prompt draft'"), true);
+    await focus("#catalog-prompt"); await command("Input.insertText", { text: "local draft" });
+    await shortEditor("#catalog-prompt");
+    assert.equal(await evaluate("document.querySelector('#catalog-prompt').value==='local draft' && settingsShellFixture.sends.length===0"), true);
+    for (let i = 0; i < 12 && !await evaluate("document.activeElement?.textContent==='Create and transfer draft'"); i++) {
+      await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+      await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+    }
+    assert.equal(await evaluate("(()=>{const b=document.activeElement,r=b.getBoundingClientRect();return b.textContent==='Create and transfer draft' && document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('button')===b})()"), true,
+      "local draft creation action is reachable without creating or sending");
   } finally {
     socket?.close(); browser?.kill();
     await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });

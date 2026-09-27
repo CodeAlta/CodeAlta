@@ -20,6 +20,8 @@ import { createAskActions, captureAskAction } from "./sessionAsks";
 import { createUserInputReviewer } from "./sessionUserInput";
 import { createPermissionReviewer, type PermissionReviewState } from "./sessionPermissions";
 import type { SessionPermissionCommand, SessionPermissionResolution } from "#neoastra";
+import { ShellLanguageContext } from "./shellLanguage";
+import { translate, type Locale } from "./localization";
 
 const epoch = "12345678-1234-1234-1234-123456789abc";
 const sessions: WorkspaceSession[] = ["one", "two"].map(id => ({ createdAt: null, id, title: id, fullTitle: id, fullTitleTruncated: false,
@@ -45,21 +47,32 @@ const inputs = createUserInputReviewer(async request => { reads.push(`input:${re
   entries: [{ handle: inputHandle(request.sessionId), providerId: "fixture", prompts: [{ id: "q", question: "Question", header: null,
     options: [], allowFreeform: true }] }], hasMore: false }; }, request => hold("resolveInput", request), request => hold("cancelInput", request));
 const permissionEntry: SessionPermissionCommand = { handle: inputHandle("one"), providerId: "fixture",
-  command: "original command", workingDirectory: "C:\\fixture", reason: null };
+  command: "original command Settings Unknown Ready Copy", workingDirectory: "C:\\fixture\\Settings", reason: "Unknown Ready" };
 const permissions = createPermissionReviewer(async request => { reads.push(`permission:${request.sessionId}`); return { status: "ok" as const, hostEpoch: epoch, sessionId: request.sessionId,
   entries: request.sessionId === "one" ? [permissionEntry] : [], hasMore: false }; },
   request => hold("permission", request) as Promise<SessionPermissionResolution>);
 const reminders = createReminderActions(request => hold("createReminder", request), request => hold("deleteReminder", request), undefined,
   request => hold("save", request));
-const runtimeReader = createRuntimeStateReader(async request => ({ status: "ok", hostEpoch: epoch, sessionId: request.sessionId,
-  runtimeInstanceId: "fixture-runtime", coordinatorTransitionInProgress: false, entry: null }));
+const runtimeReads: unknown[] = [];
+const runtimeReader = createRuntimeStateReader(async request => {
+  runtimeReads.push(request);
+  return { status: "ok", hostEpoch: epoch, sessionId: request.sessionId,
+    runtimeInstanceId: "fixture-runtime", coordinatorTransitionInProgress: false, entry: {
+      attachmentGeneration: "5", activeRunId: null, isRetiring: false, isTerminated: false, queueDrainInProgress: false,
+      providerId: "Settings", providerKey: "Ready", modelId: "Unknown", reasoningEffort: "Copy",
+      agentPromptId: "Send", pendingAgentPromptId: "Abort", activity: null,
+    } };
+});
 const drafts = createDraftIndicators();
 const selections = createNextSendSelectionStore(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value));
 let setArchived: (value: boolean) => void = () => {};
 let setSession: (value: string) => void = () => {};
 let setHost: (value: string | null) => void = () => {};
 let setView: (value: "workspace" | "reminders") => void = () => {};
-const fixture = { calls, reads,
+let setLanguage: (value: Locale) => void = () => {};
+const fixture = { calls, reads, runtimeReads,
+  language: (value: Locale) => setLanguage(value),
+  revoke: () => capability.observe({ status: "stale_epoch", epoch }),
   draftVisible: (id: string, selected: string | null) => drafts.visible(id, selected),
   archive: (value: boolean) => setArchived(value), session: (value: string) => setSession(value),
   host: (value: string | null) => setHost(value), view: (value: "workspace" | "reminders") => setView(value),
@@ -105,6 +118,8 @@ const fixture = { calls, reads,
 Object.assign(window, { archivedRecoveryFixture: fixture });
 
 function App() {
+  const [locale, language] = useState<Locale>("en");
+  setLanguage = language;
   const [archived, archive] = useState(false);
   const [sessionId, session] = useState("one");
   const [host, hostChange] = useState<string | null>(epoch);
@@ -129,7 +144,7 @@ function App() {
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
   }, [archived, view, current, selected, sessionId]);
-  return <div ref={shell} className="session-workspace" data-archived={archived} data-session={sessionId}>
+  return <ShellLanguageContext.Provider value={{ locale, choice: locale, setLanguage: () => {} }}><div ref={shell} className="session-workspace" data-archived={archived} data-session={sessionId} data-locale={locale}>
     <button type="button" onClick={() => navigate("workspace")}>Workspace</button>
     <button type="button" onClick={() => navigate("reminders")}>Reminders</button>
     {view === "workspace" && selected && <SessionComposerGate snapshot={snapshot} projectId="project" session={selected}
@@ -138,7 +153,7 @@ function App() {
         capability={capability} runtimeReader={runtimeReader} permissionReviewer={null} draftIndicators={drafts}
         selections={selections} compactTrigger={trigger} /> : null}
       readOnly={<ReadOnlyComposer key={sessionId} sessionId={sessionId} provider="fixture" draftIndicators={drafts}
-        reason={archived ? "Archived project; this session is read-only. Sending is unavailable." : undefined} />}
+        reason={archived ? translate(locale, "Archived project; this session is read-only. Sending is unavailable.") : undefined} />}
       recovery={current ? <ArchivedActionRecovery epoch={epoch} sessionId={sessionId} submissions={submissions}
         steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} asks={asks} inputs={inputs} permissions={permissions} /> : null} />}
     {view === "reminders" && <ReminderScopeGate snapshot={snapshot} projectId="project" session={current || undefined}
@@ -148,6 +163,6 @@ function App() {
       readDetail={async request => ({ status: "missing_reminder", epoch: request.expectedEpoch, sessionId: request.sessionId,
         reminderId: request.reminderId, content: null, delaySeconds: null, repeatCount: null, editRevision: null })}
       actions={reminders} />}
-  </div>;
+  </div></ShellLanguageContext.Provider>;
 }
 createRoot(document.getElementById("app")!).render(<App />);

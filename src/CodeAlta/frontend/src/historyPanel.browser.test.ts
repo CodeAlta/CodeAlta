@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { timelineGeometryProbe } from "./timelineGeometryProbe";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -7,6 +8,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
+import { locales, translate } from "./localization";
 
 const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
@@ -23,7 +25,8 @@ test("mounted reverse history retains latest, anchors older pages and fences swi
     await build({ entryPoints: [fileURLToPath(new URL("./historyPanel.mount.tsx", import.meta.url))],
       outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife" });
     const page = join(root, "fixture.html");
-    await writeFile(page, '<!doctype html><html><body><div id="app"></div><script src="fixture.js"></script></body></html>');
+    await writeFile(join(root, "style.css"), readFileSync(fileURLToPath(new URL("./style.css", import.meta.url))));
+    await writeFile(page, '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><div id="app"></div><script src="fixture.js"></script></body></html>');
     const profile = join(root, "profile");
     browser = spawn(edge!, ["--headless=new", "--disable-gpu", "--no-first-run", "--disable-background-networking", "--disable-extensions",
       `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", windowsHide: true });
@@ -79,11 +82,34 @@ test("mounted reverse history retains latest, anchors older pages and fences swi
       first: document.querySelector('.timeline-message')?.textContent, last: [...document.querySelectorAll('.timeline-message')].at(-1)?.textContent,
       top: document.querySelector('.timeline-scroll')?.scrollTop, height: document.querySelector('.timeline-scroll')?.scrollHeight,
       following: document.querySelector('.timeline-scroll')?.dataset.following, calls: window.fixture.calls })`);
+    const languages = async () => {
+      const paint = () => evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))");
+      await paint();
+      await evaluate(`void(window.languageHistory={calls:JSON.stringify(fixture.calls),focus:document.activeElement,scroller:document.querySelector('.timeline-scroll'),
+        outer:document.querySelector('.outer-scroll').scrollTop,row:[...document.querySelectorAll('.timeline-message')].find(row=>row.getBoundingClientRect().bottom>document.querySelector('.timeline-scroll').getBoundingClientRect().top)});
+        languageHistory.top=languageHistory.row?.getBoundingClientRect().top;languageHistory.offset=languageHistory.top-languageHistory.scroller.getBoundingClientRect().top;languageHistory.following=languageHistory.scroller.dataset.following;languageHistory.metrics=[]`);
+      for (const locale of locales) {
+        await evaluate(`fixture.language('${locale}')`);
+        await wait(`document.querySelector('#history-heading').textContent===${JSON.stringify(translate(locale, "Session timeline"))}`);
+        await paint();
+        if (process.env.CODEALTA_TIMELINE_GEOMETRY) console.log("HISTORY GEOMETRY", locale, JSON.stringify(await evaluate(timelineGeometryProbe)));
+        await evaluate(`languageHistory.metrics.push({locale:'${locale}',top:languageHistory.row?.getBoundingClientRect().top,viewport:languageHistory.scroller.getBoundingClientRect().top,outer:document.querySelector('.outer-scroll').scrollTop,scroll:languageHistory.scroller.scrollTop,header:document.querySelector('.section-heading').getBoundingClientRect().height,banners:[...document.querySelectorAll('.banner')].map(n=>n.getBoundingClientRect().height),button:document.querySelector('.load-more')?.getBoundingClientRect().height})`);
+        // Inner anchoring must stay enabled; the independent outer access scroller
+        // must not compensate a second time for the same locale reflow.
+        assert.equal(await evaluate("getComputedStyle(languageHistory.scroller).overflowAnchor==='auto' && getComputedStyle(document.querySelector('.outer-scroll')).overflowAnchor==='none'"), true);
+        assert.equal(await evaluate("document.querySelector('.outer-scroll').scrollTop===languageHistory.outer"), true, `${locale}: locale reflow must not move the outer scroller`);
+        assert.equal(await evaluate(`JSON.stringify(fixture.calls)===languageHistory.calls && document.activeElement===languageHistory.focus && document.querySelector('.timeline-scroll')===languageHistory.scroller && languageHistory.scroller.dataset.following===languageHistory.following && (!languageHistory.row || languageHistory.row.isConnected && Math.abs(languageHistory.row.getBoundingClientRect().top-languageHistory.scroller.getBoundingClientRect().top-languageHistory.offset)<2)`), true, `${locale}: history keeps viewport-relative anchor, follow, mounted owner and admitted reads`);
+      }
+      await evaluate("fixture.language('en')"); await wait("document.querySelector('#history-heading').textContent==='Session timeline'");
+      await paint();
+      assert.equal(await evaluate("!languageHistory.row || Math.abs(languageHistory.row.getBoundingClientRect().top-languageHistory.top)<2"), true, `restoring English also retains the history anchor: ${await evaluate("JSON.stringify({metrics:languageHistory.metrics,top:languageHistory.row?.getBoundingClientRect().top,scroll:languageHistory.scroller.scrollTop,header:document.querySelector('.section-heading').getBoundingClientRect().height,banners:[...document.querySelectorAll('.banner')].map(n=>n.getBoundingClientRect().height),button:document.querySelector('.load-more')?.getBoundingClientRect().height})")}`);
+    };
     await wait("document.querySelectorAll('.timeline-message').length === 1000 && document.body.innerText.includes('latest user prompt')");
     let result = JSON.parse((await snapshot())!) as { rows: number; first: string; last: string; top: number; height: number; following: string; calls: string[] };
     assert.match(result.first, /turn-205/);
     assert.match(result.last, /latest user prompt/);
     assert.equal(result.following, "true");
+    await languages();
     assert.ok(result.calls.length <= 11 && result.calls.every(call => call.startsWith("A:tail") || call.startsWith("A:2:")));
     await evaluate(`(() => { const outer = document.querySelector('.outer-scroll');
       document.querySelector('.keyboard-target').focus(); outer.scrollTop = 35;
@@ -97,6 +123,7 @@ test("mounted reverse history retains latest, anchors older pages and fences swi
     assert.ok(Math.abs(firstPosition.offset) < 2, "Ctrl+F3 positions the first retained row, not the outer scroller");
     assert.equal(firstPosition.outer, 35);
     assert.equal(firstPosition.focus, "keyboard-target");
+    await languages();
     await evaluate(`(() => { const outside = document.querySelector('.outside-target'); outside.focus();
       outside.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', bubbles: true, cancelable: true }));
       outside.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', ctrlKey: true, bubbles: true, cancelable: true }));
@@ -138,7 +165,10 @@ test("mounted reverse history retains latest, anchors older pages and fences swi
       scroller.dispatchEvent(new Event('scroll', { bubbles: true })); const viewport = scroller.getBoundingClientRect();
       const anchor = [...document.querySelectorAll('.timeline-message')].find(row => row.getBoundingClientRect().bottom > viewport.top);
       window.fixture.anchor = anchor; window.fixture.anchorTop = anchor.getBoundingClientRect().top;
-      document.querySelector('.load-more').click(); return true; })()`);
+      window.fixture.holdNext(); document.querySelector('.load-more').click(); return true; })()`);
+    await wait("document.querySelector('.load-more').disabled");
+    await languages();
+    await evaluate("fixture.release()");
     await wait("document.body.innerText.includes('Newer journal events are no longer')");
     result = JSON.parse((await snapshot())!);
     assert.equal(result.rows, 1000);
@@ -149,6 +179,7 @@ test("mounted reverse history retains latest, anchors older pages and fences swi
       delta: window.fixture.anchor.getBoundingClientRect().top - window.fixture.anchorTop })`))!) as { connected: boolean; delta: number };
     assert.equal(anchored.connected, true);
     assert.ok(Math.abs(anchored.delta) < 2, `older-page prepend moved the reading anchor: ${JSON.stringify(anchored)}`);
+    await languages();
     await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F3', ctrlKey: true, bubbles: true, cancelable: true }))`);
     await wait("document.querySelector('.navigation-notice').textContent.includes('turn-105')");
     await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F3', bubbles: true, cancelable: true }))`);

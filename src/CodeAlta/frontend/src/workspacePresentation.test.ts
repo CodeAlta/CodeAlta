@@ -54,7 +54,7 @@ test("contextual controls appear only for an eligible observation or a retained 
     runtimeInstanceId: "abcdefab-1234-5678-9abc-abcdefabcdef", coordinatorTransitionInProgress: false,
     entry: { attachmentGeneration: "1", activeRunId: "run", isTerminated: false, isRetiring: false,
       queueDrainInProgress: false, providerId: "provider", providerKey: "provider", modelId: null,
-      reasoningEffort: null, agentPromptId: null, pendingAgentPromptId: null } };
+      reasoningEffort: null, agentPromptId: null, pendingAgentPromptId: null, activity: null } };
   const eligibleSteer = (value: SessionRuntimeStateResponse | undefined) => showContextAction(
     captureSteering("epoch", "session", value, "x", "availability") !== null, false);
   const eligibleQueue = (value: SessionRuntimeStateResponse | undefined) => showContextAction(

@@ -66,6 +66,8 @@ export function dispatchWorkspaceShortcut(event: KeyboardEvent, state: Workspace
     sessionInfoChordContextAllowed({ ...common, triggerReady: ready(context.reminderTrigger) })
     ? context.selection : null;
   if (!resolved.handled) return;
+  if (resolved.action && ["nextTab", "previousTab", "closeTab", "reopenTab", "browseSessions"].includes(resolved.action) &&
+    (!common.workspaceActive || !common.inWorkspace)) return;
   event.preventDefault();
   if (resolved.action) context.run(resolved.action);
 }

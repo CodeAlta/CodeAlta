@@ -1,6 +1,6 @@
 // Isolated bridge for mounting the actual main.tsx in a local browser test.
 // No native bridge or user data is touched.
-import type { HistoryRequest, HistoryResponse, SessionDisplayItem, SessionDisplayRequest } from "#neoastra";
+import type { HistoryRequest, HistoryResponse, SessionDisplayItem, SessionDisplayRequest, ReminderListRequest, ReminderListResponse, WorkspaceArchiveProjectRequest, SessionRuntimeScopedRequest, SkillsScanRequest, SkillsScanResponse } from "#neoastra";
 const epoch = "12345678-1234-1234-1234-123456789abc";
 const session = { id: "one", title: "one", fullTitle: "one", fullTitleTruncated: false, createdAt: "2026-01-02T03:04:05.1234567+14:00",
   parentSessionId: null, scopeKind: localStorage.getItem("infoFixtureUnknown") === "true" ? null : "project",
@@ -15,16 +15,30 @@ const catalog = { configured: true, projects: [{ id: "project", name: "Project",
   projectsTruncated: localStorage.getItem("usageFixtureTruncated") === "true", sessionsTruncated: false, displayTextTruncated: false };
 const unavailable = async () => { throw new Error("test bridge unavailable"); };
 const calls: string[] = [];
+const rpcCalls: string[] = [];
+const archives: Array<{ request: WorkspaceArchiveProjectRequest; resolve: (value: unknown) => void }> = [];
+const runtimeReads: Array<{ request: SessionRuntimeScopedRequest; signal: AbortSignal; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
+const skillReads: Array<{ request: SkillsScanRequest; resolve: (value: SkillsScanResponse) => void; reject: (error: Error) => void }> = [];
+const promptCreates: Array<{ request: unknown; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
+const promptReads: unknown[] = [];
+export const promptCreation = { create: (request: unknown) => new Promise((resolve, reject) => { promptCreates.push({ request, resolve, reject }); }) };
+export const skillsInspection = { scan: (request: SkillsScanRequest) => new Promise<SkillsScanResponse>((resolve, reject) => { skillReads.push({ request, resolve, reject }); }) };
 const sends: unknown[] = [];
 const sendFailures: Array<() => void> = [];
 const displayCalls: SessionDisplayRequest[] = [];
 const displayCleanup: string[] = [];
+const lateDisplayAttempts: string[] = [];
+const reminderReads: Array<{ request: ReminderListRequest; signal: AbortSignal; resolve: (value: ReminderListResponse) => void }> = [];
 const notesCalls: unknown[] = [];
+const projectNameReads: Array<{ request: { projectId: string; projectPath: string }; resolve: (value: unknown) => void }> = [];
+const referenceReads: Array<{ request: unknown; resolve: (value: unknown) => void }> = [];
+const referenceObservations: Array<{ request: { text: string }; resolve: (value: unknown) => void }> = [];
 const choiceReads: Array<{ request: { expectedEpoch: string; sessionId: string }; resolve: (value: unknown) => void }> = [];
 const usageReads: Array<{ request: unknown; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
 const probes: unknown[] = [];
 const clearRequests: unknown[] = [];
 const renameRequests: unknown[] = [];
+const projectRenames: Array<{ request: { displayName: string }; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
 const deleteRequests: unknown[] = [];
 const mutationReplies: Array<{ kind: "rename" | "delete"; resolve: (value: unknown) => void }> = [];
 type CreateRequest = { expectedHostEpoch: string; scope: string; projectId: string | null; projectPath: string | null; title: string | null };
@@ -42,11 +56,59 @@ function navigationHistory(request: HistoryRequest): HistoryResponse {
     entries: kinds.map((kind, index) => ({ offset: `${index + 1}`, eventType: kind === "Status" ? "sessionUpdate" : "contentCompleted", providerId: "fixture",
       sessionId: request.sessionId, runId: null, timestamp: "2026-09-24T00:00:00Z", kind, phase: null,
       contentId: `${index}`, activityId: null, parentActivityId: null, interactionId: null, name: null,
-      text: `persisted-${kind}-${request.sessionId}`, details: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false })) };
+      text: `persisted-${kind}-${request.sessionId}` + (mode === "tabs" ? "\n\n" + Array.from({ length: 30 }, (_, n) => `Retained paragraph ${n}`).join("\n\n") : ""),
+      details: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false })) };
 }
-Object.assign(window, { settingsShellFixture: { calls, sends, choiceReads, usageReads, probes, clearRequests,
-  renameRequests, deleteRequests, creates, snapshots, snapshotCalls, catalog, historyCalls,
-  displayCalls, displayCleanup, notesCalls,
+Object.assign(window, { settingsShellFixture: { calls, rpcCalls, sends, choiceReads, usageReads, probes, clearRequests,
+  renameRequests, projectRenames, deleteRequests, creates, snapshots, snapshotCalls, catalog, historyCalls,
+  displayCalls, displayCleanup, notesCalls, lateDisplayAttempts, reminderReads, projectNameReads, referenceReads,
+  referenceObservations, archives, runtimeReads, skillReads, promptCreates, promptReads,
+  releaseSkills(index = skillReads.length - 1, mode = "parsed") {
+    const { request, resolve, reject } = skillReads[index];
+    if (mode === "error") { reject(new Error("fixture transport error")); return; }
+    resolve({ status: mode === "unknown" ? "metadata_unavailable" : "ok", hostEpoch: epoch, request,
+      traversalStatus: mode === "unknown" ? null : "complete", diagnostics: mode === "unknown" ? "none" : "None", entriesVisited: mode === "unknown" ? 0 : 2, directoriesOpened: mode === "unknown" ? 0 : 1,
+      metadataBytesRead: mode === "unknown" ? 0 : 50, responseOmitted: 0, candidates: mode === "empty" || mode === "unknown" ? [] : [
+        { id: "0", relativePath: "example/SKILL.md", status: "parsed", diagnostic: "none", name: "example", description: "Example raw metadata" },
+        { id: "1", relativePath: "bad/SKILL.md", status: "unsupported", diagnostic: "yaml_feature", name: null, description: null }] });
+  },
+  releaseRuntime(index = runtimeReads.length - 1, mode = "active") {
+    const { request, resolve } = runtimeReads[index];
+    resolve({ status: mode === "error" ? "read_failed" : "ok", hostEpoch: epoch, sessionId: request.sessionId, scope: request.scope,
+      projectId: request.projectId, projectPath: request.projectPath, observation: mode === "error" ? null : {
+        status: "ok", hostEpoch: epoch, sessionId: request.sessionId, runtimeInstanceId: epoch, coordinatorTransitionInProgress: mode === "transition",
+        entry: mode === "absent" ? null : { attachmentGeneration: "1", isTerminated: false, isRetiring: mode === "retiring", activeRunId: "fake-run",
+           queueDrainInProgress: false, providerId: "fixture", providerKey: mode === "info" ? "observed-provider" : "fixture", modelId: mode === "info" ? "observed-model" : null,
+           reasoningEffort: mode === "info" ? "High" : null, agentPromptId: mode === "info" ? "current-agent" : null, pendingAgentPromptId: mode === "info" ? "pending-agent" : null,
+           activity: { timestamp: "2026-01-01T12:00:00.0000001+02:00", source: "admitted_agent_event", admittedEvents: "2", omittedEvents: "1" } } } });
+  },
+  releaseInfoUsage(attachment = "1") {
+    const read = usageReads.at(-1)!;
+    const request = read.request as { expectedHostEpoch: string; sessionId: string };
+    read.resolve({ status: "ok", hostEpoch: request.expectedHostEpoch, sessionId: request.sessionId, runtimeInstanceId: epoch,
+      attachmentGeneration: attachment, omittedUsageEvents: "2", observation: { sequence: "1", scope: "CurrentWindow", source: "LocalProviderUsage",
+        sourceUpdatedAt: null, eventTimestamp: "2026-01-01T00:00:00Z", hadInvalidValues: true, hadOmittedData: true,
+        window: { currentTokens: "0", tokenLimit: null, messageCount: 0 }, lastOperation: null } });
+  },
+  releaseArchive(status = "ok") {
+    const work = archives.at(-1)!; const request = work.request;
+    if (status === "ok") catalog.projects.find(project => project.id === request.projectId)!.archived = request.archived;
+    work.resolve({ status, hostEpoch: epoch, projectId: request.projectId, projectPath: request.projectPath,
+      sourcePath: request.sourcePath, revision: request.revision, archived: request.archived });
+  },
+  releaseReferenceObservation(index = referenceObservations.length - 1, items?: unknown[]) {
+    const read = referenceObservations[index];
+    read.resolve({ status: "ok", epoch, omitted: false, items: items ?? [{ start: 0, length: read.request.text.trimEnd().length, status: "resolved" }] });
+  },
+  releaseReferences(index = referenceReads.length - 1) { const read = referenceReads[index]; read.resolve({ status: "ok", epoch, omitted: false,
+    items: [{ path: "src/app.cs", directory: false, recent: true }, { path: "Settings/Copy", directory: true, recent: false }] }); },
+  releaseProjectName() { const read = projectNameReads.shift()!; read.resolve({ status: "ok", hostEpoch: epoch,
+    ...read.request, displayName: "Original name", sourcePath: "/fixture/projects.yml", revision: "A".repeat(64) }); },
+  releaseReminder(index: number) {
+    const read = reminderReads[index];
+    read.resolve({ status: "ok", epoch: read.request.expectedEpoch, sessionId: read.request.sessionId,
+      reminders: [], activeCount: 0, completedCount: 0 });
+  },
   failSend() { sendFailures.shift()?.(); },
   releaseHistory() { for (const release of historyReads.splice(0)) release(); },
   releaseCreate(status = "ok") { const original = creates[0]; original.resolve({ status, hostEpoch: epoch,
@@ -58,6 +120,9 @@ Object.assign(window, { settingsShellFixture: { calls, sends, choiceReads, usage
       [{ ...session, id: "created", title: "created", fullTitle: "created" }])] }); },
   releaseMutation(kind: "rename" | "delete") { const index = mutationReplies.findIndex(reply => reply.kind === kind);
     if (index >= 0) mutationReplies.splice(index, 1)[0].resolve({}); },
+  releaseExactDelete(status = "ok", hostEpoch?: string) { const index = mutationReplies.findIndex(reply => reply.kind === "delete");
+    const request = deleteRequests.at(-1) as { expectedHostEpoch: string };
+    if (index >= 0) mutationReplies.splice(index, 1)[0].resolve({ ...request, hostEpoch: hostEpoch ?? request.expectedHostEpoch, status }); },
   releaseChoices(mode: "ok" | "stale" | "different" = "ok") { for (const read of choiceReads.splice(0)) {
     const value = choices(read.request);
     read.resolve(mode === "stale" ? { ...value, status: "stale_epoch", epoch: "different-host" }
@@ -67,8 +132,8 @@ const owned = () => localStorage.getItem("settingsFixtureOwned") === "true";
 const choices = (request: { expectedEpoch: string; sessionId: string }) => ({ status: "ok", epoch: request.expectedEpoch, sessionId: request.sessionId,
   current: { providerKey: "fixture", agentPromptId: "default", modelId: "old", reasoningEffort: "Low" },
   prompts: [{ id: "default", name: "Default" }, { id: "plan", name: "Plan" }],
-  models: [{ id: "old", name: "Old", efforts: ["Low"] }, ...(localStorage.getItem("settingsFixtureNewChoices") === "true"
-    ? [{ id: "new", name: "New", efforts: ["High"] }] : [])] });
+  models: [{ id: "old", name: "Old", efforts: ["Low"], imageInput: false }, ...(localStorage.getItem("settingsFixtureNewChoices") === "true"
+    ? [{ id: "new", name: "New", efforts: ["High"], imageInput: true }] : [])] });
 export const boot = { status: async () => ({ state: owned() ? "owned" : "catalog", hostAvailable: owned(),
   hostEpoch: owned() ? epoch : null, productName: "CodeAlta", version: "development" }) };
 export const workspace = { snapshot: async () => {
@@ -87,8 +152,12 @@ export const workspace = { snapshot: async () => {
       return new Promise<HistoryResponse>(resolve => historyReads.push(() => resolve(navigationHistory(request))));
     return Promise.resolve(navigationHistory(request));
   },
-  openProject: unavailable, readProjectName: unavailable,
-  renameProject: unavailable, createSession: (request: CreateRequest) => new Promise(resolve => creates.push({ request, resolve })),
+  openProject: unavailable, readProjectName: (request: { projectId: string; projectPath: string }) =>
+    localStorage.getItem("draftTabFixture") === "true" ? new Promise(resolve => projectNameReads.push({ request, resolve })) : unavailable(),
+  archiveProject: (request: WorkspaceArchiveProjectRequest) => request.confirmed ? new Promise(resolve => archives.push({ request, resolve }))
+    : Promise.resolve({ status: "confirmation_required", hostEpoch: epoch, projectId: request.projectId, projectPath: request.projectPath,
+      sourcePath: "/fixture/catalog/project.md", revision: "A".repeat(64), archived: request.expectedArchived }),
+  renameProject: (request: { displayName: string }) => new Promise((resolve, reject) => projectRenames.push({ request, resolve, reject })), createSession: (request: CreateRequest) => new Promise(resolve => creates.push({ request, resolve })),
   renameSession: (request: unknown) => { renameRequests.push(request); return new Promise(resolve => mutationReplies.push({ kind: "rename", resolve })); },
   deleteSession: (request: unknown) => { deleteRequests.push(request); return new Promise(resolve => mutationReplies.push({ kind: "delete", resolve })); } };
 export const configuration = { snapshot: async () => ({ providers: [], plugins: [], pluginRuntimeAvailable: false }) };
@@ -107,10 +176,13 @@ models: async () => ({ status: "ok", epoch, providerId: "fixture", availability:
     { id: "old", name: "Old model", description: null, efforts: [], defaultEffort: null, contextTokens: null,
       inputTokens: null, outputTokens: null, reasoning: false, tools: null, structuredOutput: null, imageInput: null }] }),
   probe: (request: unknown) => { probes.push(request); return new Promise(() => {}); } };
-export const promptCatalog = { list: async () => ({ status: "ok", epoch, sessionId: "one", truncated: false,
-  prompts: [{ id: "plan", name: "Plan", description: null, builtIn: true, appended: false, bodyTruncated: false, body: "Plan", scope: "BuiltIn" }] }) };
+export const promptCatalog = { list: async () => { promptReads.push({}); return { status: "ok", epoch, sessionId: "one", truncated: false,
+  prompts: [{ id: "plan", name: "Plan", description: null, builtIn: true, appended: false, bodyTruncated: false, body: "Plan", scope: "BuiltIn" }] }; } };
 export const mcpInventory = { list: unavailable };
-export const reminder = { list: unavailable, detail: unavailable, create: unavailable, delete: unavailable, save: unavailable };
+export const reminder = { list: (request: ReminderListRequest, options: { signal: AbortSignal }) =>
+  localStorage.getItem("layoutFixtureReminders") === "true"
+    ? new Promise<ReminderListResponse>(resolve => reminderReads.push({ request, signal: options.signal, resolve }))
+    : unavailable(), detail: unavailable, create: unavailable, delete: unavailable, save: unavailable };
 export const sessionDisplay = { observe: async (request: SessionDisplayRequest, options: { signal: AbortSignal }) => {
   displayCalls.push(request);
   if (!localStorage.getItem("navigationFixture")) return unavailable();
@@ -129,13 +201,24 @@ export const sessionDisplay = { observe: async (request: SessionDisplayRequest, 
       if (hold && !options.signal.aborted) await new Promise<void>(resolve => {
         options.signal.addEventListener("abort", () => resolve(), { once: true });
       });
+      if (hold && options.signal.aborted && localStorage.getItem("layoutFixtureReminders") === "true") {
+        // Deliberately late fake-provider delivery: cancellation must not publish
+        // into the App-owned display cache or a subsequent workspace attachment.
+        lateDisplayAttempts.push(request.sessionId);
+        yield { ...item, revision: "1", previousRevision: "0", isInitial: false,
+          session: { ...item.session!, revision: "1", text: [{ runId: "late", contentId: "late", kind: "User",
+            text: "stale-disposed-display", isComplete: true, isTruncated: false, startedWithDelta: false }] } };
+      }
     } finally { displayCleanup.push(request.sessionId); }
   })();
 } };
-export const sessionRuntimeState = { current: unavailable };
+export const sessionRuntimeState = { current: unavailable, observe: (request: SessionRuntimeScopedRequest, options: { signal: AbortSignal }) =>
+  new Promise((resolve, reject) => runtimeReads.push({ request, signal: options.signal, resolve, reject })) };
 export const sessionUsage = { read: (request: unknown) => new Promise((resolve, reject) => usageReads.push({ request, resolve, reject })) };
 export const sessionPermissions = { list: unavailable, resolve: unavailable };
-export const sessionOperations = { choices: (request: { expectedEpoch: string; sessionId: string }) =>
+export const sessionOperations = { observeReferences: (request: { text: string }) => new Promise(resolve => referenceObservations.push({ request, resolve })),
+  searchReferences: (request: unknown) => new Promise(resolve => referenceReads.push({ request, resolve })),
+  choices: (request: { expectedEpoch: string; sessionId: string }) =>
   localStorage.getItem("settingsFixtureHoldChoices") === "true" ? new Promise(resolve => choiceReads.push({ request, resolve })) : Promise.resolve(choices(request)),
   send: (request: unknown) => { sends.push(request); return new Promise((_resolve, reject) => {
     sendFailures.push(() => reject(new Error("fixture transport uncertainty")));
@@ -144,3 +227,15 @@ export const sessionOperations = { choices: (request: { expectedEpoch: string; s
 export const sessionAsks = { answer: unavailable, cancel: unavailable };
 export const sessionNotes = { current: (request: unknown) => { notesCalls.push(request); return unavailable(); }, clear: unavailable };
 export const sessionUserInput = { list: unavailable, resolve: unavailable, cancel: unavailable };
+
+// Observe every fake bridge invocation; language changes must not start backend work.
+for (const [name, service] of Object.entries({ boot, workspace, configuration, applicationLogs, modelCatalog, promptCatalog,
+  promptCreation, skillsInspection, mcpInventory, reminder, sessionDisplay, sessionRuntimeState, sessionUsage,
+  sessionPermissions, sessionOperations, sessionAsks, sessionNotes, sessionUserInput })) {
+  for (const [method, invoke] of Object.entries(service)) {
+    Object.defineProperty(service, method, { value: (...args: unknown[]) => {
+      rpcCalls.push(`${name}.${method}`);
+      return (invoke as (...values: unknown[]) => unknown)(...args);
+    } });
+  }
+}

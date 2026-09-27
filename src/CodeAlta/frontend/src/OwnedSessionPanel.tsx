@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from "react";
+import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectReferencePicker";
 import { sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, refreshSubmissions, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
@@ -20,10 +21,14 @@ import { validReminderList } from "./reminderListObservation";
 import { SessionUsageInspector } from "./SessionUsageInspector";
 import { RetainedRequestStrip } from "./RetainedRequestStrip";
 import type { UsageTarget } from "./sessionUsage";
+import { imageHelp, imageLimits, readPastedPng } from "./promptImages";
+import { useShellLanguage } from "./shellLanguage";
+import type { ClipboardEvent } from "react";
 
-export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount }: {
+export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount, inputLifetime }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
   projectId?: string | null;
+  inputLifetime?: { current: () => boolean };
   usageTarget?: UsageTarget | null;
   infoControl?: ReactNode;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
@@ -45,10 +50,18 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
 }) {
   const [draft, setDraft] = useState(() => ({ text: restoreDraft(key => localStorage.getItem(key), sessionId), editGeneration: null as number | null }));
   const text = draft.text;
+  const inputRevision = useRef(0);
+  const { t } = useShellLanguage();
+  const imageOwner = submissions.imageDrafts;
+  useSyncExternalStore(imageOwner.subscribe, imageOwner.getSnapshot);
+  const imageKey = JSON.stringify([epoch, sessionId, projectId, usageTarget?.expectedProjectPath ?? null]);
+  const images = imageOwner.get(imageKey);
+  const [imageNotice, setImageNotice] = useState("");
   const latestText = useRef(text);
   const restoredText = useRef(text);
   useLayoutEffect(() => { draftIndicators.clear(sessionId); }, [draftIndicators, sessionId, epoch]);
   function editText(value: string) {
+    inputRevision.current++;
     latestText.current = value;
     const editGeneration = draftIndicators.edit(sessionId, value, restoredText.current);
     setDraft({ text: value, editGeneration });
@@ -60,12 +73,19 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     setDraft({ text: "", editGeneration: null });
   }
   const promptInput = useRef<HTMLTextAreaElement>(null);
+  const referenceScope = useContext(ProjectReferenceContext);
   const [expanded, setExpanded] = useState(false);
   const [choices, setChoices] = useState<SessionChoicesResponse>();
   const [selection, setSelection] = useState<SessionSelection | null>(null);
   const [choicesNotice, setChoicesNotice] = useState("Loading session choices…");
   const [choicesRevision, setChoicesRevision] = useState(0);
+  useLayoutEffect(() => { inputRevision.current++; }, [choicesRevision, selection, choices]);
   const selectionRevision = useRef(0);
+  function refreshChoices() {
+    inputRevision.current++;
+    selectionRevision.current++;
+    setChoicesRevision(value => value + 1);
+  }
   useEffect(() => selections.subscribe(value => {
     if (value.epoch !== epoch || value.sessionId !== sessionId || !capability.canMutate()) return;
     selectionRevision.current++;
@@ -139,8 +159,8 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     !reminderOperation?.pending && !reminderOperation?.hold && reminderObservation?.epoch === epoch &&
     reminderObservation.sessionId === sessionId && reminderObservation.reload === reminderReload &&
     reminderObservation.operation === reminderOperation ? reminderObservation.count : null;
-  const reminderLabel = observedReminderCount === null ? "Reminders for selected session: active count unknown"
-    : `Reminders for selected session: ${observedReminderCount} active at last observation; may have changed`;
+  const reminderLabel = observedReminderCount === null ? t("Reminders for selected session: active count unknown")
+    : t("Reminders for selected session: {count} active at last observation; may have changed", { count: observedReminderCount });
   const scope = useRef<AbortController | null>(null);
   const receiptRevision = useRef(0);
   useEffect(() => {
@@ -236,7 +256,16 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       setMessage("Next Send choices changed. Wait for the mounted composer to show the validated selection before sending.");
       return;
     }
-    const request = retained?.request ?? captureSubmission(epoch, sessionId, text, crypto.randomUUID(), latest ?? selection);
+    const references = referenceScope?.expectedEpoch === epoch && referenceScope.sessionId === sessionId
+      ? { projectId: referenceScope.projectId, projectPath: referenceScope.projectPath } : null;
+    const sendSelection = latest ?? selection ?? (images.length ? activeChoices?.current ?? null : null);
+    if (!retained && images.length && (imageCapability !== true || !activeChoices || !sendSelection || !validSelection(activeChoices, sendSelection))) {
+      setImageNotice("Image input is unsupported or unknown for the current selection. Remove attachments or choose an observed supported model."); return;
+    }
+    const revision = ++inputRevision.current;
+    const capturedImages = images;
+    const request = retained?.request ?? captureSubmission(epoch, sessionId, text, crypto.randomUUID(), sendSelection, references, images);
+    if (!request && images.length) setImageNotice("Image Send requires nonempty text up to 4096 characters and an explicit supported model.");
     if (!request || !capability.canSubmit(request)) return;
     draftIndicators.clear(sessionId);
     setMessage("Submission admission pending…");
@@ -245,7 +274,8 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       setMessage(result.status === "accepted" || result.status === "replay"
         ? "Submission accepted. Refresh submissions for dispatch outcome; this is not run completion."
         : `Submission: ${result.status}. Refresh receipts before considering an explicit retry.`);
-      if ((result.status === "accepted" || result.status === "replay") && !signal.aborted) clearText();
+      if ((!retained || !request.images?.length) && (result.status === "accepted" || result.status === "replay") && !signal.aborted && inputRevision.current === revision
+        && imageOwner.get(imageKey) === capturedImages) { clearText(); imageOwner.replace(imageKey, capturedImages, []); }
     });
   }
   function refresh(offset = 0) {
@@ -256,8 +286,10 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       if (revision !== receiptRevision.current) return;
       observeEpoch(result);
       setPage(result);
+      const recoveringImages = !!submissions.pending(sessionId)?.request.images?.length;
       const recovered = submissions.reconcile(sessionId, result, capability);
-      if (recovered.sendRecovered && !signal.aborted) clearText();
+      // Receipt recovery cannot prove a remounted image draft's original input revision.
+      if (recovered.sendRecovered && !signal.aborted && !recoveringImages) clearText();
       if (recovered.sendRecovered || recovered.abortsRecovered > 0)
         setMessage("Send/Abort receipt reconciled without prompt text. Admission/control settlement is not rollback or run completion.");
       if (steering.reconcile(sessionId, result, capability)) {
@@ -278,6 +310,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     }, capability);
   }
   function steer(fromComposer = false) {
+    if (images.length || pending?.request.images?.length) { setImageNotice("Steer refuses image attachments. Use normal Send or remove attachments first."); return; }
     const signal = scope.current?.signal;
     if (!signal || signal.aborted || !capability.canMutate()) return;
     if (fromComposer && submissions.pending(sessionId)) return; // Disabled Send recovery is not the editable composer draft.
@@ -338,6 +371,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     });
   }
   function queueTextInHost(fromComposer: boolean) {
+    if (images.length || pending?.request.images?.length) { setImageNotice("Queue refuses image attachments. Use normal Send or remove attachments first."); return; }
     const signal = scope.current?.signal;
     if (!signal || signal.aborted || !capability.canMutate()) return;
     const retained = queue.pending(sessionId);
@@ -398,11 +432,57 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     setChoicesNotice("Selection saved for the next Send; active runs and queued text are unchanged.");
   }
   const efforts = activeChoices?.models.find(m => m.id === selected?.modelId)?.efforts ?? [];
-  return <section className="owned-session" aria-label="Owned text submission">
-    {expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onClose={() => setExpanded(false)} />}
-    <label className="sr-only" htmlFor="session-prompt">Message</label>
-    <textarea id="session-prompt" ref={promptInput} className="prompt-input" rows={1} maxLength={32768} value={pending?.request.text ?? text} disabled={!!pending}
-      onChange={event => editText(event.target.value)} placeholder="Ask CodeAlta to work on this project…" onKeyDown={event => {
+  const imageCapability = activeChoices?.models.find(m => m.id === selected?.modelId)?.imageInput;
+  async function pasteImages(event: ClipboardEvent<HTMLTextAreaElement>) {
+    if (!event.clipboardData.files.length) return;
+    event.preventDefault();
+    const revision = ++inputRevision.current;
+    if (event.clipboardData.files.length > imageLimits.count) { setImageNotice("Image paste refused. " + imageHelp); return; }
+    const files = Array.from(event.clipboardData.files);
+    const origin = event.currentTarget;
+    if (pending || invalidEpoch || imageCapability !== true || !capability.canMutate()) {
+      setImageNotice("Image paste unavailable: choose an explicitly supported observed model and an editable composer."); return;
+    }
+    const original = imageOwner.get(imageKey);
+    const selectionVersion = selectionRevision.current; const lifetime = inputLifetime;
+    const signal = scope.current?.signal;
+    const current = () => !signal?.aborted && inputRevision.current === revision && selectionRevision.current === selectionVersion
+      && origin.isConnected && !origin.closest("[inert]") && (!lifetime || lifetime.current()) && capability.canMutate()
+      && imageOwner.get(imageKey) === original && !submissions.pending(sessionId);
+    if (!current()) return;
+    const finish = imageOwner.beginRead(imageKey);
+    if (!finish) { setImageNotice("An image read is still pending, or the eight-read limit has been reached."); return; }
+    try {
+      if (original.length + files.length > imageLimits.count || files.some(file => file.type !== "image/png" || file.size > imageLimits.bytes)
+        || original.reduce((sum, image) => sum + atob(image.base64).length, 0) + files.reduce((sum, file) => sum + file.size, 0) > imageLimits.total)
+        throw new Error(imageHelp);
+      const added = [];
+      for (const file of files) { added.push(await readPastedPng(file, `Image ${original.length + added.length + 1}`)); if (!current()) return; }
+      if (!imageOwner.replace(imageKey, original, [...original, ...added])) {
+        setImageNotice("Image draft capacity reached (8 image-bearing drafts). Remove attachments from another draft first."); return;
+      }
+      setImageNotice("PNG attached. Original encoded bytes are retained until Send or removal.");
+    } catch { if (current()) setImageNotice("Image paste refused. " + imageHelp); }
+    finally { finish(); }
+  }
+  const imageCount = (pending?.request.images ?? images).length;
+  const attachmentStrip = <div className="prompt-image-attachments" aria-label={t("Prompt image attachments")}>
+    <details><summary>{t("PNG attachments")} — {t(imageCapability === true ? "available (observed)" : imageCapability === false ? "unsupported" : "unknown")}</summary><p>{t(imageHelp)}</p>
+      <p>{imageCount ? t(imageCount === 1 ? "{count} image attached" : "{count} images attached", { count: imageCount }) : t("No images attached")}</p></details>
+    {(pending?.request.images ?? images).map((image, index) => <figure key={index}>
+      <img src={`data:image/png;base64,${image.base64}`} alt={image.title} width={80} height={80} />
+      <figcaption>{image.title}</figcaption>
+      <button type="button" disabled={!!pending} onClick={() => { inputRevision.current++; imageOwner.replace(imageKey, images, images.filter((_, i) => i !== index)); }}>{t("Remove {title}", { title: image.title })}</button>
+    </figure>)}
+    {imageNotice && <p role="status">{imageNotice}</p>}
+  </div>;
+  return <section className="owned-session" aria-label={t("Owned text submission")}>
+    {referenceScope && <p className="catalog-diagnostics">@ project references resolve once on normal Send (up to 32 paths, bounded ranges). Missing/unsafe/over-budget references stay literal. File contents are not uploaded. Queue and Steer always send literal text.</p>}
+    {expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
+    {!expanded && attachmentStrip}
+    <label className="sr-only" htmlFor="session-prompt">{t("Message")}</label>
+    <textarea id="session-prompt" ref={promptInput} onPaste={pasteImages} className="prompt-input" rows={1} maxLength={32768} value={pending?.request.text ?? text} disabled={!!pending}
+      onChange={event => editText(event.target.value)} placeholder={t("Ask CodeAlta to work on this project…")} onKeyDown={event => {
         if (dispatchTransientComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
           altKey: event.altKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing,
           keyCode: event.nativeEvent.keyCode, repeat: event.repeat, defaultPrevented: event.defaultPrevented },
@@ -412,153 +492,154 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
           isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode,
           repeat: event.repeat, defaultPrevented: event.defaultPrevented }, submit, () => steer(true))) event.preventDefault();
       }} />
+    {!pending && !expanded && !invalidEpoch && <ProjectReferencePicker text={text} edit={editText} input={promptInput} />}
     <div className="composer-toolbar">
-    <div className="prompt-options" aria-label="Session configuration">
-      <label><span>Agent prompt</span><select aria-label="Agent prompt" value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title="Agent prompt for the next Send">
-        {!activeChoices?.prompts.some(p => p.id === selected?.agentPromptId) && <option value={selected?.agentPromptId ?? ""}>{selected?.agentPromptId ?? "Loading…"}</option>}
+    <div className="prompt-options" aria-label={t("Session configuration")}>
+      <label><span>{t("Agent prompt")}</span><select aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
+        {!activeChoices?.prompts.some(p => p.id === selected?.agentPromptId) && <option value={selected?.agentPromptId ?? ""}>{selected?.agentPromptId ?? t("Loading…")}</option>}
         {activeChoices?.prompts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
       </select></label>
-      <label><span>Model</span><select aria-label="Model" value={selected?.modelId ?? ""} disabled={selectionDisabled} onChange={event => select("modelId", event.target.value)} title={`Model for the next Send · ${selected?.providerKey ?? "session provider"}`}>
-        <option value="">Provider default</option>
-        {selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) && <option value={selected.modelId}>{selected.modelId} (not in catalog)</option>}
+      <label><span>{t("Model")}</span><select aria-label={t("Model")} value={selected?.modelId ?? ""} disabled={selectionDisabled} onChange={event => select("modelId", event.target.value)} title={t("Model for the next Send · {provider}", { provider: selected?.providerKey ?? t("session provider") })}>
+        <option value="">{t("Provider default")}</option>
+        {selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) && <option value={selected.modelId}>{selected.modelId} ({t("not in catalog")})</option>}
         {activeChoices?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
       </select></label>
-      <label><span>Reasoning</span><select aria-label="Reasoning" value={selected?.reasoningEffort ?? ""} disabled={selectionDisabled || efforts.length === 0} onChange={event => select("reasoningEffort", event.target.value)} title="Supported reasoning effort for the selected model">
-        <option value="">Model default</option>
-        {selected?.reasoningEffort && !efforts.includes(selected.reasoningEffort) && <option value={selected.reasoningEffort}>{selected.reasoningEffort} (not in catalog)</option>}
+      <label><span>{t("Reasoning")}</span><select aria-label={t("Reasoning")} value={selected?.reasoningEffort ?? ""} disabled={selectionDisabled || efforts.length === 0} onChange={event => select("reasoningEffort", event.target.value)} title={t("Supported reasoning effort for the selected model")}>
+        <option value="">{t("Model default")}</option>
+        {selected?.reasoningEffort && !efforts.includes(selected.reasoningEffort) && <option value={selected.reasoningEffort}>{selected.reasoningEffort} ({t("not in catalog")})</option>}
         {efforts.map(e => <option key={e} value={e}>{e}</option>)}
       </select></label>
     </div>
     <div className="history-controls">
-      <span className="sr-only">Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer</span>
+      <span className="sr-only">{t("Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer")}</span>
       {infoControl}
       {usageTarget && <SessionUsageInspector key={JSON.stringify(usageTarget)} target={usageTarget} capability={capability} />}
       {onOpenReminders && <button ref={remindersTrigger} type="button" className="composer-icon-button" data-reminder-count=""
         disabled={invalidEpoch} aria-label={reminderLabel} title={`${reminderLabel} (Ctrl+G, Ctrl+D)`}
         onClick={onOpenReminders}><AppIcon name="reminder" size={16} /><span className="reminder-count" aria-hidden="true">{observedReminderCount ?? "?"}</span></button>}
-      <button id="expand-session-prompt" type="button" className="composer-icon-button" disabled={!!pending || invalidEpoch} aria-label="Expand prompt editor" title="Edit prompt in a large window (F6)" onClick={() => setExpanded(true)}><AppIcon name="expand" size={16} /></button>
+      <button id="expand-session-prompt" type="button" className="composer-icon-button" disabled={!!pending || invalidEpoch} aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => { inputRevision.current++; setExpanded(true); }}><AppIcon name="expand" size={16} /></button>
       {observedSteerRun && <button type="button" className="composer-icon-button" onClick={() => steer(true)}
         disabled={invalidEpoch || !!pending || !!pendingSteer || !availableComposerSteer || !capability.canSubmit(availableComposerSteer)}
-        aria-label="Steer current composer to observed run" aria-describedby="observed-steering-help"
-        title={`Steer current composer to observed run ${observedSteerRun.expectedRunId} (Ctrl+Enter; point-in-time observation, not run completion; retained steering requires separate manual review)`}>
+        aria-label={t("Steer current composer to observed run")} aria-describedby="observed-steering-help"
+        title={t("Steer current composer to observed run {run} (Ctrl+Enter; point-in-time observation, not run completion; retained steering requires separate manual review)", { run: observedSteerRun.expectedRunId })}>
         <AppIcon name="steer" size={16} /></button>}
       {observedQueueAttachment && <button type="button" className="composer-icon-button" onClick={() => queueTextInHost(true)}
         disabled={invalidEpoch || !!pending || !!pendingQueue || !availableComposerQueue || !capability.canSubmit(availableComposerQueue)}
-        aria-label="Queue current composer in this host" aria-describedby="observed-queue-help"
-        title={`Queue current composer for observed attachment ${observedQueueAttachment.expectedAttachmentGeneration} in this host only; no run target. Reservation does not confirm insertion or execution; composer draft stays editable.`}>
+        aria-label={t("Queue current composer in this host")} aria-describedby="observed-queue-help"
+        title={t("Queue current composer for observed attachment {attachment} in this host only; no run target. Reservation does not confirm insertion or execution; composer draft stays editable.", { attachment: observedQueueAttachment.expectedAttachmentGeneration })}>
         <AppIcon name="queue" size={16} /></button>}
       {(availableCompact || pendingCompact) && <button ref={compactTrigger} type="button" className="composer-icon-button" onClick={compact}
         data-epoch={epoch} data-session-id={sessionId} data-project-id={projectId ?? ""}
         disabled={invalidEpoch || !!pendingCompact?.inFlight || (pendingCompact
           ? !capability.canSubmit(pendingCompact.request) : !availableCompact || !capability.canSubmit(availableCompact))}
-        aria-label={pendingCompact ? `Retry exact compaction request for attachment ${pendingCompact.request.expectedAttachmentGeneration}` : "Compact observed idle attachment"}
+        aria-label={pendingCompact ? t("Retry exact compaction request for attachment {attachment}", { attachment: pendingCompact.request.expectedAttachmentGeneration }) : t("Compact observed idle attachment")}
         aria-describedby="observed-compaction-help"
-        title={pendingCompact ? `Manual retry of exact compaction: epoch ${pendingCompact.request.expectedEpoch}, session ${pendingCompact.request.sessionId}, runtime ${pendingCompact.request.expectedRuntimeInstanceId}, attachment ${pendingCompact.request.expectedAttachmentGeneration}, request ${pendingCompact.request.clientRequestId}`
-          : `Compact observed idle attachment (Ctrl+F11; point-in-time idle observation permits only an attempt; provider must prove idle)`}>
+        title={pendingCompact ? `${t("Manual retry of exact compaction:")} ${t("epoch")} ${pendingCompact.request.expectedEpoch}, ${t("session")} ${pendingCompact.request.sessionId}, ${t("runtime")} ${pendingCompact.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingCompact.request.expectedAttachmentGeneration}, ${t("request")} ${pendingCompact.request.clientRequestId}`
+          : t("Compact observed idle attachment (Ctrl+F11; point-in-time idle observation permits only an attempt; provider must prove idle)")}>
         <AppIcon name="compact" size={16} /></button>}
       {(availableAbortRun || pendingAbortRun) && <button type="button" className={`cancel-run-button${cancellationPrimary ? " primary-button" : ""}`} onClick={abortRun}
         disabled={invalidEpoch || !!pendingAbortRun?.inFlight || (pendingAbortRun
           ? !capability.canSubmit(pendingAbortRun.request) : !availableAbortRun || !capability.canSubmit(availableAbortRun))}
-        aria-label={pendingAbortRun ? `Retry exact cancellation request for observed run ${pendingAbortRun.request.expectedRunId}` : "Cancel observed run"}
+        aria-label={pendingAbortRun ? t("Retry exact cancellation request for observed run {run}", { run: pendingAbortRun.request.expectedRunId }) : t("Cancel observed run")}
         aria-describedby="observed-run-cancellation-help"
-        title={pendingAbortRun ? `Manual retry of exact cancellation: epoch ${pendingAbortRun.request.expectedEpoch}, session ${pendingAbortRun.request.sessionId}, runtime ${pendingAbortRun.request.expectedRuntimeInstanceId}, attachment ${pendingAbortRun.request.expectedAttachmentGeneration}, run ${pendingAbortRun.request.expectedRunId}, request ${pendingAbortRun.request.clientRequestId}`
-          : `Cancel observed run ${availableAbortRun?.expectedRunId} (point-in-time runtime observation, not original Send Abort; signalling does not confirm completion)`}>
-        <AppIcon name="stop" size={16} /><span>{pendingAbortRun ? "Retry exact cancellation" : "Cancel observed run"}</span></button>}
-      <button type="button" className={`send-button${cancellationPrimary ? "" : " primary-button"}`} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : captureSubmission(epoch, sessionId, text, "availability") === null)} onClick={submit}>{pending ? "Retry exact request" : <><span>Send</span><AppIcon name="send" size={14} /></>}</button>
+        title={pendingAbortRun ? `${t("Manual retry of exact cancellation:")} ${t("epoch")} ${pendingAbortRun.request.expectedEpoch}, ${t("session")} ${pendingAbortRun.request.sessionId}, ${t("runtime")} ${pendingAbortRun.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingAbortRun.request.expectedAttachmentGeneration}, ${t("run")} ${pendingAbortRun.request.expectedRunId}, ${t("request")} ${pendingAbortRun.request.clientRequestId}`
+          : t("Cancel observed run {run} (point-in-time runtime observation, not original Send Abort; signalling does not confirm completion)", { run: availableAbortRun?.expectedRunId ?? "" })}>
+        <AppIcon name="stop" size={16} /><span>{t(pendingAbortRun ? "Retry exact cancellation" : "Cancel observed run")}</span></button>}
+      <button type="button" className={`send-button${cancellationPrimary ? "" : " primary-button"}`} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : captureSubmission(epoch, sessionId, text, "availability") === null)} onClick={submit}>{pending ? t("Retry exact request") : <><span>{t("Send")}</span><AppIcon name="send" size={14} /></>}</button>
     </div>
     </div>
-    <span id="observed-run-cancellation-help" className="sr-only">Targets a point-in-time observed run, not the original Send receipt. Cancellation signalled does not confirm run completion. Retained requests are only retried manually against their original target after the previous wait settles.</span>
-    <span id="observed-steering-help" className="sr-only">Uses current composer text and the point-in-time observed run. Admission is not run completion. Retained steering is reviewed or retried separately, never from this button.</span>
-    <span id="observed-queue-help" className="sr-only">Uses current editable composer text and the point-in-time observed attachment, including busy or draining attachments; never targets a run. Reservation does not prove host-only insertion, durability or execution. The composer draft is preserved. Retained queue requests are reviewed or retried separately, never from this button.</span>
-    <span id="observed-compaction-help" className="sr-only">Point-in-time idle observation permits only an attempt; the provider must prove idle. Busy is a permanent outcome, not an automatic retry. Retained requests are retried manually against their original attachment after the previous wait settles.</span>
+    <span id="observed-run-cancellation-help" className="sr-only">{t("Targets a point-in-time observed run, not the original Send receipt. Cancellation signalled does not confirm run completion. Retained requests are only retried manually against their original target after the previous wait settles.")}</span>
+    <span id="observed-steering-help" className="sr-only">{t("Uses current composer text and the point-in-time observed run. Admission is not run completion. Retained steering is reviewed or retried separately, never from this button.")}</span>
+    <span id="observed-queue-help" className="sr-only">{t("Uses current editable composer text and the point-in-time observed attachment, including busy or draining attachments; never targets a run. Reservation does not prove host-only insertion, durability or execution. The composer draft is preserved. Retained queue requests are reviewed or retried separately, never from this button.")}</span>
+    <span id="observed-compaction-help" className="sr-only">{t("Point-in-time idle observation permits only an attempt; the provider must prove idle. Busy is a permanent outcome, not an automatic retry. Retained requests are retried manually against their original attachment after the previous wait settles.")}</span>
     {choicesNotice !== "Selections apply on Send; active runs and queued text are unchanged." && <p className="composer-notice" role={choicesNotice.includes("could not") || choicesNotice.includes("unavailable") ? "alert" : "status"}>{choicesNotice}
-      {(choicesNotice.includes("could not") || choicesNotice.includes("unavailable")) && <button type="button" disabled={!!pending || invalidEpoch} onClick={() => setChoicesRevision(value => value + 1)}>Retry choices</button>}</p>}
+      {(choicesNotice.includes("could not") || choicesNotice.includes("unavailable")) && <button type="button" disabled={!!pending || invalidEpoch} onClick={refreshChoices}>{t("Retry choices")}</button>}</p>}
     {(message !== "Ready to send to this owned session." || pending || pendingAborts.length > 0) && <p className="composer-notice" role="status">{message}</p>}
-    {(pending || pendingAborts.length > 0) && <button type="button" onClick={() => refresh()}>Refresh receipts</button>}
-    {invalidEpoch && <p role="alert">Host/runtime identity changed. Reload required; mutations are disabled. The exact uncertain request is retained and will not be rebased or resent.</p>}
-    {runtimeState?.kind === "error" && <p role="alert">Runtime observation unavailable ({runtimeState.code}). {['stale_epoch', 'stale_runtime'].includes(runtimeState.code) ? "Reload required." : "No idle or completion state is inferred."}</p>}
-    {mcpPlugin && /fail|error/i.test(mcpPlugin.state) && <p role="alert">MCP plugin: {mcpPlugin.state}. Check advanced diagnostics.</p>}
-    {page && page.status !== "ok" && <p role="alert">Receipt snapshot: {page.status}</p>}
+    {(pending || pendingAborts.length > 0) && <button type="button" onClick={() => refresh()}>{t("Refresh receipts")}</button>}
+    {invalidEpoch && <p role="alert">{t("Host/runtime identity changed. Reload required; mutations are disabled. The exact uncertain request is retained and will not be rebased or resent.")}</p>}
+    {runtimeState?.kind === "error" && <p role="alert">{t("Runtime observation unavailable ({code}).", { code: runtimeState.code })} {t(['stale_epoch', 'stale_runtime'].includes(runtimeState.code) ? "Reload required." : "No idle or completion state is inferred.")}</p>}
+    {mcpPlugin && /fail|error/i.test(mcpPlugin.state) && <p role="alert">{t("MCP plugin:")} {mcpPlugin.state}. {t("Check advanced diagnostics.")}</p>}
+    {page && page.status !== "ok" && <p role="alert">{t("Receipt snapshot:")} {page.status}</p>}
     {(compactMessage !== "Refresh runtime state explicitly before attempting idle compaction." || pendingAbortRun) && <p className="composer-notice" role="status">{compactMessage !== "Refresh runtime state explicitly before attempting idle compaction." && compactMessage} {pendingAbortRun && abortRunMessage}</p>}
-    {pendingCompact && <p className="composer-notice">Manual exact compaction retry only: epoch {pendingCompact.request.expectedEpoch} · session {pendingCompact.request.sessionId} · runtime {pendingCompact.request.expectedRuntimeInstanceId} · attachment {pendingCompact.request.expectedAttachmentGeneration} · request {pendingCompact.request.clientRequestId}. Refresh never retargets this intent.</p>}
-    {pendingAbortRun && <p className="composer-notice">Manual exact cancellation retry only: epoch {pendingAbortRun.request.expectedEpoch} · session {pendingAbortRun.request.sessionId} · runtime {pendingAbortRun.request.expectedRuntimeInstanceId} · attachment {pendingAbortRun.request.expectedAttachmentGeneration} · run {pendingAbortRun.request.expectedRunId} · request {pendingAbortRun.request.clientRequestId}. Refresh never retargets this intent.</p>}
+    {pendingCompact && <p className="composer-notice">{t("Manual exact compaction retry only:")} {t("epoch")} {pendingCompact.request.expectedEpoch} · {t("session")} {pendingCompact.request.sessionId} · {t("runtime")} {pendingCompact.request.expectedRuntimeInstanceId} · {t("attachment")} {pendingCompact.request.expectedAttachmentGeneration} · {t("request")} {pendingCompact.request.clientRequestId}. {t("Refresh never retargets this intent.")}</p>}
+    {pendingAbortRun && <p className="composer-notice">{t("Manual exact cancellation retry only:")} {t("epoch")} {pendingAbortRun.request.expectedEpoch} · {t("session")} {pendingAbortRun.request.sessionId} · {t("runtime")} {pendingAbortRun.request.expectedRuntimeInstanceId} · {t("attachment")} {pendingAbortRun.request.expectedAttachmentGeneration} · {t("run")} {pendingAbortRun.request.expectedRunId} · {t("request")} {pendingAbortRun.request.clientRequestId}. {t("Refresh never retargets this intent.")}</p>}
     <RetainedRequestStrip epoch={epoch} sessionId={sessionId} queue={queue} steering={steering} />
     {(showSteering || showQueue) && <div className="context-actions">
-      {showSteering && <div><label>Steer observed run {pendingSteer?.request.expectedRunId ?? observedTarget?.entry?.activeRunId}<textarea maxLength={32768} value={pendingSteer?.request.text ?? steerText} disabled={!!pendingSteer} onChange={event => setSteerText(event.target.value)} /></label>
-        {pendingSteer && <p className="detail">Retained run {pendingSteer.request.expectedRunId} · attachment {pendingSteer.request.expectedAttachmentGeneration} · request {pendingSteer.request.clientRequestId}; refresh never retargets this request.</p>}
-        <button type="button" disabled={invalidEpoch || !!pendingSteer?.inFlight || (pendingSteer ? !capability.canSubmit(pendingSteer.request) : !canCaptureSteer)} onClick={() => steer()}>{pendingSteer ? "Retry exact steering request" : "Steer observed run"}</button>
+      {showSteering && <div><label>{t("Steer observed run")} {pendingSteer?.request.expectedRunId ?? observedTarget?.entry?.activeRunId}<textarea maxLength={32768} value={pendingSteer?.request.text ?? steerText} disabled={!!pendingSteer} onChange={event => setSteerText(event.target.value)} /></label>
+        {pendingSteer && <p className="detail">{t("Retained run")} {pendingSteer.request.expectedRunId} · {t("attachment")} {pendingSteer.request.expectedAttachmentGeneration} · {t("request")} {pendingSteer.request.clientRequestId}; {t("refresh never retargets this request.")}</p>}
+        <button type="button" disabled={invalidEpoch || !!pendingSteer?.inFlight || (pendingSteer ? !capability.canSubmit(pendingSteer.request) : !canCaptureSteer)} onClick={() => steer()}>{t(pendingSteer ? "Retry exact steering request" : "Steer observed run")}</button>
         {steerMessage !== "Refresh runtime state explicitly before targeting a run." && <p role="status">{steerMessage}</p>}</div>}
-      {showQueue && <div><label>Host-only queued text<textarea maxLength={32768} value={pendingQueue?.request.text ?? queueText} disabled={!!pendingQueue} onChange={event => editQueueText(event.target.value)} /></label>
-        <p className="detail">Reservation is not insertion, execution or durable storage. Refresh receipts manually.</p>
-        {pendingQueue && <p className="detail">Retained attachment {pendingQueue.request.expectedAttachmentGeneration} · request {pendingQueue.request.clientRequestId}; no durable recovery or retargeting.</p>}
-        <button type="button" disabled={invalidEpoch || !!pendingQueue?.inFlight || (pendingQueue ? !capability.canSubmit(pendingQueue.request) : !canCaptureQueue)} onClick={() => queueTextInHost(false)}>{pendingQueue ? "Retry exact host-only queue request" : "Queue text — this host only"}</button>
+      {showQueue && <div><label>{t("Host-only queued text")}<textarea maxLength={32768} value={pendingQueue?.request.text ?? queueText} disabled={!!pendingQueue} onChange={event => editQueueText(event.target.value)} /></label>
+        <p className="detail">{t("Reservation is not insertion, execution or durable storage. Refresh receipts manually.")}</p>
+        {pendingQueue && <p className="detail">{t("Retained attachment")} {pendingQueue.request.expectedAttachmentGeneration} · {t("request")} {pendingQueue.request.clientRequestId}; {t("no durable recovery or retargeting.")}</p>}
+        <button type="button" disabled={invalidEpoch || !!pendingQueue?.inFlight || (pendingQueue ? !capability.canSubmit(pendingQueue.request) : !canCaptureQueue)} onClick={() => queueTextInHost(false)}>{t(pendingQueue ? "Retry exact host-only queue request" : "Queue text — this host only")}</button>
         {pendingQueueCancellations.map(value => <div key={value.intent.request.targetOperationId}>
-          <p className="detail">Retained cancellation · original operation {value.intent.request.targetOperationId} · request {value.intent.request.clientRequestId}</p>
-          <button type="button" disabled={invalidEpoch || value.inFlight || !capability.canSubmit(value.intent.request)} onClick={() => cancelQueued(undefined, value.intent.request.targetOperationId)}>Retry exact queued-operation cancellation</button>
+          <p className="detail">{t("Retained cancellation")} · {t("original operation")} {value.intent.request.targetOperationId} · {t("request")} {value.intent.request.clientRequestId}</p>
+          <button type="button" disabled={invalidEpoch || value.inFlight || !capability.canSubmit(value.intent.request)} onClick={() => cancelQueued(undefined, value.intent.request.targetOperationId)}>{t("Retry exact queued-operation cancellation")}</button>
         </div>)}
         {queueMessage !== "Refresh runtime state explicitly before queueing text in this host." && <p role="status">{queueMessage}</p>}</div>}
     </div>}
     {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId} />}
-    <details className="advanced-session-controls"><summary>Advanced session controls and diagnostics</summary><div>
-    <p className="detail">Selections apply on Send; active runs and queued text are unchanged.</p>
-    <button id="refresh-session-context" type="button" onClick={() => void runtimeScope.current?.refresh()} aria-label="Refresh context and runtime configuration" title={`Refresh context · ${runtimeConfiguration?.providerKey ?? "session provider"}`}><AppIcon name="refresh" size={14} /> Refresh context</button>
-    <button type="button" disabled={!!pending || invalidEpoch} onClick={() => setChoicesRevision(value => value + 1)}><AppIcon name="refresh" size={14} /> Refresh choices</button>
+    <details className="advanced-session-controls"><summary>{t("Advanced session controls and diagnostics")}</summary><div>
+    <p className="detail">{t("Selections apply on Send; active runs and queued text are unchanged.")}</p>
+    <button id="refresh-session-context" type="button" onClick={() => void runtimeScope.current?.refresh()} aria-label={t("Refresh context and runtime configuration")} title={`${t("Refresh context")} · ${runtimeConfiguration?.providerKey ?? t("session provider")}`}><AppIcon name="refresh" size={14} /> {t("Refresh context")}</button>
+    <button type="button" disabled={!!pending || invalidEpoch} onClick={refreshChoices}><AppIcon name="refresh" size={14} /> {t("Refresh choices")}</button>
     {onOpenReminders && readReminderCount && reminderActions && <button type="button" disabled={invalidEpoch}
-      aria-label="Refresh observed reminder count" onClick={() => { reminderRevision.current++; setReminderObservation(undefined); setReminderReload(value => value + 1); }}>
-      <AppIcon name="refresh" size={14} /> Refresh reminder count</button>}
-    <p className="detail">MCP: {mcpPlugin?.state ?? (configuration?.pluginRuntimeAvailable ? "Off" : "Unavailable")} · {runtimeState?.kind === "loading" ? "Reading context…" : runtimeConfiguration?.activeRunId ? "Run active" : runtimeConfiguration ? "Context ready" : "Context unavailable"}.</p>
-    <p className="detail">Existing session only. {permissionReviewer ? "Supported plain commands require explicit review below; other permissions are denied." : "Permissions are denied by default. Relaunch with --review-owned-command-permissions in owned mode to opt in to supported plain command review."} User input is cancelled; plugins and host-contributed tools are disabled. A submitted receipt is not a completed run. Receipt capacity is 256 for this host lifetime.</p>
-    <p className="detail">Send/Abort retains at most 256 local intents combined. Selection changes retain exact requests and live waiter exclusion. After document reload, browse host receipts manually; lost text and retry keys are not reconstructed. No automatic retry.</p>
-    <button type="button" onClick={() => refresh()}>Refresh submissions</button>
+      aria-label={t("Refresh observed reminder count")} onClick={() => { reminderRevision.current++; setReminderObservation(undefined); setReminderReload(value => value + 1); }}>
+      <AppIcon name="refresh" size={14} /> {t("Refresh reminder count")}</button>}
+    <p className="detail">MCP: {mcpPlugin?.state ?? t(configuration?.pluginRuntimeAvailable ? "Off" : "Unavailable")} · {t(runtimeState?.kind === "loading" ? "Reading context…" : runtimeConfiguration?.activeRunId ? "Run active" : runtimeConfiguration ? "Context ready" : "Context unavailable")}.</p>
+    <p className="detail">{t("Existing session only.")} {t(permissionReviewer ? "Supported plain commands require explicit review below; other permissions are denied." : "Permissions are denied by default. Relaunch with --review-owned-command-permissions in owned mode to opt in to supported plain command review.")} {t("User input is cancelled; plugins and host-contributed tools are disabled. A submitted receipt is not a completed run. Receipt capacity is 256 for this host lifetime.")}</p>
+    <p className="detail">{t("Send/Abort retains at most 256 local intents combined. Selection changes retain exact requests and live waiter exclusion. After document reload, browse host receipts manually; lost text and retry keys are not reconstructed. No automatic retry.")}</p>
+    <button type="button" onClick={() => refresh()}>{t("Refresh submissions")}</button>
     {(Array.isArray(page?.rows) ? page.rows : []).filter(row => row && typeof row.sessionId === "string" && row.sessionId.toLowerCase() === sessionId.toLowerCase()).map(row => <div key={row.operationId}>
       {row.kind === "Queue" ? <><p>Queue · {row.operationId}</p>
-        {queueReceiptPhases(row)?.map((phase, index) => <p key={index}>{index + 1}. {phase}</p>) ?? <p>Malformed queue receipt; not actionable.</p>}</>
-        : row.kind === "CancelQueue" ? <p>CancelQueue · {queueCancellationStatus(row) ?? "Malformed cancellation receipt; not actionable."} · target {row.targetOperationId}</p>
-        : <p>{row.kind} · {row.outcome === "Completed" ? (row.kind === "Abort" ? "Original Send control settled; not rollback, decision retraction or run termination" : row.kind === "AbortRun" ? "Cancellation signalled; run completion is not confirmed" : row.kind === "Compact" ? "compaction settled successfully" : row.kind === "Steer" ? "steering input submitted" : "submission submitted") : row.outcome === "Failed" ? "operation failed" : row.outcome === "Cancelled" ? "operation cancelled" : "operation pending"} {row.code ?? ""} · {row.operationId}</p>}
+        {queueReceiptPhases(row)?.map((phase, index) => <p key={index}>{index + 1}. {phase}</p>) ?? <p>{t("Malformed queue receipt; not actionable.")}</p>}</>
+        : row.kind === "CancelQueue" ? <p>CancelQueue · {queueCancellationStatus(row) ?? t("Malformed cancellation receipt; not actionable.")} · {t("target")} {row.targetOperationId}</p>
+        : <p>{row.kind} · {t(row.outcome === "Completed" ? (row.kind === "Abort" ? "Original Send control settled; not rollback, decision retraction or run termination" : row.kind === "AbortRun" ? "Cancellation signalled; run completion is not confirmed" : row.kind === "Compact" ? "compaction settled successfully" : row.kind === "Steer" ? "steering input submitted" : "submission submitted") : row.outcome === "Failed" ? "operation failed" : row.outcome === "Cancelled" ? "operation cancelled" : "operation pending")} {row.code ?? ""} · {row.operationId}</p>}
       {row.kind === "Queue" && <button type="button" disabled={invalidEpoch || !!queue.cancelPending(row.operationId)
         || (!!pendingQueue?.inFlight && pendingQueue.request.clientRequestId === row.clientRequestId)
-        || !page || captureQueueCancellation(epoch, sessionId, page, row, "availability") === null} onClick={() => cancelQueued(row)}>Cancel this queued operation</button>}
+        || !page || captureQueueCancellation(epoch, sessionId, page, row, "availability") === null} onClick={() => cancelQueued(row)}>{t("Cancel this queued operation")}</button>}
       {row.kind === "Send" && row.state === "pending" && <button type="button" disabled={invalidEpoch || !!submissions.abortPending(row.operationId)
         || (!!pending?.inFlight && pending.request.clientRequestId === row.clientRequestId)
-        || !page || captureSubmissionAbort(epoch, sessionId, page, row, "availability") === null} onClick={() => abort(row)}>Abort original Send operation</button>}
+        || !page || captureSubmissionAbort(epoch, sessionId, page, row, "availability") === null} onClick={() => abort(row)}>{t("Abort original Send operation")}</button>}
     </div>)}
-    {page?.next != null && <button type="button" onClick={() => refresh(page.next!)}>Next receipt page</button>}
+    {page?.next != null && <button type="button" onClick={() => refresh(page.next!)}>{t("Next receipt page")}</button>}
     {pendingAborts.map(value => <div key={value.intent.request.targetOperationId}>
-      <p className="detail">Retained Abort: original session {value.intent.sessionId} · operation {value.intent.request.targetOperationId} · request {value.intent.request.clientRequestId}</p>
+      <p className="detail">{t("Retained Abort: original session")} {value.intent.sessionId} · {t("operation")} {value.intent.request.targetOperationId} · {t("request")} {value.intent.request.clientRequestId}</p>
       <button type="button" disabled={invalidEpoch || value.inFlight || !capability.canSubmit(value.intent.request)}
-        onClick={() => abort(undefined, value.intent.request.targetOperationId)}>Retry exact original Send Abort</button>
+        onClick={() => abort(undefined, value.intent.request.targetOperationId)}>{t("Retry exact original Send Abort")}</button>
     </div>)}
-    <h3>Current runtime — manual point-in-time observation</h3>
-    <p className="detail">Recorded facts at the last refresh, not provider inactivity or successful run completion. Queue depth is unknown. This does not acknowledge effects or synchronize Display, receipts or persisted history.</p>
-    <button type="button" disabled={runtimeState?.kind === "error" && ["stale_epoch", "stale_runtime"].includes(runtimeState.code)} onClick={() => void runtimeScope.current?.refresh()}>Refresh runtime state</button>
-    {runtimeState?.kind === "loading" && <p role="status">Reading current runtime facts…</p>}
+    <h3>{t("Current runtime — manual point-in-time observation")}</h3>
+    <p className="detail">{t("Recorded facts at the last refresh, not provider inactivity or successful run completion. Queue depth is unknown. This does not acknowledge effects or synchronize Display, receipts or persisted history.")}</p>
+    <button type="button" disabled={runtimeState?.kind === "error" && ["stale_epoch", "stale_runtime"].includes(runtimeState.code)} onClick={() => void runtimeScope.current?.refresh()}>{t("Refresh runtime state")}</button>
+    {runtimeState?.kind === "loading" && <p role="status">{t("Reading current runtime facts…")}</p>}
     {runtimeState?.kind === "ready" && <>
-      <p className="detail">Runtime instance {runtimeState.snapshot.runtimeInstanceId} · coordinator transition recorded: {runtimeState.snapshot.coordinatorTransitionInProgress ? "yes" : "no"}</p>
+      <p className="detail">{t("Runtime instance")} {runtimeState.snapshot.runtimeInstanceId} · {t("coordinator transition recorded:")} {t(runtimeState.snapshot.coordinatorTransitionInProgress ? "yes" : "no")}</p>
       {runtimeState.snapshot.entry ? <>
         <dl>
-          <dt>Attachment generation (identity, not revision)</dt><dd>{runtimeState.snapshot.entry.attachmentGeneration}</dd>
-          <dt>Active run recorded</dt><dd>{runtimeState.snapshot.entry.activeRunId ?? "No run recorded — provider activity unknown"}</dd>
-          <dt>Shutdown observed on entry</dt><dd>{runtimeState.snapshot.entry.isTerminated ? "yes" : "no"}</dd>
-          <dt>Attachment retiring</dt><dd>{runtimeState.snapshot.entry.isRetiring ? "yes" : "no"}</dd>
-          <dt>Queue drain in progress</dt><dd>{runtimeState.snapshot.entry.queueDrainInProgress ? "yes" : "no"}</dd>
+          <dt>{t("Attachment generation (identity, not revision)")}</dt><dd>{runtimeState.snapshot.entry.attachmentGeneration}</dd>
+          <dt>{t("Active run recorded")}</dt><dd>{runtimeState.snapshot.entry.activeRunId ?? t("No run recorded — provider activity unknown")}</dd>
+          <dt>{t("Shutdown observed on entry")}</dt><dd>{t(runtimeState.snapshot.entry.isTerminated ? "yes" : "no")}</dd>
+          <dt>{t("Attachment retiring")}</dt><dd>{t(runtimeState.snapshot.entry.isRetiring ? "yes" : "no")}</dd>
+          <dt>{t("Queue drain in progress")}</dt><dd>{t(runtimeState.snapshot.entry.queueDrainInProgress ? "yes" : "no")}</dd>
         </dl>
-        <p className="detail">Captured configuration — not verified provider-effective settings.</p>
+        <p className="detail">{t("Captured configuration — not verified provider-effective settings.")}</p>
         <dl>
-          <dt>Provider / configured key</dt><dd>{runtimeState.snapshot.entry.providerId} / {runtimeState.snapshot.entry.providerKey}</dd>
-          <dt>Captured model</dt><dd>{runtimeState.snapshot.entry.modelId ?? "Not recorded"}</dd>
-          <dt>Captured reasoning</dt><dd>{runtimeState.snapshot.entry.reasoningEffort ?? "Not recorded"}</dd>
-          <dt>Captured prompt</dt><dd>{runtimeState.snapshot.entry.agentPromptId ?? "Not recorded"}</dd>
-          <dt>Pending prompt (separate selection)</dt><dd>{runtimeState.snapshot.entry.pendingAgentPromptId ?? "None recorded"}</dd>
+          <dt>{t("Provider / configured key")}</dt><dd>{runtimeState.snapshot.entry.providerId} / {runtimeState.snapshot.entry.providerKey}</dd>
+          <dt>{t("Captured model")}</dt><dd>{runtimeState.snapshot.entry.modelId ?? t("Not recorded")}</dd>
+          <dt>{t("Captured reasoning")}</dt><dd>{runtimeState.snapshot.entry.reasoningEffort ?? t("Not recorded")}</dd>
+          <dt>{t("Captured prompt")}</dt><dd>{runtimeState.snapshot.entry.agentPromptId ?? t("Not recorded")}</dd>
+          <dt>{t("Pending prompt (separate selection)")}</dt><dd>{runtimeState.snapshot.entry.pendingAgentPromptId ?? t("None recorded")}</dd>
         </dl>
-      </> : <p>No runtime entry observed. This does not imply idle, completion or absence of a durable session.</p>}
+      </> : <p>{t("No runtime entry observed. This does not imply idle, completion or absence of a durable session.")}</p>}
     </>}
-    <h3>Signal cancellation for observed run</h3>
-    <p className="detail">Targets only the explicitly observed runtime, attachment and run. Unsupported, stale, retiring, transitioning or draining targets fail closed without fallback. Signalling is not run completion or rollback; previously accepted decisions remain accepted. Failure can occur after signalling. Refreshes never retarget a retained request.</p>
-    {pendingAbortRun && <p className="detail">Retained target: runtime {pendingAbortRun.request.expectedRuntimeInstanceId} · attachment {pendingAbortRun.request.expectedAttachmentGeneration} · run {pendingAbortRun.request.expectedRunId} · request {pendingAbortRun.request.clientRequestId}</p>}
+    <h3>{t("Signal cancellation for observed run")}</h3>
+    <p className="detail">{t("Targets only the explicitly observed runtime, attachment and run. Unsupported, stale, retiring, transitioning or draining targets fail closed without fallback. Signalling is not run completion or rollback; previously accepted decisions remain accepted. Failure can occur after signalling. Refreshes never retarget a retained request.")}</p>
+    {pendingAbortRun && <p className="detail">{t("Retained target: runtime")} {pendingAbortRun.request.expectedRuntimeInstanceId} · {t("attachment")} {pendingAbortRun.request.expectedAttachmentGeneration} · {t("run")} {pendingAbortRun.request.expectedRunId} · {t("request")} {pendingAbortRun.request.clientRequestId}</p>}
     <p role="status">{abortRunMessage}</p>
-    <h3>Compact the observed attachment if idle now</h3>
-    <p className="detail">Recorded idleness only permits an attempt: the provider must prove idle without waiting. Compacts context current at provider admission, not the history from your observation. Stale, retiring, non-owned or unsupported targets are rejected without fallback. No new permission authority is created. A busy receipt is permanent; a new explicit action uses a fresh key. Refreshes never retarget an uncertain request.</p>
-    {pendingCompact && <p className="detail">Retained target: runtime {pendingCompact.request.expectedRuntimeInstanceId} · attachment {pendingCompact.request.expectedAttachmentGeneration} · request {pendingCompact.request.clientRequestId}</p>}
+    <h3>{t("Compact the observed attachment if idle now")}</h3>
+    <p className="detail">{t("Recorded idleness only permits an attempt: the provider must prove idle without waiting. Compacts context current at provider admission, not the history from your observation. Stale, retiring, non-owned or unsupported targets are rejected without fallback. No new permission authority is created. A busy receipt is permanent; a new explicit action uses a fresh key. Refreshes never retarget an uncertain request.")}</p>
+    {pendingCompact && <p className="detail">{t("Retained target: runtime")} {pendingCompact.request.expectedRuntimeInstanceId} · {t("attachment")} {pendingCompact.request.expectedAttachmentGeneration} · {t("request")} {pendingCompact.request.clientRequestId}</p>}
     <p role="status">{compactMessage}</p>
     </div></details>
   </section>;

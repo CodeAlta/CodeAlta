@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { paletteAvailable, paletteCommands, type PaletteAction, type PaletteContext } from "./paletteActions";
+import { useShellLanguage } from "./shellLanguage";
 
 export function CommandPalette({ context, captured, onChoose, onClose }: {
   context: PaletteContext;
@@ -7,6 +8,7 @@ export function CommandPalette({ context, captured, onChoose, onClose }: {
   onChoose: (action: PaletteAction) => void;
   onClose: () => void;
 }) {
+  const { t } = useShellLanguage();
   const dialog = useRef<HTMLDialogElement>(null);
   const results = useRef<HTMLDivElement>(null);
   const composingEscape = useRef(false);
@@ -14,7 +16,7 @@ export function CommandPalette({ context, captured, onChoose, onClose }: {
   const [active, setActive] = useState(0);
   const words = query.trim().toLowerCase().split(/\s+/);
   const matches = paletteCommands(captured).filter(command => paletteAvailable(command.id, captured, context) &&
-    words.every(word => command.label.toLowerCase().includes(word)));
+    words.every(word => `${command.label} ${t(command.label)} ${command.aliases ?? ""}`.toLowerCase().includes(word)));
   const index = Math.min(active, matches.length - 1);
   useLayoutEffect(() => {
     const element = dialog.current;
@@ -36,6 +38,7 @@ export function CommandPalette({ context, captured, onChoose, onClose }: {
     onKeyUp={() => { composingEscape.current = false; }} onCompositionEnd={() => { composingEscape.current = false; }}
     onKeyDown={event => {
       event.stopPropagation();
+      if (event.defaultPrevented || event.repeat) return;
       if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
         if (event.key === "Escape") composingEscape.current = true;
         return;
@@ -51,16 +54,16 @@ export function CommandPalette({ context, captured, onChoose, onClose }: {
         if (index >= 0) onChoose(matches[index].id);
       }
     }}>
-    <header><div><span className="eyebrow">Implemented actions</span><h2 id="palette-title">Command palette</h2></div>
-      <button type="button" className="icon-button" aria-label="Close command palette" onClick={onClose}>✕</button></header>
-    <label htmlFor="palette-search">Search commands</label>
+    <header><div><span className="eyebrow">{t("Implemented actions")}</span><h2 id="palette-title">{t("Command palette")}</h2></div>
+      <button type="button" className="icon-button" aria-label={t("Close command palette")} onClick={onClose}>✕</button></header>
+    <label htmlFor="palette-search">{t("Search commands")}</label>
     <input autoFocus id="palette-search" type="search" role="combobox" aria-autocomplete="list" aria-expanded={matches.length > 0}
       aria-controls="palette-results" aria-activedescendant={index >= 0 ? `palette-option-${matches[index].id}` : undefined}
       value={query} onChange={event => { setQuery(event.target.value); setActive(0); }} />
-    <div ref={results} id="palette-results" className="dialog-list" role="listbox" aria-label="Available commands">
+    <div ref={results} id="palette-results" className="dialog-list" role="listbox" aria-label={t("Available commands")}>
       {matches.map((command, i) => <button type="button" role="option" id={`palette-option-${command.id}`} key={command.id}
-        aria-selected={i === index} tabIndex={-1} onMouseEnter={() => setActive(i)} onClick={() => onChoose(command.id)}>{command.label}</button>)}
-      {!matches.length && <p role="status">No available commands match.</p>}
+        aria-selected={i === index} tabIndex={-1} onMouseEnter={() => setActive(i)} onClick={() => onChoose(command.id)}>{t(command.label)}</button>)}
+      {!matches.length && <p role="status">{t("No available commands match.")}</p>}
     </div>
   </dialog>;
 }

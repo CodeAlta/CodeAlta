@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { workflowLanguages, workflowNarrow } from "./workflowLocalizationChecks";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -77,6 +78,8 @@ test("mounted About settings and palette inspect only current boot identity", { 
     assert.equal(await evaluate("document.activeElement.getAttribute('aria-label')"), "Close About");
     assert.equal(await evaluate("[...document.querySelectorAll('.about-dialog dd')].map(x=>x.textContent).join('|')"), "Fixture Desktop|2.7.9+build.123|build.123");
     assert.equal(await evaluate("document.querySelector('.about-dialog').textContent.includes('Update checks, downloads and installation are not supported')"), true);
+    await workflowLanguages(evaluate, "[fixtureWrites,fixtureNetwork,fixtureClipboard]", ".about-dialog", "#about-title", "About CodeAlta", "dd");
+    await workflowNarrow(evaluate, command, ".about-dialog");
     await click("#commands");
     assert.equal(await evaluate("!!document.querySelector('.command-palette')"), false);
     await evaluate("document.querySelector('.about-dialog header button').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',isComposing:true,bubbles:true,cancelable:true}))");

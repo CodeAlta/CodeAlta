@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { workflowLanguages, workflowNarrow } from "./workflowLocalizationChecks";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -75,6 +76,9 @@ test("mounted selected-project Details uses current bounded catalog identity wit
     await evaluate("document.querySelector('.project-details-trigger').focus()");
     await open();
     assert.equal(await evaluate("document.activeElement.getAttribute('aria-label')"), "Close project details");
+    const languages = () => workflowLanguages(evaluate, "[projectDetailsFixture.copied,projectDetailsFixture.pending,projectDetailsFixture.current]", ".project-details-dialog", "#project-details-title", "Project details", ".project-details-fields div:nth-child(-n+3) dd", "projectDetailsFixture.current");
+    await languages();
+    await workflowNarrow(evaluate, command, ".project-details-dialog");
     await evaluate("window.fixtureShellKeys=0;window.addEventListener('keydown',()=>window.fixtureShellKeys++)");
     await press("Tab", "Tab", 9);
     assert.equal(await evaluate("document.querySelector('.project-details-dialog').contains(document.activeElement)"), true);
@@ -97,6 +101,7 @@ test("mounted selected-project Details uses current bounded catalog identity wit
     await evaluate("window.projectDetailsFixture.copyMode('reject')");
     await click(".project-details-dialog footer button:nth-of-type(2)");
     assert.equal(await wait("document.querySelector('.project-details-dialog [role=alert]')?.textContent.includes('Could not copy project path')"), true);
+    await languages();
     assert.equal(await evaluate("document.body.innerText.includes('private clipboard failure')"), false);
     await evaluate("window.projectDetailsFixture.copyMode('unavailable')");
     await click(".project-details-dialog footer button:first-of-type");
@@ -104,6 +109,7 @@ test("mounted selected-project Details uses current bounded catalog identity wit
     await evaluate("window.projectDetailsFixture.copyMode('pending')");
     await click(".project-details-dialog footer button:nth-of-type(2)");
     assert.equal(await wait("window.projectDetailsFixture.pending===1"), true);
+    await languages();
     assert.equal(await evaluate("document.querySelector('.project-details-dialog footer button:first-of-type').disabled"), true);
     await click(".project-details-dialog footer button:first-of-type");
     assert.equal(await evaluate("window.projectDetailsFixture.pending"), 1);

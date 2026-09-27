@@ -95,14 +95,19 @@ test("production workspace composer separator resizes without replacing draft, p
     await evaluate("document.querySelector('.composer-splitter').dispatchEvent(new KeyboardEvent('keydown',{key:'Home',bubbles:true,cancelable:true}))");
     assert.equal(await wait("!document.querySelector('.composer-region.resized')"), true);
     // Pointer capture uses real CDP events, and release/cancel must not keep dragging.
+    // Leave room for the complete 95px gesture; clamping is exercised below.
+    await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 1000, deviceScaleFactor: 1, mobile: false });
+    assert.equal(await wait("Number(document.querySelector('.composer-splitter').getAttribute('aria-valuemax'))>" + ((automatic as number) + 95)), true);
+    const pointerBase = await evaluate("document.querySelector('.composer-region').getBoundingClientRect().height") as number;
     const handle = await evaluate("(() => {const r=document.querySelector('.composer-splitter').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
     const point = handle as { x: number; y: number };
     await command("Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: "left", clickCount: 1 });
     await command("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y - 35, button: "left", buttons: 1 });
+    assert.equal(await wait("document.querySelector('.composer-region').getBoundingClientRect().height===" + Math.round(pointerBase + 35)), true);
     await command("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y - 95, button: "left", buttons: 1 });
     await command("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y - 95, button: "left", clickCount: 1 });
     assert.equal(await wait("document.querySelector('.composer-region.resized')?.getBoundingClientRect().height > " + automatic), true);
-    await evaluate("new Promise(resolve=>setTimeout(resolve,80))");
+    assert.equal(await wait("document.querySelector('.composer-region').getBoundingClientRect().height===" + Math.round(pointerBase + 95)), true);
     const afterPointer = await evaluate("document.querySelector('.composer-region').getBoundingClientRect().height");
     assert.ok((afterPointer as number) > (automatic as number) + 40, "successive pointer moves accumulate their deltas");
     await command("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y - 155, button: "none", buttons: 0 });
@@ -135,6 +140,8 @@ test("production workspace composer separator resizes without replacing draft, p
     const small = await evaluate("document.querySelector('.composer-region').getBoundingClientRect().height");
     await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
     assert.equal(await wait("document.querySelector('.composer-region').getBoundingClientRect().height>" + small), true, "preferred height survives a short viewport");
+    assert.equal(await wait("innerWidth===1120 && innerHeight===800 && document.querySelector('.active-session-content').clientHeight>600 && document.querySelector('.session-workspace').clientWidth>480"), true,
+      "wide content geometry is restored before measuring automatic editor growth");
     await evaluate("document.querySelector('.composer-splitter').focus()");
     assert.equal(await evaluate("getComputedStyle(document.querySelector('.composer-splitter')).cursor"), "row-resize");
     await evaluate("document.documentElement.dataset.theme='dark'; document.querySelector('[aria-label=\"Reset composer size to automatic\"]').click()");

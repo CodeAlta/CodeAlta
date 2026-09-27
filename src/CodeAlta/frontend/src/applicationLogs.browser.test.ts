@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { workflowLanguages } from "./workflowLocalizationChecks";
+import { inventoryNarrow } from "./inventoryLocalizationChecks";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -95,6 +97,7 @@ test("mounted production logs screen is explicit, bounded, plain text and fences
     const wait = (condition: string) => evaluate(`new Promise(resolve=>{let end=Date.now()+7000;function tick(){if(${condition})resolve(true);
       else if(Date.now()>end)resolve(document.body.innerText.slice(0,400));else setTimeout(tick,20)}tick()})`);
     const click = (selector: string) => evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+    const languages = () => workflowLanguages(evaluate, "[logsFixture.reads,logsFixture.clearRequests,[...document.querySelectorAll('.logs-rows pre')].map(n=>n.firstChild?.textContent)]", ".application-logs", ".application-logs h1", "Application Logs", ".logs-metadata,code", "logsFixture.clearRequests[0]");
     assert.equal(await wait("!!document.querySelector('#navigate-logs')"), true);
     await click("#navigate-logs");
     assert.equal(await wait("!!document.querySelector('.logs-toolbar button')"), true);
@@ -102,6 +105,7 @@ test("mounted production logs screen is explicit, bounded, plain text and fences
     assert.equal(await evaluate("document.activeElement.textContent.trim()"), "Refresh logs");
     await click(".logs-toolbar button");
     assert.equal(await wait("window.logsFixture.reads===1"), true);
+    await languages();
     await click("#navigate-logs");
     await evaluate(`window.logsFixture.resolve({status:'ok',rows:[{timestamp:'2026',level:'Warn',logger:'test',text:'STALE',textTruncated:false}],captureOmitted:'0',readOmitted:0})`);
     await click("#navigate-logs");
@@ -114,6 +118,8 @@ test("mounted production logs screen is explicit, bounded, plain text and fences
     assert.equal(await evaluate("document.querySelectorAll('.logs-rows a,.logs-rows script').length"), 0);
     assert.equal(await evaluate("document.querySelector('.logs-rows pre').textContent.includes('<script>')"), true);
     assert.match(String(await evaluate("document.querySelector('[role=status]').textContent")), /7 from in-memory capacity, 3 from the bounded response/);
+    await languages();
+    await inventoryNarrow(evaluate, command);
     for (const width of [390, 1120]) {
       await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
       for (const theme of ["dark", "light"]) {
@@ -148,8 +154,9 @@ test("mounted production logs screen is explicit, bounded, plain text and fences
     await evaluate("window.logsFixture.reject('private-path-and-exception-text')");
     assert.equal(await wait("!!document.querySelector('[role=alert]')"), true);
     assert.equal(await evaluate("document.body.innerText.includes('private-path-and-exception-text')"), false);
+    await languages();
     await click(".logs-toolbar button");
-    await evaluate("window.logsFixture.resolve({status:'ok',rows:[{timestamp:'t',level:'Warn',logger:'test',text:'observed',textTruncated:false}],captureOmitted:'2',readOmitted:1})");
+    await evaluate("window.logsFixture.resolve({status:'ok',rows:[{timestamp:'t',level:'Error',logger:'Settings',text:'observed Copy /Settings/Refresh.log',textTruncated:false}],captureOmitted:'2',readOmitted:1})");
     assert.equal(await wait("!!document.querySelector('.logs-toolbar button:nth-child(3)') && document.body.innerText.includes('observed')"), true);
     await click(".logs-toolbar button:nth-child(3)");
     assert.equal(await wait("!!document.querySelector('.logs-confirm input')"), true);
@@ -173,8 +180,13 @@ test("mounted production logs screen is explicit, bounded, plain text and fences
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'CLEAR CAPTURED LOGS');
       input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
     assert.equal(await wait("document.querySelector('.logs-confirm button[type=submit]').disabled===false"), true);
+    await languages();
+    await inventoryNarrow(evaluate, command);
+    await evaluate("document.querySelector('.logs-confirm input').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',isComposing:true,bubbles:true,cancelable:true}))");
+    assert.equal(await evaluate("document.querySelector('.logs-confirm input').value"), "CLEAR CAPTURED LOGS", "composing Escape retains exact confirmation");
     await click(".logs-confirm button[type=submit]");
     assert.equal(await wait("window.logsFixture.clearRequests.length===1"), true);
+    await languages();
     const first = await evaluate("window.logsFixture.clearRequests[0]") as {captureId:string;boundary:string;grant:string;confirmation:string};
     assert.equal(first.confirmation, "CLEAR CAPTURED LOGS");
     assert.match(first.captureId, /^[0-9a-f-]{36}$/);
@@ -203,6 +215,7 @@ test("mounted production logs screen is explicit, bounded, plain text and fences
     assert.equal(await wait("window.logsFixture.clearRequests.length===2"), true);
     await evaluate("window.logsFixture.resolveClear({status:'cleared',captureId:'not-original',boundary:'999',clearedRows:1,coveredOmitted:'0'})");
     assert.equal(await wait("document.querySelector('.logs-clear-status')?.textContent.includes('unconfirmed')"), true);
+    await languages();
     await click("#navigate-logs"); await click("#navigate-logs");
     await click(".logs-toolbar button:first-child");
     await evaluate("window.logsFixture.resolve({status:'ok',rows:[{timestamp:'t',level:'Info',logger:'test',text:'fresh',textTruncated:false}],captureOmitted:'0',readOmitted:0})");

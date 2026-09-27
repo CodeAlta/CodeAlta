@@ -1,4 +1,5 @@
 import type { SessionRuntimeStateRequest, SessionRuntimeStateResponse } from "#neoastra";
+import { validActivity } from "./recentSessions";
 
 export type RuntimeState =
   | { kind: "loading" }
@@ -138,12 +139,13 @@ function identity(value: unknown): value is string {
   return true;
 }
 
-function correlatedIdentity(snapshot: SessionRuntimeStateResponse, sessionId: string): boolean {
+export function correlatedIdentity(snapshot: SessionRuntimeStateResponse, sessionId: string): boolean {
   if (!snapshot || !["ok", "invalid_request", "stale_epoch", "wire_limit", "closed", "read_failed"].includes(snapshot.status) ||
     !identity(snapshot.hostEpoch) || !identity(snapshot.sessionId) || snapshot.sessionId !== sessionId) return false;
   if ((snapshot.runtimeInstanceId !== null && !identity(snapshot.runtimeInstanceId)) ||
     (snapshot.coordinatorTransitionInProgress !== null && typeof snapshot.coordinatorTransitionInProgress !== "boolean") ||
     (snapshot.entry !== null && (!identity(snapshot.entry?.attachmentGeneration) || !identity(snapshot.entry.providerId) ||
       !identity(snapshot.entry.providerKey) || (snapshot.entry.activeRunId !== null && !identity(snapshot.entry.activeRunId))))) return false;
+  if (snapshot.entry?.activity != null && !validActivity(snapshot.entry.activity)) return false;
   return snapshot.status !== "ok" || (identity(snapshot.runtimeInstanceId) && typeof snapshot.coordinatorTransitionInProgress === "boolean");
 }

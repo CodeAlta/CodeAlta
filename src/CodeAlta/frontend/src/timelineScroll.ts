@@ -2,6 +2,14 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState,
   type KeyboardEvent, type PointerEvent, type WheelEvent } from "react";
 import type { NewestHistoryRequest, NewestHistoryResult } from "./HistoryPanel";
 import { historyMessage } from "./history";
+import { translate, type Locale, type MessageKey } from "./localization";
+
+export type TimelineNotice = Readonly<{ key: MessageKey; parameters?: Readonly<Record<string, string>>; error?: string }> | null;
+// Only typed UI notices enter this formatter; never translate captured message text.
+export function timelineNotice(locale: Locale, notice: TimelineNotice): string {
+  return notice ? translate(locale, notice.key, { label: translate(locale, "User or assistant message"), ...notice.parameters,
+    ...(notice.error !== undefined ? { error: translate(locale, historyMessage(notice.error)) } : {}) }) : "";
+}
 
 export type ScrollMetrics = Readonly<{ scrollTop: number; scrollHeight: number; clientHeight: number }>;
 
@@ -318,7 +326,7 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
 // Only a user-requested, generation-matched settled tail can opt a reader into follow.
 // Pending intent belongs to the mounted selection, never to a global history request.
 export function useExplicitNewestHistory(sessionId: string, projectId: string | null, epoch: string | null,
-  position: ReturnType<typeof useTimelinePosition>, onNotice: (message: string) => void) {
+  position: ReturnType<typeof useTimelinePosition>, onNotice: (message: TimelineNotice) => void) {
   const requestRef = useRef<NewestHistoryRequest | null>(null);
   const pending = useRef<{ generation: number; sessionId: string; projectId: string | null; epoch: string | null;
     wasFollowing: boolean; anchor: HTMLElement | null; anchorTop: number } | null>(null);
@@ -326,13 +334,13 @@ export function useExplicitNewestHistory(sessionId: string, projectId: string | 
     if (pending.current && (pending.current.sessionId !== sessionId || pending.current.projectId !== projectId ||
       pending.current.epoch !== epoch)) {
       pending.current = null;
-      onNotice("");
+      onNotice(null);
     }
   }, [sessionId, projectId, epoch, onNotice]);
   function cancel() {
     if (!pending.current) return;
     pending.current = null;
-    onNotice("Newest history is still loading; automatic follow canceled by newer user navigation.");
+    onNotice({ key: "Newest history is still loading; automatic follow canceled by newer user navigation." });
   }
   const onTarget = useCallback((generation: number): boolean => {
     if (pending.current?.generation === generation) return true;
@@ -347,7 +355,7 @@ export function useExplicitNewestHistory(sessionId: string, projectId: string | 
       .find(row => row.getBoundingClientRect().bottom > element.getBoundingClientRect().top) ?? null : null;
     pending.current = { generation, sessionId, projectId, epoch, wasFollowing: position.following,
       anchor, anchorTop: anchor?.getBoundingClientRect().top ?? 0 };
-    onNotice("Refreshing the newest persisted history window…");
+    onNotice({ key: "Refreshing the newest persisted history window…" });
   }
   function onScroll() {
     const intent = pending.current;
@@ -361,11 +369,11 @@ export function useExplicitNewestHistory(sessionId: string, projectId: string | 
     pending.current = null;
     if (result.error) {
       if (!intent.wasFollowing) position.pause();
-      onNotice(`Newest history refresh failed: ${historyMessage(result.error)} Follow preference unchanged.`);
+      onNotice({ key: "Newest history refresh failed: {error} Follow preference unchanged.", error: result.error });
     }
     else {
       position.jump();
-      onNotice("Newest persisted history window loaded; following visible content.");
+      onNotice({ key: "Newest persisted history window loaded; following visible content." });
     }
   }
   return { requestRef, available: () => requestRef.current !== null, pending: () => pending.current !== null,

@@ -7,6 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
+import { locales, translate } from "./localization";
 
 const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
@@ -127,6 +128,22 @@ test("mounted reminder shortcuts stay panel-scoped, guarded and never bypass con
     await edit("#reminder-content", "local Create draft");
     await edit("#reminder-delay", "0");
     assert.equal(await wait("[...document.querySelectorAll('button')].find(b=>b.textContent==='Create reminder').disabled"), "ready");
+    for (const locale of locales) {
+      await evaluate(`reminderFixture.language(${JSON.stringify(locale)})`);
+      assert.equal(await wait(`document.querySelector('.reminder-page h1').textContent===${JSON.stringify(translate(locale, "Reminders"))}`), "ready");
+      assert.equal(await evaluate(`document.body.textContent.includes(${JSON.stringify(translate(locale, "Enter 1–86400 whole seconds or HH:mm:ss (00–23 hours), optionally prefixed with d. (e.g. 1.00:00:00). Fractions are not accepted."))})`), true);
+      assert.equal(await evaluate("document.querySelector('#reminder-delay').value"), "0");
+      assert.equal(await createKey("#reminder-content"), false, `${locale}: invalid duration cannot create`);
+      assert.equal(await synthetic("#reminder-edit", "s", "isComposing:true"), false, `${locale}: IME cannot Save`);
+      assert.equal(await evaluate("JSON.stringify([reminderFixture.reads.length,reminderFixture.details.length,reminderFixture.writes.length])"), "[2,2,0]");
+      if (locale === "de" || locale === "ja") {
+        await evaluate("document.querySelector('#reminder-edit').focus()");
+        await press("Tab", "Tab", 9);
+        assert.equal(await evaluate("document.activeElement.textContent"), translate(locale, "Save message"));
+      }
+    }
+    await evaluate("reminderFixture.language('en')");
+    assert.equal(await wait("document.querySelector('.reminder-page h1').textContent==='Reminders'"), "ready");
     assert.equal(await synthetic("#reminder-content", "s"), false);
     assert.equal(await createKey("#reminder-content"), false); // Disabled Create is not handled.
     await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Use as new reminder').click()");

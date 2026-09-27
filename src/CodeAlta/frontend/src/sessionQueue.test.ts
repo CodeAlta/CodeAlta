@@ -10,7 +10,7 @@ function observation(): SessionRuntimeStateResponse {
   return { status: "ok", hostEpoch: "epoch", sessionId: "session", runtimeInstanceId: operation, coordinatorTransitionInProgress: false,
     entry: { attachmentGeneration: "9223372036854775807", activeRunId: "earlier", isTerminated: false, isRetiring: false,
       queueDrainInProgress: true, providerId: "inert", providerKey: "inert", modelId: null, reasoningEffort: null,
-      agentPromptId: null, pendingAgentPromptId: null } };
+      agentPromptId: null, pendingAgentPromptId: null, activity: null } };
 }
 function request(): SessionQueueRequest { return captureQueue("epoch", "session", observation(), " exact text \n", "key")!; }
 function row(): SessionReceiptView {

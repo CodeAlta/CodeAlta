@@ -2,11 +2,15 @@ import { useId, useLayoutEffect, useRef, useState } from "react";
 import { AppIcon } from "./AppIcon";
 import { MarkdownContent } from "./MarkdownContent";
 import { writeMarkdown, type TimelineItem } from "./timeline";
+import { useShellLanguage } from "./shellLanguage";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
+// These labels are generated UI chrome in timeline.ts, never provider content.
+const detailLabels = Object.freeze(["Details", "File change record details", "Prompt details", "Usage details", "Model details", "Command and result", "Tool details"] as const);
 
 export function TimelineMessage({ item }: { item: TimelineItem }) {
+  const { t } = useShellLanguage();
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [wrapDetails, setWrapDetails] = useState(true);
   const [disclosure, setDisclosure] = useState<{ source: string; expanded: boolean } | null>(null);
@@ -53,13 +57,18 @@ export function TimelineMessage({ item }: { item: TimelineItem }) {
   }
   const hasDetails = !!(item.detailMarkdown || item.details || item.metadata.length);
   const hasToolDetails = (item.category === "tool" || item.category === "file") && !!item.details;
-  const copyLabel = copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : `Copy ${item.title} as Markdown`;
+  const detailLabel = detailLabels.find(label => label === item.detailsLabel);
+  // Categories below have fixed UI titles in toTimelineItem; tool/provider names do not.
+  const title = item.category === "user" ? t("You") : item.category === "plan" ? t("Plan")
+    : item.category === "notes" ? t("Alta notes") : item.category === "error" ? t("Error")
+    : item.category === "reasoning" ? t(item.title === "Reasoning summary" ? "Reasoning summary" : "Reasoning") : item.title;
+  const copyLabel = copyState === "copied" ? t("Copied") : copyState === "failed" ? t("Copy failed") : t("Copy {title} as Markdown", { title });
   return <article className={`message timeline-message message-${item.category}`}
     data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}>
     <div className="avatar"><AppIcon name={item.icon} size={17} /></div>
     <div className="message-body">
       <div className="message-heading">
-        <span><strong>{item.title}</strong>{item.subtitle && <small>{item.subtitle}</small>}</span>
+        <span><strong>{title}</strong>{item.subtitle && <small>{item.subtitle}</small>}</span>
         <span className="message-actions">
           {item.copyMarkdown && <button type="button" className={`copy-markdown copy-${copyState}`} onClick={() => void copy()}
             aria-label={copyLabel} title={copyLabel}><AppIcon name={copyState === "copied" ? "checked" : copyState === "failed" ? "error" : "copy"} size={15} /><span className="sr-only" aria-live="polite">{copyState === "idle" ? "" : copyLabel}</span></button>}
@@ -70,26 +79,26 @@ export function TimelineMessage({ item }: { item: TimelineItem }) {
       {body && longBody ? <>
         <button type="button" className="quiet-button long-message-toggle" aria-controls={bodyId}
           aria-expanded={expanded} onClick={() => setDisclosure({ source: body, expanded: !expanded })}>
-          <AppIcon name="chevronDown" size={14} />{expanded ? "Collapse message" : "Show full message"}
+          <AppIcon name="chevronDown" size={14} />{t(expanded ? "Collapse message" : "Show full message")}
         </button>
         <div id={bodyId}>{expanded ? <MarkdownContent source={body} timelineCodeBlocks />
-          : <p className="long-message-preview">Preview (plain text): {plainTextPreview(body)}…</p>}</div>
+          : <p className="long-message-preview">{t("Preview (plain text):")} {plainTextPreview(body)}…</p>}</div>
       </> : body && <MarkdownContent source={body} timelineCodeBlocks />}
-      {hasDetails && <details className="event-details"><summary><AppIcon name="chevronDown" size={14} />{item.detailsLabel}</summary>
+      {hasDetails && <details className="event-details"><summary><AppIcon name="chevronDown" size={14} />{detailLabel ? t(detailLabel) : item.detailsLabel}</summary>
         <div className="event-detail-body">
           {item.detailMarkdown && item.detailMarkdown !== item.markdown && <>
-            {item.eventType === "activity" && item.category === "tool" && <p className="muted-text">Supplied activity message</p>}
+            {item.eventType === "activity" && item.category === "tool" && <p className="muted-text">{t("Supplied activity message")}</p>}
             <MarkdownContent source={item.detailMarkdown} timelineCodeBlocks />
           </>}
           {item.details && <pre className={hasToolDetails && wrapDetails ? "tool-detail-pre-wrap" : undefined}>{item.details}</pre>}
           {hasToolDetails && <label className="tool-detail-wrap"><input type="checkbox" checked={wrapDetails}
-            onChange={event => setWrapDetails(event.target.checked)} />Wrap lines</label>}
+            onChange={event => setWrapDetails(event.target.checked)} />{t("Wrap lines")}</label>}
           <ul className="event-meta-inline">{item.metadata.map(value => <li key={value}>{value}</li>)}</ul>
         </div>
       </details>}
-      {item.bodyOmitted && <p className="muted-text">{item.category === "user" || item.category === "assistant"
-        ? "Additional message content was omitted from this history record." : "Additional diagnostic details were omitted."}</p>}
-      {item.truncated && <p className="muted-text">Some details were shortened to fit the desktop history window.</p>}
+      {item.bodyOmitted && <p className="muted-text">{t(item.category === "user" || item.category === "assistant"
+        ? "Additional message content was omitted from this history record." : "Additional diagnostic details were omitted.")}</p>}
+      {item.truncated && <p className="muted-text">{t("Some details were shortened to fit the desktop history window.")}</p>}
     </div>
   </article>;
 }

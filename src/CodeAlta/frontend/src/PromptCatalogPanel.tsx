@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { PromptCatalogRequest, PromptCatalogResponse, SessionChoicesRequest, SessionChoicesResponse, SessionSelection } from "#neoastra";
 import type { NextSendResult, PromptNextSendTarget, createNextSendSelectionStore } from "./nextSendSelection";
+import { useShellLanguage } from "./shellLanguage";
+import { inventoryNotice, type InventoryNotice } from "./inventoryNotice";
 
 export function PromptCatalogPanel({ epoch, target, readPrompts, readChoices, selections, pendingSend, pendingSelection, onApply }: {
   epoch: string | null; target: { epoch: string; sessionId: string } | null;
@@ -9,12 +11,13 @@ export function PromptCatalogPanel({ epoch, target, readPrompts, readChoices, se
   selections: ReturnType<typeof createNextSendSelectionStore>; pendingSend: boolean; pendingSelection: SessionSelection | null;
   onApply: (target: PromptNextSendTarget, signal: AbortSignal) => Promise<NextSendResult>;
 }) {
+  const { t, locale } = useShellLanguage();
   const [page, setPage] = useState<PromptCatalogResponse>();
-  const [error, setError] = useState("");
+  const [error, setError] = useState<InventoryNotice>("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [choices, setChoices] = useState<SessionChoicesResponse>();
-  const [choicesError, setChoicesError] = useState("");
-  const [applyError, setApplyError] = useState("");
+  const [choicesError, setChoicesError] = useState<InventoryNotice>("");
+  const [applyError, setApplyError] = useState<InventoryNotice>("");
   const [applying, setApplying] = useState(false);
   const applyController = useRef<AbortController | null>(null);
   const generation = useRef(0);
@@ -28,7 +31,7 @@ export function PromptCatalogPanel({ epoch, target, readPrompts, readChoices, se
       if (controller.signal.aborted) return;
       if (value.epoch !== target.epoch || value.status !== "ok" || value.sessionId !== target.sessionId) {
         setError(value.status === "stale_epoch" || value.epoch !== target.epoch ? "Host identity changed. Reload required."
-          : `Prompt inventory unavailable (${value.status}).`); return;
+          : { key: "Prompt inventory unavailable ({status}).", status: value.status }); return;
       }
       if (!Array.isArray(value.prompts) || value.prompts.length > 64 || value.prompts.some(prompt =>
         typeof prompt.id !== "string" || !prompt.id || prompt.id.length > 256 || typeof prompt.name !== "string"
@@ -82,37 +85,37 @@ export function PromptCatalogPanel({ epoch, target, readPrompts, readChoices, se
     } catch { if (action === generation.current) setApplyError("Next Send selection could not be validated. No change was applied."); }
     finally { if (action === generation.current) { applyController.current = null; applyingRef.current = false; setApplying(false); } }
   }
-  return <main className="configuration-page prompt-catalog-page" aria-label="Agent prompts">
-    <header className="page-heading"><span className="eyebrow">Desktop / Agent prompts</span><h1>Agent prompts</h1>
-      <p>Effective host-discovered prompts for the selected session. Inspection is read-only; selection affects only its next Send.</p></header>
-    {!epoch ? <p role="status">Catalog-only mode has no owned prompt inventory.</p>
-      : !target ? <p role="status">Select an owned session to inspect its prompt scope.</p>
-      : <div className="model-catalog-layout"><section className="model-catalog-providers" aria-label="Prompt inventory"><h2>Prompts</h2>
-        {!activePage && !error && <p role="status">Loading prompts.</p>}
-        {error && <p role="alert" className="error-text">{error}</p>}
-        {activePage?.prompts.length === 0 && <p role="status">No effective prompts were discovered in this session's scope.</p>}
+  return <main className="configuration-page prompt-catalog-page" aria-label={t("Agent prompts")}>
+    <header className="page-heading"><span className="eyebrow">{t("Desktop / Agent prompts")}</span><h1>{t("Agent prompts")}</h1>
+      <p>{t("Effective host-discovered prompts for the selected session. Inspection is read-only; selection affects only its next Send.")}</p></header>
+    {!epoch ? <p role="status">{t("Catalog-only mode has no owned prompt inventory.")}</p>
+      : !target ? <p role="status">{t("Select an owned session to inspect its prompt scope.")}</p>
+      : <div className="model-catalog-layout"><section className="model-catalog-providers" aria-label={t("Prompt inventory")}><h2>{t("Prompts")}</h2>
+        {!activePage && !error && <p role="status">{t("Loading prompts.")}</p>}
+        {error && <p role="alert" className="error-text">{inventoryNotice(locale, error)}</p>}
+        {activePage?.prompts.length === 0 && <p role="status">{t("No effective prompts were discovered in this session's scope.")}</p>}
         {activePage?.prompts.map(prompt => <button type="button" key={prompt.id} aria-pressed={selectedId === prompt.id}
           onClick={() => setSelectedId(prompt.id)}><strong>{prompt.name}</strong><small>{prompt.id} · {prompt.scope}</small></button>)}
-        {activePage?.truncated && <p role="status">Showing {activePage.prompts.length} prompts; others were omitted by the bounded inventory.</p>}
-      </section><section className="model-catalog-results" aria-label="Prompt details"><h2>Details</h2>
-        {!selected ? <p>Select a prompt to inspect its effective content.</p> : <article className="model-catalog-detail">
-          <h3>{selected.name}</h3><p>ID: <code>{selected.id}</code></p><p>{selected.description ?? "No description supplied."}</p>
-          <p>Scope: {selected.scope}. {selected.builtIn ? "Built-in, read-only." : "Read-only here; edit in the TUI."}
-            {selected.appended && " Effective content may compose lower-precedence sources; the full source chain is not shown."}</p>
-          <h4>Effective agent prompt body</h4><pre className="prompt-catalog-body">{selected.body}</pre>
-          {selected.bodyTruncated && <p role="status">Content truncated to 2,048 characters. This is not the full prompt.</p>}
-          <section className="model-catalog-next" aria-label="Next Send prompt selection"><h4>Next Send for selected session</h4>
-            <p>Session: <code>{target.sessionId}</code>. No running or retained turn changes.</p>
-            {!activeChoices && !choicesError && <p role="status">Loading session choices.</p>}
-            {choicesError && <p role="alert" className="error-text">{choicesError}</p>}
-            {activeChoices && <><p>Session-recorded prompt: {activeChoices.current?.agentPromptId ?? "Unknown"}.</p>
-              <p>Next Send: {pendingSend ? `Retained exact request (${pendingSelection?.agentPromptId ?? "host-selected prompt"})`
-                : `${nextSend?.agentPromptId ?? "Unknown"} · model ${nextSend?.modelId ?? "provider default"} · effort ${nextSend?.reasoningEffort ?? "model default"}`}.</p>
-              {!available && <p role="status">This prompt is unavailable for this session's next Send.</p>}
-              {pendingSend && <p role="status">Finish or reconcile the exact pending Send before changing its next selection.</p>}
+        {activePage?.truncated && <p role="status">{t("Showing {count} prompts; others were omitted by the bounded inventory.", { count: activePage.prompts.length })}</p>}
+      </section><section className="model-catalog-results" aria-label={t("Prompt details")}><h2>{t("Details")}</h2>
+        {!selected ? <p>{t("Select a prompt to inspect its effective content.")}</p> : <article className="model-catalog-detail">
+          <h3>{selected.name}</h3><p>{t("ID")}: <code>{selected.id}</code></p><p>{selected.description ?? t("No description supplied.")}</p>
+          <p>{t("Scope:")} {selected.scope}. {t(selected.builtIn ? "Built-in, read-only." : "Read-only here; edit in the TUI.")}
+            {selected.appended && ` ${t("Effective content may compose lower-precedence sources; the full source chain is not shown.")}`}</p>
+          <h4>{t("Effective agent prompt body")}</h4><pre className="prompt-catalog-body">{selected.body}</pre>
+          {selected.bodyTruncated && <p role="status">{t("Content truncated to 2,048 characters. This is not the full prompt.")}</p>}
+          <section className="model-catalog-next" aria-label={t("Next Send prompt selection")}><h4>{t("Next Send for selected session")}</h4>
+            <p>{t("Session:")} <code>{target.sessionId}</code>. {t("No running or retained turn changes.")}</p>
+            {!activeChoices && !choicesError && <p role="status">{t("Loading session choices.")}</p>}
+            {choicesError && <p role="alert" className="error-text">{inventoryNotice(locale, choicesError)}</p>}
+            {activeChoices && <><p>{t("Session-recorded prompt: {prompt}.", { prompt: activeChoices.current?.agentPromptId ?? t("Unknown") })}</p>
+              <p>{t("Next Send:")} {pendingSend ? t("Retained exact request ({selection})", { selection: pendingSelection?.agentPromptId ?? t("host-selected prompt") })
+                : t("{prompt} · model {model} · effort {effort}", { prompt: nextSend?.agentPromptId ?? t("Unknown"), model: nextSend?.modelId ?? t("provider default"), effort: nextSend?.reasoningEffort ?? t("model default") })}.</p>
+              {!available && <p role="status">{t("This prompt is unavailable for this session's next Send.")}</p>}
+              {pendingSend && <p role="status">{t("Finish or reconcile the exact pending Send before changing its next selection.")}</p>}
               <button type="button" disabled={!available || pendingSend || applying || !nextSend} onClick={() => void apply()}>
-                {applying ? "Validating next Send." : "Use prompt for next Send"}</button></>}
-            {applyError && <p role="alert" className="error-text">{applyError}</p>}
+                {t(applying ? "Validating next Send." : "Use prompt for next Send")}</button></>}
+            {applyError && <p role="alert" className="error-text">{inventoryNotice(locale, applyError)}</p>}
           </section></article>}
       </section></div>}
   </main>;

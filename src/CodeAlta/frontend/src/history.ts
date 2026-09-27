@@ -82,7 +82,7 @@ export async function loadHistory(
   }
 }
 
-export function historyMessage(code: string): string {
+export function historyMessage(code: string): import("./localization").MessageKey {
   switch (code) {
     case "unconfigured": return "History requires an explicitly admitted trusted catalog COPY and cache-write opt-in.";
     case "missing_session": return "The persisted journal is no longer available. This does not refresh the catalog snapshot.";

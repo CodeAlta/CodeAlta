@@ -4,6 +4,24 @@ This folder documents the current CodeAlta 1.0 implementation. It is not a backl
 
 ## Reading path
 
+See [bounded Desktop command access](command-access.md) for registry-backed Skills,
+logs, usage, Open Project and Help access, exact-original guards, TUI chord conflicts
+and the retained final bounded-test failure. Independent acceptance remains pending.
+
+Provider/timeline localization and its scroll correction are independently accepted;
+Settings inventory translation is also independently accepted. Static project/session
+workflow translation awaits independent review.
+See [WebView shell language](webview-localization.md) for the bounded local-language
+shell/composer/palette/tab/browsing/inspection and static Skills/prompt-creation/
+batch-deletion/Reminder/caller-ask/Settings inventory/project-session workflow controls, persistence semantics, untranslated areas and
+review limitations.
+Static About/log/reference presentation and its native-modal lifetime publication
+correction have scoped independent acceptance, with the split-layout process-exit gap
+retained. Advanced-session/retained-action/archived recovery presentation has bounded
+independent acceptance; see the localization evidence and literal-diagnostic boundary linked there.
+See [short-window composer layout](responsive-composer.md) for the scroll policy,
+retained-owner guarantees and responsive validation scope.
+
 Read the documents in this order when onboarding or reviewing architecture-sensitive changes:
 
 | Step | Document | Purpose |
@@ -26,6 +44,12 @@ Read the documents in this order when onboarding or reviewing architecture-sensi
 > **In development:** [Dual-head desktop parity and baseline](dual-head-desktop-parity.md) tracks the approved desktop/TUI work separately from the current implementation documented here. Pending acceptance criteria are not shipped features or platform-support claims.
 
 The isolated desktop boot entrypoint and its test-owned native fixtures are described in [desktop native qualification](desktop-native-qualification.md), including preserved M0 evidence and explicit platform gaps.
+
+The scoped [Desktop prompt-image path](prompt-images.md) documents PNG paste/preview/removal, observed capability, typed owned Send and its retention/filesystem limits.
+
+The [Desktop raw Skills inspector](skills-inspection.md) documents explicit host-derived roots, bounded metadata, omissions and original-read lifetime; it is not effective discovery or activation parity.
+
+The [Desktop create-only agent prompt author](prompt-creation.md) documents explicit scope/review, shared non-overwriting publication, precedence and retained original outcomes. Existing-source CRUD remains separate.
 
 ```mermaid
 flowchart TD

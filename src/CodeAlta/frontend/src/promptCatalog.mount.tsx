@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { InventoryLanguageFixture } from "./inventoryLanguage.mount";
 import { PromptCatalogPanel } from "./PromptCatalogPanel";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { applyPromptNextSend, createNextSendSelectionStore } from "./nextSendSelection";
@@ -18,7 +19,7 @@ const readPrompts: React.ComponentProps<typeof PromptCatalogPanel>["readPrompts"
 const choices: SessionChoicesResponse = { status: "ok", epoch: "e1", sessionId: "one",
   current: { providerKey: "beta", agentPromptId: "default", modelId: "model", reasoningEffort: "High" },
   prompts: [{ id: "default", name: "Default" }, { id: "plan", name: "Plan" }],
-  models: [{ id: "model", name: "Model", efforts: ["High"] }] };
+  models: [{ id: "model", name: "Model", efforts: ["High"], imageInput: null }] };
 const unavailable = async (): Promise<never> => { throw new Error("Fixture must not submit this operation."); };
 const sent: SessionSendRequest[] = [];
 const capability = createMutationCapability("e1");
@@ -55,10 +56,10 @@ function render() {
       abortRuns={createAbortRunSubmissions(unavailable)} queue={createQueueSubmissions(unavailable, unavailable)}
       permissionReviewer={null} runtimeReader={createRuntimeStateReader(async () => ({ status: "ok", hostEpoch: epoch,
         sessionId, entry: null, runtimeInstanceId: "literal-runtime", coordinatorTransitionInProgress: false }))} /></div>);
-  else root.render(<PromptCatalogPanel epoch={epoch} target={epoch && sessionId ? { epoch, sessionId } : null}
+  else root.render(<InventoryLanguageFixture><PromptCatalogPanel epoch={epoch} target={epoch && sessionId ? { epoch, sessionId } : null}
     readPrompts={readPrompts} readChoices={readChoices} selections={selections}
     pendingSend={!!(sessionId && submissions.pending(sessionId))}
-    pendingSelection={sessionId ? submissions.pending(sessionId)?.request.selection ?? null : null} onApply={onApply} />);
+    pendingSelection={sessionId ? submissions.pending(sessionId)?.request.selection ?? null : null} onApply={onApply} /></InventoryLanguageFixture>);
 }
 const readChoices: React.ComponentProps<typeof PromptCatalogPanel>["readChoices"] = request => fixture.readChoices(request.expectedEpoch, request.sessionId);
 render();

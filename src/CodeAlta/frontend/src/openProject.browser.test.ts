@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { workflowLanguages, workflowNarrow } from "./workflowLocalizationChecks";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -93,11 +94,15 @@ test("mounted saved-project dialog preserves exact read-only navigation and isol
     assert.equal(await evaluate("window.openProjectFixture.completionCalls.length"), 0);
     await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').click()");
     assert.equal(await wait("window.openProjectFixture.completionCalls.length===1"), "ready");
+    const languages = () => workflowLanguages(evaluate, "[openProjectFixture.calls,openProjectFixture.completionCalls,openProjectFixture.selected,openProjectFixture.session,openProjectFixture.evidence]",
+      ".app-dialog", "#open-project-title", "Open project", "code,#saved-project-results small,#folder-suggestions small", "openProjectFixture.evidence");
+    await languages();
     assert.equal(await evaluate("JSON.stringify(window.openProjectFixture.completionCalls[0].request)"),
       JSON.stringify({ expectedHostEpoch: "12345678-1234-1234-1234-123456789abc", directoryPath: "C:\\Work\\", prefix: "Al" }));
     await evaluate(`window.openProjectFixture.completionCalls[0].resolve({status:'complete',hostEpoch:'12345678-1234-1234-1234-123456789abc',
       directoryPath:'C:\\\\Work\\\\',prefix:'Al',directories:['C:\\\\Work\\\\Alpha'],entriesVisited:1,omittedUnsafeEntries:false})`);
     assert.equal(await wait("document.querySelectorAll('#folder-suggestions [role=option]').length===1"), "ready");
+    await languages();
     await evaluate("document.querySelector('#folder-suggestions [role=option]').click()");
     assert.equal(await evaluate("document.querySelector('#project-folder-path').value"), "C:\\Work\\Alpha");
     assert.equal(await evaluate("document.activeElement?.id"), "saved-project-filter",
@@ -148,6 +153,7 @@ test("mounted saved-project dialog preserves exact read-only navigation and isol
     await open();
     await evaluate("window.openProjectFixture.failRefresh=true; [...document.querySelectorAll('button')].find(x=>x.textContent==='Refresh projects').click()");
     assert.equal(await wait("document.body.innerText.includes('Saved selection is paused after a failed refresh')"), "ready");
+    await languages();
     assert.equal(await evaluate("document.querySelector('#saved-project-results button').disabled"), true);
     assert.equal(await evaluate("document.querySelector('#selection').textContent"), "one / session-one");
     await evaluate("window.openProjectFixture.failRefresh=false; [...document.querySelectorAll('button')].find(x=>x.textContent==='Refresh projects').click()");
@@ -189,12 +195,15 @@ test("mounted saved-project dialog preserves exact read-only navigation and isol
     await evaluate("window.openProjectFixture.calls[0].resolve({status:'confirmation_required',hostEpoch:'12345678-1234-1234-1234-123456789abc',requestedPath:'C:/different',projectPath:'C:/normalized',projectId:null})");
     assert.equal(await wait("!!document.querySelector('.project-import input[type=checkbox]')"), "ready");
     await evaluate("document.querySelector('.project-import input[type=checkbox]').click()");
+    await languages();
+    await workflowNarrow(evaluate, command, ".app-dialog");
     await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Import and open folder').click()");
     assert.equal(await wait("window.openProjectFixture.calls.length===2"), "ready");
     await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Cancel').click()");
     assert.equal(await wait("!document.querySelector('#saved-project-filter')"), "ready");
     await open();
     assert.equal(await wait("document.body.innerText.includes('Captured import pending')"), "ready");
+    await languages();
     assert.equal(await evaluate("document.body.innerText.includes('12345678-1234-1234-1234-123456789abc') && document.body.innerText.includes('C:/different') && document.body.innerText.includes('C:/normalized')"), true);
     assert.equal(await evaluate("document.querySelector('#saved-project-results button').disabled"), true);
     assert.equal(await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').disabled"), true);
@@ -209,6 +218,7 @@ test("mounted saved-project dialog preserves exact read-only navigation and isol
     await evaluate("window.openProjectFixture.calls[1].reject(new Error('lost result'))");
     await open();
     assert.equal(await wait("document.body.innerText.includes('Captured import uncertain')"), "ready");
+    await languages();
     assert.equal(await evaluate("document.body.innerText.includes('no navigation, new request or retry')"), true);
     assert.equal(await evaluate("document.querySelector('#saved-project-results button').disabled"), true);
     assert.equal(await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Suggest folders').disabled"), true);

@@ -7,6 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
+import { locales, translate } from "./localization";
 
 const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
@@ -185,6 +186,15 @@ test("mounted long persisted messages preserve copy, identity, follow and older 
     const copyButton = ".message-assistant:has(.long-message-toggle) .copy-markdown";
     await click(copyButton);
     assert.equal(await wait("window.toolFixture.pendingCopies.length===1"), true);
+    await evaluate("window.localeCopyCalls=JSON.stringify(toolFixture.calls);window.localeCopyText=toolFixture.pendingCopies[0].text;toolFixture.copyNode.focus()");
+    for (const locale of locales) {
+      await evaluate(`toolFixture.language('${locale}')`);
+      assert.equal(await wait(`document.querySelector('#history-heading').textContent===${JSON.stringify(translate(locale, "Session timeline"))}`), true);
+      assert.equal(await evaluate(`toolFixture.copyNode===document.querySelector(${JSON.stringify(copyButton)}) && document.activeElement===toolFixture.copyNode && JSON.stringify(toolFixture.calls)===localeCopyCalls && toolFixture.pendingCopies.length===1 && toolFixture.pendingCopies[0].text===localeCopyText`), true, `${locale}: persisted Copy keeps captured Markdown, focus, node and read count`);
+      assert.equal(await evaluate("toolFixture.copyNode.getAttribute('aria-label')"), translate(locale, "Copy {title} as Markdown", { title: "CodeAlta" }));
+    }
+    await evaluate("toolFixture.language('en')");
+    assert.equal(await wait("document.querySelector('#history-heading').textContent==='Session timeline'"), true);
     assert.match(String(await evaluate("window.toolFixture.pendingCopies[0].text")), /B-700$/);
     await evaluate("window.toolFixture.changeBody();document.querySelector('.history .section-heading button').click()");
     assert.equal(await wait("document.querySelector('.history').dataset.windowReady==='true' && document.querySelector('.message-assistant .long-message-toggle').getAttribute('aria-expanded')==='false'"), true,

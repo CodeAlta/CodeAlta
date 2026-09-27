@@ -44,11 +44,12 @@ test("exact selected project identity/path renders only recorded snapshot metada
   });
   const html = renderToStaticMarkup(createElement(SessionInfoDialog, { info, demo: false, onClose: () => {} }));
   assert.match(html, /<dialog[^>]*aria-labelledby="session-info-title"[^>]*aria-describedby="session-info-description"/);
-  assert.match(html, /Saved catalog metadata, not live runtime status/);
+  assert.match(html, /Saved metadata and separate point-in-time observations/);
   assert.match(html, /Project: Recorded project/);
   assert.match(html, /<time dateTime="2026-09-23T01:02:03\+00:00"/);
   assert.match(html, /Copy session ID/);
-  assert.doesNotMatch(html, /\bRunning\b|\bUsage\b|\bPrompt\b|\bModel\b/);
+  assert.match(html, /Unavailable: recorded-only, archived, demo or unverified scope/);
+  assert.doesNotMatch(html, /Observed active run/);
 });
 
 test("global persists even when its working path equals a project; unknown or mismatched scope is not inferred", () => {

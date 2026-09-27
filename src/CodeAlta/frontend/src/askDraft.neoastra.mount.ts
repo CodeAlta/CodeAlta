@@ -2,5 +2,6 @@
 export const sessionAsks = {
   list: (request: unknown) => (window as Window & { askFixtureList?: (request: unknown) => Promise<unknown> }).askFixtureList?.(request)
     ?? Promise.reject(new Error("Fixture list transport is not mounted")),
-  observe: async () => { throw new Error("Observation is not available in this fixture"); },
+  observe: (request: unknown) => (window as Window & { askFixtureObserve?: (request: unknown) => Promise<unknown> }).askFixtureObserve?.(request)
+    ?? Promise.reject(new Error("Observation is not available in this fixture")),
 };

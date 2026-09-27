@@ -164,7 +164,7 @@ test("stale host requires reload and cannot retry the old epoch", () => Fixture.
 
 test("runtime identity changes require reload; attachment generations are not ordered", () => Fixture.run(async f => {
   const entry = { attachmentGeneration: "9007199254740993", isTerminated: false, isRetiring: true, activeRunId: null,
-    queueDrainInProgress: true, providerId: "fake", providerKey: "fake", modelId: null, reasoningEffort: null, agentPromptId: "default", pendingAgentPromptId: "plan" };
+    queueDrainInProgress: true, providerId: "fake", providerKey: "fake", modelId: null, reasoningEffort: null, agentPromptId: "default", pendingAgentPromptId: "plan", activity: null };
   const results = [response({ entry }), response({ entry: { ...entry, attachmentGeneration: "1" } }),
     response({ entry: { ...entry, attachmentGeneration: "9223372036854775807" } }), response({ runtimeInstanceId: "replacement" })];
   const states: RuntimeState[] = []; let calls = 0;

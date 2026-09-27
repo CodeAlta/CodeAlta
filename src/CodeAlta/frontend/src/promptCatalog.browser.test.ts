@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { inventoryLanguages, inventoryNarrow } from "./inventoryLocalizationChecks";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -27,7 +28,8 @@ test("mounted prompt inventory to composer to captured Send rejects stale, pendi
         build.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("./promptCatalog.neoastra.mount.ts", import.meta.url)) }));
       } }] });
     const page = join(root, "fixture.html");
-    await writeFile(page, '<!doctype html><html><body><div id="app"></div><script src="fixture.js"></script></body></html>');
+    await writeFile(join(root, "style.css"), readFileSync(fileURLToPath(new URL("./style.css", import.meta.url))));
+    await writeFile(page, '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><div id="app"></div><script src="fixture.js"></script></body></html>');
     const profile = join(root, "profile");
     browser = spawn(edge!, ["--headless=new", "--disable-gpu", "--no-first-run", "--disable-background-networking", "--disable-extensions",
       `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", windowsHide: true });
@@ -76,19 +78,24 @@ test("mounted prompt inventory to composer to captured Send rejects stale, pendi
       else setTimeout(check, 20); }; check(); })`);
     const prompt = (epoch: string, sessionId: string) => `({status:'ok',epoch:'${epoch}',sessionId:'${sessionId}',truncated:true,prompts:[
       {id:'default',name:'Default',description:null,scope:'BuiltIn',builtIn:true,appended:false,body:'built in',bodyTruncated:false},
-      {id:'plan',name:'Plan',description:'planning mode',scope:'Project',builtIn:false,appended:true,body:'effective content',bodyTruncated:true}]})`;
+      {id:'plan',name:'Plan',description:'No description supplied.',scope:'Project',builtIn:false,appended:true,body:'Settings\\nUnknown\\n<tools> literal source'.padEnd(2048,'x'),bodyTruncated:true}]})`;
     assert.equal(await wait("window.promptFixture?.reads.length === 1"), "ready");
+    const languages = () => inventoryLanguages(evaluate,
+      "[promptFixture.reads.length,promptFixture.choicesReads,promptFixture.sent,JSON.stringify(localStorage)]", "Agent prompts");
+    await languages();
     assert.match((await evaluate("document.body.innerText"))!, /Loading prompts/);
     await evaluate(`window.promptFixture.session('two')`);
     assert.equal(await wait("window.promptFixture.reads.length === 2"), "ready");
     await evaluate(`window.promptFixture.reads[0].resolve(${prompt("e1", "one")})`);
     await evaluate(`window.promptFixture.reads[1].resolve({status:'stale_epoch',epoch:'other',sessionId:'two',prompts:[],truncated:false})`);
     assert.equal(await wait("document.body.innerText.includes('Reload required')"), "ready");
+    await languages();
     assert.equal(await evaluate("document.querySelector('.prompt-catalog-body')"), null);
     await evaluate(`window.promptFixture.session('one')`);
     assert.equal(await wait("window.promptFixture.reads.length === 3"), "ready");
     await evaluate(`window.promptFixture.reads[2].reject(new Error('private catalog failure'))`);
     assert.equal(await wait("document.body.innerText.includes('could not be read')"), "ready");
+    await languages();
     assert.doesNotMatch((await evaluate("document.body.innerText"))!, /private catalog failure/);
     await evaluate(`window.promptFixture.session('two')`);
     assert.equal(await wait("window.promptFixture.reads.length === 4"), "ready");
@@ -99,9 +106,14 @@ test("mounted prompt inventory to composer to captured Send rejects stale, pendi
     assert.equal(await wait(`document.querySelectorAll('[aria-label="Prompt inventory"] button').length === 2`), "ready");
     await evaluate(`document.querySelectorAll('[aria-label="Prompt inventory"] button')[1].click()`);
     assert.equal(await wait("document.body.innerText.includes('Content truncated')"), "ready");
+    assert.equal(await evaluate("document.querySelector('.prompt-catalog-body').textContent.length"), 2048);
+    assert.equal(await evaluate("document.querySelector('.prompt-catalog-body tools')"), null, "literal source never becomes HTML");
     assert.match((await evaluate("document.body.innerText"))!, /read-only here|Read-only here/);
     assert.equal(await wait("document.body.innerText.includes('Session-recorded prompt: default')"), "ready");
     assert.match((await evaluate("document.body.innerText"))!, /Next Send: default · model model · effort High/);
+    await inventoryLanguages(evaluate, "[promptFixture.reads.length,promptFixture.choicesReads]", "Agent prompts", "Content truncated to 2,048 characters. This is not the full prompt.", ".model-catalog-detail > p:nth-of-type(2)");
+    await inventoryNarrow(evaluate, command);
+    await languages();
     await evaluate(`document.querySelector('.model-catalog-next button').click()`);
     assert.equal(await wait(`document.querySelector('select[aria-label="Agent prompt"]')?.value === 'plan'`), "ready");
     assert.equal(await evaluate(`document.querySelector('select[aria-label="Model"]').value`), "model");
@@ -119,6 +131,7 @@ test("mounted prompt inventory to composer to captured Send rejects stale, pendi
     await evaluate(`window.promptFixture.reads[5].resolve(${prompt("e1", "one")})`);
     await evaluate(`document.querySelectorAll('[aria-label="Prompt inventory"] button')[0].click()`);
     assert.equal(await wait("document.body.innerText.includes('Retained exact request')"), "ready");
+    await languages();
     assert.equal(await evaluate("document.querySelector('.model-catalog-next button').disabled"), true);
     await evaluate(`window.promptFixture.session('two')`);
     assert.equal(await wait("window.promptFixture.reads.length === 7"), "ready");
@@ -127,6 +140,7 @@ test("mounted prompt inventory to composer to captured Send rejects stale, pendi
     assert.equal(await wait("document.querySelector('.model-catalog-next button:not(:disabled)')"), "ready");
     await evaluate(`window.promptFixture.hold=true; document.querySelector('.model-catalog-next button').click()`);
     assert.equal(await wait("!!window.promptFixture.release"), "ready");
+    await languages();
     await evaluate(`window.promptFixture.leave(); window.promptFixture.hold=false; window.promptFixture.release()`);
     assert.equal(await wait("document.querySelector('#session-prompt')"), "ready");
     assert.equal(await evaluate("localStorage.getItem('codealta.desktop.selection.two')"), null);
@@ -153,6 +167,13 @@ test("mounted prompt inventory to composer to captured Send rejects stale, pendi
     assert.equal(await wait("window.promptFixture.reads.length === 10"), "ready");
     await evaluate(`window.promptFixture.reads[9].resolve({status:'ok',epoch:'e1',sessionId:'three',prompts:[],truncated:false})`);
     assert.equal(await wait("document.body.innerText.includes('No effective prompts were discovered')"), "ready");
+    await languages();
+    await evaluate("promptFixture.session('four')");
+    assert.equal(await wait("promptFixture.reads.length===11"), "ready");
+    await evaluate(`promptFixture.reads[10].resolve({...${prompt("e1", "four")},prompts:[{id:'Settings',name:'Settings',description:null,scope:'Project',builtIn:false,appended:false,body:'x'.repeat(2049),bodyTruncated:false}]})`);
+    assert.equal(await wait("document.body.innerText.includes('Invalid prompt inventory')"), "ready");
+    await languages();
+    assert.equal(await evaluate("document.querySelector('.prompt-catalog-body')"), null);
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }

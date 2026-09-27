@@ -7,7 +7,7 @@ import { captureSubmission, createMutationCapability, createOwnedSubmissions } f
 const current: SessionSelection = { providerKey: "alpha", agentPromptId: "plan", modelId: "old", reasoningEffort: "High" };
 const choices: SessionChoicesResponse = { status: "ok", epoch: "epoch", sessionId: "one", current,
   prompts: [{ id: "plan", name: "Plan" }, { id: "default", name: "Default" }],
-  models: [{ id: "old", name: "Old", efforts: ["High"] }, { id: "new", name: "New", efforts: ["Low"] }] };
+  models: [{ id: "old", name: "Old", efforts: ["High"], imageInput: null }, { id: "new", name: "New", efforts: ["Low"], imageInput: null }] };
 const target = { epoch: "epoch", sessionId: "one", providerKey: "alpha", modelId: "new", reasoningEffort: null };
 
 test("catalog model handoff preserves session prompt, resets unsupported effort and freezes the next Send", async () => {

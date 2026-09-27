@@ -1,38 +1,49 @@
 import { useRef, useState } from "react";
+import type { PreferenceIssue } from "./localization";
+import { readRecentSessionCount, recentSessionCountKey, validRecentSessionCount } from "./recentSessions";
 import { persistProjectSort, projectSortStorageKey, type ProjectSort } from "./projectRail";
 import { persistProjectRailCollapsed, projectRailVisibilityKey, resetNarrowRail, toggleProjectRail, type ProjectRailState } from "./projectRailVisibility";
 
 export type Theme = "dark" | "light";
 export const themeStorageKey = "codealta.desktop.theme.v1";
-type Preference = "theme" | "sort" | "rail";
-type Notices = Partial<Record<Preference, string>>;
+type Preference = "theme" | "sort" | "rail" | "recent";
+export type PreferenceNotices = Partial<Record<Preference, PreferenceIssue>>;
 
-function readPreference<T extends string>(key: string, valid: readonly T[], fallback: T, label: string): { value: T; notice?: string } {
+function readPreference<T extends string>(key: string, valid: readonly T[], fallback: T): { value: T; notice?: PreferenceIssue } {
   try {
     const value = localStorage.getItem(key);
     if (value === null) return { value: fallback };
     if (valid.some(option => option === value)) return { value: value as T };
-    return { value: fallback, notice: `${label}: invalid saved preference; using ${fallback}. Not overwritten.` };
+    return { value: fallback, notice: "invalid" };
   } catch {
-    return { value: fallback, notice: `${label}: local storage unavailable; using ${fallback}. Not saved.` };
+    return { value: fallback, notice: "unavailable" };
   }
 }
 
 export function useWindowPreferences() {
   const [initial] = useState(() => ({
-    theme: readPreference(themeStorageKey, ["dark", "light"], "dark", "Theme"),
-    sort: readPreference(projectSortStorageKey, ["name", "recent"], "name", "Project sort"),
-    rail: readPreference(projectRailVisibilityKey, ["expanded", "collapsed"], "expanded", "Desktop projects"),
+    theme: readPreference(themeStorageKey, ["dark", "light"], "dark"),
+    recent: readRecentSessionCount(() => localStorage.getItem(recentSessionCountKey)),
+    sort: readPreference(projectSortStorageKey, ["name", "recent"], "name"),
+    rail: readPreference(projectRailVisibilityKey, ["expanded", "collapsed"], "expanded"),
   }));
   const [theme, updateTheme] = useState<Theme>(initial.theme.value);
+  const [recentSessionCount, updateRecent] = useState(initial.recent.value);
   const [projectSort, updateSort] = useState<ProjectSort>(initial.sort.value);
   const [railState, updateRail] = useState<ProjectRailState>({ desktopCollapsed: initial.rail.value === "collapsed", narrowOpen: false });
   const railCurrent = useRef(railState);
-  const [notices, setNotices] = useState<Notices>({ theme: initial.theme.notice, sort: initial.sort.notice, rail: initial.rail.notice });
+  const [notices, setNotices] = useState<PreferenceNotices>({ theme: initial.theme.notice, sort: initial.sort.notice, rail: initial.rail.notice, recent: initial.recent.issue });
+
+  function setRecentSessionCount(value: number) {
+    if (!validRecentSessionCount(value)) return;
+    updateRecent(value);
+    try { localStorage.setItem(recentSessionCountKey, String(value)); setNotices(current => ({ ...current, recent: undefined })); }
+    catch { setNotices(current => ({ ...current, recent: "unsaved" })); }
+  }
 
   function save(key: Preference, persist: () => boolean) {
     const saved = persist();
-    setNotices(current => ({ ...current, [key]: saved ? undefined : `${key === "sort" ? "Project sort" : key === "rail" ? "Desktop projects" : "Theme"}: applied in this window, but local storage could not save the change.` }));
+    setNotices(current => ({ ...current, [key]: saved ? undefined : "unsaved" }));
   }
   function setTheme(value: Theme) {
     updateTheme(value);
@@ -51,5 +62,5 @@ export function useWindowPreferences() {
   function toggleRail(narrow: boolean) { changeRail(toggleProjectRail(railCurrent.current, narrow), !narrow); }
   function closeNarrowRail() { changeRail(resetNarrowRail(railCurrent.current), false); }
 
-  return { theme, setTheme, projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices };
+  return { theme, setTheme, projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices, recentSessionCount, setRecentSessionCount };
 }

@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import type { ApplicationLogsResponse, ApplicationLogsClearRequest, ApplicationLogsClearResponse } from "#neoastra";
 import { ApplicationLogsPanel } from "./ApplicationLogsPanel";
 import { createApplicationLogClearActions } from "./applicationLogClear";
+import { InventoryLanguageFixture } from "./inventoryLanguage.mount";
 
 const pending: Array<{ resolve: (value: ApplicationLogsResponse) => void; reject: (reason: Error) => void }> = [];
 const pendingClear: Array<{ resolve: (value: ApplicationLogsClearResponse) => void; reject: (reason: Error) => void }> = [];
@@ -28,4 +29,4 @@ function App() {
   return <><button type="button" id="navigate-logs" onClick={() => setView(!view)}>{view ? "Settings" : "Application Logs"}</button>
     {view && <ApplicationLogsPanel clearActions={actions} read={() => { reads++; return new Promise((resolve, reject) => pending.push({ resolve, reject })); }} />}</>;
 }
-createRoot(document.getElementById("app")!).render(<App />);
+createRoot(document.getElementById("app")!).render(<InventoryLanguageFixture><App /></InventoryLanguageFixture>);

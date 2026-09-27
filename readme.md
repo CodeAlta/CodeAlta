@@ -2,6 +2,21 @@
 
 CodeAlta is a terminal workspace for agentic coding. It brings model-provider setup, project navigation, prompt attachments, durable sessions, delegated work, and trusted local plugins behind the `altatui` command.
 
+The desktop WebView supports local shell language selection in Settings → Appearance
+for English, Spanish, French, German, Japanese and Simplified Chinese. This is a
+bounded navigation/Settings/shortcut Help, composer, action-palette, session-tab
+and saved-session browsing/inspection translation, plus static Skills, create-only
+prompt, batch-deletion, Reminder, caller-ask, Settings inventory and static project/session workflow controls—not full UI localization;
+see [scope and limitations](doc/webview-localization.md).
+Static About/log/reference translation and its reference-preview lifetime publication
+correction have scoped independent acceptance; the separate split-layout cleanup
+failure remains open. Static advanced-session and archived recovery presentation is
+independently accepted within its bounded scope; raw diagnostics remain literal.
+Provider/timeline translation and its scroll correction are independently accepted.
+The bounded Settings inventory translation awaits independent acceptance.
+Short desktop windows use a [scrollable selected-content pane](doc/responsive-composer.md)
+to keep the regular composer and its actions reachable.
+
 > CodeAlta is pre-release software. Configuration, screenshots, and extension APIs may change before `1.0`.
 
 > On this development branch, the terminal package is renamed to `CodeAlta.Tui` / `altatui`. Installation commands below describe that package once released. Existing releases used `CodeAlta` / `alta`; the replacement desktop head is still in development. Shared `~/.alta` state and the in-session `alta` tool keep their identities.
@@ -9,6 +24,12 @@ CodeAlta is a terminal workspace for agentic coding. It brings model-provider se
 The development desktop includes an opt-in [workspace snapshot browser](src/CodeAlta/README.md#browse-a-task-owned-catalog-copy), bounded persisted-event history, and separately consented [existing-session text submission](src/CodeAlta/README.md#explicit-owned-text-submission) with a selected-session live status/text window and two recently reported plain tool activities for trusted task-owned roots. The live window is partial, not a complete transcript; tool reports and submission receipts do not establish permission approval or live-run completion. Full agent workflows and native qualification remain incomplete. This is not shared-profile startup. Continue using `altatui` for normal agent workflows.
 
 Shared-runtime [provider-event forwarding ownership](doc/runtime-provider-event-forwarding.md) now retains admitted callback work through queue/parent bookkeeping and shutdown joins. It remains separate from the partial Desktop display window and does not guarantee event replay or shutdown of noncooperative providers.
+
+Owned Desktop Send supports [bounded pasted PNG attachments](doc/prompt-images.md) with previews/removal and explicitly observed model capability: at most three images, 64 KiB each / 96 KiB total. Original bytes travel as typed images, not Markdown; Queue/Steer and local draft transfer refuse attachments. This narrow path does not add native clipboard qualification, URL/path access or broader image-format support.
+
+Desktop **Settings → Skills** provides [explicit bounded raw candidate inspection](doc/skills-inspection.md) for verified project/user CodeAlta roots, with local search and metadata details. These are raw files—not loaded, enabled or active skills—and ignored paths may appear. No source/config editing or activation is offered.
+
+Desktop **Settings → Agent prompts** supports [bounded create-only authoring](doc/prompt-creation.md) with explicit project/user-global scope, composition acknowledgement and review. Existing sources are never overwritten; creation does not automatically refresh, apply a prompt or change a pending Send. Existing-source edit/delete and system-prompt management are not exposed.
 
 Experimental owned Desktop mode also offers explicitly opted-in plain-command review with **Allow once / Deny / Cancel**. Permissions remain denied by default; pending requests are refreshed manually, and approval can execute commands with the host's privileges. **Observe retained decision** checks the original response locally across selection changes, without resending it; renderer reload loses that record. See the [owned-mode safety and usage notes](src/CodeAlta/README.md#explicit-owned-text-submission); this is not full permission or ask parity.
 
@@ -42,6 +63,13 @@ In the owned Desktop composer, the Reminders icon or Ctrl+G, Ctrl+D (from the wo
 On the Reminders page, Ctrl+Enter invokes the existing Create button only when focus is on the current Create message, delay, repeat or Create button and no modal/confirmation or reminder admission blocks it. Enter in the message remains a newline; Ctrl+Enter in the Save editor, list, deletion confirmation, recovery or another pane does not create. Ctrl+S remains the scoped Save-message shortcut. This is not full TUI keyboard parity.
 
 In the Desktop regular composer (owned or catalog/archived draft-only), typing `?` into an **exactly empty** prompt opens keyboard help; typing `/` opens the existing implemented-actions palette. These are transient keyboard shortcuts, not slash-command execution. Pasted text, composition, selection replacement and nonempty drafts remain literal; the expanded editor and other search/input fields do not use these shortcuts. Draft-only scopes can navigate/help but cannot gain mutation permissions from the palette.
+
+The palette also exposes eligible Skills inspection and last-observed usage, plus
+existing Open Project and Help. Outside text in the workspace, Ctrl+G then Ctrl+K
+opens eligible Skills Settings without scanning; Ctrl+G then Ctrl+L opens Application
+Logs. Usage reuses its existing guarded modal; Ctrl+G then Ctrl+U remains Context state
+because of the TUI mapping conflict. See [bounded command access](doc/command-access.md)
+for scope, validation and remaining qualification gaps.
 
 The Desktop timeline/composer divider can be dragged to reserve more room for the regular composer. Focus the divider and use **Arrow Up** to enlarge the composer, **Arrow Down** to shrink it, or **Home** (or **Auto size**) to restore compact automatic sizing. A bounded in-memory preference is kept separately per host/project/session during this window's lifetime; it does not alter drafts, Send/Steer authority or profile settings. A shorter window temporarily clamps the visible size without changing the preference. The composer and timeline stay mounted during resizing, and long controls/recovery details remain scrollable.
 

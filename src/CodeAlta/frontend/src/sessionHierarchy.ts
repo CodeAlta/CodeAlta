@@ -46,7 +46,7 @@ export function sessionHierarchy(visibleScope: readonly WorkspaceSession[], all:
     issue.set(session.id, diagnostic);
   }
 
-  // Sort by latest descendant activity like the TUI, but never recurse through untrusted lineage.
+  // Saved-update ordering only (not TUI LastActiveAt); never recurse through untrusted lineage.
   const activity = new Map(visibleScope.map(session => [session.id, Date.parse(session.updatedAt) || 0]));
   for (const session of visibleScope) {
     const seen = new Set<string>();

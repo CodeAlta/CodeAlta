@@ -188,7 +188,7 @@ const props = {
       entry: hasEntry ? { attachmentGeneration: String(attachment), activeRunId: observedRun,
         isRetiring: retiring, isTerminated: false, queueDrainInProgress: draining,
         providerId: "fixture-provider", providerKey: "fixture-provider", modelId: null,
-        reasoningEffort: null, agentPromptId: null, pendingAgentPromptId: null } : null,
+        reasoningEffort: null, agentPromptId: null, pendingAgentPromptId: null, activity: null } : null,
       runtimeInstanceId: runtime, coordinatorTransitionInProgress: transitioning } satisfies SessionRuntimeStateResponse;
   }),
 };

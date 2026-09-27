@@ -3,10 +3,12 @@ import { createElement, useCallback, useLayoutEffect, useRef, useState,
 import { createRoot } from "react-dom/client";
 import type { HistoryRequest, HistoryResponse } from "#neoastra";
 import { History } from "./HistoryPanel";
-import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePosition } from "./timelineScroll";
+import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePosition, timelineNotice, type TimelineNotice } from "./timelineScroll";
 import { dispatchWorkspaceShortcut, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
 import { MarkdownContent } from "./MarkdownContent";
 import { LiveTextMessage, LiveToolMessage } from "./LiveSessionPanel";
+import { ShellLanguageContext } from "./shellLanguage";
+import type { Locale } from "./localization";
 
 function createFixture() {
   const memory = createTimelineScrollMemory();
@@ -54,13 +56,15 @@ function createFixture() {
         lastWriteUtcTicks: "7", offset: `${start * 200}` } : null, tailOmitted: false };
   }
   function Mounted({ sessionId }: { sessionId: string }) {
+    const [locale, language] = useState<Locale>("en");
     const [, rerender] = useState(0);
     const position = useTimelinePosition(sessionId, memory);
     const shell = useRef<HTMLDivElement>(null);
     const chord = useRef<WorkspaceShortcutState>({ chordPending: false, sessionInfoPrefix: null, reminderPrefix: null });
     const [notice, setNotice] = useState("");
     const [deferredHeight, setDeferredHeight] = useState(0);
-    const newest = useExplicitNewestHistory(sessionId, null, "fixture-epoch", position, setNotice);
+    const presentNotice = useCallback((value: TimelineNotice) => setNotice(timelineNotice("en", value)), []);
+    const newest = useExplicitNewestHistory(sessionId, null, "fixture-epoch", position, presentNotice);
     const reset = useCallback((generation: number, explicitNewest: boolean) => {
       position.resetMessageNavigation();
       if (!newest.onTarget(generation)) {
@@ -71,7 +75,7 @@ function createFixture() {
     useLayoutEffect(() => {
       const fixture = Object.assign((window as Window & { toolFixture?: object }).toolFixture ?? {}, {
         select: (id: string) => window.dispatchEvent(new CustomEvent("tool-select", { detail: id })),
-        grow: setDeferredHeight, calls, enableLong: () => { longBodies = true; }, changeBody: () => { changedBody = true; },
+        language, grow: setDeferredHeight, calls, enableLong: () => { longBodies = true; }, changeBody: () => { changedBody = true; },
         replaceAssistant: (value: typeof assistantOverride) => { assistantOverride = value; },
         codeText, codeMarkdown, changeCode: () => { codeSuffix = "\nChanged source"; },
         toolMessage, replaceToolMessage: (value: string) => { toolMessage = value; },
@@ -92,7 +96,8 @@ function createFixture() {
       window.addEventListener("keydown", keyDown);
       return () => window.removeEventListener("keydown", keyDown);
     });
-    return createElement("div", { className: "fixture-workspace", ref: shell, style: { width: "100%", minWidth: 0, overflow: "hidden" } },
+    return createElement(ShellLanguageContext, { value: { locale, choice: locale, setLanguage: () => {} } },
+      createElement("div", { className: "fixture-workspace", ref: shell, style: { width: "100%", minWidth: 0, overflow: "hidden" } },
       createElement("button", { className: "keyboard-target", type: "button" }, "Timeline keyboard target"),
       createElement("div", { className: "timeline-scroll", ref: position.elementRef, "data-following": position.following,
         onScroll: (event: UIEvent<HTMLDivElement>) => { newest.onScroll(); if (!newest.pending()) position.scroll(event.currentTarget); },
@@ -113,7 +118,7 @@ function createFixture() {
       sessionId === "C" && createElement("div", { className: "unchanged-markdown" },
         createElement(MarkdownContent, { source: codeMarkdown }),
         createElement(LiveTextMessage, { row: { runId: "literal", contentId: "code", kind: "Assistant", text: codeMarkdown,
-          isComplete: false, isTruncated: false, startedWithDelta: false } })));
+          isComplete: false, isTruncated: false, startedWithDelta: false } }))));
   }
   function Fixture() {
     const [session, setSession] = useState("A");

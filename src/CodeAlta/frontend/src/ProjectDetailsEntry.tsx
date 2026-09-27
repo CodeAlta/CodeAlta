@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { WorkspaceProject, WorkspaceSnapshot } from "#neoastra";
 import { savedProjectSelection } from "./savedProjectSelection";
 import { AppIcon } from "./AppIcon";
+import { useShellLanguage } from "./shellLanguage";
 
 export type ProjectDetailsContext = Readonly<{ snapshot: WorkspaceSnapshot | undefined; projectId: string | null;
   sessionId: string | null; hostEpoch: string | null; hostAvailable: boolean;
@@ -35,6 +36,7 @@ async function copyProjectValue(text: string): Promise<"copied" | "unavailable" 
 function ProjectDetailsDialog({ project, snapshot, isCurrent, onClose }: {
   project: WorkspaceProject; snapshot: WorkspaceSnapshot; isCurrent: () => boolean; onClose: () => void;
 }) {
+  const { t } = useShellLanguage();
   const dialog = useRef<HTMLDialogElement>(null);
   const alive = useRef(false);
   const copying = useRef(false);
@@ -67,28 +69,29 @@ function ProjectDetailsDialog({ project, snapshot, isCurrent, onClose }: {
       else composingEscape.current = true;
     }} onKeyUp={() => { composingEscape.current = false; }} onCompositionEnd={() => { composingEscape.current = false; }}
     onCancel={event => { event.preventDefault(); if (!composingEscape.current) close(); }}>
-    <header><div><span className="eyebrow">Selected project</span><h2 id="project-details-title">Project details</h2></div>
-      <button autoFocus type="button" className="icon-button" aria-label="Close project details" onClick={close}><AppIcon name="close" size={16} /></button></header>
-    <p id="project-details-description" className="muted-text">Read-only saved catalog snapshot. Branch, tags, description and source metadata are not available here.</p>
-    <dl className="session-info-fields project-details-fields" tabIndex={0} aria-label="Recorded project information">
-      <div><dt>Project ID</dt><dd><code>{project.id}</code></dd></div>
-      <div><dt>Display name</dt><dd>{project.name}</dd></div>
-      <div><dt>Catalog path</dt><dd><code>{project.path}</code></dd></div>
-      <div><dt>Archived</dt><dd>{project.archived ? "Yes (read-only project)" : "No"}</dd></div>
+    <header><div><span className="eyebrow">{t("Selected project")}</span><h2 id="project-details-title">{t("Project details")}</h2></div>
+      <button autoFocus type="button" className="icon-button" aria-label={t("Close project details")} onClick={close}><AppIcon name="close" size={16} /></button></header>
+    <p id="project-details-description" className="muted-text">{t("Read-only saved catalog snapshot. Branch, tags, description and source metadata are not available here.")}</p>
+    <dl className="session-info-fields project-details-fields" tabIndex={0} aria-label={t("Recorded project information")}>
+      <div><dt>{t("Project ID")}</dt><dd><code>{project.id}</code></dd></div>
+      <div><dt>{t("Display name")}</dt><dd>{project.name}</dd></div>
+      <div><dt>{t("Catalog path")}</dt><dd><code>{project.path}</code></dd></div>
+      <div><dt>{t("Archived")}</dt><dd>{t(project.archived ? "Yes (read-only project)" : "No")}</dd></div>
     </dl>
-    {snapshot.projectsTruncated && <p className="muted-text">Project list is partial; omitted projects are not shown. No total session count is available.</p>}
-    {snapshot.sessionsTruncated && <p className="muted-text">Session list is partial; no session totals are reported.</p>}
-    {snapshot.displayTextTruncated && <p className="muted-text">Some display text was shortened in this bounded snapshot; this name may be shortened.</p>}
+    {snapshot.projectsTruncated && <p className="muted-text">{t("Project list is partial; omitted projects are not shown. No total session count is available.")}</p>}
+    {snapshot.sessionsTruncated && <p className="muted-text">{t("Session list is partial; no session totals are reported.")}</p>}
+    {snapshot.displayTextTruncated && <p className="muted-text">{t("Some display text was shortened in this bounded snapshot; this name may be shortened.")}</p>}
     <footer><span>{feedback && <span role={feedback.result === "copied" ? "status" : "alert"}>
-      {feedback.result === "copied" ? `Project ${feedback.field} copied.` : feedback.result === "unavailable"
-        ? "Clipboard unavailable; nothing copied." : `Could not copy project ${feedback.field}.`}
-    </span>}</span><span><button type="button" className="quiet-button" disabled={copyBusy} onClick={() => void copy("ID")}>Copy project ID</button>{" "}
-      <button type="button" className="quiet-button" disabled={copyBusy} onClick={() => void copy("path")}>Copy project path</button>{" "}
-      <button type="button" className="quiet-button" onClick={close}>Close</button></span></footer>
+      {feedback.result === "copied" ? t(feedback.field === "ID" ? "Project ID copied." : "Project path copied.") : feedback.result === "unavailable"
+        ? t("Clipboard unavailable; nothing copied.") : t(feedback.field === "ID" ? "Could not copy project ID." : "Could not copy project path.")}
+    </span>}</span><span><button type="button" className="quiet-button" disabled={copyBusy} onClick={() => void copy("ID")}>{t("Copy project ID")}</button>{" "}
+      <button type="button" className="quiet-button" disabled={copyBusy} onClick={() => void copy("path")}>{t("Copy project path")}</button>{" "}
+      <button type="button" className="quiet-button" onClick={close}>{t("Close")}</button></span></footer>
   </dialog>;
 }
 
 export function ProjectDetailsEntry({ context, getCurrent }: { context: ProjectDetailsContext; getCurrent: () => ProjectDetailsContext }) {
+  const { t } = useShellLanguage();
   const [opened, setOpened] = useState<{ context: ProjectDetailsContext; project: WorkspaceProject } | null>(null);
   const origin = useRef<HTMLButtonElement | null>(null);
   const project = selectedProjectDetails(context);
@@ -112,6 +115,6 @@ export function ProjectDetailsEntry({ context, getCurrent }: { context: ProjectD
       if (!selected || !project || !savedProjectSelection(project, getCurrent().snapshot)) return;
       origin.current = event.currentTarget;
       setOpened({ context, project: { ...selected } });
-    }}>Details</button>
+    }}>{t("Details")}</button>
     {visible && opened?.context.snapshot && <ProjectDetailsDialog project={opened.project} snapshot={opened.context.snapshot} isCurrent={isCurrent} onClose={close} />}</>;
 }

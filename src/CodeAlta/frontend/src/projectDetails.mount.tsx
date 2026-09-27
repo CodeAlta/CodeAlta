@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { ProjectRailRows } from "./ProjectRailRows";
 import { ProjectDetailsEntry, type ProjectDetailsContext } from "./ProjectDetailsEntry";
+import { InventoryLanguageFixture } from "./inventoryLanguage.mount";
 
 const projects = [
   { id: "one", name: "Alpha", path: "C:/catalog/alpha", archived: false },
@@ -55,4 +56,4 @@ function App() {
     <main className="content"><p id="selection">{context.projectId ?? "global"} / {context.sessionId ?? "none"}</p></main>
   </div></div>;
 }
-createRoot(document.getElementById("app")!).render(<App />);
+createRoot(document.getElementById("app")!).render(<InventoryLanguageFixture><App /></InventoryLanguageFixture>);

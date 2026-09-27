@@ -7,6 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
+import { locales, translate } from "./localization";
 
 const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
@@ -81,6 +82,23 @@ test("mounted production ask editor retains only exact validated drafts through 
     assert.equal(ready, "ready");
     const waitFor = (condition: string) => evaluate(`new Promise(resolve => { const end = Date.now() + 4000; const check = () => {
       if (${condition}) resolve('ready'); else if (Date.now() > end) resolve('timed out'); else setTimeout(check, 25); }; check(); })`);
+    const languages = async () => {
+      await evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))`);
+      await evaluate(`void (window.languageKeep={calls:JSON.stringify([askFixture.requests.length,askFixture.answers,askFixture.cancellations,askFixture.observations]),entries:askFixture.retained().map(e=>e.request),
+        inputs:[...document.querySelectorAll('input,textarea')].map(e=>({node:e,value:e.value,checked:e.checked,disabled:e.disabled})),focus:document.activeElement,
+        wording:JSON.stringify([...document.querySelectorAll('[data-ask-question] h4,[data-ask-question] > p,[data-ask-question] label')].map(e=>e.textContent))})`);
+      for (const locale of locales) {
+        await evaluate(`askFixture.language(${JSON.stringify(locale)})`);
+        assert.equal(await waitFor(`!!document.querySelector('[aria-label=${JSON.stringify(translate(locale, "Owned asks"))}]') || document.querySelector('.ask-refresh')?.textContent===${JSON.stringify(translate(locale, "Check asks"))}`), "ready");
+        assert.equal(await evaluate(`languageKeep.calls===JSON.stringify([askFixture.requests.length,askFixture.answers,askFixture.cancellations,askFixture.observations]) &&
+          languageKeep.entries.every((r,i)=>r===askFixture.retained()[i].request) && languageKeep.inputs.every(i=>i.node.isConnected && i.node.value===i.value && i.node.checked===i.checked && i.node.disabled===i.disabled) && document.activeElement===languageKeep.focus`), true,
+          `${locale}: literal answers/choices, mounted controls/focus, original requests and RPC counts retained`);
+        assert.equal(await evaluate(`languageKeep.wording===JSON.stringify([...document.querySelectorAll('[data-ask-question] h4,[data-ask-question] > p,[data-ask-question] label')].map(e=>e.textContent))`), true, `${locale}: caller wording stays literal`);
+      }
+      await evaluate(`askFixture.language('en')`);
+      assert.equal(await waitFor(`!!document.querySelector('[aria-label="Owned asks"]') || document.querySelector('.ask-refresh')?.textContent==='Check asks'`), "ready");
+    };
+    await languages(); // Initial list is still pending.
     const chordProbe = (selector: string, key: string, options: Record<string, unknown> = {}, prevent = false, focus = true) =>
       evaluate(`(() => { const target=document.querySelector(${JSON.stringify(selector)});
         if (${focus}) target.focus();
@@ -111,6 +129,7 @@ test("mounted production ask editor retains only exact validated drafts through 
       'same validated ask refresh preserves unsubmitted text');
     assert.equal(await evaluate(`document.querySelector('[aria-label="Owned asks"] input[type=checkbox]').checked`), true);
     assert.equal(await evaluate(`window.askFixture.answers.length+window.askFixture.cancellations.length`), 0);
+    await languages();
     const write = (value: string) => evaluate(`(() => {const el=document.querySelector('[aria-label="Owned asks"] textarea');
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,${JSON.stringify(value)});
       el.dispatchEvent(new Event('input',{bubbles:true}));})()`);
@@ -123,6 +142,7 @@ test("mounted production ask editor retains only exact validated drafts through 
     await write('Changed while refresh pending\nwith emoji 😀');
     await evaluate(`document.querySelectorAll('[aria-label="Owned asks"] input[type=checkbox]')[1].click()`);
     await click('Answer original ask'); await click('Cancel original ask');
+    await languages(); // Dirty draft during an explicit pending read.
     assert.equal(await evaluate(`window.askFixture.answers.length+window.askFixture.cancellations.length`), 0);
     await evaluate(`window.askFixture.page(${JSON.stringify(head)})`);
     assert.equal(await waitFor(`document.querySelector('[aria-label="Owned asks"] textarea')?.value===
@@ -159,6 +179,7 @@ test("mounted production ask editor retains only exact validated drafts through 
       'a settled failed read must not be labeled pending, although its old page remains unusable');
     assert.equal(await evaluate(`document.querySelectorAll('.ask-draft-recovery')[2].querySelector('pre').textContent`), 'Third draft');
     await click('Discard local draft…');
+    await languages(); // Explicit discard review is presentation state, not a locale effect.
     assert.equal(await evaluate(`document.querySelectorAll('.ask-draft-recovery').length`), 3, 'discard requires confirmation');
     await evaluate(`[...document.querySelectorAll('.ask-draft-recovery button')]
       .find(b=>b.textContent==='Confirm discard local draft').focus()`);
@@ -180,6 +201,7 @@ test("mounted production ask editor retains only exact validated drafts through 
     await evaluate(`document.querySelector('[aria-label="Owned asks"] input[type=checkbox]').click()`);
     await click('Answer original ask');
     assert.equal(await waitFor(`window.askFixture.answers.length===1`), 'ready');
+    await languages();
     assert.equal(await evaluate(`JSON.stringify(window.askFixture.answers[0].action.answers)`),
       JSON.stringify([{questionIndex:0,selectedChoiceIndexes:[0],freeformText:'Only fresh answer should submit'}]));
     assert.equal(await evaluate(`[...document.querySelectorAll('[aria-label="Owned asks"] textarea, [aria-label="Owned asks"] pre')]
@@ -210,6 +232,7 @@ test("mounted production ask editor retains only exact validated drafts through 
     assert.equal(await waitFor(`document.querySelector('[aria-label="Owned asks"]')?.textContent.includes('uncertain')`), 'ready');
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(captured)}+' pre').textContent`), 'Only fresh answer should submit');
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(captured)}).textContent.includes('Transport uncertain')`), true);
+    await languages();
     await click('Answer original ask'); await click('Cancel original ask');
     assert.equal(await evaluate(`window.askFixture.answers.length+window.askFixture.cancellations.length`), 1,
       'uncertain original answer is not retried by a refreshed editor');
@@ -242,6 +265,7 @@ test("mounted production ask editor retains only exact validated drafts through 
     await write('Local draft before session replacement');
     await evaluate(`window.askFixture.scope('session-other')`);
     assert.equal(await waitFor(`window.askFixture.requests.length===15`), 'ready');
+    await languages();
     assert.equal(await evaluate(`document.querySelectorAll('.ask-draft-recovery').length`), 0,
       'local recovery stays private to the original session');
     assert.equal(await evaluate(`!!document.querySelector(${JSON.stringify(captured)})`), false,
@@ -255,14 +279,18 @@ test("mounted production ask editor retains only exact validated drafts through 
       'app-owned action survives panel scope changes independently of the local draft');
     assert.equal(await evaluate(`document.querySelector('[aria-label="Owned asks"] textarea').value`), '',
       'scope round-trip does not silently reactivate the detached local draft');
+    await languages();
     await write('Unsent when cancel was captured');
     await click('Cancel original ask');
     assert.equal(await waitFor(`window.askFixture.cancellations.length===1`), 'ready');
+    await languages();
     assert.equal(await evaluate(`[...document.querySelectorAll('.ask-draft-recovery pre')].some(el=>el.textContent==='Unsent when cancel was captured')`), true);
     await click('Cancel original ask'); await click('Answer original ask');
     assert.equal(await evaluate(`window.askFixture.answers.length+window.askFixture.cancellations.length`), 2);
     await evaluate(`window.askFixture.failCancel()`);
     assert.equal(await waitFor(`document.querySelector('[aria-label="Owned asks"]')?.textContent.includes('uncertain')`), 'ready');
+    assert.equal(await waitFor(`askFixture.retained().some(e=>e.kind==='cancel' && e.transport==='uncertain')`), 'ready');
+    await languages();
     await evaluate(`(() => {const row=[...document.querySelectorAll('.ask-draft-recovery')]
       .find(el=>el.querySelector('pre')?.textContent==='Unsent when cancel was captured');row.querySelector('button').click();})()`);
     await click('Confirm discard local draft');
@@ -293,6 +321,15 @@ test("mounted production ask editor retains only exact validated drafts through 
     assert.equal(await waitFor(`window.askFixture.requests.length===19`), 'ready');
     await evaluate(`window.askFixture.page(null,{epoch:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'})`);
     assert.equal(await waitFor(`document.querySelector('[aria-label="Owned asks"]')?.textContent.includes('Host identity changed')`), 'ready');
+    await languages();
+    for (const locale of ["de", "ja"] as const) for (const theme of ["light", "dark"]) {
+      await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 500, deviceScaleFactor: 1, mobile: false });
+      await evaluate(`askFixture.language('${locale}');document.documentElement.dataset.theme='${theme}'`);
+      assert.equal(await waitFor(`document.querySelector('h3')?.textContent===${JSON.stringify(translate(locale, "Pending asks"))}`), "ready");
+      assert.equal(await evaluate(`document.documentElement.scrollWidth<=innerWidth+2 && [...document.querySelectorAll('.ask-draft-recovery,.ask-captured-answer')].every(e=>e.scrollWidth<=e.clientWidth+2)`), true, `${locale}/${theme}: short narrow retained ask evidence fits`);
+    }
+    await evaluate(`askFixture.language('en')`);
+    assert.equal(await waitFor(`!!document.querySelector('[aria-label="Owned asks"]')`), "ready");
     assert.equal(await evaluate(`[...document.querySelectorAll('.ask-draft-recovery pre')]
       .some(el=>el.textContent==='Retained after malformed read')`), true, 'stale host cannot erase local recovery');
     for (const width of [390,1120]) for (const theme of ['dark','light']) {
@@ -359,6 +396,17 @@ test("mounted production ask editor retains only exact validated drafts through 
     assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Owned asks"] fieldset h4').length`), 1);
     await nav('Previous question');
     assert.equal(await position(), 'Question 1 of 3: Choice and text', 'previous clamps without wrapping');
+    for (const locale of locales) {
+      await evaluate(`askFixture.language(${JSON.stringify(locale)})`);
+      assert.equal(await waitFor(`document.querySelector('[data-ask-direction="1"]').textContent===${JSON.stringify(translate(locale, "Next question"))}`), "ready");
+      assert.equal(await chordProbe('[data-ask-direction="1"]', 'n', { isComposing: true }), true, `${locale}: navigation button suppresses native activation while composing`);
+      assert.equal(await evaluate(`!!document.querySelector('[data-ask-question="0"]')`), true, `${locale}: composition cannot navigate`);
+      assert.equal(await chordProbe('[data-ask-direction="1"]', 'n'), true, `${locale}: navigation-button dispatch cannot depend on English ARIA`);
+      assert.equal(await chordProbe('[data-ask-direction="-1"]', 'p'), true);
+      assert.equal(await evaluate(`!!document.querySelector('[data-ask-question="0"]')`), true);
+    }
+    await evaluate(`askFixture.language('en')`);
+    assert.equal(await waitFor(`document.querySelector('[aria-label="Ask question position"]')?.textContent.includes('Question 1 of 3')`), "ready");
     await write('First answer 😀');
     await evaluate(`document.querySelector('[aria-label="Owned asks"] input[type=checkbox]').click()`);
     await evaluate(`document.querySelector('[data-ask-question="0"] textarea').focus()`);
@@ -559,6 +607,28 @@ test("mounted production ask editor retains only exact validated drafts through 
     assert.equal(await evaluate(`(() => {const event=new KeyboardEvent('keydown',{key:'p',ctrlKey:true,bubbles:true,cancelable:true});
       window.__oldAskInput.dispatchEvent(event);return event.defaultPrevented;})()`), false,
     'old-epoch editor cannot consume Ctrl+P');
+    await command('Page.navigate', { url: pathToFileURL(page).href });
+    assert.equal(await waitFor(`window.askFixture?.requests.length===1`), 'ready');
+    await evaluate(`askFixture.page(${JSON.stringify({ ...head, request: { questions: [{ title: "Answer", question: "Reminders", description: "Settings",
+      choices: [{ title: "None", description: "Refresh asks" }], freeform: { title: "Answer", placeholder: "Keep draft" } }] } })})`);
+    assert.equal(await waitFor(`document.querySelector('[data-ask-question] h4')?.textContent==='Answer'`), 'ready');
+    await write('  Answer\nNone 日本語  ');
+    await evaluate(`document.querySelector('[data-ask-question] input').click();document.querySelector('[data-ask-question] textarea').focus()`);
+    await languages();
+    assert.equal(await evaluate(`document.querySelector('[data-ask-question] textarea').placeholder`), 'Keep draft');
+    for (const locale of ['de', 'ja'] as const) for (const theme of ['light', 'dark']) {
+      await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 500, deviceScaleFactor: 1, mobile: false });
+      await evaluate(`askFixture.language('${locale}');document.documentElement.dataset.theme='${theme}'`);
+      assert.equal(await waitFor(`document.querySelector('h3')?.textContent===${JSON.stringify(translate(locale, 'Pending asks'))}`), 'ready');
+      assert.equal(await evaluate(`document.documentElement.scrollWidth<=innerWidth+2 && document.querySelector('fieldset').scrollWidth<=document.querySelector('fieldset').clientWidth+2`), true, `${locale}/${theme}: short narrow caller editor fits`);
+    }
+    await evaluate(`askFixture.language('en')`);
+    assert.equal(await waitFor(`!!document.querySelector('[aria-label="Owned asks"]')`), 'ready');
+    await click('Answer original ask');
+    assert.equal(await waitFor(`askFixture.answers.length===1`), 'ready');
+    await languages();
+    assert.equal(await evaluate(`askFixture.answers[0].action.answers[0].freeformText`), '  Answer\nNone 日本語  ');
+    assert.equal(await evaluate(`JSON.stringify(askFixture.answers[0].action.answers[0].selectedChoiceIndexes)`), '[0]');
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }

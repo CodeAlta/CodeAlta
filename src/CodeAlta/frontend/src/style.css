@@ -1,3 +1,32 @@
+.skills-inspection { min-width: 0; overflow-wrap: anywhere; }
+.skills-inspection label { display: block; margin-block: .75rem; }
+.skills-inspection select, .skills-inspection input { max-width: 100%; }
+.skills-inspection ul { padding-inline-start: 1.25rem; }
+.skills-inspection li { margin-block: .35rem; }
+.skills-inspection li button { max-width: 100%; white-space: normal; text-align: start; overflow-wrap: anywhere; }
+.skills-inspection dd { margin-inline-start: 1rem; white-space: pre-wrap; }
+.prompt-image-attachments { display: flex; flex-wrap: wrap; gap: 0.5rem; min-width: 0; overflow-wrap: anywhere; }
+.prompt-image-attachments details, .prompt-image-attachments > p { flex-basis: 100%; }
+.prompt-image-attachments figure { margin: 0; display: flex; flex-direction: column; gap: 0.25rem; max-width: 10rem; }
+.prompt-image-attachments img { object-fit: contain; }
+.runtime-observation { display: block; font-size: .75rem; line-height: 1.5; font-weight: normal; overflow-wrap: anywhere; }
+.observed-activity, .unknown-activity { display: block; overflow-wrap: anywhere; }
+.unknown-activity { border-top: 1px dashed var(--muted); padding-top: .25rem; color: var(--muted); }
+.session-batch-delete { border: 1px solid var(--muted); padding: .5rem; overflow-wrap: anywhere; }
+.session-batch-delete fieldset { max-height: 12rem; overflow: auto; min-width: 0; }
+.session-browser .session-batch-delete label { display: block; }
+.session-batch-delete input[type="checkbox"] { width: auto; margin-right: .5rem; }
+.session-batch-report { max-height: 24rem; overflow: auto; }
+.session-batch-report input { max-width: 100%; }
+.runtime-observation-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; max-width: 100%; }
+/* Stable line boxes prevent CJK fallback metrics shifting the retained timeline. */
+.runtime-observation-controls button { line-height: 1.5; }
+.runtime-observation-controls small { max-width: 36rem; overflow-wrap: anywhere; }
+.session-tabs .runtime-observation-controls { flex: 1 1 100%; }
+/* Archive confirmation retains long exact identities without overflowing narrow windows. */
+.archive-dialog { width: min(36rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow: auto; box-sizing: border-box; }
+.archive-dialog p, .archive-dialog details { overflow-wrap: anywhere; }
+.archive-dialog button { margin: .5rem .5rem .5rem 0; }
 :root {
   color-scheme: dark;
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -80,8 +109,8 @@ code, pre { font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
 .connection-live .connection-dot, .connection-readonly .connection-dot { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 15%, transparent); }
 .connection-error .connection-dot { background: var(--red); }
 
-.workspace-shell { min-width: 0; min-height: 0; display: grid; grid-template-columns: var(--project-pane-width, 240px) 8px var(--session-pane-width, 310px) 8px minmax(480px, 1fr); grid-template-areas: "projects project-resize sessions session-resize content"; overflow: hidden; }
-.workspace-shell:not(.project-rail-open) { grid-template-columns: 0 0 var(--session-pane-width, 310px) 8px minmax(480px, 1fr); }
+.workspace-shell { min-width: 0; min-height: 0; display: grid; grid-template-columns: var(--project-pane-width, 240px) 8px minmax(calc(var(--session-pane-width, 310px) + 488px), 1fr); grid-template-areas: "projects project-resize session-content"; overflow: hidden; }
+.workspace-shell:not(.project-rail-open) { grid-template-columns: 0 0 minmax(calc(var(--session-pane-width, 310px) + 488px), 1fr); }
 .project-rail { grid-area: projects; }
 .project-splitter { grid-area: project-resize; }
 .session-rail { grid-area: sessions; }
@@ -173,6 +202,26 @@ h1, h2, h3, p { margin-top: 0; }
 .workspace-layout { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0;
   --flexlayout-color-text: var(--text); --flexlayout-color-background: transparent;
   --flexlayout-color-base: transparent; --flexlayout-color-1: transparent; }
+.session-content-layout { grid-area: session-content; --flexlayout-splitter-size: 0px; --flexlayout-splitter-active-size: 0px; }
+/* Public classNameMapper replaces the library input surface. App's existing
+   pointer-captured control owns the 8px space inside the rail slot instead. */
+.session-content-library-divider { display: none; }
+.session-content-rail-slot { display: grid; grid-template-columns: minmax(0, 1fr) 8px; grid-template-areas: "sessions session-resize"; height: 100%; min-height: 0; }
+.session-content-layout .content { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+/* The outer short-window access scroller must not anchor to content that is
+   independently anchored/scrolled by the timeline inside it. */
+.active-session-content { flex: 1; min-height: 0; overflow: auto; overflow-anchor: none; }
+/* Keep one usable workspace when stacked panes leave little height. Its public
+   content container scrolls instead of squeezing the regular editor to zero. */
+.active-session-content > .session-workspace { min-height: 480px; }
+.session-tabs { display: flex; flex: none; align-items: center; gap: 4px; min-width: 0; border-bottom: 1px solid var(--line); }
+.session-tabs [role="tablist"] { display: flex; overflow-x: auto; flex: 1; min-width: 0; }
+.session-tab { display: flex; flex: none; align-items: center; }
+.session-tab [role="tab"] { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 8px; }
+.session-tab [aria-selected="true"] { border-bottom: 2px solid var(--text); }
+.close-session-tab { padding: 6px; }
+.session-content-top-size { position: absolute; width: 0; height: 0; visibility: hidden; pointer-events: none; }
+.session-content-layout.sessions-hidden .session-content-rail-panel { display: none !important; }
 .session-workspace { width: min(1080px, calc(100% - 32px)); height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; margin: 0 auto; padding: 20px 0 14px; overflow: hidden; }
 .session-header { display: flex; justify-content: space-between; align-items: end; gap: 18px; padding: 0 4px 18px; border-bottom: 1px solid var(--line); }
 .session-header > div:first-child { min-width: 0; }
@@ -187,7 +236,11 @@ dt { color: var(--muted); }
 dd { margin: 0; overflow-wrap: anywhere; }
 
 .conversation { margin-top: 12px; }
-.timeline-scroll { flex: 1 1 auto; min-width: 0; min-height: 0; overflow-y: scroll; overscroll-behavior: contain; padding: 0 8px 28px 0; }
+/* Give the automatic composer its intrinsic room before allocating the timeline remainder. */
+/* Chrome must not acquire taller line boxes solely from CJK fallback fonts.
+   Markdown/code retain their own line heights; translated text can still wrap.
+   The outer access scroller opts out of anchoring; this viewport keeps its own. */
+.timeline-scroll { flex: 1 1 0; min-width: 0; min-height: 0; overflow-y: scroll; overscroll-behavior: contain; padding: 0 8px 28px 0; line-height: 1.5; }
 .composer-resize-bar { flex: 0 0 auto; display: flex; align-items: center; min-height: 8px; margin: 6px 4px 0; }
 .composer-resize-bar .quiet-button { flex: 0 0 auto; padding: 2px 7px; font-size: 11px; }
 .composer-splitter { flex: 1 1 auto; position: relative; height: 8px; cursor: row-resize; touch-action: none; }
@@ -266,6 +319,25 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .event-meta-inline { display: flex; flex-wrap: wrap; gap: 3px 11px; margin: 8px 0 0; padding: 7px 0 0; border-top: 1px solid var(--line); color: color-mix(in srgb, var(--muted) 70%, transparent); list-style: none; }
 .composer { flex: 0 0 auto; position: relative; margin: 10px 4px 0; border: 1px solid var(--line-strong); border-radius: 14px; background: color-mix(in srgb, var(--panel-2) 96%, transparent); box-shadow: var(--shadow); overflow: hidden; }
 .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 65%, var(--line)); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow); }
+.project-reference-picker { max-height: 220px; overflow: auto; border: 1px solid var(--line); padding: 8px; background: var(--panel-2); }
+.project-reference-picker [role="listbox"] { display: flex; flex-direction: column; }
+.project-reference-picker [aria-selected="true"] { outline: 2px solid var(--accent); outline-offset: -2px; }
+.session-browser { width: min(720px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); box-sizing: border-box; overflow: auto; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+.session-browser::backdrop { background: #0008; }
+.session-browser header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.session-browser label { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.session-browser input, .session-browser select { min-width: 0; width: 100%; box-sizing: border-box; }
+.session-browser-results { max-height: 45dvh; overflow: auto; }
+.session-browser-results button { display: flex; flex-direction: column; text-align: left; width: 100%; overflow-wrap: anywhere; white-space: normal; gap: 4px; padding: 10px; }
+.session-browser-results [aria-selected="true"] { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); }
+.session-browser [role="alert"] { color: var(--red); }
+.reference-presentation { font-size: .8rem; min-width: 0; }
+.reference-presentation p { margin: .3rem 0; }
+.reference-presentation pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 10rem; overflow: auto; margin: .3rem 0; }
+.reference-presentation mark { background: transparent; color: inherit; }
+.reference-presentation .reference-resolved { color: var(--accent); text-decoration: underline solid 2px; }
+.reference-presentation .reference-unresolved { color: var(--red); text-decoration: underline wavy; }
+.reference-presentation .reference-escaped { text-decoration: underline dotted; }
 .composer textarea { width: 100%; min-height: 84px; padding: 14px 15px 8px; resize: vertical; border: 0; outline: 0; color: var(--text); background: transparent; line-height: 1.5; }
 .composer textarea::placeholder { color: var(--muted); }
 .composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 9px 9px 14px; color: var(--muted); font-size: 11px; }
@@ -283,7 +355,12 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .catalog-composer .catalog-diagnostics { margin: 0; padding: 0 12px 7px; color: var(--muted); font-size: 11px; }
 .section-heading { display: flex; align-items: end; justify-content: space-between; margin: 25px 4px 4px; }
 .section-heading h2 { margin: 0; font-size: 18px; }
+/* Give both translated history title and action the available width rather than
+   making their line counts depend on competing flex items. */
+.history > .section-heading { flex-direction: column; align-items: flex-start; gap: 4px; }
 .empty-history { padding: 60px 20px; color: var(--muted); text-align: center; }
+/* Reserve a two-line read-notice slot; longer notices still grow and wrap. */
+.history > .error-text { min-block-size: 2lh; }
 .load-more { display: flex; align-items: center; gap: 6px; margin: 9px auto 2px; }
 
 .empty-workspace { height: 100%; display: grid; place-content: center; justify-items: center; padding: 40px; color: var(--muted); text-align: center; }
@@ -299,6 +376,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .page-heading p { color: var(--muted); }
 .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .settings-card-page .settings-grid { grid-template-columns: minmax(0, 1fr); }
+.settings-card-page { overflow-wrap: anywhere; }
+.settings-card .segmented { flex-wrap: wrap; }
 .settings-card { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 14px; min-height: 170px; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: 0 8px 30px rgba(0, 0, 0, .06); }
 .settings-card h2 { margin-bottom: 7px; font-size: 16px; }
 .settings-card p { margin-bottom: 14px; color: var(--muted); line-height: 1.55; }
@@ -358,13 +437,14 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .reminder-page .reminder-recovery, .archived-action-recovery { min-width: 0; max-width: 100%; margin: 16px 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); overflow-wrap: anywhere; }
 .reminder-page .reminder-recovery pre, .archived-action-recovery pre { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
 .reminder-page .reminder-recovery button { margin: 8px 8px 0 0; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); background: var(--panel-2); }
-.reminder-page section[aria-label="Selected reminder"] { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--line); }
+.reminder-page .selected-reminder { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--line); }
 @media (max-width: 650px) { .model-catalog-layout { grid-template-columns: minmax(0, 1fr); } }
 
 /* Existing owned-runtime controls keep their full semantics while fitting the workspace. */
 .owned-session, .session-workspace > section:not(.conversation):not(.composer):not(.owned-session), .session-workspace > form { margin-top: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .timeline-scroll > section:not(.conversation):not(.live-indicator), .timeline-scroll > form { margin-top: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
-.session-workspace > .composer-region > .owned-session { flex: 0 1 auto; max-height: min(60vh, 680px); margin: 10px 4px 0; overflow-y: auto; box-shadow: var(--shadow); }
+/* Keep margin/layout semantics identical when the first resize allocates editor space. */
+.session-workspace > .composer-region > .owned-session { flex: 0 1 auto; display: flex; flex-direction: column; max-height: min(60vh, 680px); margin: 10px 4px 0; overflow-y: auto; box-shadow: var(--shadow); }
 .session-workspace > .composer-region.resized > .owned-session { flex: 1 0 auto; max-height: none; display: flex; flex-direction: column; overflow: visible; }
 .owned-session h3, .owned-session h4 { margin: 22px 0 8px; }
 .owned-session > h3:first-child { margin-top: 0; }
@@ -463,7 +543,10 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .owned-session .expanded-prompt-dialog textarea { flex: 1; min-height: 0; margin: 0; resize: none; line-height: 1.5; }
 .expanded-prompt-dialog p { margin: 0; color: var(--muted); font-size: 12px; }
 .app-dialog { width: min(620px, 100%); max-height: min(720px, calc(100vh - 48px)); display: flex; flex-direction: column; padding: 18px; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 15px; background: var(--panel); box-shadow: var(--shadow); }
-.session-info-dialog { width: min(560px, calc(100vw - 32px)); color: var(--text); }
+.session-info-dialog { width: min(560px, calc(100vw - 32px)); color: var(--text); overflow-y: auto; }
+.session-info-dialog > * { flex-shrink: 0; }
+.session-info-dialog section h3 { margin: 12px 0 4px; font-size: 14px; }
+.session-info-dialog section p { font-size: 12px; color: var(--muted); }
 .session-usage-dialog { width: min(510px, calc(100vw - 32px)); max-height: min(640px, calc(100dvh - 32px)); color: var(--text); }
 .session-usage-dialog::backdrop { background: rgba(0, 0, 0, .62); }
 .session-usage-dialog > p { margin: 0 0 10px; font-size: 12px; overflow-wrap: anywhere; }
@@ -485,6 +568,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .session-info-fields small { display: block; color: var(--muted); }
 .session-info-dialog > footer { gap: 12px; flex-wrap: wrap; }
 .session-info-dialog > footer span { overflow-wrap: anywhere; }
+.session-info-dialog > footer > span:last-child { display: flex; flex-wrap: wrap; gap: 6px; }
 .about-dialog > footer { justify-content: flex-end; }
 .app-dialog > header { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
 .app-dialog > header h2 { margin: 0 0 14px; font-size: 21px; }
@@ -532,8 +616,10 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
   .settings-dialog-content > .configuration-page, .settings-dialog-content > :not(.configuration-page) { padding: 14px; }
   .connection { display: none; }
   .app-shell { grid-template-rows: auto minmax(0, 1fr); }
-  .workspace-shell, .workspace-shell:not(.project-rail-open) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(340px, 45vh) minmax(0, 1fr); grid-template-areas: "sessions" "content"; height: auto; }
-  .workspace-shell.project-rail-open { grid-template-areas: "projects" "content"; }
+  .workspace-shell, .workspace-shell:not(.project-rail-open) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(340px, 45vh) minmax(0, 1fr); grid-template-areas: "session-content" "session-content"; height: auto; }
+  .workspace-shell.project-rail-open { grid-template-areas: "projects" "session-content"; }
+  .session-content-top-size { height: max(340px, 45vh); }
+  .session-content-rail-slot { grid-template-columns: minmax(0, 1fr); grid-template-areas: "sessions"; }
   .pane-splitter { display: none; }
   .project-rail:not([hidden]) { display: flex; border-bottom: 1px solid var(--line); }
   .session-rail { height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
@@ -552,6 +638,14 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
   .shortcut-dialog dl { grid-template-columns: 1fr; }
 }
 
+.prompt-creation { padding: 20px; min-width: 0; border-bottom: 1px solid var(--line); }
+.prompt-creation fieldset { display: grid; gap: 10px; min-width: 0; border: 1px solid var(--line); }
+.prompt-creation label { display: grid; gap: 5px; min-width: 0; }
+.prompt-creation input:not([type="checkbox"]), .prompt-creation textarea, .prompt-creation select { width: 100%; min-width: 0; max-width: 100%; }
+.prompt-creation pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
+.prompt-creation p { overflow-wrap: anywhere; }
+
 @media (max-width: 875px) and (max-height: 600px) {
   .workspace-shell, .workspace-shell:not(.project-rail-open) { grid-template-rows: minmax(180px, 40vh) minmax(0, 1fr); }
+  .session-content-top-size { height: max(180px, 40vh); }
 }
