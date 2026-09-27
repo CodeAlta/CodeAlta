@@ -1327,7 +1327,14 @@ function App() {
             {projectId !== null && ` ${t("The selected project and session remain open.")}`}
           </p>}
           {snapshot && <ProjectRailRows projects={projectListing?.projects ?? []} selectedId={projectId} onSelect={selectProject}
-            canRename={owned} renameBusy={projectRenameBusy || !mutation?.capability.canMutate()} onRename={() => void beginProjectRename()} />}
+            canRename={owned} renameBusy={projectRenameBusy || !mutation?.capability.canMutate()} onRename={() => void beginProjectRename()}
+            actions={{ current: () => ({ ...currentProjectDetailsContext(),
+              active: creationAlive.current && currentView.current === "workspace" && !settingsVisible.current && !!projectRail.current && !projectRail.current.hidden,
+              generation: browserRevision.current + projectRenameGeneration.current, modalGeneration: creationGeneration.current,
+              canMutate: owned && !!mutation?.capability.canMutate(),
+              locked: projectRenamePending.current || !!uncertainProjectRename.current || projectRenameLocked
+                || !!projectRenameTarget || projectArchive.locked || !!projectOpening.getSnapshot() }),
+              open: selectProject, rename: () => void beginProjectRename(), archive: () => setDialog("archive") }} />}
           <button type="button" className="quiet-button" disabled={!selectedProject || !owned || !mutation?.capability.canMutate()}
             onClick={() => setDialog("archive")}>{t(selectedProject?.archived ? "Unarchive project…" : "Archive project…")}</button>
           {projectArchive.records.length > 0 && <button type="button" className="quiet-button" onClick={() => setDialog("archive")}>{t("Archive operation evidence")}</button>}

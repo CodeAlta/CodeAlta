@@ -2718,6 +2718,184 @@ test("production shell settings overlay keeps the session workspace mounted and 
       await evaluate("unmountShellFixture();toolCopy.click()"); await frames();
       assert.equal(await evaluate(`document.querySelector('#root').childElementCount===0 && toolCopies.length===${mode === "copy" ? 1 : 0}`), true);
     }
+    // Project-row actions follow every accepted scenario. Menu display itself is read-free.
+    for (const mode of ["selected", "other", "catalog-only", "archived", "catalog-aba", "host-aba", "scope-aba", "modal-aba", "removed"]) {
+      t.diagnostic(`Project-row actions App scenario: ${mode}`);
+      await evaluate(`localStorage.clear();localStorage.setItem('settingsFixtureOwned','${mode !== "catalog-only"}');localStorage.setItem('settingsFixtureSecondProject','true');${mode === "archived" ? "localStorage.setItem('usageFixtureArchived','true');" : ""}`);
+      await command("Page.reload");
+      assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one' && document.querySelectorAll('.project-actions-trigger').length===2"), true);
+      // Earlier accepted scenarios leave a 750px viewport; narrow rails start hidden.
+      // Use the real reveal control rather than dispatching keys into hidden content.
+      await evaluate("if(document.querySelector('#project-rail').hidden) document.querySelector('[aria-label=\"Show projects\"]').click()");
+      const path = mode === "other" ? "/fixture/other" : "/fixture/project";
+      await evaluate(`void(window.projectOrigin=document.querySelector('#project-list button[title="${path}"]').closest('li').querySelector('.project-actions-trigger'))`);
+      const before = await evaluate(`JSON.stringify([${workflowCalls},settingsShellFixture.snapshotCalls,settingsShellFixture.projectNameReads,settingsShellFixture.historyCalls])`);
+      await evaluate("projectOrigin.focus();projectOrigin.dispatchEvent(new KeyboardEvent('keydown',{key:'F10',shiftKey:true,bubbles:true,cancelable:true}))");
+      assert.equal(await wait("!!document.querySelector('.project-actions-menu')"), true);
+      assert.equal(await evaluate("document.querySelector('.session-header h1').textContent==='one' && document.querySelector('.project-actions-menu button')===document.activeElement"), true);
+      assert.equal(await evaluate(`JSON.stringify([${workflowCalls},settingsShellFixture.snapshotCalls,settingsShellFixture.projectNameReads,settingsShellFixture.historyCalls])`), before);
+      if (["other", "catalog-only"].includes(mode)) assert.equal(await evaluate("[...document.querySelectorAll('.project-actions-menu button')].slice(2).every(b=>b.disabled)"), true);
+      if (mode === "archived") assert.equal(await evaluate("document.querySelectorAll('.project-actions-menu button')[2].disabled && !document.querySelectorAll('.project-actions-menu button')[3].disabled && document.querySelectorAll('.project-actions-menu button')[3].textContent==='Unarchive project…'"), true);
+      await evaluate("void(window.originalProjectAction=document.querySelector('.project-actions-menu button'))");
+      if (mode === "catalog-aba") await evaluate("publishLayoutCatalog({...settingsShellFixture.catalog});publishLayoutCatalog(settingsShellFixture.catalog)");
+      if (mode === "host-aba") await evaluate("cycleInfoHost()");
+      if (mode === "scope-aba") await evaluate("cycleInfoSelection()");
+      if (mode === "modal-aba") await evaluate("{const d=document.createElement('dialog');document.body.append(d);d.showModal();d.close();d.remove()}");
+      if (mode === "removed") await evaluate("publishLayoutCatalog({...settingsShellFixture.catalog,projects:[]})");
+      if (["catalog-aba", "host-aba", "scope-aba", "modal-aba", "removed"].includes(mode)) {
+        await frames(); await evaluate("originalProjectAction.click()");
+        assert.equal(await evaluate("!document.querySelector('.project-actions-menu') && settingsShellFixture.projectRenames.length===0 && settingsShellFixture.archives.length===0"), true);
+      } else {
+        if (mode === "selected") {
+          await workflowLanguages(evaluate, `[${workflowCalls},settingsShellFixture.snapshotCalls,settingsShellFixture.projectNameReads]`, ".project-actions-menu", ".project-actions-menu button", "Open");
+          await evaluate("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true,cancelable:true}))");
+          assert.equal(await evaluate("document.activeElement===document.querySelectorAll('.project-actions-menu button')[3]"), true);
+          await evaluate("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Home',bubbles:true,cancelable:true}));document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
+          await frames(); assert.equal(await evaluate("document.activeElement===projectOrigin && !document.querySelector('.project-actions-menu')"), true);
+          await evaluate("projectOrigin.closest('li').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}))");
+        }
+        await evaluate("document.querySelectorAll('.project-actions-menu button')[1].click()");
+        assert.equal(await wait("document.querySelector('.project-details-dialog')?.open"), true);
+        assert.equal(await evaluate(`document.querySelector('.project-details-fields').textContent.includes('${path}') && document.querySelector('.session-header h1').textContent==='one'`), true);
+        await evaluate("document.querySelector('.project-details-dialog header button').click()"); await frames();
+        assert.equal(await evaluate("document.activeElement===projectOrigin"), true);
+      }
+      await evaluate("unmountShellFixture();originalProjectAction.click()");
+      assert.equal(await wait("document.querySelector('#root').childElementCount===0"), true);
+    }
+    for (const mode of ["copy", "own-aba", "other-modal", "removed"]) {
+      t.diagnostic(`Project-row Details lifetime: ${mode}`);
+      await evaluate("localStorage.clear();localStorage.setItem('settingsFixtureOwned','true')");
+      await command("Page.reload");
+      assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one' && !!document.querySelector('.project-actions-trigger')"), true);
+      await evaluate("if(document.querySelector('#project-rail').hidden) document.querySelector('[aria-label=\"Show projects\"]').click()");
+      await evaluate("window.rowCopies=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{rowCopies.push(text)}}});document.querySelector('.project-actions-trigger').click()");
+      assert.equal(await wait("!!document.querySelector('.project-actions-menu')"), true);
+      await evaluate("document.querySelectorAll('.project-actions-menu button')[1].click()");
+      assert.equal(await wait("document.querySelector('.project-details-dialog')?.open"), true);
+      await evaluate("void(window.rowCopy=document.querySelector('.project-details-dialog footer button'))");
+      if (mode === "own-aba") await evaluate("{const d=document.querySelector('.project-details-dialog');d.close();d.showModal();rowCopy.click()}");
+      if (mode === "other-modal") await evaluate("{const d=document.createElement('dialog');document.body.append(d);d.showModal();d.close();d.remove();rowCopy.click()}");
+      if (mode === "removed") await evaluate("publishLayoutCatalog({...settingsShellFixture.catalog,projects:[]})");
+      await evaluate("rowCopy.click()"); await frames();
+      assert.deepEqual(await evaluate("rowCopies"), mode === "copy" ? ["project"] : []);
+      if (mode !== "copy") assert.equal(await evaluate("!document.querySelector('.project-details-dialog')"), true);
+      await evaluate("unmountShellFixture();rowCopy.click()");
+      assert.equal(await wait("document.querySelector('#root').childElementCount===0"), true);
+      assert.deepEqual(await evaluate("rowCopies"), mode === "copy" ? ["project"] : []);
+    }
+    for (const mode of ["rename-cancel", "rename-confirm", "rename-uncertain", "archive-cancel", "archive-confirm", "archive-uncertain"]) {
+      t.diagnostic(`Project-row workflow App scenario: ${mode}`);
+      await evaluate("localStorage.clear();localStorage.setItem('settingsFixtureOwned','true');localStorage.setItem('draftTabFixture','true')");
+      await command("Page.reload");
+      assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one' && !!document.querySelector('.project-actions-trigger')"), true);
+      await evaluate("if(document.querySelector('#project-rail').hidden) document.querySelector('[aria-label=\"Show projects\"]').click()");
+      await evaluate("document.querySelector('.project-actions-trigger').click()");
+      assert.equal(await wait("!!document.querySelector('.project-actions-menu')"), true);
+      assert.equal(await evaluate("settingsShellFixture.projectNameReads.length===0 && settingsShellFixture.archives.length===0 && settingsShellFixture.projectRenames.length===0"), true);
+      if (mode.startsWith("rename")) {
+        await evaluate("document.querySelectorAll('.project-actions-menu button')[2].click()");
+        assert.equal(await wait("settingsShellFixture.projectNameReads.length===1"), true);
+        assert.deepEqual(await evaluate("settingsShellFixture.projectNameReads[0].request"), { expectedHostEpoch: "12345678-1234-1234-1234-123456789abc", projectId: "project", projectPath: "/fixture/project" });
+        await evaluate("settingsShellFixture.releaseProjectName()");
+        assert.equal(await wait("!!document.querySelector('.project-rename input')"), true);
+        assert.equal(await evaluate("settingsShellFixture.projectRenames.length"), 0);
+        if (mode === "rename-cancel") {
+          assert.equal(await evaluate("[...document.querySelectorAll('.project-rename button:not(:disabled)')].filter(b=>b.textContent==='Cancel (Escape)').length"), 1);
+          await evaluate("[...document.querySelectorAll('.project-rename button:not(:disabled)')].find(b=>b.textContent==='Cancel (Escape)').click()");
+        }
+        else {
+          await evaluate("{const input=document.querySelector('.project-rename input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Context renamed');input.dispatchEvent(new Event('input',{bubbles:true}))}");
+          await frames(); await evaluate("document.querySelector('.project-rename button').click()");
+          assert.equal(await wait("settingsShellFixture.projectRenames.length===1"), true);
+          assert.deepEqual(await evaluate("settingsShellFixture.projectRenames[0].request"), { expectedHostEpoch: "12345678-1234-1234-1234-123456789abc", projectId: "project", projectPath: "/fixture/project", sourcePath: "/fixture/projects.yml", revision: "A".repeat(64), displayName: "Context renamed" });
+          if (mode === "rename-confirm") await evaluate("{const work=settingsShellFixture.projectRenames[0];settingsShellFixture.catalog.projects[0].name='Context renamed';work.resolve({...work.request,status:'ok',hostEpoch:work.request.expectedHostEpoch})}");
+          else await evaluate("settingsShellFixture.projectRenames[0].reject(new Error('lost fake response'))");
+          await frames();
+          await evaluate("document.querySelector('.project-actions-trigger').click()");
+          assert.equal(await wait("!!document.querySelector('.project-actions-menu')"), true);
+          if (mode === "rename-uncertain") assert.equal(await evaluate("document.querySelectorAll('.project-actions-menu button')[2].disabled && settingsShellFixture.projectRenames.length===1"), true);
+        }
+      } else {
+        await evaluate("document.querySelectorAll('.project-actions-menu button')[3].click()");
+        assert.equal(await wait("document.querySelector('.archive-dialog')?.open && [...document.querySelectorAll('.archive-dialog button')].some(b=>b.textContent==='Confirm archive'&&!b.disabled)"), true);
+        assert.equal(await evaluate("settingsShellFixture.archives.length"), 0);
+        if (mode === "archive-cancel") await evaluate("[...document.querySelectorAll('.archive-dialog button')].find(b=>b.textContent==='Close').click()");
+        else {
+          await evaluate("[...document.querySelectorAll('.archive-dialog button')].find(b=>b.textContent==='Confirm archive').click()");
+          assert.equal(await wait("settingsShellFixture.archives.length===1"), true);
+          assert.deepEqual(await evaluate("settingsShellFixture.archives[0].request"), { expectedHostEpoch: "12345678-1234-1234-1234-123456789abc", projectId: "project", projectPath: "/fixture/project", expectedArchived: false, archived: true, confirmed: true, sourcePath: "/fixture/catalog/project.md", revision: "A".repeat(64) });
+          await evaluate(`settingsShellFixture.releaseArchive('${mode === "archive-confirm" ? "ok" : "unknown"}')`); await frames();
+          await evaluate("[...document.querySelectorAll('.archive-dialog button')].find(b=>b.textContent==='Close').click()");
+          await frames(); await evaluate("document.querySelector('.project-actions-trigger').click()");
+          assert.equal(await wait("!!document.querySelector('.project-actions-menu')"), true);
+          assert.equal(await evaluate(`document.querySelectorAll('.project-actions-menu button')[3].${mode === "archive-confirm" ? "textContent==='Unarchive project…'" : "disabled"} && settingsShellFixture.archives.length===1`), true);
+        }
+      }
+      if (mode.endsWith("cancel")) assert.equal(await evaluate("settingsShellFixture.projectRenames.length===0 && settingsShellFixture.archives.length===0"), true);
+      await evaluate("unmountShellFixture()");
+      assert.equal(await wait("document.querySelector('#root').childElementCount===0"), true);
+    }
+    // Remaining project-row qualification follows every original workflow scenario.
+    for (const mode of ["missing", "duplicate-id", "duplicate-path", "changed-name", "changed-path", "changed-archive", "open", "keys-themes"]) {
+      t.diagnostic(`Project-row final qualification: ${mode}`);
+      await evaluate("localStorage.clear();localStorage.setItem('settingsFixtureOwned','true');localStorage.setItem('settingsFixtureSecondProject','true')");
+      await command("Page.reload");
+      assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one' && document.querySelectorAll('.project-actions-trigger').length===2"), true);
+      await evaluate("if(document.querySelector('#project-rail').hidden) document.querySelector('[aria-label=\"Show projects\"]').click()");
+      await evaluate("void(window.finalRowOrigin=document.querySelector('#project-list button[title=\"/fixture/other\"]').closest('li').querySelector('.project-actions-trigger'));finalRowOrigin.click()");
+      assert.equal(await wait("!!document.querySelector('.project-actions-menu')"), true);
+      await evaluate("void(window.finalRowAction=document.querySelector('.project-actions-menu button'))");
+      if (mode === "missing") await evaluate("publishLayoutCatalog({...settingsShellFixture.catalog,projects:settingsShellFixture.catalog.projects.filter(p=>p.id!=='other')})");
+      if (mode === "duplicate-id") await evaluate("publishLayoutCatalog({...settingsShellFixture.catalog,projects:[...settingsShellFixture.catalog.projects,{...settingsShellFixture.catalog.projects[1],path:'/duplicate'}]})");
+      if (mode === "duplicate-path") await evaluate("publishLayoutCatalog({...settingsShellFixture.catalog,projects:[...settingsShellFixture.catalog.projects,{...settingsShellFixture.catalog.projects[1],id:'duplicate'}]})");
+      if (mode.startsWith("changed")) await evaluate(`publishLayoutCatalog({...settingsShellFixture.catalog,projects:settingsShellFixture.catalog.projects.map(p=>p.id==='other'?{...p,${mode === "changed-name" ? "name:'Changed'" : mode === "changed-path" ? "path:'/changed'" : "archived:true"}}:p)})`);
+      if (!["open", "keys-themes"].includes(mode)) {
+        await frames(); await evaluate("finalRowAction.click()");
+        assert.equal(await evaluate("!document.querySelector('.project-actions-menu') && document.querySelector('.session-header h1').textContent==='one' && settingsShellFixture.projectRenames.length===0 && settingsShellFixture.archives.length===0"), true);
+        if (mode.startsWith("duplicate")) {
+          await evaluate("finalRowOrigin.click()"); await frames();
+          assert.equal(await evaluate("!document.querySelector('.project-actions-menu')"), true);
+        }
+      } else if (mode === "open") {
+        await evaluate("finalRowAction.click()");
+        assert.equal(await wait("document.querySelector('#project-list button[title=\"/fixture/other\"]')?.getAttribute('aria-pressed')==='true' && !!document.querySelector('.session-title')?.textContent.includes('other-session')"), true);
+        assert.equal(await evaluate("settingsShellFixture.projectRenames.length===0 && settingsShellFixture.archives.length===0 && settingsShellFixture.creates.length===0"), true);
+      } else {
+        await evaluate("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))"); await frames();
+        const size = await evaluate("({width:innerWidth,height:innerHeight})") as { width: number; height: number };
+        for (const width of [390, 1120]) for (const theme of ["light", "dark"]) {
+          await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
+          await frames();
+          await evaluate(`document.documentElement.dataset.theme='${theme}';if(document.querySelector('#project-rail').hidden) document.querySelector('[aria-label="Show projects"]').click()`);
+          await evaluate("finalRowOrigin.focus()");
+          for (const extra of ["repeat:true", "isComposing:true", "keyCode:229"]) {
+            await evaluate(`finalRowOrigin.dispatchEvent(new KeyboardEvent('keydown',{key:'ContextMenu',bubbles:true,cancelable:true,${extra}}))`);
+            assert.equal(await evaluate("!document.querySelector('.project-actions-menu')"), true);
+          }
+          await command("Input.dispatchKeyEvent", { type: "keyDown", key: "ContextMenu", code: "ContextMenu", windowsVirtualKeyCode: 93 });
+          await command("Input.dispatchKeyEvent", { type: "keyUp", key: "ContextMenu", code: "ContextMenu", windowsVirtualKeyCode: 93 });
+          assert.equal(await wait("!!document.querySelector('.project-actions-menu')"), true);
+          assert.equal(await evaluate("(()=>{const d=document.querySelector('.project-actions-menu'),r=d.getBoundingClientRect();return r.width>0&&r.left>=0&&r.right<=innerWidth+1&&d.scrollWidth<=d.clientWidth+1})()"), true);
+          await command("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 });
+          await command("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 });
+          assert.equal(await evaluate("document.activeElement===document.querySelectorAll('.project-actions-menu button')[1]"), true);
+          await evaluate("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',repeat:true,bubbles:true,cancelable:true}));document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',isComposing:true,bubbles:true,cancelable:true}))");
+          assert.equal(await evaluate("!!document.querySelector('.project-actions-menu') && !document.querySelector('.project-details-dialog')"), true);
+          await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+          await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+          assert.equal(await wait("document.querySelector('.project-details-dialog')?.open"), true);
+          await evaluate("window.finalCopies=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{finalCopies.push(text)}}});document.querySelectorAll('.project-details-dialog footer button')[1].click()");
+          await frames(); assert.deepEqual(await evaluate("finalCopies"), ["/fixture/other"]);
+          assert.equal(await evaluate("document.querySelector('.session-header h1').textContent==='one'"), true);
+          await evaluate("document.querySelector('.project-details-dialog header button').click()"); await frames();
+          assert.equal(await evaluate("document.activeElement===finalRowOrigin"), true);
+        }
+        await command("Emulation.setDeviceMetricsOverride", { ...size, deviceScaleFactor: 1, mobile: false });
+      }
+      await evaluate("unmountShellFixture()");
+      assert.equal(await wait("document.querySelector('#root').childElementCount===0"), true);
+    }
   } finally {
     socket?.close(); browser?.kill();
     await writeFile(join(root, "session-content-observations.json"), JSON.stringify(layoutObservations, null, 2));

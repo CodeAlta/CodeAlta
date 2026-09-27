@@ -4,6 +4,9 @@ function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
   return Object.freeze(Object.fromEntries(Object.entries(rows).map(([key, row]) => [key, Object.freeze(row)]))) as Readonly<T>;
 }
 export const messages = dictionary({
+  "Project actions": ["Acciones del proyecto", "Actions du projet", "Projektaktionen", "プロジェクト操作", "项目操作"],
+  "Open": ["Abrir", "Ouvrir", "Öffnen", "開く", "打开"],
+  "Rename project…": ["Renombrar proyecto…", "Renommer le projet…", "Projekt umbenennen…", "プロジェクト名を変更…", "重命名项目…"],
   "Inspect supplied tool record": ["Inspeccionar registro de herramienta", "Examiner l’enregistrement d’outil fourni", "Gelieferten Werkzeugeintrag prüfen", "提供されたツール記録を確認", "检查提供的工具记录"],
   "One persisted record only. Reported phase is not proof of success or completion; outputs may be incomplete.": ["Solo un registro persistido. La fase informada no demuestra éxito ni finalización; las salidas pueden estar incompletas.", "Un seul enregistrement conservé. La phase rapportée ne prouve ni réussite ni achèvement ; les sorties peuvent être incomplètes.", "Nur ein gespeicherter Eintrag. Die gemeldete Phase beweist weder Erfolg noch Abschluss; Ausgaben können unvollständig sein.", "保存済みの単一記録です。報告された段階は成功や完了の証明ではなく、出力は不完全な場合があります。", "仅一条持久化记录。报告的阶段不证明成功或完成；输出可能不完整。"],
   "Display excerpt; Copy retains the supplied JSON.": ["Extracto visible; Copiar conserva el JSON suministrado.", "Extrait affiché ; Copier conserve le JSON fourni.", "Anzeigeauszug; Kopieren behält das gelieferte JSON bei.", "表示は抜粋です。コピーには提供されたJSONが保持されます。", "显示为节选；复制保留提供的 JSON。"],

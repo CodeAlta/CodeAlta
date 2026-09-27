@@ -33,7 +33,7 @@ async function copyProjectValue(text: string): Promise<"copied" | "unavailable" 
   } catch { return "failed"; }
 }
 
-function ProjectDetailsDialog({ project, snapshot, isCurrent, onClose }: {
+export function ProjectDetailsDialog({ project, snapshot, isCurrent, onClose }: {
   project: WorkspaceProject; snapshot: WorkspaceSnapshot; isCurrent: () => boolean; onClose: () => void;
 }) {
   const { t } = useShellLanguage();
@@ -48,7 +48,9 @@ function ProjectDetailsDialog({ project, snapshot, isCurrent, onClose }: {
     const element = dialog.current;
     alive.current = true;
     element?.showModal();
-    return () => { alive.current = false; if (element?.open) element.close(); };
+    // DOM removal closes the dialog on real unmount. Closing here would manufacture
+    // a close/reopen transition during StrictMode effect replay and retire its owner.
+    return () => { alive.current = false; };
   }, []);
   function close() { if (!closing.current) { closing.current = true; onClose(); } }
   async function copy(field: "ID" | "path") {

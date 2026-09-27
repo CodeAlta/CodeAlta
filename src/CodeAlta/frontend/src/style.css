@@ -1,3 +1,7 @@
+.project-action-row { position: relative; }
+.project-list .project-actions-trigger { width: 30px; min-height: 30px; margin-left: auto; padding: 4px; }
+.project-actions-menu { display: grid; position: relative; z-index: 5; width: 100%; padding: 4px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--panel); }
+.project-list .project-actions-menu > button { width: 100%; min-height: 32px; text-align: left; white-space: normal; overflow-wrap: anywhere; }
 .app-dialog.model-chooser { display: block; width: min(42rem, calc(100vw - 2rem)); max-height: 85dvh; overflow: auto; text-align: start; }
 .model-chooser input, .model-chooser select { max-width: 100%; }
 .model-chooser-list { display: grid; gap: .4rem; max-height: 40dvh; overflow: auto; margin-block: .75rem; }
