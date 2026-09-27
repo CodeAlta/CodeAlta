@@ -4,6 +4,11 @@ function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
   return Object.freeze(Object.fromEntries(Object.entries(rows).map(([key, row]) => [key, Object.freeze(row)]))) as Readonly<T>;
 }
 export const messages = dictionary({
+  "Inspect supplied tool record": ["Inspeccionar registro de herramienta", "Examiner l’enregistrement d’outil fourni", "Gelieferten Werkzeugeintrag prüfen", "提供されたツール記録を確認", "检查提供的工具记录"],
+  "One persisted record only. Reported phase is not proof of success or completion; outputs may be incomplete.": ["Solo un registro persistido. La fase informada no demuestra éxito ni finalización; las salidas pueden estar incompletas.", "Un seul enregistrement conservé. La phase rapportée ne prouve ni réussite ni achèvement ; les sorties peuvent être incomplètes.", "Nur ein gespeicherter Eintrag. Die gemeldete Phase beweist weder Erfolg noch Abschluss; Ausgaben können unvollständig sein.", "保存済みの単一記録です。報告された段階は成功や完了の証明ではなく、出力は不完全な場合があります。", "仅一条持久化记录。报告的阶段不证明成功或完成；输出可能不完整。"],
+  "Display excerpt; Copy retains the supplied JSON.": ["Extracto visible; Copiar conserva el JSON suministrado.", "Extrait affiché ; Copier conserve le JSON fourni.", "Anzeigeauszug; Kopieren behält das gelieferte JSON bei.", "表示は抜粋です。コピーには提供されたJSONが保持されます。", "显示为节选；复制保留提供的 JSON。"],
+  "Supplied record provenance": ["Procedencia del registro suministrado", "Provenance de l’enregistrement fourni", "Herkunft des gelieferten Eintrags", "提供された記録の出所", "提供记录的来源"],
+  "Copy supplied tool JSON": ["Copiar JSON de herramienta suministrado", "Copier le JSON d’outil fourni", "Geliefertes Werkzeug-JSON kopieren", "提供されたツールJSONをコピー", "复制提供的工具 JSON"],
   "Next Send agent prompt selection": ["Selección de agente para el próximo envío", "Sélection de l’agent du prochain envoi", "Agentenauswahl für die nächste Sendung", "次の送信用エージェントプロンプト選択", "选择下次发送的代理提示词"],
   "Search agent prompts": ["Buscar prompts de agente", "Rechercher des prompts d’agent", "Agentenprompts suchen", "エージェントプロンプトを検索", "搜索代理提示词"],
   "No agent prompts match this search.": ["Ningún prompt de agente coincide.", "Aucun prompt d’agent ne correspond.", "Keine passenden Agentenprompts.", "一致するエージェントプロンプトはありません。", "没有匹配的代理提示词。"],

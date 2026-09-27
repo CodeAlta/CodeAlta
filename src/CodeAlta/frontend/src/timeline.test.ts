@@ -5,6 +5,25 @@ import { buildTimelineItems, formatDetails, latestNotes, writeMarkdown } from ".
 
 type Entry = HistoryResponse["entries"][number];
 
+test("persisted tool inspection projects only supplied structured fields without changing raw details", () => {
+  const details = '{"arguments":{"command":"<literal>\\n"},"result":{"content":"  output\\r\\n","detailedContent":"extra"},"error":{"message":"literal failure"}}';
+  const item = buildTimelineItems([entry({ eventType: "activity", kind: "ToolCall", name: "literal_tool", phase: "Started", details })])[0]!;
+  assert.equal(item.toolRecord?.fields.find(field => field.path === "result.content")?.text, "  output\r\n");
+  assert.equal(item.toolRecord?.raw, details);
+  assert.equal(item.details, formatDetails(details));
+});
+
+test("tool inspection refuses ambiguous, malformed, oversized and truncated JSON", () => {
+  for (const details of ['{"arguments":1,"arguments":2}', '{"arguments":{"a":1,"\\u0061":2}}', '{', '[]', '{}',
+    '{"result":{"content":42}}', ' '.repeat(8193), '{"arguments":' + '['.repeat(33) + '0' + ']'.repeat(33) + '}']) {
+    const item = buildTimelineItems([entry({ eventType: "activity", kind: "ToolCall", details })])[0]!;
+    assert.equal(item.toolRecord, undefined);
+    assert.equal(item.details, formatDetails(details));
+  }
+  for (const patch of [{ detailsTruncated: true }, { eventType: "contentDelta" }, { kind: "Unknown" }])
+    assert.equal(buildTimelineItems([entry({ eventType: "activity", kind: "ToolCall", details: '{"arguments":{}}', ...patch })])[0]?.toolRecord, undefined);
+});
+
 test("file changes inspect supplied paths and count only validated per-file hunks without changing raw Copy", () => {
   const details = JSON.stringify({ changes: [
     { path: "<script>literal</script>.ts", kind: { type: "update" }, diff: "@@ -1 +1,2 @@\n-old\n+new\n+line\n" },

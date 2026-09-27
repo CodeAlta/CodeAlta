@@ -90,6 +90,40 @@ test("production file records preserve literal data, raw Copy, bounded fallbacks
       assert.equal(await evaluate("document.querySelectorAll('[data-file-record]').length===0 && !!document.querySelector('.file-change-inspection [role=status]')"), true);
     }
     assert.equal(await evaluate("fileNetwork"), 0);
+    // Tool inspection uses the same production record/lifetime fixture, after all file checks.
+    await evaluate("window.toolRaw=JSON.stringify({arguments:{command:'<script>literal</script>'},result:{content:'  literal output\\r\\n',detailedContent:'x'.repeat(5000)},error:{message:'reported error'}});fileFixture.replace({kind:'ToolCall',name:'Settings',details:toolRaw,detailsTruncated:false,bodyOmitted:true})");
+    assert.equal(await wait("!!document.querySelector('.tool-record-trigger')"), true);
+    await evaluate("document.querySelector('.tool-record-trigger').focus()");
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", text: "\r", windowsVirtualKeyCode: 13 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    assert.equal(await wait("document.querySelector('.tool-record-dialog')?.open"), true);
+    assert.equal(await evaluate("document.querySelector('[data-tool-field=\"result.content\"]').textContent==='  literal output\\r\\n' && document.querySelector('[data-tool-field=\"result.detailedContent\"]').textContent.length===4096 && !document.querySelector('.tool-record-dialog script')"), true);
+    for (const theme of ["light", "dark"]) for (const locale of ["en", "es", "fr", "de", "ja", "zh-CN"] as Locale[]) {
+      await evaluate(`document.documentElement.dataset.theme='${theme}';fileFixture.language('${locale}')`); await frames();
+      assert.equal(await evaluate("document.querySelector('.tool-record-dialog h2').textContent"), translate(locale, "Inspect supplied tool record"));
+      assert.equal(await evaluate("document.querySelector('[data-tool-field=\"result.content\"]').textContent==='  literal output\\r\\n' && document.documentElement.scrollWidth<=390"), true);
+    }
+    await evaluate("fileFixture.language('en');document.querySelector('.tool-record-copy').click()"); await frames();
+    assert.equal(await evaluate("fileFixture.copies.at(-1)===toolRaw"), true);
+    await evaluate("{const d=document.querySelector('.tool-record-dialog');d.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));d.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true,isComposing:true}));d.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}))}");
+    assert.equal(await evaluate("document.querySelector('.tool-record-dialog').open"), true);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    assert.equal(await wait("!document.querySelector('.tool-record-dialog') && document.activeElement.classList.contains('tool-record-trigger')"), true);
+    for (const mode of ["replace", "scope", "native", "own"]) {
+      await evaluate("document.querySelector('.tool-record-trigger').click()");
+      assert.equal(await wait("document.querySelector('.tool-record-dialog')?.open"), true);
+      await evaluate("void(window.oldToolCopy=document.querySelector('.tool-record-copy'));window.toolCopyCount=fileFixture.copies.length");
+      if (mode === "replace") await evaluate("fileFixture.replace({details:'{\"arguments\":{}}'});fileFixture.replace({details:toolRaw})");
+      if (mode === "scope") await evaluate("fileFixture.scope()");
+      if (mode === "native") await evaluate("{const d=document.createElement('dialog');document.body.append(d);d.showModal();d.close();d.remove()}");
+      if (mode === "own") await evaluate("{const d=document.querySelector('.tool-record-dialog');d.close();d.showModal();oldToolCopy.click()}");
+      await evaluate("oldToolCopy.click()"); await frames();
+      assert.equal(await evaluate("fileFixture.copies.length===toolCopyCount"), true, mode);
+      await evaluate("document.querySelector('.tool-record-dialog header button')?.click()"); await frames();
+    }
+    await evaluate("fileFixture.replace({details:'{\"arguments\":1,\"arguments\":2}'})");
+    assert.equal(await evaluate("!document.querySelector('.tool-record-trigger') && !!document.querySelector('.event-details pre') && !!document.querySelector('.tool-detail-wrap') && !!document.querySelector('.copy-markdown') && fileNetwork===0"), true);
     await evaluate("fileFixture.unmount()"); assert.equal(await evaluate("document.querySelector('#app').childElementCount"), 0);
   } finally { socket?.close(); browser?.kill(); }
 });

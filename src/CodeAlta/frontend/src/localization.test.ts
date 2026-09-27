@@ -48,6 +48,7 @@ test("inventory labels translate in six languages while status codes and English
     for (const key of ["Provider management", "Model catalog", "Agent prompts", "MCP Servers", "Configured providers",
       "Search models", "Search MCP servers", "Adapter type", "Cached availability", "Effective agent prompt body",
       "Search agent prompts", "Next Send agent prompt selection", "No agent prompts match this search.",
+      "Inspect supplied tool record", "Supplied record provenance", "Copy supplied tool JSON", "Display excerpt; Copy retains the supplied JSON.",
       "Observed prompt (choices snapshot, not live execution)", "Local next-Send prompt", "Retained original Send prompt",
       "Use model for next Send", "Use prompt for next Send", "Loading MCP configuration.",
       "Content truncated to 2,048 characters. This is not the full prompt."] as const) {

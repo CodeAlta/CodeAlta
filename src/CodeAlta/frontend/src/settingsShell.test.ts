@@ -2689,6 +2689,35 @@ test("production shell settings overlay keeps the session workspace mounted and 
       await evaluate("document.querySelector('.prompt-chooser header button').click();unmountShellFixture()");
       assert.equal(await wait("document.querySelector('#root').childElementCount===0"), true);
     }
+    // Supplied persisted tool inspection follows every accepted chooser scenario.
+    for (const mode of ["copy", "session-aba", "host-aba", "settings", "native-aba", "own-aba"]) {
+      t.diagnostic(`Persisted tool inspection App scenario: ${mode}`);
+      await evaluate("localStorage.clear();localStorage.setItem('settingsFixtureOwned','true');localStorage.setItem('toolFixtureEnabled','true')");
+      await command("Page.reload");
+      assert.equal(await wait("document.querySelector('.session-header h1')?.textContent==='one' && !!document.querySelector('.tool-record-trigger')"), true);
+      await evaluate("window.toolRpc=settingsShellFixture.rpcCalls.length;window.toolCopies=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{toolCopies.push(value)}}});document.querySelector('.tool-record-trigger').click()");
+      assert.equal(await wait("document.querySelector('.tool-record-dialog')?.open"), true);
+      await evaluate("void(window.toolCopy=document.querySelector('.tool-record-copy'))");
+      if (mode === "copy") {
+        await workflowLanguages(evaluate, workflowCalls, ".tool-record-dialog", ".tool-record-dialog h2", "Inspect supplied tool record", "pre,code");
+        await workflowNarrow(evaluate, command, ".tool-record-dialog");
+        await evaluate("toolCopy.click()"); await frames();
+        assert.equal(await evaluate("toolCopies.length===1 && JSON.parse(toolCopies[0]).result.content==='literal output'"), true);
+      }
+      if (mode === "session-aba") await evaluate("cycleInfoSelection()");
+      if (mode === "host-aba") await evaluate("cycleInfoHost()");
+      if (mode === "settings") {
+        await evaluate("document.querySelector('.rail-footer .icon-label-button').click()");
+        assert.equal(await wait("!!document.querySelector('[aria-label=\"Close settings\"]')"), true);
+        await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
+      }
+      if (mode === "native-aba") await evaluate("{const d=document.createElement('dialog');document.body.append(d);d.showModal();d.close();d.remove()}");
+      if (mode === "own-aba") await evaluate("{const d=document.querySelector('.tool-record-dialog');d.close();d.showModal();toolCopy.click()}");
+      if (mode !== "copy") { await evaluate("toolCopy.click()"); await frames(); assert.equal(await evaluate("toolCopies.length"), 0, mode); }
+      assert.equal(await evaluate("settingsShellFixture.rpcCalls.length===toolRpc && settingsShellFixture.sends.length===0"), true, mode);
+      await evaluate("unmountShellFixture();toolCopy.click()"); await frames();
+      assert.equal(await evaluate(`document.querySelector('#root').childElementCount===0 && toolCopies.length===${mode === "copy" ? 1 : 0}`), true);
+    }
   } finally {
     socket?.close(); browser?.kill();
     await writeFile(join(root, "session-content-observations.json"), JSON.stringify(layoutObservations, null, 2));

@@ -1,6 +1,7 @@
 import type { HistoryResponse } from "#neoastra";
 import type { IconName } from "./AppIcon";
 import { projectFileChanges, type FileChanges } from "./fileChanges";
+import { projectToolRecord, type ToolRecord } from "./toolRecords";
 
 export type HistoryEntry = HistoryResponse["entries"][number];
 
@@ -23,6 +24,7 @@ export type TimelineItem = Readonly<{
   bodyOmitted: boolean;
   copyMarkdown: string | null;
   fileChanges?: FileChanges;
+  toolRecord?: ToolRecord;
 }>;
 
 type JsonObject = Record<string, unknown>;
@@ -200,6 +202,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     bodyOmitted: entry.bodyOmitted,
     copyMarkdown,
     fileChanges: projectFileChanges(entry),
+    toolRecord: projectToolRecord(entry),
   };
 }
 

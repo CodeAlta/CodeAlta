@@ -75,6 +75,10 @@ function fileHistory(request: HistoryRequest): HistoryResponse {
       textTruncated: false, detailsTruncated: false, bodyOmitted: false },
   ] };
 }
+function toolHistory(request: HistoryRequest): HistoryResponse {
+  return { ...fileHistory(request), entries: [{ ...fileHistory(request).entries[0], kind: "ToolCall", name: "literal_tool",
+    details: '{"arguments":{"command":"literal input"},"result":{"content":"literal output"},"error":{"message":"supplied error"}}' }] };
+}
 const longBodyText = "**Supplied prose**\n\n" + "literal paragraph\n\n".repeat(110) + '<img src=x onerror="window.bodyInjected=true"> END';
 function bodyHistory(request: HistoryRequest): HistoryResponse {
   return { status: "ok", next: null, tailOmitted: false, entries: [
@@ -192,6 +196,7 @@ export const workspace = { snapshot: async () => {
 },
   historyTail: (request: HistoryRequest) => {
     if (localStorage.getItem("bodyFixtureEnabled") === "true") { historyCalls.push(request); return Promise.resolve(bodyHistory(request)); }
+    if (localStorage.getItem("toolFixtureEnabled") === "true") { historyCalls.push(request); return Promise.resolve(toolHistory(request)); }
     if (localStorage.getItem("fileFixtureEnabled") === "true") { historyCalls.push(request); return Promise.resolve(fileHistory(request)); }
     if (!localStorage.getItem("navigationFixture")) return unavailable();
     historyCalls.push(request);

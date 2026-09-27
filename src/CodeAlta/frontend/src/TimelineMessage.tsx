@@ -5,6 +5,7 @@ import { writeMarkdown, type TimelineItem } from "./timeline";
 import { useShellLanguage } from "./shellLanguage";
 import { timelineTime } from "./sessionTime";
 import { FileChangeInspection } from "./FileChangeInspection";
+import { ToolRecordInspection } from "./ToolRecordInspection";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
@@ -108,6 +109,7 @@ export function TimelineMessage({ item, canInspect }: { item: TimelineItem; canI
           : <p className="long-message-preview">{t("Preview (plain text):")} {plainTextPreview(body)}…</p>}</div>
       </> : body && <MarkdownContent source={body} timelineCodeBlocks />}
       {item.fileChanges && <FileChangeInspection key={item.fileChanges.source} changes={item.fileChanges} canInspect={canInspect} />}
+      {item.toolRecord && <ToolRecordInspection key={item.toolRecord.source} record={item.toolRecord} canInspect={canInspect} />}
       {hasDetails && <details className="event-details"><summary><AppIcon name="chevronDown" size={14} />{detailLabel ? t(detailLabel) : item.detailsLabel}</summary>
         <div className="event-detail-body">
           {item.detailMarkdown && item.detailMarkdown !== item.markdown && <>
