@@ -17,6 +17,46 @@ namespace CodeAlta.Orchestration.Tests;
 public sealed class OwnedSessionCommandServiceTests
 {
     [TestMethod]
+    public Task ProjectReferencesReachProviderOnceAndReplayCannotChangeScope() => Fixture.RunAsync(async f =>
+    {
+        var project = await f.Observe(f.Host.ProjectCatalog.GetByPathAsync(f.ProjectRoot));
+        Assert.IsNotNull(project);
+        var path = Path.Combine(f.ProjectRoot, "reference.txt");
+        File.WriteAllText(path, "disposable\nreference");
+        var scope = new OwnedProjectReferenceScope(project.Id, project.ProjectPath);
+        var search = await f.Observe(f.Host.Commands.SearchReferencesAsync(scope, f.SessionId, "reference", CancellationToken.None));
+        Assert.AreEqual("reference.txt", search.Items.Single().Path);
+        Assert.AreEqual("resolved", (await f.Observe(f.Host.Commands.ObserveReferencesAsync(scope, f.SessionId, "@reference.txt:1-2", CancellationToken.None))).Items.Single().Status);
+        Assert.AreEqual("resolved", (await f.Observe(f.Host.Commands.ObserveReferencesAsync(scope, null, "@reference.txt", CancellationToken.None))).Items.Single().Status);
+        Assert.AreEqual("scope_missing", (await f.Observe(f.Host.Commands.ObserveReferencesAsync(scope with { ProjectPath = Path.GetTempPath() }, f.SessionId, "@reference.txt", CancellationToken.None))).Status);
+        Assert.IsFalse(f.Provider.PreparationStarted.Task.IsCompleted, "Metadata search must not prepare a provider session.");
+        Assert.AreEqual("scope_missing", (await f.Observe(f.Host.Commands.SearchReferencesAsync(
+            scope with { ProjectPath = Path.GetTempPath() }, f.SessionId, "reference", CancellationToken.None))).Status);
+        var request = new OwnedTextSendRequest("reference-send", f.SessionId, "Inspect @reference.txt:1-2 @@literal @missing") { References = scope };
+        var admission = f.AdmitSend(request);
+        Assert.IsNotNull(admission.Receipt);
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, admission.Receipt, "reference send");
+        Assert.IsInstanceOfType<AgentInputItem.File>(f.Provider.FirstSendOptions!.Input.Items[1]);
+        var file = (AgentInputItem.File)f.Provider.FirstSendOptions.Input.Items[1];
+        Assert.AreEqual(path, file.Path);
+        Assert.AreEqual(new AgentLineRange(1, 2), file.LineRange);
+        File.Delete(path);
+        Assert.AreSame(admission.Receipt, f.AdmitSend(request).Receipt);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitSend(request with { References = null }).Kind);
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(admission.Receipt.Completion)).Outcome);
+        Assert.AreSame(admission.Receipt, f.AdmitSend(request).Receipt);
+        project.Archived = true;
+        await f.Observe(f.Host.ProjectCatalog.SaveAsync(project));
+        Assert.AreEqual("scope_missing", (await f.Observe(f.Host.Commands.ObserveReferencesAsync(scope, f.SessionId, "@reference.txt", CancellationToken.None))).Status);
+        Assert.AreEqual("scope_missing", (await f.Observe(f.Host.Commands.SearchReferencesAsync(scope, f.SessionId, "reference", CancellationToken.None))).Status);
+        var archived = f.AdmitSend(request with { ClientRequestId = "archived-reference" });
+        Assert.IsNotNull(archived.Receipt);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Failed, (await f.Observe(archived.Receipt.Completion)).Outcome);
+        Assert.IsNull(f.Provider.SecondSendOptions);
+    });
+
+    [TestMethod]
     public Task DeleteRefusesActiveOwnedRunWithoutLosingJournal() => Fixture.RunAsync(async f =>
     {
         var receipt = f.Send();
@@ -74,6 +114,111 @@ public sealed class OwnedSessionCommandServiceTests
         runtime = await f.Observe(f.Host.RuntimeService.GetCurrentStateAsync(f.SessionId));
         Assert.AreEqual("plan", runtime.Entry!.AgentPromptId, "Explicit next-send selection takes precedence over an older pending prompt.");
         Assert.IsNull(runtime.Entry.PendingAgentPromptId);
+    });
+
+    [TestMethod]
+    [DataRow("send")]
+    [DataRow("abort")]
+    [DataRow("shutdown")]
+    public Task ImageSend_FreezesBytesAndTitleAndReplaysWithoutSavingAgain(string completion) => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        await f.Observe(f.Host.ModelProviderInitializationService.RefreshProviderAsync(f.Provider.Descriptor.ProviderId));
+        var bytes = OwnedPromptImageTests.Png(1, 1);
+        var project = await f.Observe(f.Host.ProjectCatalog.GetByPathAsync(f.ProjectRoot));
+        Assert.IsNotNull(project);
+        var images = new[] { new OwnedPromptImage("Exact title", "image/png", Convert.ToBase64String(bytes)),
+            new OwnedPromptImage("Second title", "image/png", Convert.ToBase64String(OwnedPromptImageTests.Png(2, 1))) };
+        var request = new OwnedTextSendRequest("image-original", f.SessionId, "describe")
+        {
+            Selection = new(f.Provider.Descriptor.ProviderId.Value, "default", "image-model", null), Images = images,
+            References = new(project.Id, project.ProjectPath),
+        };
+        var admission = f.AdmitSend(request);
+        Assert.IsNotNull(admission.Receipt);
+        images[0] = images[0] with { Title = "changed after admission" };
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, admission.Receipt, "image send");
+        var typedImages = f.Provider.Input!.Items.OfType<AgentInputItem.LocalImage>().ToArray();
+        Assert.HasCount(2, typedImages);
+        Assert.AreEqual("Second title", typedImages[1].DisplayName);
+        CollectionAssert.AreEqual(OwnedPromptImageTests.Png(2, 1), await File.ReadAllBytesAsync(typedImages[1].Path));
+        var input = typedImages[0];
+        Assert.AreEqual("Exact title", input.DisplayName);
+        Assert.AreEqual("image/png", input.MediaType);
+        CollectionAssert.AreEqual(bytes, await File.ReadAllBytesAsync(input.Path));
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitSend(request).Kind);
+        images[0] = images[0] with { Title = "Exact title" };
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitSend(request with { Images = images.Reverse().ToArray() }).Kind);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitSend(request with { Images = [images[0] with { Base64 = images[1].Base64 }, images[1]] }).Kind);
+        Assert.AreSame(admission.Receipt, f.AdmitSend(request).Receipt);
+        Assert.HasCount(2, Directory.GetFiles(Path.GetDirectoryName(input.Path)!));
+        var disposal = completion == "shutdown" ? f.BeginDisposal() : null;
+        var abort = completion == "abort" ? f.Accept(f.AdmitAbort(new("abort-image-original", admission.Receipt.OperationId))) : null;
+        if (completion != "send")
+        {
+            await f.ObserveReadiness(f.Provider.SendCancelled.Task, admission.Receipt, "image cancellation");
+            Assert.IsFalse(admission.Receipt.Completion.IsCompleted);
+            Assert.AreEqual(0, f.Provider.EarlyDisposals);
+        }
+        f.Provider.ReleaseAll();
+        if (disposal is not null) await f.Observe(disposal);
+        if (abort is not null) await f.Observe(abort.Completion);
+        Assert.AreEqual(completion == "send" ? OwnedSessionCommandOutcome.Completed : OwnedSessionCommandOutcome.Cancelled,
+            (await f.Observe(admission.Receipt.Completion)).Outcome);
+        CollectionAssert.AreEqual(bytes, await File.ReadAllBytesAsync(input.Path), "Successfully saved copies stay session-owned after cancellation/shutdown.");
+    });
+
+    [TestMethod]
+    [DataRow("fixture-model", true)]
+    [DataRow("text-model", true)]
+    [DataRow("image-model", false)]
+    public Task ImageSend_RefusesUnknownUnsupportedAndUnobservedModelsWithoutProbe(string model, bool observeModels) => Fixture.RunAsync(async f =>
+    {
+        if (observeModels)
+        {
+            f.Provider.ExposeSelectionModels = true;
+            await f.Observe(f.Host.ModelProviderInitializationService.RefreshProviderAsync(f.Provider.Descriptor.ProviderId));
+        }
+        var project = await f.Observe(f.Host.ProjectCatalog.GetByPathAsync(f.ProjectRoot));
+        Assert.IsNotNull(project);
+        var request = new OwnedTextSendRequest("image-refused", f.SessionId, "describe")
+        {
+            Selection = new(f.Provider.Descriptor.ProviderId.Value, "default", model, null),
+            References = new(project.Id, project.ProjectPath),
+            Images = [new("Image 1", "image/png", Convert.ToBase64String(OwnedPromptImageTests.Png(1, 1)))],
+        };
+        using var canceled = new CancellationTokenSource(); canceled.Cancel();
+        Assert.ThrowsExactly<OperationCanceledException>(() => f.Host.Commands.AdmitSend(request, canceled.Token));
+        var admission = f.AdmitSend(request);
+        Assert.IsNotNull(admission.Receipt);
+        Assert.AreEqual("preparation_failed", (await f.Observe(admission.Receipt.Completion)).Code);
+        Assert.IsNull(f.Provider.Input);
+        Assert.AreEqual(observeModels, f.Provider.ProbeStarted.Task.IsCompleted);
+        Assert.AreSame(admission.Receipt, f.AdmitSend(request).Receipt);
+        Assert.HasCount(0, Directory.GetFiles(Directory.GetParent(f.ProjectRoot)!.FullName, "*.png", SearchOption.AllDirectories));
+    });
+
+    [TestMethod]
+    public Task ImageReceiptCapacity_DoesNotEvictReplayOrConsumeTextCapacity() => Fixture.RunAsync(async f =>
+    {
+        var request = new OwnedTextSendRequest("bounded-image-0", f.SessionId, "describe")
+        {
+            Selection = new(f.Provider.Descriptor.ProviderId.Value, "default", "unobserved", null),
+            Images = [new("Image 1", "image/png", Convert.ToBase64String(OwnedPromptImageTests.Png(1, 1)))],
+        };
+        OwnedSessionCommandReceipt? first = null;
+        for (var index = 0; index < 8; index++)
+        {
+            var admission = f.AdmitSend(request with { ClientRequestId = "bounded-image-" + index });
+            Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, admission.Kind);
+            first ??= admission.Receipt;
+            Assert.AreEqual("preparation_failed", (await f.Observe(admission.Receipt!.Completion)).Code);
+        }
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Capacity, f.AdmitSend(request with { ClientRequestId = "overflow" }).Kind);
+        Assert.AreSame(first, f.AdmitSend(request).Receipt);
+        var text = f.Accept(f.AdmitSend(new("text-after-image-capacity", f.SessionId, "text only")));
+        f.Provider.ReleaseAll();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(text.Completion)).Outcome);
     });
 
     [TestMethod]
@@ -1599,7 +1744,9 @@ public sealed class OwnedSessionCommandServiceTests
             ProbeStarted.TrySetResult();
             if (ProbeDependency is { } dependency) await dependency.ConfigureAwait(false);
             return new ModelProviderProbeResult { ProviderId = Descriptor.ProviderId,
-                Models = [new("fixture-model"), new("selected-model", SupportedReasoningEfforts: [AgentReasoningEffort.High])] };
+                Models = [new("fixture-model"), new("selected-model", SupportedReasoningEfforts: [AgentReasoningEffort.High]),
+                    new("image-model", Capabilities: new Dictionary<string, object?> { ["supportsImageInput"] = true }),
+                    new("text-model", Capabilities: new Dictionary<string, object?> { ["supportsImageInput"] = false })] };
         }
         public IModelProviderTurnExecutor CreateTurnExecutor() => throw new InvalidOperationException("Unexpected turn-executor route.");
         internal IModelProviderRuntime CreateRuntime() => new Runtime(this);

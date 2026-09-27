@@ -2,15 +2,23 @@ using CodeAlta.Agent;
 
 namespace CodeAlta.Orchestration.Runtime;
 
-/// <summary>Immutable text-only admission input; no caller-owned execution objects are accepted.</summary>
+/// <summary>Text and optional bounded image admission input; no caller-owned execution objects are accepted.</summary>
 /// <param name="ClientRequestId">Ordinal owner-lifetime retry key.</param>
 /// <param name="SessionId">Case-insensitive durable session identity, without leading or trailing whitespace.</param>
 /// <param name="Text">Exact text; whitespace is not normalized.</param>
 public sealed record OwnedTextSendRequest(string ClientRequestId, string SessionId, string Text)
 {
+    /// <summary>Gets bounded encoded image copies; admission snapshots the list and preserves exact payloads for replay.</summary>
+    public IReadOnlyList<OwnedPromptImage>? Images { get; init; }
+    /// <summary>Gets the exact catalog scope whose references should be resolved once by the original worker.</summary>
+    public OwnedProjectReferenceScope? References { get; init; }
     /// <summary>Gets the optional configuration captured for this send, never for an already-running turn.</summary>
     public OwnedSessionSelection? Selection { get; init; }
 }
+
+/// <summary>Expected catalog identity, not permission to use a renderer-supplied root.</summary>
+/// <param name="ProjectId">Exact project ID.</param><param name="ProjectPath">Expected catalog path, compared before using the host catalog root.</param>
+public sealed record OwnedProjectReferenceScope(string ProjectId, string ProjectPath);
 
 /// <summary>Immutable next-send configuration. Null model/effort requests the provider default.</summary>
 /// <param name="ProviderKey">Expected configured provider; this does not switch providers.</param>

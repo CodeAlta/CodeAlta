@@ -28,4 +28,14 @@ public sealed record SessionRuntimeCurrentState(Guid RuntimeInstanceId, string S
 /// <param name="PendingAgentPromptId">Separately pending prompt selection, not yet the captured coordinator setting.</param>
 public sealed record SessionRuntimeCurrentEntry(long AttachmentGeneration, bool IsTerminated, bool IsRetiring,
     string? ActiveRunId, bool QueueDrainInProgress, string ProviderId, string ProviderKey, string? ModelId,
-    AgentReasoningEffort? ReasoningEffort, string? AgentPromptId, string? PendingAgentPromptId);
+    AgentReasoningEffort? ReasoningEffort, string? AgentPromptId, string? PendingAgentPromptId)
+{
+    /// <summary>Last valid timestamp admitted from this attachment's session/provider-correlated agent events, not historical latest activity.</summary>
+    public SessionRuntimeActivity? Activity { get; init; }
+}
+
+/// <summary>Actor-owned attachment-local activity. Arrival order, not maximum timestamp; never a journal total.</summary>
+/// <param name="Timestamp">Timestamp of the last valid matching admitted agent event, otherwise unknown.</param>
+/// <param name="AdmittedEvents">Matching valid callback count, saturating at Int64 maximum.</param>
+/// <param name="OmittedEvents">Foreign-identity or invalid-time callbacks rejected on the current nonretiring attachment.</param>
+public sealed record SessionRuntimeActivity(DateTimeOffset? Timestamp, long AdmittedEvents, long OmittedEvents);

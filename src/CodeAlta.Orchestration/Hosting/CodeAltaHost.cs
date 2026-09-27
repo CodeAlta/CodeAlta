@@ -61,6 +61,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
         Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity, reviewOwnedCommandPermissions, enableOwnedAsks, enableOwnedUserInput)
         {
             SelectionModels = modelProviderInitializationService.GetModelsAsync,
+            ObservedImageModels = provider => modelProviderInitializationService.CurrentStates
+                .FirstOrDefault(state => state.ProviderId == provider && state.Descriptor.IsEnabled
+                    && state.Availability == ModelProviderAvailability.Ready)?.Models ?? [],
         };
         WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore, runtimeService);
         _earlyReadShutdown = new HostDisposalStage(() => WorkspaceReads.DisposeAsync().AsTask());

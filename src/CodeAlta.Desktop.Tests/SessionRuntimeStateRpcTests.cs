@@ -12,6 +12,66 @@ public sealed class SessionRuntimeStateRpcTests
     private const string Epoch = "00000000-0000-0000-0000-000000000001";
 
     [TestMethod]
+    public async Task ActivityProjectionPreservesOffsetAndExactCountsAndRejectsInvalidTime()
+    {
+        var entry = new SessionRuntimeCurrentEntry(1, false, false, null, false, "fake", "fake", null, null, null, null)
+        { Activity = new(DateTimeOffset.Parse("2026-01-01T12:00:00+02:00", System.Globalization.CultureInfo.InvariantCulture), long.MaxValue, 2) };
+        var state = new SessionRuntimeCurrentState(Guid.NewGuid(), "session", false, entry);
+        var service = new SessionRuntimeStateService((_, _) => Task.FromResult(state), Epoch);
+        var value = await service.CurrentAsync(new(Epoch, "session"), default);
+        Assert.AreEqual("9223372036854775807", value.Entry!.Activity!.AdmittedEvents);
+        Assert.AreEqual("2", value.Entry.Activity.OmittedEvents);
+        StringAssert.EndsWith(value.Entry.Activity.Timestamp!, "+02:00");
+        Assert.AreEqual("admitted_agent_event", value.Entry.Activity.Source);
+        state = state with { Entry = entry with { Activity = new(DateTimeOffset.MinValue, 1, 0) } };
+        Assert.AreEqual("wire_limit", (await service.CurrentAsync(new(Epoch, "session"), default)).Status);
+        foreach (var invalid in new[] { new SessionRuntimeActivity(null, 1, 0), new(null, -1, 0), new(null, 0, -1), new(entry.Activity.Timestamp, 0, 0) })
+        {
+            state = state with { Entry = entry with { Activity = invalid } };
+            Assert.AreEqual("wire_limit", (await service.CurrentAsync(new(Epoch, "session"), default)).Status);
+        }
+    }
+
+    [TestMethod]
+    public async Task ScopedObservationBindsIdentityScopeAndEpochWithBoundedProjection()
+    {
+        var count = 0;
+        var state = new SessionRuntimeCurrentState(Guid.NewGuid(), "session", true,
+            new(9, false, true, "run", true, "fake", "fake", null, null, null, null));
+        var service = new SessionRuntimeStateService((id, date, scope, project, path, token) =>
+        {
+            count++; Assert.AreEqual("session", id); Assert.AreEqual("global", scope);
+            Assert.IsNull(project); Assert.IsNull(path);
+            return Task.FromResult(new OwnedRuntimeObservation("ok", state));
+        }, Epoch);
+        var request = new SessionRuntimeScopedRequest(Epoch, "session", DateTimeOffset.UnixEpoch.ToString("O"), "global", null, null);
+        Assert.AreEqual("invalid_request", (await service.ObserveAsync(request with { SessionId = "../session" }, default)).Status);
+        Assert.AreEqual("invalid_request", (await service.ObserveAsync(request with { Scope = "project" }, default)).Status);
+        Assert.AreEqual("stale_epoch", (await service.ObserveAsync(request with { ExpectedHostEpoch = "old" }, default)).Status);
+        Assert.AreEqual(0, count);
+        var response = await service.ObserveAsync(request, default);
+        Assert.AreEqual("ok", response.Status);
+        Assert.AreEqual("global", response.Scope);
+        Assert.IsTrue(response.Observation!.CoordinatorTransitionInProgress);
+        Assert.IsTrue(response.Observation.Entry!.IsRetiring);
+        Assert.AreEqual("9", response.Observation.Entry.AttachmentGeneration);
+        Assert.IsTrue(JsonSerializer.SerializeToUtf8Bytes(response, DesktopJsonContext.Default.SessionRuntimeScopedResponse).Length < 64 * 1024);
+        state = state with { Entry = null, CoordinatorTransitionInProgress = false };
+        Assert.IsNull((await service.ObserveAsync(request, default)).Observation!.Entry);
+        state = state with { SessionId = "other" };
+        Assert.AreEqual("wire_limit", (await service.ObserveAsync(request, default)).Status);
+        await Assert.ThrowsAsync<OperationCanceledException>(() => service.ObserveAsync(request, new CancellationToken(true)));
+        foreach (var (exception, status) in new (Exception, string)[] {
+            (new ObjectDisposedException("private"), "closed"), (new IOException("private"), "read_failed") })
+        {
+            var failed = new SessionRuntimeStateService((_, _, _, _, _, _) => Task.FromException<OwnedRuntimeObservation>(exception), Epoch);
+            var refusal = await failed.ObserveAsync(request, default);
+            Assert.AreEqual(status, refusal.Status);
+            Assert.IsNull(refusal.Observation);
+        }
+    }
+
+    [TestMethod]
     public async Task InvalidIdentityEpochAndPreCancellation_DoNotInvokeRuntime()
     {
         var service = new SessionRuntimeStateService((_, _) => throw new AssertFailedException("Query forbidden."), Epoch);

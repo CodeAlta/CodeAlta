@@ -12,6 +12,10 @@ internal sealed partial class WorkspaceService
     private readonly object _importGate = new();
     private Task<WorkspaceOpenProjectResponse>? _importWork;
     private bool _importsClosed;
+    // Access only under _importGate (also used by session creation).
+    private bool CatalogAdmissionClosed => _importsClosed || _sessionsClosed;
+    private bool CatalogAdmissionBusy => _sessionWork is not null || _archiveWork is not null || _importWork is not null
+        || _projectReadWork is not null || _projectRenameWork is not null || _promptCreateWork is { IsCompleted: false };
 
     internal WorkspaceService(OwnedSessionWorkspace reads, ProjectCatalog catalog, string epoch) : this(reads)
     {
@@ -65,8 +69,8 @@ internal sealed partial class WorkspaceService
         Task<WorkspaceOpenProjectResponse> work;
         lock (_importGate)
         {
-            if (_importsClosed) return Reply("closed", request.DirectoryPath);
-            if (_importWork is not null || _projectReadWork is not null || _projectRenameWork is not null) return Reply("busy", request.DirectoryPath);
+            if (CatalogAdmissionClosed) return Reply("closed", request.DirectoryPath);
+            if (CatalogAdmissionBusy) return Reply("busy", request.DirectoryPath);
             var completion = new TaskCompletionSource<WorkspaceOpenProjectResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
             _importWork = work = completion.Task;
             _ = ImportAsync(path, request.DirectoryPath, completion);
@@ -81,9 +85,11 @@ internal sealed partial class WorkspaceService
         Task? read;
         Task? rename;
         Task? completion;
-        lock (_importGate) { _importsClosed = true; work = _importWork; read = _projectReadWork; rename = _projectRenameWork; completion = _directoryCompletionWork; }
+        Task? archive;
+        Task? promptCreate;
+        lock (_importGate) { _importsClosed = true; work = _importWork; read = _projectReadWork; rename = _projectRenameWork; completion = _directoryCompletionWork; archive = _archiveWork; promptCreate = _promptCreateWork; }
         await Task.WhenAll(work ?? Task.CompletedTask, read ?? Task.CompletedTask, rename ?? Task.CompletedTask,
-            completion ?? Task.CompletedTask).ConfigureAwait(false);
+            completion ?? Task.CompletedTask, archive ?? Task.CompletedTask, promptCreate ?? Task.CompletedTask).ConfigureAwait(false);
     }
 
     private async Task ImportAsync(string path, string requestedPath, TaskCompletionSource<WorkspaceOpenProjectResponse> completion)
@@ -94,6 +100,14 @@ internal sealed partial class WorkspaceService
             if (!Directory.Exists(path)) completion.TrySetResult(new("missing_directory", _importEpoch, requestedPath, null, null));
             else
             {
+                // General catalog Upsert/EnsurePersisted may restore archives. Desktop
+                // must require the separate revision-checked unarchive confirmation.
+                var existing = await _importCatalog!.GetByPathAsync(path, CancellationToken.None).ConfigureAwait(false);
+                if (existing?.Archived == true)
+                {
+                    completion.TrySetResult(new("archived", _importEpoch, requestedPath, existing.ProjectPath, existing.Id));
+                    return;
+                }
                 var project = await _import!(path).ConfigureAwait(false);
                 completion.TrySetResult(new("ok", _importEpoch, requestedPath, project.ProjectPath, project.Id));
             }

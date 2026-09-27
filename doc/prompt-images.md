@@ -1,0 +1,27 @@
+# Desktop prompt images (bounded owned Send)
+
+The owned desktop composer accepts **user paste events containing PNG files**. It does not read the OS clipboard on mount, use a file picker, accept renderer paths/URLs, fetch images, or process clipboard HTML. Regular and expanded editors share App-owned attachment drafts. Local/read-only drafts refuse image paste before any create/transfer operation; create/open an owned session first.
+
+## Limits and capability
+
+- At most **3 images**, **64 KiB per encoded PNG**, **96 KiB total**. These are binary encoded-file sizes, before base64. Image-bearing Send requires nonempty text of at most **4096 UTF-16 code units**. Text-only Send retains its existing limit.
+- At most **2048 pixels per side** and **4,000,000 pixels**. The initial subset is RGB/RGBA, 8-bit, non-interlaced PNG. CRCs/chunk boundaries are checked; animation, palettes, compressed metadata/profiles and unknown chunks are refused. Only IHDR/IDAT/IEND and fixed-size sRGB/gAMA/cHRM/pHYs metadata are accepted. The frontend decodes the bounded raster for preview; the host additionally checks bounded decompressed scanline length and filter bytes. No re-encoding: accepted original bytes are preserved.
+- The small budgets fit the existing **208 KiB bridge frame** without changing its limit or CSP. Previews use the existing `img-src data:` permission; no blob/network permission is added.
+- Capability is **available (observed)**, **unsupported**, or **unknown**. The shared `AgentImageInputCapability` reads explicit boolean/image-modality metadata, not provider/model-name guesses. Owned desktop choices now read current enabled/ready provider observations without probing. Refresh choices does not probe: explicitly use the existing Models catalog provider probe when desired. Missing/default-only models do not enable images.
+- Normal Send captures an explicit supported model and checks its choice before dispatch. The original host worker rechecks current non-probing choices/capability before saving or preparing a provider. A stale/unsupported original may therefore have an accepted admission receipt but a `preparation_failed` dispatch outcome. Admission is not run completion. Queue/Steer refuse when the composer contains attachments; they never drop images into a text-only fallback.
+
+## Ownership and retention
+
+Each Send freezes exact text, ordered image bytes/base64, media type and generated display titles with the existing epoch/session/scope/selection/request key. The host snapshots the input list; equality/replay includes every image field and order. Existing receipt replay does not validate/decode/save/resolve/send the original again. Shared host-capability invalidation and existing drain/receipt ownership remain in place.
+
+App-lifetime drafts are scoped by epoch/session/project/path, with at most **8 image-bearing drafts** and **8 outstanding image reads**, one read per draft. No image data is placed in localStorage. Text edits, removal, Send, selection changes, expanded-editor transitions, originating DOM element disconnection, input lifetime/Settings/navigation ABA, or authority loss fence a late paste. No cross-session payload is displayed. A page reload loses unsent images; ordinary remount/navigation does not.
+
+Pending/uncertain originals use the existing **256 combined Send/Abort intent** ceiling, with each image request bounded as above; immutable base64 strings are shared rather than repeatedly cloned. The host admits at most **8 image-bearing original receipts per host lifetime** (maximum 768 KiB binary / approximately 1 MiB base64 retained), independently of text-only capacity. Image capacity does not silently evict evidence or retry originals. Remove buttons cannot edit the pending original. A newly admitted Send clears a draft only while its exact input revision/attachment snapshot remains current. An image retry or manual receipt recovery conservatively preserves the draft because it cannot prove the original revision after remount.
+
+The original worker saves through `PromptImageAttachmentStore` using the **host-resolved session**, then appends typed `AgentInputItem.LocalImage(Path, Title, MediaType)` items in order. Text and existing path-reference resolution stay intact. There is no Markdown embedding or text fallback.
+
+The Store is a **trusted backend filesystem API, not a renderer sandbox or external path-race proof**. Session-derived directories can still be externally replaced with symlinks/reparse points, and failed-write cleanup is best effort. Successfully saved files remain session-owned after cancellation, dispatch failure, composer clearing or host shutdown; this slice does not add artifact garbage collection. There is no cross-process CAS or transactional claim over catalog, provider configuration and filesystem state. Catalog changes are validated at the existing worker preparation boundaries, not locked against external processes through provider Send.
+
+## Qualification
+
+Tests use generated tiny PNGs, synthetic clipboard events, fake providers/hosts and disposable roots only. Native clipboard/WebView2, real-provider rendering, full-suite and website qualification are deliberately not performed in this scoped batch. This is narrower than TUI support: no image-only Send, image rename, JPEG/WebP/GIF/DIB conversion, or local draft image transfer.

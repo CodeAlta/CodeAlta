@@ -18,6 +18,74 @@ public sealed class WorkspaceCreateSessionTests
         { IsDefault = true, DefaultModelId = "fixture-model" };
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task ArchiveAndCreationReserveSameOwnerThroughCanceledWaitAndDrain(bool archiveFirst)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-archive-admission-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = Path.Combine(root, "global") });
+            var project = await catalog.UpsertFromPathAsync(root);
+            await using var reads = new OwnedSessionWorkspace(catalog, new SessionViewJournalStore(catalog.Options));
+            await using var providers = new ModelProviderRegistry();
+            providers.RegisterOrReplace(Provider, () => new DraftRuntime());
+            var calls = 0;
+            var rpc = new WorkspaceService(reads, catalog, Epoch, providers, async (p, _, _) =>
+            {
+                calls++; entered.TrySetResult(); await release.Task;
+                await catalog.EnsurePersistedAsync(p!);
+                return new SessionViewDescriptor { SessionId = "created", Kind = SessionViewKind.ProjectSession,
+                    ProjectRef = p!.Id, WorkingDirectory = p.ProjectPath };
+            });
+            rpc.ArchiveWriter = async (request, revision) =>
+            {
+                entered.TrySetResult(); await release.Task;
+                return await catalog.SetArchivedAsync(request.ProjectId, request.ProjectPath, request.SourcePath!, revision,
+                    request.ExpectedArchived, request.Archived);
+            };
+            var evidence = await catalog.ReadArchiveAsync(project.Id, root);
+            Assert.IsNotNull(evidence, "Ordinary serializer-produced projects must support archive.");
+            var archive = new WorkspaceArchiveProjectRequest(Epoch, project.Id, root, false, true, true, evidence.SourcePath, evidence.Revision.ContentHash);
+            var create = new WorkspaceCreateSessionRequest(Epoch, "project", project.Id, root, null);
+            using var cancel = new CancellationTokenSource();
+            Task original = archiveFirst ? rpc.ArchiveProjectAsync(archive, cancel.Token) : rpc.CreateSessionAsync(create, cancel.Token);
+            try
+            {
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                cancel.Cancel();
+                try { await original; Assert.Fail("Canceled wait must stop waiting."); } catch (OperationCanceledException) { }
+                Assert.AreEqual("busy", (await rpc.ArchiveProjectAsync(archive, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(3))).Status);
+                Assert.AreEqual("busy", (await rpc.CreateSessionAsync(create, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(3))).Status);
+                Assert.AreEqual("busy", (await rpc.OpenProjectAsync(new(Epoch, root, true), CancellationToken.None)).Status);
+                Assert.AreEqual("busy", (await rpc.RenameProjectAsync(new(Epoch, project.Id, root, evidence.SourcePath,
+                    evidence.Revision.ContentHash!, "Renamed"), CancellationToken.None)).Status);
+                var drain = Task.WhenAll(rpc.CloseImportsAsync(), rpc.CloseSessionsAsync());
+                Assert.IsFalse(drain.IsCompleted);
+                release.TrySetResult();
+                await drain.WaitAsync(TimeSpan.FromSeconds(10));
+                Assert.AreEqual(archiveFirst, (await catalog.GetByIdAsync(project.Id))!.Archived);
+                Assert.AreEqual(archiveFirst ? 0 : 1, calls);
+                if (archiveFirst)
+                {
+                    var fresh = new WorkspaceService(reads, catalog, Epoch, providers, (_, _, _) => throw new AssertFailedException("Archived create must refuse."));
+                    Assert.AreEqual("project_missing", (await fresh.CreateSessionAsync(create, CancellationToken.None)).Status);
+                    Assert.AreEqual("archived", (await fresh.OpenProjectAsync(new(Epoch, root, true), CancellationToken.None)).Status);
+                    Assert.IsTrue((await catalog.GetByIdAsync(project.Id))!.Archived);
+                    await fresh.CloseSessionsAsync(); await fresh.CloseImportsAsync();
+                }
+                Assert.AreEqual("closed", (await rpc.ArchiveProjectAsync(archive, CancellationToken.None)).Status);
+                Assert.AreEqual("closed", (await rpc.CreateSessionAsync(create, CancellationToken.None)).Status);
+            }
+            finally { release.TrySetResult(); await rpc.CloseSessionsAsync(); await rpc.CloseImportsAsync(); }
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [TestMethod]
     public async Task RealOwnedHostCreatesProjectAndGlobalSessionsVisibleInActualCatalog()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-session-create-" + Guid.NewGuid().ToString("N"));

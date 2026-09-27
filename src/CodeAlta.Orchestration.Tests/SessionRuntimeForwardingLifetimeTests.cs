@@ -16,6 +16,76 @@ namespace CodeAlta.Orchestration.Tests;
 public sealed class SessionRuntimeForwardingLifetimeTests
 {
     [TestMethod]
+    public Task Activity_IsAttachmentLocalAdmissionOrderWithExplicitOmissions() => Fixture.Run(async f =>
+    {
+        var read = () => f.Runtime.ObserveOwnedStateAsync(f.Session.SessionId, f.Session.CreatedAt, "project", f.ProjectId, f.ProjectPath);
+        Assert.IsNull((await f.Wait(read())).State!.Entry);
+        Assert.AreEqual(0, f.Provider.Creates);
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        Assert.IsNull((await f.Wait(read())).State!.Entry!.Activity!.Timestamp);
+        var creates = f.Provider.Creates;
+        var when = DateTimeOffset.Parse("2026-01-01T12:00:00+02:00", System.Globalization.CultureInfo.InvariantCulture);
+        await f.EmitAndObserve(AgentSessionUpdateKind.Warning, null, timestamp: when);
+        await f.EmitAndObserve(AgentSessionUpdateKind.Warning, null, timestamp: when.AddDays(-1));
+        await f.EmitAndObserve(AgentSessionUpdateKind.Warning, null, timestamp: DateTimeOffset.MinValue);
+        await f.EmitAndObserve(AgentSessionUpdateKind.Warning, null, timestamp: when, eventSessionId: "foreign-session");
+        await f.EmitAndObserve(AgentSessionUpdateKind.Warning, null, timestamp: when, eventProviderId: new ModelProviderId("foreign-provider"));
+        var observed = (await f.Wait(read())).State!.Entry!;
+        Assert.AreEqual(new SessionRuntimeActivity(when.AddDays(-1), 2, 3), observed.Activity);
+        Assert.AreEqual(creates, f.Provider.Creates);
+        Assert.AreEqual(0, f.Provider.HistoryReads);
+        f.Provider.HoldAbort = true;
+        var replacement = f.Track(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.OptionsFor("replacement")));
+        await f.Ready(f.Provider.AbortStarted.Task);
+        var retiring = (await f.Wait(read())).State!;
+        Assert.IsTrue(retiring.Entry!.IsRetiring);
+        Assert.AreEqual(observed.Activity, retiring.Entry.Activity);
+        f.Provider.ReleaseAbort.TrySetResult(); await f.Wait(replacement);
+        var fresh = (await f.Wait(read())).State!.Entry!;
+        Assert.AreNotEqual(observed.AttachmentGeneration, fresh.AttachmentGeneration);
+        Assert.AreEqual(new SessionRuntimeActivity(null, 0, 0), fresh.Activity);
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        var returned = (await f.Wait(read())).State!.Entry!;
+        Assert.IsTrue(returned.AttachmentGeneration > fresh.AttachmentGeneration, "Returning to original configuration is a new attachment, not an activity ABA.");
+        Assert.AreEqual(new SessionRuntimeActivity(null, 0, 0), returned.Activity);
+        Assert.AreEqual(0, f.Provider.HistoryReads);
+    });
+
+    [TestMethod]
+    public Task OwnedState_VerifiesScopeWithoutAcquisitionAndPreservesAbsentTransitionFacts() => Fixture.Run(async f =>
+    {
+        var read = () => f.Runtime.ObserveOwnedStateAsync(f.Session.SessionId, f.Session.CreatedAt, "project", f.ProjectId, f.ProjectPath);
+        var absent = await f.Wait(read());
+        Assert.AreEqual("ok", absent.Status);
+        Assert.IsNull(absent.State!.Entry);
+        Assert.AreEqual(0, f.Provider.Creates);
+        Assert.AreEqual(0, f.Provider.AttachmentCount);
+        var global = f.NewSession(); global.Kind = SessionViewKind.GlobalSession; global.ProjectRef = null; global.WorkingDirectory = f.GlobalRoot;
+        await f.Persist(global);
+        var globalObserved = await f.Wait(f.Runtime.ObserveOwnedStateAsync(global.SessionId, global.CreatedAt, "global", null, null));
+        Assert.AreEqual("ok", globalObserved.Status); Assert.IsNull(globalObserved.State!.Entry);
+        Assert.AreEqual("scope_mismatch", (await f.Wait(f.Runtime.ObserveOwnedStateAsync(f.Session.SessionId, f.Session.CreatedAt, "global", null, null))).Status);
+        Assert.AreEqual("scope_mismatch", (await f.Wait(f.Runtime.ObserveOwnedStateAsync(f.Session.SessionId, f.Session.CreatedAt, "project", f.ProjectId, f.GlobalRoot))).Status);
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        var attached = await f.Wait(read());
+        Assert.AreEqual("ok", attached.Status);
+        Assert.IsNotNull(attached.State!.Entry);
+        var creates = f.Provider.Creates;
+        await f.EmitAndObserve(AgentSessionUpdateKind.Warning, new AgentRunId("observed-run"));
+        Assert.AreEqual("observed-run", (await f.Wait(read())).State!.Entry!.ActiveRunId);
+        await f.EmitAndObserve(AgentSessionUpdateKind.Shutdown, null, timestamp: DateTimeOffset.UnixEpoch);
+        Assert.IsTrue((await f.Wait(read())).State!.Entry!.IsTerminated);
+        Assert.AreEqual(creates, f.Provider.Creates);
+        Assert.AreEqual(0, f.Provider.HistoryReads);
+        var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = f.GlobalRoot });
+        var project = (await catalog.GetByIdAsync(f.ProjectId))!;
+        project.Archived = true; await catalog.SaveAsync(project);
+        Assert.AreEqual("archived_project", (await f.Wait(read())).Status);
+        using var canceled = new CancellationTokenSource(); canceled.Cancel();
+        await f.ExpectCancellation(f.Track(f.Runtime.ObserveOwnedStateAsync(f.Session.SessionId, f.Session.CreatedAt, "project", f.ProjectId, f.ProjectPath, canceled.Token)));
+    });
+
+    [TestMethod]
     public Task CurrentState_AbsentAndCanceledQueriesDoNotAcquire_AndClosureRejects() => Fixture.Run(async f =>
     {
         var absent = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
@@ -384,6 +454,9 @@ public sealed class SessionRuntimeForwardingLifetimeTests
         var during = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
         Assert.IsTrue(during.CoordinatorTransitionInProgress);
         Assert.IsTrue(during.Entry!.IsRetiring);
+        var scoped = await f.Wait(f.Runtime.ObserveOwnedStateAsync(f.Session.SessionId, f.Session.CreatedAt, "project", f.ProjectId, f.ProjectPath));
+        Assert.AreEqual("ok", scoped.Status);
+        Assert.AreEqual(during, scoped.State);
         Assert.AreEqual(before.Entry.AttachmentGeneration, during.Entry.AttachmentGeneration);
         f.Provider.ReleaseAbort.TrySetResult();
         await f.Wait(replace);
@@ -882,7 +955,10 @@ public sealed class SessionRuntimeForwardingLifetimeTests
                 or SessionLifecycleEventKind.RunCompleted or SessionLifecycleEventKind.RunSubmitted or SessionLifecycleEventKind.SessionStarted }));
         Assert.IsFalse(observed.Any(value => value is SessionCatalogRuntimeEvent { Session.StartedAt: not null }),
             "A rejected owned send must not publish a started catalog snapshot for its resolved descriptor.");
-        Assert.AreEqual(before, await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId)));
+        var after = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        Assert.AreEqual(before, after with { Entry = after.Entry! with { Activity = before.Entry.Activity } });
+        Assert.AreEqual(before.Entry.Activity!.AdmittedEvents + 1, after.Entry!.Activity!.AdmittedEvents,
+            "The trailing warning marker is observed, without changing command/configuration state.");
     }, reviewPermissions: reviewPermissions);
 
     [TestMethod]

@@ -11,7 +11,9 @@ internal sealed partial class WorkspaceService
     private readonly Func<ProjectDescriptor?, ModelProviderDescriptor, string?, Task<SessionViewDescriptor>>? _createSession;
     private readonly Func<string, string?, string, string, Task<bool>>? _renameSession;
     private readonly Func<string, string?, string, string, Task<string>>? _deleteSession;
-    private readonly object _sessionGate = new();
+    // One instance monitor makes catalog-affecting admission atomic. Workers keep
+    // their own original tasks; no monitor is held over awaited work.
+    private object _sessionGate => _importGate;
     private Task<WorkspaceCreateSessionResponse>? _sessionWork;
     private Task<WorkspaceRenameSessionResponse>? _renameWork;
     private Task<WorkspaceDeleteSessionResponse>? _deleteWork;
@@ -64,8 +66,8 @@ internal sealed partial class WorkspaceService
         Task<WorkspaceCreateSessionResponse> work;
         lock (_sessionGate)
         {
-            if (_sessionsClosed) return Reply("closed");
-            if (_sessionWork is not null) return Reply("busy");
+            if (CatalogAdmissionClosed) return Reply("closed");
+            if (CatalogAdmissionBusy) return Reply("busy");
             var providers = _sessionProviders.ListProviders();
             var provider = providers.FirstOrDefault(static value => value.IsDefault) ?? providers.FirstOrDefault();
             if (provider is null) return Reply("provider_unavailable");

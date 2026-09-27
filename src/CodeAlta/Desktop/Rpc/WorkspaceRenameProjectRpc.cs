@@ -33,8 +33,8 @@ internal sealed partial class WorkspaceService
         Task<WorkspaceReadProjectNameResponse> work;
         lock (_importGate)
         {
-            if (_importsClosed) return Reply("closed");
-            if (_importWork is not null || _projectReadWork is not null || _projectRenameWork is not null) return Reply("busy");
+            if (CatalogAdmissionClosed) return Reply("closed");
+            if (CatalogAdmissionBusy) return Reply("busy");
             var completion = new TaskCompletionSource<WorkspaceReadProjectNameResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
             _projectReadWork = work = completion.Task;
             _ = ReadProjectNameOwnedAsync(request, completion);
@@ -59,8 +59,8 @@ internal sealed partial class WorkspaceService
         Task<WorkspaceRenameProjectResponse> work;
         lock (_importGate)
         {
-            if (_importsClosed) return Reply("closed");
-            if (_importWork is not null || _projectReadWork is not null || _projectRenameWork is not null) return Reply("busy");
+            if (CatalogAdmissionClosed) return Reply("closed");
+            if (CatalogAdmissionBusy) return Reply("busy");
             var completion = new TaskCompletionSource<WorkspaceRenameProjectResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
             _projectRenameWork = work = completion.Task;
             _ = RenameProjectOwnedAsync(request, completion);

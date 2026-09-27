@@ -73,7 +73,7 @@ Activation:
 
 Activated agent-runtime skills are replayed from the session journal after resume. Before compaction, activated payloads remain ordinary replayed context. After compaction, CodeAlta can rehydrate activated skills into composed instructions so compacted sessions retain skill guidance without duplicating current context. If a compacted skill payload references a missing on-disk skill, CodeAlta preserves history and reports the missing path.
 
-## UI
+## Terminal UI
 
 Open the skills browser with `/skills`, `/skill`, the command palette entry, or `Ctrl+G Ctrl+K`.
 
@@ -87,6 +87,8 @@ Available actions:
 - **New skill** scaffolds a skill under `<project>/.alta/skills/<name>/` when a project is selected, otherwise under `~/.alta/skills/<name>/`.
 
 The scaffold creates `SKILL.md` plus empty `scripts/`, `references/`, and `assets/` directories, then opens `SKILL.md` in the editor.
+
+The Desktop **Settings → Skills** page instead offers [explicit bounded raw candidate/metadata inspection](skills-inspection.md). It does not expose the terminal management/activation actions or effective discovery semantics described above.
 
 ## Live-tool commands
 

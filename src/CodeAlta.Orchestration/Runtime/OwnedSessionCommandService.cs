@@ -1,6 +1,7 @@
 using System.Runtime.ExceptionServices;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Orchestration.Runtime.Prompts;
 
 namespace CodeAlta.Orchestration.Runtime;
 
@@ -37,6 +38,60 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     private Task<string>? _deleteWork;
     private readonly OriginalInvocation _permissionShutdown = new();
     private readonly OriginalInvocation _askDrain = new();
+    private readonly BoundedPromptReferences _references = new();
+
+    /// <summary>Searches a verified nonarchived project without creating a session or provider.</summary>
+    /// <param name="scope">Expected project identity.</param><param name="sessionId">Optional exact session identity.</param>
+    /// <param name="query">Bounded literal substring query.</param><param name="cancellationToken">Cancels the read.</param>
+    /// <returns>Bounded metadata matches, never permission to read an arbitrary renderer root.</returns>
+    /// <exception cref="OperationCanceledException">The read was canceled.</exception>
+    public async Task<OwnedReferenceSearchResult> SearchReferencesAsync(OwnedProjectReferenceScope scope, string? sessionId, string query, CancellationToken cancellationToken)
+    {
+        lock (_gate) { if (_closed || _retained) return new("closed", [], false); }
+        if (scope is null || query is null || query.Length > 256 || query.Any(char.IsControl)) return new("invalid_request", [], false);
+        var project = await ResolveReferenceProjectAsync(scope, cancellationToken).ConfigureAwait(false);
+        if (!ReferenceScopeMatches(scope, project)) return new("scope_missing", [], false);
+        if (sessionId is not null)
+        {
+            var session = await _runtime.ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            if (session is null || session.SessionId != sessionId || session.ProjectRef != project!.Id || session.WorkingDirectory != project.ProjectPath)
+                return new("scope_missing", [], false);
+        }
+        lock (_gate) { if (_closed || _retained) return new("closed", [], false); }
+        return _references.Search(project!.ProjectPath, query, cancellationToken);
+    }
+
+    private static bool ReferenceScopeMatches(OwnedProjectReferenceScope scope, ProjectDescriptor? project)
+        => project is { Archived: false } && project.Id == scope.ProjectId && project.ProjectPath == scope.ProjectPath;
+
+    /// <summary>Observes raw prompt reference spans using the dispatch parser/path policy without provider work or recency changes.</summary>
+    /// <param name="scope">Expected catalog identity, never an authoritative renderer root.</param>
+    /// <param name="sessionId">Optional exact session identity.</param><param name="text">Bounded original prompt.</param>
+    /// <param name="cancellationToken">Cancels the metadata read.</param>
+    /// <returns>Bounded observed spans; resolution remains the original Send worker's responsibility.</returns>
+    /// <exception cref="OperationCanceledException">The read was canceled.</exception>
+    public async Task<OwnedReferenceObservation> ObserveReferencesAsync(OwnedProjectReferenceScope scope, string? sessionId, string text, CancellationToken cancellationToken)
+    {
+        lock (_gate) { if (_closed || _retained) return new("closed", [], false); }
+        if (scope is null || text is null || text.Length > 32768) return new("invalid_request", [], false);
+        var project = await ResolveReferenceProjectAsync(scope, cancellationToken).ConfigureAwait(false);
+        if (!ReferenceScopeMatches(scope, project)) return new("scope_missing", [], false);
+        if (sessionId is not null)
+        {
+            var session = await _runtime.ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            if (session is null || session.SessionId != sessionId || session.ProjectRef != project!.Id || session.WorkingDirectory != project.ProjectPath)
+                return new("scope_missing", [], false);
+        }
+        lock (_gate) { if (_closed || _retained) return new("closed", [], false); }
+        return _references.Observe(text, project!.ProjectPath, cancellationToken);
+    }
+
+    private async Task<ProjectDescriptor?> ResolveReferenceProjectAsync(OwnedProjectReferenceScope scope, CancellationToken token)
+    {
+        var projects = await _projects.LoadAsync(token).ConfigureAwait(false);
+        var matches = projects.Where(project => string.Equals(project.Id, scope.ProjectId, StringComparison.OrdinalIgnoreCase)).Take(2).ToArray();
+        return matches.Length == 1 && ReferenceScopeMatches(scope, matches[0]) ? matches[0] : null;
+    }
 
     internal OwnedSessionCommandService(
         SessionRuntimeService runtime, ProjectCatalog projects, CatalogOptions catalog, int capacity, bool reviewPermissions, bool enableAsks = false, bool enableUserInput = false)
@@ -106,6 +161,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     }
 
     internal Func<ModelProviderId, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>>? SelectionModels { get; init; }
+    internal Func<ModelProviderId, IReadOnlyList<AgentModelInfo>>? ObservedImageModels { get; init; }
 
     internal static bool SameAskContext(OwnedAskSubmission? first, OwnedAskSubmission? second) => ReferenceEquals(first, second);
 
@@ -122,6 +178,15 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ClientRequestId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.SessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Text);
+        if (request.Images is { Count: > 0 } images)
+        {
+            if (images.Count > OwnedPromptImages.MaxCount || request.Selection?.ModelId is null || request.Text.Length > 4096)
+                throw new ArgumentException("Images require an explicit model and at most three attachments.", nameof(request));
+            request = request with { Images = Array.AsReadOnly(images.ToArray()) };
+        }
+        if (request.References is { } scope && (request.Text.Length > 32768 || string.IsNullOrWhiteSpace(scope.ProjectId)
+            || scope.ProjectId.Length > 256 || string.IsNullOrWhiteSpace(scope.ProjectPath) || scope.ProjectPath.Length > 4096))
+            throw new ArgumentException("Invalid bounded reference scope.", nameof(request));
         if (request.Selection is { } selection &&
             (string.IsNullOrWhiteSpace(selection.ProviderKey) || selection.ProviderKey.Length > 256
              || string.IsNullOrWhiteSpace(selection.AgentPromptId) || selection.AgentPromptId.Length > 256
@@ -138,12 +203,21 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             {
                 var same = previous.Send is not null && SameAskContext(previous.Ask, askSubmission) &&
                     string.Equals(previous.Send.SessionId, request.SessionId, StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(previous.Send.Text, request.Text, StringComparison.Ordinal) && previous.Send.Selection == request.Selection;
+                    string.Equals(previous.Send.Text, request.Text, StringComparison.Ordinal) && previous.Send.Selection == request.Selection
+                    && previous.Send.References == request.References
+                    && (previous.Send.Images ?? []).SequenceEqual(request.Images ?? []);
                 return Replay(previous, same);
             }
             if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
             if (_deleteWork is not null) return new(OwnedSessionCommandAdmissionKind.Busy);
             if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
+            if (request.Images is { Count: > 0 })
+            {
+                // Payload evidence remains with receipts for the host lifetime; no unbounded image history.
+                if (_receipts.Values.Count(entry => entry.Send?.Images is { Count: > 0 }) >= 8)
+                    return new(OwnedSessionCommandAdmissionKind.Capacity);
+                request = request with { Images = OwnedPromptImages.Freeze(request.Images) };
+            }
             if (_active.ContainsKey(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             if (request.Selection is not null && (_queueing.Contains(request.SessionId) || _compacting.Contains(request.SessionId)
                 || _steering.Contains(request.SessionId) || _abortingRuns.Contains(request.SessionId)))
@@ -610,7 +684,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                     else
                     {
                         if (Asks.Enabled) operation.AskExecution = Asks.CreateExecution(operation.Receipt.OperationId, prepared.Session.SessionId, operation.Execution.Token);
-                        var sendOptions = new AgentSendOptions { Input = AgentInput.Text(operation.Request.Text), AskId = operation.AskSubmission?.AskId };
+                        var sendOptions = new AgentSendOptions { Input = prepared.Input, AskId = operation.AskSubmission?.AskId };
                         operation.SendInvocation.Launch(() => operation.Send = _runtime.SendOwnedCommandAsync(prepared.Session, prepared.Options, sendOptions,
                             operation.PermissionExecution, operation.Execution.Token, operation.AskExecution, operation.AskSubmission));
                         if (await operation.SendInvocation.Outcome.ConfigureAwait(false) is { } sendFailure) ExceptionDispatchInfo.Throw(sendFailure);
@@ -676,12 +750,38 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             if (session is null || !string.Equals(session.SessionId, operation.SessionId, StringComparison.OrdinalIgnoreCase)) return null;
             var project = string.IsNullOrWhiteSpace(session.ProjectRef) ? null
                 : await _projects.GetByIdAsync(session.ProjectRef, CancellationToken.None).ConfigureAwait(false);
+            var input = AgentInput.Text(operation.Request.Text);
+            if (operation.Request.References is { } referenceScope)
+            {
+                project = await ResolveReferenceProjectAsync(referenceScope, operation.Execution.Token).ConfigureAwait(false);
+                if (!ReferenceScopeMatches(referenceScope, project) || session.ProjectRef != referenceScope.ProjectId
+                    || session.WorkingDirectory != project!.ProjectPath || session.SessionId != operation.SessionId) return null;
+                // Once per admitted original, before any provider creation. Replays retain the
+                // original receipt/work and never resolve mutable filesystem metadata again.
+                input = _references.Resolve(operation.Request.Text, project.ProjectPath, operation.Execution.Token);
+            }
             var selection = operation.Request.Selection;
             if (selection is not null)
             {
-                var choices = await GetSelectionChoicesAsync(operation.SessionId, CancellationToken.None).ConfigureAwait(false);
+                var choices = await GetSelectionChoicesCoreAsync(operation.SessionId, CancellationToken.None,
+                    observedOnly: operation.Request.Images is { Count: > 0 }).ConfigureAwait(false);
                 if (choices is null || !IsValidSelection(choices, selection))
                     throw new ArgumentException("The selected session configuration is no longer available.");
+            }
+            if (operation.Request.Images is { Count: > 0 } images)
+            {
+                var model = ObservedImageModels?.Invoke(new ModelProviderId(session.ResolvedProviderKey))
+                    .SingleOrDefault(model => model.Id == selection!.ModelId);
+                if (selection?.ProviderKey != session.ResolvedProviderKey || AgentImageInputCapability.Read(model) != true)
+                    throw new ArgumentException("Image input capability is unknown, unsupported, or no longer available.");
+                if (project is { Archived: true } || (!string.IsNullOrWhiteSpace(session.ProjectRef)
+                    && (project is null || operation.Request.References is null)))
+                    throw new ArgumentException("Image Send requires the exact current project scope.");
+                operation.Execution.Token.ThrowIfCancellationRequested();
+                var attachments = images.Select((image, index) => new PromptImageAttachment(
+                    operation.Receipt.OperationId.ToString("N") + index, image.Title, OwnedPromptImages.Decode(image), image.MediaType, ".png")).ToArray();
+                var saved = await new PromptImageAttachmentStore(_catalog).SaveAsync(session, attachments, operation.Execution.Token).ConfigureAwait(false);
+                input = new AgentInput(input.Items.Concat(saved.Select(image => new AgentInputItem.LocalImage(image.Path, image.Title, image.MediaType))).ToArray());
             }
             var policy = SessionExecutionPolicy.CaptureSession(
                 session, project, _catalog.GlobalRoot, default,
@@ -696,8 +796,9 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 await _runtime.EnsureOwnedCoordinatorSessionAsync(session, options).ConfigureAwait(false);
             else
                 await _runtime.EnsureOwnedCoordinatorSessionAsync(session, options, useExplicitPrompt: true).ConfigureAwait(false);
-            return new Prepared(session, options);
+            return new Prepared(session, options, input);
         }
+        catch (OperationCanceledException) when ((operation.Request.References is not null || operation.Request.Images is { Count: > 0 }) && operation.Execution.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
@@ -1010,7 +1111,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     private sealed record ReceiptEntry(OwnedSessionCommandReceipt Receipt, OwnedTextSendRequest? Send = null, OwnedAbortRequest? Abort = null,
         OwnedTextSteerRequest? Steer = null, OwnedCompactRequest? Compact = null, OwnedAbortRunRequest? AbortRun = null,
         OwnedTextQueueRequest? Queue = null, OwnedCancelQueueRequest? CancelQueue = null, OwnedAskSubmission? Ask = null);
-    private sealed record Prepared(SessionViewDescriptor Session, SessionExecutionOptions Options);
+    private sealed record Prepared(SessionViewDescriptor Session, SessionExecutionOptions Options, AgentInput Input);
 
     private sealed class QueueOperation(OwnedTextQueueRequest request, OwnedSessionCommandReceipt receipt)
     {

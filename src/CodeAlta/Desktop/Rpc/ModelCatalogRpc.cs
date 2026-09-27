@@ -149,8 +149,7 @@ internal sealed class ModelCatalogService(
                 ? true : Flag(metadata, "supportsReasoning", "reasoning"),
             Flag(metadata, "supportsToolCall", "toolCall", "tool_call"),
             Flag(metadata, "supportsStructuredOutput", "structuredOutput", "structured_output"),
-            Flag(metadata, "supportsImageInput", "imageInput", "supportsImages", "supportsVision", "vision")
-                ?? ImageModalities(metadata));
+            AgentImageInputCapability.Read(model));
     }
 
     private static int? Limit(IReadOnlyDictionary<string, object?>? metadata, params string[] keys)
@@ -174,21 +173,6 @@ internal sealed class ModelCatalogService(
                 JsonElement element when element.ValueKind == JsonValueKind.False => false, _ => null };
         }
         return null;
-    }
-
-    private static bool? ImageModalities(IReadOnlyDictionary<string, object?>? metadata)
-    {
-        if (!TryRead(metadata, "inputModalities", out var raw) &&
-            !TryRead(metadata, "input_modalities", out raw)) return null;
-        return raw switch
-        {
-            IEnumerable<string> values => values.Any(value => value.Equals("image", StringComparison.OrdinalIgnoreCase) ||
-                value.Equals("vision", StringComparison.OrdinalIgnoreCase)),
-            JsonElement { ValueKind: JsonValueKind.Array } array => array.EnumerateArray().Any(element =>
-                element.ValueKind == JsonValueKind.String && (element.GetString()?.Equals("image", StringComparison.OrdinalIgnoreCase) == true ||
-                element.GetString()?.Equals("vision", StringComparison.OrdinalIgnoreCase) == true)),
-            _ => null,
-        };
     }
 
     private static bool TryRead(IReadOnlyDictionary<string, object?>? metadata, string key, out object? value)

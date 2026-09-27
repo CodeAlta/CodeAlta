@@ -12,7 +12,11 @@ public sealed record OwnedPromptChoice(string Id, string Name);
 /// <param name="Id">Provider model identifier.</param>
 /// <param name="Name">Display name.</param>
 /// <param name="Efforts">Supported reasoning efforts.</param>
-public sealed record OwnedModelChoice(string Id, string Name, IReadOnlyList<AgentReasoningEffort> Efforts);
+public sealed record OwnedModelChoice(string Id, string Name, IReadOnlyList<AgentReasoningEffort> Efforts)
+{
+    /// <summary>Gets observed image capability: true available, false unsupported, null unknown.</summary>
+    public bool? ImageInput { get; init; }
+}
 
 /// <summary>Session-scoped next-send choices; does not confer authority to mutate a running turn.</summary>
 /// <param name="Current">Persisted session selection.</param>
@@ -59,7 +63,16 @@ public sealed partial class OwnedSessionCommandService
     /// <summary>Reads bounded choices for an existing session, probing its configured provider if needed.</summary>
     /// <exception cref="ArgumentException">The session identity is blank.</exception>
     /// <exception cref="OperationCanceledException">The caller cancels its read.</exception>
-    public async Task<OwnedSelectionChoices?> GetSelectionChoicesAsync(string sessionId, CancellationToken cancellationToken = default)
+    public Task<OwnedSelectionChoices?> GetSelectionChoicesAsync(string sessionId, CancellationToken cancellationToken = default)
+        => GetSelectionChoicesCoreAsync(sessionId, cancellationToken, observedOnly: false);
+
+    /// <summary>Reads next-send choices from current provider observations without activation or probing.</summary>
+    /// <exception cref="ArgumentException">The session identity is blank.</exception>
+    /// <exception cref="OperationCanceledException">The read is canceled.</exception>
+    public Task<OwnedSelectionChoices?> GetObservedSelectionChoicesAsync(string sessionId, CancellationToken cancellationToken = default)
+        => GetSelectionChoicesCoreAsync(sessionId, cancellationToken, observedOnly: true);
+
+    private async Task<OwnedSelectionChoices?> GetSelectionChoicesCoreAsync(string sessionId, CancellationToken cancellationToken, bool observedOnly)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         lock (_gate) { if (_closed || _retained) return null; }
@@ -71,11 +84,12 @@ public sealed partial class OwnedSessionCommandService
             .Where(p => p.PromptName.Length <= 256).Take(64)
             .Select(p => new OwnedPromptChoice(p.PromptName, Bound(p.DisplayName))).ToArray();
         var provider = session.ResolvedProviderKey;
-        var models = SelectionModels is null ? []
+        var models = observedOnly ? ObservedImageModels?.Invoke(new ModelProviderId(provider)) ?? [] : SelectionModels is null ? []
             : await SelectionModels(new ModelProviderId(provider), cancellationToken).ConfigureAwait(false);
         return new(new(provider, session.AgentPromptId ?? "default", session.ModelId, session.ReasoningEffort), prompts,
             models.Where(m => m.Id.Length <= 256).Take(128)
-                .Select(m => new OwnedModelChoice(m.Id, Bound(m.DisplayName ?? m.Id), m.SupportedReasoningEfforts?.ToArray() ?? [])).ToArray());
+                .Select(m => new OwnedModelChoice(m.Id, Bound(m.DisplayName ?? m.Id), m.SupportedReasoningEfforts?.ToArray() ?? [])
+                { ImageInput = AgentImageInputCapability.Read(m) }).ToArray());
     }
 
     internal static bool IsValidSelection(OwnedSelectionChoices choices, OwnedSessionSelection selection)

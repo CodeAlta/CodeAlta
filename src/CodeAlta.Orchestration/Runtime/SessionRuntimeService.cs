@@ -1816,14 +1816,20 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         return await actor.QueryAsync(_ =>
         {
-            SessionRuntimeCurrentEntry? snapshot = null;
-            if (_entries.TryGetValue(sessionId, out var entry))
-                snapshot = new(entry.Attachment.Ordinal, entry.IsTerminated, entry.Attachment.IsRetiring,
-                    entry.ActiveRunId?.Value, entry.QueueDrainInProgress, entry.ProviderId.Value, entry.ProviderKey,
-                    entry.Model, entry.ReasoningEffort, entry.AgentPromptId, entry.PendingAgentPromptId);
-            return ValueTask.FromResult(new SessionRuntimeCurrentState(_runtimeInstanceId, sessionId,
-                _transitions.ContainsKey(sessionId), snapshot));
+            return ValueTask.FromResult(CaptureCurrentState(sessionId));
         }, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    // Called only on the existing session actor.
+    private SessionRuntimeCurrentState CaptureCurrentState(string sessionId)
+    {
+        SessionRuntimeCurrentEntry? snapshot = null;
+        if (_entries.TryGetValue(sessionId, out var entry))
+            snapshot = new(entry.Attachment.Ordinal, entry.IsTerminated, entry.Attachment.IsRetiring,
+                entry.ActiveRunId?.Value, entry.QueueDrainInProgress, entry.ProviderId.Value, entry.ProviderKey,
+                entry.Model, entry.ReasoningEffort, entry.AgentPromptId, entry.PendingAgentPromptId)
+            { Activity = new(entry.ActivityTimestamp, entry.ActivityEvents, entry.OmittedActivityEvents) };
+        return new(_runtimeInstanceId, sessionId, _transitions.ContainsKey(sessionId), snapshot);
     }
 
     /// <summary>
@@ -2503,6 +2509,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         {
             await publication.CompleteAsync(mark => actor.QueryAsync(_ =>
                 {
+                    ObserveAdmittedActivity(sessionId, projector.Entry!, @event);
                     var sanitized = projector.Project(@event);
                     ObserveAdmittedUsage(sessionId, projector.Entry!, sanitized);
                     published = sanitized;
@@ -2544,6 +2551,21 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         catch (UnauthorizedAccessException) when (publication.CanToleratePrepublicationFailure)
         {
         }
+    }
+
+    // Actor-only, using the existing admitted callback path before projection (including Shutdown).
+    // Like the TUI event reducer, arrival order can move the timestamp backwards. No wall-clock fallback.
+    private void ObserveAdmittedActivity(string sessionId, RuntimeSessionEntry entry, AgentEvent @event)
+    {
+        if (!_entries.TryGetValue(sessionId, out var active) || !ReferenceEquals(active, entry)
+            || _transitions.ContainsKey(sessionId) || entry.Attachment.IsRetiring || entry.IsTerminated) return;
+        if (@event.SessionId != sessionId || @event.ProviderId != entry.ProviderId || @event.Timestamp.Year <= 1)
+        {
+            entry.OmittedActivityEvents = entry.OmittedActivityEvents == long.MaxValue ? long.MaxValue : entry.OmittedActivityEvents + 1;
+            return;
+        }
+        entry.ActivityTimestamp = @event.Timestamp;
+        entry.ActivityEvents = entry.ActivityEvents == long.MaxValue ? long.MaxValue : entry.ActivityEvents + 1;
     }
 
     // Actor-only; do not alter the existing event stream/journal path for nonmatching provider callbacks.
@@ -3616,6 +3638,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         public SessionRuntimeUsageObservation? LastObservedUsage { get; set; }
         public long UsageSequence { get; set; }
         public long OmittedUsageEvents { get; set; }
+        public DateTimeOffset? ActivityTimestamp { get; set; }
+        public long ActivityEvents { get; set; }
+        public long OmittedActivityEvents { get; set; }
 
         public AgentRunId? ActiveRunId { get; private set; }
 

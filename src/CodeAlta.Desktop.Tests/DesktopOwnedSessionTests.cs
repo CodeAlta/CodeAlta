@@ -17,6 +17,27 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class DesktopOwnedSessionTests
 {
     [TestMethod]
+    public async Task ReferenceContractsRefuseUnownedAndStaleAndFreezeExpectedScope()
+    {
+        OwnedTextSendRequest? captured = null;
+        var service = new SessionOperationsService("epoch", request => { captured = request; return new(OwnedSessionCommandAdmissionKind.Busy); },
+            _ => throw new AssertFailedException("Unexpected abort"));
+        var request = new SessionSendRequest("epoch", "key", "session", "@file") { References = new("project", "/project") };
+        Assert.AreEqual("busy", service.Send(request, CancellationToken.None).Status);
+        Assert.AreEqual(new OwnedProjectReferenceScope("project", "/project"), captured!.References);
+        Assert.AreEqual("invalid_request", service.Send(request with { References = new("", "/project") }, CancellationToken.None).Status);
+        var search = new SessionReferenceSearchRequest("epoch", "project", "/project", null, "file");
+        Assert.AreEqual("unconfigured", (await new SessionOperationsService().SearchReferencesAsync(search, CancellationToken.None)).Status);
+        Assert.AreEqual("stale_epoch", (await service.SearchReferencesAsync(search with { ExpectedEpoch = "old" }, CancellationToken.None)).Status);
+        Assert.AreEqual("unavailable", (await service.SearchReferencesAsync(search, CancellationToken.None)).Status);
+        var observation = new SessionReferenceObservationRequest("epoch", "project", "/project", null, "@file");
+        Assert.AreEqual("unconfigured", (await new SessionOperationsService().ObserveReferencesAsync(observation, CancellationToken.None)).Status);
+        Assert.AreEqual("stale_epoch", (await service.ObserveReferencesAsync(observation with { ExpectedEpoch = "old" }, CancellationToken.None)).Status);
+        Assert.AreEqual("unavailable", (await service.ObserveReferencesAsync(observation, CancellationToken.None)).Status);
+        Assert.AreEqual("invalid_request", (await service.ObserveReferencesAsync(observation with { Text = new string('x', 32769) }, CancellationToken.None)).Status);
+    }
+
+    [TestMethod]
     public void SelectedSend_ValidatesAndForwardsExactConfiguration()
     {
         OwnedTextSendRequest? captured = null;

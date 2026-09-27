@@ -22,12 +22,14 @@ internal sealed class SessionOperationsService
     private readonly Dictionary<Guid, OwnedSessionCommandReceipt> _receipts = [];
     private bool _closed;
     private readonly Func<string, CancellationToken, Task<OwnedSelectionChoices?>>? _choices;
+    private readonly OwnedSessionCommandService? _commands;
 
     internal SessionOperationsService() { }
     internal SessionOperationsService(OwnedSessionCommandService commands, string epoch)
     {
         ArgumentNullException.ThrowIfNull(commands);
         _epoch = epoch;
+        _commands = commands;
         _send = commands.AdmitSend;
         _abort = commands.AdmitAbort;
         _steer = commands.AdmitSteer;
@@ -35,7 +37,7 @@ internal sealed class SessionOperationsService
         _abortRun = commands.AdmitAbortRun;
         _queue = commands.AdmitQueue;
         _cancelQueue = commands.AdmitCancelQueue;
-        _choices = commands.GetSelectionChoicesAsync;
+        _choices = commands.GetObservedSelectionChoicesAsync;
     }
     // Mandatory rejection-route seam: tests use throwing literal callbacks, never fabricate receipts.
     internal SessionOperationsService(string epoch, Func<OwnedTextSendRequest, OwnedSessionCommandAdmission> send,
@@ -83,6 +85,8 @@ internal sealed class SessionOperationsService
             if (denied is not null) return new(denied, _epoch, null);
             if (!Identity(request.ClientRequestId, 256) || !Identity(request.SessionId, 256) || !Identity(request.Text, 32768, trim: false))
                 return new("invalid_request", _epoch, null);
+            if (request.References is { } references && (!Identity(references.ProjectId, 256) || !Identity(references.ProjectPath, 4096)))
+                return new("invalid_request", _epoch, null);
             cancellationToken.ThrowIfCancellationRequested();
             if (request.Selection is { } selection && (!Identity(selection.ProviderKey, 256) || !Identity(selection.AgentPromptId, 256)
                 || selection.ModelId is not null && !Identity(selection.ModelId, 256)
@@ -91,6 +95,8 @@ internal sealed class SessionOperationsService
                 return new("invalid_request", _epoch, null);
             try { return Retain(_send!(new(request.ClientRequestId, request.SessionId, request.Text)
             {
+                Images = request.Images?.Select(image => new OwnedPromptImage(image.Title, image.MediaType, image.Base64)).ToArray(),
+                References = request.References is { } scope ? new(scope.ProjectId, scope.ProjectPath) : null,
                 Selection = request.Selection is { } value ? new(value.ProviderKey, value.AgentPromptId, value.ModelId,
                     value.ReasoningEffort is null ? null : Enum.Parse<AgentReasoningEffort>(value.ReasoningEffort)) : null,
             }, cancellationToken)); }
@@ -98,6 +104,48 @@ internal sealed class SessionOperationsService
             catch (OperationCanceledException) { throw; }
             catch (Exception) { return new("admission_failed", _epoch, null); }
         }
+    }
+
+    [NeoRpcMethod("searchReferences")]
+    public async Task<SessionReferenceSearchResponse> SearchReferencesAsync(SessionReferenceSearchRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return new(denied, _epoch, [], false);
+            if (!Identity(request.ProjectId, 256) || !Identity(request.ProjectPath, 4096) || request.Query is null || request.Query.Length > 256
+                || request.SessionId is not null && !Identity(request.SessionId, 256)) return new("invalid_request", _epoch, [], false);
+        }
+        if (_commands is null) return new("unavailable", _epoch, [], false);
+        try
+        {
+            var result = await _commands.SearchReferencesAsync(new(request.ProjectId, request.ProjectPath), request.SessionId, request.Query, cancellationToken).ConfigureAwait(false);
+            return new(result.Status, _epoch, result.Items.Select(item => new SessionReferenceMatch(item.Path, item.Directory, item.Recent)).ToArray(), result.Omitted);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception) { return new("read_error", _epoch, [], true); }
+    }
+
+    [NeoRpcMethod("observeReferences")]
+    public async Task<SessionReferenceObservationResponse> ObserveReferencesAsync(SessionReferenceObservationRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return new(denied, _epoch, [], false);
+            if (!Identity(request.ProjectId, 256) || !Identity(request.ProjectPath, 4096) || request.Text is null || request.Text.Length > 32768
+                || request.SessionId is not null && !Identity(request.SessionId, 256)) return new("invalid_request", _epoch, [], false);
+        }
+        if (_commands is null) return new("unavailable", _epoch, [], false);
+        try
+        {
+            var result = await _commands.ObserveReferencesAsync(new(request.ProjectId, request.ProjectPath), request.SessionId, request.Text, cancellationToken).ConfigureAwait(false);
+            return new(result.Status, _epoch, result.Items.Select(item => new SessionReferenceSpan(item.Start, item.Length, item.Status)).ToArray(), result.Omitted);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception) { return new("read_error", _epoch, [], true); }
     }
 
     [NeoRpcMethod("choices")]
@@ -117,7 +165,7 @@ internal sealed class SessionOperationsService
             return new("ok", _epoch, request.SessionId,
                 new(choices.Current.ProviderKey, choices.Current.AgentPromptId, choices.Current.ModelId, choices.Current.ReasoningEffort?.ToString()),
                 choices.Prompts.Select(p => new SessionPromptChoice(p.Id, p.Name)).ToArray(),
-                choices.Models.Select(m => new SessionModelChoice(m.Id, m.Name, m.Efforts.Select(e => e.ToString()).ToArray())).ToArray());
+                choices.Models.Select(m => new SessionModelChoice(m.Id, m.Name, m.Efforts.Select(e => e.ToString()).ToArray()) { ImageInput = m.ImageInput }).ToArray());
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception) { return new("unavailable", _epoch, request.SessionId, null, [], []); }
@@ -355,12 +403,25 @@ internal sealed class SessionOperationsService
 
 internal sealed record SessionSendRequest(string ExpectedEpoch, string ClientRequestId, string SessionId, string Text)
 {
+    public IReadOnlyList<SessionPromptImage>? Images { get; init; }
+    public SessionReferenceScope? References { get; init; }
     public SessionSelection? Selection { get; init; }
 }
+internal sealed record SessionReferenceScope(string ProjectId, string ProjectPath);
+internal sealed record SessionReferenceSearchRequest(string ExpectedEpoch, string ProjectId, string ProjectPath, string? SessionId, string Query);
+internal sealed record SessionReferenceMatch(string Path, bool Directory, bool Recent);
+internal sealed record SessionReferenceSearchResponse(string Status, string? Epoch, IReadOnlyList<SessionReferenceMatch> Items, bool Omitted);
+internal sealed record SessionReferenceObservationRequest(string ExpectedEpoch, string ProjectId, string ProjectPath, string? SessionId, string Text);
+internal sealed record SessionReferenceSpan(int Start, int Length, string Status);
+internal sealed record SessionReferenceObservationResponse(string Status, string? Epoch, IReadOnlyList<SessionReferenceSpan> Items, bool Omitted);
 internal sealed record SessionSelection(string ProviderKey, string AgentPromptId, string? ModelId, string? ReasoningEffort);
 internal sealed record SessionChoicesRequest(string ExpectedEpoch, string SessionId);
 internal sealed record SessionPromptChoice(string Id, string Name);
-internal sealed record SessionModelChoice(string Id, string Name, IReadOnlyList<string> Efforts);
+internal sealed record SessionPromptImage(string Title, string MediaType, string Base64);
+internal sealed record SessionModelChoice(string Id, string Name, IReadOnlyList<string> Efforts)
+{
+    public bool? ImageInput { get; init; }
+}
 internal sealed record SessionChoicesResponse(string Status, string? Epoch, string SessionId, SessionSelection? Current,
     IReadOnlyList<SessionPromptChoice> Prompts, IReadOnlyList<SessionModelChoice> Models);
 internal sealed record SessionAbortRequest(string ExpectedEpoch, string ClientRequestId, string TargetOperationId);
