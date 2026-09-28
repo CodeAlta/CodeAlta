@@ -240,6 +240,112 @@ public sealed class AgentRuntimeTests
     }
 
     [TestMethod]
+    public async Task AgentRuntime_ResumeMissingSession_DoesNotCreateReplacementOrExecuteProvider()
+    {
+        using var temp = TestTempDirectory.Create();
+        await using var runtime = CreateAgentRuntime(temp.Path, out var executor);
+        await Assert.ThrowsExactlyAsync<KeyNotFoundException>(() => runtime.ResumeSessionAsync("missing-session",
+            new AgentSessionResumeOptions
+            {
+                ProviderKey = "openai", WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => throw new AssertFailedException("Resume must not request permission."),
+            }));
+        Assert.AreEqual(0, (await CreateSessionStore(temp.Path).ListSessionsAsync().ToArrayAsync()).Length);
+        Assert.AreEqual(0, executor.Requests.Count);
+    }
+
+    [TestMethod]
+    public async Task AgentRuntime_UnknownTransferProvider_PreservesOriginalJournal()
+    {
+        using var temp = TestTempDirectory.Create();
+        await using var runtime = CreateAgentRuntime(temp.Path, out var executor);
+        await using var source = await runtime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            ProviderKey = "openai", Model = "original-model", WorkingDirectory = temp.Path,
+            OnPermissionRequest = static (_, _) => throw new AssertFailedException("Preparation must not request permission."),
+        });
+        var store = CreateSessionStore(temp.Path);
+        var summary = await store.GetSessionSummaryAsync(source.SessionId);
+        Assert.IsNotNull(summary);
+        var path = new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents"))
+            .GetSessionFilePath(source.SessionId, summary.CreatedAt);
+        var before = await File.ReadAllBytesAsync(path);
+        await Assert.ThrowsExactlyAsync<KeyNotFoundException>(() => runtime.ResumeSessionAsync(source.SessionId,
+            new AgentSessionResumeOptions
+            {
+                ProviderKey = "unknown", WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => throw new AssertFailedException("Preparation must not request permission."),
+            }));
+        CollectionAssert.AreEqual(before, await File.ReadAllBytesAsync(path));
+        Assert.AreEqual(0, executor.Requests.Count);
+    }
+
+    // Characterization of the legacy resume path, NOT the safety contract for explicit transfer.
+    // The future prepare/commit path must never use this method as speculative preparation.
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task AgentRuntime_LegacyTransfer_PostSummaryFailureLeavesMixedDurableProvider(bool cancel)
+    {
+        using var temp = TestTempDirectory.Create();
+        await using var sourceRuntime = CreateAgentRuntime(temp.Path, out var sourceExecutor);
+        await using var source = await sourceRuntime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            ProviderKey = "openai", Model = "original-model", WorkingDirectory = temp.Path,
+            OnPermissionRequest = static (_, _) => throw new AssertFailedException("Preparation must not request permission."),
+        });
+        var store = CreateSessionStore(temp.Path);
+        var original = await store.GetStateAsync(source.SessionId);
+        Assert.IsNotNull(original);
+        using var continuation = JsonDocument.Parse("""{"responseId":"original-continuation"}""");
+        await store.UpsertStateAsync(original with
+        {
+            ProviderSessionId = "original-continuation", ProviderState = continuation.RootElement.Clone(),
+        });
+        using var cancellation = new CancellationTokenSource();
+        var failure = new InvalidOperationException("injected post-summary cache failure");
+        var cache = new TransferFaultCache(projection =>
+        {
+            Assert.AreEqual("anthropic", projection.Summary.ProviderKey);
+            if (cancel) { cancellation.Cancel(); cancellation.Token.ThrowIfCancellationRequested(); }
+            throw failure;
+        });
+        var targetExecutor = new RecordingTurnExecutor();
+        await using var target = CreateAgentRuntime(temp.Path, targetExecutor, "anthropic", "Anthropic",
+            "anthropic-messages", AgentTransportKind.AnthropicMessages, new ModelProviderId("anthropic"), cache);
+        Exception? observed = null;
+        try
+        {
+            await using var unexpected = await target.ResumeSessionAsync(source.SessionId,
+                new AgentSessionResumeOptions
+                {
+                    ProviderKey = "anthropic", Model = "target-model", WorkingDirectory = temp.Path,
+                    OnPermissionRequest = static (_, _) => throw new AssertFailedException("Preparation must not request permission."),
+                },
+                cancellation.Token);
+        }
+        catch (Exception error) { observed = error; }
+        Assert.IsNotNull(observed);
+        if (cancel) Assert.IsInstanceOfType<OperationCanceledException>(observed);
+        else Assert.AreSame(failure, observed);
+        Assert.AreEqual(1, cache.Writes);
+
+        // Read through a new cache-free store to establish persisted, not in-memory, evidence.
+        var reopened = CreateSessionStore(temp.Path);
+        var summary = await reopened.GetSessionSummaryAsync(source.SessionId);
+        var state = await reopened.GetStateAsync(source.SessionId);
+        Assert.IsNotNull(summary);
+        Assert.IsNotNull(state);
+        Assert.AreEqual("anthropic", summary.ProviderKey);
+        Assert.AreEqual("target-model", summary.ModelId);
+        Assert.AreEqual("openai", state.ProviderKey);
+        Assert.AreEqual("original-continuation", state.ProviderSessionId);
+        Assert.AreEqual("original-continuation", state.ProviderState!.Value.GetProperty("responseId").GetString());
+        Assert.AreEqual(0, sourceExecutor.Requests.Count);
+        Assert.AreEqual(0, targetExecutor.Requests.Count);
+    }
+
+    [TestMethod]
     public async Task AgentRuntime_SendAsync_EmitsTurnDiffForBuiltInFileChanges()
     {
         using var temp = TestTempDirectory.Create();
@@ -552,7 +658,8 @@ public sealed class AgentRuntimeTests
         string displayName,
         string protocolFamily,
         AgentTransportKind transportKind,
-        ModelProviderId ProviderId)
+        ModelProviderId ProviderId,
+        IAgentSessionProjectionCache? projectionCache = null)
     {
         return new AgentRuntime(
             new ModelProviderId(ProviderId.Value),
@@ -560,6 +667,7 @@ public sealed class AgentRuntimeTests
             new AgentRuntimeOptions
             {
                 StateRootPath = Path.Combine(tempRoot, "machine", "agents"),
+                SessionProjectionCache = projectionCache,
                 Providers =
                 [
                     new AgentRuntimeProviderRegistration
@@ -586,6 +694,25 @@ public sealed class AgentRuntimeTests
                     },
                 ],
             });
+    }
+
+    private sealed class TransferFaultCache(Action<AgentSessionCacheProjection> onWrite) : IAgentSessionProjectionCache
+    {
+        public int Writes { get; private set; }
+        public Task UpsertSessionAsync(AgentSessionCacheProjection projection, CancellationToken cancellationToken = default)
+        {
+            Writes++;
+            onWrite(projection);
+            return Task.CompletedTask;
+        }
+        public Task<AgentSessionCacheProjection?> GetSessionAsync(string sessionId, AgentSessionCacheProjectionContext context, CancellationToken cancellationToken = default)
+            => Task.FromResult<AgentSessionCacheProjection?>(null);
+        public IAsyncEnumerable<AgentSessionCacheProjection> ListSessionsAsync(AgentSessionCacheProjectionContext context, CancellationToken cancellationToken = default)
+            => throw new AssertFailedException("Transfer must not enumerate unrelated sessions.");
+        public Task RemoveSessionAsync(string sessionId, CancellationToken cancellationToken = default)
+            => throw new AssertFailedException("Transfer must not delete the original session.");
+        public Task<AgentSessionCacheReconciliationResult> ReconcileAsync(AgentSessionCacheProjectionContext context, CancellationToken cancellationToken = default)
+            => throw new AssertFailedException("Transfer must not reconcile unrelated sessions.");
     }
 
     private static async Task WriteLegacyProviderIdOnlyJournalAsync(

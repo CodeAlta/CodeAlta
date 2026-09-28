@@ -343,7 +343,22 @@ diff JSON cannot produce trustworthy file summaries; the host must eventually pr
 truncation. Desktop model choices use `GetObservedSelectionChoicesAsync`, not the TUI's potentially
 populated provider catalog. Missing observed models are labeled **Unverified**, not falsely declared
 absent from the provider. No catalog activation/probing or provider-switch lifecycle changes were
-introduced. Existing-session provider switching still needs the separately blocked recovery policy.
+introduced. The subsequently approved parity plan specifies a prepare/commit/recovery protocol;
+the earlier unresolved recovery policy is no longer a planning blocker. Implementation remains open.
+
+Approved-plan implementation baseline: `parityApp.browser.test.ts` bundles the actual `main.tsx`
+against a test-only bridge, asserts the native client is absent, blocks external resource URLs,
+checks for unexpected requests/runtime exceptions and captures 390/1280px light/dark screenshots
+plus layout/text measurements. This is a populated read-only App baseline, **not** owned-session,
+dialog, composer or visual-parity acceptance. No production App extraction was necessary.
+
+Agent runtime fault characterization now reproduces a durable target summary paired with the
+original provider's continuation state when cache failure or cancellation occurs after the summary
+append in legacy cross-provider resume. A fresh cache-free store confirms the mixed durable state;
+neither fake executor runs. These passing characterization tests document the unsafe legacy path,
+not successful transfer recovery. Additional checks ensure missing sessions are not created by
+AgentRuntime resume and unknown providers leave the original journal byte-for-byte unchanged.
+The 15 AgentRuntime tests, actual-App baseline browser test and strict TypeScript passed.
 
 The Explorer now nests sessions beneath the selected project in an accordion rather than
 reserving separate vertical project/session panes. Project and session rows are compact single
