@@ -589,3 +589,26 @@ The full Blueprint stylesheet increases built CSS to about 575 kB (65 kB gzip); 
 existing JavaScript chunk warning remains. No dependencies were installed, no native
 host/providers were executed, and no full suite or website build was run. Previously
 documented legacy-fixture and transitive peer-range limitations remain unchanged.
+
+### Blueprint visual foundation
+
+The shell now derives its light/dark palette, borders, shadows, primary and status
+colors from the installed Blueprint variables instead of the previous purple custom
+palette. Shell and timeline typography use Blueprint's font family and standard type
+sizes; transcript surfaces are neutral rather than individually tinted. Workspace
+navigation and the main composer actions use Blueprint Buttons, while appearance
+settings use Card, ButtonGroup and Checkbox. Composer dropdowns remain HTMLSelect,
+with FormGroup labels, responsive widths and no miniature label/icon typography.
+Legacy button rules explicitly exclude Blueprint buttons so their default sizing,
+focus, disabled and intent styling survives the application cascade.
+
+This is a focused presentation pass, not an exhaustive migration of every legacy
+dialog or control. Keep further visual iteration Blueprint-first: use its components,
+classes and design variables, reserving application CSS for layout and domain-specific
+content. Session/provider guards and event handlers are unchanged.
+
+Verification: strict TypeScript and the production frontend build pass (the existing
+JavaScript chunk-size warning remains). No tests were added or run, as requested.
+No native host, real providers or live data were used; this pass has not been visually
+accepted in a browser. The existing frontend `npm run demo` command provides the
+isolated fixture-backed app for screenshot iteration without starting a native host.

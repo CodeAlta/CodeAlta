@@ -1,4 +1,4 @@
-import { Classes, HTMLSelect } from "@blueprintjs/core";
+import { Button, Classes, HTMLSelect } from "@blueprintjs/core";
 import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
@@ -1376,13 +1376,13 @@ function App() {
           "--session-pane-width": `${visibleSessionWidth}px`,
         } as CSSProperties}>
         <nav className="activity-rail" aria-label={t("Workspace navigation")}>
-          <button ref={projectRailToggle} type="button" className="icon-button" aria-label={t("Explorer")} title={t("Explorer")} aria-expanded={railVisible} aria-controls="project-rail" onClick={() => { setIdeWidth(value => ({ ...value, full: false })); toggleProjects(); }}><AppIcon name="folder" size={18} /></button>
-          <button type="button" className="icon-button timeline-width-toggle" aria-label={t(ideWidth.full ? "Restore Explorer width" : "Use full content width")}
+          <Button ref={projectRailToggle} variant="minimal" active={railVisible} icon={<AppIcon name="folder" size={20} />} aria-label={t("Explorer")} title={t("Explorer")} aria-expanded={railVisible} aria-controls="project-rail" onClick={() => { setIdeWidth(value => ({ ...value, full: false })); toggleProjects(); }} />
+          <Button variant="minimal" active={ideWidth.full} icon={<AppIcon name={ideWidth.full ? "compact" : "expand"} size={20} />} className="timeline-width-toggle" aria-label={t(ideWidth.full ? "Restore Explorer width" : "Use full content width")}
             title={t(ideWidth.full ? "Restore Explorer width" : "Use full content width")} aria-pressed={ideWidth.full}
-            onClick={() => setIdeWidth(value => ({ ...value, full: !value.full }))}><AppIcon name={ideWidth.full ? "compact" : "expand"} size={16} /></button>
-          <button type="button" className="icon-button" aria-label={t("Alta notes")} title={t("Alta notes")} aria-pressed={notesVisible} onClick={() => { setNotesVisible(value => !value); if (!railVisible) { setIdeWidth(value => ({ ...value, full: false })); toggleProjects(); } }}><AppIcon name="notes" size={18} /></button>
-          <button type="button" className="icon-button" aria-label={t("Open command palette")} aria-haspopup="dialog" title={`${t("Open command palette")} (Ctrl+P)`} onClick={openPalette}><AppIcon name="search" size={18} /></button>
-          <button type="button" className="icon-button activity-settings" aria-label={t("Settings & extensions")} title={t("Settings & extensions")} onClick={() => navigate("appearance")}><AppIcon name="settings" size={18} /></button>
+            onClick={() => setIdeWidth(value => ({ ...value, full: !value.full }))} />
+          <Button variant="minimal" active={notesVisible} icon={<AppIcon name="notes" size={20} />} aria-label={t("Alta notes")} title={t("Alta notes")} aria-pressed={notesVisible} onClick={() => { setNotesVisible(value => !value); if (!railVisible) { setIdeWidth(value => ({ ...value, full: false })); toggleProjects(); } }} />
+          <Button variant="minimal" icon={<AppIcon name="search" size={20} />} aria-label={t("Open command palette")} aria-haspopup="dialog" title={`${t("Open command palette")} (Ctrl+P)`} onClick={openPalette} />
+          <Button variant="minimal" icon={<AppIcon name="settings" size={20} />} className="activity-settings" aria-label={t("Settings & extensions")} title={t("Settings & extensions")} onClick={() => navigate("appearance")} />
         </nav>
         <SessionContentLayout sessionWidth={ideWidth.width} narrow={narrow} sessionsHidden={!railVisible}
           projects={sessions => <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}>

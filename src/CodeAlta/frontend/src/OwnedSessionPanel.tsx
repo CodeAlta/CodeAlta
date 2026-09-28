@@ -1,4 +1,4 @@
-import { HTMLSelect } from "@blueprintjs/core";
+import { Button, FormGroup, HTMLSelect } from "@blueprintjs/core";
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from "react";
 import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectReferencePicker";
 import { modelCatalog, sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
@@ -591,11 +591,11 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       }} />
     <div className="composer-toolbar">
     <div className="prompt-options" aria-label={t("Session configuration")}>
-      <label><AppIcon name="prompt" size={14} /><span>{t("Agent prompt")}</span><HTMLSelect aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
+      <FormGroup className="composer-field" label={t("Agent prompt")} labelFor={`composer-agent-${sessionId}`}><HTMLSelect fill id={`composer-agent-${sessionId}`} aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
         {!activeChoices?.prompts.some(p => p.id === selected?.agentPromptId) && <option value={selected?.agentPromptId ?? ""}>{selected?.agentPromptId ?? t("Loading…")}</option>}
         {activeChoices?.prompts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-      </HTMLSelect></label>
-      <div className="composer-model-options"><label htmlFor={`composer-model-${sessionId}`}><AppIcon name="model" size={14} /><span>{t("Model")}:</span></label>
+      </HTMLSelect></FormGroup>
+      <FormGroup className="composer-field composer-model-field" label={t("Model")} labelFor={`composer-model-${sessionId}`}><div className="composer-model-options">
       <ProviderChooser epoch={epoch} sessionId={sessionId} providerKey={selected?.providerKey ?? t("session provider")}
         disabled={selectionDisabled || !capability.canMutate() || runtimeState?.kind !== "ready"
           || runtimeState.snapshot.coordinatorTransitionInProgress || !!runtimeState.snapshot.entry?.activeRunId
@@ -610,7 +610,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
           setChoices(value); setChoicesNotice("");
           void runtimeScope.current?.refresh();
         }} />
-      <HTMLSelect id={`composer-model-${sessionId}`} data-model-selector aria-label={t("Model")} value={selected?.modelId ?? ""} disabled={invalidEpoch || !!pending || loadingChoices}
+      <HTMLSelect fill id={`composer-model-${sessionId}`} data-model-selector aria-label={t("Model")} value={selected?.modelId ?? ""} disabled={invalidEpoch || !!pending || loadingChoices}
         onPointerDown={event => { if (!activeChoices?.models.length && !loadingChoices) { event.preventDefault(); loadModelChoices(); } }}
         onKeyDown={event => {
           if (!activeChoices?.models.length && !loadingChoices && !event.nativeEvent.isComposing && !event.repeat
@@ -620,37 +620,37 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
         <option value="">{t("Provider default")}</option>
         {selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) && <option value={selected.modelId}>{selected.modelId} · {t("Unverified")}</option>}
         {activeChoices?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-      </HTMLSelect></div>
-      <label><AppIcon name="brain" size={14} /><span>{t("Reasoning")}</span><HTMLSelect aria-label={t("Reasoning")} value={selected?.reasoningEffort ?? ""} disabled={selectionDisabled || efforts.length === 0} onChange={event => select("reasoningEffort", event.target.value)} title={t("Supported reasoning effort for the selected model")}>
+      </HTMLSelect></div></FormGroup>
+      <FormGroup className="composer-field" label={t("Reasoning")} labelFor={`composer-reasoning-${sessionId}`}><HTMLSelect fill id={`composer-reasoning-${sessionId}`} aria-label={t("Reasoning")} value={selected?.reasoningEffort ?? ""} disabled={selectionDisabled || efforts.length === 0} onChange={event => select("reasoningEffort", event.target.value)} title={t("Supported reasoning effort for the selected model")}>
         <option value="">{t("Model default")}</option>
         {selected?.reasoningEffort && !efforts.includes(selected.reasoningEffort) && <option value={selected.reasoningEffort}>{selected.reasoningEffort} · {t("Unverified")}</option>}
         {efforts.map(e => <option key={e} value={e}>{e}</option>)}
-      </HTMLSelect></label>
+      </HTMLSelect></FormGroup>
     </div>
     <div className="history-controls">
       {!pending && !expanded && !invalidEpoch && <ProjectReferencePicker text={text} edit={editText} input={promptInput} />}
-      {(showSteering || showQueue) && <button type="button" className="composer-icon-button" aria-label={t("Queue and steering editors")} title={t("Queue and steering editors")} aria-expanded={recoveryExpanded} aria-controls="composer-recovery-editors" onClick={() => setRecoveryExpanded(value => !value)}><AppIcon name="queue" size={16} /></button>}
-      <button type="button" className="composer-icon-button" aria-label={t("Advanced session controls and diagnostics")} title={t("Advanced session controls and diagnostics")} aria-expanded={diagnosticsExpanded} aria-controls="composer-advanced-diagnostics" onClick={() => setDiagnosticsExpanded(value => !value)}><AppIcon name="settings" size={16} /></button>
+      {(showSteering || showQueue) && <Button variant="minimal" icon={<AppIcon name="queue" size={16} />} aria-label={t("Queue and steering editors")} title={t("Queue and steering editors")} aria-expanded={recoveryExpanded} aria-controls="composer-recovery-editors" onClick={() => setRecoveryExpanded(value => !value)} />}
+      <Button variant="minimal" icon={<AppIcon name="settings" size={16} />} aria-label={t("Advanced session controls and diagnostics")} title={t("Advanced session controls and diagnostics")} aria-expanded={diagnosticsExpanded} aria-controls="composer-advanced-diagnostics" onClick={() => setDiagnosticsExpanded(value => !value)} />
       <PromptChooser disabled={promptSelectionDisabled} capture={capturePromptChooser} />
       <ModelChooser disabled={selectionDisabled || !boundedModelChoices(activeChoices)} capture={captureModelChooser} />
       <span className="sr-only">{t("Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer")}</span>
       {infoControl}
       {usageTarget && <SessionUsageInspector key={JSON.stringify(usageTarget)} target={usageTarget} capability={capability} />}
-      {onOpenReminders && <button ref={remindersTrigger} type="button" className="composer-icon-button" data-reminder-count=""
+      {onOpenReminders && <Button ref={remindersTrigger} variant="minimal" icon={<AppIcon name="reminder" size={16} />} data-reminder-count=""
         disabled={invalidEpoch} aria-label={reminderLabel} title={`${reminderLabel} (Ctrl+G, Ctrl+D)`}
-        onClick={onOpenReminders}><AppIcon name="reminder" size={16} /><span className="reminder-count" aria-hidden="true">{observedReminderCount ?? "?"}</span></button>}
-      <button id="expand-session-prompt" type="button" className="composer-icon-button" disabled={!!pending || invalidEpoch} aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => { inputRevision.current++; setExpanded(true); }}><AppIcon name="expand" size={16} /></button>
-      {observedSteerRun && <button type="button" className="composer-icon-button" onClick={() => steer(true)}
+        onClick={onOpenReminders}><span className="reminder-count" aria-hidden="true">{observedReminderCount ?? "?"}</span></Button>}
+      <Button id="expand-session-prompt" variant="minimal" icon={<AppIcon name="expand" size={16} />} disabled={!!pending || invalidEpoch} aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => { inputRevision.current++; setExpanded(true); }} />
+      {observedSteerRun && <Button variant="minimal" onClick={() => steer(true)}
         disabled={invalidEpoch || !!pending || !!pendingSteer || !availableComposerSteer || !capability.canSubmit(availableComposerSteer)}
         aria-label={t("Steer current composer to observed run")} aria-describedby="observed-steering-help"
         title={t("Steer current composer to observed run {run} (Ctrl+Enter; point-in-time observation, not run completion; retained steering requires separate manual review)", { run: observedSteerRun.expectedRunId })}>
-        <AppIcon name="steer" size={16} /></button>}
-      {observedQueueAttachment && <button type="button" className="composer-icon-button" onClick={() => queueTextInHost(true)}
+        <AppIcon name="steer" size={16} /></Button>}
+      {observedQueueAttachment && <Button variant="minimal" onClick={() => queueTextInHost(true)}
         disabled={invalidEpoch || !!pending || !!pendingQueue || !availableComposerQueue || !capability.canSubmit(availableComposerQueue)}
         aria-label={t("Queue current composer in this host")} aria-describedby="observed-queue-help"
         title={t("Queue current composer for observed attachment {attachment} in this host only; no run target. Reservation does not confirm insertion or execution; composer draft stays editable.", { attachment: observedQueueAttachment.expectedAttachmentGeneration })}>
-        <AppIcon name="queue" size={16} /></button>}
-      {(availableCompact || pendingCompact) && <button ref={compactTrigger} type="button" className="composer-icon-button" onClick={compact}
+        <AppIcon name="queue" size={16} /></Button>}
+      {(availableCompact || pendingCompact) && <Button ref={compactTrigger} variant="minimal" onClick={compact}
         data-epoch={epoch} data-session-id={sessionId} data-project-id={projectId ?? ""}
         disabled={invalidEpoch || !!pendingCompact?.inFlight || (pendingCompact
           ? !capability.canSubmit(pendingCompact.request) : !availableCompact || !capability.canSubmit(availableCompact))}
@@ -658,16 +658,16 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
         aria-describedby="observed-compaction-help"
         title={pendingCompact ? `${t("Manual retry of exact compaction:")} ${t("epoch")} ${pendingCompact.request.expectedEpoch}, ${t("session")} ${pendingCompact.request.sessionId}, ${t("runtime")} ${pendingCompact.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingCompact.request.expectedAttachmentGeneration}, ${t("request")} ${pendingCompact.request.clientRequestId}`
           : t("Compact observed idle attachment (Ctrl+F11; point-in-time idle observation permits only an attempt; provider must prove idle)")}>
-        <AppIcon name="compact" size={16} /></button>}
-      {(availableAbortRun || pendingAbortRun) && <button type="button" className={`cancel-run-button${cancellationPrimary ? " primary-button" : ""}`} onClick={abortRun}
+        <AppIcon name="compact" size={16} /></Button>}
+      {(availableAbortRun || pendingAbortRun) && <Button intent={cancellationPrimary ? "danger" : "none"} icon={<AppIcon name="stop" size={16} />} onClick={abortRun}
         disabled={invalidEpoch || !!pendingAbortRun?.inFlight || (pendingAbortRun
           ? !capability.canSubmit(pendingAbortRun.request) : !availableAbortRun || !capability.canSubmit(availableAbortRun))}
         aria-label={pendingAbortRun ? t("Retry exact cancellation request for observed run {run}", { run: pendingAbortRun.request.expectedRunId }) : t("Cancel observed run")}
         aria-describedby="observed-run-cancellation-help"
         title={pendingAbortRun ? `${t("Manual retry of exact cancellation:")} ${t("epoch")} ${pendingAbortRun.request.expectedEpoch}, ${t("session")} ${pendingAbortRun.request.sessionId}, ${t("runtime")} ${pendingAbortRun.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingAbortRun.request.expectedAttachmentGeneration}, ${t("run")} ${pendingAbortRun.request.expectedRunId}, ${t("request")} ${pendingAbortRun.request.clientRequestId}`
           : t("Cancel observed run {run} (point-in-time runtime observation, not original Send Abort; signalling does not confirm completion)", { run: availableAbortRun?.expectedRunId ?? "" })}>
-        <AppIcon name="stop" size={16} /><span>{t(pendingAbortRun ? "Retry exact cancellation" : "Cancel observed run")}</span></button>}
-      <button type="button" aria-label={t(pending ? "Retry exact request" : "Send")} title={t(pending ? "Retry exact request" : "Send")} className={`send-button${cancellationPrimary ? "" : " primary-button"}`} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || captureSubmission(epoch, sessionId, text, "availability", images.length ? selected : null, null, images) === null)} onClick={submit}><AppIcon name={pending ? "refresh" : "send"} size={16} /></button>
+        {t(pendingAbortRun ? "Retry exact cancellation" : "Cancel observed run")}</Button>}
+      <Button aria-label={t(pending ? "Retry exact request" : "Send")} title={t(pending ? "Retry exact request" : "Send")} intent={cancellationPrimary ? "none" : "primary"} icon={<AppIcon name={pending ? "refresh" : "send"} size={16} />} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || captureSubmission(epoch, sessionId, text, "availability", images.length ? selected : null, null, images) === null)} onClick={submit} />
     </div>
     </div>
     {diagnosticsExpanded && <details className="composer-selection-evidence"><summary>{t("Session configuration")}</summary><p className="composer-notice prompt-selection-observation">

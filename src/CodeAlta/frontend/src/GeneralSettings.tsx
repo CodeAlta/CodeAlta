@@ -1,4 +1,4 @@
-import { HTMLSelect } from "@blueprintjs/core";
+import { Button, ButtonGroup, Card, Checkbox, HTMLSelect } from "@blueprintjs/core";
 import type { ProjectSort } from "./projectRail";
 import type { Theme, PreferenceNotices } from "./windowPreferences";
 import { useShellLanguage } from "./shellLanguage";
@@ -16,7 +16,7 @@ export function GeneralSettings({ theme, setTheme, sort, setSort, desktopCollaps
   notices: PreferenceNotices;
 }) {
   const { t, locale, choice, issue, setLanguage } = useShellLanguage();
-  return <section className="settings-card" aria-labelledby="general-settings-title"><div className="settings-icon">◐</div><div>
+  return <Card className="appearance-settings" aria-labelledby="general-settings-title">
     <h2 id="general-settings-title">{t("Appearance & navigator")}</h2>
     <p>{t("Local preferences for this window. Changes apply immediately.")}</p>
     <label htmlFor="settings-language">{t("Language")}</label>
@@ -25,10 +25,10 @@ export function GeneralSettings({ theme, setTheme, sort, setSort, desktopCollaps
     </HTMLSelect>
     <p className="muted-text">{t("Shell language only: navigation, Settings, General and shortcut Help. Host language is unchanged. Composer, timeline, management dialogs and backend feedback remain English. Restarting does not translate these areas.")}</p>
     {issue && <p role="status" className="notice" data-diagnostic={issue}>{preferenceNotice(locale, "Language", "English", issue)}</p>}
-    <fieldset><legend>{t("Theme")}</legend><div className="segmented">
-      <button type="button" aria-pressed={theme === "dark"} onClick={() => setTheme("dark")}>{t("Dark")}</button>
-      <button type="button" aria-pressed={theme === "light"} onClick={() => setTheme("light")}>{t("Light")}</button>
-    </div></fieldset>
+    <fieldset><legend>{t("Theme")}</legend><ButtonGroup>
+      <Button active={theme === "dark"} aria-pressed={theme === "dark"} onClick={() => setTheme("dark")}>{t("Dark")}</Button>
+      <Button active={theme === "light"} aria-pressed={theme === "light"} onClick={() => setTheme("light")}>{t("Light")}</Button>
+    </ButtonGroup></fieldset>
     {notices.theme && <p role="status" className="notice" data-diagnostic={notices.theme}>{preferenceNotice(locale, "Theme", locale === "en" ? "dark" : t("Dark"), notices.theme)}</p>}
     <label htmlFor="settings-project-sort">{t("Sort projects")}</label>
     <HTMLSelect id="settings-project-sort" value={sort} onChange={event => setSort(event.target.value as ProjectSort)}>
@@ -43,8 +43,8 @@ export function GeneralSettings({ theme, setTheme, sort, setSort, desktopCollaps
     <p className="muted-text">{t("Limits loaded navigator and saved-browser rows only, not globally recent sessions. Active navigator session and required ancestors remain visible. Show all loaded or browse to reach older rows; no extra reads.")}</p>
     <output>{t(recentSessionCount === 1 ? "{count} session" : "{count} sessions", { count: recentSessionCount })}</output>
     {notices.recent && <p role="status" className="notice" data-diagnostic={notices.recent}>{preferenceNotice(locale, "Recent session count", "20", notices.recent)}</p>}
-    <label className="settings-checkbox"><input type="checkbox" checked={desktopCollapsed} onChange={event => setDesktopCollapsed(event.target.checked)} />{t("Collapse desktop project rail")}</label>
+    <Checkbox checked={desktopCollapsed} onChange={event => setDesktopCollapsed(event.currentTarget.checked)} label={t("Collapse desktop project rail")} />
     <p className="muted-text">{t("On narrow screens, Show projects temporarily reveals the rail without changing this desktop preference.")}</p>
     {notices.rail && <p role="status" className="notice" data-diagnostic={notices.rail}>{preferenceNotice(locale, "Desktop projects", locale === "en" ? "expanded" : t("Show projects"), notices.rail)}</p>}
-  </div></section>;
+  </Card>;
 }

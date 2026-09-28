@@ -59,7 +59,7 @@ export function ProviderChooser({ epoch, sessionId, providerKey, disabled, curre
     finally { if (scope.current === controller) { submitting.current = false; setBusy(false); } }
   }
   return <span className="provider-chooser">
-    <HTMLSelect className="current-provider" aria-label={t("Change provider")} value={providerKey} disabled={disabled || busy}
+    <HTMLSelect fill className="current-provider" aria-label={t("Change provider")} value={providerKey} disabled={disabled || busy}
       title={t("History and draft are kept. The provider connects on your next Send.")}
       onFocus={() => { if (!choices && !busy) void load(); }} onChange={event => void select(event.currentTarget.value)}>
       {!choices?.providers.some(provider => provider.id === providerKey) && <option value={providerKey}>{providerKey}</option>}
