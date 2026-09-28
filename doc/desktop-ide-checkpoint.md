@@ -360,6 +360,15 @@ not successful transfer recovery. Additional checks ensure missing sessions are 
 AgentRuntime resume and unknown providers leave the original journal byte-for-byte unchanged.
 The 15 AgentRuntime tests, actual-App baseline browser test and strict TypeScript passed.
 
+App-first catalog correction: opening the composer's Model selector when its observed list is
+empty, or using the adjacent Refresh choices button, now loads that session provider through
+the existing `modelCatalog.models` service and re-reads session-scoped choices. This reaches
+the real `ModelProviderInitializationService.GetModelsAsync` path used by the existing provider
+infrastructure; no substitute provider or model list is shipped. Passive navigation still does
+not initialize providers. Late scope/provider changes and failed catalog loads do not apply
+model choices. On first empty-list activation, use the selector again after loading finishes.
+Provider switching and catalogs beyond the current bounded choices limit remain open work.
+
 The Explorer now nests sessions beneath the selected project in an accordion rather than
 reserving separate vertical project/session panes. Project and session rows are compact single
 lines. Sessions initially use the configured recent-session limit (20 by default); **Show more…**
