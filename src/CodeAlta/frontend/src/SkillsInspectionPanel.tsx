@@ -1,3 +1,4 @@
+import { HTMLSelect } from "@blueprintjs/core";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { SkillsCapture, SkillsInspection } from "./skillsInspection";
 import { useShellLanguage } from "./shellLanguage";
@@ -18,11 +19,11 @@ export function SkillsInspectionPanel({ owner, capture }: { owner: SkillsInspect
     <p>{t("One root per action: up to 257 encountered entries, 64 directories, 16 candidates and 4 bounded metadata reads. Five-second cooperative deadline; OS calls may block longer. No automatic refresh.")}</p>
     {!available && <p role="status">{t("Unavailable: select a verified, nonarchived saved session in an owned host. Catalog-only and unknown scopes cannot scan.")}</p>}
     {available && <p>{t("Verification scope: {scope}; saved session {session}. Root ownership is rechecked by the host on Scan.", { scope: available.target.scope, session: available.target.sessionId })}</p>}
-    <label>{t("Source root")} <select aria-label={t("Skill source root")} value={root} onChange={event => { owner.invalidate(); setRoot(event.target.value); setSelected(null); }}>
+    <label>{t("Source root")} <HTMLSelect aria-label={t("Skill source root")} value={root} onChange={event => { owner.invalidate(); setRoot(event.target.value); setSelected(null); }}>
       <option value="">{t("Choose a supported root")}</option>
       <option value="project_alta" disabled={available?.target.scope !== "project"}>{t("Project CodeAlta — .alta/skills")}</option>
       <option value="user_alta">{t("User CodeAlta — host catalog root/skills")}</option>
-    </select></label>
+    </HTMLSelect></label>
     <button type="button" disabled={!available || !root || state.busy || root === "project_alta" && available.target.scope !== "project"}
       onClick={() => { const original = capture(); if (original) { setSelected(null); void owner.scan({ ...original.target, rootKind: root }, original.current, original.capability); } }}>{t("Scan raw candidates")}</button>
     <p role="status">{state.message}</p>

@@ -172,6 +172,43 @@ internal sealed class SessionOperationsService
         catch (Exception) { return new("unavailable", _epoch, request.SessionId, null, [], []); }
     }
 
+    [NeoRpcMethod("providerChoices")]
+    public async Task<SessionProviderChoices> ProviderChoicesAsync(SessionChoicesRequest request, CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return new(denied, _epoch, request.SessionId, null, null, null, null, []);
+            if (!Identity(request.SessionId, 256)) return new("invalid_request", _epoch, request.SessionId, null, null, null, null, []);
+        }
+        var context = _commands is null ? null : await _commands.GetProviderSelectionAsync(request.SessionId).WaitAsync(cancellationToken).ConfigureAwait(false);
+        return context is null ? new("unavailable", _epoch, request.SessionId, null, null, null, null, [])
+            : new("ok", _epoch, request.SessionId, context.RuntimeInstanceId.ToString("D"), context.AttachmentGeneration?.ToString(CultureInfo.InvariantCulture),
+                context.ProviderKey, context.Revision, context.Providers.Take(32).Select(provider => new SessionProviderChoice(provider.ProviderId.Value, provider.DisplayName)).ToArray());
+    }
+
+    [NeoRpcMethod("selectProvider")]
+    public async Task<SessionProviderResult> SelectProviderAsync(SessionProviderRequest request, CancellationToken cancellationToken)
+    {
+        Task<string> work;
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return new(denied, _epoch, request.SessionId);
+            if (!Identity(request.SessionId, 256) || !Identity(request.ProviderKey, 256) || !Identity(request.ExpectedProviderKey, 256)
+                || !CanonicalGuid(request.RuntimeInstanceId, out var runtime) || runtime == Guid.Empty
+                || !long.TryParse(request.Revision, NumberStyles.None, CultureInfo.InvariantCulture, out var revision) || revision < 0
+                || request.AttachmentGeneration is not null && (!long.TryParse(request.AttachmentGeneration, NumberStyles.None, CultureInfo.InvariantCulture, out var generation) || generation < 0))
+                return new("invalid_request", _epoch, request.SessionId);
+            if (_commands is null) return new("unavailable", _epoch, request.SessionId);
+            cancellationToken.ThrowIfCancellationRequested();
+            work = _commands.SelectProviderAsync(new(request.SessionId, runtime,
+                request.AttachmentGeneration is null ? null : long.Parse(request.AttachmentGeneration, CultureInfo.InvariantCulture),
+                request.ExpectedProviderKey, request.Revision, []), request.ProviderKey);
+        }
+        return new(await work.WaitAsync(cancellationToken).ConfigureAwait(false), _epoch, request.SessionId);
+    }
+
     [NeoRpcMethod("abort")]
     public SessionAdmission Abort(SessionAbortRequest request, CancellationToken cancellationToken)
     {

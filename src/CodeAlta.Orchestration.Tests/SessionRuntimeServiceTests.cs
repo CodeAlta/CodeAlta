@@ -12,6 +12,65 @@ namespace CodeAlta.Orchestration.Tests;
 public sealed class SessionRuntimeServiceTests
 {
     [TestMethod]
+    public async Task IdleProviderSelection_PersistsCoherentStateWithoutExecutingProviders_AndRejectsStaleRequests()
+    {
+        using var temp = new TempDirectory();
+        var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplace(new(new("target"), "Target", "openai-responses"), () => throw new AssertFailedException("Selection must not activate a provider."));
+        await using var hub = new AgentHub(registry, temp.Path);
+        await using var runtime = CreateRuntime(temp.Path, hub);
+        var journal = new SessionViewCatalog(new CatalogOptions { GlobalRoot = temp.Path }).JournalStore;
+        var store = journal.CreateSessionStore();
+        var now = DateTimeOffset.UtcNow;
+        var descriptor = new SessionViewDescriptor { SessionId = "provider-selection", Kind = SessionViewKind.GlobalSession,
+            ProviderId = "original", ProviderKey = "original", Title = "Preserved", WorkingDirectory = temp.Path, CreatedAt = now, UpdatedAt = now };
+        await journal.EnsureHeaderAsync(descriptor);
+        await store.UpsertSessionAsync(new() { SessionId = descriptor.SessionId, ProviderId = new("original"), ProviderKey = "original",
+            ProtocolFamily = "original", WorkingDirectory = temp.Path, Title = "Preserved", CreatedAt = now, UpdatedAt = now });
+        await store.UpsertStateAsync(new() { SessionId = descriptor.SessionId, ProviderKey = "original", ProtocolFamily = "original",
+            ProviderSessionId = "opaque-original", UpdatedAt = now });
+        await journal.AppendStateAsync(descriptor, new() { ProviderKey = "original", AgentPromptId = "default" });
+        var before = await runtime.ReadProviderSelectionAsync(descriptor.SessionId);
+        Assert.IsNotNull(before);
+        Assert.AreEqual("stale_runtime", await runtime.SelectOwnedProviderAsync(before with { RuntimeInstanceId = Guid.NewGuid() }, "target"));
+        Assert.AreEqual("stale_attachment", await runtime.SelectOwnedProviderAsync(before with { AttachmentGeneration = 1 }, "target"));
+        Assert.AreEqual("provider_unavailable", await runtime.SelectOwnedProviderAsync(before, "missing"));
+        await journal.AppendStateAsync(descriptor, new() { ProviderKey = "original", QueuedPrompts = [new()
+            { QueueItemId = "keep", Kind = "prompt", Prompt = "Retain this queued prompt", State = "queued", CreatedAt = now }] });
+        await Assert.ThrowsAsync<InvalidOperationException>(() => runtime.SelectOwnedProviderAsync(before, "target"));
+        Assert.AreEqual("original", (await store.GetSessionSummaryAsync(descriptor.SessionId))!.ProviderKey);
+        Assert.AreEqual("opaque-original", (await store.GetStateAsync(descriptor.SessionId))!.ProviderSessionId);
+        await journal.AppendStateAsync(descriptor, new() { ProviderKey = "original", AgentPromptId = "default" });
+        var path = Directory.EnumerateFiles(temp.Path, "*.jsonl", SearchOption.AllDirectories).Single();
+        var bytes = await File.ReadAllBytesAsync(path);
+        using (var readLock = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            Exception? failure = null;
+            try { await runtime.SelectOwnedProviderAsync(before, "target"); }
+            catch (Exception exception) { failure = exception; }
+            Assert.IsTrue(failure is IOException or UnauthorizedAccessException, "Locked canonical journal must reject replacement.");
+        }
+        CollectionAssert.AreEqual(bytes, await File.ReadAllBytesAsync(path));
+        Assert.AreEqual(0, Directory.EnumerateFiles(temp.Path, "*.selection-*", SearchOption.AllDirectories).Count());
+        var turn = new AgentActivityEvent(new("original"), descriptor.SessionId, now, new("incomplete"),
+            AgentActivityKind.Turn, AgentActivityPhase.Started, "turn", null, "Turn", null);
+        await store.AppendEventsAsync("original", "original", descriptor.SessionId, [turn]);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => runtime.SelectOwnedProviderAsync(before, "target"));
+        await store.AppendEventsAsync("original", "original", descriptor.SessionId, [turn with { Phase = AgentActivityPhase.Completed }]);
+        Assert.AreEqual("ok", await runtime.SelectOwnedProviderAsync(before, "target"));
+        var fresh = journal.CreateSessionStore();
+        Assert.AreEqual("target", (await fresh.GetSessionSummaryAsync(descriptor.SessionId))!.ProviderKey);
+        var state = await fresh.GetStateAsync(descriptor.SessionId);
+        Assert.IsNotNull(state);
+        Assert.AreEqual("target", state.ProviderKey);
+        Assert.IsNull(state.ProviderSessionId);
+        Assert.IsNull(state.ProviderState);
+        Assert.AreEqual("target", (await journal.ReadLatestStateAsync(descriptor.SessionId, now))!.ProviderKey);
+        Assert.AreEqual("stale_selection", await runtime.SelectOwnedProviderAsync(before, "target"));
+        Assert.AreEqual("target", (await runtime.ReadProviderSelectionAsync(descriptor.SessionId))!.ProviderKey);
+    }
+
+    [TestMethod]
     public void FormatAgentPromptSourcePathForTimeline_UsesProjectRelativePathWhenAvailable()
     {
         var projectRoot = Path.Combine(Path.GetTempPath(), "CodeAltaProject");

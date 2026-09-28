@@ -795,6 +795,49 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
         return projection?.Summary?.ProviderId ?? new ModelProviderId(providerKey);
     }
 
+    internal async Task CommitProviderSelectionAsync(AgentTransferSnapshot original, AgentSessionSummary summary,
+        AgentSessionState state, string? header, IReadOnlyList<string> additionalSnapshots, CancellationToken token)
+    {
+        var path = await TryGetSessionFilePathAsync(summary.SessionId, token).ConfigureAwait(false)
+            ?? throw new KeyNotFoundException("The transfer session no longer exists.");
+        var snapshots = new List<string>
+        {
+            new AgentRawEvent(summary.ProviderId, summary.SessionId, summary.UpdatedAt, SessionSummaryEventType,
+                JsonSerializer.SerializeToElement(summary, AgentJsonSerializerContext.Default.AgentSessionSummary)).ToJson(),
+            new AgentRawEvent(summary.ProviderId, summary.SessionId, state.UpdatedAt, SessionStateEventType,
+                JsonSerializer.SerializeToElement(state, AgentJsonSerializerContext.Default.AgentSessionState)).ToJson(),
+        };
+        snapshots.AddRange(additionalSnapshots);
+        await _journalFile.ReplaceWithSnapshotsAsync(path, original.Revision, header, snapshots, token).ConfigureAwait(false);
+    }
+
+    internal async Task<AgentTransferSnapshot> ReadTransferSnapshotAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        cancellationToken.ThrowIfCancellationRequested();
+        var path = await TryGetSessionFilePathAsync(sessionId, cancellationToken).ConfigureAwait(false)
+            ?? throw new KeyNotFoundException("The original transfer session does not exist.");
+        return await _journalFile.WithPathLockAsync(path, async () =>
+        {
+            var before = GetFileStamp(path) ?? throw new KeyNotFoundException("The original transfer journal does not exist.");
+            // Unlike display/history reads, transfer must reject a malformed final record.
+            var projection = await ProjectSessionFileWithHistoryAsync(path, cancellationToken, strict: true).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (GetFileStamp(path) != before)
+                throw new InvalidOperationException("The journal changed during transfer preparation.");
+            var summary = projection.Summary;
+            var state = projection.State;
+            if (summary is null || state is null || summary.SessionId != sessionId || state.SessionId != sessionId
+                || !string.Equals(summary.ProviderKey, state.ProviderKey, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(summary.ProtocolFamily, state.ProtocolFamily, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The original session requires recovery before provider transfer.");
+            if (projection.History.Any(value => value.SessionId != sessionId))
+                throw new InvalidOperationException("The journal contains another session's history.");
+            return new AgentTransferSnapshot(summary, state, projection.History,
+                new AgentHistoryRevision(sessionId, before.Length, before.LastWriteTimeUtc.Ticks));
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task<SessionProjection?> TryProjectSessionAsync(
         string sessionId,
         bool includeHistory,
@@ -911,13 +954,15 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
 
     private async Task<SessionProjection> ProjectSessionFileWithHistoryAsync(
         string sessionFile,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool strict = false)
     {
         AgentSessionSummary? summary = null;
         AgentSessionState? state = null;
         var history = new List<AgentEvent>();
 
-        await foreach (var @event in ReadJournalEventsAsync(sessionFile, cancellationToken).ConfigureAwait(false))
+        await using var stream = await OpenReadStreamAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+        await foreach (var @event in ReadJournalEventsAsync(stream, tolerateIncompleteTail: !strict, cancellationToken).ConfigureAwait(false))
         {
             if (@event is AgentRawEvent rawEvent)
             {

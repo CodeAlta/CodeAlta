@@ -13,7 +13,7 @@ test("reverse pages retain the latest user prompt across the 1,000-event window 
     timestamp: "2026-01-01T00:00:00Z", kind: index === 1204 ? "User" : "Assistant", phase: null,
     contentId: `${index}`, activityId: null, parentActivityId: null, interactionId: null, name: null,
     text: index === 1204 ? "latest user prompt" : `${index}`, details: null, textTruncated: false,
-    files: null, detailsTruncated: false, bodyOmitted: false,
+    tool: null, files: null, detailsTruncated: false, bodyOmitted: false,
   } satisfies HistoryResponse["entries"][number]));
   let timeline;
   for (let end = 1205; end > 0 && (timeline?.entries.length ?? 0) < 1000; end -= 100) {
@@ -35,7 +35,7 @@ test("an uneven initial page keeps the newest 1,000 and rewinds the older cursor
     offset: `${index * 200}`, eventType: "contentCompleted", providerId: "p", sessionId: "runtime", runId: null,
     timestamp: "2026-01-01T00:00:00Z", kind: "Assistant", phase: null, contentId: `${index}`,
     activityId: null, parentActivityId: null, interactionId: null, name: null, text: `turn-${index}`, details: null,
-    files: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false,
+    tool: null, files: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false,
   });
   let timeline;
   for (let end = 1205; end > 0 && (timeline?.entries.length ?? 0) < 1000;) {
@@ -108,7 +108,7 @@ test("timeline paging accumulates distinct rows and an explicit restart replaces
     offset: "0", eventType: "contentDelta", providerId: "p", sessionId: "runtime", runId: null,
     timestamp: "2026-01-01T00:00:00Z", kind: "Assistant", phase: null, contentId: "content",
     activityId: null, parentActivityId: null, interactionId: null, name: null, text: "delta", details: null,
-    files: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false,
+    tool: null, files: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false,
   };
   const cursor = { version: 2, sessionId: "s", length: "100", lastWriteUtcTicks: "7", offset: "10" };
   const first = mergeHistoryPage(undefined, request, { ...page, entries: [{ ...entry, offset: "10" }], next: cursor });
@@ -124,7 +124,7 @@ test("timeline paging de-duplicates offsets and remains bounded", () => {
     offset: `${index + 100}`, eventType: "contentCompleted", providerId: "p", sessionId: "s", runId: null,
     timestamp: "2026-01-01T00:00:00Z", kind: "Assistant", phase: null, contentId: `${index}`,
     activityId: null, parentActivityId: null, interactionId: null, name: null, text: `${index}`, details: null,
-    files: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false,
+    tool: null, files: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false,
   }));
   const cursor = { version: 2, sessionId: "s", length: "2000", lastWriteUtcTicks: "7", offset: "1000" };
   const first = mergeHistoryPage(undefined, request, { ...page, entries, next: cursor });

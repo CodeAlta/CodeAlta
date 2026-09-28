@@ -12,9 +12,24 @@ const record: TimelineItem = { key: "42", eventType: "sessionUpdate", category: 
   metadata: ["Provider: literal"], truncated: false, bodyOmitted: false, copyMarkdown: "original\nbytes" };
 
 test("command cards summarize identity without displaying entire command scripts", () => {
-  assert.equal(commandPreview('git commit -m "long message"; git status --short'), "git commit…");
-  assert.equal(commandPreview("dotnet test -c Release"), "dotnet test…");
-  assert.ok(commandPreview('"' + "x".repeat(500)).length <= 49);
+  assert.equal(commandPreview('git commit -m "long message"; git status --short'), 'git commit -m "long message"; git status --short');
+  assert.equal(commandPreview("dotnet test -c Release"), "dotnet test -c Release");
+  assert.ok(commandPreview('"' + "x".repeat(500)).length <= 161);
+});
+
+test("tool cards keep output statistics separate from clipped previews and expose outcomes", () => {
+  for (const title of ["shell_command", "alta", "apply_patch"]) {
+    const html = renderToStaticMarkup(<TimelineMessage toolTile item={{ ...record, category: "tool", title,
+      markdown: null, summary: "command with long arguments", summaryIsCode: true, toolPhase: "completed",
+      toolOutput: "output ".repeat(100), toolOutputLines: 27, toolOutputBytes: 1434 }} />);
+    assert.match(html, /tool-output-stats[^>]*>27L · 1\.4 KB/);
+    assert.match(html, /tool-outcome[^>]*>Completed/);
+    assert.match(html, new RegExp(title));
+  }
+  const unknown = renderToStaticMarkup(<TimelineMessage toolTile item={{ ...record, category: "tool", markdown: null,
+    toolPhase: "failed", toolOutput: "incomplete preview" }} />);
+  assert.match(unknown, /tool-outcome[^>]*>Failed/);
+  assert.doesNotMatch(unknown, /tool-output-stats/);
 });
 
 test("status rows are compact and details are dialog actions, not permanent disclosures", () => {

@@ -61,7 +61,8 @@ internal static class HistoryFileProjection
             var rowCost = 256 + 6 * (candidate.Path.Length + (kind?.Length ?? 0));
             if (cost + rowCost > budget) { partial = true; break; }
             cost += rowCost;
-            rows.Add(new(candidate.Path, kind, null));
+            var (added, removed) = CountLines(candidate.Diff);
+            rows.Add(new(candidate.Path, kind, null, added, removed));
             diffs.Add(candidate.Diff);
         }
         for (var index = 0; index < rows.Count; index++)
@@ -77,7 +78,22 @@ internal static class HistoryFileProjection
 
     private static string? Text(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object
         && value.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.String ? property.GetString() : null;
+
+    // Match the TUI's supplied-diff statistics, independently of the preview budget.
+    private static (int? Added, int? Removed) CountLines(string? diff)
+    {
+        if (string.IsNullOrWhiteSpace(diff)) return (null, null);
+        var added = 0;
+        var removed = 0;
+        foreach (var line in diff.AsSpan().EnumerateLines())
+        {
+            if (line.StartsWith("+++", StringComparison.Ordinal) || line.StartsWith("---", StringComparison.Ordinal)) continue;
+            if (line.StartsWith("+", StringComparison.Ordinal)) added++;
+            else if (line.StartsWith("-", StringComparison.Ordinal)) removed++;
+        }
+        return added > 0 || removed > 0 ? (added, removed) : (null, null);
+    }
 }
 
-internal sealed record HistoryFileRow(string Path, string? Kind, string? Diff);
+internal sealed record HistoryFileRow(string Path, string? Kind, string? Diff, int? Added = null, int? Removed = null);
 internal sealed record HistoryFileSet(HistoryFileRow[] Rows, bool Partial);

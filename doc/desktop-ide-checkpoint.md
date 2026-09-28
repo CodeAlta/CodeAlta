@@ -471,3 +471,92 @@ defaults were updated after the initial generated-contract compile failure. No n
 acceptance, full suite or site work. These improvements do not establish all-card/prompt parity:
 live tool chronology, richer pre-truncation tool summaries, TUI turn aggregation, permission-policy
 visibility, provider switching and remaining lifecycle-only panel updates still need work.
+
+### Grouped tools, dialog polish and idle provider selection (September 28)
+
+This follow-up supersedes the provider-switching blocker above for **idle selection** only.
+The composer provider button now loads enabled registrations from the real host registry and
+saves the selected provider without executing it. History and the draft are retained; model,
+reasoning effort and incompatible opaque continuation are cleared. The new provider attaches
+on the next Send, matching the TUI's deferred-selection behavior. This does not invoke or
+claim to repair the legacy live cross-provider transfer path or its separate prepare prototype.
+
+The owned command service reserves mutation admission and the session actor validates runtime,
+attachment and selection guards, active/draining/queued work, asks, permissions and user inputs.
+Persisted unfinished turns and queued work also prevent switching. Summary, continuation and
+local selection share a flushed same-directory journal replacement; a stale revision or failed
+replacement leaves the original journal intact. Derived-cache reads check file stamps. The old
+attachment is retired only after that durable decision. Cleanup failure retains a blocked
+transition and reports `selected_cleanup_required`, not a rollback. Lifecycle/catalog events
+publish the committed state; admitted work is not canceled by a disconnected chooser, and the
+UI does not retry mutations. This is an owned-idle-session contract, not qualification for
+simultaneous writers in multiple hosts or the full prepare/commit recovery fault matrix.
+
+Tool groups now ignore nonvisual journal plumbing while respecting typed provider/run/parent
+and visible-message boundaries. Retained live groups remain separate from journal chronology.
+Cards show call/done counts, fuller command identity and supplied output previews. Before raw
+JSON truncation, the host projects bounded argument/output fields (up to 8 Ki text units total,
+further constrained by the existing wire budget). File counts survive omitted diff previews.
+Raw record/chunk controls and repeated shortening/reasoning headings are no longer routine
+timeline chrome. Details remain bounded; this does not claim complete turn-wide aggregation.
+
+Tool/file dialogs have padded, wrapped previews, literal React-rendered JSON highlighting,
+themed controls, outside-click and Escape dismissal, and guarded focus restoration. Timeline
+cards have a left gutter and both persisted/live assistant labels say “Assistant.” A narrow
+localized heading overflow found by the file fixture was fixed with heading wrapping.
+
+Verification: 50 focused frontend checks pass, including mounted production App at 390/1280px
+in both themes, grouping, dialogs, highlighting, draft retention, rejected provider selection
+without retry, and dismissal during an outstanding provider request. File/tool inspection
+checks retain IME, copy, modal and scope invalidation coverage. Strict TypeScript, Release
+desktop/frontend build, 12 history tests, 14 runtime tests and 8 journal/cache tests pass.
+The existing bundle-size warning remains. Logs are retained under `tmp/ide-ux-20260927/`.
+
+Two older browser fixtures remain red: `longMessage.browser.test.ts` expects collapsed
+user/assistant messages, and `toolDetail.browser.test.ts` expects the removed `.event-details`
+inline disclosure/wrap toggle. Those expectations already contradict the pre-slice HEAD
+presentation; their isolated bridge resolution is fixed, but their broader scroll matrices
+still need migration. The initial failed logs and subsequent focused passing logs are retained;
+this is not an all-tests-green claim. No native host/live provider execution, full suite,
+website work or manual screenshot acceptance was performed.
+
+### Tool statistics and Blueprint dropdowns (September 28)
+
+Tool cards now separate the tool name, wrapped command, outcome, output preview and
+non-clipped `27L · 1.4 KB` statistics. The old 45%-width title cap no longer applies
+inside a tool card. Completed commands/titles are green and failed ones red in both
+themes; text outcomes remain visible without color. Live tool titles use the same
+reported-phase colors, but their limited live DTOs do not invent output totals.
+
+The host measures complete output before wire/detail truncation, using the TUI's
+CRLF/CR normalization, trailing-newline line accounting and UTF-8 byte counts.
+Typed completed tool output can supply its exact session/provider/run/parent activity's
+totals and bounded details. Missing output has no fabricated count; retained deltas
+and preview text are not treated as complete output.
+
+All frontend native dropdowns now use actual Blueprint `HTMLSelect`, including
+composer provider/model/prompt/reasoning, creation, settings, catalogs and session/skill
+browsers. The provider selector is no longer a dialog. Choices load on eligibility
+changes (or user focus after an unavailable read), while mutations retain host revision,
+runtime, attachment and lifetime guards, no automatic retries, and next-Send attachment.
+Admitted completion survives transient idle-control disablement but not unmount/session
+replacement. The explicit Blueprint request required adding pinned `@blueprintjs/core`
+6.20.0 and its npm lockfile dependencies; only its HTMLSelect styling is applied through
+the existing palette, not Blueprint's global reset.
+
+Verification: 47 focused frontend checks and 21 history projection tests pass; strict
+TypeScript and Release desktop/frontend build pass. Mounted production-App fixtures
+check narrow/wide layouts, both themes, visible statistics, command wrapping, semantic
+colors, Blueprint wrappers, provider draft retention, stale rejection/no retry, transient
+disablement and unmounted completion. Initial failures are retained in the local evidence
+directory: a browser focus-emulation omission and a translation-key type widening were
+fixed. `generalSettings.browser.test.ts` still stops on a pre-existing assertion for the
+removed `ProjectRailToggle` in `main.tsx`; its dropdown assertion was updated, not its
+unrelated rail contract. The two older browser gaps above remain unchanged.
+
+The existing bundle-size warning remains. Blueprint itself declares React 19 support,
+but transitive `react-popper` peer ranges still cause npm warnings and an `npm ls react
+react-dom` `ELSPROBLEMS` result; no overrides or dependency-validation bypass were added.
+No native host/live provider execution, full suite, website build or manual screenshot
+acceptance was performed. Logs are under `tmp/ide-ux-20260927/tool-dropdown-*` and
+`blueprint-peer-audit.log`; fixture screenshots remain isolated test artifacts.

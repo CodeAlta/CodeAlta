@@ -10,6 +10,85 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class DesktopHistoryTests
 {
     [TestMethod]
+    [DataRow("", 0, 0)]
+    [DataRow("\r\n\r", 0, 2)]
+    [DataRow("\né\r\n\r", 2, 5)]
+    [DataRow("😀", 1, 4)]
+    public void ToolProjection_CountsEmptyAndUnicodeOutput(string output, int lines, int bytes)
+    {
+        var summary = HistoryToolProjection.ProjectOutput(output, 4096, out _);
+        Assert.AreEqual(lines, summary!.OutputLines);
+        Assert.AreEqual(bytes, summary.OutputBytes);
+    }
+
+    [TestMethod]
+    public void ToolProjection_DoesNotInventMissingOutputTotals()
+    {
+        var activity = new AgentActivityEvent(new("provider"), "session", DateTimeOffset.UnixEpoch, new("run"),
+            AgentActivityKind.ToolCall, AgentActivityPhase.Started, "activity", null, "alta", "Starting tool");
+        Assert.IsNull(HistoryToolProjection.Project(activity).OutputBytes);
+    }
+
+    [TestMethod]
+    [DataRow("shell_command")]
+    [DataRow("alta")]
+    [DataRow("apply_patch")]
+    public void ToolProjection_CountsNormalizedUtf8BeforeTruncation(string name)
+    {
+        var output = "é\r\n" + new string('x', 9000) + "\r\n\r\n";
+        var activity = new AgentActivityEvent(new("provider"), "session", DateTimeOffset.UnixEpoch, new("run"),
+            AgentActivityKind.ToolCall, AgentActivityPhase.Completed, "activity", null, name, null,
+            JsonSerializer.SerializeToElement(new { result = new { content = output } }));
+        var row = WorkspaceService.ProjectHistory(new([new AgentSessionHistoryEntry(0, activity)], null, false)).Entries.Single();
+        Assert.AreEqual(2, row.Tool!.OutputLines);
+        Assert.AreEqual(9005, row.Tool.OutputBytes);
+        Assert.IsTrue(row.Tool.Fields.Single().Truncated);
+    }
+
+    [TestMethod]
+    public void ToolProjection_ProjectsCompletedOutputBeforeTextTruncation()
+    {
+        var completed = new AgentContentCompletedEvent(new("provider"), "session", DateTimeOffset.UnixEpoch, new("run"),
+            AgentContentKind.ToolOutput, "content", "activity", "é\r\n" + new string('x', 40000));
+        var row = WorkspaceService.ProjectHistory(new([new AgentSessionHistoryEntry(0, completed)], null, false)).Entries.Single();
+        Assert.IsTrue(row.TextTruncated);
+        Assert.AreEqual(2, row.Tool!.OutputLines);
+        Assert.AreEqual(40003, row.Tool.OutputBytes);
+    }
+
+    [TestMethod]
+    public void ToolProjection_ReadsJsonEncodedArgumentsAndLiteralOutput()
+    {
+        var details = JsonSerializer.SerializeToElement(new { arguments = "{\"command\":\"dotnet test -c Release\"}", result = "first\nsecond" });
+        var activity = new AgentActivityEvent(new("provider"), "session", DateTimeOffset.UnixEpoch, new("run"),
+            AgentActivityKind.ToolCall, AgentActivityPhase.Completed, "activity", null, "shell_command", null, details);
+        var projected = HistoryToolProjection.Project(activity);
+        Assert.AreEqual("dotnet test -c Release", projected.Primary);
+        Assert.AreEqual("first", projected.Output);
+        Assert.AreEqual(2, projected.OutputLines);
+    }
+
+    [TestMethod]
+    public void ToolProjection_KeepsCommandAndOutputSummaryBeforeRawTruncation()
+    {
+        var details = JsonSerializer.SerializeToElement(new { arguments = new { command = "git diff --stat" },
+            result = new { content = "first line\n" + new string('x', 9000) + "\n" } });
+        var activity = new AgentActivityEvent(new("provider"), "session", DateTimeOffset.UnixEpoch, new("run"),
+            AgentActivityKind.ToolCall, AgentActivityPhase.Completed, "activity", null, "shell_command", null, details);
+        var projected = WorkspaceService.ProjectHistory(new([new AgentSessionHistoryEntry(0, activity)], null, false));
+        var row = projected.Entries.Single();
+        Assert.IsTrue(row.DetailsTruncated);
+        Assert.AreEqual("git diff --stat", row.Tool!.Primary);
+        Assert.AreEqual("first line", row.Tool.Output);
+        Assert.AreEqual(2, row.Tool.OutputLines);
+        Assert.AreEqual("arguments", row.Tool.Fields[0].Path);
+        StringAssert.Contains(row.Tool.Fields[0].Text, "git diff --stat");
+        Assert.IsFalse(row.Tool.Fields[0].Truncated);
+        Assert.IsTrue(row.Tool.Fields[1].Truncated);
+        Assert.IsTrue(row.Tool.Fields[1].Text.Length > 4000);
+    }
+
+    [TestMethod]
     public void FileProjection_PreservesLaterPathsBeforeRawDetailsTruncation()
     {
         var diff = "diff --git a/large.cs b/large.cs\n--- a/large.cs\n+++ b/large.cs\n@@ -0,0 +1,1 @@\n+"
@@ -19,6 +98,8 @@ public sealed class DesktopHistoryTests
         Assert.AreEqual(2, result.Rows.Length);
         Assert.AreEqual("last.cs", result.Rows[1].Path);
         Assert.IsNull(result.Rows[0].Diff);
+        Assert.AreEqual(1, result.Rows[0].Added);
+        Assert.AreEqual(0, result.Rows[0].Removed);
         StringAssert.Contains(result.Rows[1].Diff!, "+new");
         Assert.IsTrue(result.Partial);
         Assert.IsTrue(cost <= 16000);

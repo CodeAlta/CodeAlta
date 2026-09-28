@@ -8,10 +8,10 @@ import type { Locale } from "./localization";
 const root = createRoot(document.getElementById("app")!);
 const source = "x".repeat(239) + "😀\n\n**supplied** [link](https://example.invalid)\n\n" + "prose\n\n".repeat(220)
   + '<img src=x onerror="window.injected=true"><script>window.injected=true</script> END';
-const original: HistoryEntry = { offset: "1", eventType: "contentCompleted", kind: "Reasoning", phase: null,
+const original: HistoryEntry = { offset: "1", eventType: "error", kind: "Failure", phase: null,
   sessionId: "one", providerId: "provider", runId: "run", contentId: "body", activityId: null,
   parentActivityId: null, interactionId: null, name: null, timestamp: "2026-09-27T00:00:00Z",
-  files: null, text: source, details: '{"literal":"<img src=x>"}', textTruncated: true, detailsTruncated: false, bodyOmitted: true };
+  tool: null, files: null, text: source, details: '{"literal":"<img src=x>"}', textTruncated: true, detailsTruncated: false, bodyOmitted: true };
 let entry = original, patch: Partial<TimelineItem> = {}, locale: Locale = "en", generation = 0;
 const copies: string[] = [];
 Object.defineProperty(navigator, "clipboard", { value: { writeText: async (value: string) => { copies.push(value); } } });

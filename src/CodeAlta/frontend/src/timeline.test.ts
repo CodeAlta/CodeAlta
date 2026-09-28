@@ -5,6 +5,23 @@ import { buildTimelineItems, formatDetails, latestNotes, writeMarkdown } from ".
 
 type Entry = HistoryResponse["entries"][number];
 
+test("typed completed output retains authoritative totals with its exact activity", () => {
+  const activity = entry({ eventType: "activity", kind: "ToolCall", activityId: "tool", phase: "Completed", name: "alta", text: null });
+  const output = entry({ offset: "2", kind: "ToolOutput", parentActivityId: "tool", text: "bounded preview", textTruncated: true,
+    tool: { primary: null, isCommand: false, output: "bounded preview", outputLines: 27, outputBytes: 1434, fields: [] } });
+  const items = buildTimelineItems([activity, output]);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].toolOutputLines, 27);
+  assert.equal(items[0].toolOutputBytes, 1434);
+  assert.deepEqual(items[0].toolFields, [{ path: "content", text: "bounded preview", truncated: true }]);
+  for (const patch of [{ sessionId: "other" }, { providerId: "other" }, { runId: "other" }, { parentActivityId: "other" }]) {
+    const separate = buildTimelineItems([activity, { ...output, ...patch }]);
+    assert.equal(separate.length, 2);
+    assert.equal(separate[0].toolOutputBytes, undefined);
+  }
+  assert.equal(buildTimelineItems([activity, { ...output, tool: null }])[0].toolOutputBytes, undefined);
+});
+
 test("TUI status-only updates do not become timeline cards", () => {
   assert.deepEqual(buildTimelineItems(["Idle", "UsageUpdated", "Shutdown"].map(kind => entry({ eventType: "sessionUpdate", kind }))), []);
 });
@@ -45,7 +62,7 @@ function entry(overrides: Partial<Entry>): Entry {
     offset: "1", eventType: "contentCompleted", providerId: "provider", sessionId: "session", runId: "run",
     timestamp: "2026-09-22T10:00:00Z", kind: "Assistant", phase: null, contentId: "content", activityId: null,
     parentActivityId: null, interactionId: null, name: null, text: "Hello", details: null,
-    files: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, ...overrides,
+    tool: null, files: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, ...overrides,
   };
 }
 
@@ -126,7 +143,7 @@ test("timeline replaces streamed deltas with completed content and preserves orp
   ]);
   assert.equal(items.length, 2);
   assert.equal(items[0].markdown, "final");
-  assert.equal(items[0].title, "CodeAlta");
+  assert.equal(items[0].title, "Assistant");
   assert.equal(items[1].markdown, "one two");
   assert.equal(items[1].title, "Reasoning");
   assert.equal(items[1].subtitle, "Streaming");

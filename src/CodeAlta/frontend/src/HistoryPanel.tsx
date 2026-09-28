@@ -151,7 +151,11 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
       {groupTimelineTools(items, timeline?.entries ?? []).map(group => <div key={`${sessionId}:${window?.revision ?? "unversioned"}:${group.key}`}
         className={group.tools ? "timeline-tool-group" : "timeline-single-row"} role={group.tools ? "group" : undefined}
         aria-label={group.tools ? t("Tools") : undefined}>
-        {group.tools && <div className="timeline-tool-group-heading"><AppIcon name="tool" size={14} /><span>{t("Tool calls")}</span><span>{group.rows.length}</span></div>}
+        {group.tools && <div className="timeline-tool-group-heading"><AppIcon name="tool" size={14} /><span>{t("Tool calls")}</span><span className="tool-group-counts">{t("{count} call(s)", { count: group.rows.length })}
+          {(["completed", "failed", "started", "canceled"] as const).map(phase => {
+            const count = group.rows.filter(row => (row.source === "history" ? row.item.toolPhase : row.source === "liveTool" ? row.row.phase.toLowerCase() : null) === phase).length;
+            return count > 0 ? <span key={phase} data-phase={phase}> · {t(phase === "completed" ? "{count} done" : phase === "failed" ? "{count} failed" : phase === "started" ? "{count} running" : "{count} canceled", { count })}</span> : null;
+          })}</span></div>}
         {group.rows.map(item => item.source === "history" ? <TimelineMessage key={`${sessionId}:${window?.revision ?? "unversioned"}:${item.key}`} item={item.item} canInspect={canInspect} toolTile={group.tools}
         onOpenSource={value => {
           const captured = generation.current;

@@ -21,6 +21,9 @@ test("actual App mounts against an isolated bridge and records parity baselines"
       assert.ok(!Object.keys(result.metafile!.inputs).some(path => path.includes("obj/neoastra") || path.includes("@neoastra/client")), "No native bridge may enter the fixture bundle");
     });
     await writeFile(join(root, "fixture.html"), '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="fixture.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
+    await build({ entryPoints: [fileURLToPath(new URL("./providerChooser.mount.tsx", import.meta.url))], outfile: join(root, "provider.js"), bundle: true, platform: "browser", format: "iife",
+      alias: { "#neoastra": fileURLToPath(new URL("./providerChooser.bridge.ts", import.meta.url)) } });
+    await writeFile(join(root, "provider.html"), '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="provider.css"></head><body><div id="root"></div><script src="provider.js"></script></body></html>');
     const profile = join(root, "profile");
     browser = spawn(edge!, ["--headless=new", "--disable-gpu", "--no-first-run", "--disable-background-networking", "--disable-extensions", `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", windowsHide: true });
     let port = "";
@@ -54,6 +57,7 @@ test("actual App mounts against an isolated bridge and records parity baselines"
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails)); return result.result?.value;
     };
     await command("Page.enable"); await command("Runtime.enable"); await command("Network.enable");
+    await command("Emulation.setFocusEmulationEnabled", { enabled: true });
     // Block resource attempts outside the isolated fixture even if a regression introduces one.
     await command("Network.setBlockedURLs", { urls: ["http://*", "https://*", "ws://*", "wss://*"] });
     await command("Page.navigate", { url: pathToFileURL(join(root, "fixture.html")).href });
@@ -64,16 +68,49 @@ test("actual App mounts against an isolated bridge and records parity baselines"
       await evaluate(`document.documentElement.dataset.theme='${theme}';new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))`);
       assert.equal(await evaluate("document.body.textContent.includes('The workspace shell is ready.')"), true);
       assert.equal(await evaluate("document.querySelectorAll('.timeline-tool-group .tool-tile-title').length"), 3);
+      assert.equal(await evaluate("document.querySelectorAll('.timeline-tool-group').length"), 1);
+      assert.equal(await evaluate("document.querySelector('.message-assistant .message-heading strong').textContent"), "Assistant");
+      assert.equal(await evaluate("parseFloat(getComputedStyle(document.querySelector('.messages')).paddingLeft) >= 12"), true);
       assert.equal(await evaluate("document.querySelectorAll('.message-notes').length"), 0);
       assert.equal(await evaluate("document.querySelectorAll('[data-file-record]').length"), 2);
+      assert.equal(await evaluate("document.querySelector('.tool-group-counts').textContent.includes('3 call(s)') && document.querySelector('.tool-group-counts').textContent.includes('3 done')"), true);
+      assert.equal(await evaluate("document.querySelector('.tool-command-preview').textContent.includes('git diff')"), true);
+      assert.equal(await evaluate("document.querySelector('.tool-output-stats').textContent"), "27L · 1.4 KB");
+      assert.equal(await evaluate("[...document.querySelectorAll('select')].every(select=>select.parentElement.classList.contains('bp6-html-select'))"), true);
+      assert.equal(await evaluate("(() => { const card=document.querySelector('.timeline-tool-group .message');const heading=card.querySelector('.message-heading > span');return heading.clientWidth > card.clientWidth * .6; })()"), true, "Tool names use the card width, not the old 45% cap");
+      assert.equal(await evaluate("[...document.querySelectorAll('.tool-command-preview,.tool-output-stats')].every(e=>e.scrollWidth<=e.clientWidth+1)"), true, "Commands wrap and totals remain visible");
+      const successColor = await evaluate("getComputedStyle(document.querySelector('.tool-command-preview')).color");
+      await evaluate("document.querySelector('.timeline-tool-group .message').dataset.toolPhase='failed'");
+      const failureColor = await evaluate("getComputedStyle(document.querySelector('.tool-command-preview')).color");
+      assert.notEqual(successColor, failureColor, "Completed and failed commands use different semantic colors in each theme");
+      assert.equal(await evaluate("getComputedStyle(document.querySelector('.tool-tile-title strong')).color"), failureColor);
+      await evaluate("document.querySelector('.timeline-tool-group .message').dataset.toolPhase='completed'");
+      assert.equal(await evaluate("document.querySelector('.file-change-inspection li .file-counts').textContent"), "+2 \u22120");
+      assert.equal(await evaluate("document.querySelector('.file-change-inspection li').getBoundingClientRect().height <= 44"), true);
+      assert.equal(await evaluate("document.querySelectorAll('.timeline-source-trigger').length"), 0);
+      assert.equal(await evaluate("document.querySelector('.messages').textContent.includes('Some details were shortened')"), false);
       await evaluate("document.querySelector('[data-file-record=\"1\"]').click();new Promise(r=>requestAnimationFrame(r))");
       assert.equal(await evaluate("document.querySelector('[data-file-diff]')?.textContent.includes('+new file')"), true);
+      assert.equal(await evaluate("document.querySelector('[data-file-diff]').textContent.includes('@@')"), false);
+      assert.equal(await evaluate("getComputedStyle(document.querySelector('[data-file-diff]')).fontFamily.includes('monospace')"), true);
+      assert.equal(await evaluate("getComputedStyle(document.querySelector('dialog[open] > header > button')).backgroundColor"), "rgba(0, 0, 0, 0)");
       await evaluate("document.querySelector('dialog[open] button').click();new Promise(r=>requestAnimationFrame(r))");
       for (let index = 0; index < 3; index++) {
         await evaluate(`document.querySelectorAll('.tool-tile-title')[${index}].click();new Promise(r=>requestAnimationFrame(r))`);
         assert.equal(await evaluate("!!document.querySelector('dialog[open]')"), true);
         assert.equal(await evaluate(`document.querySelector('dialog[open]').textContent.includes(${JSON.stringify(["Read source", "Search references", "Inspect changes"][index])})`), true);
-        await evaluate("document.querySelector('dialog[open]').dispatchEvent(new Event('cancel',{cancelable:true}));new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
+        assert.equal(await evaluate("!!document.querySelector('dialog[open] .json-key') && getComputedStyle(document.querySelector('dialog[open] pre')).whiteSpace==='pre-wrap' && parseFloat(getComputedStyle(document.querySelector('dialog[open] pre')).paddingLeft)>=10"), true);
+        assert.equal(await evaluate("[...document.querySelectorAll('dialog[open] pre')].every(pre=>pre.scrollWidth<=pre.clientWidth+1)"), true);
+        if (index === 0) {
+          const popup = await command("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+          await writeFile(join(root, `popup-${width}-${theme}.png`), Buffer.from(popup.data, "base64"));
+          await command("Input.dispatchMouseEvent", { type: "mousePressed", x: 1, y: 1, button: "left", clickCount: 1 });
+          await command("Input.dispatchMouseEvent", { type: "mouseReleased", x: 1, y: 1, button: "left", clickCount: 1 });
+        } else {
+          await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+          await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+        }
+        await evaluate("new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
         assert.equal(await evaluate("!document.querySelector('dialog[open]')"), true);
         assert.equal(await evaluate(`document.activeElement===document.querySelectorAll('.tool-tile-title')[${index}]`), true);
       }
@@ -96,5 +133,38 @@ test("actual App mounts against an isolated bridge and records parity baselines"
     assert.deepEqual(exceptions, []);
     assert.deepEqual(requests.filter(url => !url.startsWith(pathToFileURL(root).href + "/") && !url.startsWith("data:")), []);
     assert.ok((await evaluate("parityFixture.calls")).includes("workspace.historyTimeline:demo-active"));
+    await command("Page.navigate", { url: pathToFileURL(join(root, "provider.html")).href });
+    assert.equal(await evaluate("new Promise(resolve=>{const end=Date.now()+5000;function check(){if(document.querySelector('.current-provider'))resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(check,20)}check()})"), true);
+    await evaluate("document.querySelector('.current-provider select').focus();new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
+    assert.equal(await evaluate("document.querySelector('.provider-chooser').textContent.includes('Target')"), true);
+    assert.equal(await evaluate("document.querySelector('.current-provider').classList.contains('bp6-html-select') && !document.querySelector('dialog')"), true);
+    const chooseProvider = (value: string) => evaluate(`(()=>{const select=document.querySelector('.current-provider select');select.value=${JSON.stringify(value)};select.dispatchEvent(new Event('change',{bubbles:true}));})();new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))`);
+    await chooseProvider("target");
+    assert.equal(await evaluate("!document.querySelector('dialog[open]') && document.querySelector('.current-provider select').value==='target'"), true);
+    assert.equal(await evaluate("document.querySelector('textarea').value"), "Keep my unsent prompt");
+    assert.equal(await evaluate("providerBridge.requests.length"), 1);
+    assert.equal(await evaluate("providerBridge.requests[0].expectedProviderKey==='original' && providerBridge.requests[0].attachmentGeneration==='2' && providerBridge.requests[0].revision==='42'"), true);
+    await evaluate("providerFixture.busy(true);new Promise(r=>requestAnimationFrame(r))");
+    assert.equal(await evaluate("document.querySelector('.current-provider select').disabled"), true);
+    await evaluate("providerFixture.busy(false);providerBridge.status('stale_selection');new Promise(r=>requestAnimationFrame(r))");
+    await chooseProvider("original");
+    assert.equal(await evaluate("document.querySelector('.provider-chooser [role=alert]').textContent.includes('stale_selection') && document.querySelector('.current-provider select').value==='target'"), true);
+    assert.equal(await evaluate("providerBridge.requests.length"), 2, "A rejected mutation is not retried");
+    await evaluate("providerBridge.status('ok');providerBridge.hold();document.querySelector('.current-provider select').blur();document.querySelector('.current-provider select').focus();new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
+    await chooseProvider("original");
+    assert.equal(await evaluate("document.querySelector('.current-provider select').disabled"), true);
+    await evaluate("providerFixture.busy(true);new Promise(r=>requestAnimationFrame(r))");
+    await evaluate("providerFixture.busy(false);new Promise(r=>requestAnimationFrame(r))");
+    await evaluate("providerBridge.release();new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
+    assert.equal(await evaluate("document.querySelector('.current-provider select').value==='original' && providerBridge.requests.length===3"), true, "An admitted selection survives transient idle-control disablement");
+    await evaluate("providerBridge.hold()");
+    await chooseProvider("target");
+    assert.equal(await evaluate("document.querySelector('.current-provider select').disabled"), true);
+    await evaluate("providerFixture.shown(false);new Promise(r=>requestAnimationFrame(r))");
+    await evaluate("providerBridge.release();new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
+    assert.equal(await evaluate("!document.querySelector('.current-provider') && document.querySelector('#selected-provider').textContent==='original' && providerBridge.requests.length===4"), true, "Completion cannot update an unmounted chooser");
+    assert.equal(await evaluate("document.querySelector('textarea').value"), "Keep my unsent prompt");
+    assert.deepEqual(exceptions, []);
+    assert.deepEqual(requests.filter(url => !url.startsWith(pathToFileURL(root).href + "/") && !url.startsWith("data:")), []);
   } finally { socket?.close(); browser?.kill(); }
 });

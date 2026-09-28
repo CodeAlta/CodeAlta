@@ -1,3 +1,4 @@
+import { HTMLSelect } from "@blueprintjs/core";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { WorkspaceSnapshot } from "#neoastra";
 import type { SessionTab } from "./sessionTabs";
@@ -62,16 +63,16 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
       } else if (event.key === "Enter") { event.preventDefault(); activate(selected); }
     }}>
     <header><h2 id="session-browser-title">{t("Browse saved sessions")}</h2><button type="button" onClick={close}>{t("Close")}</button></header>
-    <label>{t("Scope")} <select aria-label={t("Session browser scope")} value={scope === null ? "global" : "project"} onChange={event => { batch?.owner.invalidate(); observations?.store.invalidate(); setScope(event.target.value === "global" ? null : projectId); setSelected(0); }}>
+    <label>{t("Scope")} <HTMLSelect aria-label={t("Session browser scope")} value={scope === null ? "global" : "project"} onChange={event => { batch?.owner.invalidate(); observations?.store.invalidate(); setScope(event.target.value === "global" ? null : projectId); setSelected(0); }}>
       {projectId !== null && <option value="project">{t("Selected project: {name}", { name: project.length === 1 ? project[0].name : t("ambiguous or missing") })}{project[0]?.archived ? t(" (archived, read-only)") : ""}</option>}
       <option value="global">{t("Global sessions")}</option>
-    </select></label>
+    </HTMLSelect></label>
     <label>{t("Title or ID")} <input ref={search} aria-label={t("Find saved sessions")} maxLength={256} value={query}
       onChange={event => { batch?.owner.invalidate(); observations?.store.invalidate(); setQuery(event.target.value); setSelected(0); }} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="session-browser-results"
       aria-activedescendant={rows[selected] ? `session-browser-row-${selected}` : undefined} /></label>
-    <label>{t("Order loaded sessions")} <select aria-label={t("Order loaded sessions")} value={sort} onChange={event => { batch?.owner.invalidate(); setSelected(selected); setSort(event.target.value); }}>
+    <label>{t("Order loaded sessions")} <HTMLSelect aria-label={t("Order loaded sessions")} value={sort} onChange={event => { batch?.owner.invalidate(); setSelected(selected); setSort(event.target.value); }}>
       <option value="saved">{t("Saved update")}</option><option value="name">{t("Name")}</option><option value="activity">{t("Observed activity (explicit refresh)")}</option>
-    </select></label>
+    </HTMLSelect></label>
     <button type="button" onClick={() => { batch?.owner.invalidate(); setShowAll(value => !value); }}>{t(showAll ? "Use recent session limit" : "Show all loaded matches")}</button>
     <p role="status">{t("{shown} shown / {matching} matching / {loaded} loaded in scope. Limit {limit}; active/highlighted rows retained.", { shown: rows.length, matching: page.matched, loaded: page.loaded, limit: recentCount })}{" "}{page.hidden > 0 && <>{t("{count} matches omitted by the 200-row display limit.", { count: page.hidden })}{" "}</>}
       {t(page.incomplete ? "Snapshot or display text was truncated; more may exist." : "Loaded snapshot only; not a completeness or running-status report.")}</p>

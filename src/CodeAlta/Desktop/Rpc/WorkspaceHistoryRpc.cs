@@ -169,6 +169,12 @@ internal sealed partial class WorkspaceService
             var rowBudget = remaining / rowsRemaining;
             var detailsBudget = Math.Max(0, rowBudget - 1024 - identityCost - 6 * (name?.Length ?? 0));
             var fileCost = 0;
+            var toolCost = 0;
+            var tool = value is AgentActivityEvent activityValue && activityValue.Kind != AgentActivityKind.FileChange
+                ? HistoryToolProjection.Project(activityValue, detailsBudget / 2, out toolCost)
+                : value is AgentContentCompletedEvent output && output.Kind is AgentContentKind.ToolOutput or AgentContentKind.CommandOutput or AgentContentKind.FileChangeOutput
+                    ? HistoryToolProjection.ProjectOutput(output.Content, detailsBudget / 2, out toolCost) : null;
+            detailsBudget -= toolCost;
             var files = (type == "activity" && kind == "FileChange") || (type == "sessionUpdate" && kind == "DiffUpdated")
                 ? HistoryFileProjection.Project(details, detailsBudget / 2, out fileCost) : null;
             detailsBudget -= fileCost;
@@ -176,12 +182,12 @@ internal sealed partial class WorkspaceService
             details = Preview(details, Math.Min(8 * 1024, detailsBudget / 18), ref detailsShortened);
             var textBudget = Math.Max(0, detailsBudget - 6 * (details?.Length ?? 0));
             text = Preview(text, Math.Min(32 * 1024, textBudget / 6), ref shortened);
-            var cost = 1024 + identityCost + fileCost + 6 * ((text?.Length ?? 0) + (name?.Length ?? 0) + (details?.Length ?? 0));
+            var cost = 1024 + identityCost + fileCost + toolCost + 6 * ((text?.Length ?? 0) + (name?.Length ?? 0) + (details?.Length ?? 0));
             if (cost > remaining) return Failure("wire_limit");
             remaining -= cost;
             rows.Add(new(entry.Offset.ToString(CultureInfo.InvariantCulture), type, provider, value.SessionId, run,
                 value.Timestamp, kind, phase, contentId, activityId, parentId, interactionId, name, text, details,
-                shortened, detailsShortened, omitted, files));
+                shortened, detailsShortened, omitted, files, tool));
         }
         HistoryCursor? next = null;
         if (page.Next is { } cursor)
@@ -328,4 +334,4 @@ internal sealed record HistoryResponse(string Status, HistoryEntry[] Entries, Hi
 internal sealed record HistoryEntry(string Offset, string EventType, string ProviderId, string SessionId, string? RunId,
     DateTimeOffset Timestamp, string? Kind, string? Phase, string? ContentId, string? ActivityId, string? ParentActivityId,
     string? InteractionId, string? Name, string? Text, string? Details, bool TextTruncated, bool DetailsTruncated, bool BodyOmitted,
-    HistoryFileSet? Files = null);
+    HistoryFileSet? Files = null, HistoryToolSummary? Tool = null);

@@ -50,11 +50,11 @@ test("production long diagnostic bodies preserve literal preview, full Copy, not
     await command("Page.enable"); await command("Emulation.setFocusEmulationEnabled", { enabled: true });
     await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 720, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(join(root, "fixture.html")).href });
-    assert.equal(await wait("!!window.bodyFixture && !!document.querySelector('.message-reasoning')"), true);
-    assert.equal(await evaluate("!!document.querySelector('.message-reasoning .long-message-toggle')"), true, "Long supplied reasoning starts collapsed");
+    assert.equal(await wait("!!window.bodyFixture && !!document.querySelector('.message-error')"), true);
+    assert.equal(await evaluate("!!document.querySelector('.message-error .long-message-toggle')"), true, "Long diagnostic errors start collapsed");
     await evaluate("window.bodyNetwork=0;window.fetch=()=>{bodyNetwork++;throw Error('forbidden')};window.open=()=>{bodyNetwork++;throw Error('forbidden')}");
     assert.equal(await evaluate("!document.querySelector('.markdown-content') && document.querySelector('.long-message-preview').textContent==='Preview (plain text): '+ 'x'.repeat(239)+'…'"), true, "Surrogate-safe inert excerpt, no cut Markdown parse");
-    assert.equal(await evaluate("document.querySelector('article').textContent.includes('Additional diagnostic details were omitted.') && document.querySelector('article').textContent.includes('Some details were shortened')"), true);
+    assert.equal(await evaluate("document.querySelector('article').textContent.includes('Additional diagnostic details were omitted.') || document.querySelector('article').textContent.includes('Some details were shortened')"), false);
     await evaluate("document.querySelector('.copy-markdown').click()"); await frames();
     assert.equal(await evaluate("bodyFixture.copies[0]===bodyFixture.expectedCopy() && bodyFixture.copies[0].includes(' END')"), true);
     await evaluate("document.querySelector('.long-message-toggle').focus()");
@@ -73,8 +73,8 @@ test("production long diagnostic bodies preserve literal preview, full Copy, not
     }
     await evaluate("{const b=document.querySelector('.long-message-toggle');b.addEventListener('click',e=>e.preventDefault(),{once:true});b.click()}"); await frames();
     assert.equal(await evaluate("document.querySelector('.long-message-toggle').getAttribute('aria-expanded')"), "false");
-    for (const value of [{ kind: "Plan" }, { eventType: "planSnapshot", kind: "Updated" }, { eventType: "notes", kind: "Set" },
-      { eventType: "error", kind: "Failure" }, { eventType: "sessionUpdate", kind: "Warning" }, { eventType: "sessionUpdate", kind: "Status" }, { kind: "CommandOutput" }]) {
+    for (const value of [{ eventType: "contentCompleted", kind: "Plan" }, { eventType: "planSnapshot", kind: "Updated" },
+      { eventType: "error", kind: "Failure" }, { eventType: "sessionUpdate", kind: "Warning" }]) {
       await evaluate(`bodyFixture.replace(${JSON.stringify(value)})`);
       assert.equal(await evaluate("document.querySelector('.long-message-toggle').getAttribute('aria-expanded')"), "false", JSON.stringify(value));
       await toggle(); assert.equal(await evaluate("document.querySelectorAll('.markdown-content').length"), 1);
@@ -100,8 +100,15 @@ test("production long diagnostic bodies preserve literal preview, full Copy, not
         assert.equal(await evaluate("document.querySelector('.markdown-content > p').textContent"), text);
       } else assert.equal(await evaluate("!document.querySelector('.markdown-content')"), true);
     }
-    await evaluate("bodyFixture.replace({eventType:'sessionUpdate',kind:'UsageUpdated'})");
-    assert.equal(await evaluate("!document.querySelector('.long-message-toggle') && document.querySelectorAll('.event-details .markdown-content').length===1 && !document.querySelector('.event-details').open"), true, "Existing detail-only messages keep one route, not nested expanders");
+    for (const value of [{ eventType: "contentCompleted", kind: "Reasoning" },
+      { eventType: "sessionUpdate", kind: "CompactionStarted" }, { eventType: "contentCompleted", kind: "CommandOutput" }]) {
+      await evaluate(`bodyFixture.replace(${JSON.stringify(value)})`);
+      assert.equal(await evaluate("!document.querySelector('.long-message-toggle') && !!document.querySelector('.timeline-detail-trigger')"), true, "Compact rows open details rather than nested expanders");
+      await evaluate("document.querySelector('.timeline-detail-trigger').click()"); await frames();
+      assert.equal(await evaluate("!!document.querySelector('dialog[open]') && document.querySelector('dialog[open]').textContent.includes(' END') && !document.querySelector('dialog script, dialog img')"), true);
+      await evaluate("bodyFixture.scope()"); await frames();
+      assert.equal(await evaluate("!document.querySelector('dialog[open]')"), true, "Scope replacement retires compact details");
+    }
     await evaluate("bodyFixture.replace({});void(window.detachedBody=document.querySelector('.long-message-toggle'));bodyFixture.unmount();detachedBody.click()");
     assert.equal(await evaluate("document.querySelector('#app').childElementCount===0 && bodyNetwork===0"), true);
   } finally { socket?.close(); browser?.kill(); }

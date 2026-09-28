@@ -1,3 +1,4 @@
+import { HTMLSelect } from "@blueprintjs/core";
 import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
@@ -1096,12 +1097,12 @@ function App() {
       && inventory.providers.filter(other => other.id === provider.id).length === 1) : [];
     return <div className="creation-provider">
       <label><span>{t("Provider for new session")}</span>
-        <select value={creatingProvider} disabled={creatingBusy || !owned} onChange={event => setCreatingProvider(event.target.value)}>
+        <HTMLSelect value={creatingProvider} disabled={creatingBusy || !owned} onChange={event => setCreatingProvider(event.target.value)}>
           <option value="">{t("Default or first enabled provider")}</option>
           {creatingProvider && !providers.some(provider => provider.id === creatingProvider)
             && <option value={creatingProvider} disabled>{creatingProvider}</option>}
           {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.id}</option>)}
-        </select>
+        </HTMLSelect>
       </label>
       <small>{t("Cached enabled providers only; enabled does not mean ready or capable. Create may initialize a provider.")}</small>
     </div>;
@@ -1390,9 +1391,9 @@ function App() {
             <input id="project-filter" ref={projectFilterInput} type="search" value={projectFilter} onChange={event => setProjectFilter(event.target.value)}
               placeholder={t("Name or path")} aria-label={t("Filter projects by name or path")} aria-controls="project-list" />
             <div className="project-options-fields">
-              <select id="project-sort" aria-label={t("Sort projects")} value={projectSort} onChange={event => setProjectSort(event.target.value as ProjectSort)}>
+              <HTMLSelect id="project-sort" aria-label={t("Sort projects")} value={projectSort} onChange={event => setProjectSort(event.target.value as ProjectSort)}>
                 <option value="name">{t("Name")}</option><option value="recent">{t("Recent visible updates")}</option>
-              </select>
+              </HTMLSelect>
               <button type="button" className="quiet-button" disabled={!projectFilter} onClick={() => { setProjectFilter(""); projectFilterInput.current?.focus(); }}>{t("Clear filter")}</button>
               <button type="button" className="quiet-button" disabled={!selectedProject || !owned || !mutation?.capability.canMutate()}
                 onClick={() => setDialog("archive")}>{t(selectedProject?.archived ? "Unarchive project…" : "Archive project…")}</button>

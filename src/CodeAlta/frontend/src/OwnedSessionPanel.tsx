@@ -1,3 +1,4 @@
+import { HTMLSelect } from "@blueprintjs/core";
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from "react";
 import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectReferencePicker";
 import { modelCatalog, sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
@@ -16,6 +17,7 @@ import { promptEditorHeight, showContextAction } from "./workspacePresentation";
 import { changeSelection, validSelection } from "./sessionSelection";
 import { ModelChooser, boundedModelChoices, type ModelChooserCapture } from "./ModelChooser";
 import { PromptChooser, boundedPromptChoices, promptChoicesSignature, type PromptChooserCapture } from "./PromptChooser";
+import { ProviderChooser } from "./ProviderChooser";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
@@ -154,6 +156,10 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   const [message, setMessage] = useState("Ready to send to this owned session.");
   const [page, setPage] = useState<SessionReceiptPage>();
   const [runtimeState, setRuntimeState] = useState<RuntimeState>();
+  const observedProvider = runtimeState?.kind === "ready" ? runtimeState.snapshot.entry?.providerKey : undefined;
+  const observedTransition = runtimeState?.kind === "ready" ? runtimeState.snapshot.coordinatorTransitionInProgress : undefined;
+  // Lifecycle observations, not polling: reconcile persisted selection after attach/detach/switch.
+  useEffect(() => { setChoicesRevision(value => value + 1); }, [observedProvider, observedTransition]);
   const queueReviewRuntime = useRef(runtimeState); queueReviewRuntime.current = runtimeState;
   const runtimeScope = useRef<ReturnType<typeof runtimeReader.forSelection> | null>(null);
   const [observedInvalidEpoch, setInvalidEpoch] = useState(!capability.canMutate());
@@ -585,13 +591,26 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       }} />
     <div className="composer-toolbar">
     <div className="prompt-options" aria-label={t("Session configuration")}>
-      <label><AppIcon name="prompt" size={14} /><span>{t("Agent prompt")}</span><select aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
+      <label><AppIcon name="prompt" size={14} /><span>{t("Agent prompt")}</span><HTMLSelect aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
         {!activeChoices?.prompts.some(p => p.id === selected?.agentPromptId) && <option value={selected?.agentPromptId ?? ""}>{selected?.agentPromptId ?? t("Loading…")}</option>}
         {activeChoices?.prompts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-      </select></label>
-      <label><AppIcon name="model" size={14} /><span>{t("Model")}:</span>
-      <span className="current-provider" title={t("Provider switching is unavailable for existing desktop sessions.")}>{selected?.providerKey ?? t("session provider")}</span>
-      <select data-model-selector aria-label={t("Model")} value={selected?.modelId ?? ""} disabled={invalidEpoch || !!pending || loadingChoices}
+      </HTMLSelect></label>
+      <div className="composer-model-options"><label htmlFor={`composer-model-${sessionId}`}><AppIcon name="model" size={14} /><span>{t("Model")}:</span></label>
+      <ProviderChooser epoch={epoch} sessionId={sessionId} providerKey={selected?.providerKey ?? t("session provider")}
+        disabled={selectionDisabled || !capability.canMutate() || runtimeState?.kind !== "ready"
+          || runtimeState.snapshot.coordinatorTransitionInProgress || !!runtimeState.snapshot.entry?.activeRunId
+          || !!runtimeState.snapshot.entry?.queueDrainInProgress || !!runtimeState.snapshot.entry?.isRetiring}
+        current={() => capability.canMutate() && !pending && !scope.current?.signal.aborted}
+        onSelected={async () => {
+          const signal = scope.current?.signal;
+          const value = await sessions.choices({ expectedEpoch: epoch, sessionId }, { signal });
+          if (signal?.aborted || !capability.canMutate() || value.epoch !== epoch || value.sessionId !== sessionId || value.status !== "ok" || !value.current) return;
+          const next = { ...value.current, agentPromptId: selected?.agentPromptId ?? value.current.agentPromptId };
+          if (!selections.set(epoch, sessionId, value, next)) selections.set(epoch, sessionId, value, value.current);
+          setChoices(value); setChoicesNotice("");
+          void runtimeScope.current?.refresh();
+        }} />
+      <HTMLSelect id={`composer-model-${sessionId}`} data-model-selector aria-label={t("Model")} value={selected?.modelId ?? ""} disabled={invalidEpoch || !!pending || loadingChoices}
         onPointerDown={event => { if (!activeChoices?.models.length && !loadingChoices) { event.preventDefault(); loadModelChoices(); } }}
         onKeyDown={event => {
           if (!activeChoices?.models.length && !loadingChoices && !event.nativeEvent.isComposing && !event.repeat
@@ -601,12 +620,12 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
         <option value="">{t("Provider default")}</option>
         {selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) && <option value={selected.modelId}>{selected.modelId} · {t("Unverified")}</option>}
         {activeChoices?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-      </select></label>
-      <label><AppIcon name="brain" size={14} /><span>{t("Reasoning")}</span><select aria-label={t("Reasoning")} value={selected?.reasoningEffort ?? ""} disabled={selectionDisabled || efforts.length === 0} onChange={event => select("reasoningEffort", event.target.value)} title={t("Supported reasoning effort for the selected model")}>
+      </HTMLSelect></div>
+      <label><AppIcon name="brain" size={14} /><span>{t("Reasoning")}</span><HTMLSelect aria-label={t("Reasoning")} value={selected?.reasoningEffort ?? ""} disabled={selectionDisabled || efforts.length === 0} onChange={event => select("reasoningEffort", event.target.value)} title={t("Supported reasoning effort for the selected model")}>
         <option value="">{t("Model default")}</option>
         {selected?.reasoningEffort && !efforts.includes(selected.reasoningEffort) && <option value={selected.reasoningEffort}>{selected.reasoningEffort} · {t("Unverified")}</option>}
         {efforts.map(e => <option key={e} value={e}>{e}</option>)}
-      </select></label>
+      </HTMLSelect></label>
     </div>
     <div className="history-controls">
       {!pending && !expanded && !invalidEpoch && <ProjectReferencePicker text={text} edit={editText} input={promptInput} />}

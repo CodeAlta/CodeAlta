@@ -16,7 +16,7 @@ const details = JSON.stringify({ changes: [
 let entry: HistoryEntry = { offset: "1", eventType: "activity", providerId: "provider", sessionId: "one", runId: "run",
   timestamp: "2026-09-22T10:00:00Z", kind: "FileChange", phase: "Failed", contentId: null, activityId: "activity",
   parentActivityId: null, interactionId: null, name: null, text: null, details,
-  files: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false };
+  tool: null, files: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false };
 let locale: Locale = "en", generation = 0;
 const copies: string[] = [];
 Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text: string) => { copies.push(text); } } });

@@ -1,3 +1,4 @@
+import { HTMLSelect } from "@blueprintjs/core";
 import { useState, useSyncExternalStore } from "react";
 import type { PromptCreation } from "./promptCreation";
 import type { SkillsCapture } from "./skillsInspection";
@@ -16,16 +17,16 @@ export function PromptCreationPanel({ owner, capture }: { owner: PromptCreation;
     {state.phase === "empty" ? <button type="button" disabled={!capture()} onClick={() => owner.start(capture())}>{t("New agent prompt")}</button> : <>
       <p>{t("Original session:")} <code>{state.target?.sessionId}</code>. {t("Project:")} <code>{state.target?.projectPath ?? t("User-global session")}</code>.</p>
       <fieldset disabled={!editable}><legend>{t("New source fields")}</legend>
-        <label>{t("Publication scope")}<select value={d.rootKind} onChange={e => owner.update({ rootKind: e.target.value, understoodShadowing: false })}>
+        <label>{t("Publication scope")}<HTMLSelect value={d.rootKind} onChange={e => owner.update({ rootKind: e.target.value, understoodShadowing: false })}>
           <option value="">{t("Choose scope explicitly")}</option><option value="user_alta">{t("User-global prompts")}</option>
-          {state.target?.scope === "project" && <option value="project_alta">{t("Original project prompts")}</option>}</select></label>
+          {state.target?.scope === "project" && <option value="project_alta">{t("Original project prompts")}</option>}</HTMLSelect></label>
         <label>{t("Prompt ID")}<input value={d.promptId} maxLength={64} onChange={e => owner.update({ promptId: e.target.value })} /></label>
         <p>{t("1-64 lowercase ASCII letters, digits or hyphens; starts with a letter. Reserved device names are refused.")}</p>
         <label>{t("Display name")}<input value={d.name} maxLength={128} onChange={e => owner.update({ name: e.target.value })} /></label>
         <label>{t("Description (optional)")}<input value={d.description} maxLength={512} onChange={e => owner.update({ description: e.target.value })} /></label>
         <label>{t("Body")}<textarea value={d.body} maxLength={16384} rows={8} onChange={e => owner.update({ body: e.target.value })} /></label>
-        <label>{t("Composition mode")}<select value={d.mode} onChange={e => owner.update({ mode: e.target.value, understoodShadowing: false })}>
-          <option value="">{t("Choose mode explicitly")}</option><option value="replace">{t("Replace lower-precedence body")}</option><option value="append">{t("Append to lower-precedence body")}</option></select></label>
+        <label>{t("Composition mode")}<HTMLSelect value={d.mode} onChange={e => owner.update({ mode: e.target.value, understoodShadowing: false })}>
+          <option value="">{t("Choose mode explicitly")}</option><option value="replace">{t("Replace lower-precedence body")}</option><option value="append">{t("Append to lower-precedence body")}</option></HTMLSelect></label>
         <p>{t("Precedence: built-in → user-global → project. Same-ID sources compose in that order; replace discards lower bodies, append adds to them. A project source may shadow this user-global source. Name/description override lower supplied metadata; absent system metadata inherits in append mode, otherwise defaults to default. Outer body/metadata whitespace is trimmed and body newlines normalize when parsed. This does not edit any system prompt.")}</p>
         <label><input type="checkbox" checked={d.understoodShadowing} onChange={e => owner.update({ understoodShadowing: e.target.checked })} />
           {t("I understand same-ID cross-scope shadowing and composition; this is not necessarily an isolated new effective prompt.")}</label>

@@ -1,3 +1,4 @@
+import { HTMLSelect } from "@blueprintjs/core";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { SessionChoicesResponse, SessionSelection } from "#neoastra";
 import { changeSelection } from "./sessionSelection";
@@ -105,10 +106,10 @@ export function ModelChooser({ disabled, capture }: { disabled: boolean; capture
         {!models.length && <p>{t("No models match this search.")}</p>}
       </div>
       <p>{t("Model")}: <code>{draft?.modelId ?? t("Provider default")}</code></p>
-      <label>{t("Reasoning effort for next Send")}<select value={draft?.reasoningEffort ?? ""} disabled={failed || !model?.efforts.length}
+      <label>{t("Reasoning effort for next Send")}<HTMLSelect value={draft?.reasoningEffort ?? ""} disabled={failed || !model?.efforts.length}
         onChange={event => edit("reasoningEffort", event.target.value)}>
         <option value="">{t("Model default")}</option>{model?.efforts.map(effort => <option key={effort} value={effort}>{effort}</option>)}
-      </select></label>
+      </HTMLSelect></label>
       {failed && <p role="alert">{t("Next Send selection could not be validated. No change was applied.")}</p>}
       <button type="button" className="model-chooser-apply" disabled={failed || !draft} onClick={() => {
         if (!draft || !current(review) || !review.source.apply(draft)) { review.valid = false; setFailed(true); return; }

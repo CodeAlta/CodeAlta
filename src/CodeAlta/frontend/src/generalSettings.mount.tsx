@@ -1,3 +1,4 @@
+import { HTMLSelect } from "@blueprintjs/core";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { WorkspaceSnapshot } from "#neoastra";
@@ -32,9 +33,9 @@ function Window() {
     {settings ? <main className="configuration-page"><div className="settings-grid"><GeneralSettings theme={theme} setTheme={setTheme}
       sort={projectSort} setSort={setProjectSort} desktopCollapsed={railState.desktopCollapsed}
       setDesktopCollapsed={setDesktopCollapsed} notices={notices} recentSessionCount={recentSessionCount} setRecentSessionCount={setRecentSessionCount} /></div></main>
-      : <main><aside id="project-rail" hidden={!visible} aria-label="Projects"><select id="project-sort" aria-label="Sort projects" value={projectSort}
+      : <main><aside id="project-rail" hidden={!visible} aria-label="Projects"><HTMLSelect id="project-sort" aria-label="Sort projects" value={projectSort}
           onChange={event => setProjectSort(event.target.value as "name" | "recent")}>
-          <option value="name">Name</option><option value="recent">Recent visible updates</option></select>
+          <option value="name">Name</option><option value="recent">Recent visible updates</option></HTMLSelect>
           <ul id="project-list">{projectRailProjection(snapshot, "", projectSort).projects.map(project => <li key={project.id}>{project.name}</li>)}</ul></aside>
         <p id="current-selection">Selected project and draft remain unchanged</p></main>}
     </>;

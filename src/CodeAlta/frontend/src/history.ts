@@ -23,7 +23,9 @@ const maximumTimelineEntries = 1000;
 const maximumTimelineCharacters = 2 * 1024 * 1024;
 export function historyEntryCharacters(entry: HistoryResponse["entries"][number]): number {
   return Object.values(entry).reduce<number>((sum, value) => sum + (typeof value === "string" ? value.length : 0), 0)
-    + (entry.files?.rows.reduce((sum, row) => sum + row.path.length + (row.kind?.length ?? 0) + (row.diff?.length ?? 0), 0) ?? 0);
+    + (entry.files?.rows.reduce((sum, row) => sum + row.path.length + (row.kind?.length ?? 0) + (row.diff?.length ?? 0), 0) ?? 0)
+    + (entry.tool?.primary?.length ?? 0) + (entry.tool?.output?.length ?? 0)
+    + (entry.tool?.fields.reduce((sum, field) => sum + field.path.length + field.text.length, 0) ?? 0);
 }
 
 export function historySettled(state: HistoryState | undefined, timeline: HistoryTimeline | undefined): boolean {

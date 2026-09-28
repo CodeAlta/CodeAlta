@@ -64,8 +64,8 @@ export function LiveSessionPanel({ store, hostEpoch, sessionId, capability }: {
 
 export function LiveToolMessage({ row }: { row: SessionDisplayToolActivity }) {
   const { t } = useShellLanguage();
-  return <article className="message timeline-message message-tool"><div className="avatar"><AppIcon name="tool" size={17} /></div>
-    <div className="message-body"><strong>{row.name ?? t("Unnamed tool")}</strong><small> · {t("Reported {phase}", { phase: row.phase })}</small>
+  return <article className="message timeline-message message-tool" data-tool-phase={row.phase.toLowerCase()}><div className="avatar"><AppIcon name="tool" size={17} /></div>
+    <div className="message-body"><strong className="tool-outcome">{row.name ?? t("Unnamed tool")}</strong><small> · {t("Reported {phase}", { phase: row.phase })}</small>
       {row.isNameTruncated && <p className="detail">{t("Name prefix truncated.")}</p>}
       <details><summary>{t("Live tool identity")}</summary><p>{t("Provider {provider} · run {run} · activity {activity}", { provider: row.providerId, run: row.runId ?? t("not supplied"), activity: row.activityId })}</p></details>
     </div></article>;
@@ -106,7 +106,7 @@ export function LiveTextMessage({ row }: { row: SessionDisplayText }) {
   const copyLabel = copyState === "copied" ? t("Copied") : copyState === "failed" ? t("Copy failed") : t("Copy {title} as Markdown", { title: row.kind });
   return <article className={`message timeline-message message-${row.kind.toLowerCase() === "user" ? "user" : row.kind.toLowerCase().startsWith("reasoning") ? "reasoning" : "assistant"}`}>
     <div className="avatar"><AppIcon name={row.kind.toLowerCase() === "user" ? "user" : row.kind.toLowerCase().startsWith("reasoning") ? "brain" : "assistant"} size={17} /></div><div className="message-body">
-      <div className="message-heading"><span><strong>{row.kind}</strong><small>{t(row.isComplete ? "Complete" : "Streaming")}</small></span><span className="message-actions">
+      <div className="message-heading"><span>{!row.kind.toLowerCase().startsWith("reasoning") && <strong>{row.kind.toLowerCase() === "assistant" ? t("Assistant") : row.kind}</strong>}<small>{t(row.isComplete ? "Complete" : "Streaming")}</small></span><span className="message-actions">
         <button type="button" className={`copy-markdown copy-${copyState}`} aria-label={copyLabel} title={copyLabel} onClick={() => void copy()}><AppIcon name={copyState === "copied" ? "checked" : copyState === "failed" ? "error" : "copy"} size={15} /><span className="sr-only" aria-live="polite">{copyState === "idle" ? "" : copyLabel}</span></button>
       </span></div>
       <MarkdownContent source={row.text} />

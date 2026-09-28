@@ -25,6 +25,8 @@ public sealed class AgentHub : IAsyncDisposable
     private Task? _disposeTask;
     private SessionEntry[]? _disposalEntries;
 
+    internal IReadOnlyList<ModelProviderDescriptor> SelectionProviders => _modelProviderRegistry.ListProviders();
+
     /// <summary>
     /// Initializes a new instance of the <see cref="AgentHub"/> class.
     /// </summary>

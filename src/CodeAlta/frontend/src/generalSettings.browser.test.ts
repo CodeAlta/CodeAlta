@@ -15,7 +15,7 @@ test("mounted local preferences share live settings and rail owners across remou
   const app = readFileSync(fileURLToPath(new URL("./main.tsx", import.meta.url)), "utf8");
   assert.match(app, /useWindowPreferences\(\)/);
   assert.match(app, /setSort: setProjectSort, desktopCollapsed: railState\.desktopCollapsed, setDesktopCollapsed/);
-  assert.match(app, /<select id="project-sort" aria-label=\{t\("Sort projects"\)\} value=\{projectSort\} onChange=\{event => setProjectSort/);
+  assert.match(app, /<HTMLSelect id="project-sort" aria-label=\{t\("Sort projects"\)\} value=\{projectSort\} onChange=\{event => setProjectSort/);
   assert.match(app, /setRailState|toggleRail\(narrow\)/);
   assert.match(app, /<ProjectRailToggle expanded=\{railVisible\} onToggle=\{toggleProjects\}/);
   const root = await mkdtemp(join(tmpdir(), "codealta-general-settings-"));

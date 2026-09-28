@@ -51,7 +51,14 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                         continue;
                     }
 
-                    yield return row.ToProjection();
+                    // Atomic selection commits may deliberately leave this derived cache behind.
+                    // Never publish a stale provider/continuation pair after a journal replacement.
+                    if (TryGetStamp(row.JournalPath) != row.Stamp)
+                    {
+                        var fresh = await context.ProjectSessionFileAsync(row.JournalPath, cancellationToken).ConfigureAwait(false);
+                        if (fresh is not null) yield return fresh;
+                    }
+                    else yield return row.ToProjection();
                 }
 
                 yield break;
@@ -91,7 +98,8 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             return null;
         }
 
-        return row.ToProjection();
+        return TryGetStamp(row.JournalPath) == row.Stamp ? row.ToProjection()
+            : await context.ProjectSessionFileAsync(row.JournalPath, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task UpsertSessionAsync(

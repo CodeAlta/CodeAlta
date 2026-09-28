@@ -52,23 +52,28 @@ test("production file records preserve literal data, raw Copy, bounded fallbacks
     assert.equal(await wait("document.querySelectorAll('[data-file-record]').length===3"), true);
     await evaluate("window.fileNetwork=0;window.fetch=()=>{fileNetwork++;throw Error('forbidden')};window.open=()=>{fileNetwork++;throw Error('forbidden')}");
     assert.equal(await evaluate("!document.querySelector('[data-file-diff],.file-change-inspection img,.file-change-inspection script,.file-change-inspection a')"), true);
-    assert.equal(await evaluate("document.querySelector('.file-change-inspection').textContent.includes('Shown counted hunks (1 records): +1 / -1')"), true);
+    assert.equal(await evaluate("document.querySelector('.file-counts').textContent"), "+1 −1");
     await evaluate("document.querySelector('[data-file-record]').focus()");
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", text: "\r", windowsVirtualKeyCode: 13 });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
-    assert.equal(await wait("document.querySelector('[data-file-diff]')?.textContent===fileFixture.diff"), true);
-    assert.equal(await evaluate("document.activeElement===document.querySelector('[data-file-record]') && !document.getElementById(document.activeElement.getAttribute('aria-controls')).hidden"), true);
+    await evaluate("fileFixture.visibleDiff=fileFixture.diff.split('\\n').filter(line=>! /^(?:@@|diff --git |index |--- |\\+\\+\\+ )/.test(line)).join('\\n')");
+    assert.equal(await wait("document.querySelector('[data-file-diff]')?.textContent===fileFixture.visibleDiff"), true);
+    assert.equal(await evaluate("document.activeElement===document.querySelector('dialog[open] header button')"), true);
     for (const theme of ["light", "dark"]) for (const locale of ["en", "es", "fr", "de", "ja", "zh-CN"] as Locale[]) {
       await evaluate(`document.documentElement.dataset.theme='${theme}';fileFixture.language('${locale}')`); await frames();
       assert.equal(await evaluate("document.querySelector('.file-change-inspection').getAttribute('aria-label')"), translate(locale, "Supplied file records"));
-      assert.equal(await evaluate("document.querySelector('[data-file-diff]').textContent===fileFixture.diff && document.querySelector('[data-file-record] code').textContent==='<img src=x onerror=alert(1)>.ts' && document.documentElement.scrollWidth<=390"), true, `${theme}/${locale}`);
+      assert.equal(await evaluate("document.querySelector('[data-file-diff]').textContent===fileFixture.visibleDiff && document.querySelector('[data-file-record] strong').textContent==='<img src=x onerror=alert(1)>.ts' && document.documentElement.scrollWidth<=390"), true, `${theme}/${locale}`);
     }
-    await evaluate("fileFixture.language('en');document.querySelector('.copy-markdown').click()"); await frames();
+    await evaluate("fileFixture.language('en');document.querySelector('dialog[open] header button').click()"); await frames();
+    assert.equal(await evaluate("document.activeElement===document.querySelector('[data-file-record]')"), true);
+    await evaluate("document.querySelector('.copy-markdown').click()"); await frames();
     assert.equal(await evaluate("fileFixture.copies[0]===JSON.stringify(JSON.parse(fileFixture.details),null,2)"), true);
     await evaluate("document.querySelector('[data-file-record=\"1\"]').click()"); await frames();
     assert.equal(await evaluate("document.querySelectorAll('[data-file-diff]').length===1 && document.querySelector('[data-file-diff]').textContent==='unsupported binary' && document.querySelector('[data-file-record=\"0\"]').getAttribute('aria-expanded')==='false'"), true);
+    await evaluate("document.querySelector('dialog[open] header button').click()"); await frames();
     await evaluate("document.querySelector('[data-file-record=\"2\"]').click()"); await frames();
     assert.equal(await evaluate("!document.querySelector('[data-file-diff]') && document.querySelector('[data-file-record=\"2\"]').getAttribute('aria-expanded')==='true'"), true);
+    await evaluate("document.querySelector('dialog[open] header button').click()"); await frames();
     for (const options of [{ repeat: true }, { isComposing: true }, { keyCode: 229 }]) {
       assert.equal(await evaluate(`!document.querySelector('[data-file-record]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true,...${JSON.stringify(options)}}))`), true);
     }
@@ -87,7 +92,7 @@ test("production file records preserve literal data, raw Copy, bounded fallbacks
     assert.equal(await evaluate("!document.querySelector('[data-file-record][aria-expanded=true]')"), true, "native modal ABA retires inspection");
     for (const patch of [{ details: null }, { details: "{" }, { details: " ".repeat(8193) }, { details: '{"diff":"aggregate"}' }, { details: '{"path":"truncated"}', detailsTruncated: true }]) {
       await evaluate(`fileFixture.replace(${JSON.stringify(patch)})`);
-      assert.equal(await evaluate("document.querySelectorAll('[data-file-record]').length===0 && !!document.querySelector('.file-change-inspection [role=status]')"), true);
+      assert.equal(await evaluate("document.querySelectorAll('[data-file-record]').length===0 && !document.querySelector('dialog[open]')"), true, JSON.stringify(patch));
     }
     assert.equal(await evaluate("fileNetwork"), 0);
     // Tool inspection uses the same production record/lifetime fixture, after all file checks.
@@ -101,7 +106,8 @@ test("production file records preserve literal data, raw Copy, bounded fallbacks
     for (const theme of ["light", "dark"]) for (const locale of ["en", "es", "fr", "de", "ja", "zh-CN"] as Locale[]) {
       await evaluate(`document.documentElement.dataset.theme='${theme}';fileFixture.language('${locale}')`); await frames();
       assert.equal(await evaluate("document.querySelector('.tool-record-dialog h2').textContent"), translate(locale, "Inspect supplied tool record"));
-      assert.equal(await evaluate("document.querySelector('[data-tool-field=\"result.content\"]').textContent==='  literal output\\r\\n' && document.documentElement.scrollWidth<=390"), true);
+      assert.equal(await evaluate("document.querySelector('[data-tool-field=\"result.content\"]').textContent==='  literal output\\r\\n' && document.documentElement.scrollWidth<=390"), true,
+        String(await evaluate("JSON.stringify({width:document.documentElement.scrollWidth,overflow:[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>390).slice(0,8).map(e=>[e.tagName,e.className,e.getBoundingClientRect().right])})")));
     }
     await evaluate("fileFixture.language('en');document.querySelector('.tool-record-copy').click()"); await frames();
     assert.equal(await evaluate("fileFixture.copies.at(-1)===toolRaw"), true);
@@ -123,7 +129,7 @@ test("production file records preserve literal data, raw Copy, bounded fallbacks
       await evaluate("document.querySelector('.tool-record-dialog header button')?.click()"); await frames();
     }
     await evaluate("fileFixture.replace({details:'{\"arguments\":1,\"arguments\":2}'})");
-    assert.equal(await evaluate("!document.querySelector('.tool-record-trigger') && !!document.querySelector('.event-details pre') && !!document.querySelector('.tool-detail-wrap') && !!document.querySelector('.copy-markdown') && fileNetwork===0"), true);
+    assert.equal(await evaluate("!document.querySelector('.tool-record-trigger') && !!document.querySelector('.timeline-detail-trigger') && !!document.querySelector('.copy-markdown') && fileNetwork===0"), true);
     await evaluate("fileFixture.unmount()"); assert.equal(await evaluate("document.querySelector('#app').childElementCount"), 0);
   } finally { socket?.close(); browser?.kill(); }
 });

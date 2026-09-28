@@ -26,6 +26,10 @@ export type TimelineItem = Readonly<{
   fileChanges?: FileChanges;
   toolRecord?: ToolRecord;
   toolPhase?: string;
+  toolOutput?: string | null;
+  toolOutputLines?: number;
+  toolOutputBytes?: number | null;
+  toolFields?: NonNullable<HistoryEntry["tool"]>["fields"];
 }>;
 
 type JsonObject = Record<string, unknown>;
@@ -41,6 +45,11 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
     .filter(entry => entry.eventType === "activity" && entry.activityId)
     .map(entry => activityKey(entry)));
   const deltas = new Map<string, TimelineItem>();
+  const outputs = new Map<string, HistoryEntry>();
+  for (const entry of entries) {
+    if (entry.eventType === "contentCompleted" && isToolOutput(entry.kind) && entry.parentActivityId && entry.tool)
+      outputs.set(parentActivityKey(entry), entry);
+  }
   const result: TimelineItem[] = [];
 
   for (const entry of entries) {
@@ -71,21 +80,27 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
       }
       continue;
     }
-    result.push(toTimelineItem(entry, false));
+    const item = toTimelineItem(entry, false);
+    const output = entry.eventType === "activity" ? outputs.get(activityKey(entry)) : undefined;
+    // A typed completed output belongs to this exact session/provider/run/activity.
+    // Never count a bounded preview or aggregate retained streaming deltas as a total.
+    result.push(output?.tool ? { ...item, toolOutput: output.tool.output, toolOutputLines: output.tool.outputLines,
+      toolOutputBytes: output.tool.outputBytes,
+      toolFields: [...(item.toolFields ?? []), { path: "content", text: output.text ?? "", truncated: output.textTruncated || output.bodyOmitted }] } : item);
   }
   return result;
 }
 
 function contentKey(entry: HistoryEntry): string {
-  return JSON.stringify([entry.providerId, entry.runId, entry.kind, entry.contentId]);
+  return JSON.stringify([entry.sessionId, entry.providerId, entry.runId, entry.kind, entry.contentId]);
 }
 
 function activityKey(entry: HistoryEntry): string {
-  return JSON.stringify([entry.providerId, entry.runId, entry.activityId]);
+  return JSON.stringify([entry.sessionId, entry.providerId, entry.runId, entry.activityId]);
 }
 
 function parentActivityKey(entry: HistoryEntry): string {
-  return JSON.stringify([entry.providerId, entry.runId, entry.parentActivityId]);
+  return JSON.stringify([entry.sessionId, entry.providerId, entry.runId, entry.parentActivityId]);
 }
 
 function isTerminalPhase(phase: string | null): boolean {
@@ -113,7 +128,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
 
   if (entry.eventType === "contentCompleted" || entry.eventType === "contentDelta") {
     if (normalizedKind === "user") { category = "user"; icon = "user"; title = "You"; }
-    else if (normalizedKind === "assistant") { category = "assistant"; icon = "assistant"; title = "CodeAlta"; }
+    else if (normalizedKind === "assistant") { category = "assistant"; icon = "assistant"; title = "Assistant"; }
     else if (normalizedKind.startsWith("reasoning")) { category = "reasoning"; icon = "brain"; title = normalizedKind === "reasoningsummary" ? "Reasoning summary" : "Reasoning"; }
     else if (normalizedKind === "plan") { category = "plan"; icon = "plan"; title = "Plan"; }
     else if (normalizedKind === "filechangeoutput") { category = "file"; icon = "file"; title = "File changes"; }
@@ -126,8 +141,8 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     const tool = toolPresentation(entry, parsedDetails);
     title = tool.name;
     subtitle = [friendly(entry.phase ?? ""), tool.kindLabel].filter(Boolean).join(" · ") || null;
-    summary = tool.primary;
-    summaryIsCode = tool.primaryIsCode;
+    summary = entry.tool?.primary ?? tool.primary;
+    summaryIsCode = entry.tool?.isCommand ?? tool.primaryIsCode;
     markdown = tool.status;
     // Retain the bounded supplied message without treating it as output or an outcome.
     if (normalizedKind === "toolcall" && !markdown && entry.text) detailMarkdown = entry.text;
@@ -209,6 +224,10 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     fileChanges: projectFileChanges(entry),
     toolRecord: projectToolRecord(entry),
     toolPhase: entry.eventType === "activity" ? entry.phase?.toLowerCase() : undefined,
+    toolOutput: entry.tool?.output,
+    toolOutputLines: entry.tool?.outputLines,
+    toolOutputBytes: entry.tool?.outputBytes,
+    toolFields: entry.tool?.fields,
   };
 }
 

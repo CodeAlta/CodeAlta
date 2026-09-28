@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { FileChanges } from "./fileChanges";
 import { useShellLanguage } from "./shellLanguage";
 import { AppIcon } from "./AppIcon";
+import { isDialogBackdrop } from "./dialogBackdrop";
 
 // Read-only disclosure: paths never become links, filesystem targets or RPC inputs.
 // The parent keys this subtree by the exact supplied record, not just byte offset.
@@ -34,14 +35,8 @@ export function FileChangeInspection({ changes, canInspect }: { changes: FileCha
     element.showModal(); element.querySelector<HTMLButtonElement>('button')?.focus();
     return () => { if (element.open) element.close(); };
   }, [selection]);
-  const counted = changes.rows.filter(row => row.counts !== null);
-  return <section className="file-change-inspection" aria-label={t("Supplied file records")}>
-    <div className="file-change-summary"><span>{changes.rows.length ? t("Supplied file records: {count}", { count: changes.rows.length }) : t("Partial or unsupported file data; inspect the original record details.")}</span>
-    <span title={t("Recorded data only, not disk state or write success. Counts cover supplied hunks, not complete file or run totals.")}><AppIcon name="info" size={12} /></span>
-    {changes.partial && <span title={t("Partial or unsupported file data; inspect the original record details.")} aria-label={t("Partial or unsupported file data; inspect the original record details.")}><AppIcon name="error" size={12} /></span>}
-    {counted.length > 0 && <span>{t("Shown counted hunks ({count} records): +{added} / -{removed}", {
-      count: counted.length, added: counted.reduce((sum, row) => sum + row.counts!.added, 0), removed: counted.reduce((sum, row) => sum + row.counts!.removed, 0),
-    })}</span>}</div>
+  return <section className="file-change-inspection" aria-label={t("Supplied file records")}
+    title={t("Recorded data only, not disk state or write success. Counts cover supplied hunks, not complete file or run totals.")}>
     <ul>{changes.rows.map(row => {
       const open = selection?.index === row.index && (selection.current?.() ?? true) && allowed();
       return <li key={row.index}>
@@ -51,15 +46,15 @@ export function FileChangeInspection({ changes, canInspect }: { changes: FileCha
             if (event.defaultPrevented || !allowed() || !event.currentTarget.isConnected || event.currentTarget.closest("[inert]")
               || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
             origin.current = event.currentTarget; setSelection(open ? null : { index: row.index, current: canInspect });
-          }}><AppIcon name="file" size={14} /><span className="file-card-path"><strong>{row.path.split(/[\\/]/).at(-1)}</strong><small>{row.path}</small></span></button>
-        <span className="file-change-kind">{row.kind ?? t("Change kind not supplied")}</span>
+          }} title={row.path}><span className="file-card-path"><strong>{row.path.split(/[\\/]/).at(-1)}</strong><small>{row.path.replace(/[\\/][^\\/]+$/, "") === row.path ? "." : row.path.replace(/[\\/][^\\/]+$/, "")}</small></span></button>
         <span className="file-counts" title={row.counts ? t("Supplied hunk lines: +{added} / -{removed}", row.counts) : t("Diff counts unavailable")}>{row.counts ? <><b>+{row.counts.added}</b> <em>−{row.counts.removed}</em></> : "—"}</span>
         {open && <dialog ref={dialog} className="app-dialog timeline-details-dialog" aria-labelledby={`${id}-title`} onClose={event => { if (!event.currentTarget.open) setSelection(null); }}
+          onClick={event => { if (!composing.current && isDialogBackdrop(event)) close(); }}
           onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
           onCancel={event => { event.preventDefault(); if (!composing.current) close(); }} onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); if (!composing.current && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && !event.repeat) close(); } }}>
           <header><h2 id={`${id}-title`}>{row.path}</h2><button type="button" aria-label={t("Close")} onClick={close}><AppIcon name="close" size={18} /></button></header>
-          <p>{t("Recorded data only, not disk state or write success. Counts cover supplied hunks, not complete file or run totals.")}</p>
-          {row.diff !== null ? <pre data-file-diff>{row.diff.split("\n").map((line, index, lines) => <span key={index}
+          <div className="file-dialog-summary"><span>{row.kind}</span>{row.counts && <span className="file-counts"><b>+{row.counts.added}</b> <em>-{row.counts.removed}</em></span>}</div>
+          {row.diff !== null ? <pre data-file-diff>{row.diff.split("\n").filter(line => !/^(?:@@|diff --git |index |--- |\+\+\+ )/.test(line)).map((line, index, lines) => <span key={index}
             className={line.startsWith("+") ? "diff-added" : line.startsWith("-") ? "diff-removed" : line.startsWith("@@") ? "diff-hunk" : undefined}>
             {line}{index < lines.length - 1 ? "\n" : ""}</span>)}</pre> : <p>{t("No supported per-file diff supplied; original record details remain available.")}</p>}
         </dialog>}

@@ -14,7 +14,7 @@ export function projectFileChanges(entry: HistoryEntry): FileChanges | undefined
   const empty: FileChanges = { source: "", rows: [], partial: true };
   if (entry.files) {
     const rows = entry.files.rows.map((row, index) => ({ index, path: row.path, kind: row.kind, diff: row.diff,
-      counts: row.diff ? countSuppliedHunks(row.diff) : null }));
+      counts: row.added != null && row.removed != null ? { added: row.added, removed: row.removed } : row.diff ? countSuppliedHunks(row.diff) : null }));
     return { source: JSON.stringify(entry), rows, partial: entry.files.partial };
   }
   if (!entry.details || entry.details.length > 8192 || entry.detailsTruncated) return empty;

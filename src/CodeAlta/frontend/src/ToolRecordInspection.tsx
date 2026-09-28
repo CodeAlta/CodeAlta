@@ -3,6 +3,8 @@ import type { ToolRecord } from "./toolRecords";
 import { createPaletteFocusRestoration } from "./paletteActions";
 import { useShellLanguage } from "./shellLanguage";
 import { AppIcon } from "./AppIcon";
+import { CodePreview } from "./CodePreview";
+import { isDialogBackdrop } from "./dialogBackdrop";
 
 // Parent keys this component by the complete bounded supplied record, not activity ID.
 export function ToolRecordInspection({ record, canInspect }: { record: ToolRecord; canInspect?: () => boolean }) {
@@ -54,7 +56,8 @@ export function ToolRecordInspection({ record, canInspect }: { record: ToolRecor
         active.current = value; setReview(value);
       }}><AppIcon name="tool" size={14} /></button>
     {review && <dialog ref={dialog} className="app-dialog tool-record-dialog" aria-modal="true" aria-labelledby={id}
-      onClose={() => { if (active.current === review) close(); }} onCancel={event => { event.preventDefault(); if (!composing.current) close(); }}
+      onClick={event => { if (!composing.current && isDialogBackdrop(event)) close(); }}
+      onClose={event => { if (!event.currentTarget.open && active.current === review) close(); }} onCancel={event => { event.preventDefault(); if (!composing.current) close(); }}
       onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
       onKeyDown={event => {
         event.stopPropagation();
@@ -64,12 +67,12 @@ export function ToolRecordInspection({ record, canInspect }: { record: ToolRecor
         }
         if (event.key === "Escape") { event.preventDefault(); close(); }
       }}>
-      <header><h2 id={id}>{t("Inspect supplied tool record")}</h2><button ref={closeButton} type="button" onClick={() => { if (active.current === review) close(); }}>{t("Close")}</button></header>
+      <header><h2 id={id}>{t("Inspect supplied tool record")}</h2><button ref={closeButton} type="button" aria-label={t("Close")} onClick={() => { if (active.current === review) close(); }}><AppIcon name="close" size={18} /></button></header>
       <p>{t("One persisted record only. Reported phase is not proof of success or completion; outputs may be incomplete.")}</p>
       <p><code>{record.name ?? t("Unknown")}</code></p>
       {record.partial && <p>{t("Additional diagnostic details were omitted.")}</p>}
       {record.fields.map(field => <section key={field.path}><h3><code>{field.path}</code></h3>
-        <pre data-tool-field={field.path}>{field.text.slice(0, field.text.charCodeAt(4095) >= 0xd800 && field.text.charCodeAt(4095) <= 0xdbff ? 4095 : 4096)}</pre>
+        <CodePreview field={field.path} text={field.text.slice(0, field.text.charCodeAt(4095) >= 0xd800 && field.text.charCodeAt(4095) <= 0xdbff ? 4095 : 4096)} />
         {field.text.length > 4096 && <p>{t("Display excerpt; Copy retains the supplied JSON.")}</p>}
       </section>)}
       <h3>{t("Supplied record provenance")}</h3><pre data-tool-provenance>{record.provenance}</pre>

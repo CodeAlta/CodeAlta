@@ -1,3 +1,4 @@
+import { HTMLSelect } from "@blueprintjs/core";
 import { useEffect, useRef, useState } from "react";
 import type { ModelCatalogModelsRequest, ModelCatalogModelsResponse, ModelCatalogProvidersRequest, ModelCatalogProvidersResponse, SessionChoicesRequest, SessionChoicesResponse, SessionSelection } from "#neoastra";
 import type { CatalogNextSendTarget, NextSendResult, createNextSendSelectionStore } from "./nextSendSelection";
@@ -171,9 +172,9 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
                       : t("{model} · effort {effort} · prompt {prompt}", { model: nextSend?.modelId ?? t("provider default"), effort: nextSend?.reasoningEffort ?? t("model default"), prompt: nextSend?.agentPromptId ?? t("Unknown") })}.</p>
                     {!sameProvider && <p role="status">{t("This provider is not the selected session's provider. Changing provider is not supported here.")}</p>}
                     {sameProvider && !modelChoice && <p role="status">{t("This model is unavailable for this session's next Send.")}</p>}
-                    {modelChoice && <label>{t("Reasoning effort for next Send")}<select value={effort} onChange={event => setEffort(event.target.value)}>
+                    {modelChoice && <label>{t("Reasoning effort for next Send")}<HTMLSelect value={effort} onChange={event => setEffort(event.target.value)}>
                       <option value="">{t("Model default")}</option>{modelChoice.efforts.map(value => <option key={value} value={value}>{value}</option>)}
-                    </select></label>}
+                    </HTMLSelect></label>}
                     {pendingSend && <p role="status">{t("Finish or reconcile the exact pending Send before changing its next selection.")}</p>}
                     <button type="button" disabled={!sameProvider || !modelChoice || pendingSend || applying || !nextSend}
                       onClick={() => void applySelection()}>{t(applying ? "Validating next Send…" : "Use model for next Send")}</button>

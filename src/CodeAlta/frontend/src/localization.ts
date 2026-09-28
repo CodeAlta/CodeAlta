@@ -4,6 +4,16 @@ function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
   return Object.freeze(Object.fromEntries(Object.entries(rows).map(([key, row]) => [key, Object.freeze(row)]))) as Readonly<T>;
 }
 export const messages = dictionary({
+  "Completed": ["Completado", "Terminé", "Abgeschlossen", "完了", "已完成"],
+  "Failed": ["Fallido", "Échec", "Fehlgeschlagen", "失敗", "失败"],
+  "Canceled": ["Cancelado", "Annulé", "Abgebrochen", "キャンセル済み", "已取消"],
+  "Running": ["En curso", "En cours", "Läuft", "実行中", "运行中"],
+  "Pending": ["Pendiente", "En attente", "Ausstehend", "待機中", "待处理"],
+  "Assistant": ["Asistente", "Assistant", "Assistent", "アシスタント", "助手"],
+  "Change provider": ["Cambiar proveedor", "Changer de fournisseur", "Anbieter wechseln", "プロバイダーを変更", "更换提供商"],
+  "Switching provider…": ["Cambiando proveedor…", "Changement de fournisseur…", "Anbieter wird gewechselt…", "プロバイダーを変更中…", "正在更换提供商…"],
+  "History and draft are kept. The provider connects on your next Send.": ["Se conservan el historial y el borrador. El proveedor se conecta al enviar.", "L’historique et le brouillon sont conservés. Le fournisseur se connecte au prochain envoi.", "Verlauf und Entwurf bleiben erhalten. Die Verbindung erfolgt beim nächsten Senden.", "履歴と下書きは保持されます。次回の送信時に接続します。", "保留历史记录和草稿。提供商将在下次发送时连接。"],
+  "Provider selection unavailable ({status}).": ["Selección de proveedor no disponible ({status}).", "Sélection du fournisseur indisponible ({status}).", "Anbieterauswahl nicht verfügbar ({status}).", "プロバイダーを選択できません（{status}）。", "无法选择提供商（{status}）。"],
   "Provider switching is unavailable for existing desktop sessions.": ["El cambio de proveedor no está disponible para sesiones de escritorio existentes.", "Le changement de fournisseur est indisponible pour les sessions de bureau existantes.", "Anbieterwechsel ist für bestehende Desktop-Sitzungen nicht verfügbar.", "既存のデスクトップセッションではプロバイダーを変更できません。", "现有桌面会话无法切换提供商。"],
   "Saved selection; not verified by this host's observed model catalog.": ["Selección guardada; no verificada por el catálogo observado de este host.", "Sélection enregistrée ; non vérifiée par le catalogue observé de cet hôte.", "Gespeicherte Auswahl; nicht im beobachteten Modellkatalog dieses Hosts verifiziert.", "保存済みの選択です。このホストで観測されたモデル一覧では未確認です。", "已保存的选择；尚未经此主机观测到的模型目录验证。"],
   "Unverified": ["Sin verificar", "Non vérifié", "Unbestätigt", "未確認", "未验证"],
@@ -855,6 +865,11 @@ export const messages = dictionary({
   "Expanded prompt": ["Entrada ampliada", "Saisie agrandie", "Erweiterte Eingabe", "拡大プロンプト", "展开的提示词"],
   "Markdown preview": ["Vista previa de Markdown", "Aperçu Markdown", "Markdown-Vorschau", "Markdown プレビュー", "Markdown 预览"],
   "Tool calls": ["Llamadas a herramientas", "Appels d’outils", "Werkzeugaufrufe", "ツール呼び出し", "工具调用"],
+  "{count} call(s)": ["{count} llamadas", "{count} appel(s)", "{count} Aufruf(e)", "{count} 回の呼び出し", "{count} 次调用"],
+  "{count} done": ["{count} completadas", "{count} terminé(s)", "{count} fertig", "{count} 完了", "{count} 已完成"],
+  "{count} failed": ["{count} fallidas", "{count} échoué(s)", "{count} fehlgeschlagen", "{count} 失敗", "{count} 失败"],
+  "{count} running": ["{count} en curso", "{count} en cours", "{count} aktiv", "{count} 実行中", "{count} 运行中"],
+  "{count} canceled": ["{count} canceladas", "{count} annulé(s)", "{count} abgebrochen", "{count} キャンセル", "{count} 已取消"],
   "Modified files": ["Archivos modificados", "Fichiers modifiés", "Geänderte Dateien", "変更されたファイル", "已修改文件"],
   "Enter / Escape / Ctrl+Enter close · Shift+Enter new line · Draft preserved; nothing is sent.": ["Enter / Escape / Ctrl+Enter cierran · Shift+Enter nueva línea · Se conserva el borrador; no se envía nada.", "Enter / Escape / Ctrl+Enter ferment · Shift+Enter nouvelle ligne · Brouillon conservé ; rien n’est envoyé.", "Enter / Escape / Ctrl+Enter schließen · Shift+Enter neue Zeile · Entwurf bleibt erhalten; nichts wird gesendet.", "Enter / Escape / Ctrl+Enter で閉じる · Shift+Enter で改行 · 下書きは保持され、送信されません。", "Enter / Escape / Ctrl+Enter 关闭 · Shift+Enter 换行 · 保留草稿，不发送任何内容。"],
   "Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer": ["Enter para enviar · Shift+Enter nueva línea · Ctrl+Enter para dirigir", "Enter pour envoyer · Shift+Enter nouvelle ligne · Ctrl+Enter pour orienter", "Enter zum Senden · Shift+Enter für neue Zeile · Ctrl+Enter zum Steuern", "Enter で送信 · Shift+Enter で改行 · Ctrl+Enter で実行を誘導", "Enter 发送 · Shift+Enter 换行 · Ctrl+Enter 引导运行"],

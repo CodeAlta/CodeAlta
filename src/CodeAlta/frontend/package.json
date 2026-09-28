@@ -11,6 +11,7 @@
     "test": "tsx --test src/*.test.ts src/*.test.tsx"
   },
   "dependencies": {
+    "@blueprintjs/core": "6.20.0",
     "@codemirror/state": "6.7.4",
     "@codemirror/view": "6.43.11",
     "@neoastra/client": "file:../obj/neoastra/client",

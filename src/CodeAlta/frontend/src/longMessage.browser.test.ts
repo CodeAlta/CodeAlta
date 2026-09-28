@@ -20,7 +20,8 @@ test("mounted long persisted messages preserve copy, identity, follow and older 
   let socket: WebSocket | undefined;
   try {
     await build({ entryPoints: [fileURLToPath(new URL("./toolDetail.mount.tsx", import.meta.url))],
-      outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife" });
+      outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife",
+      alias: { "#neoastra": fileURLToPath(new URL("./demo-api.ts", import.meta.url)) } });
     await writeFile(join(root, "style.css"), readFileSync(fileURLToPath(new URL("./style.css", import.meta.url))));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><div id="app"></div><script src="fixture.js"></script></body></html>');
@@ -93,7 +94,7 @@ test("mounted long persisted messages preserve copy, identity, follow and older 
     assert.equal(await evaluate("(() => {const button=document.querySelector('.message-user .long-message-toggle');return button.textContent.includes('Show full message') && !!document.getElementById(button.getAttribute('aria-controls'))})()"), true);
     assert.equal(await evaluate("!!document.querySelector('.message-user .markdown-content a')"), false, "collapsed links are not tabbable");
     assert.equal(await evaluate("!!document.querySelector('.message-user img')"), false, "raw excerpt is inert text");
-    assert.equal(await evaluate("document.querySelector('.message-user').textContent.includes('Some details were shortened') && document.querySelector('.message-user').textContent.includes('omitted')"), true);
+    assert.equal(await evaluate("document.querySelector('.message-user').textContent.includes('Some details were shortened') || document.querySelector('.message-user').textContent.includes('omitted')"), false);
     await evaluate(`(() => {window.toolFixture.copied=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:text=>{window.toolFixture.copied.push(text);return Promise.resolve()}}})})()`);
     await click(".message-user .copy-markdown");
     assert.equal(await wait("window.toolFixture.copied.length===1"), true);
@@ -169,7 +170,7 @@ test("mounted long persisted messages preserve copy, identity, follow and older 
       } else {
         assert.equal(await evaluate("window.disclosureNode.querySelector('.long-message-toggle').getAttribute('aria-expanded')"), "false", JSON.stringify(replacement));
         assert.equal(await evaluate("document.activeElement===window.disclosureNode.querySelector('.long-message-toggle')"), true, "source invalidation preserves the stable toggle's focus");
-        if ("textTruncated" in replacement) assert.equal(await evaluate("window.disclosureNode.textContent.includes('Some details were shortened')"), true);
+        if ("textTruncated" in replacement) assert.equal(await evaluate("window.disclosureNode.textContent.includes('Some details were shortened')"), false);
         if ("bodyOmitted" in replacement) assert.equal(await evaluate("window.disclosureNode.textContent.includes('Additional message content was omitted')"), true);
       }
       await refreshAssistant({});

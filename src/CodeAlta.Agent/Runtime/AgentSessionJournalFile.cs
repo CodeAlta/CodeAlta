@@ -160,6 +160,50 @@ internal sealed class AgentSessionJournalFile
             await committed().ConfigureAwait(false);
         }, cancellationToken);
 
+    // A same-directory rename is the commit point. No canonical bytes are changed before it.
+    // Used for idle provider selection only, not normal streaming event writes.
+    internal Task ReplaceWithSnapshotsAsync(string path, AgentHistoryRevision expected, string? header,
+        IReadOnlyList<string> snapshots, CancellationToken token)
+        => WithPathLockAsync(path, async () =>
+        {
+            var temporary = path + ".selection-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                await using var original = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+                var info = new FileInfo(path);
+                if (original.Length != expected.Length || info.LastWriteTimeUtc.Ticks != expected.LastWriteUtcTicks)
+                    throw new InvalidOperationException("The session changed before provider selection could commit.");
+                await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    await using var writer = new StreamWriter(output, new UTF8Encoding(false), leaveOpen: true);
+                    if (header is not null)
+                    {
+                        var count = 0;
+                        while (original.ReadByte() is var value && value >= 0 && value != '\n')
+                            if (++count > 128 * 1024) throw new InvalidDataException("Session header is oversized.");
+                        await writer.WriteLineAsync(header.AsMemory(), token).ConfigureAwait(false);
+                        await writer.FlushAsync(token).ConfigureAwait(false);
+                    }
+                    await original.CopyToAsync(output, token).ConfigureAwait(false);
+                    // An extra empty line is harmless and prevents joining a final unterminated record.
+                    await writer.WriteLineAsync(ReadOnlyMemory<char>.Empty, token).ConfigureAwait(false);
+                    foreach (var line in snapshots) await writer.WriteLineAsync(line.AsMemory(), token).ConfigureAwait(false);
+                    await writer.FlushAsync(token).ConfigureAwait(false);
+                    output.Flush(flushToDisk: true);
+                }
+                token.ThrowIfCancellationRequested();
+                // Windows replacement needs the read handle closed. The shared journal gate
+                // remains held; reject an externally changed path immediately before rename.
+                await original.DisposeAsync().ConfigureAwait(false);
+                info.Refresh();
+                if (info.Length != expected.Length || info.LastWriteTimeUtc.Ticks != expected.LastWriteUtcTicks)
+                    throw new InvalidOperationException("The session changed before journal replacement.");
+                File.Move(temporary, path, overwrite: true);
+                // Nothing fallible follows the durable decision; caches reproject from the changed stamp.
+            }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        }, token);
+
     private static async Task AppendLinesCoreAsync(
         string path,
         IReadOnlyList<string> lines,

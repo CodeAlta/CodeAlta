@@ -19,7 +19,8 @@ test("mounted persisted details and code retain access, follow, older anchors an
   let socket: WebSocket | undefined;
   try {
     await build({ entryPoints: [fileURLToPath(new URL("./toolDetail.mount.tsx", import.meta.url))],
-      outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife" });
+      outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife",
+      alias: { "#neoastra": fileURLToPath(new URL("./demo-api.ts", import.meta.url)) } });
     await writeFile(join(root, "style.css"), readFileSync(fileURLToPath(new URL("./style.css", import.meta.url))));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><div id="app"></div><script src="fixture.js"></script></body></html>');
@@ -84,7 +85,7 @@ test("mounted persisted details and code retain access, follow, older anchors an
     assert.equal(await evaluate("document.querySelector('.timeline-message').textContent.includes('turn-205')"), true);
     assert.equal(await evaluate(`document.querySelector('${details}').open`), false);
     assert.equal(await evaluate("document.querySelectorAll('.tool-detail-wrap').length"), 1);
-    assert.equal(await evaluate("document.querySelector('.timeline-message:last-child').textContent.includes('Some details were shortened')"), true);
+    assert.equal(await evaluate("document.querySelector('.timeline-message:last-child').textContent.includes('Some details were shortened')"), false);
     assert.equal(await evaluate("document.querySelector('.timeline-message:last-child .markdown-content code').textContent"), "literal code stays as Markdown");
     assert.equal(await wait(`${distance}<3`), true);
     await evaluate(`(() => { window.toolFixture.writes=0;window.toolFixture.network=0;window.toolFixture.copied=[];
@@ -247,7 +248,7 @@ test("mounted persisted details and code retain access, follow, older anchors an
     assert.equal(await evaluate("document.querySelector('.navigation-notice').textContent.includes('following visible content')"), false);
     assert.equal(await evaluate("document.querySelector('.timeline-message:last-child').textContent.includes('turn-2')"), true);
     assert.equal(await evaluate("!!document.querySelector('.timeline-message:last-child .tool-detail-wrap')"), false);
-    assert.equal(await evaluate("document.querySelectorAll('.timeline-message')[1].textContent.includes('Additional diagnostic details were omitted')"), true);
+    assert.equal(await evaluate("document.querySelectorAll('.timeline-message')[1].textContent.includes('Additional diagnostic details were omitted')"), false);
     assert.equal(await evaluate("!!document.querySelectorAll('.timeline-message')[1].querySelector('.tool-detail-wrap')"), false);
     assert.equal(await wait(`${distance}<3 && document.querySelector('.timeline-scroll').dataset.following==='true'`), true);
     await evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
@@ -422,7 +423,7 @@ test("mounted persisted details and code retain access, follow, older anchors an
     await click(`${supplied} .copy-markdown`);
     assert.equal(await wait("window.toolFixture.copied.length===1"), true);
     assert.equal(await evaluate("window.toolFixture.copied[0].includes(window.toolFixture.toolMessage) && window.toolFixture.copied[0].includes('tool-diagnostic-')"), true);
-    assert.equal(await evaluate(`document.querySelector('${supplied}').textContent.includes('Some details were shortened') && document.querySelector('${supplied}').textContent.includes('Additional diagnostic details were omitted')`), true);
+    assert.equal(await evaluate(`document.querySelector('${supplied}').textContent.includes('Some details were shortened') || document.querySelector('${supplied}').textContent.includes('Additional diagnostic details were omitted')`), false);
     assert.equal(await evaluate("window.toolFixture.calls.length"), messageReads, "disclosure, Wrap and Copy acquire no new history");
     await evaluate(`window.savedMessageCode=document.querySelector('${suppliedCode}')`);
     await click(".history .section-heading button");
@@ -456,7 +457,7 @@ test("mounted persisted details and code retain access, follow, older anchors an
     await click(".history .copy-markdown");
     assert.equal(await wait("window.toolFixture.copied.length===1"), true);
     assert.equal(await evaluate("window.toolFixture.copied[0]===window.toolFixture.fileCopy"), true);
-    assert.equal(await evaluate("document.querySelector('.history').textContent.includes('Some details were shortened') && document.querySelector('.history').textContent.includes('Additional diagnostic details were omitted')"), true);
+    assert.equal(await evaluate("document.querySelector('.history').textContent.includes('Some details were shortened') || document.querySelector('.history').textContent.includes('Additional diagnostic details were omitted')"), false);
     assert.equal(await evaluate("window.toolFixture.calls.length"), fileReads);
     await evaluate(`void(window.savedFileDetails=document.querySelector('${fileDetails}'))`);
     await click(".history .section-heading button");

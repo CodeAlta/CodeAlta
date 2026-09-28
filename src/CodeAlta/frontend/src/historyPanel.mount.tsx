@@ -21,7 +21,7 @@ function row(index: number, session: string): HistoryResponse["entries"][number]
     runId: null, timestamp: "2026-01-01T00:00:00Z", kind: index === 1204 ? "User" : index === 1202 ? "CommandOutput" : "Assistant", phase: null,
     contentId: `${index}`, activityId: null, parentActivityId: null, interactionId: null, name: null,
     text: index === 1204 ? "latest user prompt" : `turn-${index}`, details: null,
-    files: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false };
+    tool: null, files: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false };
 }
 async function read(request: HistoryRequest): Promise<HistoryResponse> {
   calls.push(`${request.sessionId}:${request.cursor?.version ?? "tail"}:${request.cursor?.offset ?? "end"}`);

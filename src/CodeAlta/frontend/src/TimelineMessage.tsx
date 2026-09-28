@@ -15,8 +15,7 @@ const previewLength = 240;
 // Display-only command identity, never a command parser or execution target.
 export function commandPreview(source: string): string {
   const line = source.trim().split(/\r?\n/)[0];
-  const identity = line.match(/^[\w./\\:-]+(?:\s+[\w.-]+)?/)?.[0];
-  return (identity ?? line).slice(0, 48) + ((identity ?? line).length > 48 || identity && identity.length < line.length ? "…" : "");
+  return line.slice(0, 160) + (line.length > 160 ? "…" : "");
 }
 
 export function TimelineMessage({ item, canInspect, historySource, onOpenSource, toolTile = false }: { item: TimelineItem; canInspect?: () => boolean; toolTile?: boolean;
@@ -101,10 +100,12 @@ export function TimelineMessage({ item, canInspect, historySource, onOpenSource,
   const excerpt = (item.summary || body || item.detailMarkdown || "").split(/\r?\n\s*\r?\n/)[0];
   const codePreview = item.category === "tool" && item.summaryIsCode
     ? commandPreview(excerpt) : null;
-  const toolOutput = item.toolRecord?.fields.find(field => ["result.content", "result.detailedContent", "output.body", "error.message"].includes(field.path))?.text;
+  const toolOutput = item.toolOutput ?? item.toolRecord?.fields.find(field => ["result.content", "result.detailedContent", "output.body", "error.message"].includes(field.path))?.text;
+  const outcome = ({ completed: "Completed", failed: "Failed", canceled: "Canceled", requested: "Pending",
+    started: "Running", progressed: "Running", selected: "Running", deselected: "Completed" } as Record<string, "Completed" | "Failed" | "Canceled" | "Pending" | "Running">)[item.toolPhase ?? ""];
   // Categories below have fixed UI titles in toTimelineItem; tool/provider names do not.
   const title = item.category === "file" ? t("Modified files") : item.category === "user" ? t("You") : item.category === "plan" ? t("Plan")
-    : item.category === "notes" ? t("Alta notes") : item.category === "error" ? t("Error")
+    : item.category === "assistant" ? t("Assistant") : item.category === "notes" ? t("Alta notes") : item.category === "error" ? t("Error")
     : item.category === "reasoning" ? t(item.title === "Reasoning summary" ? "Reasoning summary" : "Reasoning") : item.title;
   const copyLabel = copyState === "copied" ? t("Copied") : copyState === "failed" ? t("Copy failed") : t("Copy {title} as Markdown", { title });
   function openDetails(origin: HTMLButtonElement) {
@@ -118,25 +119,28 @@ export function TimelineMessage({ item, canInspect, historySource, onOpenSource,
       <div className="message-heading">
         <span>{toolTile && hasDetails ? <button type="button" className="tool-tile-title" aria-haspopup="dialog"
           onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
-          onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}><span className="tool-state-dot" aria-hidden="true">●</span> <strong>{codePreview || title}</strong></button>
-          : <strong>{title}</strong>}{item.subtitle && <small>{item.subtitle}</small>}</span>
-        {compact && excerpt && <div className="timeline-inline-preview">{codePreview !== null ? <code>{codePreview}</code>
+          onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}><span className="tool-state-dot" aria-hidden="true">●</span> <strong>{title}</strong></button>
+          : item.category !== "reasoning" && <strong>{title}</strong>}{!toolTile && item.subtitle && <small>{item.subtitle}</small>}</span>
+        {compact && excerpt && !toolTile && item.category !== "file" && <div className="timeline-inline-preview">{codePreview !== null ? <code>{codePreview}</code>
           : item.summary ? excerpt : <MarkdownContent source={excerpt} />}</div>}
         <span className="message-actions">
           {item.toolRecord && <ToolRecordInspection key={item.toolRecord.source} record={item.toolRecord} canInspect={canInspect} />}
           {hasDetails && <button type="button" className="timeline-detail-trigger" aria-label={t("Details")} title={t("Details")} aria-haspopup="dialog"
             onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
             onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}><AppIcon name="info" size={15} /></button>}
-          {historySource && <button type="button" className="timeline-source-trigger" aria-label={t("Read full raw record (paged)")} title={t("Read full raw record (paged)")} aria-haspopup="dialog"
-            onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
-            onClick={event => { if (!event.defaultPrevented && current() && event.currentTarget.isConnected && !event.currentTarget.closest('[inert], [hidden]') && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) onOpenSource?.(historySource); }}><AppIcon name="file" size={15} /></button>}
           {item.copyMarkdown && <button type="button" className={`copy-markdown copy-${copyState}`} onClick={() => void copy()}
             aria-label={copyLabel} title={copyLabel}><AppIcon name={copyState === "copied" ? "checked" : copyState === "failed" ? "error" : "copy"} size={15} /><span className="sr-only" aria-live="polite">{copyState === "idle" ? "" : copyLabel}</span></button>}
-          <time title={timestamp.title} dateTime={timestamp.dateTime}>{timestamp.label}</time>
+          {!toolTile && <time title={timestamp.title} dateTime={timestamp.dateTime}>{timestamp.label}</time>}
         </span>
       </div>
-      {toolTile && toolOutput && <div className="tool-result-preview" title={toolOutput.slice(0, 512)}>{toolOutput.trim().split(/\r?\n/)[0].slice(0, 160)} <span>· {toolOutput.split(/\r?\n/).length}L</span></div>}
+      {toolTile && codePreview && <code className="tool-command-preview">{codePreview}</code>}
+      {toolTile && <div className="tool-result-summary">
+        {outcome && <span className="tool-outcome">{t(outcome)}</span>}
+        {item.toolOutputBytes != null && item.toolOutputLines != null && <span className="tool-output-stats">{item.toolOutputLines}L · {(item.toolOutputBytes / 1024).toFixed(1)} KB</span>}
+        {toolOutput && <span className="tool-result-preview" title={toolOutput.slice(0, 512)}>{toolOutput.trim().split(/\r?\n/)[0].slice(0, 160)}</span>}
+      </div>}
       {!compact && item.summary && (item.summaryIsCode ? <code className="timeline-primary-code">{item.summary}</code> : <p className="timeline-summary">{item.summary}</p>)}
+      {toolTile && !codePreview && item.summary && <div className="tool-argument-preview">{item.summary}</div>}
       {!compact && (body && longBody ? <>
         <button type="button" className="quiet-button long-message-toggle" aria-controls={bodyId}
           aria-expanded={expanded} disabled={!current()}
@@ -153,9 +157,6 @@ export function TimelineMessage({ item, canInspect, historySource, onOpenSource,
       </> : body && <MarkdownContent source={body} timelineCodeBlocks />)}
       {item.fileChanges && <FileChangeInspection key={item.fileChanges.source} changes={item.fileChanges} canInspect={canInspect} />}
       {details && <TimelineDetails item={details.item} current={detailCurrent} onClose={closeDetails} />}
-      {item.bodyOmitted && <p className="muted-text">{t(item.category === "user" || item.category === "assistant"
-        ? "Additional message content was omitted from this history record." : "Additional diagnostic details were omitted.")}</p>}
-      {item.truncated && <p className="muted-text">{t("Some details were shortened to fit the desktop history window.")}</p>}
     </div>
   </article>;
 }
