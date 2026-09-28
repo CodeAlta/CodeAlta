@@ -432,3 +432,12 @@ titles, correct dialog content, close and focus restoration at 390/1280px in bot
 Strict TypeScript and frontend build pass (existing bundle-size warning). The first browser
 failures and readonly-fixture TypeScript error are preserved under `tool-groups-*.log` in the
 local evidence directory. This is not native/owned-App visual acceptance or full parity.
+
+The expanded prompt now includes a live, toggleable Markdown preview using `MarkdownContent`
+and its existing sanitization boundary. Wide layouts use side-by-side panes; narrow layouts
+stack them. The textarea remains mounted when toggling, preserving native selection, paste,
+reference and composition contracts. Closing still preserves the draft and sends nothing.
+The isolated actual-App fixture checks rendered headings, script exclusion, preview toggling
+and exact draft preservation in both widths/themes. Strict TypeScript and frontend build pass;
+no dependency was added. Syntax highlighting/formatting assistance, Modified files host-side
+projection and remaining lifecycle-driven panel conversions are still open.

@@ -75,6 +75,16 @@ test("actual App mounts against an isolated bridge and records parity baselines"
       const shot = await command("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
       await writeFile(join(root, `${width}-${theme}.png`), Buffer.from(shot.data, "base64"));
       measurements.push({ width, theme, scrollWidth: await evaluate("document.documentElement.scrollWidth"), text: await evaluate("document.body.innerText") });
+      await evaluate("document.querySelector('#expand-session-prompt').click();new Promise(r=>requestAnimationFrame(r))");
+      const draft = "# Draft heading\n\n**Review** `source` before sending.\n\n<script>window.previewUnsafe=true</script>";
+      await evaluate(`(()=>{const input=document.querySelector('.expanded-prompt-dialog textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,${JSON.stringify(draft)});input.dispatchEvent(new Event('input',{bubbles:true}));})();new Promise(r=>requestAnimationFrame(r))`);
+      assert.equal(await evaluate("document.querySelector('#expanded-prompt-preview h1')?.textContent"), "Draft heading");
+      assert.equal(await evaluate("!!window.previewUnsafe || !!document.querySelector('#expanded-prompt-preview script')"), false);
+      await evaluate("document.querySelector('.expanded-prompt-actions [aria-pressed]').click();new Promise(r=>requestAnimationFrame(r))");
+      assert.equal(await evaluate("document.querySelector('#expanded-prompt-preview').hidden"), true);
+      assert.equal(await evaluate("document.querySelector('.expanded-prompt-dialog textarea').value"), draft);
+      await evaluate("document.querySelector('.expanded-prompt-actions button:last-child').click();new Promise(r=>requestAnimationFrame(r))");
+      assert.equal(await evaluate("document.querySelector('#catalog-prompt').value"), draft);
     }
     await writeFile(join(root, "baseline.json"), JSON.stringify(measurements, null, 2));
     assert.deepEqual(await evaluate("parityFixture.unexpected"), []);

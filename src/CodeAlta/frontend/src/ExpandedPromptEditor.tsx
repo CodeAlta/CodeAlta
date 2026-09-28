@@ -1,7 +1,8 @@
-import { useEffect, useRef, type ClipboardEventHandler, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ClipboardEventHandler, type ReactNode } from "react";
 import { dispatchExpandedComposerKey } from "./composerKeyboard";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
 import { useShellLanguage } from "./shellLanguage";
+import { MarkdownContent } from "./MarkdownContent";
 
 export function ExpandedPromptEditor({ text, onChange, onClose, onPaste, attachments, onCompositionStart }: {
   text: string; onChange: (text: string) => void; onClose: () => void;
@@ -11,6 +12,7 @@ export function ExpandedPromptEditor({ text, onChange, onClose, onPaste, attachm
   const { t } = useShellLanguage();
   const dialog = useRef<HTMLDialogElement>(null);
   const editor = useRef<HTMLTextAreaElement>(null);
+  const [preview, setPreview] = useState(true);
   useEffect(() => {
     const element = dialog.current!;
     element.showModal();
@@ -31,9 +33,16 @@ export function ExpandedPromptEditor({ text, onChange, onClose, onPaste, attachm
         defaultPrevented: event.defaultPrevented }, onClose)) event.preventDefault();
       else if (event.key === "Escape") event.preventDefault();
     }}>
-    <header><h2 id="expanded-prompt-title">{t("Edit prompt")}</h2><button type="button" onClick={onClose}>{t("Close")}</button></header>
-    <textarea ref={editor} aria-label={t("Expanded prompt")} aria-describedby="expanded-prompt-hint" maxLength={32768}
-      value={text} onChange={event => onChange(event.target.value)} onPaste={onPaste} onCompositionStart={onCompositionStart} />
+    <header><h2 id="expanded-prompt-title">{t("Edit prompt")}</h2><div className="expanded-prompt-actions">
+      <button type="button" aria-pressed={preview} aria-controls="expanded-prompt-preview" onClick={() => setPreview(value => !value)}>{t("Markdown preview")}</button>
+      <button type="button" onClick={onClose}>{t("Close")}</button></div></header>
+    <div className={`expanded-prompt-panes${preview ? " with-preview" : ""}`}>
+      <textarea ref={editor} aria-label={t("Expanded prompt")} aria-describedby="expanded-prompt-hint" maxLength={32768}
+        value={text} onChange={event => onChange(event.target.value)} onPaste={onPaste} onCompositionStart={onCompositionStart} />
+      <section id="expanded-prompt-preview" className="expanded-prompt-preview" aria-label={t("Markdown preview")} hidden={!preview} tabIndex={0}>
+        {preview && <MarkdownContent source={text} timelineCodeBlocks />}
+      </section>
+    </div>
     {attachments}
     <ProjectReferencePicker text={text} edit={onChange} input={editor} compact={false} />
     <p id="expanded-prompt-hint">{t("Enter / Escape / Ctrl+Enter close · Shift+Enter new line · Draft preserved; nothing is sent.")}</p>

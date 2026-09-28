@@ -565,7 +565,15 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .expanded-prompt-dialog::backdrop { background: rgba(0, 0, 0, .62); backdrop-filter: blur(3px); }
 .expanded-prompt-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .expanded-prompt-dialog h2 { margin: 0; font-size: 20px; }
-.owned-session .expanded-prompt-dialog textarea { flex: 1; min-height: 0; margin: 0; resize: none; line-height: 1.5; }
+.expanded-prompt-actions { display: flex; gap: 8px; }
+.expanded-prompt-panes { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1; min-height: 0; gap: 12px; }
+.expanded-prompt-panes.with-preview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.expanded-prompt-dialog .expanded-prompt-panes textarea { width: 100%; height: 100%; min-height: 0; margin: 0; resize: none; line-height: 1.5; }
+.expanded-prompt-preview { overflow: auto; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); overflow-wrap: anywhere; }
+.expanded-prompt-dialog .expanded-prompt-preview p { color: var(--text); font-size: inherit; margin-block: 0 12px; }
+@media (max-width: 650px) {
+  .expanded-prompt-panes.with-preview { grid-template-columns: minmax(0, 1fr); grid-template-rows: repeat(2, minmax(0, 1fr)); }
+}
 .expanded-prompt-dialog p { margin: 0; color: var(--muted); font-size: 12px; }
 .app-dialog { width: min(620px, 100%); max-height: min(720px, calc(100vh - 48px)); display: flex; flex-direction: column; padding: 18px; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 15px; background: var(--panel); box-shadow: var(--shadow); }
 .session-info-dialog { width: min(560px, calc(100vw - 32px)); color: var(--text); overflow-y: auto; }
