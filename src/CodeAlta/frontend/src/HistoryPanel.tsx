@@ -169,6 +169,6 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
     {sourceTarget && sourceTarget.revision.sessionId === sessionId && <HistorySource key={JSON.stringify(sourceTarget)} target={sourceTarget}
       canInspect={() => sourceTarget.current() && (canInspect?.() ?? true)
         && JSON.stringify(sourceTarget.revision) === JSON.stringify(timeline?.revision)} onClose={() => setSourceTarget(null)} />}
-    {items.some(item => item.source !== "history") && <p className="detail live-order-note">{t("Live rows are recent retained updates, not timestamped journal events; text/tool ordering and missing intervening activity are unknown.")}</p>}
+    {items.some(item => item.source !== "history") && <details className="detail live-order-note"><summary>{t("Live-window coverage")}</summary><p>{t("Live rows are recent retained updates, not timestamped journal events; text/tool ordering and missing intervening activity are unknown.")}</p></details>}
   </section>;
 }

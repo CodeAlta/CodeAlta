@@ -851,7 +851,8 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .composer-icon-button, .ide-shell .history-controls > button:not(.bp6-button) { width: 30px; height: 30px; padding: 4px; border-radius: var(--bp-surface-border-radius); }
 .ide-shell .composer-status-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; color: var(--muted); font-size: 11px; }
 .ide-shell .composer-status-line > span { display: flex; align-items: center; gap: 5px; min-width: 0; }
-.ide-shell .composer-status-line > span:first-child { color: var(--green); }
+.ide-shell .composer-status-line > span:first-child { color: var(--muted); }
+.ide-shell .composer-status-line[data-busy="true"] > span:first-child { color: var(--accent); }
 .ide-shell .composer-integrations { flex-wrap: wrap; justify-content: flex-end; }
 .ide-shell .owned-session { box-shadow: none !important; }
 .ide-shell .reference-metadata-disclosure > summary { list-style: none; cursor: pointer; }
@@ -955,10 +956,9 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .app-dialog .json-string { color: var(--green); }
 .app-dialog .json-literal, .app-dialog .json-number { color: var(--red); }
 .provider-chooser { gap: 8px; }
-.ide-shell .tool-tile-title { white-space: normal; overflow-wrap: anywhere; text-align: start; }
-.ide-shell .tool-tile-title strong { white-space: normal; overflow: visible; text-overflow: clip; }
-.tool-argument-preview { font: var(--bp-typography-size-code-small)/var(--bp-typography-line-height-large) var(--bp-typography-family-mono); color: var(--muted); overflow-wrap: anywhere; }
-.tool-command-preview { display: block; font: var(--bp-typography-size-code-small)/var(--bp-typography-line-height-large) var(--bp-typography-family-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ide-shell .tool-tile-title { text-align: start; }
+.tool-argument-preview { color: var(--muted); }
+.tool-command-preview, .tool-argument-preview { display: block; min-width: 0; height: 1lh; overflow: hidden; text-overflow: ellipsis; font: var(--bp-typography-size-code-small)/var(--bp-typography-line-height-large) var(--bp-typography-family-mono); white-space: nowrap; }
 .tool-result-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; color: var(--muted); font-size: 11px; }
 .tool-output-stats { flex-shrink: 0; white-space: nowrap; font: var(--bp-typography-size-code-small)/var(--bp-typography-line-height-large) var(--bp-typography-family-mono); }
 .tool-result-summary .tool-result-preview { flex: 1 1 100%; min-width: 0; }

@@ -1,4 +1,5 @@
-import { Button, FormGroup, HTMLSelect } from "@blueprintjs/core";
+import { Button, FormGroup, HTMLSelect, Spinner } from "@blueprintjs/core";
+import type { DisplayState } from "./sessionDisplay";
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from "react";
 import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectReferencePicker";
 import { modelCatalog, sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
@@ -31,10 +32,11 @@ import { imageHelp, imageLimits, readPastedPng } from "./promptImages";
 import { useShellLanguage } from "./shellLanguage";
 import type { ClipboardEvent } from "react";
 
-export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount, inputLifetime }: {
+export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount, inputLifetime, liveState }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
   projectId?: string | null;
   inputLifetime?: { current: () => boolean };
+  liveState?: DisplayState | null;
   usageTarget?: UsageTarget | null;
   infoControl?: ReactNode;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
@@ -240,6 +242,11 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   const pendingQueueCancellations = queue.cancellations(sessionId);
   const observedTarget = runtimeState?.kind === "ready" ? runtimeState.snapshot : undefined;
   const runtimeConfiguration = observedTarget?.entry;
+  // Presentation only: live run updates never authorize composer operations.
+  const currentLive = liveState?.hostEpoch === epoch && liveState.sessionId === sessionId ? liveState : null;
+  const liveConnected = currentLive?.kind === "connected" && !currentLive.snapshot?.isClosed;
+  const runActive = liveConnected && currentLive.snapshot?.session?.lifecycle?.kind === "RunSubmitted";
+  const composerBusy = !invalidEpoch && (!!pending?.inFlight || runActive);
   const mcpPlugin = configuration?.plugins.find(plugin => `${plugin.id} ${plugin.name}`.toLowerCase().includes("mcp"));
   const canCaptureSteer = captureSteering(epoch, sessionId, observedTarget, steerText, "availability") !== null;
   const availableComposerSteer = captureSteering(epoch, sessionId, observedTarget, text, "availability");
@@ -571,8 +578,9 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     {imageNotice && <p role="status">{imageNotice}</p>}
   </div>;
   return <section className="owned-session" aria-label={t("Owned text submission")}>
-    <div className="composer-status-line" role="status"><span><AppIcon name={invalidEpoch ? "error" : pending ? "reminder" : runtimeConfiguration?.activeRunId ? "assistant" : "check"} size={14} />
-      {t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : runtimeConfiguration?.activeRunId ? "Run active" : "Prompt ready")}</span>
+    <div className="composer-status-line" role="status" data-busy={composerBusy}><span>
+      {composerBusy ? <Spinner size={16} intent="primary" aria-hidden="true" /> : <AppIcon name={invalidEpoch ? "error" : "prompt"} size={14} />}
+      {t(invalidEpoch ? "Reload required." : pending?.inFlight ? "Sending…" : runActive ? "Thinking…" : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : "Prompt ready")}</span>
       <span className="composer-integrations" title={t("Check advanced diagnostics.")}><AppIcon name="tool" size={14} />MCP: {mcpPlugin?.state ?? t(configuration?.pluginRuntimeAvailable ? "Off" : "Unavailable")}
         <AppIcon name="settings" size={14} />{t("Plugins")}: {configuration?.plugins.length ?? "?"}</span></div>
     {expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}

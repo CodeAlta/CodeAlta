@@ -11,11 +11,15 @@ import { TimelineDetails } from "./TimelineDetails";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
+const commandPreviewLength = 80;
 
 // Display-only command identity, never a command parser or execution target.
 export function commandPreview(source: string): string {
-  const line = source.trim().split(/\r?\n/)[0];
-  return line.slice(0, 160) + (line.length > 160 ? "…" : "");
+  const line = source.trim().replace(/\s+/g, " ");
+  if (line.length <= commandPreviewLength) return line;
+  const last = line.charCodeAt(commandPreviewLength - 2);
+  const end = last >= 0xd800 && last <= 0xdbff ? commandPreviewLength - 2 : commandPreviewLength - 1;
+  return line.slice(0, end) + "…";
 }
 
 export function TimelineMessage({ item, canInspect, historySource, onOpenSource, toolTile = false }: { item: TimelineItem; canInspect?: () => boolean; toolTile?: boolean;
@@ -137,10 +141,10 @@ export function TimelineMessage({ item, canInspect, historySource, onOpenSource,
       {toolTile && <div className="tool-result-summary">
         {outcome && <span className="tool-outcome">{t(outcome)}</span>}
         {item.toolOutputBytes != null && item.toolOutputLines != null && <span className="tool-output-stats">{item.toolOutputLines}L · {(item.toolOutputBytes / 1024).toFixed(1)} KB</span>}
-        {toolOutput && <span className="tool-result-preview" title={toolOutput.slice(0, 512)}>{toolOutput.trim().split(/\r?\n/)[0].slice(0, 160)}</span>}
+        {toolOutput && <span className="tool-result-preview" title={toolOutput.slice(0, 512)}>{commandPreview(toolOutput)}</span>}
       </div>}
       {!compact && item.summary && (item.summaryIsCode ? <code className="timeline-primary-code">{item.summary}</code> : <p className="timeline-summary">{item.summary}</p>)}
-      {toolTile && !codePreview && item.summary && <div className="tool-argument-preview">{item.summary}</div>}
+      {toolTile && !codePreview && item.summary && <div className="tool-argument-preview">{commandPreview(item.summary)}</div>}
       {!compact && (body && longBody ? <>
         <button type="button" className="quiet-button long-message-toggle" aria-controls={bodyId}
           aria-expanded={expanded} disabled={!current()}

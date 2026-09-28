@@ -5,7 +5,6 @@ import type { createMutationCapability } from "./sessionOperations";
 import { MarkdownContent } from "./MarkdownContent";
 import { writeMarkdown } from "./timeline";
 import { AppIcon } from "./AppIcon";
-import { showLiveDisplay } from "./workspacePresentation";
 import { useShellLanguage } from "./shellLanguage";
 
 export function LiveSessionPanel({ store, hostEpoch, sessionId, capability }: {
@@ -24,41 +23,20 @@ export function LiveSessionPanel({ store, hostEpoch, sessionId, capability }: {
   // Never flash the previous selection during the render preceding effect cleanup/admission.
   const state = observed.hostEpoch === hostEpoch && observed.sessionId === sessionId ? observed : null;
   const snapshot = state?.snapshot;
-  const session = snapshot?.session;
-  if (!showLiveDisplay(state)) return null;
+  // Keep the observation owner mounted, but don't put runtime diagnostics into
+  // the conversation. The composer presents current run activity instead.
+  if (!state || (state.kind !== "error" && !state.code && !state.cleanupBlocked
+    && state.kind !== "closed" && !snapshot?.isClosed)) return null;
   return <section className="live-indicator" aria-label={t("Selected session live status")}>
-    <span className={`status-pill live-${state?.kind ?? "loading"}`}>{t("Live")} · {session?.lifecycle?.kind ?? session?.statusKind ?? state?.kind ?? "loading"}</span>
     {state?.code === "stale_epoch" && <p role="alert">{t("The host has changed. Reload the Desktop UI before continuing; reconnecting with this old host identity will not work.")}</p>}
-    {state?.kind === "error" && !state.code && <p role="alert">{t("Live observation unavailable. No idle or completion state is inferred.")}</p>}
+    {state.kind === "error" && state.code !== "stale_epoch" && !state.cleanupBlocked && <p role="alert">{t("Live observation unavailable. No idle or completion state is inferred.")}</p>}
     {state?.cleanupBlocked && <p role="alert">{t("Previous observation cleanup failed. Its owner is retained; no successor can open here. Reconnect cannot prove cleanup or recover effects.")}</p>}
-    {(state?.code || state?.cleanupBlocked) && <button type="button" disabled={!canMutate || state?.code === "stale_epoch" || state?.cleanupBlocked} onClick={() => {
+    {(state.kind === "error" || state.kind === "closed" || snapshot?.isClosed || state.code || state.cleanupBlocked) && <button type="button" disabled={!canMutate || state.code === "stale_epoch" || state.cleanupBlocked} onClick={() => {
       const owned = scope.current;
       if (!owned || owned.hostEpoch !== hostEpoch || owned.sessionId !== sessionId || !capability.canMutate() || store.getSnapshot().cleanupBlocked) return;
       owned.selection = store.select(hostEpoch, sessionId, capability.observe);
     }}>{t("Reconnect live activity")}</button>}
-    {snapshot && <>
-      {snapshot.hasGap && <p role="status">{t("Intermediate updates were coalesced. This replacement is the latest retained window, not recovered history.")}</p>}
-      {snapshot.isClosed && <p role="status">{t("Runtime display closed. No further updates will arrive on this observation.")}</p>}
-      {(snapshot.evictedSessions !== "0" || snapshot.omittedSessionEvents !== "0") && <p className="detail">{t("Global coverage: {evicted} session windows evicted; {omitted} publications with omitted session identity.", { evicted: snapshot.evictedSessions, omitted: snapshot.omittedSessionEvents })}</p>}
-      {!session && <p role="status">{t("No retained live state for this session. It may not have published or its window was evicted; this does not mean idle or completed.")}</p>}
-      {session && <>
-        <details className="live-metadata"><summary>{t("Runtime details")}</summary><dl>
-          <dt>{t("Latest published lifecycle")}</dt><dd>{session.lifecycle?.kind ?? t("Not observed")}{session.lifecycle?.runId ? t(" · run {id}", { id: session.lifecycle.runId }) : ""}</dd>
-          <dt>{t("Queue count")}</dt><dd>{session.queuedPromptCount ?? t("Not observed")}</dd>
-          <dt>{t("Host status")}</dt><dd>{session.statusKind ?? t("Not observed")}{session.statusMessage ? ` · ${session.statusMessage}` : ""}</dd>
-          <dt>{t("Provider / configuration key")}</dt><dd>{session.configuration?.providerId ?? t("Not observed")} / {session.configuration?.providerKey ?? t("Not observed")}</dd>
-          <dt>{t("Model / reasoning")}</dt><dd>{session.configuration?.modelId ?? t("Not observed")} / {session.configuration?.reasoningEffort ?? t("Not observed")}</dd>
-          <dt>{t("Agent prompt")}</dt><dd>{session.configuration?.agentPromptId ?? t("Not observed")}</dd>
-        </dl></details>
-        {session.lifecycle?.message && <p>{session.lifecycle.message}</p>}
-        {(session.metadataTruncated || session.transportTruncated) && <p className="detail">{t("Some status/configuration labels were shortened.")}</p>}
-        {(session.evictedTextItems !== "0" || session.unsupportedEvents !== "0") && <p className="detail">{t("Retained-window omissions: {evicted} text items evicted; {unsupported} unsupported publications.", { evicted: session.evictedTextItems, unsupported: session.unsupportedEvents })}</p>}
-        <details className="live-metadata"><summary>{t("Live-window coverage")}</summary>
-          <p className="detail">{t("Only this selected session is observed. This is not persisted history, a complete transcript, or a tool-results/usage/interaction view. Closing or reconnecting does not stop a run.")}</p>
-          <p className="detail">{t("A same-host reload obtains retained partial values only. Restart restores no authority. {count} tool identities were evicted.", { count: session.evictedToolActivities })}</p>
-        </details>
-      </>}
-    </>}
+    {(state.kind === "closed" || snapshot?.isClosed) && <p role="status">{t("Runtime display closed. No further updates will arrive on this observation.")}</p>}
   </section>;
 }
 

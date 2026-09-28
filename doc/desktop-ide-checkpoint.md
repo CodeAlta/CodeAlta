@@ -612,3 +612,24 @@ JavaScript chunk-size warning remains). No tests were added or run, as requested
 No native host, real providers or live data were used; this pass has not been visually
 accepted in a browser. The existing frontend `npm run demo` command provides the
 isolated fixture-backed app for screenshot iteration without starting a native host.
+
+### Compact command previews and live composer activity
+
+Command, argument and output previews now normalize whitespace and cap their displayed
+text at 80 UTF-16 units including an ellipsis (without splitting surrogate pairs).
+Command/argument rows and tool headings no longer wrap; full details and copy content
+are unchanged. This bounds card growth even for long commands and narrow panes.
+
+The composer shows a Blueprint spinner during Send admission and “Thinking…” for the
+selected host/session's connected live `RunSubmitted` lifecycle. Terminal lifecycle
+updates stop the running indicator; disconnected observation reports unavailable
+status rather than reusing an old runtime snapshot. This is presentation only and
+does not change submission, cancellation or provider authorization.
+
+The normal “Live · SessionStarted” block and its runtime/coverage diagnostics are
+removed from the conversation, while the observation owner stays mounted. Connection
+errors, closed observation and guarded reconnect remain available. The retained-live
+ordering caveat is collapsed behind “Live-window coverage” instead of always expanded.
+
+Verification: production build and strict TypeScript pass; no tests were added or run
+per the requested rapid visual iteration. Browser/provider acceptance was not run.
