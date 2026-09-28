@@ -21,6 +21,7 @@
     "lucide-react": "0.511.0",
     "markdown-it": "15.0.2",
     "mermaid": "11.17.2",
+    "normalize.css": "8.0.1",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

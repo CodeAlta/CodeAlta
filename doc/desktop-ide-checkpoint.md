@@ -560,3 +560,32 @@ react-dom` `ELSPROBLEMS` result; no overrides or dependency-validation bypass we
 No native host/live provider execution, full suite, website build or manual screenshot
 acceptance was performed. Logs are under `tmp/ide-ux-20260927/tool-dropdown-*` and
 `blueprint-peer-audit.log`; fixture screenshots remain isolated test artifacts.
+
+### Official Blueprint stylesheet and themes (September 28)
+
+This supersedes the local Blueprint skin described above. Following Blueprint's
+[getting-started guidance](https://github.com/palantir/blueprint/blob/develop/packages/docs-app/src/getting-started.mdx),
+`main.tsx` imports `normalize.css` and `@blueprintjs/core/lib/css/blueprint.css` before
+the FlexLayout/application styles. `normalize.css` 8.0.1 was already installed and
+locked transitively; it is now an explicit dependency because the entry point imports it.
+The optional icon-font stylesheet is not loaded: HTMLSelect uses Blueprint SVG icons,
+and the other existing application icons are also SVGs.
+
+The theme preference now sets Blueprint's `Classes.DARK` (`bp6-dark`) on the document
+root before paint, alongside the existing application `data-theme`. Removing the class
+selects Blueprint's default light theme; dialogs and other document descendants inherit
+the same theme. Application CSS retains dropdown layout sizing but no longer overrides
+their colors, backgrounds, borders, padding, typography, caret, disabled or focus styling.
+The surrounding non-Blueprint shell keeps its existing palette and layout.
+
+Verification: 48 focused frontend checks, strict TypeScript and the production build pass.
+The mounted production App changes themes through its actual Settings buttons at both
+390px and 1280px. Settings dropdowns (including disabled/focused states) and the mounted
+provider selector in composer containers match computed styles from an independent
+reference document containing only the official Normalize/Blueprint CSS. Existing tool
+dialogs and provider-selection lifetime assertions still pass. The initial regression
+failures and passing logs are retained under `tmp/ide-ux-20260927/blueprint-theme-*`.
+The full Blueprint stylesheet increases built CSS to about 575 kB (65 kB gzip); the
+existing JavaScript chunk warning remains. No dependencies were installed, no native
+host/providers were executed, and no full suite or website build was run. Previously
+documented legacy-fixture and transitive peer-range limitations remain unchanged.

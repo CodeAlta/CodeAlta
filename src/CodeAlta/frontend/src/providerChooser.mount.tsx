@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ProviderChooser } from "./ProviderChooser";
+import "normalize.css";
+import "@blueprintjs/core/lib/css/blueprint.css";
 import "./style.css";
 
 function Fixture() {
@@ -10,7 +12,9 @@ function Fixture() {
   Object.assign(window, { providerFixture: { busy: setBusy, shown: setShown } });
   return <><textarea aria-label="Draft" value={draft} onChange={event => setDraft(event.target.value)} />
     <span id="selected-provider">{provider}</span>
-    {shown && <ProviderChooser epoch="fixture" sessionId="one" providerKey={provider} disabled={busy} current={() => !busy}
-      onSelected={async () => { setProvider(value => value === "original" ? "target" : "original"); }} />}</>;
+    <div className="ide-shell"><section className="owned-session"><div className="prompt-options">
+      {shown && <ProviderChooser epoch="fixture" sessionId="one" providerKey={provider} disabled={busy} current={() => !busy}
+        onSelected={async () => { setProvider(value => value === "original" ? "target" : "original"); }} />}
+    </div></section></div></>;
 }
 createRoot(document.getElementById("root")!).render(<Fixture />);

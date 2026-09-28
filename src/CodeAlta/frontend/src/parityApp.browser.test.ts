@@ -14,6 +14,9 @@ test("actual App mounts against an isolated bridge and records parity baselines"
   t.diagnostic(`Actual-App baseline artifacts (not visual acceptance): ${root}`);
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
   try {
+    // Independent stock-style reference: no application CSS or overrides.
+    await build({ stdin: { contents: '@import "normalize.css"; @import "@blueprintjs/core/lib/css/blueprint.css";', loader: "css",
+      resolveDir: fileURLToPath(new URL("../", import.meta.url)) }, outfile: join(root, "blueprint-reference.css"), bundle: true });
     await build({ entryPoints: [fileURLToPath(new URL("./main.tsx", import.meta.url))], outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife",
       alias: { "#neoastra": fileURLToPath(new URL("./parityApp.bridge.ts", import.meta.url)) },
       define: { "import.meta.env.VITE_DEMO_MODE": '"false"' }, metafile: true,
@@ -56,16 +59,46 @@ test("actual App mounts against an isolated bridge and records parity baselines"
       const result = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails)); return result.result?.value;
     };
+    const createStyleReference = async (theme: string) => {
+      const reference = `<!doctype html><html class="${theme === "dark" ? "bp6-dark" : ""}"><head><link rel="stylesheet" href="blueprint-reference.css"></head><body><div class="bp6-html-select"><select><option>Reference</option></select></div></body></html>`;
+      await evaluate(`new Promise(resolve=>{const frame=document.createElement('iframe');frame.id='blueprint-reference';frame.style.cssText='position:fixed;left:-10000px;top:0;width:300px;height:200px';frame.onload=()=>resolve(true);frame.srcdoc=${JSON.stringify(reference)};(document.querySelector('dialog[open]')??document.body).append(frame)})`);
+    };
+    const compareStyles = (selector: string, focused = false) => evaluate(`(() => {
+      const select=document.querySelector(${JSON.stringify(selector)}), frame=document.querySelector('#blueprint-reference');
+      const reference=frame.contentDocument.querySelector('select'); reference.disabled=select.disabled;
+      const properties=${JSON.stringify(focused ? ["outlineColor", "outlineStyle", "outlineWidth", "outlineOffset"] : ["color", "backgroundColor", "backgroundImage", "boxShadow", "borderRadius", "borderWidth", "paddingLeft", "paddingRight", "height", "fontSize"])};
+      if (${focused}) select.focus();
+      const actual=Object.fromEntries(properties.map(name=>[name,getComputedStyle(select)[name]]));
+      if (${focused}) reference.focus();
+      const expected=frame.contentWindow.getComputedStyle(reference);
+      const differences=properties.filter(name=>actual[name]!==expected[name]).map(name=>({name,actual:actual[name],expected:expected[name]}));
+      if (${focused}) select.blur();
+      return differences;
+    })()`);
     await command("Page.enable"); await command("Runtime.enable"); await command("Network.enable");
     await command("Emulation.setFocusEmulationEnabled", { enabled: true });
     // Block resource attempts outside the isolated fixture even if a regression introduces one.
     await command("Network.setBlockedURLs", { urls: ["http://*", "https://*", "ws://*", "wss://*"] });
     await command("Page.navigate", { url: pathToFileURL(join(root, "fixture.html")).href });
     assert.equal(await evaluate("new Promise(resolve=>{const end=Date.now()+7000;function check(){if(document.body.textContent.includes('Create a usable desktop workspace'))resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(check,20)}check()})"), true, JSON.stringify(exceptions));
+    assert.equal(await evaluate("document.documentElement.classList.contains('bp6-dark')"), true, "Default dark preference also initializes Blueprint's theme");
     const measurements = [];
     for (const width of [390, 1280]) for (const theme of ["light", "dark"]) {
       await command("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
-      await evaluate(`document.documentElement.dataset.theme='${theme}';new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))`);
+      // Use the production preference path, not a test-only dataset assignment.
+      await evaluate("document.querySelector('.activity-settings').click();new Promise(r=>requestAnimationFrame(r))");
+      await evaluate(`document.querySelectorAll('.settings-card .segmented button')[${theme === "dark" ? 0 : 1}].click();new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))`);
+      assert.equal(await evaluate("document.documentElement.dataset.theme"), theme);
+      assert.equal(await evaluate("document.documentElement.classList.contains('bp6-dark')"), theme === "dark");
+      await createStyleReference(theme);
+      for (const selector of ["#settings-language", "#settings-project-sort", "#settings-recent-count"]) {
+        assert.deepEqual(await compareStyles(selector), [], `${selector} uses stock Blueprint ${theme} styles`);
+      }
+      await evaluate("document.querySelector('#settings-language').disabled=true");
+      assert.deepEqual(await compareStyles("#settings-language"), [], "Disabled dropdown retains Blueprint styling");
+      await evaluate("document.querySelector('#settings-language').disabled=false");
+      assert.deepEqual(await compareStyles("#settings-language", true), [], "Focus styling comes from Blueprint");
+      await evaluate("document.querySelector('#blueprint-reference').remove();document.querySelector('.settings-dialog-header button').click();new Promise(r=>requestAnimationFrame(r))");
       assert.equal(await evaluate("document.body.textContent.includes('The workspace shell is ready.')"), true);
       assert.equal(await evaluate("document.querySelectorAll('.timeline-tool-group .tool-tile-title').length"), 3);
       assert.equal(await evaluate("document.querySelectorAll('.timeline-tool-group').length"), 1);
@@ -135,6 +168,12 @@ test("actual App mounts against an isolated bridge and records parity baselines"
     assert.ok((await evaluate("parityFixture.calls")).includes("workspace.historyTimeline:demo-active"));
     await command("Page.navigate", { url: pathToFileURL(join(root, "provider.html")).href });
     assert.equal(await evaluate("new Promise(resolve=>{const end=Date.now()+5000;function check(){if(document.querySelector('.current-provider'))resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(check,20)}check()})"), true);
+    for (const theme of ["light", "dark"]) {
+      await evaluate(`document.documentElement.dataset.theme='${theme}';document.documentElement.classList.toggle('bp6-dark',${theme === "dark"})`);
+      await createStyleReference(theme);
+      assert.deepEqual(await compareStyles(".current-provider select"), [], `Composer provider uses stock Blueprint ${theme} styles`);
+      await evaluate("document.querySelector('#blueprint-reference').remove()");
+    }
     await evaluate("document.querySelector('.current-provider select').focus();new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
     assert.equal(await evaluate("document.querySelector('.provider-chooser').textContent.includes('Target')"), true);
     assert.equal(await evaluate("document.querySelector('.current-provider').classList.contains('bp6-html-select') && !document.querySelector('dialog')"), true);

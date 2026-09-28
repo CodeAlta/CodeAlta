@@ -1,4 +1,4 @@
-import { HTMLSelect } from "@blueprintjs/core";
+import { Classes, HTMLSelect } from "@blueprintjs/core";
 import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
@@ -98,6 +98,8 @@ import { SessionInfoDialog, type SessionInfoLifetime } from "./SessionInfoDialog
 import { selectedSessionInfoAvailable, selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
 import { CommandPalette } from "./CommandPalette";
 import { commandAccessChord, commandAccessHelp, createPaletteFocusRestoration, paletteAvailable, paletteShortcut, type PaletteAction, type PaletteContext } from "./paletteActions";
+import "normalize.css";
+import "@blueprintjs/core/lib/css/blueprint.css";
 import "flexlayout-react/style/light.css";
 import "./style.css";
 
@@ -403,8 +405,9 @@ function App() {
     ? collapsedSessionWidth(paneLayout, workspaceWidth) : visiblePaneLayout.sessions;
   const [clock, setClock] = useState(Date.now);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme;
+    document.documentElement.classList.toggle(Classes.DARK, theme === "dark");
   }, [theme]);
 
   useEffect(() => {
