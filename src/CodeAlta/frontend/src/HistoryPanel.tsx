@@ -4,6 +4,7 @@ import { AppIcon } from "./AppIcon";
 import { historyMessage, historySettled, loadHistory, mergeHistoryPage, type HistoryState, type HistoryTimeline } from "./history";
 import { LiveTextMessage, LiveToolMessage } from "./LiveSessionPanel";
 import { reconcileTimeline } from "./reconcileTimeline";
+import { groupTimelineTools } from "./toolGroups";
 import { latestNotes } from "./timeline";
 import { TimelineMessage } from "./TimelineMessage";
 import { useShellLanguage } from "./shellLanguage";
@@ -147,7 +148,11 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
       <AppIcon name="history" size={14} />{t("Load older history")}{timeline.entries.length === 1000 ? t(" (replace newest visible events)") : ""}</button>}
     {items.length === 0 && current?.kind === "ready" && <div className="empty-history">{t("No visible events in this history.")}</div>}
     <div className="messages">
-      {items.map(item => item.source === "history" ? <TimelineMessage key={`${sessionId}:${window?.revision ?? "unversioned"}:${item.key}`} item={item.item} canInspect={canInspect}
+      {groupTimelineTools(items, timeline?.entries ?? []).map(group => <div key={`${sessionId}:${window?.revision ?? "unversioned"}:${group.key}`}
+        className={group.tools ? "timeline-tool-group" : "timeline-single-row"} role={group.tools ? "group" : undefined}
+        aria-label={group.tools ? t("Tools") : undefined}>
+        {group.tools && <div className="timeline-tool-group-heading"><AppIcon name="tool" size={14} /><span>{t("Tools")}</span><span>{group.rows.length}</span></div>}
+        {group.rows.map(item => item.source === "history" ? <TimelineMessage key={`${sessionId}:${window?.revision ?? "unversioned"}:${item.key}`} item={item.item} canInspect={canInspect} toolTile={group.tools}
         onOpenSource={value => {
           const captured = generation.current;
           setSourceTarget({ ...value, current: () => generation.current === captured && (canInspect?.() ?? true) });
@@ -155,6 +160,7 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
           ? { revision: timeline.revision, ...timeline.sources.find(source => source.start === item.item.key)! } : undefined} />
         : item.source === "liveText" ? <LiveTextMessage key={item.key} row={item.row} />
         : <LiveToolMessage key={item.key} row={item.row} />)}
+      </div>)}
     </div>
     {sourceTarget && sourceTarget.revision.sessionId === sessionId && <HistorySource key={JSON.stringify(sourceTarget)} target={sourceTarget}
       canInspect={() => sourceTarget.current() && (canInspect?.() ?? true)

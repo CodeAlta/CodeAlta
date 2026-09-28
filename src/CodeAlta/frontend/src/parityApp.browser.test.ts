@@ -63,6 +63,15 @@ test("actual App mounts against an isolated bridge and records parity baselines"
       await command("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
       await evaluate(`document.documentElement.dataset.theme='${theme}';new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))`);
       assert.equal(await evaluate("document.body.textContent.includes('The workspace shell is ready.')"), true);
+      assert.equal(await evaluate("document.querySelectorAll('.timeline-tool-group .tool-tile-title').length"), 3);
+      for (let index = 0; index < 3; index++) {
+        await evaluate(`document.querySelectorAll('.tool-tile-title')[${index}].click();new Promise(r=>requestAnimationFrame(r))`);
+        assert.equal(await evaluate("!!document.querySelector('dialog[open]')"), true);
+        assert.equal(await evaluate(`document.querySelector('dialog[open]').textContent.includes(${JSON.stringify(["Read source", "Search references", "Inspect changes"][index])})`), true);
+        await evaluate("document.querySelector('dialog[open]').dispatchEvent(new Event('cancel',{cancelable:true}));new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
+        assert.equal(await evaluate("!document.querySelector('dialog[open]')"), true);
+        assert.equal(await evaluate(`document.activeElement===document.querySelectorAll('.tool-tile-title')[${index}]`), true);
+      }
       const shot = await command("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
       await writeFile(join(root, `${width}-${theme}.png`), Buffer.from(shot.data, "base64"));
       measurements.push({ width, theme, scrollWidth: await evaluate("document.documentElement.scrollWidth"), text: await evaluate("document.body.innerText") });

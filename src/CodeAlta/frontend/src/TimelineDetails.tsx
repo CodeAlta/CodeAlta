@@ -20,7 +20,8 @@ export function TimelineDetails({ item, current, onClose }: { item: TimelineItem
   }, []);
   useLayoutEffect(() => { if (!current()) onClose(); });
   return <dialog ref={dialog} className="app-dialog timeline-details-dialog" aria-label={`${t("Details")} · ${item.title}`}
-    onClose={onClose} onCancel={event => { event.preventDefault(); if (!composing.current) onClose(); }}
+    // Effect replay can reopen the element before cleanup's queued close event arrives.
+    onClose={event => { if (!event.currentTarget.open) onClose(); }} onCancel={event => { event.preventDefault(); if (!composing.current) onClose(); }}
     onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
     onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); if (!event.repeat && !composing.current && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) onClose(); } }}>
     <header><h2>{item.title}</h2><button ref={close} type="button" aria-label={t("Close")} title={t("Close")} onClick={onClose}><AppIcon name="close" size={18} /></button></header>

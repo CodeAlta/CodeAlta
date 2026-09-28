@@ -22,7 +22,12 @@ export const workspace = {
   snapshot: async () => { calls.push("workspace.snapshot"); return demo.workspace.snapshot(); },
   historyTimeline: async (request: HistoryRequest) => {
     calls.push(`workspace.historyTimeline:${request.sessionId}`);
-    return { page: await demo.workspace.history(request), revision: null, sources: [] };
+    const page = await demo.workspace.history(request);
+    const entries = [...page.entries, ...["Read source", "Search references", "Inspect changes"].map((name, index) => ({
+      ...page.entries[0], offset: String(index + 2), eventType: "activity", kind: "ToolCall", phase: "Completed",
+      contentId: null, activityId: `tool-${index}`, name, text: `Result for ${name}`, details: null,
+    }))];
+    return { page: { ...page, entries }, revision: null, sources: [] };
   },
 };
 Object.assign(window, { parityFixture: { calls, unexpected } });

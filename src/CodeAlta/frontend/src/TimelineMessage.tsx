@@ -19,21 +19,24 @@ export function commandPreview(source: string): string {
   return (identity ?? line).slice(0, 48) + ((identity ?? line).length > 48 || identity && identity.length < line.length ? "…" : "");
 }
 
-export function TimelineMessage({ item, canInspect, historySource, onOpenSource }: { item: TimelineItem; canInspect?: () => boolean;
+export function TimelineMessage({ item, canInspect, historySource, onOpenSource, toolTile = false }: { item: TimelineItem; canInspect?: () => boolean; toolTile?: boolean;
   historySource?: HistorySourceTarget; onOpenSource?: (target: HistorySourceTarget) => void }) {
   const { t, locale } = useShellLanguage();
   const timestamp = timelineTime(item.timestamp, locale);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [details, setDetails] = useState<{ item: TimelineItem; origin: HTMLButtonElement; current?: () => boolean } | null>(null);
   const latestItem = useRef(item); latestItem.current = item;
-  const detailCurrent = () => !!details && latestItem.current === details.item && (details.current?.() ?? true) && (canInspect?.() ?? true);
+  // Reconciliation may allocate an identical presentation on an unrelated App render.
+  // Revision-key remounts and changed presentation values still retire the dialog.
+  const sameDetailItem = () => !!details && (latestItem.current === details.item || JSON.stringify(latestItem.current) === JSON.stringify(details.item));
+  const detailCurrent = () => sameDetailItem() && (details?.current?.() ?? true) && (canInspect?.() ?? true);
   function closeDetails() {
     const origin = details?.origin;
     const restore = detailCurrent();
     setDetails(null);
     if (restore && origin) requestAnimationFrame(() => {
       if (origin.isConnected && !origin.closest('[inert], [hidden]') && (canInspect?.() ?? true)
-        && latestItem.current === details?.item && (details.current?.() ?? true)
+        && sameDetailItem() && (details?.current?.() ?? true)
         && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) origin.focus();
     });
   }
@@ -103,19 +106,26 @@ export function TimelineMessage({ item, canInspect, historySource, onOpenSource 
     : item.category === "notes" ? t("Alta notes") : item.category === "error" ? t("Error")
     : item.category === "reasoning" ? t(item.title === "Reasoning summary" ? "Reasoning summary" : "Reasoning") : item.title;
   const copyLabel = copyState === "copied" ? t("Copied") : copyState === "failed" ? t("Copy failed") : t("Copy {title} as Markdown", { title });
+  function openDetails(origin: HTMLButtonElement) {
+    if (current() && origin.isConnected && !origin.closest('[inert], [hidden]')
+      && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) setDetails({ item, origin, current: canInspect });
+  }
   return <article className={`message timeline-message message-${item.category}${compact ? " timeline-compact" : ""}`}
     data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}>
     <div className="avatar"><AppIcon name={item.icon} size={17} /></div>
     <div className="message-body">
       <div className="message-heading">
-        <span><strong>{title}</strong>{item.subtitle && <small>{item.subtitle}</small>}</span>
+        <span>{toolTile && hasDetails ? <button type="button" className="tool-tile-title" aria-haspopup="dialog"
+          onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
+          onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}><strong>{title}</strong></button>
+          : <strong>{title}</strong>}{item.subtitle && <small>{item.subtitle}</small>}</span>
         {compact && excerpt && <div className="timeline-inline-preview">{codePreview !== null ? <code>{codePreview}</code>
           : item.summary ? excerpt : <MarkdownContent source={excerpt} />}</div>}
         <span className="message-actions">
           {item.toolRecord && <ToolRecordInspection key={item.toolRecord.source} record={item.toolRecord} canInspect={canInspect} />}
           {hasDetails && <button type="button" className="timeline-detail-trigger" aria-label={t("Details")} title={t("Details")} aria-haspopup="dialog"
             onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
-            onClick={event => { if (!event.defaultPrevented && current() && event.currentTarget.isConnected && !event.currentTarget.closest('[inert], [hidden]') && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) setDetails({ item, origin: event.currentTarget, current: canInspect }); }}><AppIcon name="info" size={15} /></button>}
+            onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}><AppIcon name="info" size={15} /></button>}
           {historySource && <button type="button" className="timeline-source-trigger" aria-label={t("Read full raw record (paged)")} title={t("Read full raw record (paged)")} aria-haspopup="dialog"
             onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
             onClick={event => { if (!event.defaultPrevented && current() && event.currentTarget.isConnected && !event.currentTarget.closest('[inert], [hidden]') && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) onOpenSource?.(historySource); }}><AppIcon name="file" size={15} /></button>}

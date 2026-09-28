@@ -413,3 +413,22 @@ but the entire Info suite has not passed. Usage/transient/IDE visual reruns are 
 No full suite, website build, native launch, live-data/provider validation or parked visual
 work was run. Detailed per-file results and preserved historical reds are in the local
 `tmp/ide-ux-20260927/REPORT.md`. Manual feedback is the next acceptance step.
+
+### Compact history tool sub-cards (September 27)
+
+Adjacent eligible history tools now appear as bounded groups of individually inspectable
+sub-cards. Membership uses typed session/provider/run/parent identities and preserves hidden
+record and message boundaries. Unknown identities and unmatched live rows remain separate:
+their chronology is not inferred. Each card retains Details, Copy and available raw-source
+actions; its title opens the supplied bounded details, not a provider call.
+
+Mounted App checking exposed a pre-existing detail lifetime defect: reconciliation creates
+new but value-identical presentation objects on unrelated renders. Details now compare bounded
+presentation values while retaining revision-key/session lifetime invalidation. Native close
+events from effect cleanup cannot dismiss an already reopened dialog.
+
+Two focused grouping checks and the isolated actual-App fixture pass, including all three tool
+titles, correct dialog content, close and focus restoration at 390/1280px in both themes.
+Strict TypeScript and frontend build pass (existing bundle-size warning). The first browser
+failures and readonly-fixture TypeScript error are preserved under `tool-groups-*.log` in the
+local evidence directory. This is not native/owned-App visual acceptance or full parity.
