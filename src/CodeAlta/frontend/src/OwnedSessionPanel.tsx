@@ -591,7 +591,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       </select></label>
       <label><AppIcon name="model" size={14} /><span>{t("Model")}:</span>
       <span className="current-provider" title={t("Provider switching is unavailable for existing desktop sessions.")}>{selected?.providerKey ?? t("session provider")}</span>
-      <select aria-label={t("Model")} value={selected?.modelId ?? ""} disabled={invalidEpoch || !!pending || loadingChoices}
+      <select data-model-selector aria-label={t("Model")} value={selected?.modelId ?? ""} disabled={invalidEpoch || !!pending || loadingChoices}
         onPointerDown={event => { if (!activeChoices?.models.length && !loadingChoices) { event.preventDefault(); loadModelChoices(); } }}
         onKeyDown={event => {
           if (!activeChoices?.models.length && !loadingChoices && !event.nativeEvent.isComposing && !event.repeat

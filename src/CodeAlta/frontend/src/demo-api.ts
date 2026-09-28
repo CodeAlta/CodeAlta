@@ -28,13 +28,13 @@ const snapshot: WorkspaceSnapshot = {
 
 const historyEntries: HistoryResponse["entries"] = [
   {
-    activityId: null, bodyOmitted: false, contentId: "user-1", eventType: "contentCompleted", kind: "User",
+    files: null, activityId: null, bodyOmitted: false, contentId: "user-1", eventType: "contentCompleted", kind: "User",
     details: null, detailsTruncated: false, interactionId: null, name: null, offset: "0", parentActivityId: null, phase: null, providerId: "demo", runId: "demo-run",
     sessionId: "demo-active", text: "Create a usable desktop workspace I can run locally.", textTruncated: false,
     timestamp: "2026-09-22T10:12:00Z",
   },
   {
-    activityId: null, bodyOmitted: false, contentId: "assistant-1", eventType: "contentCompleted", kind: "Assistant",
+    files: null, activityId: null, bodyOmitted: false, contentId: "assistant-1", eventType: "contentCompleted", kind: "Assistant",
     details: null, detailsTruncated: false, interactionId: null, name: null, offset: "1", parentActivityId: null, phase: null, providerId: "demo", runId: "demo-run",
     sessionId: "demo-active", text: "The workspace shell is ready. Select sessions, inspect history, and try the composer below.", textTruncated: false,
     timestamp: "2026-09-22T10:12:04Z",

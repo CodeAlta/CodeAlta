@@ -51,15 +51,17 @@ export function FileChangeInspection({ changes, canInspect }: { changes: FileCha
             if (event.defaultPrevented || !allowed() || !event.currentTarget.isConnected || event.currentTarget.closest("[inert]")
               || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
             origin.current = event.currentTarget; setSelection(open ? null : { index: row.index, current: canInspect });
-          }}><AppIcon name="file" size={14} /><code>{row.path}</code></button>
+          }}><AppIcon name="file" size={14} /><span className="file-card-path"><strong>{row.path.split(/[\\/]/).at(-1)}</strong><small>{row.path}</small></span></button>
         <span className="file-change-kind">{row.kind ?? t("Change kind not supplied")}</span>
         <span className="file-counts" title={row.counts ? t("Supplied hunk lines: +{added} / -{removed}", row.counts) : t("Diff counts unavailable")}>{row.counts ? <><b>+{row.counts.added}</b> <em>−{row.counts.removed}</em></> : "—"}</span>
-        {open && <dialog ref={dialog} className="app-dialog timeline-details-dialog" aria-labelledby={`${id}-title`} onClose={() => setSelection(null)}
+        {open && <dialog ref={dialog} className="app-dialog timeline-details-dialog" aria-labelledby={`${id}-title`} onClose={event => { if (!event.currentTarget.open) setSelection(null); }}
           onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
           onCancel={event => { event.preventDefault(); if (!composing.current) close(); }} onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); if (!composing.current && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && !event.repeat) close(); } }}>
           <header><h2 id={`${id}-title`}>{row.path}</h2><button type="button" aria-label={t("Close")} onClick={close}><AppIcon name="close" size={18} /></button></header>
           <p>{t("Recorded data only, not disk state or write success. Counts cover supplied hunks, not complete file or run totals.")}</p>
-          {row.diff !== null ? <pre data-file-diff>{row.diff}</pre> : <p>{t("No supported per-file diff supplied; original record details remain available.")}</p>}
+          {row.diff !== null ? <pre data-file-diff>{row.diff.split("\n").map((line, index, lines) => <span key={index}
+            className={line.startsWith("+") ? "diff-added" : line.startsWith("-") ? "diff-removed" : line.startsWith("@@") ? "diff-hunk" : undefined}>
+            {line}{index < lines.length - 1 ? "\n" : ""}</span>)}</pre> : <p>{t("No supported per-file diff supplied; original record details remain available.")}</p>}
         </dialog>}
       </li>;
     })}</ul>

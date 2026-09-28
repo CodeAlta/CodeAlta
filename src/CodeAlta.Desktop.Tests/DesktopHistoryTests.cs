@@ -10,6 +10,21 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class DesktopHistoryTests
 {
     [TestMethod]
+    public void FileProjection_PreservesLaterPathsBeforeRawDetailsTruncation()
+    {
+        var diff = "diff --git a/large.cs b/large.cs\n--- a/large.cs\n+++ b/large.cs\n@@ -0,0 +1,1 @@\n+"
+            + new string('x', 9000) + "\ndiff --git a/last.cs b/last.cs\n--- a/last.cs\n+++ b/last.cs\n@@ -1 +1 @@\n-old\n+new\n";
+        var result = HistoryFileProjection.Project(JsonSerializer.Serialize(new { diff }), 16000, out var cost);
+        Assert.IsNotNull(result);
+        Assert.AreEqual(2, result.Rows.Length);
+        Assert.AreEqual("last.cs", result.Rows[1].Path);
+        Assert.IsNull(result.Rows[0].Diff);
+        StringAssert.Contains(result.Rows[1].Diff!, "+new");
+        Assert.IsTrue(result.Partial);
+        Assert.IsTrue(cost <= 16000);
+    }
+
+    [TestMethod]
     public async Task Read_UsesMandatoryCallbackAndPreservesCancellation()
     {
         var calls = 0;

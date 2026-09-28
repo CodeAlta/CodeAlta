@@ -441,3 +441,33 @@ The isolated actual-App fixture checks rendered headings, script exclusion, prev
 and exact draft preservation in both widths/themes. Strict TypeScript and frontend build pass;
 no dependency was added. Syntax highlighting/formatting assistance, Modified files host-side
 projection and remaining lifecycle-driven panel conversions are still open.
+
+### TUI comparison follow-up (September 28)
+
+Compared `SessionRuntimeTimelineRenderer`, `ChatMarkdownFormatter` visibility rules,
+`ToolCallSummaryFormatter`, `FileChangePresenter` and `ModelProviderSelectorView` with the WebApp.
+Notes now update the notes surface without becoming conversation cards. Session updates use
+the TUI warning/reconnect/model/compaction allowlist; diff updates remain file presentations.
+Eligible single tools now also receive the tool-group/sub-card treatment, with reported-phase
+dots, command labels, supplied result excerpts/line counts and structured detail sections.
+
+`HistoryFileProjection` extracts bounded paths and complete small per-file diffs before raw
+Details truncation. The projection shares the existing response budget, reserves names before
+diff bodies, caps files at 32 and diffs at 4096 units, and marks omissions partial. Raw revision-
+bound source remains available. File tiles show filename/path and validated supplied-hunk counts;
+an omitted diff is not presented as zero changes. Nested projection text counts toward the
+frontend history window budget. No paths are read or executed. Quoted/unsupported diff headers,
+large per-file diffs and turn-wide accumulation remain limitations.
+
+Removed the bottom-bar `@` disclosure (typing references still uses the existing picker), widened
+the model selector and prevented it from shrinking into a tiny label, and ordered expanded
+diagnostics/recovery before the final composer toolbar. Provider transfer remains blocked by the
+documented durable-state safety gap, not by styling. No unsafe selection mutation was enabled.
+
+Verification: one isolated host projection regression (later file after >8 KiB raw diff), focused
+timeline/history/group checks and actual-App fixture (notes absent, two file tiles and inspected
+diff, existing tool dialogs) pass; strict TS and Release desktop/frontend build pass. DTO fixture
+defaults were updated after the initial generated-contract compile failure. No native/live-provider
+acceptance, full suite or site work. These improvements do not establish all-card/prompt parity:
+live tool chronology, richer pre-truncation tool summaries, TUI turn aggregation, permission-policy
+visibility, provider switching and remaining lifecycle-only panel updates still need work.

@@ -23,7 +23,7 @@ export function groupTimelineTools(rows: ReconciledRow[], entries: readonly Hist
     const last = result.at(-1);
     if (identity && identity === lastIdentity && last && last.rows.length < 12) {
       last.rows.push(row); last.tools = true;
-    } else result.push({ key: row.key, tools: false, rows: [row] });
+    } else result.push({ key: row.key, tools: row.source === "history" && row.item.category === "tool", rows: [row] });
     lastIdentity = identity;
   }
   return result;

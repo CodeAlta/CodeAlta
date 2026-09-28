@@ -25,6 +25,7 @@ export type TimelineItem = Readonly<{
   copyMarkdown: string | null;
   fileChanges?: FileChanges;
   toolRecord?: ToolRecord;
+  toolPhase?: string;
 }>;
 
 type JsonObject = Record<string, unknown>;
@@ -45,9 +46,9 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
   for (const entry of entries) {
     // Raw provider records are persistence/runtime plumbing duplicated by typed content and
     // activity events. The TUI intentionally keeps them out of its visual timeline too.
-    if (entry.eventType === "raw") continue;
+    if (entry.eventType === "raw" || entry.eventType === "notes") continue;
     // These update the TUI's status/usage surfaces, not its conversation timeline.
-    if (entry.eventType === "sessionUpdate" && ["idle", "usageupdated", "shutdown"].includes(entry.kind?.toLowerCase() ?? "")) continue;
+    if (entry.eventType === "sessionUpdate" && !["warning", "reconnecting", "modelchanged", "compactionstarted", "compactioncompleted", "diffupdated"].includes(entry.kind?.toLowerCase() ?? "")) continue;
     if (entry.eventType === "activity" && entry.activityId && !isTerminalPhase(entry.phase) && terminalActivities.has(activityKey(entry))) continue;
     if ((entry.eventType === "contentCompleted" || entry.eventType === "contentDelta") &&
         isToolOutput(entry.kind) && entry.parentActivityId && representedActivities.has(parentActivityKey(entry))) continue;
@@ -207,6 +208,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     copyMarkdown,
     fileChanges: projectFileChanges(entry),
     toolRecord: projectToolRecord(entry),
+    toolPhase: entry.eventType === "activity" ? entry.phase?.toLowerCase() : undefined,
   };
 }
 

@@ -64,6 +64,11 @@ test("actual App mounts against an isolated bridge and records parity baselines"
       await evaluate(`document.documentElement.dataset.theme='${theme}';new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))`);
       assert.equal(await evaluate("document.body.textContent.includes('The workspace shell is ready.')"), true);
       assert.equal(await evaluate("document.querySelectorAll('.timeline-tool-group .tool-tile-title').length"), 3);
+      assert.equal(await evaluate("document.querySelectorAll('.message-notes').length"), 0);
+      assert.equal(await evaluate("document.querySelectorAll('[data-file-record]').length"), 2);
+      await evaluate("document.querySelector('[data-file-record=\"1\"]').click();new Promise(r=>requestAnimationFrame(r))");
+      assert.equal(await evaluate("document.querySelector('[data-file-diff]')?.textContent.includes('+new file')"), true);
+      await evaluate("document.querySelector('dialog[open] button').click();new Promise(r=>requestAnimationFrame(r))");
       for (let index = 0; index < 3; index++) {
         await evaluate(`document.querySelectorAll('.tool-tile-title')[${index}].click();new Promise(r=>requestAnimationFrame(r))`);
         assert.equal(await evaluate("!!document.querySelector('dialog[open]')"), true);

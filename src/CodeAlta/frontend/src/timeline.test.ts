@@ -45,7 +45,7 @@ function entry(overrides: Partial<Entry>): Entry {
     offset: "1", eventType: "contentCompleted", providerId: "provider", sessionId: "session", runId: "run",
     timestamp: "2026-09-22T10:00:00Z", kind: "Assistant", phase: null, contentId: "content", activityId: null,
     parentActivityId: null, interactionId: null, name: null, text: "Hello", details: null,
-    textTruncated: false, detailsTruncated: false, bodyOmitted: false, ...overrides,
+    files: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, ...overrides,
   };
 }
 
@@ -312,6 +312,7 @@ test("FileChange adds explicit unavailable projection while preserving legacy fi
 });
 
 test("notes use the latest set or clear event", () => {
+  assert.deepEqual(buildTimelineItems([entry({ eventType: "notes", kind: "Set", text: "Sidebar only" })]), []);
   assert.equal(latestNotes([
     entry({ eventType: "notes", kind: "Set", text: "# First" }),
     entry({ offset: "2", eventType: "notes", kind: "Cleared", text: "" }),

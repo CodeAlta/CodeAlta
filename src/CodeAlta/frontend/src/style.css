@@ -900,6 +900,27 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .tool-tile-title { padding: 0; border: 0; background: transparent; color: var(--text); text-align: start; cursor: pointer; overflow-wrap: anywhere; }
 .ide-shell .tool-tile-title:hover { color: var(--accent); }
 .ide-shell .tool-tile-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+.ide-shell .owned-session .prompt-options label { flex: 0 0 auto; max-width: 100%; }
+.ide-shell .owned-session .prompt-options select { flex: 0 1 auto; min-width: 12ch; max-width: min(48ch, 65vw); }
+.ide-shell .owned-session .prompt-options select[data-model-selector] { min-width: 24ch; }
+/* The toolbar is always the final in-flow composer row, including recovery/error UI. */
+.ide-shell .owned-session > .composer-toolbar { order: 100; flex-shrink: 0; }
+.ide-shell .timeline-tool-group > .message { max-width: 440px; }
+.ide-shell .timeline-tool-group .avatar { display: none; }
+.ide-shell .timeline-tool-group .message-heading > span:first-child { width: 100%; }
+.ide-shell .timeline-tool-group .message-heading small { font-size: 10px; }
+.file-change-inspection > ul { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 6px; padding: 0; list-style: none; }
+.file-change-inspection > ul > li { min-width: 0; padding: 8px; border: 1px solid var(--line); border-radius: 5px; }
+.file-card-path { display: flex; flex-direction: column; min-width: 0; text-align: start; }
+.file-card-path small { color: var(--muted); overflow-wrap: anywhere; }
+.tool-state-dot { color: var(--muted); }
+[data-tool-phase="completed"] .tool-state-dot { color: var(--success, #58a86b); }
+[data-tool-phase="failed"] .tool-state-dot { color: var(--danger, #dc6565); }
+[data-tool-phase="started"] .tool-state-dot { color: var(--accent); }
+.tool-result-preview { color: var(--muted); font: 12px/1.5 var(--mono, monospace); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+[data-file-diff] .diff-added { color: var(--success, #58a86b); background: color-mix(in srgb, #58a86b 10%, transparent); }
+[data-file-diff] .diff-removed { color: var(--danger, #dc6565); background: color-mix(in srgb, #dc6565 10%, transparent); }
+[data-file-diff] .diff-hunk { color: var(--accent); }
 .ide-shell .timeline-compact .message-heading { margin: 0; }
 .ide-shell .timeline-inline-preview { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 12px; }
 .ide-shell .message-body { min-width: 0; flex: 1; }

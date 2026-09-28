@@ -101,8 +101,9 @@ export function TimelineMessage({ item, canInspect, historySource, onOpenSource,
   const excerpt = (item.summary || body || item.detailMarkdown || "").split(/\r?\n\s*\r?\n/)[0];
   const codePreview = item.category === "tool" && item.summaryIsCode
     ? commandPreview(excerpt) : null;
+  const toolOutput = item.toolRecord?.fields.find(field => ["result.content", "result.detailedContent", "output.body", "error.message"].includes(field.path))?.text;
   // Categories below have fixed UI titles in toTimelineItem; tool/provider names do not.
-  const title = item.category === "user" ? t("You") : item.category === "plan" ? t("Plan")
+  const title = item.category === "file" ? t("Modified files") : item.category === "user" ? t("You") : item.category === "plan" ? t("Plan")
     : item.category === "notes" ? t("Alta notes") : item.category === "error" ? t("Error")
     : item.category === "reasoning" ? t(item.title === "Reasoning summary" ? "Reasoning summary" : "Reasoning") : item.title;
   const copyLabel = copyState === "copied" ? t("Copied") : copyState === "failed" ? t("Copy failed") : t("Copy {title} as Markdown", { title });
@@ -111,13 +112,13 @@ export function TimelineMessage({ item, canInspect, historySource, onOpenSource,
       && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) setDetails({ item, origin, current: canInspect });
   }
   return <article className={`message timeline-message message-${item.category}${compact ? " timeline-compact" : ""}`}
-    data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}>
+    data-tool-phase={item.toolPhase} data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}>
     <div className="avatar"><AppIcon name={item.icon} size={17} /></div>
     <div className="message-body">
       <div className="message-heading">
         <span>{toolTile && hasDetails ? <button type="button" className="tool-tile-title" aria-haspopup="dialog"
           onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
-          onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}><strong>{title}</strong></button>
+          onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}><span className="tool-state-dot" aria-hidden="true">●</span> <strong>{codePreview || title}</strong></button>
           : <strong>{title}</strong>}{item.subtitle && <small>{item.subtitle}</small>}</span>
         {compact && excerpt && <div className="timeline-inline-preview">{codePreview !== null ? <code>{codePreview}</code>
           : item.summary ? excerpt : <MarkdownContent source={excerpt} />}</div>}
@@ -134,6 +135,7 @@ export function TimelineMessage({ item, canInspect, historySource, onOpenSource,
           <time title={timestamp.title} dateTime={timestamp.dateTime}>{timestamp.label}</time>
         </span>
       </div>
+      {toolTile && toolOutput && <div className="tool-result-preview" title={toolOutput.slice(0, 512)}>{toolOutput.trim().split(/\r?\n/)[0].slice(0, 160)} <span>· {toolOutput.split(/\r?\n/).length}L</span></div>}
       {!compact && item.summary && (item.summaryIsCode ? <code className="timeline-primary-code">{item.summary}</code> : <p className="timeline-summary">{item.summary}</p>)}
       {!compact && (body && longBody ? <>
         <button type="button" className="quiet-button long-message-toggle" aria-controls={bodyId}

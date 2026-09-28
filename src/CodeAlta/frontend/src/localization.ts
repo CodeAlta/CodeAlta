@@ -854,6 +854,8 @@ export const messages = dictionary({
   "Edit prompt": ["Editar entrada", "Modifier la saisie", "Eingabe bearbeiten", "プロンプトを編集", "编辑提示词"],
   "Expanded prompt": ["Entrada ampliada", "Saisie agrandie", "Erweiterte Eingabe", "拡大プロンプト", "展开的提示词"],
   "Markdown preview": ["Vista previa de Markdown", "Aperçu Markdown", "Markdown-Vorschau", "Markdown プレビュー", "Markdown 预览"],
+  "Tool calls": ["Llamadas a herramientas", "Appels d’outils", "Werkzeugaufrufe", "ツール呼び出し", "工具调用"],
+  "Modified files": ["Archivos modificados", "Fichiers modifiés", "Geänderte Dateien", "変更されたファイル", "已修改文件"],
   "Enter / Escape / Ctrl+Enter close · Shift+Enter new line · Draft preserved; nothing is sent.": ["Enter / Escape / Ctrl+Enter cierran · Shift+Enter nueva línea · Se conserva el borrador; no se envía nada.", "Enter / Escape / Ctrl+Enter ferment · Shift+Enter nouvelle ligne · Brouillon conservé ; rien n’est envoyé.", "Enter / Escape / Ctrl+Enter schließen · Shift+Enter neue Zeile · Entwurf bleibt erhalten; nichts wird gesendet.", "Enter / Escape / Ctrl+Enter で閉じる · Shift+Enter で改行 · 下書きは保持され、送信されません。", "Enter / Escape / Ctrl+Enter 关闭 · Shift+Enter 换行 · 保留草稿，不发送任何内容。"],
   "Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer": ["Enter para enviar · Shift+Enter nueva línea · Ctrl+Enter para dirigir", "Enter pour envoyer · Shift+Enter nouvelle ligne · Ctrl+Enter pour orienter", "Enter zum Senden · Shift+Enter für neue Zeile · Ctrl+Enter zum Steuern", "Enter で送信 · Shift+Enter で改行 · Ctrl+Enter で実行を誘導", "Enter 发送 · Shift+Enter 换行 · Ctrl+Enter 引导运行"],
   "Create and transfer draft": ["Crear y transferir borrador", "Créer et transférer le brouillon", "Erstellen und Entwurf übertragen", "作成して下書きを転送", "创建并转移草稿"],

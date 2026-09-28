@@ -12,6 +12,11 @@ export function projectFileChanges(entry: HistoryEntry): FileChanges | undefined
   if (!(entry.eventType === "activity" && entry.kind?.toLowerCase() === "filechange")
     && !(entry.eventType === "sessionUpdate" && entry.kind?.toLowerCase() === "diffupdated")) return;
   const empty: FileChanges = { source: "", rows: [], partial: true };
+  if (entry.files) {
+    const rows = entry.files.rows.map((row, index) => ({ index, path: row.path, kind: row.kind, diff: row.diff,
+      counts: row.diff ? countSuppliedHunks(row.diff) : null }));
+    return { source: JSON.stringify(entry), rows, partial: entry.files.partial };
+  }
   if (!entry.details || entry.details.length > 8192 || entry.detailsTruncated) return empty;
   let value: unknown;
   try { value = JSON.parse(entry.details); } catch { return empty; }

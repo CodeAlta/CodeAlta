@@ -73,7 +73,7 @@ function entry(index: number): HistoryResponse["entries"][number] {
   return { offset: String(index * 200), eventType: "contentCompleted", providerId: "p", sessionId: "s", runId: null,
     timestamp: "2026-01-01T00:00:00Z", kind: "Assistant", phase: null, contentId: String(index), activityId: null,
     parentActivityId: null, interactionId: null, name: null, text: "x".repeat(32768), details: null,
-    textTruncated: true, detailsTruncated: false, bodyOmitted: false };
+    files: null, textTruncated: true, detailsTruncated: false, bodyOmitted: false };
 }
 
 test("large pages bound retained text, preserve newest, and explicitly slide older without losing cursor", () => {

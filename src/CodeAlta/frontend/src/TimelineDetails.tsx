@@ -28,7 +28,8 @@ export function TimelineDetails({ item, current, onClose }: { item: TimelineItem
     {item.summary && <pre>{item.summary}</pre>}
     {item.markdown && <MarkdownContent source={item.markdown} timelineCodeBlocks />}
     {item.detailMarkdown && item.detailMarkdown !== item.markdown && <MarkdownContent source={item.detailMarkdown} timelineCodeBlocks />}
-    {item.details && <pre>{item.details}</pre>}
+    {item.toolRecord?.fields.map(field => <section key={field.path}><h3>{field.path}</h3><pre>{field.text}</pre></section>)}
+    {item.details && (item.toolRecord ? <details><summary>{t("Details")}</summary><pre>{item.details}</pre></details> : <pre>{item.details}</pre>)}
     <ul>{item.metadata.map(value => <li key={value}>{value}</li>)}</ul>
     {item.bodyOmitted && <p>{t("Additional diagnostic details were omitted.")}</p>}
     {item.truncated && <p>{t("Some details were shortened to fit the desktop history window.")}</p>}

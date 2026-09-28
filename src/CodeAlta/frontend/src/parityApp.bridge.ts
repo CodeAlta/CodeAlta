@@ -27,6 +27,10 @@ export const workspace = {
       ...page.entries[0], offset: String(index + 2), eventType: "activity", kind: "ToolCall", phase: "Completed",
       contentId: null, activityId: `tool-${index}`, name, text: `Result for ${name}`, details: null,
     }))];
+    entries.push({ ...page.entries[0], offset: "5", eventType: "notes", kind: "Set", text: "Notes stay outside the conversation" });
+    entries.push({ ...page.entries[0], offset: "6", eventType: "sessionUpdate", kind: "DiffUpdated", text: "Turn diff updated", details: "{", detailsTruncated: true,
+      files: { partial: false, rows: [{ path: "src/first.ts", kind: "update", diff: "@@ -1 +1 @@\n-old\n+new\n" },
+        { path: "src/last.ts", kind: "create", diff: "@@ -0,0 +1 @@\n+new file\n" }] } });
     return { page: { ...page, entries }, revision: null, sources: [] };
   },
 };
