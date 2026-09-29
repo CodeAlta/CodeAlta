@@ -8,7 +8,9 @@ In the development WebApp, queued text and steering appear as compact rows above
 Use **Enqueue** to stage text for the next idle turn, and the row controls to edit, repeat or
 delete waiting messages. These drafts live only in the app, not across reloads. Image prompts
 use immediate Send. **Agent→** and **Model→** open their selection windows, and provider
-readiness is shown in the bottom bar.
+readiness is shown as a compact active-provider count in the bottom bar (green when ready,
+orange on provider errors). Send becomes Stop during a run and returns to Send afterward.
+The compaction icon stays visible and is enabled when the session can safely be compacted.
 
 ## Install
 

@@ -188,12 +188,17 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     {
                         ContractHash = NeoRpcGeneratedContract.Hash, Release = true, MaximumFrameBytes = 128 * 1024 * 1024,
                         MaximumChannelsPerSession = 2, MaximumUnacknowledgedChannelItems = 2,
+                        // NeoAstra 0.2 retains completed IDs for the document lifetime, not just
+                        // concurrent calls. Background observations exhaust its 4096 default.
+                        MaximumRetainedRequestIds = 1_000_000,
+                        DiagnosticSink = new DesktopRpcDiagnostics(),
                     });
                     builder.AddBootService(new BootService(epoch, options.ReviewOwnedCommandPermissions, options.EnableOwnedUserInput));
                     builder.AddWorkspaceService(workspace);
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime));
                     builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
                     providers = new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch);
+                    _ = providers.StartInitialization(); // Retained and joined by providers.DrainAsync.
                     builder.AddModelCatalogService(providers);
                     builder.AddPromptCatalogService(new PromptCatalogService(host.Commands, epoch));
                     builder.AddPromptCreationService(promptCreation);

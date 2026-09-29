@@ -145,8 +145,8 @@ test("mounted retained queue and steering strip is exact, copyable and read-only
         steerRequest.expectedAttachmentGeneration,steerRequest.expectedRunId,steerRequest.clientRequestId]));
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(steer)}).textContent.includes('not run completion')`), true);
     await evaluate(`window.fixture.failRuntimeRead(true);document.querySelector('#refresh-session-context').click()`);
-    assert.equal(await waitFor(`document.querySelector('.composer-notice')?.textContent.includes('read_failed') ||
-      [...document.querySelectorAll('.owned-session')].some(el=>el.textContent.includes('read_failed'))`), 'ready');
+    assert.equal(await waitFor(`!!document.querySelector('.owned-session .observation-status')`), 'ready');
+    assert.equal(await evaluate(`document.body.textContent.includes('Receipt snapshot: read_failed')`), false);
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(steer)}+' pre').textContent`), steerRequest.text,
       'a failed observation cannot erase retained steering evidence');
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(queue)}+' summary').textContent.includes('manual recovery')`), true);

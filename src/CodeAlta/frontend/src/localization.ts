@@ -4,6 +4,11 @@ function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
   return Object.freeze(Object.fromEntries(Object.entries(rows).map(([key, row]) => [key, Object.freeze(row)]))) as Readonly<T>;
 }
 export const messages = dictionary({
+  "Detecting providers…": ["Detectando proveedores…", "Détection des fournisseurs…", "Anbieter werden erkannt…", "プロバイダーを検出中…", "正在检测提供商…"],
+  "{count} active provider": ["{count} proveedor activo", "{count} fournisseur actif", "{count} aktiver Anbieter", "{count} 個の有効なプロバイダー", "{count} 个活动提供商"],
+  "{count} active providers": ["{count} proveedores activos", "{count} fournisseurs actifs", "{count} aktive Anbieter", "{count} 個の有効なプロバイダー", "{count} 个活动提供商"],
+  "{count} provider errors": ["{count} errores de proveedor", "{count} erreurs de fournisseur", "{count} Anbieterfehler", "{count} 件のプロバイダーエラー", "{count} 个提供商错误"],
+  "Reconnecting… Your draft is safe.": ["Reconectando… Tu borrador está a salvo.", "Reconnexion… Votre brouillon est conservé.", "Verbindung wird wiederhergestellt… Dein Entwurf ist sicher.", "再接続中… 下書きは保存されています。", "正在重新连接… 草稿已保留。"],
   "Queue": ["Cola", "File", "Warteschlange", "キュー", "队列"],
   "Queued and steering messages": ["Mensajes en cola y de dirección", "Messages en file et de guidage", "Warteschlangen- und Steuerungsnachrichten", "キューと実行への指示", "排队和引导消息"],
   "Repeat count": ["Repeticiones", "Répétitions", "Wiederholungen", "繰り返し回数", "重复次数"],

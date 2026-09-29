@@ -404,10 +404,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .composer-queue-actions { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
 .composer-queue-actions input { width: 4em; padding: 2px; }
 .active-provider-status .bp6-button-text { display: flex; gap: 8px; }
-.provider-status-item { font-size: 11px; white-space: nowrap; }
-.provider-status-item > span { color: var(--muted); }
-.provider-status-item[data-state="ready"] > span { color: var(--green); }
-.provider-status-item[data-state="failed"] > span { color: var(--red); }
+.active-provider-status { white-space: nowrap; }
+.observation-status { display: inline-block; padding: 4px 8px; font-size: 12px; color: var(--muted); }
 .timeline-notices [role="alert"] { color: var(--red); }
 .muted-text, .detail { color: var(--muted); font-size: 12px; line-height: 1.5; }
 

@@ -8,8 +8,18 @@ optimistic echoes can reconcile with attachment-enriched source text only within
 run; matching remains one-to-one, timestamp-bounded and unrelated to request settlement.
 
 Ask observation failures no longer create a Pending asks panel; that heading requires a real
-pending ask. Errors are shown as timeline alerts, and runtime/receipt/composer outcome notices
-are rendered in the timeline rather than below the prompt. Real ask actions and recovery remain.
+pending ask. Transient runtime/receipt/ask observation errors no longer appear as raw timeline
+alerts. Reads continue automatically, receipt and ask drafts are retained, and a delayed compact
+status indicates prolonged unavailability. Stale host/runtime identity still blocks mutations;
+no observation failure authorizes a retry or proves idle. Real ask actions and recovery remain.
+
+Owned startup now initializes all configured providers, matching the TUI, and renders an aggregate
+ready count with error tone. Send/Stop share one slot; the compaction icon remains visible.
+NeoAstra 0.2 retains completed RPC IDs until document teardown. Its 4,096 default was incompatible
+with continuous observation polling; the owned host now uses the supported 1,000,000 ceiling
+and logs framework diagnostic codes without request contents. This is a bounded mitigation,
+not an unlimited-lifetime transport fix: eliminating eventual exhaustion requires upstream
+request-ID lifecycle/replay handling. No automatic document reload or mutation replay is used.
 PNG paste and owned Send no longer enforce the former 64 KiB/96 KiB, three-image or 2048px/4MP
 limits. The owned inbound frame allowance is now 128 MiB (superseding historical 208 KiB claims
 below), and image-bearing text shares the 32,768-character prompt limit. See

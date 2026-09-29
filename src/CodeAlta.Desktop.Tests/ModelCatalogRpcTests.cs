@@ -8,6 +8,25 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class ModelCatalogRpcTests
 {
     [TestMethod]
+    public async Task StartupInitializesProvidersOnceWithoutInventoryReadsLaunchingWork()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var probes = 0;
+        var descriptor = new ModelProviderDescriptor(new("ready"), "Ready");
+        registry.RegisterOrReplace(descriptor, () => new LiteralRuntime(descriptor, () => { probes++; return [new AgentModelInfo("model")]; }));
+        var initialization = new ModelProviderInitializationService(registry);
+        var service = new ModelCatalogService(registry, initialization, "epoch");
+        Assert.AreEqual("Unknown", service.Providers(new("epoch")).Providers[0].Availability);
+        Assert.AreEqual(0, probes);
+        await service.StartInitialization();
+        await service.StartInitialization();
+        Assert.AreEqual(1, probes);
+        Assert.AreEqual("Ready", service.Providers(new("epoch")).Providers[0].Availability);
+        await service.DrainAsync();
+        Assert.AreEqual("closed", service.Providers(new("epoch")).Status);
+    }
+
+    [TestMethod]
     public async Task ExplicitProviderReadProjectsOnlyReportedModelsAndKnownMetadata()
     {
         await using var registry = new ModelProviderRegistry();

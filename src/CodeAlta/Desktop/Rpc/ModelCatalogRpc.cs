@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using CodeAlta.Agent;
 using NeoAstra.Rpc;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Desktop.Rpc;
 
@@ -17,6 +18,32 @@ internal sealed class ModelCatalogService(
     private readonly object _probeGate = new();
     private readonly HashSet<Task> _probes = [];
     private bool _closed;
+    private Task _initialization = Task.CompletedTask;
+    private bool _initializationStarted;
+
+    // Startup owns this work, just as the TUI does. Inventory reads never launch probes.
+    internal Task StartInitialization()
+    {
+        lock (_probeGate)
+        {
+            if (!_closed && !_initializationStarted)
+            {
+                _initializationStarted = true;
+                _initialization = InitializeAsync();
+            }
+            return _initialization;
+        }
+    }
+
+    private async Task InitializeAsync()
+    {
+        try { await initialization!.InitializeAllAsync(CancellationToken.None).ConfigureAwait(false); }
+        catch (Exception failure)
+        {
+            // Individual provider failures are exposed as readiness states by the service.
+            XenoAtom.Logging.LogManager.GetLogger("CodeAlta.Desktop").Error(failure, "Provider initialization failed");
+        }
+    }
 
     [NeoRpcMethod("providers")]
     public ModelCatalogProvidersResponse Providers(ModelCatalogProvidersRequest request)
@@ -85,7 +112,7 @@ internal sealed class ModelCatalogService(
     internal async Task DrainAsync()
     {
         Task[] work;
-        lock (_probeGate) { _closed = true; work = [.. _probes]; }
+        lock (_probeGate) { _closed = true; work = [.. _probes, _initialization]; }
         await Task.WhenAll(work).ConfigureAwait(false);
     }
 

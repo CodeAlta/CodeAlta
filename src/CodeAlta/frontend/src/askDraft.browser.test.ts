@@ -173,20 +173,20 @@ test("mounted production ask editor retains only exact validated drafts through 
     await click('Refresh asks');
     assert.equal(await waitFor(`window.askFixture.requests.length===7`), 'ready');
     await evaluate(`window.askFixture.fail()`);
-    assert.equal(await waitFor(`document.querySelectorAll('.ask-draft-recovery').length===3 &&
-      !document.querySelector('[aria-label="Owned asks"] textarea')`), 'ready', 'failed read retains old drafts only as read-only recovery');
+    assert.equal(await waitFor(`document.querySelectorAll('.ask-draft-recovery').length===2 &&
+       document.querySelector('[aria-label="Owned asks"] textarea')?.disabled`), 'ready', 'failed read retains the current draft but disables action authority');
     assert.equal(await evaluate(`document.querySelector('[aria-label="Owned asks"]').textContent.includes('Ask refresh pending')`), false,
       'a settled failed read must not be labeled pending, although its old page remains unusable');
-    assert.equal(await evaluate(`document.querySelectorAll('.ask-draft-recovery')[2].querySelector('pre').textContent`), 'Third draft');
+    assert.equal(await evaluate(`document.querySelector('[aria-label="Owned asks"] textarea').value`), 'Third draft');
     await click('Discard local draft…');
     await languages(); // Explicit discard review is presentation state, not a locale effect.
-    assert.equal(await evaluate(`document.querySelectorAll('.ask-draft-recovery').length`), 3, 'discard requires confirmation');
+    assert.equal(await evaluate(`document.querySelectorAll('.ask-draft-recovery').length`), 2, 'discard requires confirmation');
     await evaluate(`[...document.querySelectorAll('.ask-draft-recovery button')]
       .find(b=>b.textContent==='Confirm discard local draft').focus()`);
     await command('Page.bringToFront');
     await command('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
     await command('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
-    assert.equal(await waitFor(`document.querySelectorAll('.ask-draft-recovery').length===2`), 'ready');
+    assert.equal(await waitFor(`document.querySelectorAll('.ask-draft-recovery').length===1`), 'ready');
     await click('Refresh asks');
     assert.equal(await waitFor(`window.askFixture.requests.length===8`), 'ready');
     await evaluate(`window.askFixture.page(null)`);
@@ -252,7 +252,7 @@ test("mounted production ask editor retains only exact validated drafts through 
     await click('Refresh asks');
     assert.equal(await waitFor(`window.askFixture.requests.length===13`), 'ready');
     await evaluate(`window.askFixture.fail()`);
-    assert.equal(await waitFor(`document.querySelector('[aria-label="Owned asks"]')?.textContent.includes('Ask read failed')`), 'ready');
+    assert.equal(await waitFor(`!!document.querySelector('[aria-label="Owned asks"] .observation-status')`), 'ready');
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(captured)}+' pre').textContent`), 'Only fresh answer should submit');
     assert.equal(await evaluate(`document.querySelector('[aria-label="Owned asks"]').textContent.includes('Ask refresh pending')`), false);
     assert.equal(await evaluate(`window.askFixture.answers.length+window.askFixture.cancellations.length`), 1,
@@ -509,13 +509,13 @@ test("mounted production ask editor retains only exact validated drafts through 
     await click('Refresh asks');
     assert.equal(await waitFor(`window.askFixture.requests.length===6`), 'ready');
     await evaluate(`window.askFixture.fail()`);
-    assert.equal(await waitFor(`document.querySelector('[aria-label="Owned asks"]')?.textContent.includes('Ask read failed')`), 'ready');
+    assert.equal(await waitFor(`!!document.querySelector('[aria-label="Owned asks"] .observation-status')`), 'ready');
     assert.equal(await evaluate(`window.askFixture.answers.length`), 0);
     await click('Refresh asks');
     assert.equal(await waitFor(`window.askFixture.requests.length===7`), 'ready');
     await evaluate(`window.askFixture.page(${JSON.stringify({...multi,request:{questions:[multi.request.questions[0],
       {...multi.request.questions[1],question:''},multi.request.questions[2]]}})})`);
-    assert.equal(await waitFor(`document.querySelector('[aria-label="Owned asks"]')?.textContent.includes('Ask read failed')`), 'ready');
+    assert.equal(await waitFor(`!!document.querySelector('[aria-label="Owned asks"] .observation-status')`), 'ready');
     assert.equal(await evaluate(`!!document.querySelector('[aria-label="Ask question position"]')`), false,
       'malformed page cannot authorize navigation or submission');
     await evaluate(`window.askFixture.scope('session-other')`);

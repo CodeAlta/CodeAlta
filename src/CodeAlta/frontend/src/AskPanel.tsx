@@ -6,6 +6,7 @@ import type { createMutationCapability } from "./sessionOperations";
 import { showAskDetails } from "./workspacePresentation";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
+import { ObservationStatus } from "./ObservationStatus";
 
 type Notice = "refresh" | "pending" | "empty" | "failed" | "invalid";
 const notices = Object.freeze({
@@ -81,8 +82,9 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
       setQuestionSelection(null);
       setReadPending(current => current?.epoch === epoch && current.sessionId === sessionId && current.version === version ? null : current);
       sourceAuthority.current = null;
-      setDrafts(current => current.map(d => !d.detached && d.epoch === epoch && d.sessionId === sessionId ? { ...d, detached: true } : d));
-      setPage(undefined); setNotice("failed");
+      // Keep the last page/draft through a transient transport failure, but revoke action
+      // authority until a successful read validates this exact head again.
+      setNotice("failed");
     } }).finally(() => {
       if (!controller.signal.aborted) timer = setTimeout(() => setRevision(value => value + 1), 1000);
     });
@@ -95,7 +97,7 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
     ? questionSelection.index : 0;
   const active = drafts.find(d => !d.detached && d.epoch === epoch && d.sessionId === sessionId && d.source === source);
   const recovery = drafts.filter(d => d.detached && d.epoch === epoch && d.sessionId === sessionId);
-  const blocked = !capability.canMutate() || !head || head.state !== "pending" || actions.blocked(head.handle)
+  const blocked = notice === "failed" || !capability.canMutate() || !head || head.state !== "pending" || actions.blocked(head.handle)
     || (!active && drafts.length >= maximumDrafts);
   const reading = readPending?.epoch === epoch && readPending.sessionId === sessionId && readPending.version === readVersion.current;
   const pageUsable = pageState?.epoch === epoch && pageState.sessionId === sessionId && pageState.version === readVersion.current;
@@ -173,11 +175,11 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
   });
   const visible = recovery.length > 0 || showAskDetails(page, retained.length);
   // This component lives in the timeline. A failed read is an error, not evidence of an ask.
-  if (!visible) return notice === "failed" && scope === previousScope.current
-    ? <p role="alert" className="error-text">{t(notices.failed)}</p> : null;
+  if (!visible) return null;
   return <section aria-label={t("Owned asks")}>
     <h3>{t(head?.state === "pending" ? "Pending asks" : "Owned asks")}</h3>
-    {(!page?.head || notice === "failed" || notice === "invalid") && <p role={notice === "failed" || notice === "invalid" ? "alert" : "status"}>{t(notices[notice])}</p>}
+    <ObservationStatus unavailable={notice === "failed"} />
+    {notice !== "failed" && (!page?.head || notice === "invalid") && <p role={notice === "invalid" ? "alert" : "status"}>{t(notices[notice])}</p>}
     {!canMutate && <p role="alert">{t("Host identity changed. Reload required; retained ask actions cannot be retargeted.")}</p>}
     <p className="detail">{t("Restricted caller-session asks only. Answer starts a new text submission; Cancel does not stop a run. No files, provider input, automatic retry or restart recovery.")}</p>
     {drafts.length >= maximumDrafts && !active && <p className="detail">{t("Local draft limit reached. Confirm discard of a recovery draft before editing another ask.")}</p>}

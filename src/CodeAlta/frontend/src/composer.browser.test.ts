@@ -225,7 +225,7 @@ test("mounted composer stays compact and its controls remain legible in both the
       "host availability without an observed run cannot expose steering");
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Queue current composer in this host"]')`), false,
       "host availability without an observed attachment cannot expose queueing");
-    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), false,
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')?.disabled`), true,
       "host availability without an observed entry cannot imply idle");
     await evaluate(`window.fixture.observe(null, 12); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), "ready");
@@ -273,17 +273,17 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await evaluate(`window.fixture.compactCalls.length`), 0);
     await evaluate(`window.fixture.flags({retiring:true}); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`[...document.querySelectorAll('.advanced-session-controls dt')].some(el => el.textContent.includes('Attachment retiring') && el.nextElementSibling?.textContent === 'yes')`), "ready");
-    assert.equal(await waitFor(`!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), "ready");
+    assert.equal(await waitFor(`document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')?.disabled`), "ready");
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Queue current composer in this host"]')`), false);
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')`), false);
     await evaluate(`window.fixture.flags({transitioning:true}); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`[...document.querySelectorAll('.advanced-session-controls .detail')].some(el => el.textContent.includes('coordinator transition recorded: yes'))`), "ready");
-    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), false);
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')?.disabled`), true);
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Queue current composer in this host"]')`), false);
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')`), false);
     await evaluate(`window.fixture.flags({draining:true}); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`[...document.querySelectorAll('.advanced-session-controls dt')].some(el => el.textContent.includes('Queue drain in progress') && el.nextElementSibling?.textContent === 'yes')`), "ready");
-    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), false);
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')?.disabled`), true);
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Queue current composer in this host"]')`), true,
       "draining blocks idle compaction but permits an attachment-targeted queue attempt");
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')`), false);
@@ -313,9 +313,9 @@ test("mounted composer stays compact and its controls remain legible in both the
       "cancellation keeps its accessible label without verbose visible text");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label="Cancel observed run"] svg')?.getAttribute('fill')`), "currentColor",
       "cancellation uses a filled stop square");
-    assert.equal(await evaluate(`window.presentationSend === document.querySelector('.send-button') &&
-      document.activeElement === window.presentationSend && window.presentationEditor === document.querySelector('#session-prompt')`), true,
-      "emphasis changes must retain the focused Send node and editor, never turn Send into Abort");
+    assert.equal(await evaluate(`!document.querySelector('.composer-toolbar [aria-label="Send"]') &&
+      window.presentationEditor === document.querySelector('#session-prompt')`), true,
+      "Stop replaces Send while preserving the editor");
     assert.equal(await evaluate(`document.querySelector('#session-prompt').value`), "Draft for compaction");
     assert.equal(await evaluate(`window.fixture.abortCalls.length`), 0, "presentation must not admit cancellation");
     assert.equal(await evaluate(`window.fixture.sendCalls.length`), 0, "presentation must not admit Send");
@@ -344,16 +344,16 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await waitFor(`[...document.querySelectorAll('.advanced-session-controls [role="status"]')].some(el => el.textContent.includes('busy'))`), "ready");
     assert.equal(await evaluate(`[...document.querySelectorAll('.composer-notice[role="status"]')].some(el => el.textContent.includes('busy') && el.textContent.includes('cannot be retried'))`), true);
     assert.equal(await evaluate(`window.fixture.compactCalls[2].expectedAttachmentGeneration`), "12");
-    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), false,
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')?.disabled`), true,
       "busy ends the old intent but an active observation does not authorize a fresh attempt");
     await evaluate(`window.fixture.observe(null, 13); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), "ready",
       "a new idle observation permits a separate explicit attempt after busy");
     await evaluate(`window.fixture.observe('run-one', 12)`);
     await evaluate(`document.querySelector('#refresh-session-context').click()`);
-    assert.equal(await waitFor(`!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), "ready");
+    assert.equal(await waitFor(`document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')?.disabled`), "ready");
     assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), "ready");
-    assert.equal(await evaluate(`document.querySelector('.composer-toolbar .send-button')?.textContent`), "Send");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label="Send"]') === null`), true);
     const presentationReads = Number(await evaluate(`window.fixture.refreshes`));
     await evaluate(`window.fixture.holdRuntimeRead(); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`!document.querySelector('.cancel-run-button')`), "ready", "loading cannot retain new cancellation authority");

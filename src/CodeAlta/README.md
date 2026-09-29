@@ -80,6 +80,13 @@ only, not durable across reloads. Image prompts still use immediate Send. **Agen
 **Model→** open their catalog windows; enabled-provider readiness appears in the bottom bar.
 The expanded prompt editor retains file insertion without reference-inspection diagnostics.
 
+The provider indicator is a compact active-provider count, green when ready and orange when
+providers fail or are unsupported. Owned startup initializes the configured providers, as in
+the TUI; inventory reads themselves do not probe. Compaction has a persistent icon, disabled
+until an idle attachment is verified. Send and Stop occupy one slot, not two adjacent buttons.
+Missed background reads retain receipts and ask drafts and recover on the next observation;
+prolonged unavailability shows a small status indicator rather than raw timeline diagnostics.
+
 Reminders is a guarded selected-session native-modal popup, not a Settings section or replacement
 workspace. Closing it does not cancel an admitted action or retry an uncertain Save; original
 request evidence remains owned by the application. The underlying workspace stays mounted.
