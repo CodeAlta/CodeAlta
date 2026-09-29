@@ -672,6 +672,20 @@ part of this change.
 
 ### Quiet timeline chrome and Monaco composer
 
+Owned WebApp hosts now explicitly select TUI-style automatic tool approval by default, fixing
+the previous unconditional command/file-write denial. `--review-owned-command-permissions`
+disables this default and retains bounded manual plain-command review. Shared orchestration
+still defaults to deny unless its trusted host opts in; renderer requests cannot change the
+policy. Automatic approval grants host privileges and is not root sandboxing. User-input,
+provider configuration and plugin policies are unchanged.
+
+Send starts animated Thinking immediately, bridges admission/preparation into the observed run,
+and displays elapsed seconds/minutes. Terminal receipts, refusals and runtime completion retire
+the local indication; uncertain requests retain their separate recovery status. Idle edited
+drafts show “Draft edited...”. Contiguous model/system-prompt setup notices are displayed after
+the user prompt without altering source timestamps. Blank reasoning is omitted in both live
+and saved timelines. Regression tests were added; execution remains skipped per user preference.
+
 The shared Monaco surface now has matching text/placeholder horizontal padding and clipped
 rounded corners in both inline and expanded editors. Image attachments use compact thumbnail
 buttons outside the inline composer, above its status, instead of inline title forms and PNG

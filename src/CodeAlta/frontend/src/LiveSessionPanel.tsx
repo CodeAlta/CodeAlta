@@ -44,5 +44,6 @@ export function LiveToolMessage({ row }: { row: SessionDisplayToolActivity }) {
 }
 
 export function LiveTextMessage({ row }: { row: SessionDisplayText }) {
-  return <TimelineMessage item={liveTextItem(row)} />;
+  const item = liveTextItem(row);
+  return item ? <TimelineMessage item={item} /> : null;
 }

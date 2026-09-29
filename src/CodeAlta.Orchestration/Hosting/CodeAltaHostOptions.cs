@@ -39,6 +39,10 @@ public sealed class CodeAltaHostOptions
     /// </remarks>
     public bool ReviewOwnedCommandPermissions { get; init; }
 
+    /// <summary>Gets whether the trusted host automatically grants owned tool permissions, like TUI AutoApprove. Default false.</summary>
+    /// <remarks>This grants commands and file changes the host's privileges, not a sandbox. Explicit command review takes precedence.</remarks>
+    public bool AutoApproveOwnedPermissions { get; init; }
+
     /// <summary>Gets whether owned sends expose the restricted, operation-bound ask producer. Default is false.</summary>
     public bool EnableOwnedAsks { get; init; }
 

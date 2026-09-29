@@ -61,6 +61,21 @@ public sealed class SessionPermissionRegistration
 /// </summary>
 public sealed partial class SessionPermissionService : IAsyncDisposable
 {
+    private readonly bool _autoApproveOwnedPermissions;
+
+    /// <summary>Creates a permission owner with deny-by-default owned callbacks.</summary>
+    public SessionPermissionService() : this(false) { }
+
+    /// <summary>Creates a permission owner with an explicit host-owned automatic approval policy.</summary>
+    /// <remarks>Automatic approval grants AllowOnce, like the TUI, and is not a filesystem sandbox.
+    /// Explicit per-operation command review still takes precedence.</remarks>
+    public SessionPermissionService(bool autoApproveOwnedPermissions)
+    {
+        _autoApproveOwnedPermissions = autoApproveOwnedPermissions;
+        OwnedDefaultPermissionHandler = (_, token) => Task.FromResult(new AgentPermissionDecision(
+            token.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0 ? AgentPermissionDecisionKind.Cancel
+            : autoApproveOwnedPermissions ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny));
+    }
     private readonly OrchestrationMailboxActor _actor = new(128);
     private readonly Dictionary<SessionPermissionHandle, PendingPermission> _pending = new();
     private readonly TaskCompletionSource _shutdown = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -77,10 +92,9 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     private readonly HashSet<PendingPermission> _ownedDeliveries = [];
     private bool _ownedAdmissionClosed;
 
-    // Immutable denial-policy capabilities, not per-send or mutable latest-callback associations.
+    // Immutable host-policy capabilities, not per-send or mutable latest-callback associations.
     // Owned sends reject a reused coordinator whose session defaults came from another caller.
     internal AgentPermissionRequestHandler OwnedDefaultPermissionHandler { get; }
-        = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny));
     internal AgentUserInputRequestHandler OwnedDefaultUserInputHandler { get; }
         = static (_, _) => Task.FromCanceled<AgentUserInputResponse>(new CancellationToken(true));
 
@@ -177,6 +191,10 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var delivery = await ExecuteAsync<Task<AgentPermissionDecision>?>(() =>
         {
+            if (_autoApproveOwnedPermissions && !execution.ReviewCommands && CanUse(execution) && !cancellationToken.IsCancellationRequested
+                && request.SessionId == execution.SessionId && request.ProviderId.Value == execution.ProviderId
+                && (!execution.RunBound || request.RunId is null || request.RunId == execution.RunId))
+                return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
             if (!execution.ReviewCommands || !CanUse(execution) || cancellationToken.IsCancellationRequested || !Eligible(execution, request)
                 || !HasOwnedDeliveryCapacity(execution)) return null;
             var command = (AgentCommandPermissionRequest)request;

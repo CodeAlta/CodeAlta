@@ -10,7 +10,7 @@ export type ReconciledRow =
 // Only a run-scoped, unambiguous match can replace a journal row.
 export function reconcileTimeline(entries: HistoryResponse["entries"], live: SessionDisplayView | null): ReconciledRow[] {
   const historical = buildTimelineItems(entries);
-  if (!live) return historical.map(item => ({ source: "history", key: `history:${item.key}`, item }));
+  if (!live) return orderTimelineRows(historical.map(item => ({ source: "history", key: `history:${item.key}`, item })));
   const providers = new Map<string, Set<string>>();
   for (const entry of entries) {
     if (!entry.runId || !entry.contentId || !entry.kind || !["contentDelta", "contentCompleted"].includes(entry.eventType)) continue;
@@ -64,11 +64,16 @@ export function reconcileTimeline(entries: HistoryResponse["entries"], live: Ses
     result.push({ source: "liveTool", key: `tool:${toolKey(row.providerId, row.runId, row.activityId)}`, row });
   }
   for (const row of live.text) {
+    if (row.kind.toLowerCase().startsWith("reasoning") && !row.text.trim()) continue;
     if (row.runId && (completed.has(textKey(row.runId, row.contentId, row.kind)) || coveredText.has(textKey(row.runId, row.contentId, row.kind)))) continue;
     result.push({ source: "liveText", key: `text:${textKey(row.runId, row.contentId, row.kind)}`, row });
   }
+  return orderTimelineRows(result);
+}
+
+export function orderTimelineRows(result: ReconciledRow[]): ReconciledRow[] {
   const timestamp = (row: ReconciledRow) => Date.parse(row.source === "history" ? row.item.timestamp : row.row.timestamp ?? "");
-  return result.sort((a, b) => {
+  result.sort((a, b) => {
     const time = timestamp(a) - timestamp(b);
     if (Number.isFinite(time) && time !== 0) return time;
     if (a.source !== "history" && b.source !== "history" && a.row.sequence && b.row.sequence) {
@@ -77,6 +82,19 @@ export function reconcileTimeline(entries: HistoryResponse["entries"], live: Ses
     }
     return 0;
   });
+  // Preparation records precede the provider's persisted user echo. Present that
+  // contiguous setup block after its prompt, without falsifying source timestamps
+  // or moving notices across assistant/tool/other turn boundaries.
+  const setup = (row: ReconciledRow) => row.source === "history" &&
+    (row.item.category === "prompt" || row.item.eventType === "sessionUpdate" && row.item.icon === "model");
+  for (let index = 0; index < result.length; index++) {
+    const row = result[index];
+    if (!(row.source === "history" ? row.item.category === "user" : row.source === "liveText" && row.row.kind.toLowerCase() === "user")) continue;
+    let start = index;
+    while (start > 0 && setup(result[start - 1])) start--;
+    if (start !== index) { result.splice(index, 1); result.splice(start, 0, row); }
+  }
+  return result;
 }
 
 function textKey(runId: string | null, contentId: string, kind: string): string {

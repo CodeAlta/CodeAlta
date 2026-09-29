@@ -82,6 +82,17 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         AgentInstructionTemplateProvider instructionTemplateProvider,
         CatalogOptions catalogOptions,
         SkillCatalog? skillCatalog = null)
+        : this(agentHub, agentSessionCatalog, projectCatalog, sessionViewCatalog, instructionTemplateProvider, catalogOptions, skillCatalog, false)
+    {
+    }
+
+    /// <summary>Initializes a runtime with an explicit owned automatic-permission policy.</summary>
+    /// <remarks>Automatic approval grants tools the host's privileges; roots are not a sandbox.</remarks>
+    /// <exception cref="ArgumentNullException">A required runtime dependency is null.</exception>
+    public SessionRuntimeService(
+        AgentHub agentHub, IAgentSessionCatalog agentSessionCatalog, ProjectCatalog projectCatalog,
+        SessionViewCatalog sessionViewCatalog, AgentInstructionTemplateProvider instructionTemplateProvider,
+        CatalogOptions catalogOptions, SkillCatalog? skillCatalog, bool autoApproveOwnedPermissions)
     {
         ArgumentNullException.ThrowIfNull(agentHub);
         ArgumentNullException.ThrowIfNull(agentSessionCatalog);
@@ -99,7 +110,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         _catalogOptions = catalogOptions;
         _configStore = new CodeAltaConfigStore(catalogOptions);
         _skillCatalog = skillCatalog ?? new SkillCatalog();
-        Permissions = new SessionPermissionService();
+        Permissions = new SessionPermissionService(autoApproveOwnedPermissions);
     }
 
     /// <summary>Gets application-owned pending permissions, independent of attached frontend presentations.</summary>
@@ -1346,7 +1357,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     coordinationCancellationToken)
                 .ConfigureAwait(false);
             if (ownedDefaultsRejected)
-                throw new InvalidOperationException("Owned command requires denying session defaults.");
+                throw new InvalidOperationException("Owned command requires matching host-owned session defaults.");
             if (handleUse is null) continue;
 
             if (sessionStateUpdated)

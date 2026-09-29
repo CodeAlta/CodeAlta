@@ -143,6 +143,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 BuiltInSkillRoot = roots.Builtin,
                 OwnedCommandReceiptCapacity = 256, PluginEnvironment = FrozenDictionary<string, string?>.Empty,
                 ReviewOwnedCommandPermissions = options.ReviewOwnedCommandPermissions,
+                AutoApproveOwnedPermissions = !options.ReviewOwnedCommandPermissions,
                 EnableOwnedAsks = true,
                 EnableOwnedUserInput = options.EnableOwnedUserInput,
                 StartPlugins = false, OwnsLogging = false, IsHeadless = true,

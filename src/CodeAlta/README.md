@@ -529,9 +529,11 @@ Registration can read declared credential environment variables and shipped defa
 submissions can authenticate and use provider storage/network. Plugins and automatic provider probes remain off; explicit Models reads and Providers tests may probe.
 Use only trusted task-owned roots, never a production profile or an untrusted copied cache.
 
-Select an existing session to send text (32,768 UTF-16 units maximum). Permissions are denied by
-default, user input is cancelled unless separately opted in below, and this path supplies no custom tools or plugins. **Refresh
-submissions** explicitly retrieves receipts; **Abort original Send operation** targets one pending send,
+Select an existing session to send text (32,768 UTF-16 units maximum). Tool permissions are automatically
+approved by default, matching TUI AutoApprove. Commands and file writes run with the host's privileges;
+project/discovery roots are not a sandbox. Explicit command-review mode below disables this default.
+User input is cancelled unless separately opted in below, and this path supplies no custom tools or plugins.
+Receipts are observed automatically; **Abort original Send operation** targets one pending send,
 not a later run. Submitted means dispatch completed, not that the conversation/run completed.
 Send and Abort retain up to 256 local intents combined, including their original live waiters,
 across selection changes and remounts. Uncertainty keeps the exact epoch/key/session/text or
@@ -624,7 +626,7 @@ uses isolated inert providers, not native UI or configured-provider workflows.
 
 Add **`--enable-owned-user-input`** to the complete owned-mode command for **Nonsecret provider input**.
 It is off by default, requires owned mode, and is independent of command review and restricted asks.
-Commands remain denied unless independently reviewed. **Never enter passwords, tokens or other secrets**:
+Command permissions follow the host's auto-approval or explicit review policy. **Never enter passwords, tokens or other secrets**:
 literal answers may persist in provider tool results and history. Unsupported/secret/oversized forms are
 cancelled as a whole; this provides no file review or credential-entry workflow.
 

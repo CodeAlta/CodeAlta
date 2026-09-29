@@ -1,5 +1,6 @@
 import { Button, FormGroup, HTMLSelect, Spinner } from "@blueprintjs/core";
 import { PromptImageAttachments } from "./PromptImageAttachments";
+import { formatThinkingElapsed, useThinkingElapsed } from "./thinkingElapsed";
 import type { DisplayState } from "./sessionDisplay";
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from "react";
 import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectReferencePicker";
@@ -149,6 +150,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   const [queueMessage, setQueueMessage] = useState("Refresh runtime state explicitly before queueing text in this host.");
   const [message, setMessage] = useState("Ready to send to this owned session.");
   const [page, setPage] = useState<SessionReceiptPage>();
+  const [submittedThinking, setSubmittedThinking] = useState<{ key: string; runId: string | null } | null>(null);
   const [runtimeState, setRuntimeState] = useState<RuntimeState>();
   const observedProvider = runtimeState?.kind === "ready" ? runtimeState.snapshot.entry?.providerKey : undefined;
   const observedTransition = runtimeState?.kind === "ready" ? runtimeState.snapshot.coordinatorTransitionInProgress : undefined;
@@ -218,6 +220,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       ? "A retained exact cancellation request exists. Refresh submissions or explicitly retry its original key and run after the previous wait settles."
       : "Refresh runtime state explicitly before targeting cancellation.");
     setRuntimeState(undefined);
+    setSubmittedThinking(null);
     runtimeScope.current = runtimeReader.forSelection({ expectedHostEpoch: epoch, sessionId }, controller.signal, setRuntimeState, capability.observe);
     const runtime = runtimeScope.current;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -267,9 +270,19 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   useEffect(() => {
     if (runtimeState?.kind !== "loading") setObservedBusy(runtimeState?.kind === "ready" && !!runtimeState.snapshot.entry?.activeRunId);
   }, [runtimeState]);
-  const runActive = !invalidEpoch && (runtimeState === undefined
-    ? liveConnected && currentLive.snapshot?.session?.lifecycle?.kind === "RunSubmitted" : observedBusy);
-  const composerBusy = !invalidEpoch && (!!pending?.inFlight || runActive);
+  const liveLifecycle = liveConnected ? currentLive.snapshot?.session?.lifecycle : null;
+  const runActive = !invalidEpoch && (runtimeState === undefined ? liveLifecycle?.kind === "RunSubmitted" : observedBusy);
+  useEffect(() => {
+    if (!submittedThinking) return;
+    const receipt = page?.rows.find(row => row.sessionId === sessionId && row.clientRequestId === submittedThinking.key && row.kind === "Send");
+    if (invalidEpoch || receipt?.state === "terminal") { setSubmittedThinking(null); return; }
+    if (runtimeState?.kind !== "ready") return;
+    const runId = runtimeState.snapshot.entry?.activeRunId ?? null;
+    if (runId && !submittedThinking.runId) setSubmittedThinking({ ...submittedThinking, runId });
+    else if (!runId && submittedThinking.runId) setSubmittedThinking(null);
+  }, [page, runtimeState, invalidEpoch, sessionId, submittedThinking]);
+  const composerBusy = !invalidEpoch && (!!pending?.inFlight || !!submittedThinking || runActive);
+  const thinkingSeconds = useThinkingElapsed(composerBusy);
   const mcpPlugin = configuration?.plugins.find(plugin => `${plugin.id} ${plugin.name}`.toLowerCase().includes("mcp"));
   const canCaptureSteer = captureSteering(epoch, sessionId, observedTarget, steerText, "availability") !== null;
   const availableComposerSteer = captureSteering(epoch, sessionId, observedTarget, text, "availability");
@@ -312,9 +325,11 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     if (!request && images.length) setImageNotice("Image Send requires empty or nonblank text up to 4096 characters and an explicit supported model.");
     if (!request || !capability.canSubmit(request)) return;
     draftIndicators.clear(sessionId);
+    setSubmittedThinking({ key: request.clientRequestId, runId: null });
     setMessage("Ready to send to this owned session.");
     void submissions.submit(request, signal, capability, result => {
       observeEpoch(result);
+      if (!["accepted", "replay"].includes(result.status) || result.receipt?.state === "terminal") setSubmittedThinking(null);
       setMessage(result.status === "accepted" || result.status === "replay"
         ? "Ready to send to this owned session."
         : `Submission: ${result.status}. Refresh receipts before considering an explicit retry.`);
@@ -533,7 +548,8 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     <section className="owned-session" aria-label={t("Owned text submission")}>
     <div className="composer-status-line" role="status" data-busy={composerBusy}><span>
       {composerBusy ? <Spinner size={16} intent="primary" aria-hidden="true" /> : <AppIcon name={invalidEpoch ? "error" : "prompt"} size={14} />}
-      {t(invalidEpoch ? "Reload required." : pending?.inFlight ? "Sending…" : runActive ? "Thinking…" : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : "Prompt ready")}</span>
+      {composerBusy ? thinkingSeconds > 0 ? t("Thinking for {elapsed}...", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
+        : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : "Prompt ready")}</span>
       </div>
     {expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
     <label className="sr-only" htmlFor="session-prompt">{t("Message")}</label>

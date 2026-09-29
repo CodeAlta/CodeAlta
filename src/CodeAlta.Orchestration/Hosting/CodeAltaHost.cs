@@ -270,7 +270,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 sessionViewCatalog,
                 instructionTemplateProvider,
                 catalogOptions,
-                skillCatalog)
+                skillCatalog,
+                options.AutoApproveOwnedPermissions && !options.ReviewOwnedCommandPermissions)
             {
                 FileSearchCache = projectFileSnapshotCache,
                 PluginEventObserver = eventObserver,

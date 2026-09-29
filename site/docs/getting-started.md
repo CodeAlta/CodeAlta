@@ -16,9 +16,10 @@ normal owned agent host for the current directory and `~/.alta`, matching the TU
 select an existing session and send a prompt immediately; the running agent appears in the live view
 while persisted events appear in its timeline. The desktop acquires the same runtime lock and may
 update project catalog, journal, cache and provider state. A submission may authenticate or use the
-configured provider's storage/network. Plugins remain disabled in this desktop host, and command
-permissions and provider input remain denied unless separately enabled through the explicit scoped
-options. Desktop-owned WebView data stays under the platform-local `CodeAlta/desktop` directory, so
+configured provider's storage/network. Plugins remain disabled in this desktop host. Tool permissions
+are automatically approved by default, matching TUI AutoApprove: commands and file writes use the
+host's privileges, not a project-root sandbox. Explicit command-review mode disables auto-approval;
+provider input remains separately opt-in. Desktop-owned WebView data stays under the platform-local `CodeAlta/desktop` directory, so
 existing terminal versions continue to use the same compatible `.alta` data without a migration.
 
 The current development IDE presentation stacks Projects and Sessions in one Explorer, with
@@ -62,7 +63,7 @@ refresh/retry. A separate scoped owned-host form remains available for isolated 
 absolute roots (the instruction root includes the project). This broader consent permits
 configuration/discovery reads, journal/provider-state writes and configured-provider
 registration; submissions may authenticate or use provider storage/network. Plugins/probes stay off,
-permissions are denied by default and user input is cancelled.
+tool permissions are automatically approved by default and user input is cancelled.
 Receipts describe submission, not live-run completion; **Abort original Send operation** is not
 general Stop-agent behavior. Send/Abort uncertainty and live-waiter exclusion survive selection
 changes, with up to 256 local intents combined. Use manual receipt refresh or exact retry after the

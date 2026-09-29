@@ -3,7 +3,7 @@ import { workspace, type HistoryRequest, type SessionDisplayView } from "#neoast
 import { AppIcon } from "./AppIcon";
 import { historyMessage, historySettled, loadHistory, mergeHistoryPage, type HistoryState, type HistoryTimeline } from "./history";
 import { liveTextItem, liveToolItem } from "./liveTimeline";
-import { reconcileTimeline } from "./reconcileTimeline";
+import { orderTimelineRows, reconcileTimeline } from "./reconcileTimeline";
 import { groupTimelineTools } from "./toolGroups";
 import { latestNotes } from "./timeline";
 import { TimelineMessage } from "./TimelineMessage";
@@ -186,7 +186,7 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
     items.push({ source: "history", key: `outgoing:${echo.key}`, item: { ...item,
       subtitle: echo.state === "sending" ? "Sending…" : echo.state === "failed" ? "Failed" : echo.state === "uncertain" ? "Pending" : null } });
   }
-  items.sort((a, b) => Date.parse(a.source === "history" ? a.item.timestamp : a.row.timestamp ?? "") - Date.parse(b.source === "history" ? b.item.timestamp : b.row.timestamp ?? ""));
+  orderTimelineRows(items);
   const olderCount = messageCount == null ? null : Math.max(0, messageCount - items.filter(row => row.source === "history" && !row.key.startsWith("outgoing:")).length);
   return <section className="conversation history" aria-label={t("Session timeline")}
     data-window-ready={current?.kind === "ready" && window?.generation === target.generation && historySettled(current, timeline)}>

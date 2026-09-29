@@ -88,7 +88,7 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
       toolOutputBytes: output.tool.outputBytes,
       toolFields: [...(item.toolFields ?? []), { path: "content", text: output.text ?? "", truncated: output.textTruncated || output.bodyOmitted }] } : item);
   }
-  return result;
+  return result.filter(item => item.category !== "reasoning" || !!item.markdown?.trim());
 }
 
 function contentKey(entry: HistoryEntry): string {

@@ -3,6 +3,23 @@ import test from "node:test";
 import type { HistoryResponse, SessionDisplayView } from "#neoastra";
 import { reconcileTimeline } from "./reconcileTimeline";
 
+test("empty reasoning is hidden in saved and live timelines", () => {
+  const blank = entry({ kind: "Reasoning", text: " \r\n\t" });
+  assert.deepEqual(reconcileTimeline([blank], null), []);
+  assert.deepEqual(reconcileTimeline([], session({ text: [{ ...session().text[0], kind: "ReasoningSummary", text: "  " }] })), []);
+  assert.equal(reconcileTimeline([entry({ kind: "Reasoning", text: "Considering options" })], null).length, 1);
+});
+
+test("turn setup notices follow the user prompt without changing source timestamps", () => {
+  const rows = reconcileTimeline([
+    entry({ offset: "1", eventType: "system_prompt", text: "System prompt changed", timestamp: "2026-09-23T00:00:01Z" }),
+    entry({ offset: "2", eventType: "sessionUpdate", kind: "ModelChanged", timestamp: "2026-09-23T00:00:02Z" }),
+    entry({ offset: "3", kind: "User", timestamp: "2026-09-23T00:00:03Z" }),
+  ], null);
+  assert.deepEqual(rows.map(row => row.source === "history" && row.item.key), ["3", "1", "2"]);
+  assert.equal(rows[0].source === "history" && rows[0].item.timestamp, "2026-09-23T00:00:03Z");
+});
+
 type Entry = HistoryResponse["entries"][number];
 const entry = (overrides: Partial<Entry> = {}): Entry => ({ offset: "1", eventType: "contentCompleted", providerId: "provider",
   sessionId: "session", runId: "run", timestamp: "2026-09-23T00:00:00Z", kind: "Assistant", phase: null,

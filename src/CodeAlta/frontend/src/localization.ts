@@ -4,6 +4,8 @@ function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
   return Object.freeze(Object.fromEntries(Object.entries(rows).map(([key, row]) => [key, Object.freeze(row)]))) as Readonly<T>;
 }
 export const messages = dictionary({
+  "Thinking for {elapsed}...": ["Pensando durante {elapsed}...", "Réflexion depuis {elapsed}...", "Denkt seit {elapsed}...", "{elapsed} 思考中...", "已思考 {elapsed}..."],
+  "Draft edited...": ["Borrador editado...", "Brouillon modifié...", "Entwurf bearbeitet...", "下書きを編集しました...", "草稿已编辑..."],
   "Save image title": ["Guardar título de imagen", "Enregistrer le titre de l’image", "Bildtitel speichern", "画像タイトルを保存", "保存图片标题"],
   "Completed": ["Completado", "Terminé", "Abgeschlossen", "完了", "已完成"],
   "Failed": ["Fallido", "Échec", "Fehlgeschlagen", "失敗", "失败"],
