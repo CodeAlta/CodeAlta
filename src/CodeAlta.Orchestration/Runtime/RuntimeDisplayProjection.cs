@@ -127,7 +127,7 @@ public sealed class RuntimeDisplayProjection
                     session = new(runtimeEvent.SessionId, revision, null, null, null, null, null, [], false, 0, 0);
 
                 // Prepare all display values before changing the committed revision, evicting or notifying.
-                var candidate = Project(session, runtimeEvent) with { Revision = revision };
+                var candidate = Project(session with { Revision = revision }, runtimeEvent);
                 if (isNew && _sessions.Count == MaxSessions)
                 {
                     _sessions.Remove(_sessions.Values.MinBy(s => s.Revision).SessionId);
@@ -189,9 +189,9 @@ public sealed class RuntimeDisplayProjection
                 session = session with { StatusKind = host.Kind, StatusMessage = Label(host.Message) };
                 break;
             case SessionAgentEvent { Event: AgentContentDeltaEvent delta }:
-                return ProjectText(session, delta.RunId?.Value, delta.ContentId, delta.Kind, delta.Delta, complete: false);
+                return ProjectText(session, delta.RunId?.Value, delta.ContentId, delta.Kind, delta.Delta, delta.Timestamp, complete: false);
             case SessionAgentEvent { Event: AgentContentCompletedEvent completed }:
-                return ProjectText(session, completed.RunId?.Value, completed.ContentId, completed.Kind, completed.Content, complete: true);
+                return ProjectText(session, completed.RunId?.Value, completed.ContentId, completed.Kind, completed.Content, completed.Timestamp, complete: true);
             case SessionAgentEvent { Event: AgentActivityEvent activity }:
                 return ProjectToolActivity(session, activity);
             default:
@@ -219,7 +219,11 @@ public sealed class RuntimeDisplayProjection
             if (items[i].ProviderId == activity.ProviderId.Value && items[i].RunId == runId && items[i].ActivityId == activity.ActivityId)
             { index = i; break; }
         var value = new RuntimeDisplayToolActivity(activity.ProviderId.Value, runId, activity.ActivityId, activity.Phase,
-            activity.Name is null ? null : Prefix(activity.Name, MaxToolNameCharacters), activity.Name?.Length > MaxToolNameCharacters);
+            activity.Name is null ? null : Prefix(activity.Name, MaxToolNameCharacters), activity.Name?.Length > MaxToolNameCharacters)
+        {
+            Timestamp = index >= 0 ? items[index].Timestamp : activity.Timestamp,
+            Sequence = index >= 0 ? items[index].Sequence : session.Revision,
+        };
         if (index >= 0) items = items.RemoveAt(index); // Latest report wins, even Completed -> Started.
         else if (items.Length == MaxToolActivitiesPerSession)
         {
@@ -245,7 +249,7 @@ public sealed class RuntimeDisplayProjection
     }
 
     private static RuntimeDisplaySession ProjectText(RuntimeDisplaySession session, string? runId, string contentId,
-        AgentContentKind kind, string? text, bool complete)
+        AgentContentKind kind, string? text, DateTimeOffset timestamp, bool complete)
     {
         // Do not retain tools, arbitrary Details, provider objects or invalid/aliased stable identities.
         if (text is null || !ValidIdentity(contentId) || (runId is not null && !ValidIdentity(runId)) ||
@@ -266,7 +270,11 @@ public sealed class RuntimeDisplayProjection
         var prefix = complete || index < 0 ? string.Empty : previous.Text;
         var remaining = MaxTextCharacters - prefix.Length;
         var value = new RuntimeDisplayText(runId, contentId, kind, prefix + Prefix(text, remaining), complete,
-            text.Length > remaining || (!complete && index >= 0 && previous.IsTruncated), !complete);
+            text.Length > remaining || (!complete && index >= 0 && previous.IsTruncated), !complete)
+        {
+            Timestamp = index >= 0 ? previous.Timestamp : timestamp,
+            Sequence = index >= 0 ? previous.Sequence : session.Revision,
+        };
         if (index >= 0) items = items.RemoveAt(index);
         else if (items.Length == MaxTextItemsPerSession)
         {

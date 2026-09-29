@@ -113,11 +113,11 @@ function createFixture() {
         createElement("div", { className: "deferred-layout", style: { height: deferredHeight } })),
       createElement("p", { role: "status", className: "navigation-notice" }, notice),
       sessionId === "D" && createElement("div", { className: "unchanged-live-tool" },
-        createElement(LiveToolMessage, { row: { providerId: "literal-provider", runId: null, activityId: "tool-0",
+        createElement(LiveToolMessage, { row: { timestamp: null, sequence: null, providerId: "literal-provider", runId: null, activityId: "tool-0",
           phase: "Completed", name: "Literal name", isNameTruncated: true } })),
       sessionId === "C" && createElement("div", { className: "unchanged-markdown" },
         createElement(MarkdownContent, { source: codeMarkdown }),
-        createElement(LiveTextMessage, { row: { runId: "literal", contentId: "code", kind: "Assistant", text: codeMarkdown,
+        createElement(LiveTextMessage, { row: { timestamp: null, sequence: null, runId: "literal", contentId: "code", kind: "Assistant", text: codeMarkdown,
           isComplete: false, isTruncated: false, startedWithDelta: false } }))));
   }
   function Fixture() {

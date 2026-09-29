@@ -76,10 +76,10 @@ internal sealed class SessionDisplayService(RuntimeDisplayProjection display, st
             selected = new(session.SessionId, Decimal(session.Revision), lifecycle, session.QueuedPromptCount, config,
                 session.StatusKind?.ToString(), message,
                 session.Text.Select(text => new SessionDisplayText(text.RunId, text.ContentId, text.Kind.ToString(),
-                    text.Text, text.IsComplete, text.IsTruncated, text.StartedWithDelta)).ToArray(),
+                    text.Text, text.IsComplete, text.IsTruncated, text.StartedWithDelta) { Timestamp = text.Timestamp, Sequence = Decimal(text.Sequence) }).ToArray(),
                 session.MetadataTruncated, shortened, Decimal(session.EvictedTextItems), Decimal(session.UnsupportedEvents),
                 session.ToolActivities.Select(activity => new SessionDisplayToolActivity(activity.ProviderId, activity.RunId,
-                    activity.ActivityId, activity.Phase.ToString(), activity.Name, activity.IsNameTruncated)).ToArray(),
+                    activity.ActivityId, activity.Phase.ToString(), activity.Name, activity.IsNameTruncated) { Timestamp = activity.Timestamp, Sequence = Decimal(activity.Sequence) }).ToArray(),
                 Decimal(session.EvictedToolActivities));
             break;
         }
@@ -89,6 +89,7 @@ internal sealed class SessionDisplayService(RuntimeDisplayProjection display, st
         // <=57 non-payload scalars * 64 bytes (canonical epochs, fixed codes/enums, Int32/Int64, bool/null),
         // plus 256 container/separator/nullable-string quote bytes = 7,612, rounded up to 8 KiB.
         // With a SEPARATE 4 KiB bridge framing allowance: 247,296 + 8,192 + 4,096 = 259,584 < 262,144.
+        // Ten row timestamps/sequences add at most 1,280 bytes: 260,864 < 262,144.
         // Actual generated JsonTypeInfo serialization remains covered by the worst-escaping budget assertion.
         return new("ok", epoch, selectedSessionId, snapshot.Epoch.ToString("D"), Decimal(snapshot.Revision),
             replacement.PreviousRevision is { } previous ? Decimal(previous) : null, replacement.IsInitial,
@@ -123,6 +124,14 @@ internal sealed record SessionDisplayLifecycle(string Kind, string? RunId, strin
 internal sealed record SessionDisplayConfiguration(string? ProviderId, string? ProviderKey, string? ModelId,
     string? ReasoningEffort, string? AgentPromptId);
 internal sealed record SessionDisplayText(string? RunId, string ContentId, string Kind, string Text,
-    bool IsComplete, bool IsTruncated, bool StartedWithDelta);
+    bool IsComplete, bool IsTruncated, bool StartedWithDelta)
+{
+    public DateTimeOffset? Timestamp { get; init; }
+    public string? Sequence { get; init; }
+}
 internal sealed record SessionDisplayToolActivity(string ProviderId, string? RunId, string ActivityId, string Phase,
-    string? Name, bool IsNameTruncated);
+    string? Name, bool IsNameTruncated)
+{
+    public DateTimeOffset? Timestamp { get; init; }
+    public string? Sequence { get; init; }
+}

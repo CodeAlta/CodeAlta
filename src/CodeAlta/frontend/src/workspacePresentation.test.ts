@@ -30,8 +30,8 @@ test("empty/loading live windows stay out of the timeline, but faults and covera
   assert.equal(showLiveDisplay({ ...empty, snapshot: { ...snapshot, session: { ...session, queuedPromptCount: 0 } } }), false);
   assert.equal(showLiveDisplay({ ...empty, snapshot: { ...snapshot, session: { ...session, queuedPromptCount: 2 } } }), true);
   assert.equal(showLiveDisplay({ ...empty, snapshot: { ...snapshot, session: { ...session, queuedPromptCount: 1 } } }), true);
-  assert.equal(showLiveDisplay({ ...empty, snapshot: { ...snapshot, session: { ...session, text: [{ runId: "run", contentId: "text", kind: "Assistant", text: "live", isComplete: false, isTruncated: false, startedWithDelta: false }] } } }), true);
-  assert.equal(showLiveDisplay({ ...empty, snapshot: { ...snapshot, session: { ...session, toolActivities: [{ providerId: "p", runId: null, activityId: "t", phase: "Started", name: null, isNameTruncated: false }] } } }), true);
+  assert.equal(showLiveDisplay({ ...empty, snapshot: { ...snapshot, session: { ...session, text: [{ timestamp: null, sequence: null, runId: "run", contentId: "text", kind: "Assistant", text: "live", isComplete: false, isTruncated: false, startedWithDelta: false }] } } }), true);
+  assert.equal(showLiveDisplay({ ...empty, snapshot: { ...snapshot, session: { ...session, toolActivities: [{ timestamp: null, sequence: null, providerId: "p", runId: null, activityId: "t", phase: "Started", name: null, isNameTruncated: false }] } } }), true);
   assert.equal(showLiveDisplay({ ...empty, snapshot: { ...snapshot, session: { ...session, unsupportedEvents: "1" } } }), true);
 });
 

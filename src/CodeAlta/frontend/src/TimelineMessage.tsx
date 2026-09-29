@@ -124,7 +124,7 @@ export function TimelineMessage({ item, canInspect, historySource, onOpenSource,
         <span>{toolTile && hasDetails ? <button type="button" className="tool-tile-title" aria-haspopup="dialog"
           onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
           onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}><span className="tool-state-dot" aria-hidden="true">●</span> <strong>{title}</strong></button>
-          : item.category !== "reasoning" && <strong>{title}</strong>}{!toolTile && item.subtitle && <small>{item.subtitle}</small>}</span>
+          : item.category !== "reasoning" && <strong>{title}</strong>}{!toolTile && item.subtitle && <small>{item.subtitle === "Sending…" || item.subtitle === "Pending" || item.subtitle === "Failed" || item.subtitle === "Streaming" ? t(item.subtitle) : item.subtitle}</small>}</span>
         {compact && excerpt && !toolTile && item.category !== "file" && <div className="timeline-inline-preview">{codePreview !== null ? <code>{codePreview}</code>
           : item.summary ? excerpt : <MarkdownContent source={excerpt} />}</div>}
         <span className="message-actions">
@@ -134,7 +134,7 @@ export function TimelineMessage({ item, canInspect, historySource, onOpenSource,
             onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}><AppIcon name="info" size={15} /></button>}
           {item.copyMarkdown && <button type="button" className={`copy-markdown copy-${copyState}`} onClick={() => void copy()}
             aria-label={copyLabel} title={copyLabel}><AppIcon name={copyState === "copied" ? "checked" : copyState === "failed" ? "error" : "copy"} size={15} /><span className="sr-only" aria-live="polite">{copyState === "idle" ? "" : copyLabel}</span></button>}
-          {!toolTile && <time title={timestamp.title} dateTime={timestamp.dateTime}>{timestamp.label}</time>}
+          <time title={timestamp.title} dateTime={timestamp.dateTime}>{timestamp.label}</time>
         </span>
       </div>
       {toolTile && codePreview && <code className="tool-command-preview">{codePreview}</code>}

@@ -89,14 +89,12 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   const [selection, setSelection] = useState<SessionSelection | null>(null);
   const [choicesNotice, setChoicesNotice] = useState("Loading session choices…");
   const [choicesRevision, setChoicesRevision] = useState(0);
-  const [loadingChoices, setLoadingChoices] = useState(false);
-  const catalogRequest = useRef<{ epoch: string; sessionId: string; revision: number } | null>(null);
+  const [loadingChoices, setLoadingChoices] = useState(true);
   useLayoutEffect(() => { inputRevision.current++; }, [choicesRevision, selection, choices]);
   const selectionRevision = useRef(0);
   function loadModelChoices() {
     inputRevision.current++;
     selectionRevision.current++;
-    catalogRequest.current = { epoch, sessionId, revision: choicesRevision + 1 };
     setChoicesRevision(value => value + 1);
   }
   useEffect(() => selections.subscribe(value => {
@@ -109,8 +107,6 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   useEffect(() => {
     const controller = new AbortController();
     const revision = selectionRevision.current;
-    setChoices(undefined);
-    setSelection(null);
     setChoicesNotice("Loading session choices…");
     setLoadingChoices(true);
     const current = () => !controller.signal.aborted && revision === selectionRevision.current && capability.canMutate();
@@ -119,14 +115,11 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       capability.observe(value);
       return value;
     };
-    const requested = catalogRequest.current;
-    const shouldActivate = requested?.epoch === epoch && requested.sessionId === sessionId && requested.revision === choicesRevision;
-    catalogRequest.current = null; // A later navigation must not replay this explicit activation.
-    void (shouldActivate ? activateSessionModels(epoch, sessionId, read, async providerId => {
+    void activateSessionModels(epoch, sessionId, read, async providerId => {
       const result = await modelCatalog.models({ expectedEpoch: epoch, providerId }, { signal: controller.signal, timeoutMilliseconds: 15000 });
       capability.observe(result);
       return result;
-    }, current) : read())
+    }, current)
       .then(value => {
         capability.observe(value);
         if (controller.signal.aborted || revision !== selectionRevision.current || value.sessionId !== sessionId) return;
@@ -306,11 +299,11 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     if (!request && images.length) setImageNotice("Image Send requires empty or nonblank text up to 4096 characters and an explicit supported model.");
     if (!request || !capability.canSubmit(request)) return;
     draftIndicators.clear(sessionId);
-    setMessage("Submission admission pending…");
+    setMessage("Ready to send to this owned session.");
     void submissions.submit(request, signal, capability, result => {
       observeEpoch(result);
       setMessage(result.status === "accepted" || result.status === "replay"
-        ? "Submission accepted. Refresh submissions for dispatch outcome; this is not run completion."
+        ? "Ready to send to this owned session."
         : `Submission: ${result.status}. Refresh receipts before considering an explicit retry.`);
       if ((!retained || !request.images?.length) && (result.status === "accepted" || result.status === "replay") && !signal.aborted && inputRevision.current === revision
         && imageOwner.get(imageKey) === capturedImages) { clearText(); imageOwner.replace(imageKey, capturedImages, []); }
@@ -460,7 +453,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   }
   const activeChoices = choices?.epoch === epoch && choices.sessionId === sessionId && choices.status === "ok" ? choices : undefined;
   const selected = pending?.request.selection ?? (activeChoices ? selection ?? activeChoices.current : null);
-  const selectionDisabled = !activeChoices?.current || invalidEpoch || !!pending;
+  const selectionDisabled = loadingChoices || !activeChoices?.current || invalidEpoch || !!pending;
   const storedPromptSelection = selections.current(epoch, sessionId);
   // A refreshed catalog cannot silently replace an unavailable saved model/effort
   // with observed defaults merely because the user intended to change a prompt.
@@ -616,6 +609,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
           const next = { ...value.current, agentPromptId: selected?.agentPromptId ?? value.current.agentPromptId };
           if (!selections.set(epoch, sessionId, value, next)) selections.set(epoch, sessionId, value, value.current);
           setChoices(value); setChoicesNotice("");
+          loadModelChoices();
           void runtimeScope.current?.refresh();
         }} />
       <HTMLSelect fill id={`composer-model-${sessionId}`} data-model-selector aria-label={t("Model")} value={selected?.modelId ?? ""} disabled={invalidEpoch || !!pending || loadingChoices}
@@ -625,8 +619,8 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
             && ["Enter", " ", "ArrowDown", "ArrowUp"].includes(event.key)) { event.preventDefault(); loadModelChoices(); }
         }}
         onChange={event => select("modelId", event.target.value)} title={selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) ? t("Saved selection; not verified by this host's observed model catalog.") : t("Model for the next Send · {provider}", { provider: selected?.providerKey ?? t("session provider") })}>
-        <option value="">{t("Provider default")}</option>
-        {selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) && <option value={selected.modelId}>{selected.modelId} · {t("Unverified")}</option>}
+        <option value="">{t(loadingChoices ? "Loading…" : "Provider default")}</option>
+        {selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) && <option value={selected.modelId}>{loadingChoices ? t("Loading…") : `${selected.modelId} · ${t("Unverified")}`}</option>}
         {activeChoices?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
       </HTMLSelect></div></FormGroup>
       <FormGroup className="composer-field" label={t("Reasoning")} labelFor={`composer-reasoning-${sessionId}`}><HTMLSelect fill id={`composer-reasoning-${sessionId}`} aria-label={t("Reasoning")} value={selected?.reasoningEffort ?? ""} disabled={selectionDisabled || efforts.length === 0} onChange={event => select("reasoningEffort", event.target.value)} title={t("Supported reasoning effort for the selected model")}>
@@ -687,9 +681,9 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     <span id="observed-steering-help" className="sr-only">{t("Uses current composer text and the point-in-time observed run. Admission is not run completion. Retained steering is reviewed or retried separately, never from this button.")}</span>
     <span id="observed-queue-help" className="sr-only">{t("Uses current editable composer text and the point-in-time observed attachment, including busy or draining attachments; never targets a run. Reservation does not prove host-only insertion, durability or execution. The composer draft is preserved. Retained queue requests are reviewed or retried separately, never from this button.")}</span>
     <span id="observed-compaction-help" className="sr-only">{t("Point-in-time idle observation permits only an attempt; the provider must prove idle. Busy is a permanent outcome, not an automatic retry. Retained requests are retried manually against their original attachment after the previous wait settles.")}</span>
-    {choicesNotice !== "Selections apply on Send; active runs and queued text are unchanged." && <p className="composer-notice" role={choicesNotice.includes("could not") || choicesNotice.includes("unavailable") ? "alert" : "status"}>{choicesNotice}</p>}
-    {(message !== "Ready to send to this owned session." || pending || pendingAborts.length > 0) && <p className="composer-notice" role="status">{message}</p>}
-    {(pending || pendingAborts.length > 0) && <button type="button" onClick={() => refresh()}>{t("Refresh receipts")}</button>}
+    {choicesNotice && choicesNotice !== "Loading session choices…" && choicesNotice !== "Selections apply on Send; active runs and queued text are unchanged." && <p className="composer-notice" role={choicesNotice.includes("could not") || choicesNotice.includes("unavailable") ? "alert" : "status"}>{choicesNotice}</p>}
+    {message !== "Ready to send to this owned session." && <p className="composer-notice" role="status">{message}</p>}
+    {(pending && !pending.inFlight || pendingAborts.length > 0) && <button type="button" onClick={() => refresh()}>{t("Refresh receipts")}</button>}
     {invalidEpoch && <p role="alert">{t("Host/runtime identity changed. Reload required; mutations are disabled. The exact uncertain request is retained and will not be rebased or resent.")}</p>}
     {runtimeState?.kind === "error" && <p role="alert">{t("Runtime observation unavailable ({code}).", { code: runtimeState.code })} {t(['stale_epoch', 'stale_runtime'].includes(runtimeState.code) ? "Reload required." : "No idle or completion state is inferred.")}</p>}
     {mcpPlugin && /fail|error/i.test(mcpPlugin.state) && <p role="alert">{t("MCP plugin:")} {mcpPlugin.state}. {t("Check advanced diagnostics.")}</p>}

@@ -309,7 +309,7 @@ export const sessionDisplay = { observe: async (request: SessionDisplayRequest, 
       statusKind: null, statusMessage: null, metadataTruncated: false, transportTruncated: false, evictedTextItems: "0",
       unsupportedEvents: "0", toolActivities: [], evictedToolActivities: "0",
       text: localStorage.getItem("navigationFixture") === "empty" ? [] : ["User", "Assistant", "Unknown"].map(kind => ({
-        runId: "live-run", contentId: kind, kind, text: `live-${kind}`, isComplete: true, isTruncated: false, startedWithDelta: false })) } };
+        timestamp: null, sequence: null, runId: "live-run", contentId: kind, kind, text: `live-${kind}`, isComplete: true, isTruncated: false, startedWithDelta: false })) } };
   return (async function* () {
     attempt.opened = true;
     try {

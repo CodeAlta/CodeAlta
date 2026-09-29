@@ -13,7 +13,7 @@ function createFixture() {
   let visible = true;
   let reads = 0;
   let locale: Locale = "en";
-  let row: SessionDisplayText = { runId: "run-one", contentId: "content-one", kind: "Assistant",
+  let row: SessionDisplayText = { timestamp: null, sequence: null, runId: "run-one", contentId: "content-one", kind: "Assistant",
     text: "**Retained** 😀 [reference](https://example.invalid/)\n\n<script>window.liveCopyInjected=true</script>\n\n```text\nSettings Copy failed Allow once\n```\n\n" + "stream text ".repeat(140) + "\nFULL OLD END",
     isComplete: false, isTruncated: true, startedWithDelta: true };
   const read = async (_request: HistoryRequest): Promise<HistoryResponse> => {

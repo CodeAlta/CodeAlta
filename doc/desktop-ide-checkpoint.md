@@ -633,3 +633,39 @@ ordering caveat is collapsed behind “Live-window coverage” instead of always
 
 Verification: production build and strict TypeScript pass; no tests were added or run
 per the requested rapid visual iteration. Browser/provider acceptance was not run.
+
+### Unified streamed timeline and immediate Send feedback
+
+Compared the display channel with `NeoAstra.Sample.Advanced/RpcTour.tsx`: both await
+the generated channel and consume its async iterator. The Desktop reader additionally
+owns cancellation, iterator cleanup and revision/epoch validation. No raw bridge,
+second event subscription or new transport is needed. The application projection was
+discarding source timestamps and shared text/tool publication order, while the renderer
+used separate live markup and never refreshed the journal after initial loading.
+
+Live text and tools now carry first-source timestamps and decimal publication sequences.
+Both use the same typed-event presentation and `TimelineMessage` as saved activity.
+Streaming replacements retain row keys, reconcile matching content, and order by source
+time (publication sequence breaks live ties). Selected-session revisions coalesce journal
+refreshes at 500 ms while the latest window is settled; explicit older history and source
+inspection are not replaced. This fills in full persisted content/tool payloads without
+turning the bounded replacement stream into a fictitious lossless journal.
+
+Send creates a bounded window-owned text echo synchronously before transport. Admission
+updates its display state; a one-to-one new user-content match retires the echo. Matching
+requires exact text and a source timestamp no earlier than the echo, plus the run identity
+when supplied by admission. It never settles Send ownership or authorizes an operation.
+Retries keep the echo identity and timestamp, and errors/uncertainty remain visible.
+
+Removed the live-window coverage footer and routine accepted-submission notice. Catalog
+activation now runs automatically on composer mount/provider change, with a loading state
+instead of a transient unverified model; genuinely unavailable saved selections still
+remain explicit rather than silently replaced. Desktop selector labels are inline (small
+windows can wrap). Blueprint violet User / blue Assistant accents follow the TUI role
+palette, with matching lightly tinted surfaces in both themes.
+
+Verification: backend Release build without restore and frontend TypeScript/production
+build. Existing fixture values were extended with nullable timestamp/order fields to
+compile against the generated contract; no test suite or real provider was run. Native
+and browser visual acceptance remain to be done. Unrelated Agent prototype work is not
+part of this change.

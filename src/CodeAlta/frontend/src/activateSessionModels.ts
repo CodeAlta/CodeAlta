@@ -1,6 +1,6 @@
 import type { ModelCatalogModelsResponse, SessionChoicesResponse } from "#neoastra";
 
-// Explicit user action only. The observed choices endpoint remains passive on navigation.
+// Load the selected provider's catalog on composer mount or explicit retry.
 // Re-read choices after the real catalog service loads; catalog display DTOs are not
 // interchangeable with the session-scoped choices used to validate Send.
 export async function activateSessionModels(epoch: string, sessionId: string,
@@ -10,6 +10,7 @@ export async function activateSessionModels(epoch: string, sessionId: string,
   if (!current()) throw new DOMException("Selection changed", "AbortError");
   if (before.status !== "ok" || before.epoch !== epoch || before.sessionId !== sessionId || !before.current)
     throw new Error("Session choices unavailable");
+  if (before.models.length > 0) return before;
   const provider = before.current.providerKey;
   const catalog = await load(provider);
   if (!current()) throw new DOMException("Selection changed", "AbortError");

@@ -28,7 +28,7 @@ test("unknown identity and provider/run/parent boundaries prevent grouping", () 
   const entries = [entry("1"), entry("2", { eventType: "raw" }), entry("3")];
   assert.equal(groupTimelineTools(reconcileTimeline(entries, null), entries).length, 1);
   const rows = reconcileTimeline([entry("1")], null);
-  rows.push({ source: "liveTool", key: "live", row: { activityId: "live", providerId: "provider", runId: "run", phase: "Started", name: "Read", isNameTruncated: false } });
+  rows.push({ source: "liveTool", key: "live", row: { timestamp: null, sequence: null, activityId: "live", providerId: "provider", runId: "run", phase: "Started", name: "Read", isNameTruncated: false } });
   assert.ok(groupTimelineTools(rows, [entry("1")]).every(group => group.rows.length === 1));
 });
 
@@ -43,6 +43,6 @@ test("journal plumbing between tool calls does not split their visual group", ()
 test("retained live tool groups stay separate from journal groups and other runs", () => {
   const rows = reconcileTimeline([entry("1")], null);
   for (const [activityId, runId] of [["a", "run"], ["b", "run"], ["c", "other"]])
-    rows.push({ source: "liveTool", key: activityId, row: { activityId, providerId: "provider", runId, phase: "Started", name: "Read", isNameTruncated: false } });
+    rows.push({ source: "liveTool", key: activityId, row: { timestamp: null, sequence: null, activityId, providerId: "provider", runId, phase: "Started", name: "Read", isNameTruncated: false } });
   assert.deepEqual(groupTimelineTools(rows, [entry("1")]).map(group => group.rows.length), [1, 2, 1]);
 });

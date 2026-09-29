@@ -4,9 +4,9 @@ import { createSessionDisplayStore, displayRowKey, displayToolActivityKey } from
 import { createMutationCapability } from "./sessionOperations";
 import type { SessionDisplayItem, SessionDisplayText, SessionDisplayToolActivity, SessionDisplayView } from "#neoastra";
 
-const row: SessionDisplayText = { runId: "run", contentId: "content", kind: "Assistant", text: "before", isComplete: false, isTruncated: false, startedWithDelta: true };
+const row: SessionDisplayText = { timestamp: null, sequence: null, runId: "run", contentId: "content", kind: "Assistant", text: "before", isComplete: false, isTruncated: false, startedWithDelta: true };
 function tool(overrides: Partial<SessionDisplayToolActivity> = {}): SessionDisplayToolActivity {
-  return { providerId: "provider", runId: "run", activityId: "tool", phase: "Started", name: null, isNameTruncated: false, ...overrides };
+  return { timestamp: null, sequence: null, providerId: "provider", runId: "run", activityId: "tool", phase: "Started", name: null, isNameTruncated: false, ...overrides };
 }
 function item(revision = "0", overrides: Partial<SessionDisplayItem> = {}): SessionDisplayItem {
   const session: SessionDisplayView = { sessionId: "selected", revision, lifecycle: null, queuedPromptCount: null, configuration: null,

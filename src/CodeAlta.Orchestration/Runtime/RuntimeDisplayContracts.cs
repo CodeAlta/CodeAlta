@@ -12,7 +12,13 @@ namespace CodeAlta.Orchestration.Runtime;
 /// <param name="IsTruncated">Whether content exceeded the retained prefix bound.</param>
 /// <param name="StartedWithDelta">No final content has established a complete baseline; earlier content may be absent.</param>
 public readonly record struct RuntimeDisplayText(string? RunId, string ContentId, AgentContentKind Kind,
-    string Text, bool IsComplete, bool IsTruncated, bool StartedWithDelta);
+    string Text, bool IsComplete, bool IsTruncated, bool StartedWithDelta)
+{
+    /// <summary>Timestamp of the first retained source event, not renderer arrival time.</summary>
+    public DateTimeOffset? Timestamp { get; init; }
+    /// <summary>Projection publication order of the first retained source event.</summary>
+    public long Sequence { get; init; }
+}
 
 /// <summary>Latest reported plain ToolCall values only; not permission, process-start, run-completion or effect acknowledgment.</summary>
 /// <param name="ProviderId">Exact provider.Value identity, at most 256 well-formed UTF-16 code units.</param>
@@ -22,7 +28,13 @@ public readonly record struct RuntimeDisplayText(string? RunId, string ContentId
 /// <param name="Name">Optional well-formed name prefix, at most 128 UTF-16 code units. A malformed name omits the entire report.</param>
 /// <param name="IsNameTruncated">Whether a valid name exceeded the retained prefix bound.</param>
 public readonly record struct RuntimeDisplayToolActivity(string ProviderId, string? RunId, string ActivityId,
-    AgentActivityPhase Phase, string? Name, bool IsNameTruncated);
+    AgentActivityPhase Phase, string? Name, bool IsNameTruncated)
+{
+    /// <summary>Timestamp of the first retained source event.</summary>
+    public DateTimeOffset? Timestamp { get; init; }
+    /// <summary>Projection publication order of the first retained source event.</summary>
+    public long Sequence { get; init; }
+}
 
 /// <summary>Latest published lifecycle values; not a recoverable execution/interaction authority.</summary>
 /// <param name="Kind">Published lifecycle kind.</param>

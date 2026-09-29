@@ -11,7 +11,7 @@ const entry = (overrides: Partial<Entry> = {}): Entry => ({ offset: "1", eventTy
 const session = (overrides: Partial<SessionDisplayView> = {}): SessionDisplayView => ({ sessionId: "session", revision: "1",
   lifecycle: null, queuedPromptCount: null, configuration: { providerId: "provider", providerKey: null, modelId: null,
     reasoningEffort: null, agentPromptId: null }, statusKind: null, statusMessage: null,
-  text: [{ runId: "run", contentId: "content", kind: "Assistant", text: "live", isComplete: true,
+  text: [{ timestamp: null, sequence: null, runId: "run", contentId: "content", kind: "Assistant", text: "live", isComplete: true,
     isTruncated: false, startedWithDelta: false }], toolActivities: [], metadataTruncated: false,
   transportTruncated: false, evictedTextItems: "0", evictedToolActivities: "0", unsupportedEvents: "0", ...overrides });
 
@@ -23,7 +23,7 @@ test("a persisted completion replaces its matching live text, but not another ru
 });
 
 test("a live replacement supersedes incomplete journal deltas and tool starts without hiding completed history", () => {
-  const tool = { providerId: "provider", runId: "run", activityId: "tool", phase: "Started", name: "Read", isNameTruncated: false };
+  const tool = { timestamp: null, sequence: null, providerId: "provider", runId: "run", activityId: "tool", phase: "Started", name: "Read", isNameTruncated: false };
   const view = session({ toolActivities: [tool] });
   const rows = reconcileTimeline([entry({ eventType: "contentDelta" }), entry({ offset: "2", eventType: "activity",
     kind: "ToolCall", activityId: "tool", contentId: null, phase: "Requested" })], view);

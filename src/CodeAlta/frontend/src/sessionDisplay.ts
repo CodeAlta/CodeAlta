@@ -84,7 +84,8 @@ export function createSessionDisplayStore(open: OpenDisplay) {
         if (revision !== null && next <= revision) continue; // Never apply duplicate or out-of-order callbacks.
         const previous = decimalRevision(item.previousRevision);
         if (revision !== null && (item.isInitial || previous === null || previous >= next)) { fail("invalid_update"); return; }
-        if (item.session !== null && !validToolActivities(item.session.toolActivities, item.session.evictedToolActivities)) {
+        if (item.session !== null && (!validToolActivities(item.session.toolActivities, item.session.evictedToolActivities)
+          || !item.session.text.every(validRowOrder))) {
           fail("invalid_update"); return;
         }
         const gap = item.hasGap || (revision !== null && (next > revision + 1n || previous !== revision));
@@ -201,13 +202,18 @@ function validToolActivities(rows: unknown, evicted: unknown): boolean {
     if (row === null || typeof row !== "object" || Array.isArray(row) ||
       !validToolIdentity(row.providerId) || (row.runId !== null && !validToolIdentity(row.runId)) || !validToolIdentity(row.activityId) ||
       !["Requested", "Started", "Progressed", "Completed", "Failed", "Canceled"].includes(row.phase) ||
-      typeof row.isNameTruncated !== "boolean" ||
+      typeof row.isNameTruncated !== "boolean" || !validRowOrder(row) ||
       (row.name === null ? row.isNameTruncated : typeof row.name !== "string" || row.name.length > 128 || !wellFormedToolString(row.name))) return false;
     const identity = JSON.stringify([row.providerId, row.runId, row.activityId]);
     if (identities.has(identity)) return false;
     identities.add(identity);
   }
   return true;
+}
+
+function validRowOrder(row: { timestamp: string | null; sequence: string | null }): boolean {
+  return (row.timestamp === null || typeof row.timestamp === "string" && Number.isFinite(Date.parse(row.timestamp)))
+    && (row.sequence === null || decimalRevision(row.sequence) !== null);
 }
 
 function immutableReplacement(item: SessionDisplayItem): SessionDisplayItem {
@@ -219,6 +225,7 @@ function immutableReplacement(item: SessionDisplayItem): SessionDisplayItem {
     toolActivities: Object.freeze(item.session.toolActivities.map(row => Object.freeze({
       providerId: row.providerId, runId: row.runId, activityId: row.activityId, phase: row.phase,
       name: row.name, isNameTruncated: row.isNameTruncated,
+      timestamp: row.timestamp, sequence: row.sequence,
     }))),
   }) });
 }

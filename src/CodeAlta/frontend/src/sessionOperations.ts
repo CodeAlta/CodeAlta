@@ -32,6 +32,9 @@ type AbortIntent = Readonly<{ request: Readonly<SessionAbortRequest>; sessionId:
 type PendingSend = { request: Readonly<SessionSendRequest>; inFlight: boolean; waiter?: Promise<SessionAdmission> };
 type PendingAbort = { intent: AbortIntent; inFlight: boolean; waiter?: Promise<SessionAdmission> };
 
+export type OutgoingMessage = Readonly<{ key: string; epoch: string; sessionId: string; text: string;
+  imageCount: number; timestamp: string; runId: string | null; state: "sending" | "accepted" | "uncertain" | "failed" }>;
+
 function wellFormed(value: string): boolean {
   for (let index = 0; index < value.length; index++) {
     const code = value.charCodeAt(index);
@@ -139,11 +142,21 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
   invokeAbort: (request: SessionAbortRequest, options: WaitOptions) => Promise<SessionAdmission>) {
   const sends = new Map<string, PendingSend>();
   const aborts = new Map<string, PendingAbort>();
+  // Window-owned display echoes only; never used as admission or execution authority.
+  const outgoing = new Map<string, OutgoingMessage>();
   const change = createOwnerChangeSignal();
   const sessionKey = (sessionId: string) => sessionId.toLowerCase();
   return {
     imageDrafts: createImageDrafts(),
     subscribe: change.subscribe, getSnapshot: change.getSnapshot,
+    outgoing(epoch: string, sessionId: string) {
+      return [...outgoing.values()].filter(row => row.epoch === epoch && sessionKey(row.sessionId) === sessionKey(sessionId));
+    },
+    acknowledgeOutgoing(keys: readonly string[]) {
+      let changed = false;
+      for (const key of keys) changed = outgoing.delete(key) || changed;
+      if (changed) change.changed();
+    },
     pending(sessionId: string) {
       const entry = sends.get(sessionKey(sessionId));
       return entry ? Object.freeze({ request: entry.request, inFlight: entry.inFlight }) : undefined;
@@ -184,6 +197,11 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
         sends.set(key, entry);
       }
       entry.inFlight = true; // Synchronous ownership precedes transport, not a React render-time guard.
+      const echoKey = JSON.stringify([request.expectedEpoch, request.sessionId, request.clientRequestId]);
+      const previousEcho = outgoing.get(echoKey);
+      if (!previousEcho && outgoing.size >= 256) outgoing.delete(outgoing.keys().next().value!);
+      outgoing.set(echoKey, Object.freeze({ key: echoKey, epoch: request.expectedEpoch, sessionId: request.sessionId,
+        text: request.text, imageCount: request.images?.length ?? 0, timestamp: previousEcho?.timestamp ?? new Date().toISOString(), runId: previousEcho?.runId ?? null, state: "sending" }));
       change.changed();
       const captured = entry.request;
       let result: SubmissionResult = { status: "uncertain", epoch: captured.expectedEpoch, receipt: null };
@@ -196,7 +214,13 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
           }
         } else if (!signal.aborted && !capability.canMutate()) result = { status: "stale_epoch", epoch: captured.expectedEpoch, receipt: null };
       } catch { /* Transport failure/cancellation is not non-admission. Preserve exact uncertainty. */ }
-      finally { entry.inFlight = false; entry.waiter = undefined; change.changed(); }
+      finally {
+        entry.inFlight = false; entry.waiter = undefined;
+        const echo = outgoing.get(echoKey);
+        if (echo) outgoing.set(echoKey, Object.freeze({ ...echo, runId: result.receipt?.runId ?? echo.runId,
+          state: result.status === "accepted" || result.status === "replay" ? "accepted" : result.status === "uncertain" ? "uncertain" : "failed" }));
+        change.changed();
+      }
       if (!signal.aborted) publish(result);
     },
     async abort(intent: AbortIntent, signal: AbortSignal, capability: Capability, publish: (result: SubmissionResult) => void): Promise<void> {

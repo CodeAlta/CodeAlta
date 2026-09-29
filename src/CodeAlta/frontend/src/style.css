@@ -54,6 +54,7 @@
   --text: var(--bp-palette-light-gray-5);
   --muted: var(--bp-palette-gray-4);
   --accent: var(--bp-palette-blue-4);
+  --user-accent: var(--bp-palette-violet-4);
   --accent-strong: var(--bp-palette-blue-3);
   --accent-soft: var(--bp-surface-layer-color-primary);
   --green: var(--bp-palette-green-4);
@@ -70,6 +71,7 @@
   --text: var(--bp-palette-dark-gray-1);
   --muted: var(--bp-palette-gray-1);
   --accent: var(--bp-palette-blue-3);
+  --user-accent: var(--bp-palette-violet-3);
   --accent-strong: var(--bp-palette-blue-2);
   --green: var(--bp-palette-green-3);
   --red: var(--bp-palette-red-3);
@@ -857,15 +859,15 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .owned-session { box-shadow: none !important; }
 .ide-shell .reference-metadata-disclosure > summary { list-style: none; cursor: pointer; }
 .ide-shell .messages { gap: 8px; }
-.ide-shell .timeline-message { position: relative; display: flex; gap: 8px; padding: 12px; border: 1px solid var(--line); border-left: 2px solid var(--card-color, var(--muted)); border-radius: var(--bp-surface-border-radius); background: var(--panel); margin-bottom: 8px; }
+.ide-shell .timeline-message { position: relative; display: flex; gap: 8px; padding: 12px; border: 1px solid var(--line); border-left: 2px solid var(--card-color, var(--muted)); border-radius: var(--bp-surface-border-radius); background: color-mix(in srgb, var(--card-color, var(--muted)) 8%, var(--panel)); margin-bottom: 8px; }
 .ide-shell .timeline-message .avatar { width: 18px; height: 22px; flex: 0 0 18px; border: 0; background: none; color: var(--card-color, var(--muted)); border-radius: 0; }
 .ide-shell .message-assistant { --card-color: var(--accent); }
-.ide-shell .message-user { --card-color: var(--accent); }
-.ide-shell .message-reasoning { --card-color: var(--muted); }
+.ide-shell .message-user { --card-color: var(--user-accent); }
+.ide-shell .message-reasoning { --card-color: color-mix(in srgb, var(--accent) 35%, var(--muted)); }
 .ide-shell .message-tool { --card-color: var(--muted); }
 .ide-shell .message-file, .ide-shell .message-plan { --card-color: var(--green); }
 .ide-shell .message-error { --card-color: var(--red); }
-.ide-shell .message-status { --card-color: var(--muted); }
+.ide-shell .message-status { --card-color: var(--green); }
 .ide-shell .message-heading { min-height: 22px; gap: 8px; margin-bottom: 4px; font-size: 12px; }
 .ide-shell .message-heading strong { color: var(--card-color, var(--text)); }
 .ide-shell .message-heading > span:first-child { display: inline-flex; flex-shrink: 0; gap: 6px; max-width: 45%; overflow: hidden; white-space: nowrap; }
@@ -971,11 +973,18 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
    controls into the shell; the root Classes.DARK follows the theme preference. */
 .bp6-html-select { min-width: 0; max-width: 100%; }
 .ide-shell .owned-session .prompt-options .bp6-html-select select { margin: 0; width: 100%; }
-.ide-shell .owned-session .prompt-options { flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 8px 0; }
-.ide-shell .prompt-options > .composer-field { flex: 1 1 130px; min-width: 0; margin: 0; }
-.ide-shell .prompt-options > .composer-model-field { flex: 2 1 300px; }
-.ide-shell .composer-model-options { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px; min-width: 0; }
-.ide-shell .composer-model-options > * { flex: 1 1 130px; min-width: 0; }
+.ide-shell .owned-session .prompt-options { flex-wrap: nowrap; align-items: center; gap: 12px; padding: 8px 0; }
+.ide-shell .prompt-options > .composer-field { flex: 1 1 0; min-width: 0; margin: 0; flex-direction: row; align-items: center; gap: 6px; }
+.ide-shell .composer-field > .bp6-label { margin: 0; white-space: nowrap; }
+.ide-shell .composer-field > .bp6-form-content { flex: 1; min-width: 0; }
+.ide-shell .prompt-options > .composer-model-field { flex: 2 1 0; }
+.ide-shell .composer-model-options { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.ide-shell .composer-model-options > * { flex: 1 1 0; min-width: 0; }
+@media (max-width: 600px) {
+  .ide-shell .owned-session .prompt-options { flex-wrap: wrap; }
+  .ide-shell .prompt-options > .composer-field { flex-basis: 180px; }
+  .ide-shell .prompt-options > .composer-model-field { flex-basis: 280px; }
+}
 .ide-shell .activity-rail > .bp6-button { min-width: 36px; min-height: 36px; }
 .appearance-settings h2 { margin: 0 0 12px; font-size: var(--bp-typography-size-heading-medium); font-weight: var(--bp-typography-weight-bold); }
 .appearance-settings p { margin: 8px 0 16px; color: var(--muted); line-height: 1.5; }

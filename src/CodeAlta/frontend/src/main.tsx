@@ -1886,6 +1886,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
     return () => { if (timelineCommand.current === command) timelineCommand.current = null; };
   });
   const observedDisplay = useSyncExternalStore(display.subscribe, display.getSnapshot);
+  useSyncExternalStore(submissions.subscribe, submissions.getSnapshot);
   const live = status?.hostEpoch && observedDisplay.hostEpoch === status.hostEpoch && observedDisplay.sessionId === session.id
     ? observedDisplay : null;
   const archivedScope = archivedProjectScope(snapshot, selectedProjectId);
@@ -1920,6 +1921,8 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}
           onNavigationReset={resetMessageNotice} newestRequest={newest.requestRef} onNewestResult={newest.onResult}
           read={readTimeline}
+          outgoing={ownedSession && status?.hostEpoch ? submissions.outgoing(status.hostEpoch, session.id) : []}
+          onAcknowledgeOutgoing={submissions.acknowledgeOutgoing}
           live={ownedSession ? live?.snapshot?.session ?? null : null} />
         {ownedSession && status?.hostEpoch
         ? <>
