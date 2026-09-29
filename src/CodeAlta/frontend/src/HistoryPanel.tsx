@@ -1,3 +1,4 @@
+import { matchesOutgoingText } from "./outgoingEcho";
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { workspace, type HistoryRequest, type SessionDisplayView } from "#neoastra";
 import { AppIcon } from "./AppIcon";
@@ -173,8 +174,8 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
       const timestamp = row.source === "history" ? row.item.timestamp : row.row.timestamp;
       const text = row.source === "history" ? row.item.markdown : row.source === "liveText" ? row.row.text : null;
       const runId = row.source === "history" ? timeline?.entries.find(entry => entry.offset === row.item.key)?.runId : row.row.runId;
-      return text === echo.text && Date.parse(timestamp ?? "") >= Date.parse(echo.timestamp)
-        && (!echo.runId || runId === echo.runId);
+      return matchesOutgoingText(text, echo.text, echo.imageCount, echo.runId, runId)
+        && Date.parse(timestamp ?? "") >= Date.parse(echo.timestamp);
     });
     if (index < 0) return true;
     availableUsers.splice(index, 1); acknowledged.push(echo.key); return false;

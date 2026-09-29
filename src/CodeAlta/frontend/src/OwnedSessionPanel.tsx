@@ -1,4 +1,4 @@
-import { Button, FormGroup, HTMLSelect, Spinner } from "@blueprintjs/core";
+import { Button, Checkbox, FormGroup, HTMLSelect, Spinner } from "@blueprintjs/core";
 import { createPortal } from "react-dom";
 import { PromptImageAttachments } from "./PromptImageAttachments";
 import { formatThinkingElapsed, useThinkingElapsed } from "./thinkingElapsed";
@@ -27,14 +27,16 @@ import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import type { createReminderActions } from "./reminderActions";
 import { validReminderList } from "./reminderListObservation";
 import { SessionUsageInspector } from "./SessionUsageInspector";
-import { RetainedRequestStrip } from "./RetainedRequestStrip";
-import { QueueIntentReview } from "./QueueIntentReview";
+import { ComposerQueueStrip } from "./ComposerQueueStrip";
+import type { ComposerQueueItem } from "./composerQueue";
+import { ActiveProviderStatus } from "./ActiveProviderStatus";
 import type { UsageTarget } from "./sessionUsage";
 import { imagePasteFailure, readPastedImage } from "./promptImages";
 import { useShellLanguage } from "./shellLanguage";
 import type { ClipboardEvent } from "react";
+import type { SessionSteerRequest } from "#neoastra";
 
-export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount, inputLifetime, liveState, timelineNotices }: {
+export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount, inputLifetime, liveState, timelineNotices, onOpenCatalog }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
   projectId?: string | null;
   inputLifetime?: { current: () => boolean };
@@ -56,6 +58,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   onOpenReminders?: () => void;
   onOpenHelp?: () => void;
   onOpenPalette?: () => void;
+  onOpenCatalog?: (page: "models" | "prompts" | "providers") => void;
   reminderActions?: ReturnType<typeof createReminderActions>;
   readReminderCount?: (request: ReminderListRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ReminderListResponse>;
 }) {
@@ -86,7 +89,10 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   const promptInput = useRef<PromptInput>(null);
   const referenceScope = useContext(ProjectReferenceContext);
   const [expanded, setExpanded] = useState(false);
-  const [recoveryExpanded, setRecoveryExpanded] = useState(false);
+  const [enqueue, setEnqueue] = useState(false);
+  const stagedRevision = useSyncExternalStore(queue.composer.subscribe, queue.composer.getSnapshot);
+  const queueRevision = useSyncExternalStore(queue.subscribe, queue.getSnapshot);
+  const steeringRevision = useSyncExternalStore(steering.subscribe, steering.getSnapshot);
   const [choices, setChoices] = useState<SessionChoicesResponse>();
   const [selection, setSelection] = useState<SessionSelection | null>(null);
   const [choicesNotice, setChoicesNotice] = useState("Loading session choices…");
@@ -301,6 +307,57 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     !!pendingSteer || steerMessage !== "Refresh runtime state explicitly before targeting a run.");
   const showQueue = showContextAction(observedQueueAttachment !== null,
     !!pendingQueue || pendingQueueCancellations.length > 0 || queueMessage !== "Refresh runtime state explicitly before queueing text in this host.");
+  function stagePrompt(kind: "Queue" | "Steer", value = text) {
+    if (images.length || pending || invalidEpoch || !(inputLifetime?.current() ?? true)) return false;
+    const request = kind === "Queue" ? captureQueue(epoch, sessionId, observedTarget, value, crypto.randomUUID())
+      : captureSteering(epoch, sessionId, observedTarget, value, crypto.randomUUID());
+    if (!request || !capability.canSubmit(request) || !queue.composer.add(kind, request)) return false;
+    if (value === latestText.current) { inputRevision.current++; clearText(); }
+    setMessage("Ready to send to this owned session.");
+    return true;
+  }
+  function dispatchStaged(item: ComposerQueueItem, retry = false) {
+    const signal = scope.current?.signal;
+    if (!signal || signal.aborted || invalidEpoch || !capability.canSubmit(item.request)) return;
+    const publish = (result: Parameters<typeof queue.composer.outcome>[1]) => {
+      observeEpoch(result); queue.composer.outcome(item.id, result);
+    };
+    if (item.kind === "Steer") {
+      const original = steering.pending(sessionId);
+      if (retry && original?.request.clientRequestId !== item.request.clientRequestId) return;
+      const request = retry ? original?.request : item.request;
+      if (!request || !("expectedRunId" in request) || typeof request.expectedRunId !== "string" || original?.inFlight) return;
+      void steering.submit(request as SessionSteerRequest, signal, capability, publish);
+    } else {
+      const original = queue.pending(sessionId);
+      if (retry && original?.request.clientRequestId !== item.request.clientRequestId) return;
+      const request = retry ? original?.request : item.request;
+      if (!request || original?.inFlight) return;
+      void queue.submit(request, signal, capability, publish, "composer");
+    }
+  }
+  useEffect(() => {
+    const items = queue.composer.list(epoch, sessionId);
+    for (const item of items) {
+      const original = item.kind === "Steer" ? steering.pending(sessionId) : queue.pending(sessionId);
+      if (item.state === "sending" && original && !original.inFlight)
+        queue.composer.outcome(item.id, { status: "uncertain", epoch, receipt: null });
+    }
+    if (invalidEpoch || pending || !(inputLifetime?.current() ?? true) || runtimeState?.kind !== "ready") return;
+    const item = items.find(item => item.kind === "Steer" && item.state === "waiting")
+      ?? items.find(item => item.kind === "Queue" && item.state === "waiting");
+    if (!item) return;
+    const target = runtimeState.snapshot;
+    if (target.runtimeInstanceId !== item.request.expectedRuntimeInstanceId || target.entry?.attachmentGeneration !== item.request.expectedAttachmentGeneration
+      || item.kind === "Steer" && target.entry?.activeRunId !== (item.request as { expectedRunId: string }).expectedRunId) {
+      queue.composer.fail(item, "target_changed"); return;
+    }
+    if (target.coordinatorTransitionInProgress || target.entry?.isRetiring || target.entry?.isTerminated || target.entry?.pendingAgentPromptId) return;
+    if (item.kind === "Queue" && (target.entry?.activeRunId || target.entry?.queueDrainInProgress || pendingQueue
+      || items.some(other => other.kind === "Queue" && ["sending", "submitted", "uncertain"].includes(other.state)))) return;
+    if (item.kind === "Steer" && pendingSteer) return;
+    if (queue.composer.claim(item)) dispatchStaged(item);
+  }, [stagedRevision, queueRevision, steeringRevision, runtimeState, invalidEpoch, pending, epoch, sessionId]);
   function observeEpoch(result: { status: string; epoch: string | null }) {
     if (!capability.observe(result)) setInvalidEpoch(true);
   }
@@ -308,6 +365,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     const signal = scope.current?.signal;
     if (!signal || signal.aborted || !capability.canMutate()) return;
     const retained = submissions.pending(sessionId);
+    if (!retained && enqueue && images.length === 0) { stagePrompt("Queue"); return; }
     if (retained?.inFlight) return;
     const latest = selections.current(epoch, sessionId);
     if (!retained && (latest || selection) && (!choices || choices.status !== "ok" || choices.epoch !== epoch || choices.sessionId !== sessionId
@@ -350,6 +408,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       if (revision !== receiptRevision.current) return;
       observeEpoch(result);
       setPage(result);
+      queue.composer.reconcile(result);
       const recoveringImages = !!submissions.pending(sessionId)?.request.images?.length;
       const recovered = submissions.reconcile(sessionId, result, capability);
       // Receipt recovery cannot prove a remounted image draft's original input revision.
@@ -374,6 +433,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     }, capability);
   }
   function steer(fromComposer = false) {
+    if (fromComposer) { stagePrompt("Steer"); return; }
     if (images.length || pending?.request.images?.length) { setImageNotice("Steer refuses image attachments. Use normal Send or remove attachments first."); return; }
     const signal = scope.current?.signal;
     if (!signal || signal.aborted || !capability.canMutate()) return;
@@ -435,6 +495,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     });
   }
   function queueTextInHost(fromComposer: boolean) {
+    if (fromComposer) { stagePrompt("Queue"); return; }
     if (images.length || pending?.request.images?.length) { setImageNotice("Queue refuses image attachments. Use normal Send or remove attachments first."); return; }
     const signal = scope.current?.signal;
     if (!signal || signal.aborted || !capability.canMutate()) return;
@@ -542,6 +603,17 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       if (canEditImages() && imageOwner.replace(imageKey, images, images.filter((_, i) => i !== index))) setImageNotice("");
     }} />;
   return <>
+    <ComposerQueueStrip owner={queue.composer} epoch={epoch} sessionId={sessionId} disabled={invalidEpoch}
+      retry={item => dispatchStaged(item, true)} cancel={item => {
+        const row = page?.rows.find(row => row.clientRequestId === item.request.clientRequestId && row.sessionId === sessionId);
+        if (row) cancelQueued(row);
+      }} steer={item => { if (stagePrompt("Steer", item.request.text)) queue.composer.remove(item); }} />
+    {pendingSteer && !queue.composer.list(epoch, sessionId).some(item => item.request.clientRequestId === pendingSteer.request.clientRequestId) &&
+      <div className="composer-queue-row"><AppIcon name="steer" size={15} /><span className="composer-queue-preview">{pendingSteer.request.text}</span>
+        <Button icon={<AppIcon name="refresh" size={14} />} aria-label={t("Retry exact request")} disabled={invalidEpoch || pendingSteer.inFlight} onClick={() => steer()} /></div>}
+    {pendingQueue && !queue.composer.list(epoch, sessionId).some(item => item.request.clientRequestId === pendingQueue.request.clientRequestId) &&
+      <div className="composer-queue-row"><AppIcon name="queue" size={15} /><span className="composer-queue-preview">{pendingQueue.request.text}</span>
+        <Button icon={<AppIcon name="refresh" size={14} />} aria-label={t("Retry exact request")} disabled={invalidEpoch || pendingQueue.inFlight} onClick={() => queueTextInHost(false)} /></div>}
     {!expanded && attachmentStrip}
     <section className="owned-session" aria-label={t("Owned text submission")}>
     <div className="composer-status-line" role="status" data-busy={composerBusy}><span>
@@ -564,11 +636,11 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       }} />
     <div className="composer-toolbar">
     <div className="prompt-options" aria-label={t("Session configuration")}>
-      <FormGroup className="composer-field" label={t("Agent prompt")} labelFor={`composer-agent-${sessionId}`}><HTMLSelect fill id={`composer-agent-${sessionId}`} aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
+      <FormGroup className="composer-field" label={<Button variant="minimal" onClick={() => onOpenCatalog?.("prompts")}>{t("Agent→")}</Button>} labelFor={`composer-agent-${sessionId}`}><HTMLSelect fill id={`composer-agent-${sessionId}`} aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
         {!activeChoices?.prompts.some(p => p.id === selected?.agentPromptId) && <option value={selected?.agentPromptId ?? ""}>{selected?.agentPromptId ?? t("Loading…")}</option>}
         {activeChoices?.prompts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
       </HTMLSelect></FormGroup>
-      <FormGroup className="composer-field composer-model-field" label={t("Model")} labelFor={`composer-model-${sessionId}`}><div className="composer-model-options">
+      <FormGroup className="composer-field composer-model-field" label={<Button variant="minimal" onClick={() => onOpenCatalog?.("models")}>{t("Model→")}</Button>} labelFor={`composer-model-${sessionId}`}><div className="composer-model-options">
       <ProviderChooser epoch={epoch} sessionId={sessionId} providerKey={selected?.providerKey ?? t("session provider")}
         disabled={selectionDisabled || !capability.canMutate() || runtimeState?.kind !== "ready"
           || runtimeState.snapshot.coordinatorTransitionInProgress || !!runtimeState.snapshot.entry?.activeRunId
@@ -595,7 +667,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
         {selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) && <option value={selected.modelId}>{loadingChoices ? t("Loading…") : `${selected.modelId} · ${t("Unverified")}`}</option>}
         {activeChoices?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
       </HTMLSelect></div></FormGroup>
-      <FormGroup className="composer-field" label={t("Reasoning")} labelFor={`composer-reasoning-${sessionId}`}><HTMLSelect fill id={`composer-reasoning-${sessionId}`} aria-label={t("Reasoning")} value={selected?.reasoningEffort ?? ""} disabled={selectionDisabled || efforts.length === 0} onChange={event => select("reasoningEffort", event.target.value)} title={t("Supported reasoning effort for the selected model")}>
+      <FormGroup className="composer-field" labelFor={`composer-reasoning-${sessionId}`}><HTMLSelect fill id={`composer-reasoning-${sessionId}`} aria-label={t("Reasoning")} value={selected?.reasoningEffort ?? ""} disabled={selectionDisabled || efforts.length === 0} onChange={event => select("reasoningEffort", event.target.value)} title={t("Supported reasoning effort for the selected model")}>
         <option value="">{t("Model default")}</option>
         {selected?.reasoningEffort && !efforts.includes(selected.reasoningEffort) && <option value={selected.reasoningEffort}>{selected.reasoningEffort} · {t("Unverified")}</option>}
         {efforts.map(e => <option key={e} value={e}>{e}</option>)}
@@ -603,7 +675,8 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     </div>
     <div className="history-controls">
       {!pending && !expanded && !invalidEpoch && <ProjectReferencePicker text={text} edit={editText} input={promptInput} />}
-      {(showSteering || showQueue) && <Button variant="minimal" icon={<AppIcon name="queue" size={16} />} aria-label={t("Queue and steering editors")} title={t("Queue and steering editors")} aria-expanded={recoveryExpanded} aria-controls="composer-recovery-editors" onClick={() => setRecoveryExpanded(value => !value)} />}
+      <Checkbox checked={enqueue} disabled={invalidEpoch || !!pending || images.length > 0} label={t("Enqueue")} onChange={event => setEnqueue(event.currentTarget.checked)} />
+      <ActiveProviderStatus epoch={epoch} onOpen={() => onOpenCatalog?.("providers")} />
       <span className="sr-only">{t("Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer")}</span>
       {infoControl}
       {usageTarget && <SessionUsageInspector key={JSON.stringify(usageTarget)} target={usageTarget} capability={capability} />}
@@ -652,40 +725,11 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     {mcpPlugin && /fail|error/i.test(mcpPlugin.state) && <p role="alert">{t("MCP plugin:")} {mcpPlugin.state}. {t("Check advanced diagnostics.")}</p>}
     {page && page.status !== "ok" && <p role="alert">{t("Receipt snapshot:")} {page.status}</p>}
     {(compactMessage !== "Refresh runtime state explicitly before attempting idle compaction." || pendingAbortRun) && <p className="composer-notice" role="status">{compactMessage !== "Refresh runtime state explicitly before attempting idle compaction." && compactMessage} {pendingAbortRun && abortRunMessage}</p>}
-    </>, timelineNotices)}
     {pendingCompact && <p className="composer-notice">{t("Manual exact compaction retry only:")} {t("epoch")} {pendingCompact.request.expectedEpoch} · {t("session")} {pendingCompact.request.sessionId} · {t("runtime")} {pendingCompact.request.expectedRuntimeInstanceId} · {t("attachment")} {pendingCompact.request.expectedAttachmentGeneration} · {t("request")} {pendingCompact.request.clientRequestId}. {t("Refresh never retargets this intent.")}</p>}
     {pendingAbortRun && <p className="composer-notice">{t("Manual exact cancellation retry only:")} {t("epoch")} {pendingAbortRun.request.expectedEpoch} · {t("session")} {pendingAbortRun.request.sessionId} · {t("runtime")} {pendingAbortRun.request.expectedRuntimeInstanceId} · {t("attachment")} {pendingAbortRun.request.expectedAttachmentGeneration} · {t("run")} {pendingAbortRun.request.expectedRunId} · {t("request")} {pendingAbortRun.request.clientRequestId}. {t("Refresh never retargets this intent.")}</p>}
-    <QueueIntentReview owner={queue} epoch={epoch} sessionId={sessionId} capture={() => {
-      const signal = scope.current?.signal; const revision = inputRevision.current;
-      const lifetime = inputLifetime; const imageRevision = imageOwner.getSnapshot();
-      const observation = runtimeState; const draftRevision = queue.draftRevision(epoch, sessionId);
-      if (!signal || signal.aborted || !capability.canMutate() || !(lifetime?.current() ?? true)) return null;
-      return () => !signal.aborted && capability.canMutate() && (lifetime?.current() ?? true)
-        && revision === inputRevision.current && imageRevision === imageOwner.getSnapshot()
-        && observation === queueReviewRuntime.current && draftRevision === queue.draftRevision(epoch, sessionId);
-    }} />
-    <RetainedRequestStrip epoch={epoch} sessionId={sessionId} queue={queue} steering={steering} />
-    {(showSteering || showQueue) && <details id="composer-recovery-editors" className="composer-recovery"
-      hidden={!recoveryExpanded && !pendingSteer && !pendingQueue && pendingQueueCancellations.length === 0
-        && steerMessage === "Refresh runtime state explicitly before targeting a run."
-        && queueMessage === "Refresh runtime state explicitly before queueing text in this host."}
-      open={recoveryExpanded || !!pendingSteer || !!pendingQueue || pendingQueueCancellations.length > 0
-        || steerMessage !== "Refresh runtime state explicitly before targeting a run."
-        || queueMessage !== "Refresh runtime state explicitly before queueing text in this host."}><summary>{t(pendingSteer || pendingQueue || pendingQueueCancellations.length > 0 ? "Retained queue and steering requests" : "Queue and steering editors")}</summary><div className="context-actions">
-      {showSteering && <div><label>{t("Steer observed run")} {pendingSteer?.request.expectedRunId ?? observedTarget?.entry?.activeRunId}<textarea maxLength={32768} value={pendingSteer?.request.text ?? steerText} disabled={!!pendingSteer} onChange={event => setSteerText(event.target.value)} /></label>
-        {pendingSteer && <p className="detail">{t("Retained run")} {pendingSteer.request.expectedRunId} · {t("attachment")} {pendingSteer.request.expectedAttachmentGeneration} · {t("request")} {pendingSteer.request.clientRequestId}; {t("refresh never retargets this request.")}</p>}
-        <button type="button" disabled={invalidEpoch || !!pendingSteer?.inFlight || (pendingSteer ? !capability.canSubmit(pendingSteer.request) : !canCaptureSteer)} onClick={() => steer()}>{t(pendingSteer ? "Retry exact steering request" : "Steer observed run")}</button>
-        {steerMessage !== "Refresh runtime state explicitly before targeting a run." && <p role="status">{steerMessage}</p>}</div>}
-      {showQueue && <div><label>{t("Host-only queued text")}<textarea maxLength={32768} value={pendingQueue?.request.text ?? queueText} disabled={!!pendingQueue} onChange={event => editQueueText(event.target.value)} /></label>
-        <p className="detail">{t("Reservation is not insertion, execution or durable storage. Refresh receipts manually.")}</p>
-        {pendingQueue && <p className="detail">{t("Retained attachment")} {pendingQueue.request.expectedAttachmentGeneration} · {t("request")} {pendingQueue.request.clientRequestId}; {t("no durable recovery or retargeting.")}</p>}
-        <button type="button" disabled={invalidEpoch || !!pendingQueue?.inFlight || (pendingQueue ? !capability.canSubmit(pendingQueue.request) : !canCaptureQueue)} onClick={() => queueTextInHost(false)}>{t(pendingQueue ? "Retry exact host-only queue request" : "Queue text — this host only")}</button>
-        {pendingQueueCancellations.map(value => <div key={value.intent.request.targetOperationId}>
-          <p className="detail">{t("Retained cancellation")} · {t("original operation")} {value.intent.request.targetOperationId} · {t("request")} {value.intent.request.clientRequestId}</p>
-          <button type="button" disabled={invalidEpoch || value.inFlight || !capability.canSubmit(value.intent.request)} onClick={() => cancelQueued(undefined, value.intent.request.targetOperationId)}>{t("Retry exact queued-operation cancellation")}</button>
-        </div>)}
-        {queueMessage !== "Refresh runtime state explicitly before queueing text in this host." && <p role="status">{queueMessage}</p>}</div>}
-    </div></details>}
+    {pendingQueueCancellations.map(value => <Button key={value.intent.request.clientRequestId} icon={<AppIcon name="refresh" size={14} />}
+      disabled={invalidEpoch || value.inFlight || !capability.canSubmit(value.intent.request)} onClick={() => cancelQueued(undefined, value.intent.request.targetOperationId)}>
+      {t("Retry exact queued-operation cancellation")}</Button>)}
     {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId}
       canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} />}
     {pendingAborts.length > 0 && <div className="retained-send-recovery">
@@ -707,5 +751,6 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
         onClick={() => abort(undefined, value.intent.request.targetOperationId)}>{t("Retry exact original Send Abort")}</button>
     </div>)}
     </div>}
+    </>, timelineNotices)}
   </section></>;
 }

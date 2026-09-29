@@ -1577,7 +1577,7 @@ function App() {
                 preferredComposerHeight={composerHeights.get(composerSizeKey(status?.hostEpoch ?? null, projectId, selectedSession.id))}
                 onComposerHeight={height => { if (selectedScope.current !== projectId || selectedSessionId.current !== selectedSession.id) return;
                   setComposerHeights(sizes => rememberComposerHeight(sizes, composerSizeKey(status?.hostEpoch ?? null, projectId, selectedSession.id), height)); }}
-                onOpenReminders={openSelectedReminders} onOpenHelp={openHelp} onOpenPalette={openPalette} readReminders={readReminders} reminderActions={reminderActions} compactTrigger={compactTrigger} status={status} mutation={mutation}
+                onOpenCatalog={navigate} onOpenReminders={openSelectedReminders} onOpenHelp={openHelp} onOpenPalette={openPalette} readReminders={readReminders} reminderActions={reminderActions} compactTrigger={compactTrigger} status={status} mutation={mutation}
                 submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} draftIndicators={draftIndicators}
                  askActions={askActions} display={display} scrollMemory={scrollMemory} runtimeReader={runtimeReader}
                  permissionReviewer={permissionReviewer} inputReviewer={inputReviewer} configuration={configurationState.snapshot}
@@ -1771,7 +1771,7 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
   </dialog>;
 }
 
-function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger, infoLifetime, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, selections, timelineCommand }: {
+function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger, infoLifetime, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, selections, timelineCommand, onOpenCatalog }: {
   session: WorkspaceSession;
   snapshot: WorkspaceSnapshot;
   selectedProjectId: string | null;
@@ -1783,6 +1783,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   onOpenReminders: (sessionId: string, epoch: string, projectId: string | null) => void;
   onOpenHelp: () => void;
   onOpenPalette: () => void;
+  onOpenCatalog: (page: "models" | "prompts" | "providers") => void;
   readReminders: (request: ReminderListRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ReminderListResponse>;
   reminderActions: ReturnType<typeof createReminderActions>;
   compactTrigger: RefObject<HTMLButtonElement | null>;
@@ -1941,7 +1942,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
               usageTarget={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? {
                 epoch: status.hostEpoch, sessionId: session.id, scope: selectedProjectId === null ? "global" : "project",
                 projectId: selectedProjectId, expectedProjectPath: selectedProjectId === null ? null : session.workspacePath } : null}
-              timelineNotices={timelineNotices} liveState={ownedSession ? live : null} inputLifetime={infoLifetime} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} infoControl={infoControl} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
+              onOpenCatalog={onOpenCatalog} timelineNotices={timelineNotices} liveState={ownedSession ? live : null} inputLifetime={infoLifetime} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} infoControl={infoControl} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
               reminderActions={reminderActions} readReminderCount={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? readReminders : undefined} /> : null}
           readOnly={<ReadOnlyComposer sessionId={session.id} provider={session.providerKey} draftIndicators={draftIndicators} infoControl={infoControl} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
               reason={archivedScope ? t("Archived project; this session is read-only. Sending is unavailable.") : undefined} />}

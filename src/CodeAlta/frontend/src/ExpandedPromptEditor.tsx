@@ -43,7 +43,7 @@ export function ExpandedPromptEditor({ text, onChange, onClose, onPaste, attachm
             keyCode: event.nativeEvent.keyCode }, onClose)) { event.preventDefault(); event.stopPropagation(); }
         }} />
     </div>
-    <ProjectReferencePicker text={text} edit={onChange} input={editor} compact={false} />
+    <ProjectReferencePicker text={text} edit={onChange} input={editor} />
     <p id="expanded-prompt-hint">{t("Escape / Ctrl+Enter close · Enter new line · Draft preserved; nothing is sent.")}</p>
   </dialog>;
 }

@@ -396,6 +396,18 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .empty-workspace h1 { margin-bottom: 8px; color: var(--text); font-size: 22px; }
 .notice { margin: 4px 14px 10px; padding: 8px 10px; border-radius: 8px; background: var(--accent-soft); color: var(--muted); font-size: 11px; line-height: 1.4; }
 .error-text { color: var(--red); }
+.composer-queue-strip { display: grid; gap: 3px; flex-shrink: 0; margin-block: 4px; }
+.composer-queue-row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.composer-queue-row[data-kind="Steer"] { background: color-mix(in srgb, var(--accent) 16%, var(--surface)); }
+.composer-queue-kind { font-size: 11px; opacity: .75; }
+.composer-queue-preview { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-queue-actions { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
+.composer-queue-actions input { width: 4em; padding: 2px; }
+.active-provider-status .bp6-button-text { display: flex; gap: 8px; }
+.provider-status-item { font-size: 11px; white-space: nowrap; }
+.provider-status-item > span { color: var(--muted); }
+.provider-status-item[data-state="ready"] > span { color: var(--green); }
+.provider-status-item[data-state="failed"] > span { color: var(--red); }
 .timeline-notices [role="alert"] { color: var(--red); }
 .muted-text, .detail { color: var(--muted); font-size: 12px; line-height: 1.5; }
 

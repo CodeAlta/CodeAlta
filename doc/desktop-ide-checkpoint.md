@@ -1,5 +1,12 @@
 # Observation error placement and practical image paste (2026-09-29)
 
+Composer follow-up: queue/steering drafts now use compact above-card rows rather than a
+collapsible diagnostic editor. Enqueue, repeat count, guarded editing/deletion, exact-key retry,
+provider readiness and Agent/Model catalog buttons are exposed without success banners.
+Staging is app-memory only; dispatch keeps epoch/runtime/attachment/run checks. Image-bearing
+optimistic echoes can reconcile with attachment-enriched source text only within the same known
+run; matching remains one-to-one, timestamp-bounded and unrelated to request settlement.
+
 Ask observation failures no longer create a Pending asks panel; that heading requires a real
 pending ask. Errors are shown as timeline alerts, and runtime/receipt/composer outcome notices
 are rendered in the timeline rather than below the prompt. Real ask actions and recovery remain.

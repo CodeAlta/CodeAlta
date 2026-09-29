@@ -72,6 +72,14 @@ actions under **More composer actions**, with retained-request recovery separate
 closed and can be opened explicitly. Existing selected-session keyed transitions and
 draft/uncertain-action guards remain in place.
 
+Queued text and steering use compact rows outside and above the prompt card. **Enqueue** makes
+Send stage text for the next idle observation; queued rows expose repeat count, editing, steering
+and deletion. Claimed requests retain their exact targets and keys; uncertain outcomes require
+explicit retry, and receipt-confirmed consumption removes the row. Staged rows are app-memory
+only, not durable across reloads. Image prompts still use immediate Send. **Agent→** and
+**Model→** open their catalog windows; enabled-provider readiness appears in the bottom bar.
+The expanded prompt editor retains file insertion without reference-inspection diagnostics.
+
 Reminders is a guarded selected-session native-modal popup, not a Settings section or replacement
 workspace. Closing it does not cancel an admitted action or retry an uncertain Save; original
 request evidence remains owned by the application. The underlying workspace stays mounted.

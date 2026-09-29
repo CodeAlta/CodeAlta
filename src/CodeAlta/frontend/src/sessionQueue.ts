@@ -1,6 +1,7 @@
 import type { SessionAdmission, SessionCancelQueueRequest, SessionQueueRequest, SessionReceiptPage, SessionReceiptView, SessionRuntimeStateResponse } from "#neoastra";
 import type { createMutationCapability, SubmissionResult } from "./sessionOperations";
 import { createOwnerChangeSignal } from "./ownerChangeSignal";
+import { createComposerQueue } from "./composerQueue";
 
 type Capability = ReturnType<typeof createMutationCapability>;
 type WaitOptions = { signal: AbortSignal; timeoutMilliseconds: number };
@@ -135,6 +136,7 @@ export function createQueueSubmissions(invoke: (request: SessionQueueRequest, op
   const sessionKey = (sessionId: string) => sessionId.toLowerCase();
   const draftKey = (epoch: string, sessionId: string) => JSON.stringify([epoch, sessionKey(sessionId)]);
   return {
+    composer: createComposerQueue(),
     subscribe: change.subscribe, getSnapshot: change.getSnapshot,
     draft(epoch: string, sessionId: string): string { return drafts.get(draftKey(epoch, sessionId))?.text ?? ""; },
     draftRevision(epoch: string, sessionId: string): number { return drafts.get(draftKey(epoch, sessionId))?.revision ?? 0; },

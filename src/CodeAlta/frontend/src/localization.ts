@@ -4,6 +4,15 @@ function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
   return Object.freeze(Object.fromEntries(Object.entries(rows).map(([key, row]) => [key, Object.freeze(row)]))) as Readonly<T>;
 }
 export const messages = dictionary({
+  "Queue": ["Cola", "File", "Warteschlange", "キュー", "队列"],
+  "Queued and steering messages": ["Mensajes en cola y de dirección", "Messages en file et de guidage", "Warteschlangen- und Steuerungsnachrichten", "キューと実行への指示", "排队和引导消息"],
+  "Repeat count": ["Repeticiones", "Répétitions", "Wiederholungen", "繰り返し回数", "重复次数"],
+  "Edit queued prompt": ["Editar mensaje en cola", "Modifier le message en file", "Wartenden Prompt bearbeiten", "キューのプロンプトを編集", "编辑排队提示"],
+  "Delete pending message": ["Eliminar mensaje pendiente", "Supprimer le message en attente", "Wartende Nachricht löschen", "待機中のメッセージを削除", "删除待处理消息"],
+  "Enqueue": ["Encolar", "Mettre en file", "Einreihen", "キューに追加", "排队"],
+  "Agent→": ["Agente→", "Agent→", "Agent→", "エージェント→", "代理→"],
+  "Model→": ["Modelo→", "Modèle→", "Modell→", "モデル→", "模型→"],
+  "Active providers": ["Proveedores activos", "Fournisseurs actifs", "Aktive Anbieter", "有効なプロバイダー", "活动提供商"],
   "Paste PNG, JPEG, WebP, GIF or BMP images. Normal Send requires an observed supported model. Queue and Steer refuse images.": ["Pega imágenes PNG, JPEG, WebP, GIF o BMP. Enviar requiere un modelo compatible observado. Cola y dirección rechazan imágenes.", "Collez des images PNG, JPEG, WebP, GIF ou BMP. Envoyer exige un modèle compatible observé. File et orientation refusent les images.", "PNG-, JPEG-, WebP-, GIF- oder BMP-Bilder einfügen. Senden erfordert ein beobachtetes geeignetes Modell. Warteschlange und Steuerung lehnen Bilder ab.", "PNG、JPEG、WebP、GIF、BMP画像を貼り付けます。通常の送信には対応が確認されたモデルが必要です。キューと実行への指示は画像を拒否します。", "粘贴 PNG、JPEG、WebP、GIF 或 BMP 图片。正常发送需要已观察到支持图像的模型。排队和引导拒绝图像。"],
   "Could not read the pasted image. Paste a valid PNG, JPEG, WebP, GIF or BMP image. Original attachments are retained.": ["No se pudo leer la imagen pegada. Pega una imagen PNG, JPEG, WebP, GIF o BMP válida. Se conservan los adjuntos originales.", "Impossible de lire l’image collée. Collez une image PNG, JPEG, WebP, GIF ou BMP valide. Les pièces jointes d’origine sont conservées.", "Das eingefügte Bild konnte nicht gelesen werden. Ein gültiges PNG-, JPEG-, WebP-, GIF- oder BMP-Bild einfügen. Vorhandene Anhänge bleiben erhalten.", "貼り付けた画像を読み取れませんでした。有効なPNG、JPEG、WebP、GIF、BMP画像を貼り付けてください。元の添付は保持されます。", "无法读取粘贴的图片。请粘贴有效的 PNG、JPEG、WebP、GIF 或 BMP 图片。原始附件仍然保留。"],
   "Local image edit refused. Use a supported image and a writable owned draft; original attachments are retained.": ["Edición rechazada. Usa una imagen compatible y un borrador propio editable; se conservan los adjuntos.", "Modification refusée. Utilisez une image compatible et un brouillon détenu modifiable ; les pièces jointes sont conservées.", "Bildänderung abgelehnt. Unterstütztes Bild und bearbeitbaren eigenen Entwurf verwenden; Anhänge bleiben erhalten.", "画像の編集を拒否しました。対応する画像と編集可能な所有下書きを使用してください。元の添付は保持されます。", "图像编辑被拒绝。请使用受支持的图片和可写的自有草稿；原始附件仍然保留。"],

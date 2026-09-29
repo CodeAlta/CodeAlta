@@ -4,6 +4,12 @@ title: Getting Started
 
 # Getting Started
 
+In the development WebApp, queued text and steering appear as compact rows above the prompt.
+Use **Enqueue** to stage text for the next idle turn, and the row controls to edit, repeat or
+delete waiting messages. These drafts live only in the app, not across reloads. Image prompts
+use immediate Send. **Agent→** and **Model→** open their selection windows, and provider
+readiness is shown in the bottom bar.
+
 ## Install
 
 The CodeAlta terminal workspace is packaged as the .NET global tool `CodeAlta.Tui`; the installed command is `altatui`. The in-session agent tool remains named `alta`.
