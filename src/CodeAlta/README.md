@@ -63,13 +63,14 @@ Settings opens a modal overlay approximately 80% of the desktop viewport; the se
 composer draft and timeline remain mounted underneath but cannot be interacted with while it is
 open. Use the overlay's sections and Back to settings control, Escape or Close settings to return;
 at narrow widths it uses viewport margins and scrolls internally. Configuration, Providers,
-Models, Agent prompts, MCP Servers and Logs are **not** workspace tabs. Future session/file tabs
-are separate; no multi-workspace tabbing is implemented here. The current IDE presentation uses
+Models, Agent prompts, MCP Servers and Logs are **not** workspace tabs. Session tabs can be dragged
+to workspace edges to create multiple simultaneous panes (up to 32 open sessions). The presentation uses
 stable content slots and one vertical Explorer with Projects above Sessions. Its width is locally
 saved (220–360 pixels); the full-content button hides it without discarding the restore width.
 Settings and the command palette are on the activity rail. The compact composer keeps secondary
-actions under **More composer actions**, with retained-request recovery separate. Alta notes start
-closed and can be opened explicitly. Existing selected-session keyed transitions and
+actions under **More composer actions**, with retained-request recovery separate. Alta notes belong
+to each session, start closed when empty, and open when meaningful content arrives. Their FlexLayout
+border tab can be dragged left or right, resized, or collapsed. Existing session-keyed transitions and
 draft/uncertain-action guards remain in place.
 
 Queued text and steering use compact rows outside and above the prompt card. **Enqueue** makes
@@ -87,12 +88,27 @@ until an idle attachment is verified. Send and Stop occupy one slot, not two adj
 Missed background reads retain receipts and ask drafts and recover on the next observation;
 prolonged unavailability shows a small status indicator rather than raw timeline diagnostics.
 
+For a Send lockup, preserve the developer-console entries prefixed `[CodeAlta Send]` and
+`[CodeAlta RPC]`. They report composer guards, dispatch, safe framework error codes, elapsed time
+and UUID request keys, never prompt text or provider credentials. Match a dispatch key with
+`Send reached backend (<key>)` in application logs. `duplicate_request` can mean NeoAstra's
+window-lifetime request-ID budget is exhausted, not that CodeAlta replayed the prompt;
+`too_many_requests` means admission/rate/channel pressure; `connection_closed` means transport
+loss. An uncancelled eight-second `operation_canceled` wait is consistent with the client timeout.
+The one-million-ID limit is still finite: upstream must support safe completed-ID retirement or
+document/RPC renewal with distinct replay protection and a specific capacity error. No automatic
+reload, capability reset or mutation retry is performed. Inspect receipts before deliberate retry.
+
 Reminders is a guarded selected-session native-modal popup, not a Settings section or replacement
 workspace. Closing it does not cancel an admitted action or retry an uncertain Save; original
 request evidence remains owned by the application. The underlying workspace stays mounted.
-Real FlexLayout session tabs now project existing bounded identities plus a draft tab, with
-compact status/close chrome and secondary Reopen/Refresh menus. App owns the sole active
-workspace; inactive factories return no live session content. Provider switching remains blocked
+Clicking a project opens a blank timeline with a bottom prompt and animated CodeAlta wordmark
+(stationary with reduced motion); there is no draft tab. Real FlexLayout session tabs project
+existing bounded identities, with compact status/close chrome and secondary Reopen/Refresh menus.
+Open sessions retain independent display/runtime/review/notes owners and drafts; the focused pane
+owns global composer shortcuts. Running indicators in the project/session sidebar refresh in bounded
+batches, prioritizing visible and open sessions (at most 32 verified sessions per batch). Missing or
+stale observations never imply idle or authorize mutations. Provider switching remains blocked
 on failed-switch persistence/recovery semantics. Timeline loading now supports records up to
 8 MiB, with bounded previews and an explicit raw-source inspector showing at most 16 KiB per
 chunk. Previously loaded rows survive later page errors with a partial-state notice. The window
@@ -100,8 +116,8 @@ is bounded to 1,000 events, 2 Mi text units or 32 automatic pages; load older ex
 Larger records produce an explicit error, not a silent skip. Visual/browser acceptance is deferred; known browser
 fixture failures are preserved, not reported as fixed. See the
 [current runnable checkpoint and verification gaps](../../doc/desktop-ide-checkpoint.md).
-The session-tab candidate passes 33 scoped functional tests, strict TypeScript and desktop/
-frontend builds. Independent source/functional review passed; mounted-lifetime qualification remains pending.
+The earlier single-pane session-tab candidate passed 33 scoped functional tests. The split-pane
+follow-up adds regression coverage but is build-verified only; mounted-lifetime qualification remains pending.
 The native @ reference-palette candidate replaces inline results with a bounded, separate
 query and literal file/folder paths. Selection revalidates the captured input after native
 close before inserting; nothing is sent or uploaded. Its 20 scoped functional tests, strict
@@ -682,15 +698,15 @@ does not reveal a lost outcome. Closing the application or cancelling the origin
 invalidates pending attempts; host restart restores no old input authority. Native UI and configured-provider
 qualification remain incomplete.
 
-The selected owned-host session also has **Current durable notes — read only**. Use **Refresh notes**
-explicitly; selecting a session does not automatically read it. It displays the latest stored notes
-in journal order as literal text, not live progress or rendered Markdown. Complete notes up to
+Each open owned-host session has a read-only **Alta notes** dock. It reads current durable notes
+automatically, refreshes every ten seconds after the previous read completes, and supports explicit
+**Refresh notes**. It displays the latest stored notes as sanitized Markdown. Complete notes up to
 16,384 UTF-16 units are shown without truncation; larger or invalid text produces an error. Empty
 notes, cleared notes and no notes event share the same empty result; a failed read is distinct.
-There is no editing, automatic retry or browser persistence. This feature does not require ask opt-in.
+There is no editing, automatic mutation retry or browser persistence. This feature does not require ask opt-in.
 
 Selection/remount changes detach presentation but retain the original read. While it is pending,
-another local refresh is refused; after failure, retry is a new explicit read, not a recovered write
+another local refresh is refused; after failure, the next refresh is a new read, not a recovered write
 outcome. Host identity change requires reload before further operations. Notes shares the host's
 eight actual workspace/history reads, and a cancelled/timed-out wait does not release a still-running
 backend read. The display limit does not bound journal scanning or latency. Reload can perform a

@@ -1,6 +1,7 @@
 import type { SessionAdmission, SessionAbortRequest, SessionReceiptPage, SessionReceiptRequest, SessionReceiptView, SessionSendRequest, SessionSelection, SessionReferenceScope } from "#neoastra";
 import { createOwnerChangeSignal } from "./ownerChangeSignal";
 import { createImageDrafts, freezeImages, validImages } from "./promptImages";
+import { diagnosticRequestId, rpcFailureCode } from "./rpcDiagnostics";
 
 type WaitOptions = { signal: AbortSignal; timeoutMilliseconds: number };
 export type SubmissionResult = SessionAdmission | { status: "uncertain"; epoch: string; receipt: null };
@@ -204,8 +205,11 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
         text: request.text, imageCount: request.images?.length ?? 0, timestamp: previousEcho?.timestamp ?? new Date().toISOString(), runId: previousEcho?.runId ?? null, state: "sending" }));
       change.changed();
       const captured = entry.request;
+      const started = Date.now();
+      const diagnosticId = diagnosticRequestId(captured.clientRequestId);
       let result: SubmissionResult = { status: "uncertain", epoch: captured.expectedEpoch, receipt: null };
       try {
+        console.info("[CodeAlta Send] dispatch", { requestId: diagnosticId });
         entry.waiter = invokeSend(captured, { signal, timeoutMilliseconds: 8_000 });
         const admission = await entry.waiter;
         if (observeAdmission(admission, capability) && !signal.aborted && capability.canSubmit(captured) && admission.epoch === captured.expectedEpoch) {
@@ -213,8 +217,14 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
             sends.delete(key); result = admission;
           }
         } else if (!signal.aborted && !capability.canMutate()) result = { status: "stale_epoch", epoch: captured.expectedEpoch, receipt: null };
-      } catch { /* Transport failure/cancellation is not non-admission. Preserve exact uncertainty. */ }
+      } catch (error) {
+        console.warn("[CodeAlta Send] transport failure; original request retained, not replayed", {
+          requestId: diagnosticId, code: rpcFailureCode(error), elapsedMs: Date.now() - started, aborted: signal.aborted,
+        });
+        // Transport failure/cancellation is not non-admission. Preserve exact uncertainty.
+      }
       finally {
+        console.info("[CodeAlta Send] settled", { requestId: diagnosticId, uncertain: result.status === "uncertain", elapsedMs: Date.now() - started });
         entry.inFlight = false; entry.waiter = undefined;
         const echo = outgoing.get(echoKey);
         if (echo) outgoing.set(echoKey, Object.freeze({ ...echo, runId: result.receipt?.runId ?? echo.runId,

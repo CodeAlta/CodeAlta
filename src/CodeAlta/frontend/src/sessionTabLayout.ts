@@ -2,7 +2,6 @@ import { Actions, DockLocation, Model, TabNode, type Action } from "flexlayout-r
 import type { WorkspaceSnapshot } from "#neoastra";
 import { openSessionTab, reconcileSessionTabs, resolveSessionTab, selectedTab, sessionTabLimit, tabKey, type SessionTab, type SessionTabs } from "./sessionTabs";
 
-export const draftTabId = "session-draft";
 const panelId = "session-tabs-panel";
 export const sessionNodeId = (tab: SessionTab) => `session:${tabKey(tab)}`;
 
@@ -19,52 +18,53 @@ export function sessionTabPresentation(state: SessionTabs, snapshot: WorkspaceSn
 
 export function createSessionTabModel() {
   return Model.fromJson({ global: {
-    enableEdgeDock: false, enableEdgeDockIndicators: false,
-    tabEnableDrag: false, tabEnableRename: false, tabEnablePin: false,
+    enableEdgeDock: true, enableEdgeDockIndicators: true,
+    tabEnableDrag: true, tabEnableRename: false, tabEnablePin: false,
     tabEnableFloat: false, tabEnableFloatIcon: false,
     tabEnablePopout: false, tabEnablePopoutIcon: false, tabEnablePopoutOverlay: false,
-    // Crucial: hidden factories must be invalidated too, to release the old owner.
+    // Keep open panes mounted so in-flight waits and editor drafts survive tab changes.
     tabEnableRenderOnDemand: false, tabEnableScrollbars: false,
-    tabSetEnableClose: false, tabSetEnableCloseButton: false, tabSetEnableDeleteWhenEmpty: false,
-    tabSetEnableDivide: false, tabSetEnableDrag: false, tabSetEnableDrop: false,
+    tabSetEnableClose: true, tabSetEnableCloseButton: false, tabSetEnableDeleteWhenEmpty: true,
+    tabSetEnableDivide: true, tabSetEnableDrag: true, tabSetEnableDrop: true,
     tabSetEnableMaximize: false, tabSetEnableActiveIcon: false, tabSetEnableTabGroups: false,
   }, borders: [], layout: { type: "row", id: "session-tabs-row", children: [
-    { type: "tabset", id: panelId, selected: 0, children: [
-      { type: "tab", id: draftTabId, name: "Prompt draft", component: "session", enableClose: false },
-    ] },
+    { type: "tabset", id: panelId, selected: 0, children: [] },
   ] } });
 }
 
 // Only public actions; retained nodes (and their factory roots) are never rebuilt.
 export function reconcileSessionTabModel(model: Model, state: SessionTabs, label: (tab: SessionTab | null) => string) {
   const open = state.open.slice(0, sessionTabLimit);
-  const ids = new Set([draftTabId, ...open.map(sessionNodeId)]);
-  for (const node of [...model.getNodeById(panelId)!.getChildren()]) {
+  const ids = new Set(open.map(sessionNodeId));
+  const existing: TabNode[] = [];
+  model.visitNodes(node => { if (node instanceof TabNode) existing.push(node); });
+  for (const node of existing) {
     if (!ids.has(node.getId())) model.doAction(Actions.deleteTab(node.getId()));
   }
-  for (const tab of [null, ...open]) {
-    const id = tab ? sessionNodeId(tab) : draftTabId;
+  for (const tab of open) {
+    const id = sessionNodeId(tab);
     const name = label(tab);
     const node = model.getNodeById(id);
-    if (!node) model.doAction(Actions.addTab({ type: "tab", id, name, component: "session" }, panelId, DockLocation.CENTER, -1, false));
+    if (!node) model.doAction(Actions.addTab({ type: "tab", id, name, component: "session" }, model.getActiveTabset()?.getId() ?? panelId, DockLocation.CENTER, -1, false));
     else if (node instanceof TabNode && node.getName() !== name) model.doAction(Actions.renameTab(id, name));
   }
-  const active = state.active ? sessionNodeId(state.active) : draftTabId;
-  const node = model.getNodeById(ids.has(active) ? active : draftTabId);
+  const active = state.active ? sessionNodeId(state.active) : "";
+  const node = ids.has(active) ? model.getNodeById(active) : undefined;
   if (node instanceof TabNode && !node.isSelected()) model.doAction(Actions.selectTab(node.getId()));
+  if (node instanceof TabNode && node.getParent() && model.getActiveTabset() !== node.getParent())
+    model.doAction(Actions.setActiveTabset(node.getParent()!.getId()));
 }
 
-export type SessionTabIntent = { kind: "draft" } | { kind: "select" | "close"; tab: SessionTab };
+export type SessionTabIntent = { kind: "select" | "close"; tab: SessionTab };
 export function sessionTabAction(action: Action, state: SessionTabs, snapshot: WorkspaceSnapshot | undefined,
   current: () => boolean): SessionTabIntent | null {
   if (!current() || !snapshot || (action.type !== Actions.SELECT_TAB && action.type !== Actions.DELETE_TAB)) return null;
   const id = action.type === Actions.SELECT_TAB ? action.data.tabNode : action.data.node;
-  if (id === draftTabId) return action.type === Actions.SELECT_TAB ? { kind: "draft" } : null;
   const matches = state.open.slice(0, sessionTabLimit).filter(tab => sessionNodeId(tab) === id);
   if (matches.length !== 1 || !resolveSessionTab(snapshot, matches[0])) return null;
   return { kind: action.type === Actions.SELECT_TAB ? "select" : "close", tab: matches[0] };
 }
 
 export function ownsSessionTabContent(id: string, state: SessionTabs) {
-  return id === (state.active ? sessionNodeId(state.active) : draftTabId);
+  return !!state.active && id === sessionNodeId(state.active);
 }

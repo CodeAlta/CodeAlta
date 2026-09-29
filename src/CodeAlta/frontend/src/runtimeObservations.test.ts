@@ -14,14 +14,18 @@ const reply = (id = "one"): SessionRuntimeScopedResponse => ({ status: "ok", hos
 
 test("runtime observations distinguish active, absent, transition, retiring, termination and errors without idle inference", () => {
   assert.equal(projectRuntimeObservation(reply()).label, "Observed active run");
+  assert.equal(projectRuntimeObservation(reply()).running, true);
   const absent = { ...reply(), observation: { ...reply().observation!, entry: null } };
   assert.equal(projectRuntimeObservation(absent).label, "Unknown · not attached");
+  assert.equal(projectRuntimeObservation(absent).running, false);
   absent.observation!.coordinatorTransitionInProgress = true;
   assert.equal(projectRuntimeObservation(absent).label, "Observed transition");
   const retiring = { ...reply(), observation: { ...reply().observation!, entry: { ...reply().observation!.entry!, isRetiring: true } } };
   assert.equal(projectRuntimeObservation(retiring).label, "Observed retiring");
+  assert.equal(projectRuntimeObservation(retiring).running, false);
   const ended = { ...reply(), observation: { ...reply().observation!, entry: { ...reply().observation!.entry!, isTerminated: true } } };
   assert.equal(projectRuntimeObservation(ended).label, "Observed terminated attachment");
+  assert.equal(projectRuntimeObservation(ended).running, false);
   assert.equal(projectRuntimeObservation({ ...reply(), status: "closed", observation: null }).label, "Unknown · closed");
   assert.equal(projectRuntimeObservation({ ...reply(), status: "read_failed", observation: null }).label, "Error · read_failed");
 });
@@ -61,6 +65,7 @@ test("wrong scope and older attachment facts are refused, with fences retained a
   await owner.refresh([target()]);
   value = { ...reply(), projectId: "wrong" }; await owner.refresh([target()]);
   assert.equal(row()?.label, "Error · identity mismatch");
+  assert.equal(row()?.running, undefined);
   value = { ...reply(), observation: { ...reply().observation!, entry: { ...reply().observation!.entry!, attachmentGeneration: "8" } } };
   await owner.refresh([target()]); assert.equal(row()?.label, "Stale attachment");
   await owner.refresh([target()]); assert.equal(row()?.label, "Stale attachment");

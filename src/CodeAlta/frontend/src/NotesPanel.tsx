@@ -5,7 +5,8 @@ import type { createMutationCapability } from "./sessionOperations";
 import { notesResizeKey, visibleNotesHeight } from "./notesHeight";
 import { AppIcon } from "./AppIcon";
 
-export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkdown, preferredHeight, onResize, onReset, onCleared, onClose }: {
+export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkdown, preferredHeight, onResize, onReset, onCleared, onClose, docked = false, onContent }: {
+  docked?: boolean; onContent?: (markdown: string) => void;
   epoch?: string;
   sessionId: string | null;
   reader?: ReturnType<typeof createNotesReader>;
@@ -31,6 +32,7 @@ export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkd
     setCopyStatus(undefined);
     setObserved({ epoch, sessionId, state: { kind: "loading" } });
     const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const actions = reader.forSelection(epoch, sessionId, controller.signal,
       state => setObserved({ epoch, sessionId, state }),
       () => { capability.observe({ status: "stale_epoch", epoch }); });
@@ -38,16 +40,18 @@ export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkd
     const uncertain = actions.uncertainClear();
     if (uncertain) setAction({ epoch, sessionId, state: uncertain });
     // StrictMode may dispose the first effect immediately. Do not admit its obsolete read.
-    queueMicrotask(() => {
+    const refresh = () => {
       if (controller.signal.aborted) return;
       void actions.refresh().then(() => {
         const uncertainAfterRead = actions.uncertainClear();
         if (!controller.signal.aborted && uncertainAfterRead)
           setAction({ epoch, sessionId, state: uncertainAfterRead });
+        if (!controller.signal.aborted && docked) timer = setTimeout(refresh, 10000);
       });
-    });
-    return () => { controller.abort(); selection.current = undefined; };
-  }, [epoch, sessionId, reader, capability]);
+    };
+    queueMicrotask(refresh);
+    return () => { clearTimeout(timer); controller.abort(); selection.current = undefined; };
+  }, [epoch, sessionId, reader, capability, docked]);
   useEffect(() => {
     const rail = pane.current?.parentElement;
     if (!rail) return;
@@ -66,6 +70,11 @@ export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkd
   const current = selected && selected.epoch === epoch && selected.sessionId === sessionId ? selected.actions : undefined;
   const clearEnabled = !!current && canClearNotes(state, current.uncertainClear(), !!capability?.canMutate(), result);
   const markdown = state?.kind === "ready" ? state.markdown : fallbackMarkdown;
+  useEffect(() => {
+    // A polling read in progress/failure is not empty notes; never reopen a dismissed dock on each poll.
+    if (state?.kind === "ready") onContent?.(state.markdown);
+    else if (!epoch || !reader) onContent?.(fallbackMarkdown);
+  }, [state, epoch, reader, fallbackMarkdown, onContent]);
   const height = visibleNotesHeight(preferredHeight, railHeight);
   const showAction = (value: NotesClearState) => {
     if (epoch && sessionId) setAction({ epoch, sessionId, state: value });
@@ -82,15 +91,15 @@ export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkd
     else onResize(change);
   }
   return <>
-    <div className="notes-splitter" role="separator" aria-label="Resize Alta notes" aria-orientation="horizontal"
+    {!docked && <div className="notes-splitter" role="separator" aria-label="Resize Alta notes" aria-orientation="horizontal"
       aria-valuemin={112} aria-valuemax={Math.max(112, Math.floor(railHeight * 0.65))} aria-valuenow={renderedHeight || height}
       tabIndex={0} onKeyDown={keyDown} onDoubleClick={onReset}
       onPointerDown={event => { lastY.current = event.clientY; event.currentTarget.setPointerCapture(event.pointerId); }}
       onPointerMove={event => {
         if (lastY.current === undefined || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
         const delta = event.clientY - lastY.current; lastY.current = event.clientY; onResize(delta);
-      }} onPointerUp={pointerEnd} onPointerCancel={pointerEnd}><span /></div>
-    <section ref={pane} className="notes-pane" aria-label="Alta notes" tabIndex={-1} style={{ height }}>
+      }} onPointerUp={pointerEnd} onPointerCancel={pointerEnd}><span /></div>}
+    <section ref={pane} className="notes-pane" aria-label="Alta notes" tabIndex={-1} style={{ height: docked ? "100%" : height }}>
       <header><span><strong>Alta notes</strong><small>Markdown · session scoped</small></span><span>
         {current && <button type="button" title="Refresh notes" aria-label="Refresh notes" disabled={result?.kind === "clearing"}
           onClick={() => void current.reconcile().then(() => {

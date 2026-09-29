@@ -4,7 +4,7 @@ import { validActivity } from "./recentSessions";
 import type { SessionRuntimeActivityResponse } from "#neoastra";
 
 export type RuntimeTarget = Readonly<{ tab: SessionTab; request: SessionRuntimeScopedRequest }>;
-export type RuntimeObservation = Readonly<{ label: string; details: string; stale?: boolean; epoch?: string; runtime?: string; attachment?: string; activity?: SessionRuntimeActivityResponse }>;
+export type RuntimeObservation = Readonly<{ label: string; details: string; stale?: boolean; epoch?: string; runtime?: string; attachment?: string; activity?: SessionRuntimeActivityResponse; running?: boolean; projectId?: string | null }>;
 type Read = (request: SessionRuntimeScopedRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<SessionRuntimeScopedResponse>;
 export const maximumRuntimeRows = 32;
 
@@ -28,6 +28,7 @@ export function projectRuntimeObservation(reply: SessionRuntimeScopedResponse): 
     : entry.isRetiring ? "Observed retiring" : entry.isTerminated ? "Observed terminated attachment"
       : entry.activeRunId ? "Observed active run" : entry.queueDrainInProgress ? "Observed queue drain" : "Observed attached · no active run";
   return { label, epoch: reply.hostEpoch, runtime: state.runtimeInstanceId, attachment: entry?.attachmentGeneration,
+    running: !!entry?.activeRunId && !entry.isRetiring && !entry.isTerminated,
     activity: validActivity(entry?.activity) ? entry.activity : undefined,
     details: `${label}. Observed ${new Date().toISOString()}; may already be stale, not liveness/finality or command authority. Runtime ${state.runtimeInstanceId}; attachment ${entry?.attachmentGeneration ?? "absent"}; run ${entry?.activeRunId ?? "absent"}; transition ${state.coordinatorTransitionInProgress}; retiring ${entry?.isRetiring ?? "unknown"}; terminated ${entry?.isTerminated ?? "unknown"}; queue drain ${entry?.queueDrainInProgress ?? "unknown"}.` };
 }
@@ -82,7 +83,7 @@ export function createRuntimeObservations(read: Read) {
             if (observed.runtime) fences.set(key, { ...observed, attachment: observed.attachment ?? (prior && prior.epoch === observed.epoch ? prior.attachment : undefined) });
           } catch { observed = { label: controller.signal.aborted ? "Unknown · canceled/omitted" : "Error · read failed", details: "No runtime facts accepted; refresh is explicit." }; }
           if (version !== generation) return;
-          rows.set(key, observed); completed++; publish(new Map(rows), summary(completed));
+          rows.set(key, { ...observed, projectId: target.tab.projectId }); completed++; publish(new Map(rows), summary(completed));
         }
       } finally {
         clearTimeout(deadline);

@@ -5,6 +5,14 @@ import { useShellLanguage } from "./shellLanguage";
 
 export type RuntimeObservationControls = { store: ReturnType<typeof createRuntimeObservations>; enabled: boolean; canObserve: (tab: SessionTab) => boolean; refresh: (tabs: readonly SessionTab[]) => void };
 
+export function RunningSessionBadge({ controls, tab, projectId }: { controls: RuntimeObservationControls; tab?: SessionTab; projectId?: string | null }) {
+  const { t } = useShellLanguage();
+  const state = useSyncExternalStore(controls.store.subscribe, controls.store.getSnapshot);
+  const rows = tab ? [state.rows.get(tabKey(tab))] : [...state.rows.values()].filter(row => row.projectId === projectId);
+  if (!controls.enabled || tab && !controls.canObserve(tab) || !rows.some(row => row?.running && !row.stale)) return null;
+  return <span className="session-running" role="img" aria-label={t("Running")} title={t("Running")}>●</span>;
+}
+
 export function RuntimeObservationBadge({ controls, tab, compact = false }: { controls: RuntimeObservationControls; tab: SessionTab; compact?: boolean }) {
   const { t } = useShellLanguage();
   const state = useSyncExternalStore(controls.store.subscribe, controls.store.getSnapshot);

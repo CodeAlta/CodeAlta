@@ -1,3 +1,34 @@
+# Split session panes and transport diagnostics (2026-09-29)
+
+Supersedes the historical single-active-workspace/draft-tab descriptions below. Project selection
+now presents an empty timeline, animated Code/Alta wordmark and bottom composer. Session tabs dock
+into more than two simultaneous panes. Open panes have separate display/runtime/permission/input/
+notes readers, retained across close/reopen; mutation owners keep exact original requests. The
+focused session alone owns global composer IDs/shortcuts and its project-reference scope.
+Notes use per-session FlexLayout borders, resize/collapse, allow left/right placement, and open
+on an empty-to-content transition (not every polling read). Cleared border notes collapse.
+Sidebar project/session running badges use verified, bounded observations, refreshed five seconds
+after each batch, prioritizing visible/open sessions. Only 32 targets are observed per batch;
+unobserved/stale sessions are not asserted idle. Notes refresh ten seconds after each read.
+
+Owned transport allowances now accommodate 32 open panes: 34 channels, 128 concurrent invocations
+within the existing 256 application limit, 512 requests/second and 1,024 burst. These remain bounded.
+Source inspection of NeoAstra 0.2 `NeoRpcHost.RememberRequestId` confirms budget exhaustion and an
+actual reused ID both return `duplicate_request`; completed IDs are never retired. Raising the
+limit to one million is not indefinite uptime. Upstream needs safe ID retirement/replay protection
+or supported RPC renewal, a distinct capacity error and request-budget telemetry. The user's latest
+lockup has not been reproduced; this is an evidenced failure mode, not a proven incident diagnosis.
+
+Developer-console `[CodeAlta Send]` events distinguish composer action/guard state, RPC dispatch,
+settlement and sanitized failure codes/timing. `[CodeAlta RPC]` reports transport closure/failure.
+The .NET arrival log uses the same UUID key. No arguments, prompt text, paths, credentials, raw error
+objects or messages are logged. No mutation replay, reload or authority reset is introduced.
+Added split-model and diagnostic-redaction regression cases; verification is builds only at user
+request. Tests and native/provider/browser acceptance are not executed for this follow-up.
+Frontend production/TypeScript, Release desktop, desktop test-project compilation and Lunet site
+builds passed. The frontend retains its existing large-bundle warning. Unrelated Agent transfer
+prototype, runtime test edits and local `.alta` state are excluded from the workspace commit.
+
 # Observation error placement and practical image paste (2026-09-29)
 
 Composer follow-up: queue/steering drafts now use compact above-card rows rather than a

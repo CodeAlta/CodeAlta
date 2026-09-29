@@ -151,10 +151,23 @@ can read retained same-host state but does not recreate lost intent, and restart
 This restricted workflow provides no general LiveTool dispatch, attached files or provider-input
 activation. Continue using `altatui` for complete agent workflows.
 
-In owned-host mode, the **Alta notes** pane automatically reads current durable notes for the selected
-session without starting a provider and renders the complete text as Markdown. The read remains bounded
+Clicking a project opens a blank timeline with a bottom prompt and an animated CodeAlta wordmark;
+there is no separate prompt-draft tab. Drag session tabs to the workspace edges for two or more
+simultaneous session panes. Running indicators refresh automatically for bounded batches of verified
+sessions, prioritizing visible/open sessions (up to 32); unknown or stale status is not proof of idle.
+
+In owned-host mode, each session's **Alta notes** dock automatically reads current durable notes
+without starting a provider and renders the complete text as Markdown. Empty notes start collapsed;
+content opens the dock by default. Resize its divider, collapse its tab, or drag it to the left/right
+border of that session. Reads refresh every ten seconds after completion. The read remains bounded
 at 16,384 UTF-16 units; oversized notes are refused without truncation, and read failure is distinct
 from empty notes. Switching sessions does not stop an already-started read. Editing is not provided.
+
+If Send stops working, preserve developer-console entries beginning `[CodeAlta Send]` or
+`[CodeAlta RPC]` and the matching application-log `Send reached backend` UUID. These diagnostics
+omit prompt and credential contents. The current NeoAstra request-ID lifetime limit is mitigated,
+not eliminated; a timeout is uncertainty, never permission for automatic resend. See the
+[desktop troubleshooting notes](https://github.com/CodeAlta/CodeAlta/blob/main/src/CodeAlta/README.md).
 
 For supported **nonsecret provider input**, separately add `--enable-owned-user-input` to the complete
 owned-mode command. It is off by default and does not approve commands or files. **Never enter secrets**:

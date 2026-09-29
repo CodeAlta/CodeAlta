@@ -233,6 +233,15 @@ h1, h2, h3, p { margin-top: 0; }
    content container scrolls instead of squeezing the regular editor to zero. */
 .active-session-content > .session-workspace { min-height: 480px; }
 .session-tabs { flex: 1; min-width: 0; min-height: 0; }
+.session-dock { position: absolute; inset: 0; }
+.session-dock[hidden] { display: none; }
+.session-running { color: var(--green); flex: 0 0 auto; font-size: 11px; }
+.blank-project-logo { flex: 1; min-height: 100px; display: flex; justify-content: center; align-items: center; gap: .2em; font-size: clamp(28px, 5vw, 72px); font-weight: 800; letter-spacing: -.04em; text-shadow: 2px 3px 0 var(--line); user-select: none; }
+.logo-alta { background: linear-gradient(110deg, #37b4ed, #c46af3, #ffb34c, #37b4ed); background-size: 300% 100%; background-clip: text; color: transparent; text-shadow: none; animation: alta-logo-colors 9s linear infinite; }
+@keyframes alta-logo-colors { to { background-position: 300% 0; } }
+@media (prefers-reduced-motion: reduce) { .logo-alta { animation: none; } }
+@media (forced-colors: active) { .logo-alta { background: none; color: CanvasText; animation: none; } }
+.session-notes-dock .notes-pane { min-width: 0; margin: 0; border-radius: 0; overflow: auto; }
 .session-tabs .active-session-content { height: 100%; }
 .session-tabs .session-tab-label { display: block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-tabs .runtime-observation-compact { padding: 0 3px; border: 0; font-size: 11px; }

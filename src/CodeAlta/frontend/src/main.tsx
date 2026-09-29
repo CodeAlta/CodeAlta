@@ -1,4 +1,6 @@
 import { Button, Classes, HTMLSelect } from "@blueprintjs/core";
+import { connect, onDiagnostic } from "@neoastra/client";
+import { rpcFailureCode } from "./rpcDiagnostics";
 import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
@@ -52,9 +54,9 @@ import { createAbortRunSubmissions } from "./sessionAbortRun";
 import { createQueueSubmissions } from "./sessionQueue";
 import { AskPanel } from "./AskPanel";
 import { askWireRequest, createAskActions } from "./sessionAsks";
-import { NotesPanel } from "./NotesPanel";
+import { SessionNotesDock } from "./SessionNotesDock";
+import { RunningSessionBadge } from "./RuntimeObservation";
 import { createNotesReader } from "./sessionNotes";
-import { notesHeightKey, defaultNotesHeight, restoreNotesHeight, persistNotesHeight, resizeNotesHeight } from "./notesHeight";
 import { createUserInputReviewer } from "./sessionUserInput";
 import { UserInputPanel } from "./UserInputPanel";
 import { LiveSessionPanel } from "./LiveSessionPanel";
@@ -229,9 +231,6 @@ function App() {
   const { projectSort, setProjectSort, theme, setTheme, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount } = useWindowPreferences();
   const [sessionExpansion, setSessionExpansion] = useState<{ projectId: string | null; search: string; extra: number } | null>(null);
   const [notesVisible, setNotesVisible] = useState(true);
-  const [notesHeight, setNotesHeight] = useState(() => restoreNotesHeight(() => localStorage.getItem(notesHeightKey)));
-  const [historyNotes, setHistoryNotes] = useState<{ sessionId: string | null; markdown: string }>({ sessionId: null, markdown: "" });
-  const updateHistoryNotes = useCallback((markdown: string) => setHistoryNotes({ sessionId, markdown }), [sessionId]);
   const [dialog, writeDialog] = useState<"project" | "help" | "about" | "sessions" | "archive" | "reminders" | null>(null);
   function setDialog(value: typeof dialog) { batchDeletion.invalidate(); invalidateCreation(); writeDialog(value); }
   const helpOrigin = useRef<{ element: HTMLElement | null; view: View; sessionId: string | null; scope: string | null } | null>(null);
@@ -255,6 +254,21 @@ function App() {
   const palettePending = useRef<{ action: PaletteAction; captured: PaletteContext } | null>(null);
   const [configurationState, setConfigurationState] = useState<{ snapshot?: ConfigurationSnapshot; error?: string }>({});
   const initialSelectionMade = useRef(false);
+  useEffect(() => {
+    if (demoMode) return;
+    const lifetime = new AbortController();
+    const unsubscribe = onDiagnostic(value => {
+      if (value.level === "warning" || value.level === "error")
+        console.warn("[CodeAlta RPC] transport diagnostic", { code: rpcFailureCode(value) });
+    });
+    void connect().then(connection => {
+      if (lifetime.signal.aborted) return;
+      const closed = () => console.warn("[CodeAlta RPC] connection closed; inspect receipts before any explicit retry. No automatic replay.");
+      if (connection.closed.aborted) closed();
+      else connection.closed.addEventListener("abort", closed, { once: true, signal: lifetime.signal });
+    }).catch(error => { if (!lifetime.signal.aborted) console.warn("[CodeAlta RPC] connection unavailable", { code: rpcFailureCode(error) }); });
+    return () => { lifetime.abort(); unsubscribe(); };
+  }, []);
   const [submissions] = useState(() => createOwnedSubmissions(sessionOperations.send, sessionOperations.abort));
   const reminderCapability = useRef<ReturnType<typeof createMutationCapability> | undefined>(undefined);
   const [reminderActions] = useState(() => createReminderActions(reminder.create, reminder.delete, (target, reply) => {
@@ -273,10 +287,8 @@ function App() {
   const [askActions] = useState(() => createAskActions(
     request => sessionAsks.answer(askWireRequest(request), { timeoutMilliseconds: 8000 }),
     request => sessionAsks.cancel(askWireRequest(request), { timeoutMilliseconds: 8000 })));
-  const [display] = useState(() => createSessionDisplayStore(sessionDisplay.observe));
+  const [sessionPaneOwners] = useState(() => new Map<string, ReturnType<typeof createSessionPaneOwners>>());
   const [scrollMemory] = useState(createTimelineScrollMemory);
-  const [runtimeReader] = useState(() => createRuntimeStateReader(sessionRuntimeState.current));
-  const [notesReader] = useState(() => createNotesReader(sessionNotes.current, sessionNotes.clear));
   const [projectOpening] = useState(() => createProjectOpening(workspace.openProject));
   const [projectArchive] = useState(() => createProjectArchive(workspace.archiveProject));
   const [projectRename] = useState(() => createProjectRename(workspace.readProjectName, workspace.renameProject));
@@ -361,11 +373,6 @@ function App() {
       document.removeEventListener("beforetoggle", modalTransition, true);
     };
   }, []);
-  const [inputReviewer] = useState(() => createUserInputReviewer(
-    request => sessionUserInput.list(request, { timeoutMilliseconds: 8000 }),
-    request => sessionUserInput.resolve({ ...request, answers: request.answers.map(answer => ({ ...answer })) }, { timeoutMilliseconds: 8000 }),
-    request => sessionUserInput.cancel(request, { timeoutMilliseconds: 8000 })));
-  const [permissionReviewer] = useState(() => createPermissionReviewer(sessionPermissions.list, sessionPermissions.resolve));
   const [mutation, setMutation] = useState<{ epoch: string; capability: ReturnType<typeof createMutationCapability> }>();
   reminderCapability.current = mutation?.capability;
   const subscribeReminderCapability = useCallback((listener: () => void) =>
@@ -419,7 +426,6 @@ function App() {
     persistPaneLayout(value => localStorage.setItem(paneLayoutStorageKey, value), paneLayout);
   }, [paneLayout]);
 
-  useEffect(() => { persistNotesHeight(value => localStorage.setItem(notesHeightKey, value), notesHeight); }, [notesHeight]);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 875px)");
@@ -546,7 +552,7 @@ function App() {
     return { store: runtimeObservations, enabled, canObserve: (tab: SessionTab) => !!runtimeTarget(currentSnapshot.current, tab, currentHostEpoch.current ?? undefined), refresh: (requested: readonly SessionTab[]) => {
       if (!enabled || settingsVisible.current || currentView.current !== "workspace") return;
       const targets = requested.slice(0, maximumRuntimeRows).map(tab => runtimeTarget(currentSnapshot.current, tab, currentHostEpoch.current ?? undefined)).filter(target => target !== null);
-      void runtimeObservations.refresh(targets, requested.length - targets.length);
+      return runtimeObservations.refresh(targets, requested.length - targets.length);
     } };
   }
 
@@ -599,6 +605,29 @@ function App() {
   const extraSessions = sessionExpansion?.projectId === projectId && sessionExpansion.search === search ? sessionExpansion.extra : 0;
   const visibleSessionRows = limitSessionHierarchy(loadedSessionRows, recentSessionCount + extraSessions, sessionId);
   const visibleSessions = visibleSessionRows.map(row => row.session);
+  const autoStatusRefresh = useRef<() => Promise<void> | undefined>(() => undefined);
+  autoStatusRefresh.current = () => {
+    if (!snapshot || document.visibilityState === "hidden") return;
+    const candidates = [...visibleSessions, ...snapshot.sessions.filter(row => tabs.open.some(tab => tab.sessionId === row.id)), ...snapshot.sessions];
+    const seen = new Set<string>();
+    const observed = candidates.flatMap(row => {
+      if (seen.has(row.id)) return [];
+      seen.add(row.id);
+      const tab = selectedTab(snapshot, row.scopeKind === "project" ? row.projectId : null, row.id);
+      return tab && runtimeTarget(snapshot, tab, status?.hostEpoch ?? undefined) ? [tab] : [];
+    });
+    return runtimeObservationControls().refresh(observed);
+  };
+  useEffect(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refresh = async () => {
+      try { await autoStatusRefresh.current(); }
+      finally { if (!stopped) timer = setTimeout(refresh, 5000); }
+    };
+    void refresh();
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [status?.hostAvailable, status?.hostEpoch]);
   const selectedSession = snapshot && tabs.active?.sessionId === sessionId && !resolveSessionTab(snapshot, tabs.active)
     ? undefined : snapshot?.sessions.find(value => value.id === sessionId);
   const selectedProject = snapshot?.projects.find(value => value.id === projectId);
@@ -911,8 +940,7 @@ function App() {
     setProjectRenameNotice(uncertainProjectRename.current ? { key: "A previous project rename is unconfirmed. Refresh and inspect; no retry will be sent." } : "");
     selectedScope.current = nextProjectId;
     setProjectId(nextProjectId);
-    const nextSessions = snapshot ? sessionsForProject(snapshot, nextProjectId) : [];
-    const nextSessionId = selectedId === undefined ? sessionId === null ? null : nextSessions[0]?.id ?? null : selectedId;
+    const nextSessionId = selectedId ?? null;
     setSessionId(nextSessionId);
     selectedSessionId.current = nextSessionId;
     setRenamingId(null);
@@ -1380,7 +1408,7 @@ function App() {
           <Button variant="minimal" active={ideWidth.full} icon={<AppIcon name={ideWidth.full ? "compact" : "expand"} size={20} />} className="timeline-width-toggle" aria-label={t(ideWidth.full ? "Restore Explorer width" : "Use full content width")}
             title={t(ideWidth.full ? "Restore Explorer width" : "Use full content width")} aria-pressed={ideWidth.full}
             onClick={() => setIdeWidth(value => ({ ...value, full: !value.full }))} />
-          <Button variant="minimal" active={notesVisible} icon={<AppIcon name="notes" size={20} />} aria-label={t("Alta notes")} title={t("Alta notes")} aria-pressed={notesVisible} onClick={() => { setNotesVisible(value => !value); if (!railVisible) { setIdeWidth(value => ({ ...value, full: false })); toggleProjects(); } }} />
+          <Button variant="minimal" disabled={!sessionId} icon={<AppIcon name="notes" size={20} />} aria-label={t("Alta notes")} title={t("Alta notes")} onClick={() => setNotesVisible(value => !value)} />
           <Button variant="minimal" icon={<AppIcon name="search" size={20} />} aria-label={t("Open command palette")} aria-haspopup="dialog" title={`${t("Open command palette")} (Ctrl+P)`} onClick={openPalette} />
           <Button variant="minimal" icon={<AppIcon name="settings" size={20} />} className="activity-settings" aria-label={t("Settings & extensions")} title={t("Settings & extensions")} onClick={() => navigate("appearance")} />
         </nav>
@@ -1407,6 +1435,7 @@ function App() {
             {projectId !== null && ` ${t("The selected project and session remain open.")}`}
           </p>}
           {snapshot && <ProjectRailRows projects={projectListing?.projects ?? []} selectedId={projectId} onSelect={selectProject} children={sessions}
+            activity={id => <RunningSessionBadge controls={runtimeObservationControls()} projectId={id} />}
             canRename={owned} renameBusy={projectRenameBusy || !mutation?.capability.canMutate()} onRename={() => void beginProjectRename()}
             actions={{ current: () => ({ ...currentProjectDetailsContext(),
               active: creationAlive.current && currentView.current === "workspace" && !settingsVisible.current && !!projectRail.current && !projectRail.current.hidden,
@@ -1430,11 +1459,6 @@ function App() {
             </div>}
           {projectRenameNotice && <p role="alert" className="notice error-text">{workflowNotice(language.locale, projectRenameNotice)}</p>}
           {projectRenameLocked && <button type="button" className="quiet-button" onClick={() => void refreshProjectRename()}>{t("Refresh project name (no retry)")}</button>}
-          {notesVisible && <NotesPanel epoch={owned ? status?.hostEpoch : undefined} sessionId={sessionId}
-            reader={owned ? notesReader : undefined} capability={owned ? mutation?.capability : undefined}
-            fallbackMarkdown={historyNotes.sessionId === sessionId ? historyNotes.markdown : ""} onClose={() => setNotesVisible(false)}
-            preferredHeight={notesHeight} onResize={delta => setNotesHeight(height => resizeNotesHeight(height, -delta))}
-            onReset={() => setNotesHeight(defaultNotesHeight)} onCleared={target => { if (target === sessionId) setHistoryNotes({ sessionId: target, markdown: "" }); }} />}
         </aside>}
           splitter={<PaneSplitter className="session-splitter" label={t("Resize Explorer")} value={ideWidth.width} hidden={narrow || !railVisible}
             onResize={delta => setIdeWidth(value => resizeIdeWidth(value, delta))} onReset={() => setIdeWidth({ width: 272, full: false })} />}
@@ -1499,6 +1523,7 @@ function App() {
                 onClick={() => { setMenuTarget(null); focusAction.current = null; selectedSessionId.current = session.id; setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); }}>
                 <AppIcon name="assistant" size={13} /><span className="session-title">{depth > 0 && <span aria-hidden="true">↳ </span>}{diagnostic && <span aria-hidden="true">⚠ </span>}{session.title}</span>
                 <SessionDraftBadge active={draftIndicators.visible(session.id, sessionId)} />
+                {snapshot && <RunningSessionBadge controls={runtimeObservationControls()} tab={{ projectId, sessionId: session.id, path: session.workspacePath }} />}
                 <span className="session-meta"><span>{session.providerKey ?? t("No provider")}</span><SessionTime value={session.updatedAt} now={clock} /></span>
               </button>
               <span id={`session-tooltip-${index}`} role="tooltip" className="session-tooltip"
@@ -1541,8 +1566,32 @@ function App() {
               lifetime: creationGeneration.current, capturePopup: captureReferenceLifetime,
               observe: value => mutation?.capability.observe(value) } : null}><main className="content">
           <SessionTabStrip state={sessionTabPresentation(tabs, snapshot, projectId, sessionId)} snapshot={snapshot}
+            renderSession={tab => {
+              const row = snapshot && resolveSessionTab(snapshot, tab);
+              if (!row || !snapshot) return null;
+              const ownerKey = JSON.stringify([status?.hostEpoch, tabKey(tab), row.createdAt]);
+              let owners = sessionPaneOwners.get(ownerKey);
+              if (!owners) { owners = createSessionPaneOwners(); sessionPaneOwners.set(ownerKey, owners); }
+              return <ProjectReferenceContext.Provider key={ownerKey} value={owned && status?.hostEpoch && tab.projectId !== null
+                && snapshot.projects.some(project => project.id === tab.projectId && project.path === tab.path && !project.archived)
+                ? { expectedEpoch: status.hostEpoch, projectId: tab.projectId, projectPath: tab.path!, sessionId: row.id,
+                  lifetime: creationGeneration.current, capturePopup: captureReferenceLifetime,
+                  observe: value => mutation?.capability.observe(value) } : null}>
+              <SessionWorkspace session={row} snapshot={snapshot} selectedProjectId={tab.projectId} notesReader={owners.notesReader}
+                active={tab.sessionId === sessionId} notesToggle={notesVisible} onActivate={() => { if (sessionId !== tab.sessionId) selectSessionTab(tab); }}
+                infoTrigger={sessionInfoTrigger} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger}
+                infoLifetime={{ revision: 0, current: () => !!currentSnapshot.current && !!resolveSessionTab(currentSnapshot.current, tab)
+                  && currentView.current === "workspace" && !settingsVisible.current && currentHostEpoch.current === status?.hostEpoch }}
+                preferredComposerHeight={composerHeights.get(composerSizeKey(status?.hostEpoch ?? null, tab.projectId, row.id))}
+                onComposerHeight={height => setComposerHeights(sizes => rememberComposerHeight(sizes, composerSizeKey(status?.hostEpoch ?? null, tab.projectId, row.id), height))}
+                onOpenCatalog={navigate} onOpenReminders={openSelectedReminders} onOpenHelp={openHelp} onOpenPalette={openPalette}
+                readReminders={readReminders} reminderActions={reminderActions} status={status} mutation={mutation}
+                submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} draftIndicators={draftIndicators}
+                askActions={askActions} display={owners.display} scrollMemory={scrollMemory} runtimeReader={owners.runtimeReader}
+                permissionReviewer={owners.permissionReviewer} inputReviewer={owners.inputReviewer} configuration={configurationState.snapshot}
+                selections={nextSendSelections} timelineCommand={timelineCommand} /></ProjectReferenceContext.Provider>;
+            }}
             capture={captureTabLifetime} dirty={id => draftIndicators.visible(id, sessionId)} observations={runtimeObservationControls()}
-            selectDraft={() => applyTabState({ ...tabs, active: null })}
             select={selectSessionTab} close={tab => {
               if (!snapshot || snapshot !== currentSnapshot.current || !resolveSessionTab(snapshot, tab)) return;
               const next = closeSessionTab(tabs, tab);
@@ -1560,7 +1609,7 @@ function App() {
                <textarea aria-label={t("Original creation draft {number}", { number: index + 1 })} readOnly value={record.text} /></section>)}
           </details>}
           {!selectedSession
-            ? <section className="session-workspace"><header className="session-header"><h1>{t("Prompt draft")}</h1></header>
+            ? <section className="session-workspace blank-project" data-active="true"><div className="blank-project-logo" aria-label="CodeAlta"><span>Code</span><span className="logo-alta">Alta</span></div>
                 <ReadOnlyComposer key={draftScope} sessionId={draftScope} provider={null} draftIndicators={draftIndicators}
                   localImages={owned && snapshot?.configured && currentProjectWritable() ? localImages : undefined}
                   onOpenHelp={openHelp} onOpenPalette={openPalette}
@@ -1573,16 +1622,7 @@ function App() {
                     {creatingBusy && <button type="button" onClick={() => { invalidateCreation(); setDraftHandoffNotice("Transfer canceled locally. Creation may still complete; original text retained. Inspect sessions; nothing sent."); }}>{t("Cancel transfer")}</button>}
                   </> }} />
               </section>
-            : <SessionWorkspace key={JSON.stringify([projectId, selectedSession.id])} session={selectedSession} snapshot={snapshot!} selectedProjectId={projectId} infoTrigger={sessionInfoTrigger} infoLifetime={captureInfoLifetime()} remindersTrigger={remindersTrigger}
-                preferredComposerHeight={composerHeights.get(composerSizeKey(status?.hostEpoch ?? null, projectId, selectedSession.id))}
-                onComposerHeight={height => { if (selectedScope.current !== projectId || selectedSessionId.current !== selectedSession.id) return;
-                  setComposerHeights(sizes => rememberComposerHeight(sizes, composerSizeKey(status?.hostEpoch ?? null, projectId, selectedSession.id), height)); }}
-                onOpenCatalog={navigate} onOpenReminders={openSelectedReminders} onOpenHelp={openHelp} onOpenPalette={openPalette} readReminders={readReminders} reminderActions={reminderActions} compactTrigger={compactTrigger} status={status} mutation={mutation}
-                submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} draftIndicators={draftIndicators}
-                 askActions={askActions} display={display} scrollMemory={scrollMemory} runtimeReader={runtimeReader}
-                 permissionReviewer={permissionReviewer} inputReviewer={inputReviewer} configuration={configurationState.snapshot}
-                  onNotesChange={updateHistoryNotes} selections={nextSendSelections}
-                timelineCommand={timelineCommand} />}
+            : null}
           </div></SessionTabStrip></main></ProjectReferenceContext.Provider>} />
       </div>
     {settingsOpen && <SettingsOverlay section={settingsSection} onSection={navigate} onClose={closeSettings}>
@@ -1771,7 +1811,22 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
   </dialog>;
 }
 
-function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger, infoLifetime, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, selections, timelineCommand, onOpenCatalog }: {
+function createSessionPaneOwners() {
+  return {
+    display: createSessionDisplayStore(sessionDisplay.observe),
+    runtimeReader: createRuntimeStateReader(sessionRuntimeState.current),
+    notesReader: createNotesReader(sessionNotes.current, sessionNotes.clear),
+    permissionReviewer: createPermissionReviewer(sessionPermissions.list, sessionPermissions.resolve),
+    inputReviewer: createUserInputReviewer(
+      request => sessionUserInput.list(request, { timeoutMilliseconds: 8000 }),
+      request => sessionUserInput.resolve({ ...request, answers: request.answers.map(answer => ({ ...answer })) }, { timeoutMilliseconds: 8000 }),
+      request => sessionUserInput.cancel(request, { timeoutMilliseconds: 8000 })),
+  };
+}
+
+function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, notesToggle, onActivate, notesReader }: {
+  notesReader: ReturnType<typeof createNotesReader>;
+  active?: boolean; notesToggle?: boolean; onActivate?: () => void;
   session: WorkspaceSession;
   snapshot: WorkspaceSnapshot;
   selectedProjectId: string | null;
@@ -1802,11 +1857,15 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   permissionReviewer: ReturnType<typeof createPermissionReviewer>;
   inputReviewer: ReturnType<typeof createUserInputReviewer>;
   configuration: ConfigurationSnapshot | undefined;
-  onNotesChange: (markdown: string) => void;
   selections: ReturnType<typeof createNextSendSelectionStore>;
   timelineCommand: RefObject<TimelineCommand | null>;
 }) {
   const { t, locale: languageLocale } = useShellLanguage();
+  const localInfoTrigger = useRef<HTMLButtonElement>(null), localRemindersTrigger = useRef<HTMLButtonElement>(null), localCompactTrigger = useRef<HTMLButtonElement>(null);
+  const infoTrigger = active ? sharedInfoTrigger : localInfoTrigger;
+  const remindersTrigger = active ? sharedRemindersTrigger : localRemindersTrigger;
+  const compactTrigger = active ? sharedCompactTrigger : localCompactTrigger;
+  const [historyNotes, onNotesChange] = useState("");
   const [infoOpen, setInfoOpen] = useState(false);
   const infoActive = useRef(false);
   const askRefresh = useRef<(() => void) | null>(null);
@@ -1871,7 +1930,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
     setMessageNotice(null);
   }, [timeline.resetMessageNavigation, timeline.pauseIfUnfollowed, newest.onTarget]);
   useLayoutEffect(() => {
-    if (demoMode) return;
+    if (demoMode || !active) return;
     const command: TimelineCommand = { sessionId: session.id, projectId: selectedProjectId, epoch: status?.hostEpoch ?? null,
       ready: timeline.messageReady,
       navigate: action => {
@@ -1897,7 +1956,9 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   const infoControl = <button ref={infoTrigger} type="button" className="composer-icon-button session-info-trigger"
     aria-label={t("Session info")} title={`${t("Session info")} (Ctrl+G, Ctrl+T)`} aria-haspopup="dialog" aria-expanded={infoOpen}
     onClick={openInfo}><AppIcon name="info" size={16} /></button>;
-  return <div className="session-workspace" ref={workspaceElement}>
+  return <SessionNotesDock sessionId={session.id} epoch={ownedSession ? status?.hostEpoch : undefined} capability={mutation?.capability}
+    fallbackMarkdown={historyNotes} toggle={active ? notesToggle : undefined} reader={notesReader} onActivate={onActivate}>
+    <div className="session-workspace" data-active={active} ref={workspaceElement}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       lifetime={infoLifetime} canRead={() => !!mutation?.capability.canMutate()}
       target={ownedSession && !demoMode && mutation?.capability.canMutate() ? runtimeTarget(snapshot, { sessionId: session.id, projectId: selectedProjectId, path: session.workspacePath }, status?.hostEpoch ?? undefined) : null} />}
@@ -1938,20 +1999,20 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
           style={visibleComposerHeight === undefined ? undefined : { height: visibleComposerHeight }}>
         <SessionComposerGate snapshot={snapshot} projectId={selectedProjectId} session={session}
           epoch={ownedHost ? status!.hostEpoch! : null}
-          owned={status?.hostEpoch && mutation ? <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
+          owned={status?.hostEpoch && mutation ? <OwnedSessionPanel active={active} sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
               usageTarget={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? {
                 epoch: status.hostEpoch, sessionId: session.id, scope: selectedProjectId === null ? "global" : "project",
                 projectId: selectedProjectId, expectedProjectPath: selectedProjectId === null ? null : session.workspacePath } : null}
               onOpenCatalog={onOpenCatalog} timelineNotices={timelineNotices} liveState={ownedSession ? live : null} inputLifetime={infoLifetime} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} infoControl={infoControl} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
               reminderActions={reminderActions} readReminderCount={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? readReminders : undefined} /> : null}
-          readOnly={<ReadOnlyComposer sessionId={session.id} provider={session.providerKey} draftIndicators={draftIndicators} infoControl={infoControl} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
+          readOnly={<ReadOnlyComposer active={active} sessionId={session.id} provider={session.providerKey} draftIndicators={draftIndicators} infoControl={infoControl} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
               reason={archivedScope ? t("Archived project; this session is read-only. Sending is unavailable.") : undefined} />}
           recovery={ownedHost ? <ArchivedActionRecovery epoch={status!.hostEpoch!} sessionId={session.id} submissions={submissions}
             steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue}
             asks={askActions} inputs={inputReviewer} permissions={permissionReviewer} /> : null} />
         </div>
       </>}
-  </div>;
+  </div></SessionNotesDock>;
 }
 
 function DemoConversation({ session }: { session: WorkspaceSession }) {

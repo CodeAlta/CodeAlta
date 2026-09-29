@@ -6,7 +6,8 @@ import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
 import { useShellLanguage } from "./shellLanguage";
 
-export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason, infoControl, onOpenHelp, onOpenPalette, localDraft, localImages }: {
+export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason, infoControl, onOpenHelp, onOpenPalette, localDraft, localImages, active = true }: {
+  active?: boolean;
   sessionId: string; provider: string | null;
   draftIndicators: ReturnType<typeof createDraftIndicators>; reason?: string;
   infoControl?: ReactNode;
@@ -37,8 +38,8 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
     {localDraft && <details className="composer-reference-help"><summary>@</summary><p className="catalog-diagnostics">{t("@ search requires an owned, verified project. References resolve only on normal Send after creation and transfer; file contents are not uploaded.")}</p></details>}
     {expanded && <ExpandedPromptEditor text={text} onChange={edit} onPaste={refuseImagePaste} onCompositionStart={localImages?.invalidate} attachments={localDraft && localImages ? localImages.attachments : imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>} onClose={() => { localImages?.invalidate(); setExpanded(false); }} />}
     {!expanded && imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>}
-    <label className="sr-only" htmlFor="catalog-prompt">{t("Message draft")}</label>
-    <PromptEditor id="catalog-prompt" ref={promptInput} onPaste={refuseImagePaste} label={t("Message draft")} disabled={expanded}
+    <label className="sr-only" htmlFor={active ? "catalog-prompt" : `catalog-prompt-${sessionId}`}>{t("Message draft")}</label>
+    <PromptEditor id={active ? "catalog-prompt" : `catalog-prompt-${sessionId}`} ref={promptInput} onPaste={refuseImagePaste} label={t("Message draft")} disabled={expanded}
       onCompositionStart={() => localImages?.invalidate()}
       value={text} onChange={edit} onKeyDown={event => {
         if (dispatchTransientComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
@@ -52,11 +53,11 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
       }} placeholder={t(localDraft ? "Draft a prompt — no session created yet…" : "Draft a prompt for this session…")} />
     {localDraft && !expanded && <ProjectReferencePicker text={text} edit={edit} input={promptInput} />}
     <div className="composer-toolbar">
-      <details><summary>{t("Draft only")}</summary><p id="catalog-draft-status" role="status">{reason ?? t("No owned desktop host; sending is unavailable. Drafts stay local when storage permits.")}</p></details>
+      <details><summary>{t("Draft only")}</summary><p id={`catalog-draft-status-${sessionId}`} role="status">{reason ?? t("No owned desktop host; sending is unavailable. Drafts stay local when storage permits.")}</p></details>
       <div className="history-controls">
         {infoControl}
-        <button id="expand-session-prompt" type="button" aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => setExpanded(true)}>{t("Expand")}</button>
-        {localDraft?.action ?? <button type="button" className="primary-button send-button" disabled aria-describedby="catalog-draft-status">{t("Send unavailable")}</button>}
+        <button id={active ? "expand-session-prompt" : `expand-session-prompt-${sessionId}`} type="button" aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => setExpanded(true)}>{t("Expand")}</button>
+        {localDraft?.action ?? <button type="button" className="primary-button send-button" disabled aria-describedby={`catalog-draft-status-${sessionId}`}>{t("Send unavailable")}</button>}
       </div>
     </div>
     {!localDraft && <p className="catalog-diagnostics">{t("Provider {provider}; model, prompt and reasoning not available without an owned runtime.", { provider: provider ?? t("Not recorded") })}</p>}

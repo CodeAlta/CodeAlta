@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { Actions, TabNode } from "flexlayout-react";
+import { Actions, DockLocation, TabNode } from "flexlayout-react";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { closeSessionTab, emptySessionTabs, openSessionTab, sessionTabLimit, type SessionTab } from "./sessionTabs";
-import { createSessionTabModel, draftTabId, ownsSessionTabContent, reconcileSessionTabModel, sessionNodeId, sessionTabAction, sessionTabPresentation } from "./sessionTabLayout";
+import { createSessionTabModel, ownsSessionTabContent, reconcileSessionTabModel, sessionNodeId, sessionTabAction, sessionTabPresentation } from "./sessionTabLayout";
 
 const tab = (id: string) => ({ projectId: "p", sessionId: id, path: "/p" });
 const snapshot: WorkspaceSnapshot = { configured: true, projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false,
@@ -15,7 +15,28 @@ const snapshot: WorkspaceSnapshot = { configured: true, projectsTruncated: false
 const label = (value: SessionTab | null) => value?.sessionId ?? "Prompt draft";
 const both = () => openSessionTab(openSessionTab(emptySessionTabs(), tab("one")), tab("two"));
 
-test("public model projects real identities and draft, retaining nodes across reconciliation and label/geometry updates", () => {
+test("three simultaneously selected split panes survive reconciliation and closing one", () => {
+  const model = createSessionTabModel();
+  let state = openSessionTab(both(), tab("three"));
+  reconcileSessionTabModel(model, state, label);
+  const one = model.getNodeById(sessionNodeId(tab("one"))) as TabNode;
+  const two = model.getNodeById(sessionNodeId(tab("two"))) as TabNode;
+  const three = model.getNodeById(sessionNodeId(tab("three"))) as TabNode;
+  model.doAction(Actions.moveNode(two.getId(), one.getParent()!.getId(), DockLocation.RIGHT, -1, true));
+  model.doAction(Actions.moveNode(three.getId(), two.getParent()!.getId(), DockLocation.BOTTOM, -1, true));
+  const parents = [one, two, three].map(node => node.getParent());
+  assert.equal(new Set(parents).size, 3);
+  reconcileSessionTabModel(model, state, label);
+  assert.deepEqual([one, two, three].map(node => node.getParent()), parents);
+  assert.ok([one, two, three].every(node => node.isSelected()));
+  state = closeSessionTab(state, tab("two"));
+  reconcileSessionTabModel(model, state, label);
+  assert.equal(model.getNodeById(two.getId()), undefined);
+  assert.equal(model.getNodeById(one.getId()), one);
+  assert.equal(model.getNodeById(three.getId()), three);
+});
+
+test("public model has only draggable session identities, retaining nodes across reconciliation and label/geometry updates", () => {
   const model = createSessionTabModel();
   const state = both();
   reconcileSessionTabModel(model, state, label);
@@ -24,8 +45,8 @@ test("public model projects real identities and draft, retaining nodes across re
   assert.equal(two.isSelected(), true);
   assert.equal(one.isSelected(), false);
   assert.equal(one.isEnableRenderOnDemand(), false);
-  assert.equal(one.isEnableDrag(), false);
-  assert.equal((model.getNodeById(draftTabId) as TabNode).isEnableClose(), false);
+  assert.equal(one.isEnableDrag(), true);
+  assert.equal(model.getNodeById("session-draft"), undefined);
   reconcileSessionTabModel(model, state, value => `${label(value)} localized`);
   model.doAction(Actions.adjustWeights("session-tabs-row", [100]));
   assert.equal(model.getNodeById(one.getId()), one);
@@ -33,7 +54,7 @@ test("public model projects real identities and draft, retaining nodes across re
   assert.equal(two.getName(), "two localized");
   assert.equal(two.isSelected(), true);
   reconcileSessionTabModel(model, { ...state, active: null }, label);
-  assert.equal((model.getNodeById(draftTabId) as TabNode).isSelected(), true);
+  assert.equal(model.getNodeById("session-draft"), undefined);
   assert.equal(model.getNodeById(two.getId()), two);
 });
 
@@ -52,8 +73,8 @@ test("select/delete map to App intents without changing model, invalid actions a
       { ...snapshot, projects: [{ ...snapshot.projects[0], path: "/elsewhere" }] }])
       assert.equal(sessionTabAction(action, state, catalog, () => true), null);
   }
-  assert.deepEqual(sessionTabAction(Actions.selectTab(draftTabId), state, snapshot, () => true), { kind: "draft" });
-  for (const action of [Actions.deleteTab(draftTabId), Actions.selectTab("unknown"), Actions.deleteTabset("session-tabs-panel"),
+  assert.equal(sessionTabAction(Actions.selectTab("session-draft"), state, snapshot, () => true), null);
+  for (const action of [Actions.deleteTab("session-draft"), Actions.selectTab("unknown"), Actions.deleteTabset("session-tabs-panel"),
     Actions.renameTab(sessionNodeId(tab("one")), "renamed")])
     assert.equal(sessionTabAction(action, state, snapshot, () => true), null);
   assert.deepEqual(model.toJson(), before);
@@ -61,18 +82,18 @@ test("select/delete map to App intents without changing model, invalid actions a
 
 test("factory ownership is exactly one active identity; App selection leads effects without re-binding path ABA", () => {
   let state = both();
-  const ids = [draftTabId, ...state.open.map(sessionNodeId)];
+  const ids = ["session-draft", ...state.open.map(sessionNodeId)];
   assert.deepEqual(ids.filter(id => ownsSessionTabContent(id, state)), [sessionNodeId(tab("two"))]);
   state = sessionTabPresentation(state, snapshot, "p", "one");
   assert.deepEqual(ids.filter(id => ownsSessionTabContent(id, state)), [sessionNodeId(tab("one"))]);
   state = sessionTabPresentation(state, snapshot, "p", null);
-  assert.deepEqual(ids.filter(id => ownsSessionTabContent(id, state)), [draftTabId]);
+  assert.deepEqual(ids.filter(id => ownsSessionTabContent(id, state)), []);
   const changed = { ...snapshot, sessions: snapshot.sessions.map(row => ({ ...row, workspacePath: "/changed" })),
     projects: [{ ...snapshot.projects[0], path: "/changed" }] };
   assert.equal(sessionTabPresentation(both(), changed, "p", "two").active, null);
 });
 
-test("close/reopen and 32 identity cap retain inactive owner metadata without hidden workspace payloads", () => {
+test("close/reopen and 32 identity cap retain inactive owner metadata without a draft tab", () => {
   const model = createSessionTabModel();
   let state = both();
   reconcileSessionTabModel(model, state, label);
@@ -84,8 +105,8 @@ test("close/reopen and 32 identity cap retain inactive owner metadata without hi
   state = openSessionTab(state, state.closed.at(-1)!);
   for (let i = 0; i < 50; i++) state = openSessionTab(state, tab(String(i)));
   reconcileSessionTabModel(model, state, label);
-  assert.equal(model.getNodeById("session-tabs-panel")!.getChildren().length, sessionTabLimit + 1);
-  assert.equal(model.getNodeById("session-tabs-panel")!.getChildren().filter(node => ownsSessionTabContent(node.getId(), state)).length, 1);
+  assert.equal(model.getActiveTabset()!.getChildren().length, sessionTabLimit);
+  assert.equal(model.getActiveTabset()!.getChildren().filter(node => ownsSessionTabContent(node.getId(), state)).length, 1);
 });
 
 test("captured menu lifetimes reject late and ABA actions even when the same exact identity is current again", () => {

@@ -37,7 +37,8 @@ import { useShellLanguage } from "./shellLanguage";
 import type { ClipboardEvent } from "react";
 import type { SessionSteerRequest } from "#neoastra";
 
-export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount, inputLifetime, liveState, timelineNotices, onOpenCatalog }: {
+export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true }: {
+  active?: boolean;
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
   projectId?: string | null;
   inputLifetime?: { current: () => boolean };
@@ -265,6 +266,10 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   }, [sessionId, draft, submissions, draftIndicators]);
 
   const pending = submissions.pending(sessionId);
+  useEffect(() => {
+    if (active) console.info("[CodeAlta Send] composer availability", { invalidEpoch,
+      capabilityValid: capability.canMutate(), retainedRequest: !!pending, inFlight: pending?.inFlight ?? false });
+  }, [active, invalidEpoch, !!pending, pending?.inFlight, capability]);
   const pendingAborts = submissions.aborts(sessionId);
   const pendingSteer = steering.pending(sessionId);
   const pendingCompact = compaction.pending(sessionId);
@@ -362,6 +367,9 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   }
   function submit() {
     const signal = scope.current?.signal;
+    console.info("[CodeAlta Send] composer action", { mounted: !!signal, aborted: signal?.aborted ?? false,
+      capabilityValid: capability.canMutate(), pending: !!submissions.pending(sessionId),
+      inFlight: submissions.pending(sessionId)?.inFlight ?? false, enqueue, hasImages: images.length > 0 });
     if (!signal || signal.aborted || !capability.canMutate()) return;
     const retained = submissions.pending(sessionId);
     if (!retained && enqueue && images.length === 0) { stagePrompt("Queue"); return; }
@@ -369,6 +377,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     const latest = selections.current(epoch, sessionId);
     if (!retained && (latest || selection) && (!choices || choices.status !== "ok" || choices.epoch !== epoch || choices.sessionId !== sessionId
       || !validSelection(choices, latest ?? selection!) || latest && selection !== latest)) {
+      console.warn("[CodeAlta Send] blocked: next-send selection has not been validated");
       setMessage("Next Send choices changed. Wait for the mounted composer to show the validated selection before sending.");
       return;
     }
@@ -382,7 +391,9 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     const capturedImages = images;
     const request = retained?.request ?? captureSubmission(epoch, sessionId, text, crypto.randomUUID(), sendSelection, references, images);
     if (!request && images.length) setImageNotice("Image Send requires empty or nonblank text up to 32768 characters and an explicit supported model.");
-    if (!request || !capability.canSubmit(request)) return;
+    if (!request || !capability.canSubmit(request)) {
+      console.warn("[CodeAlta Send] blocked: invalid request or revoked capability"); return;
+    }
     draftIndicators.clear(sessionId);
     setSubmittedThinking({ key: request.clientRequestId, runId: null });
     setMessage("Ready to send to this owned session.");
@@ -623,8 +634,8 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
         : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : "Prompt ready")}</span>
       </div>
     {expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
-    <label className="sr-only" htmlFor="session-prompt">{t("Message")}</label>
-    <PromptEditor id="session-prompt" ref={promptInput} onPaste={pasteImages} label={t("Message")} value={pending?.request.text ?? text} disabled={!!pending || invalidEpoch || expanded}
+    <label className="sr-only" htmlFor={active ? "session-prompt" : `session-prompt-${sessionId}`}>{t("Message")}</label>
+    <PromptEditor id={active ? "session-prompt" : `session-prompt-${sessionId}`} ref={promptInput} onPaste={pasteImages} label={t("Message")} value={pending?.request.text ?? text} disabled={!!pending || invalidEpoch || expanded}
       onChange={editText} onCompositionStart={() => { inputRevision.current++; }} placeholder={t("Ask CodeAlta to work on this project…")} onKeyDown={event => {
         if (dispatchTransientComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
           altKey: event.altKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing,
@@ -685,7 +696,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       {onOpenReminders && <Button ref={remindersTrigger} variant="minimal" icon={<AppIcon name="reminder" size={16} />} data-reminder-count=""
         disabled={invalidEpoch} aria-label={reminderLabel} title={`${reminderLabel} (Ctrl+G, Ctrl+D)`}
         onClick={onOpenReminders}><span className="reminder-count" aria-hidden="true">{observedReminderCount ?? "?"}</span></Button>}
-      <Button id="expand-session-prompt" variant="minimal" icon={<AppIcon name="expand" size={16} />} disabled={!!pending || invalidEpoch} aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => { inputRevision.current++; setExpanded(true); }} />
+      <Button id={active ? "expand-session-prompt" : `expand-session-prompt-${sessionId}`} variant="minimal" icon={<AppIcon name="expand" size={16} />} disabled={!!pending || invalidEpoch} aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => { inputRevision.current++; setExpanded(true); }} />
       {observedSteerRun && <Button variant="minimal" onClick={() => steer(true)}
         disabled={invalidEpoch || !!pending || !!pendingSteer || !availableComposerSteer || !capability.canSubmit(availableComposerSteer)}
         aria-label={t("Steer current composer to observed run")} aria-describedby="observed-steering-help"
