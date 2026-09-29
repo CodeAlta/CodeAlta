@@ -4,6 +4,9 @@ import type { SessionInfoSelection } from "./sessionInfo";
 export type ShortcutSession = Readonly<{ epoch: string; sessionId: string; projectId: string | null }>;
 export type WorkspaceShortcutState = { chordPending: boolean; sessionInfoPrefix: SessionInfoSelection | null; reminderPrefix: ShortcutSession | null };
 
+// Monaco can target an EditContext-backed div instead of a textarea/contenteditable.
+export const workspaceEditingSelector = "input, textarea, select, [contenteditable]:not([contenteditable='false']), .prompt-editor, .monaco-editor";
+
 // The mounted workspace and the production app share this keyboard dispatcher. Capture the
 // selection on the prefix so a subsequent session/host switch cannot redirect the chord.
 export function dispatchWorkspaceShortcut(event: KeyboardEvent, state: WorkspaceShortcutState, context: Readonly<{
@@ -33,10 +36,10 @@ export function dispatchWorkspaceShortcut(event: KeyboardEvent, state: Workspace
     }
     return;
   }
-  const editing = !!target?.closest("input, textarea, select, [contenteditable='true']");
+  const editing = !!target?.closest(workspaceEditingSelector);
   const common = { workspaceActive: context.workspaceActive, modalOpen: false,
     inWorkspace: !!target && context.workspaceShell?.contains(target) === true,
-    editing, promptFocused: target?.matches("#session-prompt, #catalog-prompt") === true };
+    editing, promptFocused: !!target?.closest("#session-prompt, #catalog-prompt") };
   const ready = (trigger: HTMLButtonElement | null) => !!trigger?.isConnected && !trigger.disabled &&
     context.workspaceShell?.contains(trigger) === true;
   const infoAvailable = !!state.sessionInfoPrefix && !!context.infoSelection &&

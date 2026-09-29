@@ -50,6 +50,7 @@ test("empty regular prompt consumes only unhandled single-key transient gestures
   for (const changed of [{ value: " ", selectionStart: 0, selectionEnd: 0 },
     { value: "x", selectionStart: 1, selectionEnd: 1 }, { value: "x", selectionStart: 0, selectionEnd: 1 },
     { value: "", selectionStart: 1, selectionEnd: 1 }])
-    assert.equal(dispatchTransientComposerKey({ key: "/" }, changed as HTMLTextAreaElement, help, palette), false);
+    for (const key of ["/", "?"])
+      assert.equal(dispatchTransientComposerKey({ key }, changed as HTMLTextAreaElement, help, palette), false);
   assert.deepEqual(actions, ["help", "palette"]);
 });

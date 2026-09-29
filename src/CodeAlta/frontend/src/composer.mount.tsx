@@ -54,7 +54,7 @@ const readReminderCount = (request: ReminderListRequest): Promise<ReminderListRe
   reminderReads.push(request);
   return new Promise(resolve => { reminderSettlers.push(resolve); });
 };
-const counts = { refreshes: 0, catalogOpens: 0, abortCalls: [] as SessionAbortRunRequest[], compactCalls: [] as SessionCompactRequest[],
+const counts = { helpOpens: 0, refreshes: 0, catalogOpens: 0, abortCalls: [] as SessionAbortRunRequest[], compactCalls: [] as SessionCompactRequest[],
   sendCalls: [] as SessionSendRequest[], submissionAbortCalls: [] as SessionAbortRequest[],
   holdSend() { sendGate = new Promise(resolve => { releaseSend = resolve; }); },
   settleSend() { releaseSend?.(); releaseSend = undefined; sendGate = undefined; },
@@ -147,6 +147,7 @@ window.addEventListener("keydown", event => {
     compactTrigger: compactTrigger.current,
     infoSelection: selected && selected.sessionId === currentSession ? { sessionId: currentSession, projectId: null } : null,
     selection: selected, run: action => {
+      if (action === "help") counts.helpOpens++;
       if (action === "context") activateContextShortcut(document.getElementById("workspace-shell"));
       if (action === "compact") compactTrigger.current?.click();
     },

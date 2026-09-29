@@ -632,14 +632,13 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
         title={pendingCompact ? `${t("Manual retry of exact compaction:")} ${t("epoch")} ${pendingCompact.request.expectedEpoch}, ${t("session")} ${pendingCompact.request.sessionId}, ${t("runtime")} ${pendingCompact.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingCompact.request.expectedAttachmentGeneration}, ${t("request")} ${pendingCompact.request.clientRequestId}`
           : t("Compact observed idle attachment (Ctrl+F11; point-in-time idle observation permits only an attempt; provider must prove idle)")}>
         <AppIcon name="compact" size={16} /></Button>}
-      {(availableAbortRun || pendingAbortRun) && <Button intent={cancellationPrimary ? "danger" : "none"} icon={<AppIcon name="stop" size={16} />} onClick={abortRun}
+      {(availableAbortRun || pendingAbortRun) && <Button intent={cancellationPrimary ? "danger" : "none"} icon={<AppIcon name="stop" size={16} fill="currentColor" />} onClick={abortRun}
         disabled={invalidEpoch || !!pendingAbortRun?.inFlight || (pendingAbortRun
           ? !capability.canSubmit(pendingAbortRun.request) : !availableAbortRun || !capability.canSubmit(availableAbortRun))}
         aria-label={pendingAbortRun ? t("Retry exact cancellation request for observed run {run}", { run: pendingAbortRun.request.expectedRunId }) : t("Cancel observed run")}
         aria-describedby="observed-run-cancellation-help"
         title={pendingAbortRun ? `${t("Manual retry of exact cancellation:")} ${t("epoch")} ${pendingAbortRun.request.expectedEpoch}, ${t("session")} ${pendingAbortRun.request.sessionId}, ${t("runtime")} ${pendingAbortRun.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingAbortRun.request.expectedAttachmentGeneration}, ${t("run")} ${pendingAbortRun.request.expectedRunId}, ${t("request")} ${pendingAbortRun.request.clientRequestId}`
-          : t("Cancel observed run {run} (point-in-time runtime observation, not original Send Abort; signalling does not confirm completion)", { run: availableAbortRun?.expectedRunId ?? "" })}>
-        {t(pendingAbortRun ? "Retry exact cancellation" : "Cancel observed run")}</Button>}
+          : t("Cancel observed run {run} (point-in-time runtime observation, not original Send Abort; signalling does not confirm completion)", { run: availableAbortRun?.expectedRunId ?? "" })} />}
       <Button aria-label={t(pending ? "Retry exact request" : "Send")} title={t(pending ? "Retry exact request" : "Send")} intent={cancellationPrimary ? "none" : "primary"} icon={<AppIcon name={pending ? "refresh" : "send"} size={16} />} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || captureSubmission(epoch, sessionId, text, "availability", images.length ? selected : null, null, images) === null)} onClick={submit} />
     </div>
     </div>

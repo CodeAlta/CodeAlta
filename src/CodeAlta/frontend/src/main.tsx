@@ -60,7 +60,7 @@ import { UserInputPanel } from "./UserInputPanel";
 import { LiveSessionPanel } from "./LiveSessionPanel";
 import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePosition, timelineNotice, type TimelineNotice, type MessageNavigation } from "./timelineScroll";
 import type { ShortcutAction } from "./shortcuts";
-import { dispatchWorkspaceShortcut, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
+import { dispatchWorkspaceShortcut, workspaceEditingSelector, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
 import { activateContextShortcut } from "./contextShortcut";
 import { createDraftIndicators, draftStorageKey, persistDraft, restoreDraft, transferPromptDraft } from "./promptDraft";
 import { SessionDraftBadge } from "./SessionDraftBadge";
@@ -754,7 +754,7 @@ function App() {
       const modal = !!dialog || !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]');
       const targetElement = event.target instanceof HTMLElement ? event.target : null;
       const accessAllowed = !modal && view === "workspace" && !!targetElement && workspaceShell.current?.contains(targetElement)
-        && !targetElement.closest("input, textarea, select, [contenteditable]")
+        && !targetElement.closest(workspaceEditingSelector)
         && event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey
         && !event.isComposing && event.keyCode !== 229 && !event.repeat && !event.defaultPrevented;
       if (captured && chordAction) {
@@ -769,7 +769,7 @@ function App() {
         event.preventDefault(); openPalette(); return;
       }
       const target = event.target as HTMLElement | null;
-      if (target && workspaceShell.current?.contains(target) && !target.closest("input, textarea, select, [contenteditable='true']") &&
+      if (target && workspaceShell.current?.contains(target) && !target.closest(workspaceEditingSelector) &&
         !event.isComposing && event.keyCode !== 229 && !event.defaultPrevented &&
         ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key))
         timelineCommand.current?.cancelLatest();

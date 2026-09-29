@@ -29,7 +29,10 @@ The desktop timeline now reads journal records up to 8 MiB with bounded previews
 notice. Records above the ceiling remain explicit errors; journals are never rewritten.
 
 The desktop uses Monaco Markdown editors for inline and expanded prompts (the expanded
-editor has no preview). Both editors have padded, rounded surfaces. Pasted images appear as
+editor has no preview). The running-agent stop control is icon-only, with an accessible label
+and tooltip. `?` opens help only in an empty prompt; elsewhere in the editor it is ordinary text.
+Choosing an `@` file suggestion inserts a basename-labeled project-relative Markdown link,
+matching the TUI. Both editors have padded, rounded surfaces. Pasted images appear as
 compact thumbnails above the prompt status; click a thumbnail to preview and rename or
 remove it, or use its small remove button directly. Its timeline opens at the latest user prompt, with older messages
 available above it, and automatically observes active runs and pending asks without refresh

@@ -25,9 +25,14 @@ test("reference editing handles escapes, quoted paths and bounded insertion", ()
   assert.equal(activeProjectReference("mail@host", 9), null);
   assert.equal(activeProjectReference("@src/app.cs:2-4", 15), null);
   assert.deepEqual(activeProjectReference("@src/old.cs:2-4", 4), { start: 0, end: 11, query: "src" });
-  assert.deepEqual(insertProjectReference("@src/old.cs:2-4", 0, 11, "src/app.cs", false), { text: '@"src/app.cs":2-4', caret: 13 });
+  const ranged = "[app.cs](src/app.cs:2-4)";
+  assert.deepEqual(insertProjectReference("@src/old.cs:2-4", 0, 11, "src/app.cs", false), { text: ranged, caret: ranged.length });
   assert.deepEqual(activeProjectReference('see @"src/a b', 13), { start: 4, end: 13, query: "src/a b" });
-  assert.deepEqual(insertProjectReference("see @sr end", 4, 7, "src/a b.cs", false), { text: 'see @"src/a b.cs"  end', caret: 18 });
+  const link = "[a b.cs](src/a b.cs)";
+  assert.deepEqual(insertProjectReference("see @sr end", 4, 7, "src/a b.cs", false), { text: `see ${link} end`, caret: 4 + link.length });
+  assert.deepEqual(insertProjectReference("@", 0, 1, "src/folder", true), { text: "[folder](src/folder)", caret: 20 });
+  const escaped = "[a\\].cs](src/a].cs)";
+  assert.deepEqual(insertProjectReference("@", 0, 1, "src/a].cs", false), { text: escaped, caret: escaped.length });
   for (const path of ["../secret", "/absolute", "C:/secret", "a\\b", 'a"b', "a\nfile", "a//b"])
     assert.equal(insertProjectReference("@", 0, 1, path, false), null);
   assert.equal(insertProjectReference("x".repeat(32768), 0, 0, "a", false), null);

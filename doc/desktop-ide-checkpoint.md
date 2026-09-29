@@ -672,6 +672,15 @@ part of this change.
 
 ### Quiet timeline chrome and Monaco composer
 
+The observed-run cancellation control now uses a filled square without a visible text label;
+its accessible label, original-target tooltip, disablement and exact-retry semantics remain.
+Workspace shortcut classification includes Monaco/EditContext divs, so ordinary `?` input
+cannot bubble into shell help. The regular composer's existing empty-value, selection, IME
+and modifier checks still govern its transient help gesture. File-picker insertion now uses
+the TUI's `[basename](project-relative-path)` presentation, escaping closing brackets in the
+label and preserving an existing valid line-range suffix inside the target. It adds no extra
+whitespace. Captured input/selection/lifetime fences and host reference resolution are unchanged.
+
 Owned WebApp hosts now explicitly select TUI-style automatic tool approval by default, fixing
 the previous unconditional command/file-write denial. `--review-owned-command-permissions`
 disables this default and retains bounded manual plain-command review. Shared orchestration

@@ -9,7 +9,8 @@ export function validReferenceSpans(text: string, spans: readonly { start: numbe
   });
 }
 // Only the host parser/resolver confers reference meaning. These helpers find an
-// editable trigger and insert a quoted literal path; no filesystem inference.
+// editable trigger and format the TUI's basename/project-relative Markdown link;
+// no filesystem inference or change to host reference authority.
 export function activeProjectReference(text: string, caret: number) {
   const before = text.slice(0, caret);
   const match = /(?:^|[\s(])@("[^"\r\n]*|[^@\s":\r\n]*)$/u.exec(before);
@@ -27,7 +28,10 @@ export function activeProjectReference(text: string, caret: number) {
 export function insertProjectReference(text: string, start: number, end: number, path: string, directory: boolean) {
   if (!path || path.length > 1024 || /[\u0000-\u001f\u007f"\\:<>|*?]/u.test(path) || path.startsWith("/")
     || path.split("/").some(part => !part || part === "." || part === "..")) return null;
-  const reference = `@"${path}${directory ? "/" : ""}"${text[end] === ":" ? "" : " "}`;
+  const range = !directory ? /^:[1-9]\d*(?:-[1-9]\d*)?(?=$|[\s,;!?)\]}>])/u.exec(text.slice(end))?.[0] ?? "" : "";
+  const label = path.slice(path.lastIndexOf("/") + 1).replaceAll("]", "\\]");
+  const reference = `[${label}](${path}${range})`;
+  end += range.length;
   const value = text.slice(0, start) + reference + text.slice(end);
   return value.length <= 32768 ? { text: value, caret: start + reference.length } : null;
 }

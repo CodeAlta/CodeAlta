@@ -64,7 +64,8 @@ test("capture precedes one own-modal handoff; query edits are separate and inser
   assert.equal(f.lifetime.open(f.tick), true);
   let query = f.capture.span.query; query = "other";
   assert.equal(query, "other"); assert.equal(f.input.text, "@src/old.cs:2-4");
-  assert.deepEqual(f.capture.choose("src/a b.cs", false), { text: '@"src/a b.cs":2-4', caret: 13 });
+  const link = "[a b.cs](src/a b.cs:2-4)";
+  assert.deepEqual(f.capture.choose("src/a b.cs", false), { text: link, caret: link.length });
   assert.equal(f.capture.choose("elsewhere", false), null);
   assert.equal(f.lifetime.close(f.tick), true);
   assert.equal(f.lifetime.current(), true);
@@ -132,7 +133,7 @@ test("close-time invalidation prevents insertion and focus admission; valid own 
   let edits = 0; let focus = 0;
   const next = f.capture.choose("src/a b.cs", false)!;
   if (closeReferencePopup(f.lifetime, f.capture.current, f.tick)) { edits++; focus++; f.input = { ...f.input, text: next.text }; }
-  assert.deepEqual({ edits, focus, text: f.input.text }, { edits: 1, focus: 1, text: '@"src/a b.cs":2-4' });
+  assert.deepEqual({ edits, focus, text: f.input.text }, { edits: 1, focus: 1, text: '[a b.cs](src/a b.cs:2-4)' });
   assert.equal(closeReferencePopup(f.lifetime, f.capture.current, f.tick), false);
   assert.equal(f.capture.choose("again", false), null);
 });

@@ -83,6 +83,13 @@ test("mounted composer stays compact and its controls remain legible in both the
       if (document.querySelector('select[aria-label="Agent prompt"]:not(:disabled)')) resolve('ready');
       else if (Date.now() > end) resolve(document.body.innerText.slice(0, 300)); else setTimeout(check, 35); }; check(); })`);
     assert.equal(ready, "ready");
+    assert.equal(await evaluate(`(() => {
+      const editor = document.createElement('div'); editor.className = 'prompt-editor';
+      const surface = editor.appendChild(document.createElement('div')); surface.className = 'monaco-editor';
+      surface.textContent = 'An existing prompt'; document.getElementById('workspace-shell').appendChild(editor);
+      surface.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true, cancelable: true }));
+      editor.remove(); return window.fixture.helpOpens;
+    })()`), 0, "Monaco EditContext divs must not dispatch shell help for typed question marks");
     const waitFor = (condition: string) => evaluate(`new Promise(resolve => { const end = Date.now() + 4000; const check = () => {
       if (${condition}) resolve('ready'); else if (Date.now() > end) resolve('timed out'); else setTimeout(check, 25); }; check(); })`);
     const countLabel = () => evaluate(`document.querySelector('.composer-toolbar [data-reminder-count]')?.getAttribute('aria-label')`);
@@ -302,8 +309,10 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label^="Retry exact compaction"]')?.title.includes('12')`), true);
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), true,
       "a new observed run does not displace the older retained compaction target or cancellation control");
-    assert.equal(await evaluate(`document.querySelector('.composer-toolbar .primary-button')?.textContent`), "Cancel observed run",
-      "eligible cancellation needs a truthful visible primary label, not an icon beside primary Send");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')?.textContent`), "",
+      "cancellation keeps its accessible label without verbose visible text");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label="Cancel observed run"] svg')?.getAttribute('fill')`), "currentColor",
+      "cancellation uses a filled stop square");
     assert.equal(await evaluate(`window.presentationSend === document.querySelector('.send-button') &&
       document.activeElement === window.presentationSend && window.presentationEditor === document.querySelector('#session-prompt')`), true,
       "emphasis changes must retain the focused Send node and editor, never turn Send into Abort");
