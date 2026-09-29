@@ -62,7 +62,7 @@ test("workspace ignores failure after abort", async () => {
 });
 
 test("workspace keeps persisted global/project scope and unverified or truncated unmatched sessions visible", () => {
-  const session = { createdAt: null, id: "s", title: "Saved title", fullTitle: "Saved title", fullTitleTruncated: false, parentSessionId: null,
+  const session = { messageCount: null, createdAt: null, id: "s", title: "Saved title", fullTitle: "Saved title", fullTitleTruncated: false, parentSessionId: null,
     scopeKind: "project", projectId: "p", lineageIssue: null, workspacePath: "/p", providerKey: null, updatedAt: "2026-01-01T00:00:00Z" };
   const snapshot: WorkspaceSnapshot = {
     ...empty, projects: [{ id: "p", name: "Project", path: "/p", archived: false }],

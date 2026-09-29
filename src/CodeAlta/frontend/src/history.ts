@@ -17,6 +17,7 @@ export type HistoryTimeline = Readonly<{
   revision?: HistoryRevision | null;
   sources?: readonly HistorySourceRange[];
   pages?: number;
+  turnReached?: boolean;
 }>;
 
 const maximumTimelineEntries = 1000;
@@ -30,11 +31,11 @@ export function historyEntryCharacters(entry: HistoryResponse["entries"][number]
 
 export function historySettled(state: HistoryState | undefined, timeline: HistoryTimeline | undefined): boolean {
   return state?.kind === "error" || (state?.kind === "ready" && timeline?.sessionId === state.request.sessionId
-    && (timeline.next === null || timeline.limitReached));
+    && (timeline.next === null || timeline.limitReached || timeline.turnReached === true));
 }
 
 export function mergeHistoryPage(previous: HistoryTimeline | undefined, request: HistoryRequest, page: TimelinePage,
-  explicitOlder = false): HistoryTimeline {
+  explicitOlder = false, retainedStart?: string): HistoryTimeline {
   const current = previous?.next;
   const cursor = request.cursor;
   // A new tail read starts afresh; never combine a forward cursor, another session or another revision.
@@ -52,6 +53,28 @@ export function mergeHistoryPage(previous: HistoryTimeline | undefined, request:
   }
   entries.push(...accumulated);
   let next = page.next;
+  // Initial/latest navigation stops at the last user prompt, not an arbitrary
+  // thousand-event window. The omitted prefix remains reachable by a byte cursor.
+  let turnReached = false;
+  if (!explicitOlder) {
+    let lastUser = retainedStart === undefined ? -1 : entries.findIndex(entry => entry.offset === retainedStart);
+    for (let index = entries.length - 1; index >= 0; index--) {
+      if (retainedStart !== undefined) break;
+      const entry = entries[index];
+      if (entry.kind?.toLowerCase() === "user" && (entry.eventType === "contentCompleted" || entry.eventType === "contentDelta")) { lastUser = index; break; }
+    }
+    if (lastUser >= 0) {
+      let start = lastUser;
+      while (start > 0 && entries[start - 1].contentId === entries[lastUser].contentId
+        && entries[start - 1].runId === entries[lastUser].runId && entries[start - 1].kind?.toLowerCase() === "user") start--;
+      const boundary = page.next ?? request.cursor ?? (page.revision ? { version: 2, ...page.revision, offset: "0" } : null);
+      if (start > 0 && boundary?.version === 2) {
+        next = { ...boundary, offset: entries[start].offset };
+        entries.splice(0, start);
+      }
+      turnReached = true;
+    }
+  }
   let newerOmitted = retained?.newerOmitted === true;
   let characters = entries.reduce((sum, entry) => sum + historyEntryCharacters(entry), 0);
   let trimmed = false;
@@ -79,7 +102,7 @@ export function mergeHistoryPage(previous: HistoryTimeline | undefined, request:
     tailOmitted: retained?.tailOmitted === true || page.tailOmitted,
     limitReached: next !== null && (trimmed || entries.length === maximumTimelineEntries || pages >= 32),
     newerOmitted,
-    revision: page.revision ?? retained?.revision, sources, pages,
+    revision: page.revision ?? retained?.revision, sources, pages, turnReached,
   };
 }
 

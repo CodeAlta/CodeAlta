@@ -3,11 +3,12 @@ import { sessionOperations, type SessionReferenceObservationResponse } from "#ne
 import type { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { validReferenceSpans } from "./projectReferences";
 import { useShellLanguage } from "./shellLanguage";
+import type { PromptInput } from "./PromptEditor";
 
 // A raw-text preview, not an editor overlay: native caret, wrapping, selection and
 // IME remain entirely owned by the textarea. Only the host supplies span semantics.
 export function ProjectReferencePresentation({ text, input, scope }: {
-  text: string; input: RefObject<HTMLTextAreaElement | null>; scope: ContextType<typeof ProjectReferenceContext>;
+  text: string; input: RefObject<PromptInput | null>; scope: ContextType<typeof ProjectReferenceContext>;
 }) {
   const { t } = useShellLanguage();
   const identity = JSON.stringify(scope);

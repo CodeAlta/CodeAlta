@@ -24,7 +24,7 @@ function revisionOf(cursor: HistoryRequest["cursor"]): string | null {
 }
 
 export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, onAfterOlder, onNewerOmitted, onNavigationReset,
-  newestRequest, onNewestResult, live, read, canInspect, outgoing = [], onAcknowledgeOutgoing }: {
+  newestRequest, onNewestResult, live, read, canInspect, outgoing = [], onAcknowledgeOutgoing, messageCount }: {
   sessionId: string; onNotesChange: (markdown: string) => void; onSettled: () => void;
   onBeforeOlder: () => void; onAfterOlder: () => void; live: SessionDisplayView | null;
   onNewerOmitted?: (value: boolean) => void;
@@ -35,6 +35,7 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
   canInspect?: () => boolean;
   outgoing?: readonly OutgoingMessage[];
   onAcknowledgeOutgoing?: (keys: readonly string[]) => void;
+  messageCount?: number | null;
 }) {
   const { t } = useShellLanguage();
   const [target, setTarget] = useState<HistoryTarget>(() =>
@@ -44,6 +45,7 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
   const [candidate, setCandidate] = useState<typeof window>();
   const [sourceTarget, setSourceTarget] = useState<(HistorySourceTarget & { current: () => boolean }) | null>(null);
   const generation = useRef(0);
+  const retainedStart = useRef<string | undefined>(undefined);
   const requestedNewest = useRef<number | null>(null);
   const readingRevision = useRef<{ generation: number; revision: string | null } | null>(null);
   const beforeOlder = useRef(onBeforeOlder);
@@ -51,6 +53,7 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
   const request = target.request;
   const timeline = window?.timeline;
   function refreshNewest(keyboard: boolean): number {
+    if (keyboard) retainedStart.current = undefined;
     const current = state?.request === request ? state : undefined;
     if (keyboard && target.explicitNewest && !historySettled(current,
       window?.generation === target.generation ? timeline : candidate?.generation === target.generation ? candidate.timeline : undefined)
@@ -87,7 +90,7 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
       if (value.kind === "ready") {
         if (target.explicitOlder) beforeOlder.current();
         const update = (current: typeof window) => ({
-          timeline: mergeHistoryPage(current?.timeline, value.request, value.page, target.explicitOlder),
+          timeline: mergeHistoryPage(current?.timeline, value.request, value.page, target.explicitOlder, retainedStart.current),
           generation: target.generation, revision: revisionOf(value.page.next ?? value.request.cursor),
         });
         if (target.explicitNewest) setCandidate(update);
@@ -125,10 +128,13 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
     return () => globalThis.window.clearInterval(timer);
   }, [sessionId]);
   const accumulation = target.explicitNewest ? candidate : window;
+  useLayoutEffect(() => {
+    if (accumulation?.timeline.turnReached && retainedStart.current === undefined) retainedStart.current = accumulation.timeline.entries[0]?.offset;
+  }, [accumulation]);
   useEffect(() => {
     const accumulated = accumulation?.timeline;
     if (current?.kind !== "ready" || accumulation?.generation !== target.generation || !accumulated?.next ||
-        accumulated.sessionId !== sessionId || accumulated.limitReached || target.explicitOlder) return;
+        accumulated.sessionId !== sessionId || accumulated.limitReached || accumulated.turnReached || target.explicitOlder) return;
     const timer = globalThis.window.setTimeout(() => setTarget({ request: { sessionId, cursor: accumulated.next },
       explicitOlder: false, explicitNewest: target.explicitNewest, generation: target.generation }), 0);
     return () => globalThis.window.clearTimeout(timer);
@@ -181,21 +187,17 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
       subtitle: echo.state === "sending" ? "Sending…" : echo.state === "failed" ? "Failed" : echo.state === "uncertain" ? "Pending" : null } });
   }
   items.sort((a, b) => Date.parse(a.source === "history" ? a.item.timestamp : a.row.timestamp ?? "") - Date.parse(b.source === "history" ? b.item.timestamp : b.row.timestamp ?? ""));
-  return <section className="conversation history" aria-labelledby="history-heading"
+  const olderCount = messageCount == null ? null : Math.max(0, messageCount - items.filter(row => row.source === "history" && !row.key.startsWith("outgoing:")).length);
+  return <section className="conversation history" aria-label={t("Session timeline")}
     data-window-ready={current?.kind === "ready" && window?.generation === target.generation && historySettled(current, timeline)}>
-    <div className="section-heading"><div><span className="eyebrow">{t("Journal + recent live window")}</span><h2 id="history-heading">{t("Session timeline")}</h2></div><button type="button" className="quiet-button icon-label-button" onClick={() => {
-      refreshNewest(false);
-    }}><AppIcon name="refresh" size={14} />{t("Refresh newest history")}</button></div>
     {!timeline && (!current || current.kind === "loading") && <p role="status">{t("Loading the latest persisted history.")}</p>}
     {current?.kind === "error" && <p role="alert" className="error-text">{t(historyMessage(current.code))}</p>}
     {current?.kind === "error" && !!timeline?.entries.length && <p role="status">{t("Previously loaded history is retained; the window is partial and may be from an older revision. Refresh explicitly to replace it.")}</p>}
     {timeline?.tailOmitted && <div role="status" className="banner">{t("The malformed final journal record was omitted.")}</div>}
-    {timeline?.limitReached && <div role="status" className="banner">{t("History window budget reached (1,000 events, 2 Mi text units or 32 pages). Load older explicitly; newer rows may leave this window.")}</div>}
-    {timeline?.newerOmitted && <div role="status" className="banner">{t("Newer journal events are no longer in this older window. Refresh newest history to return to the latest turn.")}</div>}
     {timeline?.next && <button type="button" className="load-more" disabled={current?.kind === "loading" || current?.kind === "error"}
       onClick={() => setTarget({ request: { sessionId, cursor: timeline.next }, explicitOlder: true,
         explicitNewest: false, generation: ++generation.current })}>
-      <AppIcon name="history" size={14} />{t("Load older history")}{timeline.entries.length === 1000 ? t(" (replace newest visible events)") : ""}</button>}
+      <AppIcon name="history" size={14} />{olderCount ? t("Load {count} previous messages", { count: olderCount }) : t("Load previous messages")}</button>}
     {items.length === 0 && current?.kind === "ready" && <div className="empty-history">{t("No visible events in this history.")}</div>}
     <div className="messages">
       {groupTimelineTools(items, timeline?.entries ?? []).map(group => <div key={`${sessionId}:${group.key}`}

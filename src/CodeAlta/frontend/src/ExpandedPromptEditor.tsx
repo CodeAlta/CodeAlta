@@ -1,18 +1,17 @@
-import { useEffect, useRef, useState, type ClipboardEventHandler, type ReactNode } from "react";
+import { useEffect, useRef, type ClipboardEventHandler, type ReactNode } from "react";
 import { dispatchExpandedComposerKey } from "./composerKeyboard";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
 import { useShellLanguage } from "./shellLanguage";
-import { MarkdownContent } from "./MarkdownContent";
+import { PromptEditor, type PromptInput } from "./PromptEditor";
 
 export function ExpandedPromptEditor({ text, onChange, onClose, onPaste, attachments, onCompositionStart }: {
   text: string; onChange: (text: string) => void; onClose: () => void;
-  onPaste?: ClipboardEventHandler<HTMLTextAreaElement>; attachments?: ReactNode;
+  onPaste?: ClipboardEventHandler<HTMLElement>; attachments?: ReactNode;
   onCompositionStart?: () => void;
 }) {
   const { t } = useShellLanguage();
   const dialog = useRef<HTMLDialogElement>(null);
-  const editor = useRef<HTMLTextAreaElement>(null);
-  const [preview, setPreview] = useState(true);
+  const editor = useRef<PromptInput>(null);
   useEffect(() => {
     const element = dialog.current!;
     element.showModal();
@@ -24,9 +23,9 @@ export function ExpandedPromptEditor({ text, onChange, onClose, onPaste, attachm
     onCancel={event => { event.preventDefault(); onClose(); }} onKeyDown={event => {
       // Modal editing must never fall through to shell shortcuts or the regular composer's Send/Steer.
       event.stopPropagation();
-      // Metadata/picker buttons retain native keyboard activation. Only textarea
+      // Metadata/picker buttons retain native keyboard activation. Only Monaco
       // editing keys (and dialog-wide Escape) use the editor close shortcut.
-      if (event.target !== editor.current && event.key !== "Escape") return;
+      if (!editor.current?.contains(event.target as Node) && event.key !== "Escape") return;
       if (dispatchExpandedComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
         altKey: event.altKey, metaKey: event.metaKey, repeat: event.repeat,
         isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode,
@@ -34,17 +33,17 @@ export function ExpandedPromptEditor({ text, onChange, onClose, onPaste, attachm
       else if (event.key === "Escape") event.preventDefault();
     }}>
     <header><h2 id="expanded-prompt-title">{t("Edit prompt")}</h2><div className="expanded-prompt-actions">
-      <button type="button" aria-pressed={preview} aria-controls="expanded-prompt-preview" onClick={() => setPreview(value => !value)}>{t("Markdown preview")}</button>
       <button type="button" onClick={onClose}>{t("Close")}</button></div></header>
-    <div className={`expanded-prompt-panes${preview ? " with-preview" : ""}`}>
-      <textarea ref={editor} aria-label={t("Expanded prompt")} aria-describedby="expanded-prompt-hint" maxLength={32768}
-        value={text} onChange={event => onChange(event.target.value)} onPaste={onPaste} onCompositionStart={onCompositionStart} />
-      <section id="expanded-prompt-preview" className="expanded-prompt-preview" aria-label={t("Markdown preview")} hidden={!preview} tabIndex={0}>
-        {preview && <MarkdownContent source={text} timelineCodeBlocks />}
-      </section>
+    <div className="expanded-prompt-panes">
+      <PromptEditor ref={editor} expanded label={t("Expanded prompt")}
+        value={text} onChange={onChange} onPaste={onPaste} onCompositionStart={onCompositionStart}
+        onKeyDown={event => {
+          if (dispatchExpandedComposerKey({ ...event, isComposing: event.nativeEvent.isComposing,
+            keyCode: event.nativeEvent.keyCode }, onClose)) { event.preventDefault(); event.stopPropagation(); }
+        }} />
     </div>
     {attachments}
     <ProjectReferencePicker text={text} edit={onChange} input={editor} compact={false} />
-    <p id="expanded-prompt-hint">{t("Enter / Escape / Ctrl+Enter close · Shift+Enter new line · Draft preserved; nothing is sent.")}</p>
+    <p id="expanded-prompt-hint">{t("Escape / Ctrl+Enter close · Enter new line · Draft preserved; nothing is sent.")}</p>
   </dialog>;
 }

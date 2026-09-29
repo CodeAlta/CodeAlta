@@ -31,7 +31,7 @@ const capability = createMutationCapability(epoch);
 const root = createRoot(document.getElementById("app")!);
 function render() {
   const session: WorkspaceSession = { id: currentSession, title: currentSession, fullTitle: currentSession,
-    createdAt: null, fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: "project", lineageIssue: null,
+    messageCount: null, createdAt: null, fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: "project", lineageIssue: null,
     workspacePath: "/fixture/project", providerKey: "fixture", updatedAt: "2026-09-25T00:00:00Z" };
   const snapshot: WorkspaceSnapshot = { configured: true, projects: [{ id: "project", name: "Project", path: "/fixture/project", archived }],
     sessions: [session], projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false };

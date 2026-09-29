@@ -1892,18 +1892,10 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   const archivedScope = archivedProjectScope(snapshot, selectedProjectId);
   const ownedHost = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
   const ownedSession = ownedHost && !archivedScope;
-  const infoControl = <><button ref={infoTrigger} type="button" className="composer-icon-button session-info-trigger"
+  const infoControl = <button ref={infoTrigger} type="button" className="composer-icon-button session-info-trigger"
     aria-label={t("Session info")} title={`${t("Session info")} (Ctrl+G, Ctrl+T)`} aria-haspopup="dialog" aria-expanded={infoOpen}
-    onClick={openInfo}><AppIcon name="info" size={16} /></button>
-    {ownedSession && status?.ownedAsksEnabled && <button type="button" className="composer-icon-button" aria-label={t("Refresh asks")} title={t("Refresh asks")}
-      onClick={() => { if (infoLifetime.current() && !document.querySelector('dialog[open]')) askRefresh.current?.(); }}><AppIcon name="question" size={16} /></button>}</>;
+    onClick={openInfo}><AppIcon name="info" size={16} /></button>;
   return <div className="session-workspace" ref={workspaceElement}>
-    <header className="session-header">
-      <div><span className="eyebrow">Session</span><h1 title={session.title}>{session.title}</h1></div>
-      <div className="session-chips"><span>{session.providerKey ?? "Provider not recorded"}</span>
-        <span>{demoMode ? "Demo" : archivedScope ? "Archived (read-only)" : status?.hostAvailable ? "Host available" : "Catalog only"}</span>
-        {demoMode && infoControl}</div>
-    </header>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       lifetime={infoLifetime} canRead={() => !!mutation?.capability.canMutate()}
       target={ownedSession && !demoMode && mutation?.capability.canMutate() ? runtimeTarget(snapshot, { sessionId: session.id, projectId: selectedProjectId, path: session.workspacePath }, status?.hostEpoch ?? undefined) : null} />}
@@ -1915,7 +1907,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
           onWheel={event => { newest.cancel(); timeline.wheel(event); }} onKeyDown={timeline.keyDown}
           onPointerDown={event => { newest.cancel(); timeline.pointerDown(event); }}
           onPointerMove={timeline.pointerMove} onPointerUp={timeline.pointerEnd} onPointerCancel={timeline.pointerEnd}>
-        <History sessionId={session.id} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onSettled={() => {
+        <History sessionId={session.id} messageCount={session.messageCount} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onSettled={() => {
           timeline.settled(); if (!newest.pending()) timeline.pauseIfUnfollowed();
         }}
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}
@@ -1938,10 +1930,6 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
         <div className="composer-resize-bar" ref={resizeBar}>
           <ComposerSplitter value={layout.rendered} min={bounds.min} max={bounds.max} automatic={preferredComposerHeight === undefined}
             onResize={resizeComposer} onReset={() => onComposerHeight(undefined)} />
-          {preferredComposerHeight !== undefined && <button type="button" className="quiet-button" onClick={() => {
-            resizeBar.current?.querySelector<HTMLElement>(".composer-splitter")?.focus(); onComposerHeight(undefined);
-          }}
-            aria-label="Reset composer size to automatic">Auto size</button>}
         </div>
         <div ref={composerRegion} className={`composer-region${preferredComposerHeight === undefined ? "" : " resized"}`}
           style={visibleComposerHeight === undefined ? undefined : { height: visibleComposerHeight }}>

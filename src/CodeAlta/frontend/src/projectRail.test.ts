@@ -8,7 +8,7 @@ import { ProjectRailRows } from "./ProjectRailRows";
 
 const project = (id: string, name: string, path = `/${id}`, archived = false): WorkspaceProject => ({ id, name, path, archived });
 const session = (id: string, projectId: string, workspacePath: string, updatedAt: string): WorkspaceSession => ({
-  createdAt: null, id, title: id, fullTitle: id, fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId,
+  messageCount: null, createdAt: null, id, title: id, fullTitle: id, fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId,
   lineageIssue: null, workspacePath, providerKey: null, updatedAt,
 });
 const snapshot = (projects: WorkspaceProject[], sessions: readonly WorkspaceSession[] = []): WorkspaceSnapshot => ({

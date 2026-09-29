@@ -57,7 +57,9 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
   const canMutate = useSyncExternalStore(capability.subscribe, capability.canMutate);
   useEffect(() => actions.subscribe(() => repaint(value => value + 1)), [actions]);
   useEffect(() => {
+    if (!canMutate) return;
     const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const version = readVersion.current;
     setReadPending({ epoch, sessionId, version });
     // Read only; selection cancellation cannot reach any action or its app-owned original waiter.
@@ -81,9 +83,11 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
       sourceAuthority.current = null;
       setDrafts(current => current.map(d => !d.detached && d.epoch === epoch && d.sessionId === sessionId ? { ...d, detached: true } : d));
       setPage(undefined); setNotice("failed");
-    } });
-    return () => { controller.abort(); void observer; };
-  }, [epoch, sessionId, revision, actions, capability, scope]);
+    } }).finally(() => {
+      if (!controller.signal.aborted) timer = setTimeout(() => setRevision(value => value + 1), 1000);
+    });
+    return () => { clearTimeout(timer); controller.abort(); void observer; };
+  }, [epoch, sessionId, revision, actions, capability, scope, canMutate]);
   const page = pageState?.epoch === epoch && pageState.sessionId === sessionId ? pageState.page : undefined;
   const head = page?.head;
   const source = head?.state === "pending" ? draftSource(epoch, sessionId, head) : null;
@@ -174,8 +178,6 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
     {(!page?.head || notice === "failed" || notice === "invalid") && <p role={notice === "failed" || notice === "invalid" ? "alert" : "status"}>{t(notices[notice])}</p>}
     {!canMutate && <p role="alert">{t("Host identity changed. Reload required; retained ask actions cannot be retargeted.")}</p>}
     <p className="detail">{t("Restricted caller-session asks only. Answer starts a new text submission; Cancel does not stop a run. No files, provider input, automatic retry or restart recovery.")}</p>
-    <button type="button" onClick={refresh}>{t("Refresh asks")}</button>
-    {reading && <p className="detail" role="status">{t("Ask refresh pending; answer and cancel are unavailable until this read settles.")}</p>}
     {drafts.length >= maximumDrafts && !active && <p className="detail">{t("Local draft limit reached. Confirm discard of a recovery draft before editing another ask.")}</p>}
     {recovery.map(d => <div className="ask-draft-recovery" key={d.id}>
       <p>{t("Local unsubmitted ask draft (read-only). The original ask changed, disappeared or could not be verified; this text cannot be submitted or silently rebound. Component-lifetime only.")}</p>

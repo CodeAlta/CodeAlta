@@ -21,7 +21,7 @@ import { selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
 import type { ReminderCreateRequest, ReminderListRequest, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 
 const sessions: WorkspaceSession[] = ["one", "two"].map(id => ({
-  createdAt: null, id, title: `Title ${id}`, fullTitle: `Title ${id}`, fullTitleTruncated: false, parentSessionId: null,
+  messageCount: null, createdAt: null, id, title: `Title ${id}`, fullTitle: `Title ${id}`, fullTitleTruncated: false, parentSessionId: null,
   scopeKind: "project", projectId: "project", lineageIssue: null, workspacePath: "/fixture/project",
   providerKey: "fixture", updatedAt: "2026-09-24T00:00:00Z",
 }));

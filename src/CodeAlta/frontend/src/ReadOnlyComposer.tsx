@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type ClipboardEvent } from "react";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
-import { promptEditorHeight } from "./workspacePresentation";
+import { PromptEditor, type PromptInput } from "./PromptEditor";
 import { dispatchTransientComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
@@ -12,58 +12,38 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
   infoControl?: ReactNode;
   onOpenHelp?: () => void; onOpenPalette?: () => void;
   localDraft?: { text: string; edit: (text: string) => void; action: ReactNode };
-  localImages?: { paste: (event: ClipboardEvent<HTMLTextAreaElement>) => void; attachments: ReactNode; invalidate: () => void };
+  localImages?: { paste: (event: ClipboardEvent<HTMLElement>) => void; attachments: ReactNode; invalidate: () => void };
 }) {
   const { t } = useShellLanguage();
   const [draft, setDraft] = useState(() => ({ text: restoreDraft(key => localStorage.getItem(key), sessionId), editGeneration: null as number | null }));
   const text = localDraft?.text ?? draft.text;
   const [expanded, setExpanded] = useState(false);
   const [imageNotice, setImageNotice] = useState("");
-  function refuseImagePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+  function refuseImagePaste(event: ClipboardEvent<HTMLElement>) {
     if (localDraft && localImages) { localImages.paste(event); return; }
     if (event.clipboardData.files.length) { event.preventDefault(); setImageNotice("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred."); }
   }
   const edit = (value: string) => localDraft ? localDraft.edit(value)
     : setDraft({ text: value, editGeneration: draftIndicators.edit(sessionId, value, restoredText.current) });
   const restoredText = useRef(text);
-  const promptInput = useRef<HTMLTextAreaElement>(null);
+  const promptInput = useRef<PromptInput>(null);
   useLayoutEffect(() => { draftIndicators.clear(sessionId); }, [draftIndicators, sessionId]);
   useEffect(() => { if (localDraft) return; draftIndicators.persisted(sessionId, draft.editGeneration,
     persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), sessionId, draft.text));
   }, [sessionId, draft, draftIndicators]);
-  useLayoutEffect(() => {
-    const input = promptInput.current;
-    if (!input) return;
-    const measure = () => {
-      input.style.height = "auto";
-      input.style.height = `${promptEditorHeight(input.scrollHeight, window.innerHeight)}px`;
-    };
-    measure();
-    const workspace = input.closest<HTMLElement>(".session-workspace");
-    let width = workspace?.clientWidth;
-    const observer = new ResizeObserver(() => {
-      if (workspace && workspace.clientWidth !== width) { width = workspace.clientWidth; measure(); }
-    });
-    if (workspace) observer.observe(workspace);
-    window.addEventListener("resize", measure);
-    return () => { observer.disconnect(); window.removeEventListener("resize", measure); };
-  }, [text]);
   return <section className="composer catalog-composer" aria-label={t("Message composer")}>
     {localDraft && <details className="composer-reference-help"><summary>@</summary><p className="catalog-diagnostics">{t("@ search requires an owned, verified project. References resolve only on normal Send after creation and transfer; file contents are not uploaded.")}</p></details>}
     {expanded && <ExpandedPromptEditor text={text} onChange={edit} onPaste={refuseImagePaste} onCompositionStart={localImages?.invalidate} attachments={localDraft && localImages ? localImages.attachments : imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>} onClose={() => { localImages?.invalidate(); setExpanded(false); }} />}
     {!expanded && localDraft && localImages && localImages.attachments}
     {!expanded && imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>}
     <label className="sr-only" htmlFor="catalog-prompt">{t("Message draft")}</label>
-    <textarea id="catalog-prompt" ref={promptInput} onPaste={refuseImagePaste} className="prompt-input" rows={1} aria-describedby="catalog-draft-status"
+    <PromptEditor id="catalog-prompt" ref={promptInput} onPaste={refuseImagePaste} label={t("Message draft")} disabled={expanded}
       onCompositionStart={() => localImages?.invalidate()}
-      maxLength={32768} value={text} onChange={event => {
-        const value = event.target.value;
-        edit(value);
-      }} onKeyDown={event => {
+      value={text} onChange={edit} onKeyDown={event => {
         if (dispatchTransientComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
           altKey: event.altKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing,
           keyCode: event.nativeEvent.keyCode, repeat: event.repeat, defaultPrevented: event.defaultPrevented },
-        event.currentTarget, onOpenHelp, onOpenPalette)) event.preventDefault();
+        promptInput.current!, onOpenHelp, onOpenPalette)) { event.preventDefault(); event.stopPropagation(); }
         if (event.key === "F6" && !event.defaultPrevented && !event.repeat && !event.nativeEvent.isComposing
           && event.nativeEvent.keyCode !== 229 && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
           event.preventDefault(); setExpanded(true);

@@ -4,6 +4,7 @@ import { captureReferenceInput, closeReferencePopup, createReferenceSearchFence,
 import { ProjectReferencePresentation } from "./ProjectReferencePresentation";
 import { AppIcon } from "./AppIcon";
 import { useShellLanguage } from "./shellLanguage";
+import type { PromptInput } from "./PromptEditor";
 
 export const ProjectReferenceContext = createContext<(Omit<SessionReferenceSearchRequest, "query"> & {
   observe?: (value: { status: string; epoch: string | null }) => void;
@@ -12,7 +13,7 @@ export const ProjectReferenceContext = createContext<(Omit<SessionReferenceSearc
 }) | null>(null);
 
 export function ProjectReferencePicker({ text, edit, input, compact = true }: {
-  text: string; edit: (text: string) => void; input: RefObject<HTMLTextAreaElement | null>; compact?: boolean;
+  text: string; edit: (text: string) => void; input: RefObject<PromptInput | null>; compact?: boolean;
 }) {
   const { t } = useShellLanguage();
   const scope = useContext(ProjectReferenceContext);
@@ -99,7 +100,7 @@ export function ProjectReferencePicker({ text, edit, input, compact = true }: {
     const interact = () => {
       const next = `${element.selectionStart}:${element.selectionEnd}`;
       if (next !== selection) { selection = next; revision.current++; cancelFocus(); }
-      if (document.activeElement === element) { engaged.current = true; setInteraction(value => value + 1); }
+      if (element.contains(document.activeElement)) { engaged.current = true; setInteraction(value => value + 1); }
     };
     const edited = () => { revision.current++; cancelFocus(); interact(); };
     const begin = () => { composing.current = true; edited(); };
@@ -128,7 +129,7 @@ export function ProjectReferencePicker({ text, edit, input, compact = true }: {
     const original = readInput();
     const element = input.current;
     const key = JSON.stringify([identity, original.text, original.start, original.end, original.revision]);
-    if (!element || document.activeElement !== element || original.text !== text || dismissed.current === key) return;
+    if (!element || !element.contains(document.activeElement) || original.text !== text || dismissed.current === key) return;
     const parent = element.closest("dialog");
     if (Array.from(document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]')).some(node => node !== parent)) return;
     const lifetime = scope.capturePopup();

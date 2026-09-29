@@ -68,14 +68,10 @@ export function ToolRecordInspection({ record, canInspect }: { record: ToolRecor
         if (event.key === "Escape") { event.preventDefault(); close(); }
       }}>
       <header><h2 id={id}>{t("Inspect supplied tool record")}</h2><button ref={closeButton} type="button" aria-label={t("Close")} onClick={() => { if (active.current === review) close(); }}><AppIcon name="close" size={18} /></button></header>
-      <p>{t("One persisted record only. Reported phase is not proof of success or completion; outputs may be incomplete.")}</p>
       <p><code>{record.name ?? t("Unknown")}</code></p>
-      {record.partial && <p>{t("Additional diagnostic details were omitted.")}</p>}
-      {record.fields.map(field => <section key={field.path}><h3><code>{field.path}</code></h3>
-        <CodePreview field={field.path} text={field.text.slice(0, field.text.charCodeAt(4095) >= 0xd800 && field.text.charCodeAt(4095) <= 0xdbff ? 4095 : 4096)} />
-        {field.text.length > 4096 && <p>{t("Display excerpt; Copy retains the supplied JSON.")}</p>}
-      </section>)}
-      <h3>{t("Supplied record provenance")}</h3><pre data-tool-provenance>{record.provenance}</pre>
+      <div className="dialog-panes">{record.fields.map(field => <section className="detail-pane" key={field.path}><h3><code>{field.path}</code></h3>
+        <CodePreview field={field.path} text={field.text} />
+      </section>)}</div>
       <button type="button" className="tool-record-copy" disabled={retired || !allowed()} onClick={async event => {
         if (event.defaultPrevented || !event.currentTarget.isConnected || !current(review)) return;
         try { await navigator.clipboard.writeText(record.raw); if (current(review)) setCopied(true); }

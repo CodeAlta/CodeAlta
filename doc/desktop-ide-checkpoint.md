@@ -669,3 +669,43 @@ build. Existing fixture values were extended with nullable timestamp/order field
 compile against the generated contract; no test suite or real provider was run. Native
 and browser visual acceptance remain to be done. Unrelated Agent prototype work is not
 part of this change.
+
+### Quiet timeline chrome and Monaco composer
+
+Removed the session/timeline headings, host/provider chips, routine history-budget banner,
+manual refresh controls, Auto size button, advanced composer diagnostics and redundant
+prompt/model search buttons. The resize separator remains keyboard accessible, with its
+existing reset gesture. Selector groups are content-sized and left aligned; timeline-to-composer
+padding is reduced. Tool names and non-interactive parts of tool rows open the same details
+dialog. Detail bodies/fields scroll inside the dialog rather than scrolling its header and
+close button; provenance and truncation diagnostic footers are removed from presentation.
+
+Inline, local-draft and expanded composers now use `monaco-editor` 0.57.0 with Blueprint's
+monospace typography class. Only the Markdown language is registered. The Vite-built worker
+is same-origin; the existing CSP is unchanged, with no CDN, blob or eval exception. Editors
+dispose models/workers through Monaco ownership, preserve controlled drafts and project-reference
+selection/focus fences, retain bounded PNG paste and the 32,768-character limit, and follow the
+shell theme. The expanded editor has no Markdown preview: Enter inserts a newline;
+Escape/Ctrl+Enter closes without submitting. Regular Enter/Shift+Enter/Ctrl+Enter semantics remain.
+
+Runtime and Ask observations refresh automatically with one read at a time per loop. A
+background runtime read retains the previous presentation until new facts arrive; failures
+and identity changes remain explicit. Thinking uses observed active-run state, including
+runs already active when the composer opens, not just a last `RunSubmitted` event. Receipt
+reconciliation also runs automatically and checks the captured draft revision/text before
+clearing it. No mutation is automatically retried or retargeted.
+
+Initial history paging stops at the latest user prompt. Later live refreshes retain that
+initial boundary so new turns do not erase previously visible conversation. Omitted older
+records retain a revisioned byte cursor; the existing memory/wire limits remain. The older
+button uses the catalog's cached display-message count when available, less rendered rows;
+missing or unusable counts fall back to “Load previous messages” rather than inventing a
+total or scanning a multi-gigabyte journal just to obtain one. Counts are catalog estimates,
+not a new lossless journal index.
+
+Verification: backend Release build and frontend TypeScript/production build. Fixture
+session objects were updated only for the nullable message-count contract. Tests and
+browser/native/provider acceptance were not run, per the rapid-iteration constraint.
+Older browser fixtures still assume textarea DOM and removed controls and need migration
+before that suite is used as an acceptance gate. Monaco increases the frontend bundle;
+the existing chunk-size warning remains.

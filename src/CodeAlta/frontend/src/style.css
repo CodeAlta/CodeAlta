@@ -262,8 +262,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
 /* Chrome must not acquire taller line boxes solely from CJK fallback fonts.
    Markdown/code retain their own line heights; translated text can still wrap.
    The outer access scroller opts out of anchoring; this viewport keeps its own. */
-.timeline-scroll { flex: 1 1 0; min-width: 0; min-height: 0; overflow-y: scroll; overscroll-behavior: contain; padding: 0 8px 28px 0; line-height: 1.5; }
-.composer-resize-bar { flex: 0 0 auto; display: flex; align-items: center; min-height: 8px; margin: 6px 4px 0; }
+.timeline-scroll { flex: 1 1 0; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 0 0; line-height: 1.5; }
+.composer-resize-bar { flex: 0 0 auto; display: flex; align-items: center; min-height: 4px; margin: 0 4px; }
 .composer-resize-bar .quiet-button { flex: 0 0 auto; padding: 2px 7px; font-size: 11px; }
 .composer-splitter { flex: 1 1 auto; position: relative; height: 8px; cursor: row-resize; touch-action: none; }
 .composer-splitter::before { content: ""; position: absolute; inset: -3px 0; }
@@ -858,7 +858,9 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .composer-integrations { flex-wrap: wrap; justify-content: flex-end; }
 .ide-shell .owned-session { box-shadow: none !important; }
 .ide-shell .reference-metadata-disclosure > summary { list-style: none; cursor: pointer; }
-.ide-shell .messages { gap: 8px; }
+.ide-shell .messages { gap: 8px; padding-bottom: 0; }
+.ide-shell .conversation { margin-top: 0; }
+.ide-shell .session-workspace { padding-top: 4px; padding-bottom: 0; }
 .ide-shell .timeline-message { position: relative; display: flex; gap: 8px; padding: 12px; border: 1px solid var(--line); border-left: 2px solid var(--card-color, var(--muted)); border-radius: var(--bp-surface-border-radius); background: color-mix(in srgb, var(--card-color, var(--muted)) 8%, var(--panel)); margin-bottom: 8px; }
 .ide-shell .timeline-message .avatar { width: 18px; height: 22px; flex: 0 0 18px; border: 0; background: none; color: var(--card-color, var(--muted)); border-radius: 0; }
 .ide-shell .message-assistant { --card-color: var(--accent); }
@@ -910,7 +912,15 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .message-body { min-width: 0; flex: 1; }
 .ide-shell .message-body .markdown-body { font-size: var(--bp-typography-size-body-medium); line-height: var(--bp-typography-line-height-large); }
 .ide-shell .timeline-message .muted-text { font-size: var(--bp-typography-size-body-small); margin: 2px 0; }
-.timeline-details-dialog, .app-dialog.history-source { width: min(850px, calc(100vw - 32px)); max-height: 80dvh; overflow: auto; }
+.timeline-details-dialog, .app-dialog.history-source, .app-dialog.tool-record-dialog { width: min(850px, calc(100vw - 32px)); max-height: 80dvh; overflow: hidden; }
+.app-dialog.tool-record-dialog { display: flex; }
+.timeline-details-dialog > header, .tool-record-dialog > header, .history-source > header { flex-shrink: 0; }
+.dialog-panes { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: auto; }
+.dialog-panes .detail-pane { flex: 0 0 auto; max-height: 35dvh; overflow: auto; }
+.dialog-panes .detail-pane > h3 { margin: 0 0 8px; }
+.timeline-details-dialog > pre, .history-source > pre { min-height: 0; flex: 1 1 auto; overflow: auto; }
+.timeline-details-dialog .detail-pane pre { max-height: none; margin: 0; }
+.message-tool { cursor: pointer; }
 .timeline-details-dialog header, .history-source header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .timeline-details-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50dvh; overflow: auto; }
 .ide-shell .session-list-disclosure { display: flex; gap: 6px; }
@@ -973,18 +983,24 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
    controls into the shell; the root Classes.DARK follows the theme preference. */
 .bp6-html-select { min-width: 0; max-width: 100%; }
 .ide-shell .owned-session .prompt-options .bp6-html-select select { margin: 0; width: 100%; }
-.ide-shell .owned-session .prompt-options { flex-wrap: nowrap; align-items: center; gap: 12px; padding: 8px 0; }
-.ide-shell .prompt-options > .composer-field { flex: 1 1 0; min-width: 0; margin: 0; flex-direction: row; align-items: center; gap: 6px; }
+.ide-shell .owned-session .prompt-options { flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-start; align-items: center; gap: 12px; padding: 4px 0; }
+.ide-shell .prompt-options > .composer-field { flex: 0 1 auto; min-width: 0; margin: 0; flex-direction: row; align-items: center; gap: 6px; }
 .ide-shell .composer-field > .bp6-label { margin: 0; white-space: nowrap; }
-.ide-shell .composer-field > .bp6-form-content { flex: 1; min-width: 0; }
-.ide-shell .prompt-options > .composer-model-field { flex: 2 1 0; }
+.ide-shell .composer-field > .bp6-form-content { flex: 0 1 auto; min-width: 0; }
+.ide-shell .prompt-options > .composer-model-field { flex: 0 1 auto; }
 .ide-shell .composer-model-options { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
-.ide-shell .composer-model-options > * { flex: 1 1 0; min-width: 0; }
+.ide-shell .composer-model-options > * { flex: 0 1 auto; min-width: 0; max-width: 240px; }
 @media (max-width: 600px) {
   .ide-shell .owned-session .prompt-options { flex-wrap: wrap; }
-  .ide-shell .prompt-options > .composer-field { flex-basis: 180px; }
-  .ide-shell .prompt-options > .composer-model-field { flex-basis: 280px; }
+  .ide-shell .prompt-options > .composer-field { max-width: 100%; }
 }
+.prompt-editor { position: relative; min-width: 0; height: 56px; flex-shrink: 0; border: 1px solid var(--line); border-radius: var(--bp-surface-border-radius); overflow: hidden; }
+.prompt-editor.expanded { height: 100%; min-height: 0; }
+.composer-region.resized .prompt-editor { flex: 1 0 auto; }
+.prompt-editor[data-placeholder]::after { content: attr(data-placeholder); position: absolute; top: 8px; left: 8px; color: var(--muted); pointer-events: none; font: inherit; }
+.prompt-editor .monaco-editor textarea { min-height: 0; padding: 0; margin: 0; border: 0; box-shadow: none; }
+.expanded-prompt-dialog { overflow: hidden; }
+.expanded-prompt-dialog > header, .expanded-prompt-dialog > p { flex-shrink: 0; }
 .ide-shell .activity-rail > .bp6-button { min-width: 36px; min-height: 36px; }
 .appearance-settings h2 { margin: 0 0 12px; font-size: var(--bp-typography-size-heading-medium); font-weight: var(--bp-typography-weight-bold); }
 .appearance-settings p { margin: 8px 0 16px; color: var(--muted); line-height: 1.5; }

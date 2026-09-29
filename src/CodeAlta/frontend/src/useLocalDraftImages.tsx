@@ -10,7 +10,7 @@ export function useLocalDraftImages(owner: ReturnType<typeof createImageDrafts>,
   const t = (key: MessageKey, parameters?: Record<string, string | number>) => translate(locale, key, parameters);
   const images = owner.get(key);
   const [notice, setNotice] = useState(false);
-  async function paste(event: ClipboardEvent<HTMLTextAreaElement>) {
+  async function paste(event: ClipboardEvent<HTMLElement>) {
     if (!event.clipboardData.files.length) return;
     event.preventDefault();
     invalidate();

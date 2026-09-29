@@ -26,6 +26,7 @@ export function TimelineMessage({ item, canInspect, historySource, onOpenSource,
   historySource?: HistorySourceTarget; onOpenSource?: (target: HistorySourceTarget) => void }) {
   const { t, locale } = useShellLanguage();
   const timestamp = timelineTime(item.timestamp, locale);
+  const toolTrigger = useRef<HTMLButtonElement>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [details, setDetails] = useState<{ item: TimelineItem; origin: HTMLButtonElement; current?: () => boolean } | null>(null);
   const latestItem = useRef(item); latestItem.current = item;
@@ -117,11 +118,15 @@ export function TimelineMessage({ item, canInspect, historySource, onOpenSource,
       && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) setDetails({ item, origin, current: canInspect });
   }
   return <article className={`message timeline-message message-${item.category}${compact ? " timeline-compact" : ""}`}
+    onClick={event => {
+      if (item.category === "tool" && hasDetails && toolTrigger.current && !event.defaultPrevented
+        && !(event.target as HTMLElement).closest("button, a, dialog, input, textarea") && !window.getSelection()?.toString()) openDetails(toolTrigger.current);
+    }}
     data-tool-phase={item.toolPhase} data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}>
     <div className="avatar"><AppIcon name={item.icon} size={17} /></div>
     <div className="message-body">
       <div className="message-heading">
-        <span>{toolTile && hasDetails ? <button type="button" className="tool-tile-title" aria-haspopup="dialog"
+        <span>{item.category === "tool" && hasDetails ? <button ref={toolTrigger} type="button" className="tool-tile-title" aria-haspopup="dialog"
           onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
           onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}><span className="tool-state-dot" aria-hidden="true">●</span> <strong>{title}</strong></button>
           : item.category !== "reasoning" && <strong>{title}</strong>}{!toolTile && item.subtitle && <small>{item.subtitle === "Sending…" || item.subtitle === "Pending" || item.subtitle === "Failed" || item.subtitle === "Streaming" ? t(item.subtitle) : item.subtitle}</small>}</span>

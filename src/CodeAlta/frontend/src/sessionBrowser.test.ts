@@ -7,7 +7,7 @@ import { paletteAvailable } from "./paletteActions";
 
 const snapshot: WorkspaceSnapshot = { configured: true, projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false,
   projects: [{ id: "p", name: "Project", path: "/p", archived: false }], sessions: ["one", "two", "global"].map(id => ({ id,
-    title: id, fullTitle: `Saved ${id}`, fullTitleTruncated: false, createdAt: null, updatedAt: "saved-time",
+    messageCount: null, title: id, fullTitle: `Saved ${id}`, fullTitleTruncated: false, createdAt: null, updatedAt: "saved-time",
     parentSessionId: null, lineageIssue: null, providerKey: null, scopeKind: id === "global" ? "global" : "project",
     projectId: id === "global" ? null : "p", workspacePath: id === "global" ? null : "/p" })) };
 const tab = { sessionId: "one", projectId: "p", path: "/p" };

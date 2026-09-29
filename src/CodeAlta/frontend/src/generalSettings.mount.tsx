@@ -11,7 +11,7 @@ import { useWindowPreferences } from "./windowPreferences";
 const snapshot: WorkspaceSnapshot = {
   configured: true, projects: [{ id: "a", name: "Alpha", path: "/a", archived: false },
     { id: "z", name: "Zeta", path: "/z", archived: false }],
-  sessions: [{ createdAt: null, id: "s", title: "S", fullTitle: "S", fullTitleTruncated: false, parentSessionId: null,
+  sessions: [{ messageCount: null, createdAt: null, id: "s", title: "S", fullTitle: "S", fullTitleTruncated: false, parentSessionId: null,
     scopeKind: "project", projectId: "z", lineageIssue: null, workspacePath: "/z", providerKey: null,
     updatedAt: "2026-01-01T00:00:00Z" }],
   projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false,

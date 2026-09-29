@@ -28,15 +28,13 @@ export function TimelineDetails({ item, current, onClose }: { item: TimelineItem
     onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
     onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); if (!event.repeat && !composing.current && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) onClose(); } }}>
     <header><h2>{item.title}</h2><button ref={close} type="button" aria-label={t("Close")} title={t("Close")} onClick={onClose}><AppIcon name="close" size={18} /></button></header>
-    {item.summary && <CodePreview text={item.summary} />}
-    {item.markdown && item.category !== "file" && <MarkdownContent source={item.markdown} timelineCodeBlocks />}
-    {item.detailMarkdown && item.category !== "file" && item.detailMarkdown !== item.markdown && <MarkdownContent source={item.detailMarkdown} timelineCodeBlocks />}
-    {(item.toolFields?.length ? item.toolFields : item.toolRecord?.fields)?.map(field => <section key={field.path}><h3>{field.path}</h3><CodePreview text={field.text} field={field.path} />
-      {"truncated" in field && field.truncated === true && <p>{t("Additional diagnostic details were omitted.")}</p>}</section>)}
-    {item.toolOutput && ![...(item.toolFields ?? []), ...(item.toolRecord?.fields ?? [])].some(field => field.text.includes(item.toolOutput!)) && <CodePreview text={item.toolOutput} />}
-    {item.details && !["tool", "file"].includes(item.category) && <pre>{item.details}</pre>}
-    <ul>{item.metadata.map(value => <li key={value}>{value}</li>)}</ul>
-    {item.bodyOmitted && <p>{t("Additional diagnostic details were omitted.")}</p>}
-    {item.truncated && <p>{t("Some details were shortened to fit the desktop history window.")}</p>}
+    <div className="dialog-panes">
+    {item.summary && <section className="detail-pane"><CodePreview text={item.summary} /></section>}
+    {item.markdown && item.category !== "file" && <section className="detail-pane"><MarkdownContent source={item.markdown} timelineCodeBlocks /></section>}
+    {item.detailMarkdown && item.category !== "file" && item.detailMarkdown !== item.markdown && <section className="detail-pane"><MarkdownContent source={item.detailMarkdown} timelineCodeBlocks /></section>}
+    {(item.toolFields?.length ? item.toolFields : item.toolRecord?.fields)?.map(field => <section className="detail-pane" key={field.path}><h3>{field.path}</h3><CodePreview text={field.text} field={field.path} /></section>)}
+    {item.toolOutput && ![...(item.toolFields ?? []), ...(item.toolRecord?.fields ?? [])].some(field => field.text.includes(item.toolOutput!)) && <section className="detail-pane"><CodePreview text={item.toolOutput} /></section>}
+    {item.details && !["tool", "file"].includes(item.category) && <section className="detail-pane"><pre>{item.details}</pre></section>}
+    </div>
   </dialog>;
 }

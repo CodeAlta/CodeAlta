@@ -178,7 +178,7 @@ internal sealed partial class WorkspaceService
             remaining -= cost;
             displayedSessions.Add(new WorkspaceSession(session.SessionId, title, session.WorkspacePath, session.ProviderKey, session.UpdatedAt,
                 fullTitle, sourceTitle.Length > 4096, parent, scopeKind, projectId, lineageIssue,
-                session.CreatedAt.Year > 1 ? session.CreatedAt : null));
+                session.CreatedAt.Year > 1 ? session.CreatedAt : null, session.ViewState?.MessageCount is >= 0 ? session.ViewState.MessageCount : null));
         }
         return new WorkspaceSnapshot(true, displayedProjects.ToArray(), displayedSessions.ToArray(),
             displayedProjects.Count < projects.Count, displayedSessions.Count < sessions.Count, shortened);
@@ -233,4 +233,4 @@ internal sealed record WorkspaceSnapshot(bool Configured, WorkspaceProject[] Pro
 internal sealed record WorkspaceProject(string Id, string Name, string Path, bool Archived);
 internal sealed record WorkspaceSession(string Id, string Title, string? WorkspacePath, string? ProviderKey, DateTimeOffset UpdatedAt,
     string FullTitle, bool FullTitleTruncated, string? ParentSessionId, string? ScopeKind, string? ProjectId, string? LineageIssue,
-    DateTimeOffset? CreatedAt);
+    DateTimeOffset? CreatedAt, int? MessageCount = null);

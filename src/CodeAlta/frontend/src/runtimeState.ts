@@ -108,7 +108,7 @@ export function createRuntimeStateReader(
       if (!signal.aborted) signal.addEventListener("abort", detach, { once: true });
       if (reloadCode) publish(selection, { kind: "error", code: reloadCode });
       return {
-        refresh(): Promise<Outcome> {
+        refresh(background = false): Promise<Outcome> {
           if (!current(selection)) return Promise.resolve("detached");
           if (reloadCode) { publish(selection, { kind: "error", code: reloadCode }); return Promise.resolve("blocked"); }
           discardPending("superseded");
@@ -118,7 +118,7 @@ export function createRuntimeStateReader(
           // Reserve the original owner and retain its drain before notifying reentrant subscribers.
           // Invocation remains scheduled, so loading still precedes the original RPC call.
           start();
-          publish(selection, { kind: "loading" });
+          if (!background) publish(selection, { kind: "loading" });
           return promise;
         },
       };

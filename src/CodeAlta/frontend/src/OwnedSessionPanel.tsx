@@ -14,10 +14,9 @@ import type { createPermissionReviewer } from "./sessionPermissions";
 import { CommandPermissionPanel } from "./CommandPermissionPanel";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { AppIcon } from "./AppIcon";
-import { promptEditorHeight, showContextAction } from "./workspacePresentation";
+import { showContextAction } from "./workspacePresentation";
+import { PromptEditor, type PromptInput } from "./PromptEditor";
 import { changeSelection, validSelection } from "./sessionSelection";
-import { ModelChooser, boundedModelChoices, type ModelChooserCapture } from "./ModelChooser";
-import { PromptChooser, boundedPromptChoices, promptChoicesSignature, type PromptChooserCapture } from "./PromptChooser";
 import { ProviderChooser } from "./ProviderChooser";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
@@ -80,11 +79,10 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     draftIndicators.clear(sessionId);
     setDraft({ text: "", editGeneration: null });
   }
-  const promptInput = useRef<HTMLTextAreaElement>(null);
+  const promptInput = useRef<PromptInput>(null);
   const referenceScope = useContext(ProjectReferenceContext);
   const [expanded, setExpanded] = useState(false);
   const [recoveryExpanded, setRecoveryExpanded] = useState(false);
-  const [diagnosticsExpanded, setDiagnosticsExpanded] = useState(false);
   const [choices, setChoices] = useState<SessionChoicesResponse>();
   const [selection, setSelection] = useState<SessionSelection | null>(null);
   const [choicesNotice, setChoicesNotice] = useState("Loading session choices…");
@@ -154,7 +152,14 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   const observedProvider = runtimeState?.kind === "ready" ? runtimeState.snapshot.entry?.providerKey : undefined;
   const observedTransition = runtimeState?.kind === "ready" ? runtimeState.snapshot.coordinatorTransitionInProgress : undefined;
   // Lifecycle observations, not polling: reconcile persisted selection after attach/detach/switch.
-  useEffect(() => { setChoicesRevision(value => value + 1); }, [observedProvider, observedTransition]);
+  const catalogObservation = useRef<string | null>(null);
+  useEffect(() => {
+    if (runtimeState?.kind !== "ready") return;
+    const signature = JSON.stringify([epoch, sessionId, observedProvider, observedTransition]);
+    if (catalogObservation.current === signature) return;
+    catalogObservation.current = signature;
+    setChoicesRevision(value => value + 1);
+  }, [runtimeState, observedProvider, observedTransition, epoch, sessionId]);
   const queueReviewRuntime = useRef(runtimeState); queueReviewRuntime.current = runtimeState;
   const runtimeScope = useRef<ReturnType<typeof runtimeReader.forSelection> | null>(null);
   const [observedInvalidEpoch, setInvalidEpoch] = useState(!capability.canMutate());
@@ -213,12 +218,31 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       : "Refresh runtime state explicitly before targeting cancellation.");
     setRuntimeState(undefined);
     runtimeScope.current = runtimeReader.forSelection({ expectedHostEpoch: epoch, sessionId }, controller.signal, setRuntimeState, capability.observe);
-    void runtimeScope.current.refresh();
+    const runtime = runtimeScope.current;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const observe = async () => {
+      if (controller.signal.aborted || !capability.canMutate()) return;
+      await runtime.refresh(true);
+      if (!controller.signal.aborted) timer = setTimeout(observe, 1000);
+    };
+    void observe();
     setMessage(submissions.pending(sessionId) || submissions.aborts(sessionId).length
       ? "Retained Send/Abort intent exists. Refresh receipts manually or retry the exact request after its original waiter settles."
       : "Ready to send to this owned session.");
-    return () => { controller.abort(); scope.current = null; runtimeScope.current = null; };
+    return () => { clearTimeout(timer); controller.abort(); scope.current = null; runtimeScope.current = null; };
   }, [sessionId, epoch, submissions, steering, compaction, abortRuns, queue, runtimeReader, capability]);
+
+  useEffect(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const read = async () => {
+      if (stopped || !capability.canMutate()) return;
+      await refresh();
+      if (!stopped) timer = setTimeout(read, 1500);
+    };
+    void read();
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [epoch, sessionId, capability]);
 
   useEffect(() => {
     if (!submissions.pending(sessionId)) draftIndicators.persisted(sessionId, draft.editGeneration,
@@ -238,7 +262,12 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   // Presentation only: live run updates never authorize composer operations.
   const currentLive = liveState?.hostEpoch === epoch && liveState.sessionId === sessionId ? liveState : null;
   const liveConnected = currentLive?.kind === "connected" && !currentLive.snapshot?.isClosed;
-  const runActive = liveConnected && currentLive.snapshot?.session?.lifecycle?.kind === "RunSubmitted";
+  const [observedBusy, setObservedBusy] = useState(false);
+  useEffect(() => {
+    if (runtimeState?.kind !== "loading") setObservedBusy(runtimeState?.kind === "ready" && !!runtimeState.snapshot.entry?.activeRunId);
+  }, [runtimeState]);
+  const runActive = !invalidEpoch && (runtimeState === undefined
+    ? liveConnected && currentLive.snapshot?.session?.lifecycle?.kind === "RunSubmitted" : observedBusy);
   const composerBusy = !invalidEpoch && (!!pending?.inFlight || runActive);
   const mcpPlugin = configuration?.plugins.find(plugin => `${plugin.id} ${plugin.name}`.toLowerCase().includes("mcp"));
   const canCaptureSteer = captureSteering(epoch, sessionId, observedTarget, steerText, "availability") !== null;
@@ -256,23 +285,6 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     !!pendingSteer || steerMessage !== "Refresh runtime state explicitly before targeting a run.");
   const showQueue = showContextAction(observedQueueAttachment !== null,
     !!pendingQueue || pendingQueueCancellations.length > 0 || queueMessage !== "Refresh runtime state explicitly before queueing text in this host.");
-  useLayoutEffect(() => {
-    const input = promptInput.current;
-    if (!input) return;
-    const measure = () => {
-      input.style.height = "auto";
-      input.style.height = `${promptEditorHeight(input.scrollHeight, window.innerHeight)}px`;
-    };
-    measure();
-    const workspace = input.closest<HTMLElement>(".session-workspace");
-    let width = workspace?.clientWidth;
-    const observer = new ResizeObserver(() => {
-      if (workspace && workspace.clientWidth !== width) { width = workspace.clientWidth; measure(); }
-    });
-    if (workspace) observer.observe(workspace);
-    window.addEventListener("resize", measure);
-    return () => { observer.disconnect(); window.removeEventListener("resize", measure); };
-  }, [text, pending?.request.text]);
   function observeEpoch(result: { status: string; epoch: string | null }) {
     if (!capability.observe(result)) setInvalidEpoch(true);
   }
@@ -305,24 +317,27 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       setMessage(result.status === "accepted" || result.status === "replay"
         ? "Ready to send to this owned session."
         : `Submission: ${result.status}. Refresh receipts before considering an explicit retry.`);
+      if (result.status === "accepted" || result.status === "replay") void runtimeScope.current?.refresh(true);
       if ((!retained || !request.images?.length) && (result.status === "accepted" || result.status === "replay") && !signal.aborted && inputRevision.current === revision
         && imageOwner.get(imageKey) === capturedImages) { clearText(); imageOwner.replace(imageKey, capturedImages, []); }
     });
   }
-  function refresh(offset = 0) {
+  async function refresh(offset = 0) {
     const signal = scope.current?.signal;
     if (!signal) return;
     const revision = ++receiptRevision.current;
-    void refreshSubmissions(sessions.receipts, epoch, offset, signal, result => {
+    const input = inputRevision.current;
+    const originalText = submissions.pending(sessionId)?.request.text;
+    await refreshSubmissions(sessions.receipts, epoch, offset, signal, result => {
       if (revision !== receiptRevision.current) return;
       observeEpoch(result);
       setPage(result);
       const recoveringImages = !!submissions.pending(sessionId)?.request.images?.length;
       const recovered = submissions.reconcile(sessionId, result, capability);
       // Receipt recovery cannot prove a remounted image draft's original input revision.
-      if (recovered.sendRecovered && !signal.aborted && !recoveringImages) clearText();
+      if (recovered.sendRecovered && !signal.aborted && !recoveringImages && inputRevision.current === input && latestText.current === originalText) clearText();
       if (recovered.sendRecovered || recovered.abortsRecovered > 0)
-        setMessage("Send/Abort receipt reconciled without prompt text. Admission/control settlement is not rollback or run completion.");
+        setMessage("Ready to send to this owned session.");
       if (steering.reconcile(sessionId, result, capability)) {
         setSteerText("");
         setSteerMessage("Steering receipt recovered. Input submission is not run completion.");
@@ -454,69 +469,17 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   const activeChoices = choices?.epoch === epoch && choices.sessionId === sessionId && choices.status === "ok" ? choices : undefined;
   const selected = pending?.request.selection ?? (activeChoices ? selection ?? activeChoices.current : null);
   const selectionDisabled = loadingChoices || !activeChoices?.current || invalidEpoch || !!pending;
-  const storedPromptSelection = selections.current(epoch, sessionId);
-  // A refreshed catalog cannot silently replace an unavailable saved model/effort
-  // with observed defaults merely because the user intended to change a prompt.
-  const promptSelectionDisabled = selectionDisabled || !boundedPromptChoices(activeChoices) || !selected
-    || !validSelection(activeChoices, selected) || !!storedPromptSelection && storedPromptSelection !== selected;
-  const chooserLatest = useRef({ activeChoices, selected, selectionDisabled, epoch, sessionId });
-  chooserLatest.current = { activeChoices, selected, selectionDisabled, epoch, sessionId };
-  const promptScopeRevision = useRef(0);
-  useLayoutEffect(() => { promptScopeRevision.current++; }, [epoch, sessionId, projectId]);
-  function capturePromptChooser(): PromptChooserCapture | null {
-    if (promptSelectionDisabled || !activeChoices || !selected) return null;
-    const observed = activeChoices; const original = selected; const signature = promptChoicesSignature(observed);
-    const revision = selectionRevision.current; const input = inputRevision.current; const projectRevision = promptScopeRevision.current;
-    const lifetime = inputLifetime; const signal = scope.current?.signal;
-    const submissionRevision = submissions.getSnapshot(); const stored = selections.current(epoch, sessionId);
-    const available = () => !!signal && !signal.aborted && scope.current?.signal === signal
-      && (!lifetime || lifetime.current()) && capability.canMutate() && promptScopeRevision.current === projectRevision
-      && chooserLatest.current.epoch === epoch && chooserLatest.current.sessionId === sessionId;
-    const current = () => available() && !submissions.pending(sessionId) && submissions.getSnapshot() === submissionRevision
-      && !chooserLatest.current.selectionDisabled && chooserLatest.current.activeChoices === observed
-      && chooserLatest.current.selected === original && selectionRevision.current === revision && inputRevision.current === input
-      && selections.current(epoch, sessionId) === stored && (!stored || stored === original)
-      && boundedPromptChoices(observed) && promptChoicesSignature(observed) === signature;
-    return { choices: observed, selection: original, current, available, apply: next => {
-      if (!current() || next.providerKey !== original.providerKey || next.modelId !== original.modelId
-        || next.reasoningEffort !== original.reasoningEffort) return false;
-      const normalized = changeSelection(observed, original, "agentPromptId", next.agentPromptId);
-      return !!normalized && selections.set(epoch, sessionId, observed, normalized);
-    } };
-  }
-  function captureModelChooser(): ModelChooserCapture | null {
-    if (selectionDisabled || !activeChoices || !selected || !boundedModelChoices(activeChoices)) return null;
-    const observed = activeChoices; const original = selected;
-    const revision = selectionRevision.current; const input = inputRevision.current;
-    const lifetime = inputLifetime; const signal = scope.current?.signal;
-    const submissionRevision = submissions.getSnapshot();
-    const stored = selections.current(epoch, sessionId);
-    const available = () => !!signal && !signal.aborted && scope.current?.signal === signal
-      && (!lifetime || lifetime.current()) && capability.canMutate()
-      && chooserLatest.current.epoch === epoch && chooserLatest.current.sessionId === sessionId;
-    const current = () => available() && !submissions.pending(sessionId) && submissions.getSnapshot() === submissionRevision
-      && !chooserLatest.current.selectionDisabled && chooserLatest.current.activeChoices === observed
-      && chooserLatest.current.selected === original && selectionRevision.current === revision && inputRevision.current === input
-      && selections.current(epoch, sessionId) === stored;
-    return { choices: observed, selection: original, current, available, apply: next => {
-      if (!current() || next.providerKey !== original.providerKey || next.agentPromptId !== original.agentPromptId) return false;
-      // Normalize by the existing controls' rules, never by a chooser-specific fallback.
-      const model = next.modelId === original.modelId ? original : changeSelection(observed, original, "modelId", next.modelId ?? "");
-      const normalized = model && changeSelection(observed, model, "reasoningEffort", next.reasoningEffort ?? "");
-      return !!normalized && selections.set(epoch, sessionId, observed, normalized);
-    } };
-  }
   function select(field: "agentPromptId" | "modelId" | "reasoningEffort", value: string) {
     if (!activeChoices || !selected || selectionDisabled) return;
     const next = changeSelection(activeChoices, selected, field, value);
     if (!next) { setChoicesNotice("Choose an available model and prompt before sending with changed settings."); return; }
     if (!selections.set(epoch, sessionId, activeChoices, next)) return;
     setSelection(next);
-    setChoicesNotice("Selection saved for the next Send; active runs and queued text are unchanged.");
+    setChoicesNotice("");
   }
   const efforts = activeChoices?.models.find(m => m.id === selected?.modelId)?.efforts ?? [];
   const imageCapability = activeChoices?.models.find(m => m.id === selected?.modelId)?.imageInput;
-  async function pasteImages(event: ClipboardEvent<HTMLTextAreaElement>) {
+  async function pasteImages(event: ClipboardEvent<HTMLElement>) {
     if (!event.clipboardData.files.length) return;
     event.preventDefault();
     const revision = ++inputRevision.current;
@@ -574,21 +537,20 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     <div className="composer-status-line" role="status" data-busy={composerBusy}><span>
       {composerBusy ? <Spinner size={16} intent="primary" aria-hidden="true" /> : <AppIcon name={invalidEpoch ? "error" : "prompt"} size={14} />}
       {t(invalidEpoch ? "Reload required." : pending?.inFlight ? "Sending…" : runActive ? "Thinking…" : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : "Prompt ready")}</span>
-      <span className="composer-integrations" title={t("Check advanced diagnostics.")}><AppIcon name="tool" size={14} />MCP: {mcpPlugin?.state ?? t(configuration?.pluginRuntimeAvailable ? "Off" : "Unavailable")}
-        <AppIcon name="settings" size={14} />{t("Plugins")}: {configuration?.plugins.length ?? "?"}</span></div>
-    {expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
+      </div>
+    {expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
     {!expanded && !!(imageCount || imageNotice) && attachmentStrip}
     <label className="sr-only" htmlFor="session-prompt">{t("Message")}</label>
-    <textarea id="session-prompt" ref={promptInput} onPaste={pasteImages} className="prompt-input" rows={1} maxLength={32768} value={pending?.request.text ?? text} disabled={!!pending}
-      onChange={event => editText(event.target.value)} placeholder={t("Ask CodeAlta to work on this project…")} onKeyDown={event => {
+    <PromptEditor id="session-prompt" ref={promptInput} onPaste={pasteImages} label={t("Message")} value={pending?.request.text ?? text} disabled={!!pending || invalidEpoch || expanded}
+      onChange={editText} onCompositionStart={() => { inputRevision.current++; }} placeholder={t("Ask CodeAlta to work on this project…")} onKeyDown={event => {
         if (dispatchTransientComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
           altKey: event.altKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing,
           keyCode: event.nativeEvent.keyCode, repeat: event.repeat, defaultPrevented: event.defaultPrevented },
-        event.currentTarget, onOpenHelp, onOpenPalette)) { event.preventDefault(); return; }
+        promptInput.current!, onOpenHelp, onOpenPalette)) { event.preventDefault(); event.stopPropagation(); return; }
         if (dispatchComposerKey({ key: event.key, ctrlKey: event.ctrlKey,
           shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey,
           isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode,
-          repeat: event.repeat, defaultPrevented: event.defaultPrevented }, submit, () => steer(true))) event.preventDefault();
+           repeat: event.repeat, defaultPrevented: event.defaultPrevented }, submit, () => steer(true))) { event.preventDefault(); event.stopPropagation(); }
       }} />
     <div className="composer-toolbar">
     <div className="prompt-options" aria-label={t("Session configuration")}>
@@ -632,9 +594,6 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     <div className="history-controls">
       {!pending && !expanded && !invalidEpoch && <ProjectReferencePicker text={text} edit={editText} input={promptInput} />}
       {(showSteering || showQueue) && <Button variant="minimal" icon={<AppIcon name="queue" size={16} />} aria-label={t("Queue and steering editors")} title={t("Queue and steering editors")} aria-expanded={recoveryExpanded} aria-controls="composer-recovery-editors" onClick={() => setRecoveryExpanded(value => !value)} />}
-      <Button variant="minimal" icon={<AppIcon name="settings" size={16} />} aria-label={t("Advanced session controls and diagnostics")} title={t("Advanced session controls and diagnostics")} aria-expanded={diagnosticsExpanded} aria-controls="composer-advanced-diagnostics" onClick={() => setDiagnosticsExpanded(value => !value)} />
-      <PromptChooser disabled={promptSelectionDisabled} capture={capturePromptChooser} />
-      <ModelChooser disabled={selectionDisabled || !boundedModelChoices(activeChoices)} capture={captureModelChooser} />
       <span className="sr-only">{t("Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer")}</span>
       {infoControl}
       {usageTarget && <SessionUsageInspector key={JSON.stringify(usageTarget)} target={usageTarget} capability={capability} />}
@@ -672,18 +631,12 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       <Button aria-label={t(pending ? "Retry exact request" : "Send")} title={t(pending ? "Retry exact request" : "Send")} intent={cancellationPrimary ? "none" : "primary"} icon={<AppIcon name={pending ? "refresh" : "send"} size={16} />} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || captureSubmission(epoch, sessionId, text, "availability", images.length ? selected : null, null, images) === null)} onClick={submit} />
     </div>
     </div>
-    {diagnosticsExpanded && <details className="composer-selection-evidence"><summary>{t("Session configuration")}</summary><p className="composer-notice prompt-selection-observation">
-      {t("Observed prompt (choices snapshot, not live execution)")}: <code>{activeChoices?.current?.agentPromptId ?? t("Unknown")}</code>
-      {" · "}{t("Local next-Send prompt")}: <code>{(selection ?? activeChoices?.current)?.agentPromptId ?? t("Unknown")}</code>
-      {pending && <>{" · "}{t("Retained original Send prompt")}: <code>{pending.request.selection?.agentPromptId ?? t("Unknown")}</code></>}
-    </p></details>}
     <span id="observed-run-cancellation-help" className="sr-only">{t("Targets a point-in-time observed run, not the original Send receipt. Cancellation signalled does not confirm run completion. Retained requests are only retried manually against their original target after the previous wait settles.")}</span>
     <span id="observed-steering-help" className="sr-only">{t("Uses current composer text and the point-in-time observed run. Admission is not run completion. Retained steering is reviewed or retried separately, never from this button.")}</span>
     <span id="observed-queue-help" className="sr-only">{t("Uses current editable composer text and the point-in-time observed attachment, including busy or draining attachments; never targets a run. Reservation does not prove host-only insertion, durability or execution. The composer draft is preserved. Retained queue requests are reviewed or retried separately, never from this button.")}</span>
     <span id="observed-compaction-help" className="sr-only">{t("Point-in-time idle observation permits only an attempt; the provider must prove idle. Busy is a permanent outcome, not an automatic retry. Retained requests are retried manually against their original attachment after the previous wait settles.")}</span>
     {choicesNotice && choicesNotice !== "Loading session choices…" && choicesNotice !== "Selections apply on Send; active runs and queued text are unchanged." && <p className="composer-notice" role={choicesNotice.includes("could not") || choicesNotice.includes("unavailable") ? "alert" : "status"}>{choicesNotice}</p>}
     {message !== "Ready to send to this owned session." && <p className="composer-notice" role="status">{message}</p>}
-    {(pending && !pending.inFlight || pendingAborts.length > 0) && <button type="button" onClick={() => refresh()}>{t("Refresh receipts")}</button>}
     {invalidEpoch && <p role="alert">{t("Host/runtime identity changed. Reload required; mutations are disabled. The exact uncertain request is retained and will not be rebased or resent.")}</p>}
     {runtimeState?.kind === "error" && <p role="alert">{t("Runtime observation unavailable ({code}).", { code: runtimeState.code })} {t(['stale_epoch', 'stale_runtime'].includes(runtimeState.code) ? "Reload required." : "No idle or completion state is inferred.")}</p>}
     {mcpPlugin && /fail|error/i.test(mcpPlugin.state) && <p role="alert">{t("MCP plugin:")} {mcpPlugin.state}. {t("Check advanced diagnostics.")}</p>}
@@ -724,18 +677,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     </div></details>}
     {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId}
       canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} />}
-    <details id="composer-advanced-diagnostics" className="advanced-session-controls" hidden={!diagnosticsExpanded && pendingAborts.length === 0} open={diagnosticsExpanded || pendingAborts.length > 0}><summary>{t("Advanced session controls and diagnostics")}</summary><div>
-    {referenceScope && <p className="catalog-diagnostics">@ project references resolve once on normal Send (up to 32 paths, bounded ranges). Missing/unsafe/over-budget references stay literal. File contents are not uploaded. Queue and Steer always send literal text.</p>}
-    {!imageCount && !expanded && attachmentStrip}
-    <p className="detail">{t("Selections apply on Send; active runs and queued text are unchanged.")}</p>
-    <button id="refresh-session-context" type="button" onClick={() => void runtimeScope.current?.refresh()} aria-label={t("Refresh context and runtime configuration")} title={`${t("Refresh context")} · ${runtimeConfiguration?.providerKey ?? t("session provider")}`}><AppIcon name="refresh" size={14} /> {t("Refresh context")}</button>
-    {onOpenReminders && readReminderCount && reminderActions && <button type="button" disabled={invalidEpoch}
-      aria-label={t("Refresh observed reminder count")} onClick={() => { reminderRevision.current++; setReminderObservation(undefined); setReminderReload(value => value + 1); }}>
-      <AppIcon name="refresh" size={14} /> {t("Refresh reminder count")}</button>}
-    <p className="detail">MCP: {mcpPlugin?.state ?? t(configuration?.pluginRuntimeAvailable ? "Off" : "Unavailable")} · {t(runtimeState?.kind === "loading" ? "Reading context…" : runtimeConfiguration?.activeRunId ? "Run active" : runtimeConfiguration ? "Context ready" : "Context unavailable")}.</p>
-    <p className="detail">{t("Existing session only.")} {t(permissionReviewer ? "Supported plain commands require explicit review below; other permissions are denied." : "Permissions are denied by default. Relaunch with --review-owned-command-permissions in owned mode to opt in to supported plain command review.")} {t("User input is cancelled; plugins and host-contributed tools are disabled. A submitted receipt is not a completed run. Receipt capacity is 256 for this host lifetime.")}</p>
-    <p className="detail">{t("Send/Abort retains at most 256 local intents combined. Selection changes retain exact requests and live waiter exclusion. After document reload, browse host receipts manually; lost text and retry keys are not reconstructed. No automatic retry.")}</p>
-    <button type="button" onClick={() => refresh()}>{t("Refresh submissions")}</button>
+    {pendingAborts.length > 0 && <div className="retained-send-recovery">
     {(Array.isArray(page?.rows) ? page.rows : []).filter(row => row && typeof row.sessionId === "string" && row.sessionId.toLowerCase() === sessionId.toLowerCase()).map(row => <div key={row.operationId}>
       {row.kind === "Queue" ? <><p>Queue · {row.operationId}</p>
         {queueReceiptPhases(row)?.map((phase, index) => <p key={index}>{index + 1}. {phase}</p>) ?? <p>{t("Malformed queue receipt; not actionable.")}</p>}</>
@@ -748,44 +690,11 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
         || (!!pending?.inFlight && pending.request.clientRequestId === row.clientRequestId)
         || !page || captureSubmissionAbort(epoch, sessionId, page, row, "availability") === null} onClick={() => abort(row)}>{t("Abort original Send operation")}</button>}
     </div>)}
-    {page?.next != null && <button type="button" onClick={() => refresh(page.next!)}>{t("Next receipt page")}</button>}
     {pendingAborts.map(value => <div key={value.intent.request.targetOperationId}>
       <p className="detail">{t("Retained Abort: original session")} {value.intent.sessionId} · {t("operation")} {value.intent.request.targetOperationId} · {t("request")} {value.intent.request.clientRequestId}</p>
       <button type="button" disabled={invalidEpoch || value.inFlight || !capability.canSubmit(value.intent.request)}
         onClick={() => abort(undefined, value.intent.request.targetOperationId)}>{t("Retry exact original Send Abort")}</button>
     </div>)}
-    <h3>{t("Current runtime — manual point-in-time observation")}</h3>
-    <p className="detail">{t("Recorded facts at the last refresh, not provider inactivity or successful run completion. Queue depth is unknown. This does not acknowledge effects or synchronize Display, receipts or persisted history.")}</p>
-    <button type="button" disabled={runtimeState?.kind === "error" && ["stale_epoch", "stale_runtime"].includes(runtimeState.code)} onClick={() => void runtimeScope.current?.refresh()}>{t("Refresh runtime state")}</button>
-    {runtimeState?.kind === "loading" && <p role="status">{t("Reading current runtime facts…")}</p>}
-    {runtimeState?.kind === "ready" && <>
-      <p className="detail">{t("Runtime instance")} {runtimeState.snapshot.runtimeInstanceId} · {t("coordinator transition recorded:")} {t(runtimeState.snapshot.coordinatorTransitionInProgress ? "yes" : "no")}</p>
-      {runtimeState.snapshot.entry ? <>
-        <dl>
-          <dt>{t("Attachment generation (identity, not revision)")}</dt><dd>{runtimeState.snapshot.entry.attachmentGeneration}</dd>
-          <dt>{t("Active run recorded")}</dt><dd>{runtimeState.snapshot.entry.activeRunId ?? t("No run recorded — provider activity unknown")}</dd>
-          <dt>{t("Shutdown observed on entry")}</dt><dd>{t(runtimeState.snapshot.entry.isTerminated ? "yes" : "no")}</dd>
-          <dt>{t("Attachment retiring")}</dt><dd>{t(runtimeState.snapshot.entry.isRetiring ? "yes" : "no")}</dd>
-          <dt>{t("Queue drain in progress")}</dt><dd>{t(runtimeState.snapshot.entry.queueDrainInProgress ? "yes" : "no")}</dd>
-        </dl>
-        <p className="detail">{t("Captured configuration — not verified provider-effective settings.")}</p>
-        <dl>
-          <dt>{t("Provider / configured key")}</dt><dd>{runtimeState.snapshot.entry.providerId} / {runtimeState.snapshot.entry.providerKey}</dd>
-          <dt>{t("Captured model")}</dt><dd>{runtimeState.snapshot.entry.modelId ?? t("Not recorded")}</dd>
-          <dt>{t("Captured reasoning")}</dt><dd>{runtimeState.snapshot.entry.reasoningEffort ?? t("Not recorded")}</dd>
-          <dt>{t("Captured prompt")}</dt><dd>{runtimeState.snapshot.entry.agentPromptId ?? t("Not recorded")}</dd>
-          <dt>{t("Pending prompt (separate selection)")}</dt><dd>{runtimeState.snapshot.entry.pendingAgentPromptId ?? t("None recorded")}</dd>
-        </dl>
-      </> : <p>{t("No runtime entry observed. This does not imply idle, completion or absence of a durable session.")}</p>}
-    </>}
-    <h3>{t("Signal cancellation for observed run")}</h3>
-    <p className="detail">{t("Targets only the explicitly observed runtime, attachment and run. Unsupported, stale, retiring, transitioning or draining targets fail closed without fallback. Signalling is not run completion or rollback; previously accepted decisions remain accepted. Failure can occur after signalling. Refreshes never retarget a retained request.")}</p>
-    {pendingAbortRun && <p className="detail">{t("Retained target: runtime")} {pendingAbortRun.request.expectedRuntimeInstanceId} · {t("attachment")} {pendingAbortRun.request.expectedAttachmentGeneration} · {t("run")} {pendingAbortRun.request.expectedRunId} · {t("request")} {pendingAbortRun.request.clientRequestId}</p>}
-    <p role="status">{abortRunMessage}</p>
-    <h3>{t("Compact the observed attachment if idle now")}</h3>
-    <p className="detail">{t("Recorded idleness only permits an attempt: the provider must prove idle without waiting. Compacts context current at provider admission, not the history from your observation. Stale, retiring, non-owned or unsupported targets are rejected without fallback. No new permission authority is created. A busy receipt is permanent; a new explicit action uses a fresh key. Refreshes never retarget an uncertain request.")}</p>
-    {pendingCompact && <p className="detail">{t("Retained target: runtime")} {pendingCompact.request.expectedRuntimeInstanceId} · {t("attachment")} {pendingCompact.request.expectedAttachmentGeneration} · {t("request")} {pendingCompact.request.clientRequestId}</p>}
-    <p role="status">{compactMessage}</p>
-    </div></details>
+    </div>}
   </section>;
 }
