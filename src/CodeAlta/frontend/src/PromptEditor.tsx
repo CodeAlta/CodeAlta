@@ -29,7 +29,7 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
   useLayoutEffect(() => {
     const node = host.current!;
     const model = monaco.editor.createModel(latest.current.value, "markdown");
-    const instance = monaco.editor.create(node, { model, automaticLayout: true, ariaLabel: label,
+    const instance = monaco.editor.create(node.firstElementChild as HTMLElement, { model, automaticLayout: true, ariaLabel: label,
       readOnly: latest.current.disabled, fontFamily: getComputedStyle(node).fontFamily, fontSize: 13, lineHeight: 20,
       minimap: { enabled: false }, lineNumbers: "off", glyphMargin: false, folding: false,
       lineDecorationsWidth: 0, lineNumbersMinChars: 0, scrollBeyondLastLine: false, wordWrap: "on",
@@ -82,5 +82,5 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
   return <div id={id} ref={host} className={`prompt-editor ${Classes.MONOSPACE_TEXT}${expanded ? " expanded" : ""}`}
     tabIndex={-1} onFocus={event => { if (event.target === event.currentTarget) editor.current?.focus(); }}
     onKeyDownCapture={onKeyDown} onPasteCapture={event => { onPaste?.(event); if (event.defaultPrevented) event.stopPropagation(); }} onCompositionStart={onCompositionStart}
-    aria-label={label} data-placeholder={!value ? placeholder : undefined} />;
+    aria-label={label} data-placeholder={!value ? placeholder : undefined}><div className="prompt-editor-surface" /></div>;
 }

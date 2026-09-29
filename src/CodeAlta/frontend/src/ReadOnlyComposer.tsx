@@ -31,10 +31,11 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
   useEffect(() => { if (localDraft) return; draftIndicators.persisted(sessionId, draft.editGeneration,
     persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), sessionId, draft.text));
   }, [sessionId, draft, draftIndicators]);
-  return <section className="composer catalog-composer" aria-label={t("Message composer")}>
+  return <>
+    {!expanded && localDraft && localImages && localImages.attachments}
+    <section className="composer catalog-composer" aria-label={t("Message composer")}>
     {localDraft && <details className="composer-reference-help"><summary>@</summary><p className="catalog-diagnostics">{t("@ search requires an owned, verified project. References resolve only on normal Send after creation and transfer; file contents are not uploaded.")}</p></details>}
     {expanded && <ExpandedPromptEditor text={text} onChange={edit} onPaste={refuseImagePaste} onCompositionStart={localImages?.invalidate} attachments={localDraft && localImages ? localImages.attachments : imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>} onClose={() => { localImages?.invalidate(); setExpanded(false); }} />}
-    {!expanded && localDraft && localImages && localImages.attachments}
     {!expanded && imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>}
     <label className="sr-only" htmlFor="catalog-prompt">{t("Message draft")}</label>
     <PromptEditor id="catalog-prompt" ref={promptInput} onPaste={refuseImagePaste} label={t("Message draft")} disabled={expanded}
@@ -59,5 +60,5 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
       </div>
     </div>
     {!localDraft && <p className="catalog-diagnostics">{t("Provider {provider}; model, prompt and reasoning not available without an owned runtime.", { provider: provider ?? t("Not recorded") })}</p>}
-  </section>;
+  </section></>;
 }

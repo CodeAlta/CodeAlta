@@ -34,6 +34,7 @@ export function ExpandedPromptEditor({ text, onChange, onClose, onPaste, attachm
     }}>
     <header><h2 id="expanded-prompt-title">{t("Edit prompt")}</h2><div className="expanded-prompt-actions">
       <button type="button" onClick={onClose}>{t("Close")}</button></div></header>
+    {attachments}
     <div className="expanded-prompt-panes">
       <PromptEditor ref={editor} expanded label={t("Expanded prompt")}
         value={text} onChange={onChange} onPaste={onPaste} onCompositionStart={onCompositionStart}
@@ -42,7 +43,6 @@ export function ExpandedPromptEditor({ text, onChange, onClose, onPaste, attachm
             keyCode: event.nativeEvent.keyCode }, onClose)) { event.preventDefault(); event.stopPropagation(); }
         }} />
     </div>
-    {attachments}
     <ProjectReferencePicker text={text} edit={onChange} input={editor} compact={false} />
     <p id="expanded-prompt-hint">{t("Escape / Ctrl+Enter close · Enter new line · Draft preserved; nothing is sent.")}</p>
   </dialog>;

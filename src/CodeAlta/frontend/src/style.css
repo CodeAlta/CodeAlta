@@ -19,11 +19,17 @@
 .skills-inspection li { margin-block: .35rem; }
 .skills-inspection li button { max-width: 100%; white-space: normal; text-align: start; overflow-wrap: anywhere; }
 .skills-inspection dd { margin-inline-start: 1rem; white-space: pre-wrap; }
-.prompt-image-attachments { display: flex; flex-wrap: wrap; gap: 0.5rem; min-width: 0; overflow-wrap: anywhere; }
-.prompt-image-attachments details, .prompt-image-attachments > p { flex-basis: 100%; }
-.prompt-image-attachments figure { margin: 0; display: flex; flex-direction: column; gap: 0.25rem; max-width: 10rem; }
-.prompt-image-attachments img { object-fit: contain; }
-.prompt-image-attachments input { width: 100%; min-width: 0; box-sizing: border-box; }
+.prompt-image-attachments { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; padding: 4px 6px 6px; overflow-wrap: anywhere; }
+.prompt-image-attachments > p { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; }
+.prompt-image-tile { position: relative; }
+.prompt-image-thumbnail.bp6-button { padding: 3px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); transition: border-color 120ms, box-shadow 120ms; }
+.prompt-image-thumbnail.bp6-button:hover, .prompt-image-thumbnail.bp6-button:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.prompt-image-thumbnail img { display: block; object-fit: contain; border-radius: 3px; }
+.prompt-image-remove.bp6-button { position: absolute; top: -3px; right: -3px; min-width: 16px; min-height: 16px; padding: 1px; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--panel-2); }
+.prompt-image-dialog.app-dialog { width: min(560px, calc(100vw - 32px)); gap: 12px; }
+.prompt-image-dialog > header, .prompt-image-dialog > footer, .prompt-image-dialog > .bp6-form-group { flex-shrink: 0; margin: 0; }
+.prompt-image-preview { min-height: 0; overflow: auto; text-align: center; }
+.prompt-image-preview img { display: block; max-width: 100%; max-height: 45dvh; margin: auto; object-fit: contain; border-radius: 6px; }
 .runtime-observation { display: block; font-size: .75rem; line-height: 1.5; font-weight: normal; overflow-wrap: anywhere; }
 .observed-activity, .unknown-activity { display: block; overflow-wrap: anywhere; }
 .unknown-activity { border-top: 1px dashed var(--muted); padding-top: .25rem; color: var(--muted); }
@@ -994,10 +1000,12 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
   .ide-shell .owned-session .prompt-options { flex-wrap: wrap; }
   .ide-shell .prompt-options > .composer-field { max-width: 100%; }
 }
-.prompt-editor { position: relative; min-width: 0; height: 56px; flex-shrink: 0; border: 1px solid var(--line); border-radius: var(--bp-surface-border-radius); overflow: hidden; }
+.prompt-editor { position: relative; min-width: 0; height: 56px; flex-shrink: 0; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--panel); }
+.prompt-editor .monaco-editor, .prompt-editor .monaco-editor-background, .prompt-editor .monaco-editor .margin { background-color: var(--panel); }
+.prompt-editor-surface { width: 100%; height: 100%; }
 .prompt-editor.expanded { height: 100%; min-height: 0; }
 .composer-region.resized .prompt-editor { flex: 1 0 auto; }
-.prompt-editor[data-placeholder]::after { content: attr(data-placeholder); position: absolute; top: 8px; left: 8px; color: var(--muted); pointer-events: none; font: inherit; }
+.prompt-editor[data-placeholder]::after { content: attr(data-placeholder); position: absolute; top: 8px; left: 8px; right: 8px; color: var(--muted); pointer-events: none; font-family: inherit; font-size: 13px; line-height: 20px; }
 .prompt-editor .monaco-editor textarea { min-height: 0; padding: 0; margin: 0; border: 0; box-shadow: none; }
 .expanded-prompt-dialog { overflow: hidden; }
 .expanded-prompt-dialog > header, .expanded-prompt-dialog > p { flex-shrink: 0; }

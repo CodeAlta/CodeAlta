@@ -672,6 +672,16 @@ part of this change.
 
 ### Quiet timeline chrome and Monaco composer
 
+The shared Monaco surface now has matching text/placeholder horizontal padding and clipped
+rounded corners in both inline and expanded editors. Image attachments use compact thumbnail
+buttons outside the inline composer, above its status, instead of inline title forms and PNG
+diagnostics. Hover/focus highlights a thumbnail; opening it shows a bounded image preview,
+an explicitly saved title, and deletion. A small remove button is also available on each
+thumbnail. Local drafts and expanded editors reuse the same presentation. The native modal
+works inside the expanded editor's native modal and isolates keyboard/IME handling. Edits
+still validate the original image-array identity, draft lifetime and owner capability; PNG
+limits and submission behavior are unchanged. Only actionable attachment errors remain inline.
+
 Removed the session/timeline headings, host/provider chips, routine history-budget banner,
 manual refresh controls, Auto size button, advanced composer diagnostics and redundant
 prompt/model search buttons. The resize separator remains keyboard accessible, with its

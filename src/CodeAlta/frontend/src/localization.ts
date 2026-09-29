@@ -4,6 +4,7 @@ function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
   return Object.freeze(Object.fromEntries(Object.entries(rows).map(([key, row]) => [key, Object.freeze(row)]))) as Readonly<T>;
 }
 export const messages = dictionary({
+  "Save image title": ["Guardar título de imagen", "Enregistrer le titre de l’image", "Bildtitel speichern", "画像タイトルを保存", "保存图片标题"],
   "Completed": ["Completado", "Terminé", "Abgeschlossen", "完了", "已完成"],
   "Failed": ["Fallido", "Échec", "Fehlgeschlagen", "失敗", "失败"],
   "Canceled": ["Cancelado", "Annulé", "Abgebrochen", "キャンセル済み", "已取消"],

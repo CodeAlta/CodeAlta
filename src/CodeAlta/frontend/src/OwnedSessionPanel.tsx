@@ -1,4 +1,5 @@
 import { Button, FormGroup, HTMLSelect, Spinner } from "@blueprintjs/core";
+import { PromptImageAttachments } from "./PromptImageAttachments";
 import type { DisplayState } from "./sessionDisplay";
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from "react";
 import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectReferencePicker";
@@ -507,39 +508,34 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       if (!imageOwner.replace(imageKey, original, [...original, ...added])) {
         setImageNotice("Image draft capacity reached (8 image-bearing drafts). Remove attachments from another draft first."); return;
       }
-      setImageNotice("PNG attached. Original encoded bytes are retained until Send or removal.");
+      setImageNotice("");
     } catch { if (current()) setImageNotice("Image paste refused. " + imageHelp); }
     finally { finish(); }
   }
-  const imageCount = (pending?.request.images ?? images).length;
-  const attachmentStrip = <div className="prompt-image-attachments" aria-label={t("Prompt image attachments")}>
-    <details><summary>{t("PNG attachments")} — {t(imageCapability === true ? "available (observed)" : imageCapability === false ? "unsupported" : "unknown")}</summary><p>{t(imageHelp)}</p>
-      <p>{imageCount ? t(imageCount === 1 ? "{count} image attached" : "{count} images attached", { count: imageCount }) : t("No images attached")}</p></details>
-    {(pending?.request.images ?? images).map((image, index) => <figure key={index}>
-      <img src={`data:image/png;base64,${image.base64}`} alt={image.title} width={80} height={80} />
-      <figcaption>{image.title}</figcaption>
-      <label>{t("Image title")}<input aria-label={t("Image title")} value={image.title} maxLength={80} disabled={!!pending || invalidEpoch}
-        onCompositionStart={() => { inputRevision.current++; }}
-        onChange={event => {
-          inputRevision.current++;
-          if (!event.currentTarget.isConnected || !scope.current || scope.current.signal.aborted
-            || submissions.pending(sessionId) || !capability.canMutate() || imageOwner.get(imageKey) !== images) return;
-          const title = event.target.value;
-          if (!imageOwner.replace(imageKey, images, images.map((item, i) => i === index ? { ...item, title } : item)))
-            setImageNotice(t("Image titles require 1–80 characters and no control characters."));
-          else setImageNotice("");
-        }} /></label>
-      <button type="button" disabled={!!pending} onClick={() => { inputRevision.current++; imageOwner.replace(imageKey, images, images.filter((_, i) => i !== index)); }}>{t("Remove {title}", { title: image.title })}</button>
-    </figure>)}
-    {imageNotice && <p role="status">{imageNotice}</p>}
-  </div>;
-  return <section className="owned-session" aria-label={t("Owned text submission")}>
+  function canEditImages() {
+    return !!scope.current && !scope.current.signal.aborted && !submissions.pending(sessionId)
+      && capability.canMutate() && (inputLifetime?.current() ?? true) && imageOwner.get(imageKey) === images;
+  }
+  const attachmentStrip = <PromptImageAttachments images={pending?.request.images ?? images}
+    disabled={!!pending || invalidEpoch} notice={imageNotice}
+    rename={(index, title) => {
+      inputRevision.current++;
+      if (!canEditImages()) return;
+      if (!imageOwner.replace(imageKey, images, images.map((item, i) => i === index ? { ...item, title } : item)))
+        setImageNotice(t("Image titles require 1–80 characters and no control characters."));
+      else setImageNotice("");
+    }} remove={index => {
+      inputRevision.current++;
+      if (canEditImages() && imageOwner.replace(imageKey, images, images.filter((_, i) => i !== index))) setImageNotice("");
+    }} />;
+  return <>
+    {!expanded && attachmentStrip}
+    <section className="owned-session" aria-label={t("Owned text submission")}>
     <div className="composer-status-line" role="status" data-busy={composerBusy}><span>
       {composerBusy ? <Spinner size={16} intent="primary" aria-hidden="true" /> : <AppIcon name={invalidEpoch ? "error" : "prompt"} size={14} />}
       {t(invalidEpoch ? "Reload required." : pending?.inFlight ? "Sending…" : runActive ? "Thinking…" : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : "Prompt ready")}</span>
       </div>
     {expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
-    {!expanded && !!(imageCount || imageNotice) && attachmentStrip}
     <label className="sr-only" htmlFor="session-prompt">{t("Message")}</label>
     <PromptEditor id="session-prompt" ref={promptInput} onPaste={pasteImages} label={t("Message")} value={pending?.request.text ?? text} disabled={!!pending || invalidEpoch || expanded}
       onChange={editText} onCompositionStart={() => { inputRevision.current++; }} placeholder={t("Ask CodeAlta to work on this project…")} onKeyDown={event => {
@@ -696,5 +692,5 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
         onClick={() => abort(undefined, value.intent.request.targetOperationId)}>{t("Retry exact original Send Abort")}</button>
     </div>)}
     </div>}
-  </section>;
+  </section></>;
 }

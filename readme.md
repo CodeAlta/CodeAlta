@@ -29,7 +29,9 @@ The desktop timeline now reads journal records up to 8 MiB with bounded previews
 notice. Records above the ceiling remain explicit errors; journals are never rewritten.
 
 The desktop uses Monaco Markdown editors for inline and expanded prompts (the expanded
-editor has no preview). Its timeline opens at the latest user prompt, with older messages
+editor has no preview). Both editors have padded, rounded surfaces. Pasted images appear as
+compact thumbnails above the prompt status; click a thumbnail to preview and rename or
+remove it, or use its small remove button directly. Its timeline opens at the latest user prompt, with older messages
 available above it, and automatically observes active runs and pending asks without refresh
 buttons. Tool rows open details with independently scrollable content and no diagnostic footer.
 The desktop composer immediately echoes submitted text in the timeline. Live and saved

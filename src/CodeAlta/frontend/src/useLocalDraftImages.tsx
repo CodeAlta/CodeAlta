@@ -1,6 +1,7 @@
 import { useState, useSyncExternalStore, type ClipboardEvent } from "react";
-import { createImageDrafts, imageHelp, imageLimits, readPastedPng } from "./promptImages";
+import { createImageDrafts, imageLimits, readPastedPng } from "./promptImages";
 import { translate, type Locale, type MessageKey } from "./localization";
+import { PromptImageAttachments } from "./PromptImageAttachments";
 
 // App supplies positive owned-local-draft eligibility and a capture of its exact lifetime.
 // This is draft storage only, never image-model or Send authority.
@@ -34,22 +35,13 @@ export function useLocalDraftImages(owner: ReturnType<typeof createImageDrafts>,
     finally { finish(); }
   }
   const editable = !!capture();
-  const attachments = <div className="prompt-image-attachments" aria-label={t("Prompt image attachments")}>
-    <p>{t("Local PNG draft only; images stay in this window. Create and transfer never sends them.")}</p>
-    <details><summary>{t("PNG attachments")}</summary><p>{t(imageHelp)}</p></details>
-    {images.map((image, index) => <figure key={index}>
-      <img src={`data:image/png;base64,${image.base64}`} alt={image.title} width={80} height={80} />
-      <figcaption>{image.title}</figcaption>
-      <label>{t("Image title")}<input aria-label={t("Image title")} maxLength={80} value={image.title} disabled={!editable}
-        onCompositionStart={invalidate} onChange={event => {
-          invalidate(); if (!capture()) return;
-          setNotice(!owner.replace(key, images, images.map((value, i) => i === index ? { ...value, title: event.target.value } : value)));
-        }} /></label>
-      <button type="button" disabled={!editable} onClick={() => {
-        invalidate(); if (capture()) owner.replace(key, images, images.filter((_, i) => i !== index));
-      }}>{t("Remove {title}", { title: image.title })}</button>
-    </figure>)}
-    {notice && <p role="status">{t("Local image edit refused. Keep PNG limits and a writable owned draft; original attachments are retained.")}</p>}
-  </div>;
+  const attachments = <PromptImageAttachments images={images} disabled={!editable}
+    notice={notice ? t("Local image edit refused. Keep PNG limits and a writable owned draft; original attachments are retained.") : null}
+    rename={(index, title) => {
+      invalidate(); if (!capture()) return;
+      setNotice(!owner.replace(key, images, images.map((value, i) => i === index ? { ...value, title } : value)));
+    }} remove={index => {
+      invalidate(); if (capture()) setNotice(!owner.replace(key, images, images.filter((_, i) => i !== index)));
+    }} />;
   return { images, paste, attachments, invalidate };
 }
