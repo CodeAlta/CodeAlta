@@ -330,7 +330,12 @@ In GitHub repositories, type `#` to search recent issues. The picker accepts num
 
 When the selected model supports image input, copy an image to the clipboard and press `Ctrl+V` in the prompt editor. CodeAlta opens a preview/title dialog so you can confirm the image before it is attached, then stores the image beside the session journal.
 
-In the WebApp, pasted PNGs appear as thumbnails above the prompt. The former 64 KiB per-image,
+In the WebApp, pasted PNG, JPEG, WebP, GIF and BMP image files are decoded by the browser and
+normalized to PNG, with thumbnails above the prompt. Images copied from editors such as
+Paint.NET need not already match a restricted PNG encoding: the browser supplies the clipboard
+image file and CodeAlta converts it. Animated images become a single frame; source metadata
+is not retained. Image-read failures do not mean the model lacks image support.
+The former 64 KiB per-image,
 96 KiB total, three-image and 2048px/4MP restrictions no longer apply. The owned host accepts
 RPC frames up to 128 MiB including base64/JSON overhead; browser and model-provider constraints
 still apply. Runtime and Ask observation failures appear as errors in the timeline, not below

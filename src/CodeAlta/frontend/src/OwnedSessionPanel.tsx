@@ -30,7 +30,7 @@ import { SessionUsageInspector } from "./SessionUsageInspector";
 import { RetainedRequestStrip } from "./RetainedRequestStrip";
 import { QueueIntentReview } from "./QueueIntentReview";
 import type { UsageTarget } from "./sessionUsage";
-import { imageHelp, readPastedPng } from "./promptImages";
+import { imagePasteFailure, readPastedImage } from "./promptImages";
 import { useShellLanguage } from "./shellLanguage";
 import type { ClipboardEvent } from "react";
 
@@ -517,12 +517,12 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     if (!finish) { setImageNotice("An image read is still pending, or the eight-read limit has been reached."); return; }
     try {
       const added = [];
-      for (const file of files) { added.push(await readPastedPng(file, `Image ${original.length + added.length + 1}`)); if (!current()) return; }
+      for (const file of files) { added.push(await readPastedImage(file, `Image ${original.length + added.length + 1}`)); if (!current()) return; }
       if (!imageOwner.replace(imageKey, original, [...original, ...added])) {
         setImageNotice("Image draft capacity reached (8 image-bearing drafts). Remove attachments from another draft first."); return;
       }
       setImageNotice("");
-    } catch { if (current()) setImageNotice("Image paste refused. " + imageHelp); }
+    } catch { if (current()) setImageNotice(t(imagePasteFailure)); }
     finally { finish(); }
   }
   function canEditImages() {

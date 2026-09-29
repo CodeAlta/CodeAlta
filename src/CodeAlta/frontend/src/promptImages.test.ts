@@ -1,7 +1,60 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createImageDrafts, freezeImages, pngHeader } from "./promptImages";
+import { createImageDrafts, freezeImages, pngHeader, readPastedImage } from "./promptImages";
 import { captureSubmission } from "./sessionOperations";
+import { deflateSync } from "node:zlib";
+
+test("paste decodes clipboard raster formats before validating the normalized PNG", async () => {
+  const chunk = (type: string, data: Buffer) => {
+    const result = Buffer.alloc(data.length + 12);
+    result.writeUInt32BE(data.length); result.write(type, 4); data.copy(result, 8);
+    let crc = 0xffffffff;
+    for (const byte of result.subarray(4, -4)) {
+      crc ^= byte;
+      for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+    result.writeUInt32BE(~crc >>> 0, result.length - 4);
+    return result;
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(1); header.writeUInt32BE(1, 4); header[8] = 8; header[9] = 6;
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const chunks = [chunk("IHDR", header), chunk("IDAT", deflateSync(Buffer.from([0, 255, 0, 0, 255]))), chunk("IEND", Buffer.alloc(0))];
+  const normalized = Buffer.concat([signature, ...chunks]);
+  const clipboardPng = Buffer.concat([signature, chunks[0], chunk("tEXt", Buffer.from("Software\0Clipboard")), ...chunks.slice(1)]);
+  assert.throws(() => pngHeader(clipboardPng), "the former parser rejects this valid metadata-bearing PNG");
+  const oldBitmap = Object.getOwnPropertyDescriptor(globalThis, "createImageBitmap");
+  const oldDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  let closed = 0; let decoded: Blob | undefined; let drawn = 0;
+  Object.defineProperty(globalThis, "createImageBitmap", { configurable: true, value: async (blob: Blob) => {
+    decoded = blob;
+    return { width: 1, height: 1, close: () => closed++ };
+  } });
+  Object.defineProperty(globalThis, "document", { configurable: true, value: {
+    createElement: (tag: string) => {
+      assert.equal(tag, "canvas");
+      return { width: 0, height: 0, getContext: () => ({ drawImage: () => drawn++ }),
+        toDataURL: () => `data:image/png;base64,${normalized.toString("base64")}` };
+    },
+  } });
+  try {
+    for (const type of ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif", "image/bmp", "image/x-ms-bmp"]) {
+      const file = new File([clipboardPng], "clipboard", { type });
+      const image = await readPastedImage(file, "Screenshot");
+      assert.equal(decoded, file, "browser receives the original clipboard file, without subset prevalidation");
+      assert.deepEqual(image, { title: "Screenshot", mediaType: "image/png", base64: normalized.toString("base64") });
+      assert.ok(Object.isFrozen(image));
+    }
+    assert.equal(closed, 7); assert.equal(drawn, 7);
+    await assert.rejects(readPastedImage(new File(["<svg/>"], "vector", { type: "image/svg+xml" }), "Image"));
+    Object.defineProperty(globalThis, "document", { configurable: true, value: { createElement: () => ({ getContext: () => null }) } });
+    await assert.rejects(readPastedImage(new File([clipboardPng], "clipboard", { type: "image/png" }), "Image"));
+    assert.equal(closed, 8, "failed conversion still releases the decoded bitmap");
+  } finally {
+    if (oldBitmap) Object.defineProperty(globalThis, "createImageBitmap", oldBitmap); else Reflect.deleteProperty(globalThis, "createImageBitmap");
+    if (oldDocument) Object.defineProperty(globalThis, "document", oldDocument); else Reflect.deleteProperty(globalThis, "document");
+  }
+});
 
 test("local handoff reserves capacity before persistence and never consumes source images", () => {
   const owner = createImageDrafts();

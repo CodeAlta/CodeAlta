@@ -2,7 +2,8 @@ import type { SessionPromptImage } from "#neoastra";
 import { createOwnerChangeSignal } from "./ownerChangeSignal";
 
 export const imageLimits = Object.freeze({ text: 32768 });
-export const imageHelp = "Paste PNG images. Normal Send requires an observed supported model. Queue and Steer refuse images.";
+export const imageHelp = "Paste PNG, JPEG, WebP, GIF or BMP images. Normal Send requires an observed supported model. Queue and Steer refuse images.";
+export const imagePasteFailure = "Could not read the pasted image. Paste a valid PNG, JPEG, WebP, GIF or BMP image. Original attachments are retained.";
 export function freezeImages(images: readonly SessionPromptImage[] | null | undefined): readonly SessionPromptImage[] {
   return Object.freeze((images ?? []).map(image => Object.freeze({ title: image.title, mediaType: image.mediaType, base64: image.base64 })));
 }
@@ -83,17 +84,25 @@ export function pngHeader(bytes: Uint8Array): { width: number; height: number } 
 }
 
 // Only called for files synchronously obtained from the originating user paste event.
-// No navigator.clipboard, filesystem paths, URL fetching, HTML or blob URLs.
-export async function readPastedPng(file: File, title: string): Promise<SessionPromptImage> {
-  if (file.type !== "image/png") throw new Error("Only PNG clipboard files are supported.");
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const dimensions = pngHeader(bytes);
-  const chunks: string[] = [];
-  for (let offset = 0; offset < bytes.length; offset += 32768)
-    chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 32768)));
-  const base64 = btoa(chunks.join(""));
-  const image = new Image(); image.src = `data:image/png;base64,${base64}`;
-  await image.decode();
-  if (image.naturalWidth !== dimensions.width || image.naturalHeight !== dimensions.height) throw new Error("PNG dimensions do not match.");
-  return Object.freeze({ title, mediaType: "image/png", base64 });
+// No navigator.clipboard, filesystem paths, URL fetching, HTML or blob URLs. Decode first:
+// clipboard PNGs may contain palettes, grayscale, interlacing or ordinary metadata that
+// the deliberately narrow host wire format does not accept. Canvas strips those differences.
+export async function readPastedImage(file: File, title: string): Promise<SessionPromptImage> {
+  if (!["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif", "image/bmp", "image/x-ms-bmp"].includes(file.type)) throw new Error(imagePasteFailure);
+  const bitmap = await createImageBitmap(file);
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width; canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error(imagePasteFailure);
+    context.drawImage(bitmap, 0, 0);
+    const dataUrl = canvas.toDataURL("image/png");
+    const prefix = "data:image/png;base64,";
+    if (!dataUrl.startsWith(prefix)) throw new Error(imagePasteFailure);
+    const base64 = dataUrl.slice(prefix.length);
+    const bytes = Uint8Array.from(atob(base64), value => value.charCodeAt(0));
+    const dimensions = pngHeader(bytes);
+    if (dimensions.width !== bitmap.width || dimensions.height !== bitmap.height) throw new Error(imagePasteFailure);
+    return Object.freeze({ title, mediaType: "image/png", base64 });
+  } finally { bitmap.close(); }
 }

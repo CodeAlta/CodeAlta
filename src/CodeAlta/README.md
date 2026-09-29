@@ -11,6 +11,13 @@ or 2048px/4MP limits. Image-bearing prompts use the normal 32,768-character text
 The owned inbound RPC frame allowance is 128 MiB including base64/JSON overhead. PNG integrity,
 observed model capability, exact draft revisions and host/session ownership remain validated.
 
+Clipboard PNG, JPEG, WebP, GIF and BMP files now pass through the browser decoder and are
+normalized to PNG before wire validation. This avoids rejecting valid editor-generated PNG
+metadata, palettes or interlacing. Paint.NET clipboard data must be exposed as an image file by
+Chrome/WebView2; there is no direct native clipboard reader. Conversion errors no longer imply
+that the selected model lacks image support. Animation is reduced to one frame and source
+metadata is not retained.
+
 `CodeAlta` is the native desktop .NET tool (`alta`), built with published NeoAstra 0.2.0,
 generated RPC, React/strict TypeScript and packaged local Vite assets. Node/npm is needed
 only to build. The installed application has no UI server or external asset origin.
