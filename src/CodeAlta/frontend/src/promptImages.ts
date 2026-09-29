@@ -1,18 +1,21 @@
 import type { SessionPromptImage } from "#neoastra";
 import { createOwnerChangeSignal } from "./ownerChangeSignal";
 
-export const imageLimits = Object.freeze({ count: 3, bytes: 65_536, total: 98_304, text: 4096 });
-export const imageHelp = "PNG: up to 3 images, 64 KiB each / 96 KiB total, 2048px per side / 4MP; RGB/RGBA 8-bit, non-interlaced. Text: empty or nonblank, up to 4096 characters. Normal Send requires an observed supported model. Queue and Steer refuse images.";
+export const imageLimits = Object.freeze({ text: 32768 });
+export const imageHelp = "Paste PNG images. Normal Send requires an observed supported model. Queue and Steer refuse images.";
 export function freezeImages(images: readonly SessionPromptImage[] | null | undefined): readonly SessionPromptImage[] {
   return Object.freeze((images ?? []).map(image => Object.freeze({ title: image.title, mediaType: image.mediaType, base64: image.base64 })));
 }
 export function validImages(images: readonly SessionPromptImage[] | null | undefined): boolean {
   if (images == null) return true;
-  return Array.isArray(images) && images.length <= imageLimits.count && images.every(image => image && image.mediaType === "image/png"
+  return Array.isArray(images) && images.every(image => image && image.mediaType === "image/png"
     && typeof image.title === "string" && image.title.trim().length > 0 && image.title.length <= 80 && !/[\u0000-\u001f\u007f-\u009f]/u.test(image.title)
-    && typeof image.base64 === "string" && image.base64.length <= Math.ceil(imageLimits.bytes / 3) * 4
-    && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(image.base64))
-    && images.reduce((sum, image) => sum + atob(image.base64).length, 0) <= imageLimits.total;
+    && typeof image.base64 === "string" && canonicalBase64(image.base64));
+}
+// Avoid a repeated-group regexp: ordinary multi-megabyte payloads can overflow its stack.
+function canonicalBase64(value: string): boolean {
+  if (!value.length || value.length % 4 !== 0 || /[^A-Za-z0-9+/=]/.test(value)) return false;
+  try { return btoa(atob(value)) === value; } catch { return false; }
 }
 export function createImageDrafts() {
   const entries = new Map<string, readonly SessionPromptImage[]>();
@@ -51,7 +54,7 @@ export function createImageDrafts() {
 
 export function pngHeader(bytes: Uint8Array): { width: number; height: number } {
   const invalid = () => new Error("Invalid or unsupported PNG. " + imageHelp);
-  if (bytes.length < 57 || bytes.length > imageLimits.bytes || ![137, 80, 78, 71, 13, 10, 26, 10].every((b, i) => bytes[i] === b)) throw invalid();
+  if (bytes.length < 57 || ![137, 80, 78, 71, 13, 10, 26, 10].every((b, i) => bytes[i] === b)) throw invalid();
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let width = 0; let height = 0; let data = false; let dataEnded = false; let ended = false;
   for (let offset = 8; offset <= bytes.length - 12;) {
@@ -66,7 +69,7 @@ export function pngHeader(bytes: Uint8Array): { width: number; height: number } 
     if (type === "IHDR") {
       if (offset !== 8 || length !== 13) throw invalid();
       width = view.getUint32(offset + 8); height = view.getUint32(offset + 12);
-      if (!width || !height || width > 2048 || height > 2048 || width * height > 4_000_000 || bytes[offset + 16] !== 8
+      if (!width || !height || width > 0x7fffffff || height > 0x7fffffff || bytes[offset + 16] !== 8
         || ![2, 6].includes(bytes[offset + 17]) || bytes[offset + 18] || bytes[offset + 19] || bytes[offset + 20]) throw invalid();
     } else if (!width) throw invalid();
     else if (type === "IDAT") { if (dataEnded) throw invalid(); data = true; }
@@ -82,11 +85,13 @@ export function pngHeader(bytes: Uint8Array): { width: number; height: number } 
 // Only called for files synchronously obtained from the originating user paste event.
 // No navigator.clipboard, filesystem paths, URL fetching, HTML or blob URLs.
 export async function readPastedPng(file: File, title: string): Promise<SessionPromptImage> {
-  if (file.type !== "image/png" || file.size > imageLimits.bytes) throw new Error("Only PNG clipboard files up to 64 KiB are supported.");
+  if (file.type !== "image/png") throw new Error("Only PNG clipboard files are supported.");
   const bytes = new Uint8Array(await file.arrayBuffer());
   const dimensions = pngHeader(bytes);
-  let binary = ""; for (const b of bytes) binary += String.fromCharCode(b);
-  const base64 = btoa(binary);
+  const chunks: string[] = [];
+  for (let offset = 0; offset < bytes.length; offset += 32768)
+    chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 32768)));
+  const base64 = btoa(chunks.join(""));
   const image = new Image(); image.src = `data:image/png;base64,${base64}`;
   await image.decode();
   if (image.naturalWidth !== dimensions.width || image.naturalHeight !== dimensions.height) throw new Error("PNG dimensions do not match.");

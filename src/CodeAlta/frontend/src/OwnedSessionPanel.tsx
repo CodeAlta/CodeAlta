@@ -1,4 +1,5 @@
 import { Button, FormGroup, HTMLSelect, Spinner } from "@blueprintjs/core";
+import { createPortal } from "react-dom";
 import { PromptImageAttachments } from "./PromptImageAttachments";
 import { formatThinkingElapsed, useThinkingElapsed } from "./thinkingElapsed";
 import type { DisplayState } from "./sessionDisplay";
@@ -29,15 +30,16 @@ import { SessionUsageInspector } from "./SessionUsageInspector";
 import { RetainedRequestStrip } from "./RetainedRequestStrip";
 import { QueueIntentReview } from "./QueueIntentReview";
 import type { UsageTarget } from "./sessionUsage";
-import { imageHelp, imageLimits, readPastedPng } from "./promptImages";
+import { imageHelp, readPastedPng } from "./promptImages";
 import { useShellLanguage } from "./shellLanguage";
 import type { ClipboardEvent } from "react";
 
-export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount, inputLifetime, liveState }: {
+export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount, inputLifetime, liveState, timelineNotices }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
   projectId?: string | null;
   inputLifetime?: { current: () => boolean };
   liveState?: DisplayState | null;
+  timelineNotices?: HTMLElement | null;
   usageTarget?: UsageTarget | null;
   infoControl?: ReactNode;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
@@ -322,7 +324,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     const revision = ++inputRevision.current;
     const capturedImages = images;
     const request = retained?.request ?? captureSubmission(epoch, sessionId, text, crypto.randomUUID(), sendSelection, references, images);
-    if (!request && images.length) setImageNotice("Image Send requires empty or nonblank text up to 4096 characters and an explicit supported model.");
+    if (!request && images.length) setImageNotice("Image Send requires empty or nonblank text up to 32768 characters and an explicit supported model.");
     if (!request || !capability.canSubmit(request)) return;
     draftIndicators.clear(sessionId);
     setSubmittedThinking({ key: request.clientRequestId, runId: null });
@@ -499,7 +501,6 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     if (!event.clipboardData.files.length) return;
     event.preventDefault();
     const revision = ++inputRevision.current;
-    if (event.clipboardData.files.length > imageLimits.count) { setImageNotice("Image paste refused. " + imageHelp); return; }
     const files = Array.from(event.clipboardData.files);
     const origin = event.currentTarget;
     if (pending || invalidEpoch || imageCapability !== true || !capability.canMutate()) {
@@ -515,9 +516,6 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     const finish = imageOwner.beginRead(imageKey);
     if (!finish) { setImageNotice("An image read is still pending, or the eight-read limit has been reached."); return; }
     try {
-      if (original.length + files.length > imageLimits.count || files.some(file => file.type !== "image/png" || file.size > imageLimits.bytes)
-        || original.reduce((sum, image) => sum + atob(image.base64).length, 0) + files.reduce((sum, file) => sum + file.size, 0) > imageLimits.total)
-        throw new Error(imageHelp);
       const added = [];
       for (const file of files) { added.push(await readPastedPng(file, `Image ${original.length + added.length + 1}`)); if (!current()) return; }
       if (!imageOwner.replace(imageKey, original, [...original, ...added])) {
@@ -646,6 +644,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     <span id="observed-steering-help" className="sr-only">{t("Uses current composer text and the point-in-time observed run. Admission is not run completion. Retained steering is reviewed or retried separately, never from this button.")}</span>
     <span id="observed-queue-help" className="sr-only">{t("Uses current editable composer text and the point-in-time observed attachment, including busy or draining attachments; never targets a run. Reservation does not prove host-only insertion, durability or execution. The composer draft is preserved. Retained queue requests are reviewed or retried separately, never from this button.")}</span>
     <span id="observed-compaction-help" className="sr-only">{t("Point-in-time idle observation permits only an attempt; the provider must prove idle. Busy is a permanent outcome, not an automatic retry. Retained requests are retried manually against their original attachment after the previous wait settles.")}</span>
+    {timelineNotices && createPortal(<>
     {choicesNotice && choicesNotice !== "Loading session choices…" && choicesNotice !== "Selections apply on Send; active runs and queued text are unchanged." && <p className="composer-notice" role={choicesNotice.includes("could not") || choicesNotice.includes("unavailable") ? "alert" : "status"}>{choicesNotice}</p>}
     {message !== "Ready to send to this owned session." && <p className="composer-notice" role="status">{message}</p>}
     {invalidEpoch && <p role="alert">{t("Host/runtime identity changed. Reload required; mutations are disabled. The exact uncertain request is retained and will not be rebased or resent.")}</p>}
@@ -653,6 +652,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     {mcpPlugin && /fail|error/i.test(mcpPlugin.state) && <p role="alert">{t("MCP plugin:")} {mcpPlugin.state}. {t("Check advanced diagnostics.")}</p>}
     {page && page.status !== "ok" && <p role="alert">{t("Receipt snapshot:")} {page.status}</p>}
     {(compactMessage !== "Refresh runtime state explicitly before attempting idle compaction." || pendingAbortRun) && <p className="composer-notice" role="status">{compactMessage !== "Refresh runtime state explicitly before attempting idle compaction." && compactMessage} {pendingAbortRun && abortRunMessage}</p>}
+    </>, timelineNotices)}
     {pendingCompact && <p className="composer-notice">{t("Manual exact compaction retry only:")} {t("epoch")} {pendingCompact.request.expectedEpoch} · {t("session")} {pendingCompact.request.sessionId} · {t("runtime")} {pendingCompact.request.expectedRuntimeInstanceId} · {t("attachment")} {pendingCompact.request.expectedAttachmentGeneration} · {t("request")} {pendingCompact.request.clientRequestId}. {t("Refresh never retargets this intent.")}</p>}
     {pendingAbortRun && <p className="composer-notice">{t("Manual exact cancellation retry only:")} {t("epoch")} {pendingAbortRun.request.expectedEpoch} · {t("session")} {pendingAbortRun.request.sessionId} · {t("runtime")} {pendingAbortRun.request.expectedRuntimeInstanceId} · {t("attachment")} {pendingAbortRun.request.expectedAttachmentGeneration} · {t("run")} {pendingAbortRun.request.expectedRunId} · {t("request")} {pendingAbortRun.request.clientRequestId}. {t("Refresh never retargets this intent.")}</p>}
     <QueueIntentReview owner={queue} epoch={epoch} sessionId={sessionId} capture={() => {

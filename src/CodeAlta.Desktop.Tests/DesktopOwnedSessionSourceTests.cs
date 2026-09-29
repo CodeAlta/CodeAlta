@@ -20,7 +20,7 @@ public sealed class DesktopOwnedSessionSourceTests
         RequireOnce(Read("CodeAlta.Orchestration/Properties/AssemblyInfo.cs"), "[assembly: InternalsVisibleTo(\"CodeAlta.Desktop.Tests\")]");
         var app = Read("CodeAlta/Desktop/DesktopApplication.cs");
         RequireOnce(app, "_hostCreation = CodeAltaHost.CreateAsync(");
-        RequireOnce(app, "MaximumFrameBytes = 208 * 1024");
+        RequireOnce(app, "MaximumFrameBytes = 128 * 1024 * 1024");
         Before(app, "CodeAltaSingleInstanceGuard.Acquire(", "Directory.CreateDirectory(options.DataRoot);", "private static int RunOwned(");
         StringAssert.Contains(app, "ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(");
         StringAssert.Contains(app, "StartPlugins = false, OwnsLogging = false, IsHeadless = true");

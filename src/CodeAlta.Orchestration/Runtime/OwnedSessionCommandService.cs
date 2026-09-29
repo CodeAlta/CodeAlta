@@ -182,8 +182,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             ArgumentException.ThrowIfNullOrWhiteSpace(request.Text);
         if (request.Images is { Count: > 0 } images)
         {
-            if (images.Count > OwnedPromptImages.MaxCount || request.Selection?.ModelId is null || request.Text.Length > 4096)
-                throw new ArgumentException("Images require an explicit model and at most three attachments.", nameof(request));
+            if (request.Selection?.ModelId is null || request.Text.Length > 32768)
+                throw new ArgumentException("Images require an explicit model and text within the prompt limit.", nameof(request));
             request = request with { Images = Array.AsReadOnly(images.ToArray()) };
         }
         if (request.References is { } scope && (request.Text.Length > 32768 || string.IsNullOrWhiteSpace(scope.ProjectId)

@@ -35,15 +35,14 @@ test("empty/loading live windows stay out of the timeline, but faults and covera
   assert.equal(showLiveDisplay({ ...empty, snapshot: { ...snapshot, session: { ...session, unsupportedEvents: "1" } } }), true);
 });
 
-test("empty asks collapse to a manual refresh; uncertainty, retained actions, and backend dispositions remain visible", () => {
-  assert.equal(showAskDetails(undefined, 0, false, false), false);
-  assert.equal(showAskDetails(noAsks, 0, false, false), false);
-  assert.equal(showAskDetails(noAsks, 1, false, false), true);
-  assert.equal(showAskDetails(noAsks, 0, true, false), true);
-  assert.equal(showAskDetails(noAsks, 0, false, true), true);
-  assert.equal(showAskDetails({ ...noAsks, hasMore: true }, 0, false, false), true);
-  assert.equal(showAskDetails({ ...noAsks, latest: {} as NonNullable<AskPage["latest"]> }, 0, false, false), true);
-  assert.equal(showAskDetails({ ...noAsks, head: {} as NonNullable<AskPage["head"]> }, 0, false, false), true);
+test("observation failures do not invent pending asks; retained actions and backend dispositions remain visible", () => {
+  assert.equal(showAskDetails(undefined, 0), false, "failed/missing reads do not imply a question");
+  assert.equal(showAskDetails(noAsks, 0), false);
+  assert.equal(showAskDetails(noAsks, 1), true);
+  assert.equal(showAskDetails(undefined, 1), true, "a read failure cannot hide an original action");
+  assert.equal(showAskDetails({ ...noAsks, hasMore: true }, 0), true);
+  assert.equal(showAskDetails({ ...noAsks, latest: {} as NonNullable<AskPage["latest"]> }, 0), true);
+  assert.equal(showAskDetails({ ...noAsks, head: {} as NonNullable<AskPage["head"]> }, 0), true);
 });
 
 test("contextual controls appear only for an eligible observation or a retained exact request", () => {

@@ -330,6 +330,13 @@ In GitHub repositories, type `#` to search recent issues. The picker accepts num
 
 When the selected model supports image input, copy an image to the clipboard and press `Ctrl+V` in the prompt editor. CodeAlta opens a preview/title dialog so you can confirm the image before it is attached, then stores the image beside the session journal.
 
+In the WebApp, pasted PNGs appear as thumbnails above the prompt. The former 64 KiB per-image,
+96 KiB total, three-image and 2048px/4MP restrictions no longer apply. The owned host accepts
+RPC frames up to 128 MiB including base64/JSON overhead; browser and model-provider constraints
+still apply. Runtime and Ask observation failures appear as errors in the timeline, not below
+the prompt. A “Pending asks” heading means there is an actual question awaiting your response,
+not merely a failed observation.
+
 <figure class="my-4">
   <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-image-prompt-copy-paste.png" alt="CodeAlta image paste dialog showing an image copied into a prompt" loading="lazy">
   <figcaption class="small text-secondary mt-2">Paste an image into the prompt, preview it, give it a title, and send it as model context when the provider/model accepts image input.</figcaption>

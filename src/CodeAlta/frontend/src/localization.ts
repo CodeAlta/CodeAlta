@@ -4,6 +4,8 @@ function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
   return Object.freeze(Object.fromEntries(Object.entries(rows).map(([key, row]) => [key, Object.freeze(row)]))) as Readonly<T>;
 }
 export const messages = dictionary({
+  "Local image edit refused. Use a supported PNG and a writable owned draft; original attachments are retained.": ["Edición rechazada. Usa un PNG compatible y un borrador propio editable; se conservan los adjuntos.", "Modification refusée. Utilisez un PNG compatible et un brouillon détenu modifiable ; les pièces jointes sont conservées.", "Bildänderung abgelehnt. Unterstütztes PNG und bearbeitbaren eigenen Entwurf verwenden; Anhänge bleiben erhalten.", "画像の編集を拒否しました。対応するPNGと編集可能な所有下書きを使用してください。元の添付は保持されます。", "图像编辑被拒绝。请使用受支持的 PNG 和可写的自有草稿；原始附件仍然保留。"],
+  "Paste PNG images. Normal Send requires an observed supported model. Queue and Steer refuse images.": ["Pega imágenes PNG. Enviar requiere un modelo compatible observado. Cola y dirección rechazan imágenes.", "Collez des images PNG. Envoyer exige un modèle compatible observé. File et orientation refusent les images.", "PNG-Bilder einfügen. Senden erfordert ein beobachtetes geeignetes Modell. Warteschlange und Steuerung lehnen Bilder ab.", "PNG画像を貼り付けます。通常の送信には対応が確認されたモデルが必要です。キューと実行への指示は画像を拒否します。", "粘贴 PNG 图片。正常发送需要已观察到支持图像的模型。排队和引导拒绝图像。"],
   "Thinking for {elapsed}...": ["Pensando durante {elapsed}...", "Réflexion depuis {elapsed}...", "Denkt seit {elapsed}...", "{elapsed} 思考中...", "已思考 {elapsed}..."],
   "Draft edited...": ["Borrador editado...", "Brouillon modifié...", "Entwurf bearbeitet...", "下書きを編集しました...", "草稿已编辑..."],
   "Save image title": ["Guardar título de imagen", "Enregistrer le titre de l’image", "Bildtitel speichern", "画像タイトルを保存", "保存图片标题"],

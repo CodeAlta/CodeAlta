@@ -234,7 +234,7 @@ flowchart LR
 
 Desktop Skills inspection must use the explicit bounded raw candidate/metadata readers with host-derived verified roots, not `SkillManagementService.LoadAsync` or effective discovery behind a response row cap. Keep raw observations distinct from ignore resolution, enablement, trust and activation; preserve one original read through dialog dismissal and validate correlation before propagating shared host evidence. See [skills-inspection.md](skills-inspection.md) for budgets, cancellation and path-race limitations.
 
-See [prompt-images.md](prompt-images.md) for the owned Send PNG subset, fixed bridge-compatible budgets,
+See [prompt-images.md](prompt-images.md) for the owned Send PNG subset, transport safeguards,
 non-probing shared capability, typed `LocalImage` transport, exact replay and App draft retention.
 Keep image validation/persistence in shared orchestration; the renderer supplies encoded copies, never
 filesystem authorization. The existing Store is trusted backend code with external path-race and

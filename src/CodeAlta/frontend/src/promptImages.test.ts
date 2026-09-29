@@ -73,7 +73,7 @@ test("image draft replacement is bounded, immutable and exact-revision fenced", 
   assert.equal(owner.replace("overflow", owner.get("overflow"), frozen), true);
 });
 
-test("PNG preview header refuses arbitrary, oversized and non-raster payloads", () => {
+test("PNG preview header refuses malformed and non-raster payloads regardless of size", () => {
   for (const bytes of [new Uint8Array(), new Uint8Array(65_537), new TextEncoder().encode("<svg/>")])
     assert.throws(() => pngHeader(bytes));
 });
@@ -102,7 +102,7 @@ test("title replacement uses exact snapshots, rejects invalid metadata and fence
   assert.equal(owner.replace("replacement scope", original, []), false);
 });
 
-test("worst-case bounded image request fits the unchanged bridge frame and freezes all fields", () => {
+test("image requests preserve metadata without the former text and total-byte limits", () => {
   const images = [65_536, 32_768].map(size => ({ title: "漢".repeat(80), mediaType: "image/png", base64: btoa("a".repeat(size)) }));
   const selection = { providerKey: "p".repeat(256), agentPromptId: "a".repeat(256), modelId: "m".repeat(256), reasoningEffort: null };
   const captured = captureSubmission("e".repeat(64), "s".repeat(256), "\u0001".repeat(4096), "k".repeat(256), selection,
@@ -111,6 +111,14 @@ test("worst-case bounded image request fits the unchanged bridge frame and freez
   assert.ok(new TextEncoder().encode(JSON.stringify(captured)).length < 200 * 1024, "leave at least 8 KiB for the existing bridge envelope");
   images[0].title = "changed";
   assert.notEqual(captured.images![0].title, images[0].title);
-  assert.equal(captureSubmission("e", "s", "x".repeat(4097), "k", selection, null, images), null);
-  assert.equal(captureSubmission("e", "s", "x", "k", selection, null, [...images, images[1]]), null);
+  assert.ok(captureSubmission("e", "s", "x".repeat(32768), "k", selection, null, images));
+  assert.ok(captureSubmission("e", "s", "x", "k", selection, null, [...images, images[1]]));
+  assert.equal(captureSubmission("e", "s", "x".repeat(32769), "k", selection, null, images), null);
+});
+
+test("ordinary multi-megabyte images and more than three attachments remain in the draft", () => {
+  const owner = createImageDrafts();
+  const image = { title: "Screenshot", mediaType: "image/png", base64: btoa("a".repeat(2_000_000)) };
+  assert.equal(owner.replace("draft", owner.get("draft"), [image, image, image, image]), true);
+  assert.equal(owner.get("draft").length, 4);
 });

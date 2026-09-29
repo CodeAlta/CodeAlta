@@ -1,5 +1,5 @@
 import { useState, useSyncExternalStore, type ClipboardEvent } from "react";
-import { createImageDrafts, imageLimits, readPastedPng } from "./promptImages";
+import { createImageDrafts, readPastedPng } from "./promptImages";
 import { translate, type Locale, type MessageKey } from "./localization";
 import { PromptImageAttachments } from "./PromptImageAttachments";
 
@@ -24,9 +24,6 @@ export function useLocalDraftImages(owner: ReturnType<typeof createImageDrafts>,
     const finish = owner.beginRead(key);
     if (!finish) { setNotice(true); return; }
     try {
-      if (original.length + files.length > imageLimits.count || files.some(file => file.type !== "image/png" || file.size > imageLimits.bytes)
-        || original.reduce((sum, image) => sum + atob(image.base64).length, 0) + files.reduce((sum, file) => sum + file.size, 0) > imageLimits.total)
-        throw Error("Image limits");
       const added = [];
       for (const file of files) { added.push(await readPastedPng(file, `Image ${original.length + added.length + 1}`)); if (!valid()) return; }
       if (!owner.replace(key, original, [...original, ...added])) { setNotice(true); return; }
@@ -36,7 +33,7 @@ export function useLocalDraftImages(owner: ReturnType<typeof createImageDrafts>,
   }
   const editable = !!capture();
   const attachments = <PromptImageAttachments images={images} disabled={!editable}
-    notice={notice ? t("Local image edit refused. Keep PNG limits and a writable owned draft; original attachments are retained.") : null}
+    notice={notice ? t("Local image edit refused. Use a supported PNG and a writable owned draft; original attachments are retained.") : null}
     rename={(index, title) => {
       invalidate(); if (!capture()) return;
       setNotice(!owner.replace(key, images, images.map((value, i) => i === index ? { ...value, title } : value)));

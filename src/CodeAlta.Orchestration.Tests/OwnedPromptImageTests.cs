@@ -8,20 +8,31 @@ namespace CodeAlta.Orchestration.Tests;
 public sealed class OwnedPromptImageTests
 {
     [TestMethod]
-    public void ValidatesExactRasterAndRejectsMalformedOrOversizedImages()
+    public void ValidatesExactRasterAndRejectsMalformedImages()
     {
         var png = Png(1, 1);
         CollectionAssert.AreEqual(png, OwnedPromptImages.Decode(new("Image 1", "image/png", Convert.ToBase64String(png))));
-        foreach (var invalid in new[] { png[..^1], Png(4097, 1), Png(1, 1, 5), new byte[65_537] })
+        foreach (var invalid in new[] { png[..^1], Png(1, 1, 5), new byte[65_537] })
             Assert.ThrowsExactly<ArgumentException>(() => OwnedPromptImages.Decode(new("Image 1", "image/png", Convert.ToBase64String(invalid))));
         png[^5] ^= 1;
         Assert.ThrowsExactly<ArgumentException>(() => OwnedPromptImages.Decode(new("Image 1", "image/png", Convert.ToBase64String(png))));
         Assert.ThrowsExactly<ArgumentException>(() => OwnedPromptImages.Decode(new("Image 1", "image/svg+xml", "AA==")));
         var image = new OwnedPromptImage("Image 1", "image/png", Convert.ToBase64String(Png(1, 1)));
-        Assert.ThrowsExactly<ArgumentException>(() => OwnedPromptImages.Freeze([image, image, image, image]));
-        var noisy = new OwnedPromptImage("Image 1", "image/png", Convert.ToBase64String(Png(100, 100, noise: true)));
-        Assert.IsTrue(OwnedPromptImages.Decode(noisy).Length > 32_768);
-        Assert.ThrowsExactly<ArgumentException>(() => OwnedPromptImages.Freeze([noisy, noisy, noisy]));
+        Assert.HasCount(4, OwnedPromptImages.Freeze([image, image, image, image]));
+    }
+
+    [TestMethod]
+    public void AcceptsLargeScreenshotsWithoutFormerByteCountOrDimensionLimits()
+    {
+        var png = Png(1280, 720, noise: true);
+        Assert.IsTrue(png.Length > 65_536);
+        var image = new OwnedPromptImage("Screenshot", "image/png", Convert.ToBase64String(png));
+        CollectionAssert.AreEqual(png, OwnedPromptImages.Decode(image));
+        Assert.HasCount(4, OwnedPromptImages.Freeze([image, image, image, image]));
+        var desktop = Png(3840, 2160);
+        CollectionAssert.AreEqual(desktop, OwnedPromptImages.Decode(new("Desktop", "image/png", Convert.ToBase64String(desktop))));
+        var wide = Png(20_000, 1);
+        CollectionAssert.AreEqual(wide, OwnedPromptImages.Decode(new("Wide", "image/png", Convert.ToBase64String(wide))));
     }
 
     internal static byte[] Png(int width, int height, byte filter = 0, bool noise = false)

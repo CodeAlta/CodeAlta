@@ -1,3 +1,13 @@
+# Observation error placement and practical image paste (2026-09-29)
+
+Ask observation failures no longer create a Pending asks panel; that heading requires a real
+pending ask. Errors are shown as timeline alerts, and runtime/receipt/composer outcome notices
+are rendered in the timeline rather than below the prompt. Real ask actions and recovery remain.
+PNG paste and owned Send no longer enforce the former 64 KiB/96 KiB, three-image or 2048px/4MP
+limits. The owned inbound frame allowance is now 128 MiB (superseding historical 208 KiB claims
+below), and image-bearing text shares the 32,768-character prompt limit. See
+[prompt-images.md](prompt-images.md) for format, transport and retention constraints.
+
 # Desktop IDE runnable checkpoint
 
 **Parent history acceptance:** independently passed 18 reader, 12 Desktop RPC/budget,

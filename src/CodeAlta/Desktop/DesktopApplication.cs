@@ -182,10 +182,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 environmentLifetime = environment;
                 if (!closeRequested.Task.IsCompleted)
                 {
-                    // Owned-only host-wide inbound UTF-8 framing cap, not a per-method/response limit.
+                    // Leave room for ordinary pasted images and their base64/JSON overhead.
+                    // Owned-only host-wide inbound UTF-8 framing cap, not a per-image/response limit.
                     var builder = new NeoRpcBuilder(new NeoRpcOptions
                     {
-                        ContractHash = NeoRpcGeneratedContract.Hash, Release = true, MaximumFrameBytes = 208 * 1024,
+                        ContractHash = NeoRpcGeneratedContract.Hash, Release = true, MaximumFrameBytes = 128 * 1024 * 1024,
                         MaximumChannelsPerSession = 2, MaximumUnacknowledgedChannelItems = 2,
                     });
                     builder.AddBootService(new BootService(epoch, options.ReviewOwnedCommandPermissions, options.EnableOwnedUserInput));

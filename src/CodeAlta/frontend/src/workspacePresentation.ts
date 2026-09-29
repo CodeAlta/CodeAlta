@@ -14,8 +14,9 @@ export function showLiveDisplay(state: DisplayState | null): boolean {
       || session.evictedTextItems !== "0" || session.evictedToolActivities !== "0" || session.unsupportedEvents !== "0");
 }
 
-export function showAskDetails(page: AskPage | undefined, retainedCount: number, readFailed: boolean, invalidEpoch: boolean): boolean {
-  return !!page?.head || !!page?.latest || !!page?.hasMore || retainedCount > 0 || readFailed || invalidEpoch;
+// Observation errors are rendered separately; only actual ask evidence opens these details.
+export function showAskDetails(page: AskPage | undefined, retainedCount: number): boolean {
+  return !!page?.head || !!page?.latest || !!page?.hasMore || retainedCount > 0;
 }
 
 export function showContextAction(observationPermits: boolean, retained: boolean): boolean {

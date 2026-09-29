@@ -1809,6 +1809,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   const [infoOpen, setInfoOpen] = useState(false);
   const infoActive = useRef(false);
   const askRefresh = useRef<(() => void) | null>(null);
+  const [timelineNotices, setTimelineNotices] = useState<HTMLDivElement | null>(null);
   const [infoFocusRestoration] = useState(createPaletteFocusRestoration);
   useEffect(() => () => infoFocusRestoration.cancel(), [infoFocusRestoration]);
   function openInfo() {
@@ -1919,6 +1920,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
         {ownedSession && status?.hostEpoch
         ? <>
           <LiveSessionPanel store={display} hostEpoch={status.hostEpoch} sessionId={session.id} capability={mutation!.capability} />
+          <div className="timeline-notices" ref={setTimelineNotices} />
           {status.ownedAsksEnabled && <AskPanel epoch={status.hostEpoch} sessionId={session.id} actions={askActions} capability={mutation!.capability} refreshTrigger={askRefresh} />}
           {status.ownedUserInputEnabled && <UserInputPanel epoch={status.hostEpoch} sessionId={session.id} reviewer={inputReviewer} capability={mutation!.capability}
             canReview={() => infoLifetime.current()} />}
@@ -1939,7 +1941,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
               usageTarget={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? {
                 epoch: status.hostEpoch, sessionId: session.id, scope: selectedProjectId === null ? "global" : "project",
                 projectId: selectedProjectId, expectedProjectPath: selectedProjectId === null ? null : session.workspacePath } : null}
-              liveState={ownedSession ? live : null} inputLifetime={infoLifetime} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} infoControl={infoControl} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
+              timelineNotices={timelineNotices} liveState={ownedSession ? live : null} inputLifetime={infoLifetime} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} infoControl={infoControl} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
               reminderActions={reminderActions} readReminderCount={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? readReminders : undefined} /> : null}
           readOnly={<ReadOnlyComposer sessionId={session.id} provider={session.providerKey} draftIndicators={draftIndicators} infoControl={infoControl} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
               reason={archivedScope ? t("Archived project; this session is read-only. Sending is unavailable.") : undefined} />}

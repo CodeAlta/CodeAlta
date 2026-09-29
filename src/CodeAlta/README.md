@@ -1,5 +1,16 @@
 # CodeAlta desktop (in development)
 
+## Observation errors and pasted images
+
+Runtime/receipt observation errors appear inside the selected session timeline, never below
+the prompt. An Ask read failure is an error, not a pending question. “Pending asks” is reserved
+for a real pending backend ask; retained answers and recovery drafts remain available.
+
+Owned PNG paste no longer imposes the former 64 KiB per image / 96 KiB aggregate, three-image
+or 2048px/4MP limits. Image-bearing prompts use the normal 32,768-character text limit.
+The owned inbound RPC frame allowance is 128 MiB including base64/JSON overhead. PNG integrity,
+observed model capability, exact draft revisions and host/session ownership remain validated.
+
 `CodeAlta` is the native desktop .NET tool (`alta`), built with published NeoAstra 0.2.0,
 generated RPC, React/strict TypeScript and packaged local Vite assets. Node/npm is needed
 only to build. The installed application has no UI server or external asset origin.

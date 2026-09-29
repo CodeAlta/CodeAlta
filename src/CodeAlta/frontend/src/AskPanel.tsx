@@ -171,10 +171,12 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
     refreshTrigger.current = refresh;
     return () => { refreshTrigger.current = null; };
   });
-  const visible = recovery.length > 0 || showAskDetails(page, retained.length, notice === "failed", !canMutate);
-  if (!visible) return null;
+  const visible = recovery.length > 0 || showAskDetails(page, retained.length);
+  // This component lives in the timeline. A failed read is an error, not evidence of an ask.
+  if (!visible) return notice === "failed" && scope === previousScope.current
+    ? <p role="alert" className="error-text">{t(notices.failed)}</p> : null;
   return <section aria-label={t("Owned asks")}>
-    <h3>{t("Pending asks")}</h3>
+    <h3>{t(head?.state === "pending" ? "Pending asks" : "Owned asks")}</h3>
     {(!page?.head || notice === "failed" || notice === "invalid") && <p role={notice === "failed" || notice === "invalid" ? "alert" : "status"}>{t(notices[notice])}</p>}
     {!canMutate && <p role="alert">{t("Host identity changed. Reload required; retained ask actions cannot be retargeted.")}</p>}
     <p className="detail">{t("Restricted caller-session asks only. Answer starts a new text submission; Cancel does not stop a run. No files, provider input, automatic retry or restart recovery.")}</p>
