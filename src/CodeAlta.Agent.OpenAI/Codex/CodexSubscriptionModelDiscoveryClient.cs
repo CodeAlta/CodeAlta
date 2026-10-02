@@ -97,7 +97,13 @@ internal sealed class CodexSubscriptionModelDiscoveryClient
         ArgumentNullException.ThrowIfNull(baseUri);
         ArgumentException.ThrowIfNullOrWhiteSpace(clientVersion);
 
-        return CodexSubscriptionHttpRequestFactory.ResolveEndpoint(baseUri, "models");
+        // The catalog is gated by `client_version`; omitting it returns only an older subset of the
+        // account's models, so keep sending the three-part client version like Codex does.
+        var modelsUri = CodexSubscriptionHttpRequestFactory.ResolveEndpoint(baseUri, "models");
+        return CodexSubscriptionHttpRequestFactory.AppendQueryParameter(
+            modelsUri,
+            "client_version",
+            NormalizeClientVersion(clientVersion));
     }
 
     private static bool IsRetryable(
@@ -110,6 +116,21 @@ internal sealed class CodexSubscriptionModelDiscoveryClient
             OperationCanceledException => !callerCancellation.IsCancellationRequested,
             _ => false,
         };
+
+    private static string NormalizeClientVersion(string clientVersion)
+    {
+        var trimmed = clientVersion.Trim();
+        var slashIndex = trimmed.LastIndexOf('/');
+        if (slashIndex >= 0 && slashIndex + 1 < trimmed.Length)
+        {
+            trimmed = trimmed[(slashIndex + 1)..];
+        }
+
+        var parts = trimmed.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.Length >= 3
+            ? string.Join('.', parts.Take(3))
+            : trimmed;
+    }
 
     private static string CreateFailureMessage(HttpStatusCode statusCode, string content)
     {

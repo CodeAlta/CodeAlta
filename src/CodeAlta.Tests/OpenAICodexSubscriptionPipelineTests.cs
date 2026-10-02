@@ -1057,7 +1057,8 @@ public sealed class OpenAICodexSubscriptionPipelineTests
 
         CollectionAssert.AreEqual(new[] { "model-z", "model-a" }, models.Select(static model => model.Id).ToArray());
         Assert.AreEqual("Z", models[0].DisplayName);
-        Assert.AreEqual("https://api.openai.com/v1/models", handler.RequestUris[0].AbsoluteUri);
+        Assert.AreEqual("https://api.openai.com/v1/models", handler.RequestUris[0].GetLeftPart(UriPartial.Path));
+        StringAssert.StartsWith(handler.RequestUris[0].Query, "?client_version=");
         Assert.AreEqual("Bearer access-token", handler.Requests[0]["Authorization"]);
     }
 
@@ -1108,8 +1109,9 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.AreEqual(false, models[1].Capabilities?["supportedInApi"]);
         Assert.AreEqual("websocket-only-codex", models[2].Id);
         Assert.AreEqual(true, models[2].Capabilities?["requiresWebSocket"]);
+        var version = typeof(OpenAIProviderSdkFactory).Assembly.GetName().Version!;
         Assert.AreEqual(
-            "https://api.openai.com/v1/models",
+            $"https://api.openai.com/v1/models?client_version={version.Major}.{version.Minor}.{version.Build}",
             handler.RequestUris[0].ToString());
         Assert.AreEqual("Bearer access-token", handler.Requests[0]["Authorization"]);
         Assert.AreEqual("acct_configured", handler.Requests[0]["ChatGPT-Account-Id"]);
@@ -1127,7 +1129,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var responses = CodexSubscriptionHttpRequestFactory.ResolveEndpoint(baseUri, "responses");
         var webSocket = OpenAICodexSubscriptionWebSocketSession.ResolveWebSocketUri(baseUri);
 
-        Assert.AreEqual("https://example.test/backend-api/codex/models?tenant=alpha%20one", models.AbsoluteUri);
+        Assert.AreEqual("https://example.test/backend-api/codex/models?tenant=alpha%20one&client_version=1.2.3", models.AbsoluteUri);
         Assert.AreEqual("https://example.test/backend-api/codex/responses?tenant=alpha%20one", responses.AbsoluteUri);
         Assert.AreEqual("wss://example.test/backend-api/codex/responses?tenant=alpha%20one", webSocket.AbsoluteUri);
     }
