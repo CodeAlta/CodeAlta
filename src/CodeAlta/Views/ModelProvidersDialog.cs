@@ -824,8 +824,6 @@ internal sealed class ModelProvidersDialog
 
         if (item.ProviderType == "codex")
         {
-            AddTextRow(form, ref row, SR.T("Auth Source"), CreateDefaultTextField(bindings.AuthSource, () => item.UseDefaultAuthSource), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultAuthSource));
-            AddTextRow(form, ref row, SR.T("Account/Workspace Id"), CreateDefaultTextField(bindings.AccountId, () => item.UseDefaultAccountId), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultAccountId));
             AddTextRow(form, ref row, SR.T("Model Discovery"), CreateDefaultTextField(bindings.ModelDiscovery, () => item.UseDefaultModelDiscovery), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultModelDiscovery));
             AddTextRow(form, ref row, SR.T("Response Transport"), CreateDefaultTextField(bindings.ResponseTransport, () => item.UseDefaultResponseTransport), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultResponseTransport));
         }
@@ -929,24 +927,16 @@ internal sealed class ModelProvidersDialog
 
     private Visual CreateCodexSubscriptionActions(ModelProviderEditorItemViewModel item)
         => new VStack(
-            new Markup($"[dim]{SR.T("ChatGPT/Codex subscription actions never send a model turn. Use Account/Workspace Id to pin a specific account when required.")}[/]") { Wrap = true },
+            new Markup($"[dim]{SR.T("Authorize CodeAlta to use your ChatGPT plan in your browser. Add a separate Codex provider for another account or workspace. Manage app limits at https://chatgpt.com/settings/usage.")}[/]") { Wrap = true },
             new HStack(
                 CreateCancelableProviderActionButton(
                     item,
-                    SR.T("Browser Login"),
+                    SR.T("Continue with ChatGPT"),
                     SR.T("Cancel Browser Login"),
                     ProviderDialogOperationKind.CodexBrowserLogin,
                     SR.T("start ChatGPT browser login"),
                     SR.T("Starting ChatGPT browser login..."),
                     _modelProviders.LoginWithBrowserAsync),
-                CreateCancelableProviderActionButton(
-                    item,
-                    SR.T("Device Login"),
-                    SR.T("Cancel Device Login"),
-                    ProviderDialogOperationKind.CodexDeviceLogin,
-                    SR.T("start ChatGPT device-code login"),
-                    SR.T("Requesting ChatGPT device code..."),
-                    _modelProviders.LoginWithDeviceCodeAsync),
                 new Button(SR.T("Test Auth"))
                     .Tone(ControlTone.Primary)
                     .Click(() => StartProviderAction(
@@ -961,19 +951,19 @@ internal sealed class ModelProvidersDialog
                         SR.T("list Codex subscription models"),
                         SR.T("Listing Codex subscription models without sending a model turn..."),
                         definition => _modelProviders.ListModelsAsync(definition))),
-                new Button(SR.T("List Accounts"))
+                new Button(SR.T("Account Info"))
                     .Tone(ControlTone.Default)
                     .Click(() => StartProviderAction(
                         item,
-                        SR.T("list ChatGPT accounts/workspaces"),
-                        SR.T("Reading ChatGPT account/workspace metadata..."),
+                        SR.T("show the saved ChatGPT account"),
+                        SR.T("Reading the saved ChatGPT registration..."),
                         definition => _modelProviders.ListAccountsAsync(definition))),
-                new Button(SR.T("Logout"))
+                new Button(SR.T("Sign out"))
                     .Tone(ControlTone.Error)
                     .Click(() => StartProviderAction(
                         item,
                         SR.T("logout ChatGPT credentials"),
-                        SR.T("Deleting CodeAlta-owned ChatGPT/Codex credentials..."),
+                        SR.T("Revoking the ChatGPT session and clearing local tokens..."),
                         definition => _modelProviders.LogoutAsync(definition))))
             {
                 Spacing = 1,
@@ -2210,7 +2200,6 @@ internal sealed class ModelProvidersDialog
 
     private static bool IsLoginOperation(ProviderDialogOperationKind operationKind)
         => operationKind is ProviderDialogOperationKind.CodexBrowserLogin
-            or ProviderDialogOperationKind.CodexDeviceLogin
             or ProviderDialogOperationKind.CopilotBrowserLogin
             or ProviderDialogOperationKind.CopilotDeviceLogin
             or ProviderDialogOperationKind.XaiBrowserLogin
@@ -2223,10 +2212,6 @@ internal sealed class ModelProvidersDialog
                 SR.T("ChatGPT Browser Login"),
                 SR.T("Cancel Browser Login"),
                 SR.T("Complete ChatGPT browser login in your browser, then return to CodeAlta.")),
-            ProviderDialogOperationKind.CodexDeviceLogin => new LoginOperationLabels(
-                SR.T("ChatGPT Device Login"),
-                SR.T("Cancel Device Login"),
-                SR.T("Open the ChatGPT verification URL and enter the device code shown below.")),
             ProviderDialogOperationKind.CopilotBrowserLogin => new LoginOperationLabels(
                 SR.T("Copilot Browser Login"),
                 SR.T("Cancel Browser Login"),
@@ -2419,7 +2404,6 @@ internal sealed class ModelProvidersDialog
     {
         None,
         CodexBrowserLogin,
-        CodexDeviceLogin,
         CopilotBrowserLogin,
         CopilotDeviceLogin,
         XaiBrowserLogin,

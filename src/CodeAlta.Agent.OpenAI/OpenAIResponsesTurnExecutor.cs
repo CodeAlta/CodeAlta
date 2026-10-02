@@ -1479,7 +1479,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
             : provider.StateRootPath;
         var installationIdProvider = new CodexSubscriptionInstallationIdProvider(
             stateRootPath,
-            CodexAuthFileReader.ResolveCodexHome());
+            CodexHomeResolver.ResolveCodexHome());
         var installationId = await installationIdProvider.ResolveAsync(
             codexOptions.SendInstallationId,
             codexOptions.InstallationIdSource,
@@ -2895,7 +2895,14 @@ internal sealed class OpenAIResponsesTurnExecutor(
             or "usage_limit_reached"
             or "invalid_prompt"
             or "cyber_policy"
-            or "bio_policy";
+            or "bio_policy"
+            or "subscription_sharing_user_not_eligible"
+            or "subscription_sharing_usage_limit_exceeded"
+            or "subscription_sharing_unsupported_capability"
+            or "subscription_sharing_route_not_supported"
+            or "subscription_sharing_invalid_user"
+            or "chatpass_v2_scope_not_authorized"
+            or "chatpass_v2_invalid_authorization_context";
     }
 
     private static bool IsWebSocketTransportTimeout(Exception exception)
@@ -2955,6 +2962,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
         var normalized = detail.ToLowerInvariant();
         return normalized.Contains("usage_limit_reached", StringComparison.Ordinal) ||
+               normalized.Contains("subscription_sharing_usage_limit_exceeded", StringComparison.Ordinal) ||
                normalized.Contains("usage_not_included", StringComparison.Ordinal) ||
                normalized.Contains("insufficient_quota", StringComparison.Ordinal) ||
                normalized.Contains("quota", StringComparison.Ordinal) ||

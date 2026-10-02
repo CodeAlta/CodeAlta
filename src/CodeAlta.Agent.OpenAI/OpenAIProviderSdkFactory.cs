@@ -258,10 +258,8 @@ internal static class OpenAIProviderSdkFactory
         {
             HttpRequestException => true,
             TimeoutException => true,
-            InvalidOperationException invalidOperationException
-                when invalidOperationException.Message.Contains("login is required", StringComparison.OrdinalIgnoreCase) => true,
             JsonException => true,
-            CodexSubscriptionModelDiscoveryException { StatusCode: System.Net.HttpStatusCode.Unauthorized } => false,
+            CodexSubscriptionModelDiscoveryException { StatusCode: System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden } => false,
             CodexSubscriptionModelDiscoveryException => true,
             _ => false,
         };
@@ -282,7 +280,6 @@ internal static class OpenAIProviderSdkFactory
         return supportedModels
             .Where(static model => model.Listable && !model.Hidden)
             .Select(model => CreateModelInfo(model, providerDescriptor))
-            .OrderBy(static model => model.DisplayName ?? model.Id, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
 
@@ -564,8 +561,7 @@ internal static class OpenAIProviderSdkFactory
             new OpenAICodexSubscriptionOAuthClient(CodexOAuthHttpClient),
             provider.ProviderKey,
             options.AuthSource,
-            options.AccountId,
-            CodexAuthFileReader.ResolveCodexHome());
+            options.AccountId);
     }
 
     internal static string ResolveStateRootPath(OpenAIProviderOptions provider)

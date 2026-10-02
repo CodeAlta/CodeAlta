@@ -216,12 +216,14 @@ public sealed class OpenAICodexSubscriptionOptions
     internal bool EnableSequentialCutoffReasoningSummaries { get; set; }
 
     /// <summary>
-    /// Gets or sets the ChatGPT/Codex OAuth credential source.
+    /// Gets or sets the ChatGPT OAuth credential source. Only <c>codealta_oauth</c> is supported;
+    /// credentials must come from CodeAlta's Sign in with ChatGPT token-sharing flow.
     /// </summary>
     public string AuthSource { get; set; } = "codealta_oauth";
 
     /// <summary>
-    /// Gets or sets an explicit ChatGPT account or workspace identifier.
+    /// Gets or sets an optional account/workspace header override. This does not select an account;
+    /// the saved issued client registration determines the authenticated account and workspace.
     /// </summary>
     public string? AccountId { get; set; }
 
@@ -264,9 +266,9 @@ public sealed class OpenAICodexSubscriptionOptions
     public string ModelDiscovery { get; set; } = "codex_endpoint_with_static_fallback";
 
     /// <summary>
-    /// Gets or sets the Responses transport mode. Use <c>websocket_with_http_fallback</c> for the default WebSocket path or <c>http</c> to force SSE.
+    /// Gets or sets the Responses transport mode. The default is <c>http</c> (SSE); <c>websocket_with_http_fallback</c> opts into WebSocket transport.
     /// </summary>
-    public string ResponseTransport { get; set; } = "websocket_with_http_fallback";
+    public string ResponseTransport { get; set; } = "http";
 
     /// <summary>
     /// Gets or sets whether to send the legacy Responses experimental beta header. The default is <see langword="false" />.
@@ -274,7 +276,8 @@ public sealed class OpenAICodexSubscriptionOptions
     public bool SendResponsesBetaHeader { get; set; }
 
     /// <summary>
-    /// Gets or sets whether to include a stable installation id in request metadata.
+    /// Gets or sets whether to include an optional stable telemetry installation id in request metadata.
+    /// This is independent of the required host identifier used during ChatGPT authorization.
     /// </summary>
     public bool SendInstallationId { get; set; }
 

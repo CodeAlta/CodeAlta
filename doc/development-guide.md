@@ -112,6 +112,7 @@ flowchart LR
 - Keep `config.toml` backward compatible: existing `extra_body`, `profile`, `compaction`, and `model_overrides` semantics remain authoritative over built-in defaults.
 - Do not add script-like provider transforms to config. Complex message restructuring must stay in code behind narrow, named compatibility flags.
 - Codex subscription prompts allow parallel tool calls independently of legacy discovery metadata, except Responses Lite, which forces false. This request policy must not be confused with host tool-handler concurrency. Subscription fast routing must remain opt-in and require an advertised `priority` service tier; do not infer premium support from static fallback data.
+- ChatGPT subscription auth uses OpenAI's public dynamic-client token-sharing flow, not the fixed Codex client or imported Codex credentials. Validate ID-token signatures and issuer/audience/lifetime/nonce before persisting identity; never use email or OIDC `sub` as a workspace ID. Keep each provider registration separate, reuse issued client IDs and the host ID, serialize rotating refreshes across processes, and clear tokens only on terminal OAuth refresh errors or explicit sign-out. Public plan inference uses `api.openai.com/v1` with the preview request restrictions; do not silently change billing paths or hide auth/permission failures behind model fallback.
 
 ## MCP Configuration And Runtime Boundaries
 

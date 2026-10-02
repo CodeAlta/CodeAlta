@@ -8,7 +8,16 @@ internal sealed class OpenAICodexSubscriptionCredential
     public string Issuer { get; set; } = OpenAICodexSubscriptionOAuthDefaults.Issuer;
 
     [JsonPropertyName("client_id")]
-    public string ClientId { get; set; } = OpenAICodexSubscriptionOAuthDefaults.ClientId;
+    public string ClientId { get; set; } = string.Empty;
+
+    [JsonPropertyName("subject")]
+    public string? Subject { get; set; }
+
+    [JsonPropertyName("email")]
+    public string? Email { get; set; }
+
+    [JsonPropertyName("ext_agent_host_id")]
+    public string? AgentHostId { get; set; }
 
     [JsonPropertyName("access_token")]
     public string AccessToken { get; set; } = string.Empty;
@@ -33,4 +42,9 @@ internal sealed class OpenAICodexSubscriptionCredential
 
     [JsonPropertyName("scopes")]
     public List<string> Scopes { get; set; } = [];
+
+    [JsonIgnore]
+    public bool HasPlanUsagePermission
+        => Scopes.Contains(OpenAICodexSubscriptionOAuthDefaults.DirectTokenScope, StringComparer.Ordinal) &&
+           Scopes.Contains("resource.invoke", StringComparer.Ordinal);
 }

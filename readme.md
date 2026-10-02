@@ -25,6 +25,8 @@ dotnet tool update -g CodeAlta
 
 On first launch, CodeAlta creates `~/.alta/config.toml`. Existing config files are left untouched on later launches so you can remove, rename, or customize bundled entries. If no provider is enabled yet, the Model Providers dialog opens so you can configure Codex, Copilot, xAI Grok, OpenAI/Azure OpenAI/Alibaba APIs, Anthropic, Gemini/Vertex, or custom endpoints.
 
+For ChatGPT subscription access, select a Codex provider and **Continue with ChatGPT**. CodeAlta uses OpenAI's public token-sharing flow: registration happens during sign-in, with no client ID to provision beforehand. Previous Codex credentials must be replaced by signing in again; see the [provider migration notes](https://codealta.github.io/docs/model-providers/#chatgpt-sign-in-and-migration).
+
 CodeAlta also expects a current [Nerd Fonts](https://www.nerdfonts.com/) patched font in your terminal profile. If icons or tree glyphs look wrong, update to the latest Nerd Fonts release, remove stale older font copies, and select the refreshed Nerd Font family, such as `CaskaydiaCove Nerd Font`.
 
 ## ✨ What it gives you

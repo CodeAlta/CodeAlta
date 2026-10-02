@@ -52,7 +52,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
         UseDefaultAccountId = source.AccountId is null;
         ModelDiscovery = source.ModelDiscovery ?? ResolveDefaultModelDiscovery(ProviderType);
         UseDefaultModelDiscovery = source.ModelDiscovery is null;
-        ResponseTransport = source.ResponseTransport ?? "websocket_with_http_fallback";
+        ResponseTransport = source.ResponseTransport ?? "http";
         UseDefaultResponseTransport = source.ResponseTransport is null;
         _isInitialized = true;
     }

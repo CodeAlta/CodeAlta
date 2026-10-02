@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace CodeAlta.Agent.OpenAI.Codex;
 
 internal sealed class OpenAICodexSubscriptionAuthManager
@@ -8,19 +6,15 @@ internal sealed class OpenAICodexSubscriptionAuthManager
     private readonly IOpenAICodexSubscriptionCredentialStore _credentialStore;
     private readonly OpenAICodexSubscriptionOAuthClient _oauthClient;
     private readonly string _providerKey;
-    private readonly string _authSource;
     private readonly string? _configuredAccountId;
-    private readonly string? _codexHome;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
-    private OpenAICodexSubscriptionCredential? _cachedCredential;
 
     public OpenAICodexSubscriptionAuthManager(
         IOpenAICodexSubscriptionCredentialStore credentialStore,
         OpenAICodexSubscriptionOAuthClient oauthClient,
         string providerKey,
         string authSource = "codealta_oauth",
-        string? configuredAccountId = null,
-        string? codexHome = null)
+        string? configuredAccountId = null)
     {
         ArgumentNullException.ThrowIfNull(credentialStore);
         ArgumentNullException.ThrowIfNull(oauthClient);
@@ -28,9 +22,11 @@ internal sealed class OpenAICodexSubscriptionAuthManager
         _credentialStore = credentialStore;
         _oauthClient = oauthClient;
         _providerKey = providerKey;
-        _authSource = authSource;
         _configuredAccountId = configuredAccountId;
-        _codexHome = codexHome;
+        if (authSource != "codealta_oauth")
+        {
+            throw new InvalidOperationException("Codex subscription credentials cannot be imported. Use Continue with ChatGPT in CodeAlta.");
+        }
     }
 
     public async ValueTask<OpenAICodexSubscriptionCredential> GetCredentialAsync(
@@ -45,15 +41,16 @@ internal sealed class OpenAICodexSubscriptionAuthManager
         await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            credential = await LoadCredentialAsync(cancellationToken, forceReload: true).ConfigureAwait(false);
+            await using var lease = await _credentialStore.AcquireLockAsync(_providerKey, cancellationToken).ConfigureAwait(false);
+            credential = await LoadCredentialAsync(cancellationToken).ConfigureAwait(false);
             if (credential.ExpiresAt > DateTimeOffset.UtcNow + RefreshSkew)
             {
                 return credential;
             }
 
             var refreshed = await RefreshAsync(credential, cancellationToken).ConfigureAwait(false);
-            _cachedCredential = refreshed;
             await _credentialStore.SaveAsync(_providerKey, refreshed, cancellationToken).ConfigureAwait(false);
+            EnsurePlanUsagePermission(refreshed);
             return refreshed;
         }
         finally
@@ -70,10 +67,11 @@ internal sealed class OpenAICodexSubscriptionAuthManager
         await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var credential = await LoadCredentialAsync(cancellationToken, forceReload: true).ConfigureAwait(false);
+            await using var lease = await _credentialStore.AcquireLockAsync(_providerKey, cancellationToken).ConfigureAwait(false);
+            var credential = await LoadCredentialAsync(cancellationToken).ConfigureAwait(false);
             var refreshed = await RefreshAsync(credential, cancellationToken).ConfigureAwait(false);
-            _cachedCredential = refreshed;
             await _credentialStore.SaveAsync(_providerKey, refreshed, cancellationToken).ConfigureAwait(false);
+            EnsurePlanUsagePermission(refreshed);
         }
         finally
         {
@@ -106,75 +104,30 @@ internal sealed class OpenAICodexSubscriptionAuthManager
             return credential.AccountId.Trim();
         }
 
-        return TryExtractAccountIdFromJwt(credential.AccessToken)
-            ?? TryExtractAccountIdFromJwt(credential.IdToken);
-    }
-
-    internal static string? TryExtractAccountIdFromJwt(string? jwt)
-    {
-        if (string.IsNullOrWhiteSpace(jwt))
-        {
-            return null;
-        }
-
-        var parts = jwt.Split('.');
-        if (parts.Length < 2)
-        {
-            return null;
-        }
-
-        try
-        {
-            var payloadBytes = Base64UrlDecode(parts[1]);
-            using var document = JsonDocument.Parse(payloadBytes);
-            if (!document.RootElement.TryGetProperty("https://api.openai.com/auth", out var auth) ||
-                auth.ValueKind != JsonValueKind.Object)
-            {
-                return null;
-            }
-
-            foreach (var propertyName in new[] { "chatgpt_account_id", "account_id", "workspace_id", "organization_id" })
-            {
-                if (auth.TryGetProperty(propertyName, out var property) &&
-                    property.ValueKind == JsonValueKind.String &&
-                    !string.IsNullOrWhiteSpace(property.GetString()))
-                {
-                    return property.GetString()!.Trim();
-                }
-            }
-        }
-        catch (JsonException)
-        {
-        }
-        catch (FormatException)
-        {
-        }
-
         return null;
     }
 
     private async ValueTask<OpenAICodexSubscriptionCredential> LoadCredentialAsync(
-        CancellationToken cancellationToken,
-        bool forceReload = false)
+        CancellationToken cancellationToken)
     {
-        if (!forceReload && _cachedCredential is not null)
+        // Always reload so sign-out, account changes, and another process's rotating
+        // refresh are observed before sending another authenticated request.
+        var credential = await _credentialStore.LoadAsync(_providerKey, cancellationToken).ConfigureAwait(false);
+        if (!OpenAICodexSubscriptionLoginManager.IsRegistration(credential) || string.IsNullOrWhiteSpace(credential!.AccessToken))
         {
-            return _cachedCredential;
+            throw new InvalidOperationException("ChatGPT login is required for the Codex subscription provider. Use Continue with ChatGPT; legacy Codex credentials are not supported.");
         }
 
-        var credential = _authSource switch
-        {
-            "codex_auth_file_readonly" => string.IsNullOrWhiteSpace(_codexHome)
-                ? null
-                : await CodexAuthFileReader.ReadAuthJsonAsync(_codexHome, cancellationToken).ConfigureAwait(false),
-            "codex_auth_import" => string.IsNullOrWhiteSpace(_codexHome)
-                ? await _credentialStore.LoadAsync(_providerKey, cancellationToken).ConfigureAwait(false)
-                : await CodexAuthFileReader.ImportAuthJsonAsync(_codexHome, _credentialStore, _providerKey, cancellationToken).ConfigureAwait(false),
-            _ => await _credentialStore.LoadAsync(_providerKey, cancellationToken).ConfigureAwait(false),
-        };
+        EnsurePlanUsagePermission(credential);
+        return credential;
+    }
 
-        _cachedCredential = credential ?? throw new InvalidOperationException("ChatGPT login is required for the Codex subscription provider.");
-        return _cachedCredential;
+    private static void EnsurePlanUsagePermission(OpenAICodexSubscriptionCredential credential)
+    {
+        if (!credential.HasPlanUsagePermission)
+        {
+            throw new InvalidOperationException("ChatGPT plan usage was not authorized. Continue with ChatGPT and allow access to your plan, or configure an API-key provider.");
+        }
     }
 
     private async Task<OpenAICodexSubscriptionCredential> RefreshAsync(
@@ -188,27 +141,23 @@ internal sealed class OpenAICodexSubscriptionAuthManager
 
         try
         {
-            var refreshed = await _oauthClient.RefreshAsync(credential.RefreshToken, cancellationToken).ConfigureAwait(false);
+            var refreshed = await _oauthClient.RefreshAsync(credential, cancellationToken).ConfigureAwait(false);
             refreshed.AccountId ??= credential.AccountId;
             refreshed.AccountLabel ??= credential.AccountLabel;
             refreshed.IsFedRamp = credential.IsFedRamp;
             return refreshed;
         }
-        catch (HttpRequestException ex)
+        catch (OpenAICodexSubscriptionTokenException ex) when (ex.HasUnusableTokens)
         {
-            await _credentialStore.DeleteAsync(_providerKey, cancellationToken).ConfigureAwait(false);
-            _cachedCredential = null;
+            credential.AccessToken = string.Empty;
+            credential.RefreshToken = null;
+            credential.IdToken = null;
+            credential.ExpiresAt = DateTimeOffset.MinValue;
+            await _credentialStore.SaveAsync(_providerKey, credential, cancellationToken).ConfigureAwait(false);
             throw new InvalidOperationException(
                 OpenAICodexSubscriptionSecretRedactor.Redact("ChatGPT token refresh failed; re-authentication is required. " + ex.Message, credential),
                 ex);
         }
-    }
-
-    private static byte[] Base64UrlDecode(string text)
-    {
-        var padded = text.Replace('-', '+').Replace('_', '/');
-        padded = padded.PadRight(padded.Length + ((4 - padded.Length % 4) % 4), '=');
-        return Convert.FromBase64String(padded);
     }
 }
 

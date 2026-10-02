@@ -409,18 +409,57 @@ public sealed class CodeAltaConfigStoreRawApiTests
         Assert.AreEqual("codex", provider.ProviderType);
         Assert.AreEqual("Codex", provider.DisplayName);
         Assert.AreEqual("gpt-5.3-codex", provider.Model);
-        Assert.AreEqual("https://chatgpt.com/backend-api/codex", provider.ApiUrl);
+        Assert.AreEqual("https://api.openai.com/v1", provider.ApiUrl);
         Assert.AreEqual("codealta_oauth", provider.AuthSource);
         Assert.AreEqual(16, provider.MaxConcurrentRequests);
         Assert.AreEqual("medium", provider.TextVerbosity);
         Assert.IsNull(provider.ServiceTier);
         Assert.IsTrue(provider.IncludeEncryptedReasoning);
         Assert.AreEqual("codex_endpoint_with_static_fallback", provider.ModelDiscovery);
-        Assert.AreEqual("websocket_with_http_fallback", provider.ResponseTransport);
+        Assert.AreEqual("http", provider.ResponseTransport);
         Assert.IsFalse(provider.SendResponsesBetaHeader);
         Assert.IsFalse(provider.SendInstallationId);
         Assert.AreEqual("codealta_state", provider.InstallationIdSource);
         Assert.IsFalse(provider.Experimental);
+    }
+
+    [TestMethod]
+    [DataRow("https://chatgpt.com/backend-api/codex")]
+    [DataRow("https://chatgpt.com/backend-api/codex/")]
+    public void LoadGlobalProviderDefinitions_CodexSubscriptionMigratesFormerDefaultEndpoint(string endpoint)
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(Path.Combine(temp.Path, "config.toml"), $$"""
+            [providers.codex]
+            type = "codex"
+            api_url = "{{endpoint}}"
+            """);
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+
+        var provider = store.LoadGlobalProviderDefinitions(includeDisabled: true).Single(static provider => provider.ProviderKey == "codex");
+
+        Assert.AreEqual("https://api.openai.com/v1", provider.ApiUrl);
+        Assert.AreEqual("http", provider.ResponseTransport);
+        StringAssert.Contains(File.ReadAllText(Path.Combine(temp.Path, "config.toml")), endpoint);
+    }
+
+    [TestMethod]
+    [DataRow("codex_auth_import")]
+    [DataRow("codex_auth_file_readonly")]
+    [DataRow("external_token_command")]
+    public void LoadGlobalProviderDefinitions_CodexSubscriptionRejectsLegacyAuthSources(string authSource)
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(Path.Combine(temp.Path, "config.toml"), $$"""
+            [providers.codex]
+            type = "codex"
+            auth_source = "{{authSource}}"
+            """);
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+
+        var exception = Assert.ThrowsExactly<InvalidDataException>(() => store.LoadGlobalProviderDefinitions(includeDisabled: true));
+
+        StringAssert.Contains(exception.InnerException?.Message, "Continue with ChatGPT");
     }
 
     [TestMethod]
@@ -436,7 +475,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
             type = "codex"
             model = " gpt-5.4 "
             api_url = " http://localhost:5111/backend-api/codex "
-            auth_source = " CODEX_AUTH_FILE_READONLY "
+            auth_source = " CODEALTA_OAUTH "
             account_id = " acct_123 "
             max_concurrent_requests = 2
             text_verbosity = " HIGH "
@@ -454,7 +493,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
 
         Assert.AreEqual("Codex Sub", provider.DisplayName);
         Assert.AreEqual("http://localhost:5111/backend-api/codex", provider.ApiUrl);
-        Assert.AreEqual("codex_auth_file_readonly", provider.AuthSource);
+        Assert.AreEqual("codealta_oauth", provider.AuthSource);
         Assert.AreEqual("acct_123", provider.AccountId);
         Assert.AreEqual(2, provider.MaxConcurrentRequests);
         Assert.AreEqual("high", provider.TextVerbosity);

@@ -91,7 +91,8 @@ internal sealed class CodexSubscriptionHttpStreamSession
         var request = new HttpRequestMessage(
             HttpMethod.Post,
             CodexSubscriptionHttpRequestFactory.ResolveEndpoint(_provider.BaseUri, "responses"));
-        var payload = ModelReaderWriter.Write(options, new ModelReaderWriterOptions("J"), OpenAIContext.Default);
+        var payload = ChatGptPlanRequestNormalizer.Normalize(
+            ModelReaderWriter.Write(options, new ModelReaderWriterOptions("J"), OpenAIContext.Default), isHttp: true);
         request.Content = new ByteArrayContent(payload.ToMemory().ToArray());
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));

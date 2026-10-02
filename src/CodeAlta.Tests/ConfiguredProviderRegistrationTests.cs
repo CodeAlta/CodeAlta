@@ -38,7 +38,7 @@ public sealed class ConfiguredProviderRegistrationTests
         Assert.IsNotNull(options.CodexSubscription);
         Assert.AreEqual(expected, options.CodexSubscription.ServiceTier);
         Assert.AreEqual("medium", options.CodexSubscription.TextVerbosity);
-        Assert.AreEqual("websocket_with_http_fallback", options.CodexSubscription.ResponseTransport);
+        Assert.AreEqual("http", options.CodexSubscription.ResponseTransport);
     }
 
     [TestMethod]

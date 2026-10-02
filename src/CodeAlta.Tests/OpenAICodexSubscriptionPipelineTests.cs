@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using Azure.AI.OpenAI;
 using CodeAlta.Agent;
@@ -62,7 +63,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
     }
 
     [TestMethod]
-    public void WebSocketRequest_ProjectsCurrentTurnStatePerSendAndKeepsFirstValidValue()
+    public void WebSocketRequest_OmitsPrivateClientMetadata()
     {
         var turnState = new CodexTurnState();
         var context = new CodexSubscriptionRequestContext(
@@ -79,14 +80,12 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         };
 
         using var first = JsonDocument.Parse(OpenAICodexSubscriptionWebSocketSession.CreateWebSocketRequest(options, context));
-        Assert.IsFalse(first.RootElement.GetProperty("client_metadata").TryGetProperty("x-codex-turn-state", out _));
+        Assert.IsFalse(first.RootElement.TryGetProperty("client_metadata", out _));
 
         turnState.Capture("first-state");
         turnState.Capture("ignored-state");
         using var second = JsonDocument.Parse(OpenAICodexSubscriptionWebSocketSession.CreateWebSocketRequest(options, context));
-        Assert.AreEqual(
-            "first-state",
-            second.RootElement.GetProperty("client_metadata").GetProperty("x-codex-turn-state").GetString());
+        Assert.IsFalse(second.RootElement.TryGetProperty("client_metadata", out _));
     }
 
     [TestMethod]
@@ -128,14 +127,14 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var httpOptions = CreateOptions();
         context.ApplyClientMetadata(httpOptions, includeTurnState: false);
 
-        using var http = JsonDocument.Parse(ModelReaderWriter.Write(
+        using var http = JsonDocument.Parse(ChatGptPlanRequestNormalizer.Normalize(ModelReaderWriter.Write(
             httpOptions,
             new ModelReaderWriterOptions("J"),
-            OpenAIContext.Default));
+            OpenAIContext.Default), isHttp: true).ToMemory());
         using var webSocket = JsonDocument.Parse(
             OpenAICodexSubscriptionWebSocketSession.CreateWebSocketRequest(CreateOptions(), context));
 
-        Assert.AreEqual(http.RootElement.EnumerateObject().Count() + 1, webSocket.RootElement.EnumerateObject().Count());
+        Assert.AreEqual(http.RootElement.EnumerateObject().Count(), webSocket.RootElement.EnumerateObject().Count());
         Assert.AreEqual("response.create", webSocket.RootElement.GetProperty("type").GetString());
         Assert.AreEqual(!lite, http.RootElement.GetProperty("parallel_tool_calls").GetBoolean());
         Assert.AreEqual(tier is not null, http.RootElement.TryGetProperty("service_tier", out var serviceTier));
@@ -145,6 +144,11 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         }
         foreach (var property in http.RootElement.EnumerateObject())
         {
+            if (property.Name == "stream")
+            {
+                continue;
+            }
+
             Assert.IsTrue(webSocket.RootElement.TryGetProperty(property.Name, out var webSocketProperty));
             Assert.IsTrue(JsonElement.DeepEquals(property.Value, webSocketProperty), property.Name);
         }
@@ -176,6 +180,9 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         using var temp = TempDirectory.Create();
         var credential = new OpenAICodexSubscriptionCredential
         {
+            ClientId = "oaiapp_test",
+            Subject = "subject",
+            Scopes = [OpenAICodexSubscriptionOAuthDefaults.DirectTokenScope, "resource.invoke"],
             AccessToken = "access-secret",
             ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
         };
@@ -203,12 +210,12 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             httpClient);
 
         using var message = pipeline.CreateMessage(
-            new Uri("https://chatgpt.com/backend-api/codex/responses"),
+            new Uri("https://api.openai.com/v1/responses"),
             "POST");
         await pipeline.SendAsync(message).ConfigureAwait(false);
 
         Assert.AreEqual("Bearer access-secret", handler.Requests[0]["Authorization"]);
-        Assert.AreEqual("https://chatgpt.com/backend-api/codex/responses", handler.RequestUris[0].ToString());
+        Assert.AreEqual("https://api.openai.com/v1/responses", handler.RequestUris[0].ToString());
         Assert.AreEqual("acct_123", handler.Requests[0]["ChatGPT-Account-Id"]);
         Assert.AreEqual("codealta", handler.Requests[0]["originator"]);
         Assert.AreEqual("responses=experimental", handler.Requests[0]["OpenAI-Beta"]);
@@ -237,6 +244,9 @@ public sealed class OpenAICodexSubscriptionPipelineTests
                 "codex",
                 new OpenAICodexSubscriptionCredential
                 {
+                    ClientId = "oaiapp_test",
+                    Subject = "subject",
+                    Scopes = [OpenAICodexSubscriptionOAuthDefaults.DirectTokenScope, "resource.invoke"],
                     AccessToken = "access-secret",
                     ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
                 })
@@ -280,6 +290,9 @@ public sealed class OpenAICodexSubscriptionPipelineTests
                 "codex",
                 new OpenAICodexSubscriptionCredential
                 {
+                    ClientId = "oaiapp_test",
+                    Subject = "subject",
+                    Scopes = [OpenAICodexSubscriptionOAuthDefaults.DirectTokenScope, "resource.invoke"],
                     AccessToken = "access-secret",
                     ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
                     AccountId = "acct_from_store",
@@ -315,7 +328,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var provider = new OpenAIProviderOptions
         {
             ProviderKey = "codex",
-            BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
+            BaseUri = new Uri("https://api.openai.com/v1"),
             StateRootPath = AppContext.BaseDirectory,
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
@@ -336,7 +349,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
                     TransportKind = AgentTransportKind.OpenAIResponses,
                 }));
 
-        Assert.AreEqual("https://chatgpt.com/backend-api/codex", client.Endpoint.ToString());
+        Assert.AreEqual("https://api.openai.com/v1", client.Endpoint.ToString());
     }
 
     [TestMethod]
@@ -797,7 +810,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var provider = new OpenAIProviderOptions
         {
             ProviderKey = "codex",
-            BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
+            BaseUri = new Uri("https://api.openai.com/v1"),
             StateRootPath = temp.Path,
             HttpClient = httpClient,
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -838,13 +851,75 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.IsInstanceOfType<OpenAI.Responses.StreamingResponseCompletedUpdate>(events[2].Update);
         Assert.AreEqual("Bearer access-token", handler.Requests[0]["Authorization"]);
         Assert.AreEqual("text/event-stream", handler.Requests[0]["Accept"]);
-        Assert.AreEqual("https://chatgpt.com/backend-api/codex/responses", handler.RequestUris[0].ToString());
+        Assert.AreEqual("https://api.openai.com/v1/responses", handler.RequestUris[0].ToString());
         Assert.AreEqual("session-http", handler.Requests[0]["session-id"]);
         Assert.AreEqual("session-http", handler.Requests[0]["thread-id"]);
         Assert.AreEqual("session-http", handler.Requests[0]["x-client-request-id"]);
         Assert.IsFalse(handler.Requests[0].ContainsKey("session_id"));
         Assert.IsFalse(handler.Requests[0].ContainsKey("OpenAI-Beta"));
         Assert.IsTrue(handler.Requests[0].ContainsKey("x-codex-turn-metadata"));
+    }
+
+    [TestMethod]
+    public async Task WebSocketSession_SignOutStopsNewTurnsOnAnExistingConnection()
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
+        using var portReservation = new TcpListener(IPAddress.Loopback, 0);
+        portReservation.Start();
+        var port = ((IPEndPoint)portReservation.LocalEndpoint).Port;
+        portReservation.Stop();
+        using var listener = new HttpListener();
+        listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+        listener.Start();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var httpClient = new HttpClient(new RecordingHttpMessageHandler());
+        var store = new FileOpenAICodexSubscriptionCredentialStore(temp.Path);
+        var authManager = new OpenAICodexSubscriptionAuthManager(store, new(httpClient), "codex");
+        using var session = new OpenAICodexSubscriptionWebSocketSession(
+            new Uri($"http://127.0.0.1:{port}/v1"), new(), authManager, "session", "CodeAlta/test", TimeSpan.FromSeconds(1));
+        var options = new OpenAI.Responses.CreateResponseOptions { Model = "test-model", StreamingEnabled = true };
+        WebSocket? serverSocket = null;
+        var serverTask = ServeFirstTurnAsync();
+        try
+        {
+            await foreach (var _ in session.CreateProtocolEventsAsync(options, cancellationToken: timeout.Token))
+            {
+            }
+
+            await serverTask.ConfigureAwait(false);
+            Assert.IsTrue(session.HasOpenConnection);
+            // Sign-out retains the registration but clears its token set.
+            var credential = (await store.LoadAsync("codex"))!;
+            credential.AccessToken = string.Empty;
+            credential.RefreshToken = null;
+            credential.IdToken = null;
+            await store.SaveAsync("codex", credential).ConfigureAwait(false);
+
+            await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
+            {
+                await foreach (var _ in session.CreateProtocolEventsAsync(options, cancellationToken: timeout.Token))
+                {
+                }
+            });
+        }
+        finally
+        {
+            await timeout.CancelAsync();
+            serverSocket?.Dispose();
+        }
+
+        async Task ServeFirstTurnAsync()
+        {
+            var context = await listener.GetContextAsync().WaitAsync(timeout.Token).ConfigureAwait(false);
+            var accepted = await context.AcceptWebSocketAsync(null).ConfigureAwait(false);
+            serverSocket = accepted.WebSocket;
+            await serverSocket.ReceiveAsync(new ArraySegment<byte>(new byte[16384]), timeout.Token).ConfigureAwait(false);
+            var completed = Encoding.UTF8.GetBytes("""
+                {"type":"response.completed","response":{"id":"response-test","object":"response","created_at":1,"status":"completed","model":"test-model","output":[]}}
+                """);
+            await serverSocket.SendAsync(new ArraySegment<byte>(completed), WebSocketMessageType.Text, true, timeout.Token).ConfigureAwait(false);
+        }
     }
 
     [TestMethod]
@@ -909,6 +984,38 @@ public sealed class OpenAICodexSubscriptionPipelineTests
     }
 
     [TestMethod]
+    public async Task ModelDiscovery_PublicCatalogUsesSlugsVisibilityAndServerOrder()
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
+        var handler = new RecordingHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""
+                {"models":[
+                  {"id":"opaque-id", "slug":"model-z", "display_name":"Z", "visibility":"list"},
+                  {"slug":"model-a", "display_name":"A", "visibility":"list"},
+                  {"slug":"model-hidden", "visibility":"hidden"}
+                ]}
+                """),
+        });
+        using var httpClient = new HttpClient(handler);
+        var provider = new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            StateRootPath = temp.Path,
+            CodexSubscriptionHttpClient = httpClient,
+            CodexSubscription = new OpenAICodexSubscriptionOptions { Experimental = true },
+        };
+
+        var models = await OpenAIProviderSdkFactory.ListModelsAsync(provider, CreateProviderDescriptor(), CancellationToken.None).ConfigureAwait(false);
+
+        CollectionAssert.AreEqual(new[] { "model-z", "model-a" }, models.Select(static model => model.Id).ToArray());
+        Assert.AreEqual("Z", models[0].DisplayName);
+        Assert.AreEqual("https://api.openai.com/v1/models", handler.RequestUris[0].AbsoluteUri);
+        Assert.AreEqual("Bearer access-token", handler.Requests[0]["Authorization"]);
+    }
+
+    [TestMethod]
     public async Task ModelDiscovery_UsesCodexEndpointAndFiltersUnsupportedModels()
     {
         using var temp = TempDirectory.Create();
@@ -917,13 +1024,14 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var provider = new OpenAIProviderOptions
         {
             ProviderKey = "codex",
-            BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
+            BaseUri = new Uri("https://api.openai.com/v1"),
             StateRootPath = temp.Path,
             CodexSubscriptionHttpClient = new HttpClient(handler),
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
                 AccountId = "acct_configured",
+                ResponseTransport = "websocket_with_http_fallback",
                 ModelDiscovery = "codex_endpoint_with_static_fallback",
             },
         };
@@ -950,9 +1058,8 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.AreEqual("\"models-fixture-etag\"", models[0].Capabilities?["etag"]);
         Assert.AreEqual("websocket-only-codex", models[1].Id);
         Assert.AreEqual(true, models[1].Capabilities?["requiresWebSocket"]);
-        var version = typeof(OpenAIProviderSdkFactory).Assembly.GetName().Version!;
         Assert.AreEqual(
-            $"https://chatgpt.com/backend-api/codex/models?client_version={version.Major}.{version.Minor}.{version.Build}",
+            "https://api.openai.com/v1/models",
             handler.RequestUris[0].ToString());
         Assert.AreEqual("Bearer access-token", handler.Requests[0]["Authorization"]);
         Assert.AreEqual("acct_configured", handler.Requests[0]["ChatGPT-Account-Id"]);
@@ -970,7 +1077,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var responses = CodexSubscriptionHttpRequestFactory.ResolveEndpoint(baseUri, "responses");
         var webSocket = OpenAICodexSubscriptionWebSocketSession.ResolveWebSocketUri(baseUri);
 
-        Assert.AreEqual("https://example.test/backend-api/codex/models?tenant=alpha%20one&client_version=1.2.3", models.AbsoluteUri);
+        Assert.AreEqual("https://example.test/backend-api/codex/models?tenant=alpha%20one", models.AbsoluteUri);
         Assert.AreEqual("https://example.test/backend-api/codex/responses?tenant=alpha%20one", responses.AbsoluteUri);
         Assert.AreEqual("wss://example.test/backend-api/codex/responses?tenant=alpha%20one", webSocket.AbsoluteUri);
     }
@@ -989,7 +1096,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var provider = new OpenAIProviderOptions
         {
             ProviderKey = "codex",
-            BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
+            BaseUri = new Uri("https://api.openai.com/v1"),
             StateRootPath = temp.Path,
             HttpClient = new HttpClient(handler),
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -1076,7 +1183,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var provider = new OpenAIProviderOptions
         {
             ProviderKey = "codex",
-            BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
+            BaseUri = new Uri("https://api.openai.com/v1"),
             StateRootPath = temp.Path,
             CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(response)),
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -1193,7 +1300,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var provider = new OpenAIProviderOptions
         {
             ProviderKey = "codex",
-            BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
+            BaseUri = new Uri("https://api.openai.com/v1"),
             StateRootPath = temp.Path,
             CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(response)),
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -1236,7 +1343,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var provider = new OpenAIProviderOptions
         {
             ProviderKey = "codex",
-            BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
+            BaseUri = new Uri("https://api.openai.com/v1"),
             StateRootPath = temp.Path,
             CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(CreateModelsResponse())),
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -1264,13 +1371,14 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var provider = new OpenAIProviderOptions
         {
             ProviderKey = "codex",
-            BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
+            BaseUri = new Uri("https://api.openai.com/v1"),
             StateRootPath = temp.Path,
             SingleModelId = "hidden-codex",
             CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(CreateModelsResponse())),
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
+                ResponseTransport = "websocket_with_http_fallback",
                 ModelDiscovery = "codex_endpoint_with_static_fallback",
             },
         };
@@ -1294,7 +1402,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var provider = new OpenAIProviderOptions
         {
             ProviderKey = "codex",
-            BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
+            BaseUri = new Uri("https://api.openai.com/v1"),
             StateRootPath = temp.Path,
             CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(
                 new HttpResponseMessage(HttpStatusCode.NotFound)
@@ -1339,7 +1447,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var provider = new OpenAIProviderOptions
         {
             ProviderKey = "codex",
-            BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
+            BaseUri = new Uri("https://api.openai.com/v1"),
             StateRootPath = temp.Path,
             CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(
                 new HttpResponseMessage(HttpStatusCode.Unauthorized)
@@ -1571,7 +1679,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
     private static async Task SendAsync(ClientPipeline pipeline)
     {
         using var message = pipeline.CreateMessage(
-            new Uri("https://chatgpt.com/backend-api/codex/responses"),
+            new Uri("https://api.openai.com/v1/responses"),
             "POST");
         await pipeline.SendAsync(message).ConfigureAwait(false);
     }
@@ -1583,6 +1691,9 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             "codex",
             new OpenAICodexSubscriptionCredential
             {
+                ClientId = "oaiapp_test",
+                Subject = "subject",
+                Scopes = [OpenAICodexSubscriptionOAuthDefaults.DirectTokenScope, "resource.invoke"],
                 AccessToken = "access-token",
                 RefreshToken = "refresh-token",
                 ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),

@@ -2,6 +2,8 @@ namespace CodeAlta.Agent.OpenAI.Codex;
 
 internal interface IOpenAICodexSubscriptionCredentialStore
 {
+    ValueTask<IAsyncDisposable> AcquireLockAsync(string providerKey, CancellationToken cancellationToken = default);
+
     ValueTask<OpenAICodexSubscriptionCredential?> LoadAsync(
         string providerKey,
         CancellationToken cancellationToken = default);

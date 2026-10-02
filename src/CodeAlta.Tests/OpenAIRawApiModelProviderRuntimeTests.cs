@@ -1966,7 +1966,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 factoryCalls++;
                 return ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession);
             },
-            CodexSubscription = new OpenAICodexSubscriptionOptions { Experimental = true },
+            CodexSubscription = new OpenAICodexSubscriptionOptions { Experimental = true, ResponseTransport = "websocket_with_http_fallback" },
         });
 
         _ = await executor.ExecuteTurnAsync(
@@ -2689,10 +2689,13 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             "codex",
             new OpenAICodexSubscriptionCredential
             {
+                ClientId = "oaiapp_test",
+                Subject = "subject",
+                Scopes = [OpenAICodexSubscriptionOAuthDefaults.DirectTokenScope, "resource.invoke"],
                 AccessToken = "access-token",
                 ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
             }).ConfigureAwait(false);
-        var handler = new StaticHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.Forbidden)
+        var handler = new StaticHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.NotFound)
         {
             Content = new StringContent("""{"detail":"model discovery is temporarily unavailable"}"""),
         });
@@ -2706,7 +2709,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 {
                     ProviderKey = "codex",
                     IsDefault = true,
-                    BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
+                    BaseUri = new Uri("https://api.openai.com/v1"),
                     CodexSubscriptionHttpClient = new HttpClient(handler),
                     CodexSubscription = new OpenAICodexSubscriptionOptions
                     {
@@ -2725,7 +2728,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             string.Join('|', models.Select(static model => model.Id)));
         Assert.IsTrue(models.All(static model => Equals("codex-static-fallback", model.Capabilities?["source"])));
         Assert.AreEqual(1, handler.Requests.Count);
-        Assert.AreEqual("/backend-api/codex/models", handler.Requests[0].AbsolutePath);
+        Assert.AreEqual("/v1/models", handler.Requests[0].AbsolutePath);
     }
 
     [TestMethod]
@@ -2924,6 +2927,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                     {
                         Experimental = true,
                         ResponseTransport = "http",
+                        ModelDiscovery = "static",
                     },
                     ModelListAsync = static _ => Task.FromResult<IReadOnlyList<AgentModelInfo>>(
                     [
@@ -3035,6 +3039,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                     {
                         Experimental = true,
                         ResponseTransport = "http",
+                        ModelDiscovery = "static",
                     },
                     ModelListAsync = static _ => Task.FromResult<IReadOnlyList<AgentModelInfo>>(
                     [
@@ -3122,6 +3127,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                     {
                         Experimental = true,
                         ResponseTransport = "http",
+                        ModelDiscovery = "static",
                     },
                     ModelListAsync = static _ => Task.FromResult<IReadOnlyList<AgentModelInfo>>(
                     [
@@ -3187,6 +3193,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
+                ResponseTransport = "websocket_with_http_fallback",
             },
         });
         var response = await executor.ExecuteTurnAsync(
@@ -3226,6 +3233,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
+                ResponseTransport = "websocket_with_http_fallback",
                 ServiceTier = tier,
             },
         });
@@ -3292,6 +3300,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
+                ResponseTransport = "websocket_with_http_fallback",
             },
         });
 
@@ -3332,6 +3341,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
+                ResponseTransport = "websocket_with_http_fallback",
             },
         });
         var sessionUpdates = new List<AgentTurnSessionUpdate>();
@@ -3396,6 +3406,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
+                ResponseTransport = "websocket_with_http_fallback",
             },
         });
 
@@ -3436,6 +3447,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
+                ResponseTransport = "websocket_with_http_fallback",
             },
         });
         var deltas = new List<AgentTurnDelta>();
@@ -3483,6 +3495,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
+                ResponseTransport = "websocket_with_http_fallback",
             },
         });
 
@@ -3525,6 +3538,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
+                ResponseTransport = "websocket_with_http_fallback",
             },
         });
 
@@ -3642,6 +3656,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
+                ResponseTransport = "websocket_with_http_fallback",
             },
         });
 
@@ -3677,7 +3692,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
-            CodexSubscription = new OpenAICodexSubscriptionOptions { Experimental = true },
+            CodexSubscription = new OpenAICodexSubscriptionOptions { Experimental = true, ResponseTransport = "websocket_with_http_fallback" },
         });
 
         var response = await executor.ExecuteTurnAsync(
@@ -3715,6 +3730,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
+                ResponseTransport = "websocket_with_http_fallback",
             },
         });
 
@@ -3750,6 +3766,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
+                ResponseTransport = "websocket_with_http_fallback",
             },
         });
 
@@ -3798,6 +3815,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
+                ResponseTransport = "websocket_with_http_fallback",
             },
         });
 
@@ -3886,6 +3904,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
+                ResponseTransport = "websocket_with_http_fallback",
             },
         });
 
@@ -3947,7 +3966,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             ProviderKey = "codex",
             ResponsesClientFactory = _ => new RecordingOpenAIResponseClient([]),
             ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(session),
-            CodexSubscription = new OpenAICodexSubscriptionOptions { Experimental = true },
+            CodexSubscription = new OpenAICodexSubscriptionOptions { Experimental = true, ResponseTransport = "websocket_with_http_fallback" },
         });
         var updates = new List<AgentTurnSessionUpdate>();
 
@@ -4004,6 +4023,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
+                ResponseTransport = "websocket_with_http_fallback",
                 ServiceTier = tier,
             },
         });
@@ -4089,6 +4109,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
+                ResponseTransport = "websocket_with_http_fallback",
             },
         });
         var firstUserMessage = new AgentConversationMessage(
@@ -4206,7 +4227,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         var provider = new OpenAIProviderOptions
         {
             ProviderKey = "codex",
-            BaseUri = new Uri("https://chatgpt.com/backend-api/codex?access_token=secret"),
+            BaseUri = new Uri("https://api.openai.com/v1?access_token=secret"),
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
@@ -4233,7 +4254,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             errorType: "HttpRequestException");
 
         StringAssert.Contains(message, "provider=codex");
-        StringAssert.Contains(message, "endpoint=chatgpt.com/backend-api/codex");
+        StringAssert.Contains(message, "endpoint=api.openai.com/v1");
         StringAssert.Contains(message, "session=session-1");
         StringAssert.Contains(message, "run=run-1");
         StringAssert.Contains(message, "retry=2");
@@ -4254,6 +4275,9 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 "codex",
                 new OpenAICodexSubscriptionCredential
                 {
+                    ClientId = "oaiapp_test",
+                    Subject = "subject",
+                    Scopes = [OpenAICodexSubscriptionOAuthDefaults.DirectTokenScope, "resource.invoke"],
                     AccessToken = "access-token-should-not-appear",
                     RefreshToken = "refresh-token-should-not-appear",
                     IdToken = "id-token-should-not-appear",
@@ -4630,11 +4654,19 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
-    public async Task OpenAIResponsesTurnExecutor_DoesNotRetryCodexFatalStreamError()
+    [DataRow("invalid_prompt")]
+    [DataRow("subscription_sharing_user_not_eligible")]
+    [DataRow("subscription_sharing_usage_limit_exceeded")]
+    [DataRow("subscription_sharing_unsupported_capability")]
+    [DataRow("subscription_sharing_route_not_supported")]
+    [DataRow("subscription_sharing_invalid_user")]
+    [DataRow("chatpass_v2_scope_not_authorized")]
+    [DataRow("chatpass_v2_invalid_authorization_context")]
+    public async Task OpenAIResponsesTurnExecutor_DoesNotRetryCodexFatalStreamError(string errorCode)
     {
         var responsesClient = new RecordingOpenAIResponseClient(
         [
-            [CreateErrorResponseUpdate("invalid_prompt", "The prompt is invalid.")],
+            [CreateErrorResponseUpdate(errorCode, "The request was rejected.")],
             [CreateTextOnlyAssistantResponseUpdate("response-should-not-run", "gpt-5.3-codex", "Unexpected.")],
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
@@ -4655,7 +4687,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             .ConfigureAwait(false);
 
         Assert.AreEqual(1, responsesClient.Requests.Count);
-        StringAssert.Contains(exception.Failure.Message, "invalid_prompt");
+        StringAssert.Contains(exception.Failure.Message, errorCode);
     }
 
     [TestMethod]
@@ -4721,12 +4753,14 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
-    public async Task OpenAIResponsesTurnExecutor_DoesNotRetryCodexUsageLimit429()
+    [DataRow("usage_limit_reached")]
+    [DataRow("subscription_sharing_usage_limit_exceeded")]
+    public async Task OpenAIResponsesTurnExecutor_DoesNotRetryCodexUsageLimit429(string errorCode)
     {
         var usageLimit = new ClientResultException(
             new TestPipelineResponse(
-                """
-                {"error":{"type":"usage_limit_reached","message":"The usage limit has been reached."}}
+                $$$"""
+                {"error":{"code":"{{{errorCode}}}","message":"The request was rejected."}}
                 """,
                 status: 429,
                 reasonPhrase: "Too Many Requests"));
@@ -4749,7 +4783,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             .ConfigureAwait(false);
 
         Assert.AreEqual(1, responsesClient.RequestCount);
-        StringAssert.Contains(exception.Failure.Message, "usage limit");
+        StringAssert.Contains(exception.Failure.Message, errorCode);
     }
 
     [TestMethod]
