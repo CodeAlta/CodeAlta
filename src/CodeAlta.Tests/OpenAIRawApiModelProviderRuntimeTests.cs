@@ -3938,7 +3938,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                     EffectiveModel: "gpt-5.3-codex-reroute",
                     ModelsETag: "models-v3",
                     ReasoningIncluded: true,
-                    SafetyBuffering: new CodexSafetyBuffering(false, null, "true", "gpt-5.3-codex-fast"),
+                    SafetyBufferingTreatment: new CodexSafetyBufferingTreatment("gpt-5.3-codex-fast"),
                     RateLimits:
                     [
                         new CodexNamedRateLimitSnapshot(
@@ -3950,7 +3950,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 "response.metadata",
                 null,
                 new CodexResponseMetadata(
-                    SafetyBuffering: new CodexSafetyBuffering(false, null, null, Message: "Safety check"),
+                    SafetyBuffering: new CodexSafetyBuffering(false, null, ["cyber"], ["user_risk"]),
                     VerificationRecommendation: "trusted_access_for_cyber",
                     TurnModeration: "{\"flagged\":true,\"secret\":\"transient-only\"}",
                     TurnState: "never-persist-turn-state")),
@@ -3993,6 +3993,53 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.IsFalse(providerState.Contains("transient-only", StringComparison.Ordinal));
         Assert.IsFalse(providerState.Contains("never-persist-turn-state", StringComparison.Ordinal));
         Assert.IsFalse(providerState.Contains("authorization", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_CodexSafetyBufferingHeadersAloneDoNotReportBufferingAndRepeatsAreDeduplicated()
+    {
+        static CodexProtocolEvent Event(CodexResponseMetadata metadata, string? type = null, StreamingResponseUpdate? update = null)
+            => new(CodexProtocolTransport.WebSocket, type, update, metadata, type == "response.completed" ? new CodexTerminalMetadata(true) : null);
+
+        var buffering = new CodexSafetyBuffering(false, null, ["cyber"], ["user_risk"]);
+        var session = new ProtocolEventOpenAIResponsesWebSocketSession(
+        [
+            Event(new CodexResponseMetadata(SafetyBufferingTreatment: new CodexSafetyBufferingTreatment("gpt-5.3-codex-fast"))),
+            Event(new CodexResponseMetadata(SafetyBuffering: buffering), "response.output_text.delta"),
+            Event(new CodexResponseMetadata(SafetyBuffering: buffering), "response.output_text.delta"),
+            Event(new CodexResponseMetadata(SafetyBuffering: buffering with { RetryModelPresent = true }), "response.output_text.delta"),
+            Event(
+                new CodexResponseMetadata(),
+                "response.completed",
+                CreateTextOnlyAssistantResponseUpdate(responseId: "response-buffered", modelId: "gpt-5.3-codex", text: "Answer.")),
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => new RecordingOpenAIResponseClient([]),
+            ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(session),
+            CodexSubscription = new OpenAICodexSubscriptionOptions { Experimental = true, ResponseTransport = "websocket_with_http_fallback" },
+        });
+        var updates = new List<AgentTurnSessionUpdate>();
+
+        await executor.ExecuteTurnAsync(
+                CreateCodexTurnRequest(),
+                static (_, _) => ValueTask.CompletedTask,
+                (update, _) =>
+                {
+                    updates.Add(update);
+                    return ValueTask.CompletedTask;
+                })
+            .ConfigureAwait(false);
+
+        var safetyUpdates = updates
+            .Where(static update => update.Message?.Contains("safety review", StringComparison.Ordinal) == true)
+            .ToArray();
+        Assert.AreEqual(2, safetyUpdates.Length, "Header treatment alone must not report buffering; repeats are reported only when the retry model changes.");
+        Assert.AreEqual(AgentSessionUpdateKind.Warning, safetyUpdates[0].Kind);
+        StringAssert.Contains(safetyUpdates[0].Details?.ToString(), "gpt-5.3-codex-fast");
+        StringAssert.Contains(safetyUpdates[0].Details?.ToString(), "cyber");
+        Assert.AreEqual(AgentSessionUpdateKind.Info, safetyUpdates[1].Kind);
     }
 
     [TestMethod]

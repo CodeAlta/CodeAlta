@@ -11,6 +11,9 @@ namespace CodeAlta.Agent.OpenAI.Codex;
 
 internal static class CodexProtocolEventParser
 {
+    private const string SafetyBufferingEnabledHeader = "x-codex-safety-buffering-enabled";
+    private const string SafetyBufferingFasterModelHeader = "x-codex-safety-buffering-faster-model";
+
     public static CodexProtocolEvent CreateInitialHttpEvent(HttpResponseMessage response)
     {
         ArgumentNullException.ThrowIfNull(response);
@@ -40,7 +43,7 @@ internal static class CodexProtocolEventParser
             var normalizedPayload = string.Equals(type, "response.done", StringComparison.Ordinal)
                 ? NormalizeLegacyDone(root)
                 : payload;
-            var metadata = ParseMetadata(root);
+            var metadata = ParseMetadata(root, type);
             var terminal = ParseTerminal(root, type);
             StreamingResponseUpdate? update = null;
 
@@ -91,44 +94,80 @@ internal static class CodexProtocolEventParser
             EffectiveModel: Header("OpenAI-Model"),
             ModelsETag: Header("x-models-etag"),
             ReasoningIncluded: Header("x-reasoning-included") is not null ? true : null,
-            SafetyBuffering: CreateHeaderSafetyBuffering(
-                Header("x-codex-safety-buffering-enabled"),
-                Header("x-codex-safety-buffering-faster-model")),
+            SafetyBufferingTreatment: CreateSafetyBufferingTreatment(
+                Header(SafetyBufferingEnabledHeader) is not null || Header(SafetyBufferingFasterModelHeader) is not null,
+                Header(SafetyBufferingFasterModelHeader)),
             RateLimits: ParseRateLimitHeaders(headers, contentHeaders));
     }
 
-    private static CodexResponseMetadata ParseMetadata(JsonElement root)
+    private static CodexResponseMetadata ParseMetadata(JsonElement root, string? type)
     {
         var headers = GetNestedObject(root, "response", "headers") ?? GetObject(root, "headers");
         var metadata = GetObject(root, "metadata") ?? GetNestedObject(root, "response", "metadata");
-        var safety = GetObject(root, "safety_buffering") ??
-                     GetNestedObject(root, "response", "safety_buffering") ??
-                     (metadata is { } metadataObject ? GetObject(metadataObject, "safety_buffering") : null);
-
-        var retryModelElement = default(JsonElement);
-        var retryModelPresent = safety is { } safetyObject && safetyObject.TryGetProperty("retry_model"u8, out retryModelElement);
-        var retryModel = retryModelPresent && retryModelElement.ValueKind == JsonValueKind.String
-            ? retryModelElement.GetString()
-            : null;
-        var parsedSafety = safety is null
-            ? null
-            : new CodexSafetyBuffering(
-                retryModelPresent,
-                retryModel,
-                 GetString(safety.Value, "treatment"),
-                 Message: GetString(safety.Value, "message"));
 
         return new CodexResponseMetadata(
             RequestId: GetString(headers, "x-request-id"),
             EffectiveModel: GetString(headers, "OpenAI-Model") ?? GetString(headers, "x-openai-model") ?? GetString(root, "model"),
             ModelsETag: GetString(headers, "x-models-etag"),
             ReasoningIncluded: GetBoolean(headers, "x-reasoning-included"),
-            SafetyBuffering: parsedSafety,
+            SafetyBuffering: ParseSafetyBuffering(root, type),
             RateLimits: ParseRateLimits(root, headers),
             VerificationRecommendation: GetVerificationRecommendation(metadata),
             TurnModeration: GetBoundedJson(metadata, "openai_chatgpt_moderation_metadata"),
-            TurnState: GetString(headers, "x-codex-turn-state"));
+            TurnState: GetString(headers, "x-codex-turn-state"),
+            SafetyBufferingTreatment: headers is { } headerObject
+                ? CreateSafetyBufferingTreatment(
+                    TryGetProperty(headerObject, SafetyBufferingEnabledHeader, out _) ||
+                    TryGetProperty(headerObject, SafetyBufferingFasterModelHeader, out _),
+                    GetString(headerObject, SafetyBufferingFasterModelHeader))
+                : null);
     }
+
+    /// <summary>
+    /// Mirrors the official Codex client: a top-level <c>safety_buffering</c> property wins when present
+    /// (non-object values such as <c>false</c> mean "not buffering"); otherwise only a
+    /// <c>response.metadata</c> event whose metadata type is <c>safety_buffering</c> carries the payload.
+    /// </summary>
+    private static CodexSafetyBuffering? ParseSafetyBuffering(JsonElement root, string? type)
+    {
+        JsonElement safety;
+        if (root.TryGetProperty("safety_buffering"u8, out var topLevel))
+        {
+            safety = topLevel;
+        }
+        else if (string.Equals(type, "response.metadata", StringComparison.Ordinal) &&
+                 GetObject(root, "metadata") is { } metadata &&
+                 string.Equals(GetString(metadata, "type"), "safety_buffering", StringComparison.Ordinal))
+        {
+            safety = metadata;
+        }
+        else
+        {
+            return null;
+        }
+
+        if (safety.ValueKind != JsonValueKind.Object ||
+            GetStringArray(safety, "use_cases") is not { } useCases ||
+            GetStringArray(safety, "reasons") is not { } reasons)
+        {
+            return null;
+        }
+
+        var retryModelPresent = safety.TryGetProperty("retry_model"u8, out var retryModelElement);
+        var retryModel = retryModelPresent && retryModelElement.ValueKind == JsonValueKind.String
+            ? retryModelElement.GetString()
+            : null;
+        return new CodexSafetyBuffering(retryModelPresent, retryModel, useCases, reasons);
+    }
+
+    private static IReadOnlyList<string>? GetStringArray(JsonElement element, string name)
+        => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Array
+            ? value.EnumerateArray()
+                .Where(static item => item.ValueKind == JsonValueKind.String)
+                .Select(static item => item.GetString()!)
+                .Take(16)
+                .ToArray()
+            : null;
 
     private static CodexTerminalMetadata? ParseTerminal(JsonElement root, string? type)
     {
@@ -222,10 +261,8 @@ internal static class CodexProtocolEventParser
         }
     }
 
-    private static CodexSafetyBuffering? CreateHeaderSafetyBuffering(string? enabled, string? fallbackRetryModel)
-        => enabled is null && fallbackRetryModel is null
-            ? null
-            : new CodexSafetyBuffering(false, null, enabled, fallbackRetryModel);
+    private static CodexSafetyBufferingTreatment? CreateSafetyBufferingTreatment(bool present, string? fasterModel)
+        => present ? new CodexSafetyBufferingTreatment(fasterModel) : null;
 
     private static CodexNamedRateLimitWindow? ParseRateLimitWindow(JsonElement details, string name)
         => GetObject(details, name) is { } window

@@ -3334,6 +3334,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
     private sealed class CodexMetadataAccumulator
     {
         private string? _fallbackRetryModel;
+        private bool _safetyBufferingReported;
+        private string? _lastSafetyBufferingRetryModel;
         private string? _lastEffectiveModelUpdate;
 
         public string? RequestId { get; private set; }
@@ -3409,19 +3411,34 @@ internal sealed class OpenAIResponsesTurnExecutor(
                 });
             }
 
+            if (metadata.SafetyBufferingTreatment is { } treatment)
+            {
+                // Like the official client, the latest treatment headers replace the fallback model.
+                _fallbackRetryModel = Normalize(treatment.FasterModel);
+            }
+
             if (metadata.SafetyBuffering is { } safety)
             {
-                _fallbackRetryModel = Normalize(safety.FallbackRetryModel) ?? _fallbackRetryModel;
                 var retryModel = safety.RetryModelPresent ? Normalize(safety.RetryModel) : _fallbackRetryModel;
-                updates.Add(new AgentTurnSessionUpdate
+                // The server repeats the buffering payload on many stream events; report it once per attempt
+                // unless the offered retry model changes.
+                if (!_safetyBufferingReported || !string.Equals(retryModel, _lastSafetyBufferingRetryModel, StringComparison.Ordinal))
                 {
-                    Kind = retryModel is null ? AgentSessionUpdateKind.Info : AgentSessionUpdateKind.Warning,
-                    Message = Normalize(safety.Message) ?? "Codex safety buffering is active.",
-                    Details = CreateDetails(
-                        ("retryModel", retryModel),
-                        ("retryModelSource", safety.RetryModelPresent ? "event" : retryModel is null ? null : "header"),
-                        ("treatment", Normalize(safety.Treatment))),
-                });
+                    _safetyBufferingReported = true;
+                    _lastSafetyBufferingRetryModel = retryModel;
+                    updates.Add(new AgentTurnSessionUpdate
+                    {
+                        Kind = retryModel is null ? AgentSessionUpdateKind.Info : AgentSessionUpdateKind.Warning,
+                        Message = retryModel is null
+                            ? "Codex is giving this request extra safety review; the response may be delayed."
+                            : $"Codex is giving this request extra safety review; the response may be delayed. A faster model ({retryModel}) is available if you prefer to retry.",
+                        Details = CreateDetails(
+                            ("retryModel", retryModel),
+                            ("retryModelSource", safety.RetryModelPresent ? "event" : retryModel is null ? null : "header"),
+                            ("useCases", safety.UseCases.Count == 0 ? null : string.Join(", ", safety.UseCases)),
+                            ("reasons", safety.Reasons.Count == 0 ? null : string.Join(", ", safety.Reasons))),
+                    });
+                }
             }
 
             if (Normalize(metadata.VerificationRecommendation) is { } verification)

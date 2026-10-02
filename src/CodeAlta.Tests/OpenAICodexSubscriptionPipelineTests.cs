@@ -665,16 +665,61 @@ public sealed class OpenAICodexSubscriptionPipelineTests
     {
         var omitted = CodexProtocolEventParser.Parse(
             CodexProtocolTransport.Http,
-            BinaryData.FromString("""{"type":"safety_buffering","safety_buffering":{"treatment":"buffered"}}"""));
+            BinaryData.FromString("""{"type":"response.metadata","safety_buffering":{"use_cases":["cyber"],"reasons":["user_risk"]}}"""));
         var explicitNull = CodexProtocolEventParser.Parse(
             CodexProtocolTransport.Http,
-            BinaryData.FromString("""{"type":"safety_buffering","safety_buffering":{"retry_model":null,"treatment":"buffered"}}"""));
+            BinaryData.FromString("""{"type":"response.metadata","safety_buffering":{"use_cases":["cyber"],"reasons":["user_risk"],"retry_model":null}}"""));
 
         Assert.IsNotNull(omitted.Metadata.SafetyBuffering);
         Assert.IsFalse(omitted.Metadata.SafetyBuffering.RetryModelPresent);
+        CollectionAssert.AreEqual(new[] { "cyber" }, omitted.Metadata.SafetyBuffering.UseCases.ToArray());
+        CollectionAssert.AreEqual(new[] { "user_risk" }, omitted.Metadata.SafetyBuffering.Reasons.ToArray());
         Assert.IsNotNull(explicitNull.Metadata.SafetyBuffering);
         Assert.IsTrue(explicitNull.Metadata.SafetyBuffering.RetryModelPresent);
         Assert.IsNull(explicitNull.Metadata.SafetyBuffering.RetryModel);
+    }
+
+    [TestMethod]
+    public void ProtocolParser_SafetyBufferingFollowsOfficialClientPrecedence()
+    {
+        static CodexSafetyBuffering? Parse(string json)
+            => CodexProtocolEventParser.Parse(CodexProtocolTransport.WebSocket, BinaryData.FromString(json)).Metadata.SafetyBuffering;
+
+        var fromMetadata = Parse("""{"type":"response.metadata","metadata":{"type":"safety_buffering","use_cases":["cyber"],"reasons":["user_risk"],"retry_model":"gpt-fast"}}""");
+        Assert.IsNotNull(fromMetadata);
+        Assert.AreEqual("gpt-fast", fromMetadata.RetryModel);
+
+        var fromDelta = Parse("""{"type":"response.output_text.delta","item_id":"msg","output_index":0,"content_index":0,"delta":"hi","safety_buffering":{"use_cases":["cyber"],"reasons":["user_risk"]}}""");
+        Assert.IsNotNull(fromDelta);
+
+        // A non-object top-level value means "not buffering" and wins over response metadata.
+        Assert.IsNull(Parse("""{"type":"response.created","response":{"id":"r"},"safety_buffering":false}"""));
+        Assert.IsNull(Parse("""{"type":"response.metadata","safety_buffering":null,"metadata":{"type":"safety_buffering","use_cases":["cyber"],"reasons":["user_risk"]}}"""));
+        // Metadata payloads only count on response.metadata events with the safety_buffering type.
+        Assert.IsNull(Parse("""{"type":"response.output_text.delta","delta":"hi","metadata":{"type":"safety_buffering","use_cases":["cyber"],"reasons":["user_risk"]}}"""));
+        Assert.IsNull(Parse("""{"type":"response.metadata","metadata":{"use_cases":["cyber"],"reasons":["user_risk"]}}"""));
+        // Payloads without the required use_cases/reasons arrays are ignored like the official client.
+        Assert.IsNull(Parse("""{"type":"response.metadata","safety_buffering":{"retry_model":"gpt-fast"}}"""));
+    }
+
+    [TestMethod]
+    [DataRow("true")]
+    [DataRow("false")]
+    public void ProtocolParser_SafetyBufferingHeadersOnlyConfigureFallbackModel(string enabled)
+    {
+        using var response = new HttpResponseMessage(HttpStatusCode.OK);
+        response.Headers.Add("x-codex-safety-buffering-enabled", enabled);
+        response.Headers.Add("x-codex-safety-buffering-faster-model", "gpt-5.3-codex-fast");
+
+        var initial = CodexProtocolEventParser.CreateInitialHttpEvent(response);
+        var webSocketMetadata = CodexProtocolEventParser.Parse(
+            CodexProtocolTransport.WebSocket,
+            BinaryData.FromString($$$"""{"type":"codex.response.metadata","headers":{"x-codex-safety-buffering-enabled":"{{{enabled}}}","x-codex-safety-buffering-faster-model":"gpt-ws-fast"}}"""));
+
+        Assert.IsNull(initial.Metadata.SafetyBuffering);
+        Assert.AreEqual("gpt-5.3-codex-fast", initial.Metadata.SafetyBufferingTreatment?.FasterModel);
+        Assert.IsNull(webSocketMetadata.Metadata.SafetyBuffering);
+        Assert.AreEqual("gpt-ws-fast", webSocketMetadata.Metadata.SafetyBufferingTreatment?.FasterModel);
     }
 
     [TestMethod]
@@ -708,7 +753,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
                     "openai_chatgpt_moderation_metadata":{"flagged":true,"category":"cyber"},
                     "raw_secret":"must-not-survive"
                   },
-                  "safety_buffering":{"message":"Checking safety","retry_model":null}
+                  "safety_buffering":{"use_cases":["cyber"],"reasons":["user_risk"],"retry_model":null}
                 }
                 """));
 
@@ -718,7 +763,8 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.AreEqual("codex_other", initial.Metadata.RateLimits?[1].Name);
         Assert.AreEqual(8, initial.Metadata.RateLimits?[1].Secondary?.UsedPercent);
         Assert.AreEqual("42.5", initial.Metadata.RateLimits?[0].Credits?.Balance);
-        Assert.AreEqual("gpt-5.3-codex-fast", initial.Metadata.SafetyBuffering?.FallbackRetryModel);
+        Assert.AreEqual("gpt-5.3-codex-fast", initial.Metadata.SafetyBufferingTreatment?.FasterModel);
+        Assert.IsNull(initial.Metadata.SafetyBuffering);
         Assert.AreEqual("trusted_access_for_cyber", metadata.Metadata.VerificationRecommendation);
         StringAssert.Contains(metadata.Metadata.TurnModeration, "flagged");
         Assert.IsFalse(JsonSerializer.Serialize(metadata.Metadata).Contains("raw_secret", StringComparison.Ordinal));
