@@ -46,7 +46,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
         ModelsIncludeRegex = source.ModelsIncludeRegex;
         UseDefaultModelsIncludeRegex = source.ModelsIncludeRegex is null;
         SortModels = source.SortModels == true;
-        AuthSource = source.AuthSource ?? "codealta_oauth";
+        AuthSource = source.AuthSource ?? ResolveDefaultAuthSource(ProviderType);
         UseDefaultAuthSource = source.AuthSource is null;
         AccountId = source.AccountId;
         UseDefaultAccountId = source.AccountId is null;
@@ -67,6 +67,14 @@ internal sealed partial class ModelProviderEditorItemViewModel
     public partial string? ProviderKey { get; set; }
 
     public bool IsReserved => false;
+
+    private static string ResolveDefaultAuthSource(string? providerType)
+        => providerType?.Trim().ToLowerInvariant() switch
+        {
+            "copilot" => "github_device_flow",
+            "xai" => "xai_browser_oauth",
+            _ => "codealta_oauth",
+        };
 
     private static string ResolveDefaultModelDiscovery(string? providerType)
         => providerType?.Trim().ToLowerInvariant() switch

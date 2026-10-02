@@ -52,7 +52,10 @@ internal sealed class ProviderFrontendCoordinator
 
     public IReadOnlyList<CodeAltaProviderDocument> LoadProviderDefinitions()
     {
-        var definitions = _configStore.LoadGlobalProviderDefinitions(includeDisabled: true);
+        // Edit normalized overrides, not runtime definitions with inherited defaults filled in.
+        var definitions = _configStore.LoadGlobal().Providers?.Values
+            .OrderBy(static definition => definition.DisplayName ?? definition.ProviderKey, StringComparer.OrdinalIgnoreCase)
+            .ToArray() ?? [];
         _hasAnyEnabledProviders = definitions.Any(static definition => definition.Enabled != false);
         return definitions;
     }

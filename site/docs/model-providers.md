@@ -63,6 +63,8 @@ The dialog can:
 - preserve advanced TOML settings such as `profile`, `compaction`, `extra_body`, `model_overrides`, and `protocol_trace`;
 - open an Advanced TOML editor with live validation.
 
+Each **Default** checkbox indicates that the field inherits its provider default rather than a custom override. Omitted settings stay marked as Default when you reopen or refresh the dialog; for example, a Codex entry containing only `type = "codex"` leaves its optional settings at their defaults. Uncheck Default to supply an override, or check it to remove the override when saving.
+
 ## Advanced TOML reference
 
 Global provider entries live under `[providers.<provider-key>]`. Provider keys are normalized to lower case; `codex` and `copilot` also receive their default provider type when `type` is omitted. Supported canonical provider types are `codex`, `copilot`, `xai`, `openai-chat`, `openai-responses`, `azure-openai`, `anthropic`, `google-genai`, and `vertex-ai`.
