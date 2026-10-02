@@ -97,6 +97,8 @@ internal sealed class CodexSubscriptionModelDiscoveryClient
         ArgumentNullException.ThrowIfNull(baseUri);
         ArgumentException.ThrowIfNullOrWhiteSpace(clientVersion);
 
+        // The catalog is gated by `client_version`; omitting it returns only an older subset of the
+        // account's models, so keep sending the three-part client version like Codex does.
         var modelsUri = CodexSubscriptionHttpRequestFactory.ResolveEndpoint(baseUri, "models");
         return CodexSubscriptionHttpRequestFactory.AppendQueryParameter(
             modelsUri,
@@ -198,8 +200,8 @@ internal sealed class CodexSubscriptionModelDiscoveryClient
         var models = new List<CodexSubscriptionDiscoveredModel>();
         foreach (var modelElement in modelsElement.EnumerateArray())
         {
-            var id = GetString(modelElement, "id") ??
-                GetString(modelElement, "slug") ??
+            var id = GetString(modelElement, "slug") ??
+                GetString(modelElement, "id") ??
                 GetString(modelElement, "name");
             if (string.IsNullOrWhiteSpace(id))
             {
@@ -213,7 +215,7 @@ internal sealed class CodexSubscriptionModelDiscoveryClient
                     GetString(modelElement, "displayName") ??
                     GetString(modelElement, "name") ??
                     id.Trim(),
-                GetBoolean(modelElement, "supported_in_api") ?? GetBoolean(modelElement, "supportedInApi") ?? false,
+                GetBoolean(modelElement, "supported_in_api") ?? GetBoolean(modelElement, "supportedInApi") ?? true,
                 GetBoolean(modelElement, "listable") ?? GetBoolean(modelElement, "is_listable") ?? IsListVisibility(visibility),
                 GetBoolean(modelElement, "hidden") ?? IsHiddenVisibility(visibility),
                 GetBoolean(modelElement, "requires_websocket") ?? GetBoolean(modelElement, "requiresWebSocket") ?? false,
@@ -228,7 +230,6 @@ internal sealed class CodexSubscriptionModelDiscoveryClient
                     GetBoolean(modelElement, "supportsImageInput") ??
                     ContainsString(modelElement, "input_modalities", "image"),
                 GetBoolean(modelElement, "supports_tools") ?? GetBoolean(modelElement, "supportsTools") ?? true,
-                GetBoolean(modelElement, "supports_parallel_tool_calls") ?? false,
                 GetBoolean(modelElement, "supports_image_detail_original") ?? false,
                 GetBoolean(modelElement, "use_responses_lite") ?? false,
                 GetReasoningEfforts(modelElement),
@@ -239,10 +240,31 @@ internal sealed class CodexSubscriptionModelDiscoveryClient
                     GetString(modelElement, "defaultTextVerbosity") ??
                     GetString(modelElement, "default_verbosity"),
                 GetInt64(modelElement, "context_window") ?? GetInt64(modelElement, "contextWindow"),
+                GetServiceTiers(modelElement),
                 etag));
         }
 
         return models;
+    }
+
+    private static IReadOnlyList<string> GetServiceTiers(JsonElement element)
+    {
+        if (!element.TryGetProperty("service_tiers", out var tiers) || tiers.ValueKind is not JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var ids = new List<string>();
+        foreach (var tier in tiers.EnumerateArray())
+        {
+            if (tier.ValueKind is JsonValueKind.Object && GetString(tier, "id") is { } id &&
+                !string.IsNullOrWhiteSpace(id))
+            {
+                ids.Add(id);
+            }
+        }
+
+        return ids;
     }
 
     private static string? GetString(JsonElement element, string name)
@@ -346,13 +368,13 @@ internal sealed record CodexSubscriptionDiscoveredModel(
     bool SupportsTextVerbosity,
     bool SupportsImageInput,
     bool SupportsTools,
-    bool SupportsParallelToolCalls,
     bool SupportsImageDetailOriginal,
     bool UseResponsesLite,
     IReadOnlyList<string>? SupportedReasoningEfforts,
     string? DefaultReasoningEffort,
     string? DefaultTextVerbosity,
     long? ContextWindow,
+    IReadOnlyList<string> ServiceTiers,
     string? ETag);
 
 internal sealed class CodexSubscriptionModelDiscoveryException : Exception

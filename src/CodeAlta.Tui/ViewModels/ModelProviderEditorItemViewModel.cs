@@ -46,13 +46,13 @@ internal sealed partial class ModelProviderEditorItemViewModel
         ModelsIncludeRegex = source.ModelsIncludeRegex;
         UseDefaultModelsIncludeRegex = source.ModelsIncludeRegex is null;
         SortModels = source.SortModels == true;
-        AuthSource = source.AuthSource ?? "codealta_oauth";
+        AuthSource = source.AuthSource ?? ResolveDefaultAuthSource(ProviderType);
         UseDefaultAuthSource = source.AuthSource is null;
         AccountId = source.AccountId;
         UseDefaultAccountId = source.AccountId is null;
         ModelDiscovery = source.ModelDiscovery ?? ResolveDefaultModelDiscovery(ProviderType);
         UseDefaultModelDiscovery = source.ModelDiscovery is null;
-        ResponseTransport = source.ResponseTransport ?? "websocket_with_http_fallback";
+        ResponseTransport = source.ResponseTransport ?? "http";
         UseDefaultResponseTransport = source.ResponseTransport is null;
         _isInitialized = true;
     }
@@ -67,6 +67,14 @@ internal sealed partial class ModelProviderEditorItemViewModel
     public partial string? ProviderKey { get; set; }
 
     public bool IsReserved => false;
+
+    private static string ResolveDefaultAuthSource(string? providerType)
+        => providerType?.Trim().ToLowerInvariant() switch
+        {
+            "copilot" => "github_device_flow",
+            "xai" => "xai_browser_oauth",
+            _ => "codealta_oauth",
+        };
 
     private static string ResolveDefaultModelDiscovery(string? providerType)
         => providerType?.Trim().ToLowerInvariant() switch
@@ -354,6 +362,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
             AccountId = definition.AccountId,
             MaxConcurrentRequests = definition.MaxConcurrentRequests,
             TextVerbosity = definition.TextVerbosity,
+            ServiceTier = definition.ServiceTier,
             IncludeEncryptedReasoning = definition.IncludeEncryptedReasoning,
             ModelDiscovery = definition.ModelDiscovery,
             ResponseTransport = definition.ResponseTransport,

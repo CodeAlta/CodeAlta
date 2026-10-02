@@ -44,11 +44,11 @@ public sealed class CodeAltaConfigStore
     private const string XaiDirectDefaultAuthSource = "xai_browser_oauth";
     private const string XaiDirectDefaultModelDiscovery = "xai_endpoint_with_static_fallback";
     private const string CodexSubscriptionDefaultDisplayName = "Codex";
-    private const string CodexSubscriptionDefaultApiUrl = "https://chatgpt.com/backend-api/codex";
+    private const string CodexSubscriptionDefaultApiUrl = "https://api.openai.com/v1";
     private const string CodexSubscriptionDefaultAuthSource = "codealta_oauth";
     private const string CodexSubscriptionDefaultTextVerbosity = "medium";
     private const string CodexSubscriptionDefaultModelDiscovery = "codex_endpoint_with_static_fallback";
-    private const string CodexSubscriptionDefaultResponseTransport = "websocket_with_http_fallback";
+    private const string CodexSubscriptionDefaultResponseTransport = "http";
     private const string CodexSubscriptionDefaultInstallationIdSource = "codealta_state";
     private const int CodexSubscriptionDefaultMaxConcurrentRequests = 16;
 
@@ -1047,6 +1047,11 @@ public sealed class CodeAltaConfigStore
         definition.AuthSource = NormalizeCodexSubscriptionAuthSource(definition.AuthSource);
         definition.AccountId = NormalizeText(definition.AccountId);
         definition.TextVerbosity = NormalizeCodexSubscriptionTextVerbosity(definition.TextVerbosity);
+        definition.ServiceTier = NormalizeText(definition.ServiceTier)?.ToLowerInvariant() switch
+        {
+            "fast" => "priority",
+            var tier => tier,
+        };
         definition.ModelDiscovery = NormalizeCodexSubscriptionModelDiscovery(definition.ModelDiscovery);
         definition.ResponseTransport = NormalizeCodexSubscriptionResponseTransport(definition.ResponseTransport);
         definition.InstallationIdSource = NormalizeCodexSubscriptionInstallationIdSource(definition.InstallationIdSource);
@@ -1333,6 +1338,12 @@ public sealed class CodeAltaConfigStore
         }
 
         definition.DisplayName ??= CodexSubscriptionDefaultDisplayName;
+        if (definition.ApiUrl is "https://chatgpt.com/backend-api/codex" or "https://chatgpt.com/backend-api/codex/")
+        {
+            // Move the former built-in endpoint along with the replaced OAuth flow.
+            definition.ApiUrl = CodexSubscriptionDefaultApiUrl;
+        }
+
         definition.ApiUrl ??= CodexSubscriptionDefaultApiUrl;
         definition.AuthSource ??= CodexSubscriptionDefaultAuthSource;
         definition.MaxConcurrentRequests ??= CodexSubscriptionDefaultMaxConcurrentRequests;
@@ -1375,6 +1386,11 @@ public sealed class CodeAltaConfigStore
 
     private static void ValidateProviderFields(CodeAltaProviderDocument definition)
     {
+        if (!string.Equals(definition.ProviderType, CodexSubscriptionProviderType, StringComparison.Ordinal))
+        {
+            RejectUnsupportedField(definition, "service_tier", definition.ServiceTier);
+        }
+
         if (!string.Equals(definition.ProviderType, CodexSubscriptionProviderType, StringComparison.Ordinal) &&
             !string.Equals(definition.ProviderType, CopilotDirectProviderType, StringComparison.Ordinal) &&
             !string.Equals(definition.ProviderType, XaiDirectProviderType, StringComparison.Ordinal))
@@ -1590,14 +1606,19 @@ public sealed class CodeAltaConfigStore
 
     private static void ValidateCodexSubscriptionFields(CodeAltaProviderDocument definition)
     {
+        if (definition.ServiceTier is not (null or "default" or "priority"))
+        {
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} service_tier must be one of: default, priority, fast (alias for priority).");
+        }
+
         if (definition.MaxConcurrentRequests is <= 0)
         {
             throw new InvalidOperationException($"providers.{definition.ProviderKey} max_concurrent_requests must be greater than zero.");
         }
 
-        if (definition.AuthSource is not ("codealta_oauth" or "codex_auth_import" or "codex_auth_file_readonly" or "external_token_command"))
+        if (definition.AuthSource != "codealta_oauth")
         {
-            throw new InvalidOperationException($"providers.{definition.ProviderKey} auth_source must be one of: codealta_oauth, codex_auth_import, codex_auth_file_readonly, external_token_command.");
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} auth_source must be codealta_oauth. Use Continue with ChatGPT in CodeAlta; legacy Codex credential imports are not supported.");
         }
 
         if (definition.TextVerbosity is not ("low" or "medium" or "high"))
@@ -1849,6 +1870,11 @@ public sealed class CodeAltaConfigStore
                 definition.TextVerbosity = null;
             }
 
+            if (definition.ServiceTier == "default")
+            {
+                definition.ServiceTier = null;
+            }
+
             if (definition.IncludeEncryptedReasoning == true)
             {
                 definition.IncludeEncryptedReasoning = null;
@@ -1959,6 +1985,7 @@ public sealed class CodeAltaConfigStore
                !string.IsNullOrWhiteSpace(definition.AccountId) ||
                definition.MaxConcurrentRequests is not null ||
                !string.IsNullOrWhiteSpace(definition.TextVerbosity) ||
+               !string.IsNullOrWhiteSpace(definition.ServiceTier) ||
                definition.IncludeEncryptedReasoning is not null ||
                !string.IsNullOrWhiteSpace(definition.ModelDiscovery) ||
                !string.IsNullOrWhiteSpace(definition.ResponseTransport) ||
@@ -2048,6 +2075,7 @@ public sealed class CodeAltaConfigStore
             AccountId = definition.AccountId,
             MaxConcurrentRequests = definition.MaxConcurrentRequests,
             TextVerbosity = definition.TextVerbosity,
+            ServiceTier = definition.ServiceTier,
             IncludeEncryptedReasoning = definition.IncludeEncryptedReasoning,
             ModelDiscovery = definition.ModelDiscovery,
             ResponseTransport = definition.ResponseTransport,

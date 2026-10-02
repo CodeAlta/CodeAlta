@@ -4,7 +4,7 @@ namespace CodeAlta.Agent.OpenAI.Codex;
 
 internal static class CodexSubscriptionHttpRequestFactory
 {
-    internal static readonly Uri DefaultBaseUri = new("https://chatgpt.com/backend-api/codex");
+    internal static readonly Uri DefaultBaseUri = new(OpenAICodexSubscriptionOAuthDefaults.Resource);
 
     public static Uri ResolveEndpoint(Uri? baseUri, string endpoint)
     {
@@ -58,11 +58,10 @@ internal static class CodexSubscriptionHttpRequestFactory
         ArgumentNullException.ThrowIfNull(authManager);
         ArgumentNullException.ThrowIfNull(options);
         var credential = await authManager.GetCredentialAsync(cancellationToken).ConfigureAwait(false);
-        var account = await authManager.GetAccountContextAsync(cancellationToken).ConfigureAwait(false);
         return new CodexSubscriptionHttpIdentity(
             credential.AccessToken,
-            string.IsNullOrWhiteSpace(options.AccountId) ? account.AccountId : options.AccountId,
-            account.IsFedRamp,
+            OpenAICodexSubscriptionAuthManager.ResolveAccountId(options.AccountId, credential),
+            credential.IsFedRamp,
             OpenAIProviderSdkFactory.CreateCodeAltaUserAgentApplicationId());
     }
 

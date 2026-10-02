@@ -109,7 +109,7 @@ internal sealed class ModelProviderDialogService : IModelProviderDialogService
         {
             "copilot" => _providerUi.LoginCopilotDirectWithDeviceCodeAsync(definition, reportStatus, cancellationToken),
             "xai" => _providerUi.LoginXaiDirectWithDeviceCodeAsync(definition, reportStatus, cancellationToken),
-            _ => _providerUi.LoginCodexSubscriptionWithDeviceCodeAsync(definition, reportStatus, cancellationToken),
+            _ => throw new InvalidOperationException("ChatGPT sign-in uses the browser. Select Continue with ChatGPT."),
         };
 
     public Task<ProviderTestResult> LogoutAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default)

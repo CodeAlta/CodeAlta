@@ -3,7 +3,6 @@ using System.Globalization;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Copilot;
 using CodeAlta.Agent.Xai;
-using CodeAlta.Agent.OpenAI.Codex;
 using CodeAlta.Tui.App.Events;
 using CodeAlta.Catalog;
 using CodeAlta.Hosting;
@@ -52,7 +51,10 @@ internal sealed class ProviderFrontendCoordinator
 
     public IReadOnlyList<CodeAltaProviderDocument> LoadProviderDefinitions()
     {
-        var definitions = _configStore.LoadGlobalProviderDefinitions(includeDisabled: true);
+        // Edit normalized overrides, not runtime definitions with inherited defaults filled in.
+        var definitions = _configStore.LoadGlobal().Providers?.Values
+            .OrderBy(static definition => definition.DisplayName ?? definition.ProviderKey, StringComparer.OrdinalIgnoreCase)
+            .ToArray() ?? [];
         _hasAnyEnabledProviders = definitions.Any(static definition => definition.Enabled != false);
         return definitions;
     }
@@ -215,55 +217,27 @@ internal sealed class ProviderFrontendCoordinator
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(reportStatus);
 
-        ProviderTestResult result = default;
-        await ConfiguredCodexAuthentication.LoginWithBrowserAsync(
+        var metadata = await ConfiguredCodexAuthentication.LoginWithBrowserAsync(
             definition,
             GetProviderStateRootPath,
             static () => SR.T("Select a Codex provider first."),
             authorizeUri => ReportCodexBrowserAuthorization(authorizeUri, reportStatus),
             TryOpenBrowser,
-            static () => SR.T("ChatGPT browser login completed"),
-            (prefix, rawAccountId) => result = FormatCodexBrowserLoginResult(prefix, rawAccountId),
             cancellationToken);
-        return result;
+        return FormatCodexBrowserLoginResult(metadata);
     }
 
     internal static void ReportCodexBrowserAuthorization(Uri authorizeUri, Action<string> reportStatus)
         => reportStatus(SR.T("Open ChatGPT login in your browser: {0}", authorizeUri));
 
-    internal static ProviderTestResult FormatCodexBrowserLoginResult(string prefix, string? rawAccountId)
+    internal static ProviderTestResult FormatCodexBrowserLoginResult(CodexAccountMetadata metadata)
     {
-        var account = string.IsNullOrWhiteSpace(rawAccountId) ? SR.T("account/workspace unknown") : rawAccountId;
-        return new ProviderTestResult(true, SR.T("{0} · account/workspace: {1}.", prefix, account), 0);
-    }
-
-    public async Task<ProviderTestResult> LoginCodexSubscriptionWithDeviceCodeAsync(
-        CodeAltaProviderDocument definition,
-        Action<string> reportStatus,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(definition);
-        ArgumentNullException.ThrowIfNull(reportStatus);
-
-        ProviderTestResult result = default;
-        await ConfiguredCodexAuthentication.LoginWithDeviceCodeAsync(
-            definition,
-            GetProviderStateRootPath,
-            static () => SR.T("Select a Codex provider first."),
-            (verificationUri, userCode) => ReportCodexDeviceCode(verificationUri, userCode, reportStatus),
-            static () => SR.T("ChatGPT device-code login completed"),
-            (prefix, rawAccountId) => result = FormatCodexDeviceLoginResult(prefix, rawAccountId),
-            cancellationToken);
-        return result;
-    }
-
-    internal static void ReportCodexDeviceCode(string verificationUri, string userCode, Action<string> reportStatus)
-        => reportStatus(SR.T("Open {0} and enter code {1}. Waiting for ChatGPT authorization...", verificationUri, userCode));
-
-    internal static ProviderTestResult FormatCodexDeviceLoginResult(string prefix, string? rawAccountId)
-    {
-        var account = string.IsNullOrWhiteSpace(rawAccountId) ? SR.T("account/workspace unknown") : rawAccountId;
-        return new ProviderTestResult(true, SR.T("{0} · account/workspace: {1}.", prefix, account), 0);
+        return new ProviderTestResult(
+            metadata.HasPlanUsagePermission,
+            FormatCodexCredentialMessage(metadata.HasPlanUsagePermission
+                ? SR.T("ChatGPT browser login completed")
+                : SR.T("Signed in, but ChatGPT plan usage is disabled. Continue with ChatGPT to enable it, or configure an API-key provider"), metadata),
+            0);
     }
 
     public async Task<ProviderTestResult> LogoutCodexSubscriptionAsync(
@@ -272,13 +246,18 @@ internal sealed class ProviderFrontendCoordinator
     {
         ArgumentNullException.ThrowIfNull(definition);
 
-        await ConfiguredCodexAuthentication.DeleteCredentialAsync(
+        var revoked = await ConfiguredCodexAuthentication.SignOutAsync(
             definition,
             GetProviderStateRootPath,
             static () => SR.T("Select a Codex provider first."),
             cancellationToken);
-        return new ProviderTestResult(true, SR.T("Deleted CodeAlta-owned ChatGPT/Codex credentials for this provider."), 0);
+        return FormatCodexSignOutResult(revoked);
     }
+
+    internal static ProviderTestResult FormatCodexSignOutResult(bool revoked)
+        => new(true, revoked
+            ? SR.T("Signed out of ChatGPT. The account registration is retained for your next sign-in.")
+            : SR.T("Signed out locally, but remote revocation was not confirmed. Disconnect CodeAlta in ChatGPT Settings if needed."), 0);
 
     public async Task<ProviderTestResult> TestCodexSubscriptionAuthenticationAsync(
         CodeAltaProviderDocument definition,
@@ -286,20 +265,17 @@ internal sealed class ProviderFrontendCoordinator
     {
         ArgumentNullException.ThrowIfNull(definition);
 
-        ProviderTestResult result = default;
-        await ConfiguredCodexAuthentication.TestAuthenticationAsync(
+        var metadata = await ConfiguredCodexAuthentication.TestAuthenticationAsync(
             definition,
             GetProviderStateRootPath,
             static () => SR.T("Select a Codex provider first."),
-            rawAccountId => result = FormatCodexAuthenticationResult(rawAccountId),
             cancellationToken);
-        return result;
+        return FormatCodexAuthenticationResult(metadata);
     }
 
-    internal static ProviderTestResult FormatCodexAuthenticationResult(string? rawAccountId)
+    internal static ProviderTestResult FormatCodexAuthenticationResult(CodexAccountMetadata metadata)
     {
-        var account = string.IsNullOrWhiteSpace(rawAccountId) ? SR.T("no account/workspace id in token") : rawAccountId;
-        return new ProviderTestResult(true, SR.T("Authenticated without sending a model turn · account/workspace: {0}.", account), 0);
+        return new ProviderTestResult(true, FormatCodexCredentialMessage(SR.T("Authenticated without sending a model turn"), metadata), 0);
     }
 
     public async Task<ProviderTestResult> ListCodexSubscriptionModelsAsync(
@@ -320,13 +296,11 @@ internal sealed class ProviderFrontendCoordinator
     {
         ArgumentNullException.ThrowIfNull(definition);
 
-        ProviderTestResult result = default;
-        await ConfiguredCodexAuthentication.ReadAccountMetadataAsync(
+        var metadata = await ConfiguredCodexAuthentication.ReadAccountMetadataAsync(
             definition,
             GetProviderStateRootPath,
-            metadata => result = FormatCodexAccountMetadataResult(metadata),
             cancellationToken);
-        return result;
+        return FormatCodexAccountMetadataResult(metadata);
     }
 
     internal static ProviderTestResult FormatCodexAccountMetadataResult(CodexAccountMetadata? metadata)
@@ -336,12 +310,7 @@ internal sealed class ProviderFrontendCoordinator
             return new ProviderTestResult(false, SR.T("Login required before account/workspace metadata can be listed."), 0);
         }
 
-        var accountId = metadata.AccountId;
-        var accountLabel = string.IsNullOrWhiteSpace(metadata.AccountLabel) ? SR.T("ChatGPT account/workspace") : metadata.AccountLabel;
-        var accountMessage = string.IsNullOrWhiteSpace(accountId)
-            ? SR.T("{0}: token did not expose an account/workspace id; enter one in Account/Workspace Id if required.", accountLabel)
-            : SR.T("{0}: {1}", accountLabel, accountId);
-        return new ProviderTestResult(true, accountMessage, string.IsNullOrWhiteSpace(accountId) ? 0 : 1);
+        return new ProviderTestResult(true, FormatCodexCredentialMessage(SR.T("Saved ChatGPT registration for this provider"), metadata), 1);
     }
 
     public async Task<ProviderTestResult> LoginCopilotDirectWithBrowserAsync(
@@ -551,35 +520,6 @@ internal sealed class ProviderFrontendCoordinator
         return true;
     }
 
-    private OpenAICodexSubscriptionLoginManager CreateCodexSubscriptionLoginManager(CodeAltaProviderDocument definition)
-    {
-        if (!string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(SR.T("Select a Codex provider first."));
-        }
-
-        return new OpenAICodexSubscriptionLoginManager(
-            new FileOpenAICodexSubscriptionCredentialStore(GetProviderStateRootPath()),
-            new OpenAICodexSubscriptionOAuthClient(new HttpClient()),
-            definition.ProviderKey);
-    }
-
-    private OpenAICodexSubscriptionAuthManager CreateCodexSubscriptionAuthManager(CodeAltaProviderDocument definition)
-    {
-        if (!string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(SR.T("Select a Codex provider first."));
-        }
-
-        return new OpenAICodexSubscriptionAuthManager(
-            new FileOpenAICodexSubscriptionCredentialStore(GetProviderStateRootPath()),
-            new OpenAICodexSubscriptionOAuthClient(new HttpClient()),
-            definition.ProviderKey,
-            definition.AuthSource ?? "codealta_oauth",
-            definition.AccountId,
-            CodexAuthFileReader.ResolveCodexHome());
-    }
-
     internal static ValueTask ReportCopilotDirectBrowserDeviceCode(
         CopilotDirectDeviceCode deviceCode,
         Action<string> reportStatus,
@@ -616,10 +556,10 @@ internal sealed class ProviderFrontendCoordinator
         => _ownedServices?.CatalogOptions.GlobalRoot
            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta");
 
-    private static string FormatCodexCredentialMessage(string prefix, OpenAICodexSubscriptionCredential credential)
+    private static string FormatCodexCredentialMessage(string prefix, CodexAccountMetadata credential)
     {
-        var account = string.IsNullOrWhiteSpace(credential.AccountId) ? SR.T("account/workspace unknown") : credential.AccountId;
-        return SR.T("{0} · account/workspace: {1}.", prefix, account);
+        var account = credential.AccountLabel ?? credential.Subject ?? SR.T("account/workspace unknown");
+        return SR.T("{0} · ChatGPT account: {1} · registration: {2}.", prefix, account, credential.ClientId);
     }
 
     internal static string FormatCopilotDirectLoginMessage(string prefix, CopilotDirectLoginResult result)

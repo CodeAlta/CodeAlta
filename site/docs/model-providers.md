@@ -58,10 +58,12 @@ The dialog can:
 - store an API key directly or refer to an environment variable;
 - list and choose a provider model on demand when the Model field is not using its default;
 - run provider tests before applying changes; a successful test automatically enables that provider;
-- start and monitor Codex/Copilot browser or device login flows; successful login automatically enables that provider;
+- start and monitor ChatGPT browser sign-in or Copilot browser/device login; successful authorization automatically enables that provider;
 - refresh saved providers from disk and retest runtime availability without reopening the app;
 - preserve advanced TOML settings such as `profile`, `compaction`, `extra_body`, `model_overrides`, and `protocol_trace`;
 - open an Advanced TOML editor with live validation.
+
+Each **Default** checkbox indicates that the field inherits its provider default rather than a custom override. Omitted settings stay marked as Default when you reopen or refresh the dialog; for example, a Codex entry containing only `type = "codex"` leaves its optional settings at their defaults. Uncheck Default to supply an override, or check it to remove the override when saving.
 
 ## Advanced TOML reference
 
@@ -101,17 +103,31 @@ Provider-type-specific fields and restrictions:
 | `google-genai` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
 | `vertex-ai` | `project` and `location` are required when enabled; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
 | `mistral` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
-| `codex` | ChatGPT/Codex OAuth state; no `api_key` or `api_key_env`; optional `api_url` | `network_timeout_seconds`, `models_include_regex`, `auth_source`, `account_id`, `max_concurrent_requests`, `text_verbosity`, `include_encrypted_reasoning`, `model_discovery`, `response_transport`, `send_responses_beta_header`, `send_installation_id`, `installation_id_source`, `experimental`, `profile`, `compaction`, `protocol_trace` |
+| `codex` | ChatGPT/Codex OAuth state; no `api_key` or `api_key_env`; optional `api_url` | `network_timeout_seconds`, `models_include_regex`, `auth_source`, `account_id`, `max_concurrent_requests`, `text_verbosity`, `service_tier`, `include_encrypted_reasoning`, `model_discovery`, `response_transport`, `send_responses_beta_header`, `send_installation_id`, `installation_id_source`, `experimental`, `profile`, `compaction`, `protocol_trace` |
 | `copilot` | GitHub device flow by default; optional `api_url` | `auth_source`, `github_enterprise_url`, `github_token_env`, `copilot_token_env`, `model_discovery`, `enable_model_policies`, `include_preview_models`, `experimental`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 | `xai` | xAI Grok OAuth (browser PKCE or device flow); optional `api_url` | `auth_source`, `model_discovery`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `request`, `model_request`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 
 For a recognized reasoning model through `openai-responses` against the official OpenAI endpoint, CodeAlta requests `summary: auto` and encrypted reasoning content even when effort is left to the service's model-specific default. The summary feeds the visible reasoning timeline, while the opaque encrypted item preserves stateless reasoning continuity between locally replayed calls. OpenAI-compatible custom endpoints retain their existing summary and encrypted-content request shape. Local replay preserves the relative order of assistant messages, opaque reasoning items, and tool calls.
 
-Codex accepts these values for constrained fields: `auth_source = "codealta_oauth"`, `"codex_auth_import"`, `"codex_auth_file_readonly"`, or `"external_token_command"`; `text_verbosity = "low"`, `"medium"`, or `"high"`; `model_discovery = "codex_endpoint_with_static_fallback"` (default), `"codex_endpoint"`, or `"static"`; `response_transport = "websocket_with_http_fallback"` or `"http"`; and `installation_id_source = "codealta_state"`, `"codex_home_import"`, or `"codex_home_readonly"`.
+### ChatGPT sign-in and migration
 
-For Codex, **Test Auth** checks authentication without sending a model turn, but it is not a read-only or necessarily online check. Depending on the authentication source and credential expiry, it can import credentials, refresh them, or save/delete CodeAlta-owned credentials. `codex_auth_file_readonly` does not prevent refresh or changes to CodeAlta's own credential store. Fresh cached credentials can succeed without contacting the server; success does not guarantee that a later model request will be accepted.
+The `codex` provider uses OpenAI's [Sign in with ChatGPT token-sharing flow](https://developers.openai.com/siwc/token-sharing-open-source). In Model Providers, choose **Continue with ChatGPT** and authorize CodeAlta to use your plan in the system browser. No developer registration, pre-issued client ID, client secret, or partner API key is needed. CodeAlta starts with `dynamic_agent_client`, then saves and reuses the issued client ID for that account/workspace, together with a stable host ID. The loopback callback uses `127.0.0.1` and an available port; browser sign-in must reach the machine running CodeAlta.
 
-Codex subscription transport is isolated from ordinary OpenAI-compatible Responses providers. The default uses WebSocket with bounded safe retry and HTTP fallback; `response_transport = "http"` forces the Codex HTTP/SSE adapter. The legacy programmatic `"sse"` alias remains runtime-tolerated but is not a valid config value. Both transports preserve configured endpoint query parameters and send `session-id`, `thread-id`, and `x-client-request-id`; HTTP sends `Accept: text/event-stream`. `send_responses_beta_header` defaults to `false` and is an opt-in compatibility switch for turn requests only—model discovery never sends that beta header.
+The TUI (`altatui`) and owned desktop share the same provider runtime and global credential store. Complete sign-in in the TUI's Model Providers dialog before using the configured provider in the desktop. Desktop provider Settings remain read-only; the desktop does not have a separate sign-in flow.
+
+Add a separate `type = "codex"` provider with a recognizable `display_name` for another account or workspace, even if it has the same email address. Selecting that provider selects its separate registration and credentials; **Account Info** shows the validated account and issued registration ID. Reauthorization validates the selected identity before replacing its credentials. If plan access is declined, the validated sign-in is retained but inference remains disabled; choose **Continue with ChatGPT** to grant access, or configure a separate API-key provider.
+
+If the first sign-in's code exchange fails with `invalid_grant`, choose **Continue with ChatGPT** again. CodeAlta retains the issued registration ID for the retry, even after restart, but does not save unvalidated identity or tokens or enable inference. Temporary signing-key service failures are checked before renewing a rotating refresh token, leaving it available for retry. OAuth registration/permission errors such as `invalid_client` are reported instead of silently displaying a static model catalog.
+
+Existing users must sign in again: old Codex credentials, credential imports, and device-code login are no longer supported. Remove legacy `auth_source` values or set `auth_source = "codealta_oauth"`. The former built-in `https://chatgpt.com/backend-api/codex` URL is normalized to `https://api.openai.com/v1` when loading configuration, without rewriting your config file. Custom endpoint overrides are not automatically changed; new tokens are intended for the public OpenAI API, not ChatGPT's private backend.
+
+**Sign out** attempts to revoke the renewable session and clears access, refresh, and ID tokens locally, retaining the account/client mapping for later sign-in. If remote revocation cannot be confirmed, CodeAlta reports it; you can disconnect the app in ChatGPT Settings. Credential files are written atomically under CodeAlta's global state root, protected with Windows DPAPI or owner-only permissions on Unix. Never copy them into source control or diagnostics. Manage app limits and plan usage at [ChatGPT Settings → Usage](https://chatgpt.com/settings/usage).
+
+Codex accepts these values for constrained fields: `auth_source = "codealta_oauth"` only; `text_verbosity = "low"`, `"medium"`, or `"high"`; `model_discovery = "codex_endpoint_with_static_fallback"` (default), `"codex_endpoint"`, or `"static"`; `response_transport = "http"` (default) or `"websocket_with_http_fallback"`; and `installation_id_source = "codealta_state"`, `"codex_home_import"`, or `"codex_home_readonly"`. The installation-ID setting controls optional telemetry headers, not the required OAuth host ID. A legacy `account_id` override is not an account picker; the issued registration determines the account/workspace.
+
+Codex subscription transport is isolated from ordinary OpenAI-compatible Responses providers. The default sends HTTP/SSE to `https://api.openai.com/v1/responses`; WebSocket with bounded safe retry and HTTP fallback is opt-in. The legacy programmatic `"sse"` alias remains runtime-tolerated but is not a valid config value. Both transports preserve configured endpoint query parameters and send `session-id`, `thread-id`, and `x-client-request-id`; HTTP sends `Accept: text/event-stream`. `send_responses_beta_header` defaults to `false` and is an opt-in compatibility switch for turn requests only—model discovery never sends that beta header.
+
+ChatGPT plan requests enforce `store: false` and HTTP `stream: true`, replay the required local history instead of using HTTP `previous_response_id`, convert system messages to developer messages, group local function/custom tools in a namespace, and omit fields unsupported by the token-sharing preview (including temperature, output-token limits, and metadata). Hosted tools unsupported by this route are rejected. Model discovery calls `https://api.openai.com/v1/models`, uses the account's model slugs and display names, and preserves server order unless `sort_models` is enabled. Static fallback is not proof that a model is available to your account; authentication and permission failures are not hidden by fallback.
 
 The Codex HTTP adapter uses the configured HTTP transport and combines SSE framing with SDK deserialization of standard `response.*` events. Codex streams stop at the first terminal event, reject premature EOF, retain indexed completed output items, and continue inference for explicit `end_turn: false`. Reasoning summary part/done and sequential-cutoff event forms are understood, although sequential-cutoff delivery is not requested by default. Models marked for Responses Lite (including the bundled GPT-5.6 Sol/Terra/Luna entries) receive Lite-specific developer input items and omit top-level tools/instructions; non-Lite request shapes are unchanged. With no session effort override, CodeAlta applies the model's advertised default and requests `summary: auto`, allowing the service to select its most detailed supported summarizer so provider summary events appear in the reasoning timeline; explicit `None` disables summary delivery. Terminal raw-reasoning extension data is not relabeled as a visible summary.
 
@@ -394,6 +410,26 @@ model_discovery = "codex_endpoint_with_static_fallback"
 ```
 
 Codex credentials are stored in CodeAlta-owned state through its login flow. It does not accept `api_key`, `api_key_env`, or arbitrary `extra_body`.
+
+#### Optional fast routing
+
+Fast routing is off by default. To opt in, add `service_tier` to your existing Codex provider table in `~/.alta/config.toml` (also available through the provider's advanced TOML editor):
+
+```toml
+[providers.codex]
+type = "codex"
+service_tier = "priority" # "fast" is an alias
+```
+
+CodeAlta sends `service_tier: "priority"` only when subscription model discovery advertises a `priority` service tier for the selected model. If it is unsupported or discovery metadata is missing—including static discovery/fallback—CodeAlta omits the tier and reports a warning that standard routing is being used. It does not probe eligibility with premium requests. Actual availability, latency, and charging depend on the model, account, and service; this is not a speed or entitlement guarantee.
+
+Set `service_tier = "default"` or remove the setting to return to standard routing. Standard routing omits the request field; saves normalize `fast` to `priority` and may omit explicit `default`. Other values and top-level `service_tier` on non-Codex providers are rejected. Subscription `extra_body`, `request`, and `model_request` restrictions remain unchanged.
+
+This setting applies **provider-wide**, including all sessions, child sessions, and compaction summaries using that provider, over both WebSocket and HTTP. Fast routing may increase subscription usage or cost. It does not change reasoning effort or implement Codex's separate `ultra` delegation policy.
+
+Regular Codex requests allow multiple tool calls in one model response, regardless of the obsolete `supports_parallel_tool_calls` model field. Responses Lite still disables that request flag. This is model-side batching, not concurrent host tool execution: CodeAlta continues to await tool handlers sequentially. `max_concurrent_requests` limits subscription requests, not handler concurrency or service tier.
+
+#### Reasoning behavior
 
 CodeAlta follows Codex's ordered per-model reasoning-effort catalog for recognized inference values. GPT-5.6 Sol, Terra, and Luna support `max` as their highest inference effort in the static fallback catalog. CodeAlta does not expose Codex's `ultra` client tier because CodeAlta does not implement its separate proactive delegation policy. A reasoning-summary part whose body, after an optional bold heading, is exactly `<!-- -->` has no body while streaming, then is hidden from completed chat history with that heading. Literal comments in real prose or fenced examples and raw session data are retained.
 

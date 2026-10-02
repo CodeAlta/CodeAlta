@@ -126,6 +126,12 @@ dotnet tool update -g CodeAlta.Tui
 
 On first launch, CodeAlta creates `~/.alta/config.toml`. Existing config files are left untouched on later launches so you can remove, rename, or customize bundled entries. If no provider is enabled yet, the Model Providers dialog opens so you can configure Codex, Copilot, xAI Grok, OpenAI/Azure OpenAI/Alibaba APIs, Anthropic, Gemini/Vertex, or custom endpoints.
 
+For ChatGPT subscription access, select a Codex provider and **Continue with ChatGPT**. CodeAlta uses OpenAI's public token-sharing flow: registration happens during sign-in, with no client ID to provision beforehand. Previous Codex credentials must be replaced by signing in again; see the [provider migration notes](https://codealta.github.io/docs/model-providers/#chatgpt-sign-in-and-migration).
+
+The TUI (`altatui`) and owned desktop share this provider implementation and global credential store. Complete sign-in in the TUI's Model Providers dialog, then use the configured provider in the desktop. Desktop provider Settings remain read-only; no separate desktop sign-in flow is introduced.
+
+If the first ChatGPT code exchange fails with `invalid_grant`, choose **Continue with ChatGPT** again; CodeAlta retains the issued registration for retry without enabling inference until identity validation succeeds.
+
 CodeAlta also expects a current [Nerd Fonts](https://www.nerdfonts.com/) patched font in your terminal profile. If icons or tree glyphs look wrong, update to the latest Nerd Fonts release, remove stale older font copies, and select the refreshed Nerd Font family, such as `CaskaydiaCove Nerd Font`.
 
 ## ✨ What it gives you
@@ -134,7 +140,7 @@ CodeAlta also expects a current [Nerd Fonts](https://www.nerdfonts.com/) patched
 - **Conflict-aware file editing**: file tabs and attached ask-file reviews preserve supported Unicode encodings and line endings, retaining unsaved edits when disk content has changed.
 - **Structured asks**: retain queued questions and choices in per-session order without requiring an open tab. Response attempts reject duplicate/stale submit and cancel callbacks; only positive runtime admission evidence consumes the ask. Uncertain responses block resubmission and local cancellation, with no recovery action yet. Pending asks are in-memory, not restart-persistent.
 - **Multilingual UI**: choose Auto, English, Spanish, French, German, Japanese, or Simplified Chinese from Workspace Settings.
-- **Provider-neutral model setup**: configure hosted APIs, subscription-backed Codex/Copilot/xAI Grok, cloud providers, and compatible endpoints with the same provider workflow.
+- **Provider-neutral model setup**: configure hosted APIs, subscription-backed Codex/Copilot/xAI Grok, cloud providers, and compatible endpoints with the same provider workflow. Codex supports opt-in, provider-wide fast routing with `service_tier = "priority"` when advertised by the model; it may increase subscription usage or cost. See [model providers](https://codealta.github.io/docs/model-providers/) for eligibility caveats and standard-routing opt-out.
 - **Context-aware prompts**: select reusable agent prompt profiles, edit global/project prompt and system-prompt replacements or append-only extensions, attach files and folders with `@`, search GitHub issues with `#` in GitHub repositories, paste images when the selected model supports them, and inspect what context was sent.
 - **Durable agent sessions**: keep project-scoped history in CodeAlta-owned journals, reopen sessions independently of provider startup, queue prompts on busy sessions, steer running work where supported, and compact long agent-runtime conversations.
 - **Session notes**: keep sticky Markdown in the session journal, use `alta notes` even when the caller's tab is closed, and restore the latest notes when reopening it.

@@ -19,6 +19,21 @@ namespace CodeAlta.Tests;
 public sealed class ModelProvidersDialogInteractionTests
 {
     [TestMethod]
+    public void ModelProvidersDialog_CodexOffersOnlyContinueWithChatGPTForLogin()
+    {
+        var definition = new CodeAltaProviderDocument { ProviderKey = "codex", ProviderType = "codex" };
+        var dialog = CreateDialog(() => [definition]);
+        var item = ViewModels.ModelProviderEditorItemViewModel.FromDocument(definition);
+        var actions = (VStack)typeof(ModelProvidersDialog)
+            .GetMethod("CreateCodexSubscriptionActions", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(dialog, [item])!;
+        var labels = actions.OfType<HStack>().Single().OfType<Button>()
+            .Select(static button => ((TextBlock)button.Content!).Text).ToArray();
+
+        CollectionAssert.AreEquivalent(new[] { "Continue with ChatGPT", "Test Auth", "List Models", "Account Info", "Sign out" }, labels);
+    }
+
+    [TestMethod]
     public void ModelProvidersDialog_LoadedProviderDefaultsDoNotStartDirty()
     {
         var definitions = new[]
@@ -626,9 +641,9 @@ public sealed class ModelProvidersDialogInteractionTests
         {
             new CodeAltaProviderDocument
             {
-                ProviderKey = "codex",
+                ProviderKey = "copilot",
                 Enabled = true,
-                ProviderType = "codex",
+                ProviderType = "copilot",
             },
         };
         var dialog = CreateDialog(() => definitions, getFocusTarget: () => root);
@@ -643,10 +658,10 @@ public sealed class ModelProvidersDialogInteractionTests
             InvokeStartCancelableProviderAction(
                 dialog,
                 provider,
-                "CodexDeviceLogin",
+                "CopilotDeviceLogin",
                 async (_, reportStatus, cancellationToken) =>
                 {
-                    reportStatus("Open https://example.test/device and enter code ABCD-EFGH. Waiting for ChatGPT authorization...");
+                    reportStatus("Open https://example.test/device and enter code ABCD-EFGH. Waiting for GitHub authorization...");
                     await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
                     return new ProviderTestResult(true, "Login completed.", 0);
                 });

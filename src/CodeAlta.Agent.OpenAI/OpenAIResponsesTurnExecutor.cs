@@ -121,6 +121,16 @@ internal sealed class OpenAIResponsesTurnExecutor(
                              turnState,
                              requestContext));
                     var fullOptions = await CreateRequestPayloadAsync(request, requestContext, cancellationToken).ConfigureAwait(false);
+                    if (attempt == 1 && provider.CodexSubscription?.ServiceTier == "priority" && fullOptions.ServiceTier is null)
+                    {
+                        var message = $"Codex provider '{provider.ProviderKey}' requested fast routing, but model '{request.ModelId}' does not advertise priority in service_tiers (or discovery metadata is unavailable); using standard routing.";
+                        Logger.Warn($"{message}");
+                        await onSessionUpdate(new AgentTurnSessionUpdate
+                        {
+                            Kind = AgentSessionUpdateKind.Warning,
+                            Message = message,
+                        }, cancellationToken).ConfigureAwait(false);
+                    }
                     LogCodexDiagnostic("request", request, attempt);
                     WriteCodexConsoleDiagnostic(
                         provider,
@@ -1416,7 +1426,13 @@ internal sealed class OpenAIResponsesTurnExecutor(
         // The Codex subscription responses endpoint currently rejects max_output_tokens.
         options.MaxOutputTokenCount = null;
         var modelCapabilities = CodexSubscriptionModelCapabilities.FromModel(request.ModelInfo);
-        options.ParallelToolCallsEnabled = modelCapabilities.SupportsParallelToolCalls;
+        // Regular Codex prompts allow multiple tool calls regardless of legacy model metadata.
+        // The Responses Lite builder below retains its protocol-specific false override.
+        options.ParallelToolCallsEnabled = true;
+        // Explicit nullable null avoids the SDK's implicit string-to-tier conversion.
+        options.ServiceTier = codexOptions.ServiceTier == "priority" && modelCapabilities.SupportsPriorityServiceTier
+            ? new ResponseServiceTier("priority")
+            : (ResponseServiceTier?)null;
         options.ToolChoice ??= ResponseToolChoice.CreateAutoChoice();
 
         if (codexOptions.IncludeEncryptedReasoning &&
@@ -1463,7 +1479,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
             : provider.StateRootPath;
         var installationIdProvider = new CodexSubscriptionInstallationIdProvider(
             stateRootPath,
-            CodexAuthFileReader.ResolveCodexHome());
+            CodexHomeResolver.ResolveCodexHome());
         var installationId = await installationIdProvider.ResolveAsync(
             codexOptions.SendInstallationId,
             codexOptions.InstallationIdSource,
@@ -2879,7 +2895,14 @@ internal sealed class OpenAIResponsesTurnExecutor(
             or "usage_limit_reached"
             or "invalid_prompt"
             or "cyber_policy"
-            or "bio_policy";
+            or "bio_policy"
+            or "subscription_sharing_user_not_eligible"
+            or "subscription_sharing_usage_limit_exceeded"
+            or "subscription_sharing_unsupported_capability"
+            or "subscription_sharing_route_not_supported"
+            or "subscription_sharing_invalid_user"
+            or "chatpass_v2_scope_not_authorized"
+            or "chatpass_v2_invalid_authorization_context";
     }
 
     private static bool IsWebSocketTransportTimeout(Exception exception)
@@ -2939,6 +2962,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
         var normalized = detail.ToLowerInvariant();
         return normalized.Contains("usage_limit_reached", StringComparison.Ordinal) ||
+               normalized.Contains("subscription_sharing_usage_limit_exceeded", StringComparison.Ordinal) ||
                normalized.Contains("usage_not_included", StringComparison.Ordinal) ||
                normalized.Contains("insufficient_quota", StringComparison.Ordinal) ||
                normalized.Contains("quota", StringComparison.Ordinal) ||
@@ -3310,6 +3334,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
     private sealed class CodexMetadataAccumulator
     {
         private string? _fallbackRetryModel;
+        private bool _safetyBufferingReported;
+        private string? _lastSafetyBufferingRetryModel;
         private string? _lastEffectiveModelUpdate;
 
         public string? RequestId { get; private set; }
@@ -3385,19 +3411,34 @@ internal sealed class OpenAIResponsesTurnExecutor(
                 });
             }
 
+            if (metadata.SafetyBufferingTreatment is { } treatment)
+            {
+                // Like the official client, the latest treatment headers replace the fallback model.
+                _fallbackRetryModel = Normalize(treatment.FasterModel);
+            }
+
             if (metadata.SafetyBuffering is { } safety)
             {
-                _fallbackRetryModel = Normalize(safety.FallbackRetryModel) ?? _fallbackRetryModel;
                 var retryModel = safety.RetryModelPresent ? Normalize(safety.RetryModel) : _fallbackRetryModel;
-                updates.Add(new AgentTurnSessionUpdate
+                // The server repeats the buffering payload on many stream events; report it once per attempt
+                // unless the offered retry model changes.
+                if (!_safetyBufferingReported || !string.Equals(retryModel, _lastSafetyBufferingRetryModel, StringComparison.Ordinal))
                 {
-                    Kind = retryModel is null ? AgentSessionUpdateKind.Info : AgentSessionUpdateKind.Warning,
-                    Message = Normalize(safety.Message) ?? "Codex safety buffering is active.",
-                    Details = CreateDetails(
-                        ("retryModel", retryModel),
-                        ("retryModelSource", safety.RetryModelPresent ? "event" : retryModel is null ? null : "header"),
-                        ("treatment", Normalize(safety.Treatment))),
-                });
+                    _safetyBufferingReported = true;
+                    _lastSafetyBufferingRetryModel = retryModel;
+                    updates.Add(new AgentTurnSessionUpdate
+                    {
+                        Kind = retryModel is null ? AgentSessionUpdateKind.Info : AgentSessionUpdateKind.Warning,
+                        Message = retryModel is null
+                            ? "Codex is giving this request extra safety review; the response may be delayed."
+                            : $"Codex is giving this request extra safety review; the response may be delayed. A faster model ({retryModel}) is available if you prefer to retry.",
+                        Details = CreateDetails(
+                            ("retryModel", retryModel),
+                            ("retryModelSource", safety.RetryModelPresent ? "event" : retryModel is null ? null : "header"),
+                            ("useCases", safety.UseCases.Count == 0 ? null : string.Join(", ", safety.UseCases)),
+                            ("reasons", safety.Reasons.Count == 0 ? null : string.Join(", ", safety.Reasons))),
+                    });
+                }
             }
 
             if (Normalize(metadata.VerificationRecommendation) is { } verification)

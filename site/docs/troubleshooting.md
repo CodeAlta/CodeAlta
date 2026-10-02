@@ -69,7 +69,11 @@ For API-key providers, verify that the environment variable exists in the shell 
 
 ## Codex or Copilot login is pending
 
-The Model Providers dialog keeps Browser Login and Device Login instructions visible while authorization is pending. The current operation can be canceled from the dialog or with `Ctrl+G Ctrl+C`. Use `Ctrl+G Ctrl+U` / `Ctrl+G Ctrl+D` to copy the current login URL or device code.
+The Model Providers dialog keeps browser sign-in and supported device-login instructions visible while authorization is pending. ChatGPT uses **Continue with ChatGPT** (browser only); Copilot and xAI also support device login. The current operation can be canceled from the dialog or with `Ctrl+G Ctrl+C`. Use `Ctrl+G Ctrl+U` / `Ctrl+G Ctrl+D` to copy the current login URL or device code.
+
+For ChatGPT, legacy Codex credentials cannot be reused or imported. Sign in again, remove old credential-import `auth_source` settings, and use the public `https://api.openai.com/v1` endpoint. The callback must reach `127.0.0.1` on the machine running CodeAlta; remote/headless setups need browser access to that loopback listener. If sign-in succeeds without plan permission, choose **Continue with ChatGPT** to enable plan access or configure an API-key provider. Temporary refresh/network failures retain credentials; an unusable refresh token requires another sign-in with the saved registration. If sign-out reports unconfirmed revocation, disconnect CodeAlta in ChatGPT Settings.
+
+If the first authorization-code exchange reports `invalid_grant`, choose **Continue with ChatGPT** again to get a fresh code using the retained registration ID. This incomplete registration cannot run model requests until identity validation succeeds. If discovery reports `invalid_client`, check the issued client registration rather than expecting static model fallback to repair authentication.
 
 ## A plugin is broken
 

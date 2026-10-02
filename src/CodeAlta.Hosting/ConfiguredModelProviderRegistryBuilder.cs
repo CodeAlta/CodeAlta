@@ -413,7 +413,7 @@ public static class ConfiguredModelProviderRegistryBuilder
     {
         var providerId = new ModelProviderId(definition.ProviderKey);
         var displayName = ResolveProviderDisplayName(definition);
-        var baseUri = ParseUri(definition.ApiUrl) ?? new Uri("https://chatgpt.com/backend-api/codex");
+        var baseUri = ParseUri(definition.ApiUrl) ?? new Uri("https://api.openai.com/v1");
         var providerOptions = new OpenAIProviderOptions
         {
             ProviderKey = definition.ProviderKey,
@@ -432,9 +432,10 @@ public static class ConfiguredModelProviderRegistryBuilder
                 AccountId = NormalizeText(definition.AccountId),
                 MaxConcurrentRequests = definition.MaxConcurrentRequests ?? 16,
                 TextVerbosity = NormalizeText(definition.TextVerbosity) ?? "medium",
+                ServiceTier = definition.ServiceTier,
                 IncludeEncryptedReasoning = definition.IncludeEncryptedReasoning ?? true,
                 ModelDiscovery = NormalizeText(definition.ModelDiscovery) ?? "codex_endpoint_with_static_fallback",
-                ResponseTransport = NormalizeText(definition.ResponseTransport) ?? "websocket_with_http_fallback",
+                ResponseTransport = NormalizeText(definition.ResponseTransport) ?? "http",
                 SendResponsesBetaHeader = definition.SendResponsesBetaHeader ?? false,
                 SendInstallationId = definition.SendInstallationId ?? false,
                 InstallationIdSource = NormalizeText(definition.InstallationIdSource) ?? "codealta_state",

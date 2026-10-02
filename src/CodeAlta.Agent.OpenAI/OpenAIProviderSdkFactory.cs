@@ -256,12 +256,13 @@ internal static class OpenAIProviderSdkFactory
 
         return exception switch
         {
+            // Refresh/JWKS failures occur before the catalog request. Do not hide
+            // their OAuth configuration or permission errors behind static models.
+            HttpRequestException { StatusCode: >= System.Net.HttpStatusCode.BadRequest and < System.Net.HttpStatusCode.InternalServerError } => false,
             HttpRequestException => true,
             TimeoutException => true,
-            InvalidOperationException invalidOperationException
-                when invalidOperationException.Message.Contains("login is required", StringComparison.OrdinalIgnoreCase) => true,
             JsonException => true,
-            CodexSubscriptionModelDiscoveryException { StatusCode: System.Net.HttpStatusCode.Unauthorized } => false,
+            CodexSubscriptionModelDiscoveryException { StatusCode: System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden } => false,
             CodexSubscriptionModelDiscoveryException => true,
             _ => false,
         };
@@ -272,9 +273,11 @@ internal static class OpenAIProviderSdkFactory
         ModelProviderRuntimeDescriptor providerDescriptor,
         OpenAICodexSubscriptionOptions options)
     {
+        // `supported_in_api` describes API-key availability. ChatGPT plan tokens use the account-specific
+        // catalog, so (like Codex in ChatGPT mode and the token-sharing docs) only visibility gates the picker.
         var includeWebSocketRequiredModels = AllowsWebSocketRequiredModels(options);
         var supportedModels = discoveredModels
-            .Where(model => model.SupportedInApi && (includeWebSocketRequiredModels || !model.RequiresWebSocket))
+            .Where(model => includeWebSocketRequiredModels || !model.RequiresWebSocket)
             .GroupBy(static model => model.Id, StringComparer.OrdinalIgnoreCase)
             .Select(static group => group.First())
             .ToArray();
@@ -282,7 +285,6 @@ internal static class OpenAIProviderSdkFactory
         return supportedModels
             .Where(static model => model.Listable && !model.Hidden)
             .Select(model => CreateModelInfo(model, providerDescriptor))
-            .OrderBy(static model => model.DisplayName ?? model.Id, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
 
@@ -303,7 +305,8 @@ internal static class OpenAIProviderSdkFactory
             ["supportVerbosity"] = model.SupportsTextVerbosity,
             ["supportsTools"] = model.SupportsTools,
             ["supportsImageInput"] = model.SupportsImageInput,
-            ["supportsParallelToolCalls"] = model.SupportsParallelToolCalls,
+            ["supportsParallelToolCalls"] = !model.UseResponsesLite,
+            ["serviceTiers"] = model.ServiceTiers,
             ["supportsImageDetailOriginal"] = model.SupportsImageDetailOriginal,
             ["useResponsesLite"] = model.UseResponsesLite,
             ["requiresWebSocket"] = model.RequiresWebSocket,
@@ -563,8 +566,7 @@ internal static class OpenAIProviderSdkFactory
             new OpenAICodexSubscriptionOAuthClient(CodexOAuthHttpClient),
             provider.ProviderKey,
             options.AuthSource,
-            options.AccountId,
-            CodexAuthFileReader.ResolveCodexHome());
+            options.AccountId);
     }
 
     internal static string ResolveStateRootPath(OpenAIProviderOptions provider)

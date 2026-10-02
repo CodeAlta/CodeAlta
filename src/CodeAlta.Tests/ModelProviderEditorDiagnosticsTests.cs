@@ -172,7 +172,7 @@ public sealed class ModelProviderEditorDiagnosticsTests
         var item = CreateCodexSubscriptionItem(enabled: true, experimental: true);
         Assert.AreEqual("codex_endpoint_with_static_fallback", item.ModelDiscovery);
         item.UseDefaultAuthSource = false;
-        item.AuthSource = "codex_auth_import";
+        item.AuthSource = "codealta_oauth";
         item.UseDefaultAccountId = false;
         item.AccountId = "acct_123";
         item.UseDefaultModelDiscovery = false;
@@ -183,7 +183,7 @@ public sealed class ModelProviderEditorDiagnosticsTests
 
         var definition = item.ToDocument();
 
-        Assert.AreEqual("codex_auth_import", definition.AuthSource);
+        Assert.AreEqual("codealta_oauth", definition.AuthSource);
         Assert.AreEqual("acct_123", definition.AccountId);
         Assert.AreEqual("static", definition.ModelDiscovery);
         Assert.AreEqual("http", definition.ResponseTransport);

@@ -236,6 +236,11 @@ browser request. Catalog-only mode lists saved descriptors read-only without run
 Provider enablement, defaults, authentication and configuration writes are not available here;
 they require a separately verified safe persisted-source mutation contract.
 
+ChatGPT subscription providers use the same token-sharing implementation and global credential
+store as the TUI. Sign in using **Continue with ChatGPT** in `altatui`, then use that configured
+provider in the owned desktop. Existing legacy Codex credentials require a new sign-in; device
+login and credential import are no longer supported. No desktop-only OAuth flow or storage is added.
+
 The **Agent prompts** Settings section (or `Ctrl+G`, then `Ctrl+H`)
 shows effective prompts discovered by the shared host catalog for the exact selected owned
 session. It shows name, ID, description, effective source scope and a read-only excerpt of the

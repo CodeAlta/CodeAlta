@@ -43,6 +43,22 @@ public sealed class ModelProviderEditorItemViewModelTests
     }
 
     [TestMethod]
+    [DataRow(null)]
+    [DataRow("default")]
+    [DataRow("priority")]
+    public void ToDocument_PreservesCodexServiceTier(string? tier)
+    {
+        var item = ModelProviderEditorItemViewModel.FromDocument(new CodeAltaProviderDocument
+        {
+            ProviderKey = "codex",
+            ProviderType = "codex",
+            ServiceTier = tier,
+        });
+
+        Assert.AreEqual(tier, item.ToDocument().ServiceTier);
+    }
+
+    [TestMethod]
     public void ToDocument_PreservesConfiguredModelSorting()
     {
         var item = ModelProviderEditorItemViewModel.FromDocument(new CodeAltaProviderDocument

@@ -9222,3 +9222,83 @@
   fr: "| Quota | Usage | Statut |"
   ja: "| クォータ | 使用量 | 状態 |"
   zh: "| 配额 | 用量 | 状态 |"
+
+# ChatGPT token-sharing sign-in.
+"Account Info":
+  de: "Kontoinformationen"
+  es: "Información de la cuenta"
+  fr: "Informations du compte"
+  ja: "アカウント情報"
+  zh: "账号信息"
+"Authenticated without sending a model turn":
+  de: "Authentifiziert, ohne eine Modellanfrage zu senden"
+  es: "Autenticado sin enviar una solicitud al modelo"
+  fr: "Authentifié sans envoyer de requête au modèle"
+  ja: "モデルへのリクエストを送信せずに認証しました"
+  zh: "已完成身份验证，未发送模型请求"
+"Authorize CodeAlta to use your ChatGPT plan in your browser. Add a separate Codex provider for another account or workspace. Manage app limits at https://chatgpt.com/settings/usage.":
+  de: "Erlauben Sie CodeAlta im Browser, Ihren ChatGPT-Tarif zu nutzen. Fügen Sie für ein anderes Konto oder einen anderen Arbeitsbereich einen separaten Codex-Anbieter hinzu. App-Limits verwalten: https://chatgpt.com/settings/usage."
+  es: "Autoriza a CodeAlta a usar tu plan de ChatGPT en el navegador. Añade un proveedor Codex separado para otra cuenta o espacio de trabajo. Gestiona los límites en https://chatgpt.com/settings/usage."
+  fr: "Autorisez CodeAlta à utiliser votre forfait ChatGPT dans le navigateur. Ajoutez un fournisseur Codex distinct pour un autre compte ou espace de travail. Gérez les limites sur https://chatgpt.com/settings/usage."
+  ja: "ブラウザーで CodeAlta に ChatGPT プランの利用を許可してください。別のアカウントやワークスペースには個別の Codex プロバイダーを追加してください。アプリの上限は https://chatgpt.com/settings/usage で管理できます。"
+  zh: "请在浏览器中授权 CodeAlta 使用您的 ChatGPT 套餐。为其他账号或工作区添加独立的 Codex 提供商。在 https://chatgpt.com/settings/usage 管理应用限额。"
+"Continue with ChatGPT":
+  de: "Mit ChatGPT fortfahren"
+  es: "Continuar con ChatGPT"
+  fr: "Continuer avec ChatGPT"
+  ja: "ChatGPT で続行"
+  zh: "使用 ChatGPT 继续"
+"Reading the saved ChatGPT registration...":
+  de: "Gespeicherte ChatGPT-Registrierung wird gelesen..."
+  es: "Leyendo el registro guardado de ChatGPT..."
+  fr: "Lecture de l’inscription ChatGPT enregistrée..."
+  ja: "保存された ChatGPT 登録情報を読み込んでいます..."
+  zh: "正在读取已保存的 ChatGPT 注册信息..."
+"Revoking the ChatGPT session and clearing local tokens...":
+  de: "ChatGPT-Sitzung wird widerrufen und lokale Tokens werden gelöscht..."
+  es: "Revocando la sesión de ChatGPT y borrando los tokens locales..."
+  fr: "Révocation de la session ChatGPT et suppression des jetons locaux..."
+  ja: "ChatGPT セッションを取り消し、ローカルトークンを削除しています..."
+  zh: "正在撤销 ChatGPT 会话并清除本地令牌..."
+"Saved ChatGPT registration for this provider":
+  de: "Gespeicherte ChatGPT-Registrierung für diesen Anbieter"
+  es: "Registro de ChatGPT guardado para este proveedor"
+  fr: "Inscription ChatGPT enregistrée pour ce fournisseur"
+  ja: "このプロバイダーに保存された ChatGPT 登録情報"
+  zh: "此提供商已保存的 ChatGPT 注册信息"
+"Sign out":
+  de: "Abmelden"
+  es: "Cerrar sesión"
+  fr: "Se déconnecter"
+  ja: "サインアウト"
+  zh: "退出登录"
+"Signed in, but ChatGPT plan usage is disabled. Continue with ChatGPT to enable it, or configure an API-key provider":
+  de: "Angemeldet, aber die Nutzung des ChatGPT-Tarifs ist deaktiviert. Fahren Sie mit ChatGPT fort, um sie zu aktivieren, oder richten Sie einen Anbieter mit API-Schlüssel ein"
+  es: "Sesión iniciada, pero el uso del plan de ChatGPT está desactivado. Continúa con ChatGPT para activarlo o configura un proveedor con clave API"
+  fr: "Connecté, mais l’utilisation du forfait ChatGPT est désactivée. Continuez avec ChatGPT pour l’activer ou configurez un fournisseur avec clé API"
+  ja: "サインインしましたが、ChatGPT プランの利用は無効です。ChatGPT で続行して有効にするか、API キープロバイダーを設定してください"
+  zh: "已登录，但尚未启用 ChatGPT 套餐使用权限。使用 ChatGPT 继续以启用，或配置 API 密钥提供商"
+"Signed out locally, but remote revocation was not confirmed. Disconnect CodeAlta in ChatGPT Settings if needed.":
+  de: "Lokal abgemeldet, aber der Remote-Widerruf wurde nicht bestätigt. Trennen Sie CodeAlta bei Bedarf in den ChatGPT-Einstellungen."
+  es: "Sesión cerrada localmente, pero no se confirmó la revocación remota. Desconecta CodeAlta en los ajustes de ChatGPT si es necesario."
+  fr: "Déconnecté localement, mais la révocation distante n’a pas été confirmée. Déconnectez CodeAlta dans les paramètres ChatGPT si nécessaire."
+  ja: "ローカルでサインアウトしましたが、リモートでの取り消しは確認できませんでした。必要に応じて ChatGPT の設定で CodeAlta の接続を解除してください。"
+  zh: "已在本地退出登录，但未确认远程撤销。如有需要，请在 ChatGPT 设置中断开 CodeAlta 的连接。"
+"Signed out of ChatGPT. The account registration is retained for your next sign-in.":
+  de: "Von ChatGPT abgemeldet. Die Kontoregistrierung bleibt für die nächste Anmeldung erhalten."
+  es: "Sesión de ChatGPT cerrada. El registro de la cuenta se conserva para el próximo inicio de sesión."
+  fr: "Déconnecté de ChatGPT. L’inscription du compte est conservée pour votre prochaine connexion."
+  ja: "ChatGPT からサインアウトしました。次回のサインイン用にアカウント登録情報は保持されます。"
+  zh: "已退出 ChatGPT 登录。账号注册信息将保留以供下次登录使用。"
+"show the saved ChatGPT account":
+  de: "das gespeicherte ChatGPT-Konto anzeigen"
+  es: "mostrar la cuenta de ChatGPT guardada"
+  fr: "afficher le compte ChatGPT enregistré"
+  ja: "保存された ChatGPT アカウントを表示"
+  zh: "显示已保存的 ChatGPT 账号"
+"{0} · ChatGPT account: {1} · registration: {2}.":
+  de: "{0} · ChatGPT-Konto: {1} · Registrierung: {2}."
+  es: "{0} · cuenta de ChatGPT: {1} · registro: {2}."
+  fr: "{0} · compte ChatGPT : {1} · inscription : {2}."
+  ja: "{0} · ChatGPT アカウント: {1} · 登録: {2}。"
+  zh: "{0} · ChatGPT 账号：{1} · 注册：{2}。"

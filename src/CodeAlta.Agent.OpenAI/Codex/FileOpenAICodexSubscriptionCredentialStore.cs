@@ -1,6 +1,6 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
-using System.Runtime.InteropServices;
 
 namespace CodeAlta.Agent.OpenAI.Codex;
 
@@ -25,7 +25,10 @@ internal sealed class FileOpenAICodexSubscriptionCredentialStore : IOpenAICodexS
             return null;
         }
 
-        var protectedBytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+        // Allow atomic replacement while a request reads the prior credential snapshot.
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 4096, useAsync: true);
+        var protectedBytes = new byte[checked((int)stream.Length)];
+        await stream.ReadExactlyAsync(protectedBytes, cancellationToken).ConfigureAwait(false);
         var jsonBytes = Unprotect(protectedBytes);
         return JsonSerializer.Deserialize(
             jsonBytes,
@@ -47,10 +50,47 @@ internal sealed class FileOpenAICodexSubscriptionCredentialStore : IOpenAICodexS
             OpenAICodexSubscriptionJsonSerializerContext.Default.OpenAICodexSubscriptionCredential);
         var protectedBytes = Protect(jsonBytes);
         var temporaryPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        await File.WriteAllBytesAsync(temporaryPath, protectedBytes, cancellationToken).ConfigureAwait(false);
-        TryRestrictFilePermissions(temporaryPath);
-        File.Move(temporaryPath, path, overwrite: true);
-        TryRestrictFilePermissions(path);
+        try
+        {
+            var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
+            if (!OperatingSystem.IsWindows())
+            {
+                options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            }
+
+            await using (var stream = new FileStream(temporaryPath, options))
+            {
+                await stream.WriteAsync(protectedBytes, cancellationToken).ConfigureAwait(false);
+            }
+
+            File.Move(temporaryPath, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    public async ValueTask<IAsyncDisposable> AcquireLockAsync(string providerKey, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
+        var path = GetCredentialPath(providerKey) + ".lock";
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException ex) when ((ex.HResult & 0xffff) is 11 or 32 or 33)
+            {
+                await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     public ValueTask DeleteAsync(
@@ -104,28 +144,6 @@ internal sealed class FileOpenAICodexSubscriptionCredentialStore : IOpenAICodexS
         }
 
         return Convert.FromBase64String(text);
-    }
-
-    private static void TryRestrictFilePermissions(string path)
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
-        try
-        {
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
-        catch (PlatformNotSupportedException)
-        {
-        }
     }
 
     private static class WindowsDataProtection

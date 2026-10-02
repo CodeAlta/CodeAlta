@@ -37,6 +37,7 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
     private readonly SemaphoreSlim _streamSemaphore = new(initialCount: 1, maxCount: 1);
 
     private ClientWebSocket? _webSocket;
+    private string? _authenticatedAccessToken;
     private bool _disposed;
 
     public OpenAICodexSubscriptionWebSocketSession(
@@ -52,7 +53,7 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(userAgentApplicationId);
 
-        _baseUri = baseUri ?? new Uri("https://chatgpt.com/backend-api/codex");
+        _baseUri = baseUri ?? CodexSubscriptionHttpRequestFactory.DefaultBaseUri;
         _options = options;
         _authManager = authManager;
         _sessionId = sessionId.Trim();
@@ -128,6 +129,7 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
         _disposed = true;
         _webSocket?.Dispose();
         _webSocket = null;
+        _authenticatedAccessToken = null;
         // Keep the semaphore alive because Dispose can race an active stream whose finally block still releases it.
     }
 
@@ -158,8 +160,7 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
 
         try
         {
-            var reusedOpenConnection = _webSocket?.State == WebSocketState.Open;
-            await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+            var reusedOpenConnection = await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
             await SendRequestWithStaleReconnectAsync(
                     options,
                     reconnectOptions,
@@ -248,22 +249,29 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
         }
     }
 
-    private async Task EnsureConnectedAsync(CancellationToken cancellationToken)
+    private async Task<bool> EnsureConnectedAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_webSocket?.State == WebSocketState.Open)
+        // Reload even on an open socket: sign-out must stop new turns, and renewal
+        // must reconnect with the new credential rather than retain the old identity.
+        var credential = await _authManager.GetCredentialAsync(cancellationToken).ConfigureAwait(false);
+        if (_webSocket?.State == WebSocketState.Open && credential.AccessToken == _authenticatedAccessToken)
         {
-            return;
+            return true;
         }
 
         _webSocket?.Dispose();
-        _webSocket = await CreateAndConnectWebSocketAsync(cancellationToken).ConfigureAwait(false);
+        _webSocket = await CreateAndConnectWebSocketAsync(credential, cancellationToken).ConfigureAwait(false);
+        _authenticatedAccessToken = credential.AccessToken;
+        return false;
     }
 
-    private async Task<ClientWebSocket> CreateAndConnectWebSocketAsync(CancellationToken cancellationToken)
+    private async Task<ClientWebSocket> CreateAndConnectWebSocketAsync(OpenAICodexSubscriptionCredential credential, CancellationToken cancellationToken)
     {
-        var credential = await _authManager.GetCredentialAsync(cancellationToken).ConfigureAwait(false);
-        var accountContext = await _authManager.GetAccountContextAsync(cancellationToken).ConfigureAwait(false);
+        var accountContext = new OpenAICodexSubscriptionAccountContext(
+            OpenAICodexSubscriptionAuthManager.ResolveAccountId(_options.AccountId, credential),
+            credential.AccountLabel,
+            credential.IsFedRamp);
         var webSocket = new ClientWebSocket();
         ApplyHeaders(webSocket.Options, credential.AccessToken, accountContext);
 
@@ -326,7 +334,7 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
     {
         try
         {
-            await SendRequestAsync(CreateWebSocketRequest(options, requestContext), cancellationToken).ConfigureAwait(false);
+            await SendRequestAsync(CreateWebSocketRequest(reusedOpenConnection ? options : reconnectOptions, requestContext), cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (reusedOpenConnection && ex is not OperationCanceledException)
         {
@@ -604,7 +612,8 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
     {
         ArgumentNullException.ThrowIfNull(requestContext);
         requestContext.ApplyClientMetadata(options, includeTurnState: true);
-        using var optionsDocument = JsonDocument.Parse(SerializeModel(options));
+        using var optionsDocument = JsonDocument.Parse(ChatGptPlanRequestNormalizer.Normalize(
+            BinaryData.FromString(SerializeModel(options)), isHttp: false).ToMemory());
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
