@@ -1523,6 +1523,26 @@ public sealed class OpenAICodexSubscriptionPipelineTests
     }
 
     [TestMethod]
+    [DataRow(400, "invalid_client", false)]
+    [DataRow(400, "invalid_scope", false)]
+    [DataRow(401, "", false)]
+    [DataRow(403, "", false)]
+    [DataRow(503, "temporarily_unavailable", true)]
+    [DataRow(0, "", true)]
+    public void ModelDiscovery_FallbackDoesNotHideOAuthConfigurationErrors(int status, string errorCode, bool fallbackAllowed)
+    {
+        var statusCode = status == 0 ? (HttpStatusCode?)null : (HttpStatusCode)status;
+        var exception = string.IsNullOrEmpty(errorCode)
+            ? new HttpRequestException("Synthetic OAuth transport failure.", null, statusCode)
+            : new OpenAICodexSubscriptionTokenException(errorCode, statusCode!.Value);
+        var method = typeof(OpenAIProviderSdkFactory).GetMethod(
+            "ShouldUseCodexStaticModelFallback", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("Codex discovery fallback policy was not found.");
+        var allowed = (bool)method.Invoke(null, [new OpenAICodexSubscriptionOptions(), exception])!;
+        Assert.AreEqual(fallbackAllowed, allowed);
+    }
+
+    [TestMethod]
     public async Task ConcurrencyLimiter_AllowsOnlyOneTurnPerSessionAndHonorsConfiguredAccountLimit()
     {
         var limiter = new CodexSubscriptionConcurrencyLimiter();

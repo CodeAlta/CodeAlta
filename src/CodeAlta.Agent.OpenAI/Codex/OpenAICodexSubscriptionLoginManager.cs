@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -13,7 +14,7 @@ internal sealed class OpenAICodexSubscriptionLoginManager(
     public async ValueTask<OpenAICodexSubscriptionBrowserLogin> BeginBrowserLoginAsync(string hostId, CancellationToken cancellationToken = default)
     {
         var saved = await credentialStore.LoadAsync(providerKey, cancellationToken).ConfigureAwait(false);
-        var registration = IsRegistration(saved) ? saved : null;
+        var registration = IsRegistration(saved) || IsPendingRegistration(saved, hostId) ? saved : null;
         var listener = StartListener();
         var redirectUri = listener.Prefixes.Single() + "auth/callback";
         var pkce = OpenAICodexSubscriptionOAuthClient.CreatePkce();
@@ -56,9 +57,31 @@ internal sealed class OpenAICodexSubscriptionLoginManager(
             throw new InvalidOperationException("OAuth callback did not include an authorization code.");
         }
 
-        var credential = await oauthClient.ExchangeAuthorizationCodeAsync(
-            code, login.Pkce.Verifier, login.RedirectUri, clientId, login.Nonce, cancellationToken).ConfigureAwait(false);
-        if (login.Registration is not null && credential.Subject != login.Registration.Subject)
+        OpenAICodexSubscriptionCredential credential;
+        try
+        {
+            credential = await oauthClient.ExchangeAuthorizationCodeAsync(
+                code, login.Pkce.Verifier, login.RedirectUri, clientId, login.Nonce, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OpenAICodexSubscriptionTokenException ex) when (ex.ErrorCode == "invalid_grant" && login.Registration is null)
+        {
+            // The code cannot be reused, but OpenAI already issued a client ID. Keep
+            // only that ID and host, never an unvalidated identity or token set.
+            await using var pendingLease = await credentialStore.AcquireLockAsync(providerKey, cancellationToken).ConfigureAwait(false);
+            var current = await credentialStore.LoadAsync(providerKey, cancellationToken).ConfigureAwait(false);
+            if (!IsRegistration(current) && !IsPendingRegistration(current, login.HostId))
+            {
+                await credentialStore.SaveAsync(providerKey, new OpenAICodexSubscriptionCredential
+                {
+                    ClientId = clientId,
+                    AgentHostId = login.HostId,
+                }, cancellationToken).ConfigureAwait(false);
+            }
+
+            throw;
+        }
+
+        if (IsRegistration(login.Registration) && credential.Subject != login.Registration.Subject)
         {
             throw new InvalidOperationException("ChatGPT sign-in returned a different account. The saved registration was not changed.");
         }
@@ -144,10 +167,16 @@ internal sealed class OpenAICodexSubscriptionLoginManager(
         return revoked;
     }
 
-    internal static bool IsRegistration(OpenAICodexSubscriptionCredential? credential)
+    internal static bool IsRegistration([NotNullWhen(true)] OpenAICodexSubscriptionCredential? credential)
+        => HasIssuedClientId(credential) && !string.IsNullOrWhiteSpace(credential.Subject);
+
+    private static bool HasIssuedClientId([NotNullWhen(true)] OpenAICodexSubscriptionCredential? credential)
         => credential is not null && credential.Issuer == OpenAICodexSubscriptionOAuthDefaults.Issuer &&
-           !string.IsNullOrWhiteSpace(credential.ClientId) && credential.ClientId != OpenAICodexSubscriptionOAuthDefaults.ClientId &&
-           !string.IsNullOrWhiteSpace(credential.Subject);
+           !string.IsNullOrWhiteSpace(credential.ClientId) && credential.ClientId != OpenAICodexSubscriptionOAuthDefaults.ClientId;
+
+    private static bool IsPendingRegistration(OpenAICodexSubscriptionCredential? credential, string hostId)
+        => HasIssuedClientId(credential) && credential.Subject is null && credential.AgentHostId == hostId &&
+           credential.AccessToken == string.Empty && credential.RefreshToken is null && credential.IdToken is null && credential.Scopes.Count == 0;
 
     private static HttpListener StartListener()
     {

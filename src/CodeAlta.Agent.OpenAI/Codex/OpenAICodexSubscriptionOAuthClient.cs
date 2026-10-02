@@ -49,7 +49,7 @@ internal sealed class OpenAICodexSubscriptionOAuthClient
             ["login_hint"] = registration?.Email,
             // This button is an explicit request to enable plan usage after a decline.
             // Do not force consent on routine reauthorization of an existing grant.
-            ["prompt"] = registration is { HasPlanUsagePermission: false } ? "consent" : null,
+            ["prompt"] = OpenAICodexSubscriptionLoginManager.IsRegistration(registration) && !registration.HasPlanUsagePermission ? "consent" : null,
         };
         return new Uri(OpenAICodexSubscriptionOAuthDefaults.AuthorizeEndpoint + "?" + string.Join(
             "&", query.Where(static pair => !string.IsNullOrWhiteSpace(pair.Value))
@@ -91,6 +91,9 @@ internal sealed class OpenAICodexSubscriptionOAuthClient
         OpenAICodexSubscriptionCredential previous,
         CancellationToken cancellationToken = default)
     {
+        // Fetch signing keys before consuming a rotating refresh token. A transient
+        // JWKS failure must leave the saved token usable for the next attempt.
+        using var jwks = await GetJsonAsync(OpenAICodexSubscriptionOAuthDefaults.JwksEndpoint, cancellationToken).ConfigureAwait(false);
         using var response = await PostTokenAsync(new Dictionary<string, string>
         {
             ["grant_type"] = "refresh_token",
@@ -107,7 +110,7 @@ internal sealed class OpenAICodexSubscriptionOAuthClient
         credential.AgentHostId = previous.AgentHostId;
         if (credential.IdToken is not null)
         {
-            await ValidateIdentityAsync(credential, nonce: null, previous.Subject, cancellationToken).ConfigureAwait(false);
+            ValidateIdentity(credential, jwks.RootElement, nonce: null, previous.Subject);
         }
         else
         {
@@ -176,7 +179,14 @@ internal sealed class OpenAICodexSubscriptionOAuthClient
         }
 
         using var jwks = await GetJsonAsync(OpenAICodexSubscriptionOAuthDefaults.JwksEndpoint, cancellationToken).ConfigureAwait(false);
-        var identity = OpenAICodexSubscriptionIdTokenValidator.Validate(credential.IdToken, jwks.RootElement, credential.ClientId, nonce);
+        ValidateIdentity(credential, jwks.RootElement, nonce, expectedSubject);
+    }
+
+    private static void ValidateIdentity(
+        OpenAICodexSubscriptionCredential credential, JsonElement jwks, string? nonce, string? expectedSubject)
+    {
+        var idToken = credential.IdToken ?? throw new InvalidOperationException("ChatGPT sign-in did not return an ID token.");
+        var identity = OpenAICodexSubscriptionIdTokenValidator.Validate(idToken, jwks, credential.ClientId, nonce);
         if (expectedSubject is not null && identity.Subject != expectedSubject)
         {
             throw new InvalidOperationException("ChatGPT sign-in returned a different account. The saved registration was not changed.");

@@ -256,6 +256,9 @@ internal static class OpenAIProviderSdkFactory
 
         return exception switch
         {
+            // Refresh/JWKS failures occur before the catalog request. Do not hide
+            // their OAuth configuration or permission errors behind static models.
+            HttpRequestException { StatusCode: >= System.Net.HttpStatusCode.BadRequest and < System.Net.HttpStatusCode.InternalServerError } => false,
             HttpRequestException => true,
             TimeoutException => true,
             JsonException => true,
