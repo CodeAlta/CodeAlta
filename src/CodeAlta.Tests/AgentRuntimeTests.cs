@@ -280,6 +280,52 @@ public sealed class AgentRuntimeTests
         Assert.AreEqual(0, executor.Requests.Count);
     }
 
+    [TestMethod]
+    public async Task AgentRuntime_PrepareTransfer_PreservesJournalAndOriginalContinuation()
+    {
+        using var temp = TestTempDirectory.Create();
+        await using var originalRuntime = CreateAgentRuntime(temp.Path, out var originalExecutor);
+        await using var original = await originalRuntime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            ProviderKey = "openai", Model = "original-model", WorkingDirectory = temp.Path,
+            OnPermissionRequest = static (_, _) => throw new AssertFailedException("No permission request expected."),
+        });
+        var store = CreateSessionStore(temp.Path);
+        var state = await store.GetStateAsync(original.SessionId);
+        Assert.IsNotNull(state);
+        await store.UpsertStateAsync(state with { ProviderSessionId = "original-continuation" });
+        var summary = await store.GetSessionSummaryAsync(original.SessionId);
+        Assert.IsNotNull(summary);
+        var path = new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents"))
+            .GetSessionFilePath(original.SessionId, summary.CreatedAt);
+        var before = await File.ReadAllBytesAsync(path);
+        var executor = new RecordingTurnExecutor();
+        var cache = new TransferFaultCache(_ => throw new AssertFailedException("Preparation must not write cache or journal."));
+        await using var target = CreateAgentRuntime(temp.Path, executor, "anthropic", "Anthropic",
+            "anthropic-messages", AgentTransportKind.AnthropicMessages, new ModelProviderId("anthropic"), cache);
+        var prepared = await target.PrepareTransferAsync(original.SessionId, new AgentSessionResumeOptions
+        {
+            ProviderKey = "anthropic", Model = "target-model", WorkingDirectory = temp.Path,
+            OnPermissionRequest = static (_, _) => throw new AssertFailedException("Preparation must not request permission."),
+        });
+        await using (prepared)
+        {
+            Assert.AreEqual("openai", prepared.OriginalSummary.ProviderKey);
+            Assert.AreEqual("original-continuation", prepared.OriginalState.ProviderSessionId);
+            Assert.AreEqual("anthropic", prepared.TargetSummary.ProviderKey);
+            Assert.AreEqual("target-model", prepared.TargetSummary.ModelId);
+            Assert.IsNull(prepared.TargetState.ProviderSessionId);
+            Assert.IsNull(prepared.TargetState.ProviderState);
+            Assert.AreEqual(before.LongLength, prepared.Revision.Length);
+            CollectionAssert.AreEqual(before, await File.ReadAllBytesAsync(path));
+        }
+        await prepared.DisposeAsync(); // Repeated abandonment must be harmless.
+        CollectionAssert.AreEqual(before, await File.ReadAllBytesAsync(path));
+        Assert.AreEqual(0, cache.Writes);
+        Assert.AreEqual(0, executor.Requests.Count);
+        Assert.AreEqual(0, originalExecutor.Requests.Count);
+    }
+
     // Characterization of the legacy resume path, NOT the safety contract for explicit transfer.
     // The future prepare/commit path must never use this method as speculative preparation.
     [TestMethod]

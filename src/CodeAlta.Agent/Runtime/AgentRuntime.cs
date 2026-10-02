@@ -15,7 +15,7 @@ public sealed class AgentRuntime : IAsyncDisposable
     private readonly IReadOnlyDictionary<string, AgentRuntimeProviderRegistration> _providersByKey;
     private readonly Dictionary<string, IReadOnlyList<AgentModelInfo>> _modelCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly AgentSessionJournalFile _journalFile = new();
-    private IAgentSessionJournalStore? _store;
+    private FileSystemAgentSessionStore? _store;
     private bool _started;
 
     /// <summary>
@@ -60,7 +60,7 @@ public sealed class AgentRuntime : IAsyncDisposable
     /// </summary>
     public string DisplayName { get; }
 
-    private IAgentSessionJournalStore Store
+    private FileSystemAgentSessionStore Store
     {
         get
         {
@@ -214,6 +214,27 @@ public sealed class AgentRuntime : IAsyncDisposable
             options,
             allowProviderContinuation: true,
             cachedModels: GetCachedModels(registration));
+    }
+
+    // Preparation is deliberately separate from legacy resume: no repair, cache upsert,
+    // continuation mutation, provider execution, or externally usable session handle.
+    internal async Task<AgentPreparedTransfer> PrepareTransferAsync(
+        string sessionId, AgentSessionResumeOptions options, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(options);
+        cancellationToken.ThrowIfCancellationRequested();
+        var snapshot = await Store.ReadTransferSnapshotAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var provider = ResolveResumeProvider(options, snapshot.Summary);
+        if (MatchesProvider(snapshot.Summary, provider.Provider))
+            throw new InvalidOperationException("Provider transfer requires a different target provider.");
+        var now = DateTimeOffset.UtcNow;
+        var summary = TransferSummaryToProvider(snapshot.Summary, provider.Provider, options, now);
+        var state = TransferStateToProvider(snapshot.State, provider.Provider, now);
+        cancellationToken.ThrowIfCancellationRequested();
+        var candidate = new AgentSession(ProviderId, provider.Provider, summary, state, snapshot.History,
+            Store, provider.TurnExecutor, options, allowProviderContinuation: false, cachedModels: GetCachedModels(provider));
+        return new AgentPreparedTransfer(candidate, snapshot.Summary, snapshot.State, summary, state, snapshot.Revision);
     }
 
     /// <inheritdoc />
