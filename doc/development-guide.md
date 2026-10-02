@@ -65,6 +65,7 @@ Add a rule here when it is important enough that contributors and agents should 
 - Keep plugin orchestration hooks headless. Frontend code may render plugin-derived projections or adapt plugin UI/tab services, but should not own agent event observer dispatch or derived-event creation.
 - Keep plugin prompt/notification abstractions minimal data contracts. Do not reproduce `XenoAtom.Terminal.UI` toast or control APIs in plugin abstractions; terminal controls and dialogs stay owned by the frontend.
 - Treat plugin-derived session/timeline events as transient projections. Do not persist them as canonical user/agent transcript events unless a future decision explicitly changes the event model.
+- Bound file-change snapshot capture and generated diffs in the shared agent runtime, before JSON serialization. Preserve explicit omission evidence and complete retained per-file diff blocks; model-visible tool-output truncation does not protect event details or `DiffUpdated` records. These inspection limits must not change file mutation or permission behavior.
 - Prefer named ports, request/response DTOs, immutable snapshots, and event streams over large callback aggregates or callback-wrapper context classes.
 - New shell/application contracts should use `ModelProvider` terminology for selectable LLM runtime and endpoint configuration. Do not introduce new `Backend` names for provider/session ownership; keep remaining backend strings limited to explicit compatibility wire/config names or real third-party terminal/backend concepts.
 

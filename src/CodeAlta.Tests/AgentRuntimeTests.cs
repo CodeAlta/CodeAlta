@@ -443,6 +443,50 @@ public sealed class AgentRuntimeTests
     }
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task AgentRuntime_SendAsync_PersistsBoundedDiffForDirectoryDeletion(bool oversizedFile)
+    {
+        using var temp = TestTempDirectory.Create();
+        var workspacePath = Path.Combine(temp.Path, "workspace");
+        var deletedPath = Path.Combine(workspacePath, "deleted");
+        Directory.CreateDirectory(deletedPath);
+        var fileCount = oversizedFile ? 1 : 6;
+        var text = new string('x', oversizedFile ? 1024 * 1024 + 1 : 256 * 1024);
+        for (var index = 0; index < fileCount; index++)
+        {
+            await File.WriteAllTextAsync(Path.Combine(deletedPath, $"{index}.txt"), text);
+        }
+
+        var executor = new DirectoryDeletingTurnExecutor(deletedPath);
+        await using var agentRuntime = CreateAgentRuntime(temp.Path, executor);
+        await using var session = await agentRuntime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            ProviderKey = "openai",
+            Model = "gpt-5.4",
+            WorkingDirectory = workspacePath,
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        });
+
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Delete the directory") });
+
+        Assert.IsFalse(Directory.Exists(deletedPath));
+        Assert.AreEqual(2, executor.RequestCount);
+        var history = await CreateSessionStore(temp.Path).ReadEventsAsync(session.SessionId);
+        Assert.IsFalse(history.OfType<AgentErrorEvent>().Any());
+        var tool = history.OfType<AgentActivityEvent>().Single(@event => @event.ActivityId == "delete-call" && @event.Phase == AgentActivityPhase.Completed);
+        Assert.IsTrue(tool.Details!.Value.GetProperty("result").GetProperty("success").GetBoolean());
+        var diff = tool.Details.Value.GetProperty("diff").GetString();
+        Assert.IsNotNull(diff);
+        Assert.IsTrue(diff.Length <= 1024 * 1024);
+        StringAssert.Contains(diff, "omitted");
+        var output = history.OfType<AgentContentCompletedEvent>().Single(@event => @event.ParentActivityId == "delete-call" && @event.Kind == AgentContentKind.ToolOutput);
+        Assert.AreEqual(diff, output.Details!.Value.GetProperty("diff").GetString());
+        var turn = history.OfType<AgentSessionUpdateEvent>().Single(@event => @event.Kind == AgentSessionUpdateKind.DiffUpdated);
+        Assert.AreEqual(diff, turn.Details!.Value.GetProperty("diff").GetString());
+    }
+
+    [TestMethod]
     public async Task AgentTurnFileChangeTracker_CreateUnifiedDiff_UsesPreciseDiffForLargeFiles()
     {
         using var temp = TestTempDirectory.Create();
@@ -851,6 +895,27 @@ public sealed class AgentRuntimeTests
                         AgentConversationRole.Assistant,
                         [new AgentMessagePart.Text($"Echo #{Requests.Count}")]),
                 });
+        }
+    }
+
+    private sealed class DirectoryDeletingTurnExecutor(string directory) : IModelProviderTurnExecutor
+    {
+        public int RequestCount { get; private set; }
+
+        public Task<AgentTurnResponse> ExecuteTurnAsync(
+            AgentTurnRequest request,
+            Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+            CancellationToken cancellationToken = default)
+        {
+            RequestCount++;
+            return Task.FromResult(new AgentTurnResponse
+            {
+                AssistantMessage = new AgentConversationMessage(
+                    AgentConversationRole.Assistant,
+                    RequestCount == 1
+                        ? [new AgentMessagePart.ToolCall("delete-call", "delete_file_or_dir", JsonSerializer.SerializeToElement(new { path = directory }))]
+                        : [new AgentMessagePart.Text("Done.")]),
+            });
         }
     }
 

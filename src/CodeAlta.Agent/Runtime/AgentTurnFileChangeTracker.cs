@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using CodeAlta.Agent.Diffing;
 using CodeAlta.Agent.Runtime.Tools;
@@ -6,8 +7,15 @@ namespace CodeAlta.Agent.Runtime;
 
 internal sealed class AgentTurnFileChangeTracker
 {
+    // Bound capture as well as output: directory mutations may include entire build/dependency trees.
+    private const int MaximumFileSnapshotByteCount = 1024 * 1024;
+    private const int MaximumCapturedTextCharacterCount = 8 * 1024 * 1024;
+    private const int MaximumDiffCharacterCount = 1024 * 1024;
+    private const string DiffOmissionNotice = "[CodeAlta: Remaining file diffs omitted because the 1,048,576-character diff display limit was reached.]\n";
+
     private readonly string _rootPath;
     private readonly Dictionary<string, FileChangeState> _changes = new(StringComparer.OrdinalIgnoreCase);
+    private int _capturedTextCharacterCount;
 
     public AgentTurnFileChangeTracker(string? workingDirectory)
     {
@@ -23,6 +31,7 @@ internal sealed class AgentTurnFileChangeTracker
     public string? CreateUnifiedDiff()
     {
         var builder = new StringBuilder();
+        var fileBuilder = new StringBuilder();
         foreach (var state in _changes.Values.OrderBy(static state => state.DisplayPath, StringComparer.OrdinalIgnoreCase))
         {
             if (state.Before is null || state.After is null || SnapshotsEqual(state.Before, state.After))
@@ -30,7 +39,16 @@ internal sealed class AgentTurnFileChangeTracker
                 continue;
             }
 
-            AppendFileDiff(builder, state.DisplayPath, state.Before, state.After);
+            fileBuilder.Clear();
+            AppendFileDiff(fileBuilder, state.DisplayPath, state.Before, state.After);
+            if (fileBuilder.Length > MaximumDiffCharacterCount - builder.Length - DiffOmissionNotice.Length)
+            {
+                // Keep complete per-file diffs rather than cutting through a hunk or UTF-16 pair.
+                builder.Append(DiffOmissionNotice);
+                break;
+            }
+
+            builder.Append(fileBuilder);
         }
 
         return builder.Length == 0 ? null : builder.ToString();
@@ -75,6 +93,12 @@ internal sealed class AgentTurnFileChangeTracker
         ChangeCapturePhase phase,
         CancellationToken cancellationToken)
     {
+        _changes.TryGetValue(fullPath, out var state);
+        if (phase is ChangeCapturePhase.Before && state?.Before is not null)
+        {
+            return;
+        }
+
         try
         {
             FileSnapshot snapshot;
@@ -84,8 +108,9 @@ internal sealed class AgentTurnFileChangeTracker
             }
             else
             {
-                var text = await File.ReadAllTextAsync(fullPath, cancellationToken).ConfigureAwait(false);
-                snapshot = new FileSnapshot(Exists: true, IsBinary: false, Text: text);
+                var replacedTextLength = phase is ChangeCapturePhase.After ? state?.After?.Text?.Length ?? 0 : 0;
+                var remainingCharacters = MaximumCapturedTextCharacterCount - _capturedTextCharacterCount + replacedTextLength;
+                snapshot = await ReadTextSnapshotAsync(fullPath, remainingCharacters, cancellationToken).ConfigureAwait(false);
             }
 
             SetSnapshot(fullPath, phase, snapshot);
@@ -96,6 +121,49 @@ internal sealed class AgentTurnFileChangeTracker
         }
     }
 
+    private static async Task<FileSnapshot> ReadTextSnapshotAsync(
+        string fullPath,
+        int remainingCharacters,
+        CancellationToken cancellationToken)
+    {
+        using var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
+            bufferSize: 4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        if (stream.Length > MaximumFileSnapshotByteCount)
+        {
+            return FileSnapshot.TextOmitted;
+        }
+
+        using var reader = new StreamReader(stream);
+        var characterLimit = Math.Min(MaximumFileSnapshotByteCount, remainingCharacters);
+        var builder = new StringBuilder();
+        var buffer = ArrayPool<char>.Shared.Rent(8192);
+        try
+        {
+            while (true)
+            {
+                // Probe one character past the budget, including if the file grows after opening.
+                var read = await reader.ReadAsync(
+                    buffer.AsMemory(0, Math.Min(buffer.Length, characterLimit - builder.Length + 1)),
+                    cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    return new FileSnapshot(Exists: true, IsBinary: false, Text: builder.ToString());
+                }
+
+                if (read > characterLimit - builder.Length)
+                {
+                    return FileSnapshot.TextOmitted;
+                }
+
+                builder.Append(buffer, 0, read);
+            }
+        }
+        finally
+        {
+            ArrayPool<char>.Shared.Return(buffer);
+        }
+    }
+
     private void CaptureMissing(string fullPath, ChangeCapturePhase phase)
     {
         SetSnapshot(fullPath, phase, FileSnapshot.Missing);
@@ -103,7 +171,7 @@ internal sealed class AgentTurnFileChangeTracker
         {
             foreach (var state in _changes.Values.Where(state => IsSamePathOrChild(fullPath, state.FullPath)))
             {
-                state.After = FileSnapshot.Missing;
+                SetSnapshot(state.FullPath, phase, FileSnapshot.Missing);
             }
         }
     }
@@ -118,12 +186,19 @@ internal sealed class AgentTurnFileChangeTracker
 
         if (phase is ChangeCapturePhase.Before)
         {
-            state.Before ??= snapshot;
+            if (state.Before is null)
+            {
+                state.Before = snapshot;
+                _capturedTextCharacterCount += snapshot.Text?.Length ?? 0;
+            }
+
             return;
         }
 
         state.Before ??= FileSnapshot.Missing;
+        _capturedTextCharacterCount -= state.After?.Text?.Length ?? 0;
         state.After = snapshot;
+        _capturedTextCharacterCount += snapshot.Text?.Length ?? 0;
     }
 
     private static IEnumerable<string> EnumerateFiles(string directory)
@@ -188,7 +263,9 @@ internal sealed class AgentTurnFileChangeTracker
     }
 
     private static bool SnapshotsEqual(FileSnapshot before, FileSnapshot after)
-        => before.Exists == after.Exists &&
+        // Unknown text must not be reported as equal: retain explicit inspection-omission evidence.
+        => !before.IsTextOmitted && !after.IsTextOmitted &&
+           before.Exists == after.Exists &&
            before.IsBinary == after.IsBinary &&
            string.Equals(before.Text, after.Text, StringComparison.Ordinal);
 
@@ -207,6 +284,12 @@ internal sealed class AgentTurnFileChangeTracker
         else if (before.Exists && !after.Exists)
         {
             builder.AppendLine("deleted file mode 100644");
+        }
+
+        if (before.IsTextOmitted || after.IsTextOmitted)
+        {
+            builder.AppendLine("[CodeAlta: File content diff omitted because a snapshot capture limit was exceeded (1 MiB per file or 8,388,608 captured text characters).]");
+            return;
         }
 
         if (before.IsBinary || after.IsBinary)
@@ -249,10 +332,12 @@ internal sealed class AgentTurnFileChangeTracker
         public FileSnapshot? After { get; set; }
     }
 
-    private sealed record FileSnapshot(bool Exists, bool IsBinary, string? Text)
+    private sealed record FileSnapshot(bool Exists, bool IsBinary, string? Text, bool IsTextOmitted = false)
     {
         public static FileSnapshot Missing { get; } = new(Exists: false, IsBinary: false, Text: null);
 
         public static FileSnapshot BinaryExists { get; } = new(Exists: true, IsBinary: true, Text: null);
+
+        public static FileSnapshot TextOmitted { get; } = new(Exists: true, IsBinary: false, Text: null, IsTextOmitted: true);
     }
 }

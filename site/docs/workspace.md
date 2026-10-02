@@ -74,6 +74,14 @@ Timeline entries are grouped so the important parts stay visible:
 - the modified-files card summarizes per-file `+/-` diff totals and can show diff details;
 - statistics cards summarize timing, tools, usage, and other plugin-projected details.
 
+Built-in file-change inspection is bounded so large files or recursive directory operations do not
+overload session history. Text snapshots skip files larger than 1 MiB and share an 8,388,608-character
+capture budget per tracker. Tool and turn diffs retain complete per-file blocks up to 1,048,576
+characters, with explicit notices when file content or remaining diffs are omitted. These limits do
+not restrict the file operation itself. Omitted content is not retained in the journal; use Git or
+another external diff when you need complete inspection rather than treating displayed counts as
+complete totals.
+
 Use `F3` / `F4` to jump between previous and next user or assistant messages. Use `Ctrl+F3` to jump to the first message and `Ctrl+F4` to return to the bottom.
 
 ## Prompt editor and prompt queue

@@ -145,6 +145,7 @@ CodeAlta also expects a current [Nerd Fonts](https://www.nerdfonts.com/) patched
 - **Durable agent sessions**: keep project-scoped history in CodeAlta-owned journals, reopen sessions independently of provider startup, queue prompts on busy sessions, steer running work where supported, and compact long agent-runtime conversations.
 - **Session notes**: keep sticky Markdown in the session journal, use `alta notes` even when the caller's tab is closed, and restore the latest notes when reopening it.
 - **Actionable operations**: model/provider tests, startup config recovery, usage details, logs, modified-file summaries, and tool input/output dialogs are built into the workspace.
+- **Bounded file-change inspection**: built-in mutation tools cap captured text and generated diffs, retaining explicit omission notices for large files or directory operations without restricting the operation itself. Use an external diff for complete inspection when details are omitted.
 - **Trusted local extension points**: source plugins, Agent Skills-compatible skill folders, and the in-session `alta` live tool let you automate local workflows while keeping provenance visible.
 
 ## ⌨️ Common shortcuts

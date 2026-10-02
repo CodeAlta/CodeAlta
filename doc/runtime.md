@@ -897,6 +897,17 @@ A local session:
 
 The journal path is `~/.alta/sessions/yyyy/MM/dd/<session-id>.jsonl`. Startup session listing reads a local projection cache at `~/.alta/cache/cache.sqlite3` first, then reconciles external journal additions/changes after the initial projection; journals remain the source of truth and are used to rebuild a missing or corrupt cache. Optional traces live at `~/.alta/sessions/traces/<session-id>.trace` when protocol tracing is enabled for a provider.
 
+Built-in file mutation tools use `AgentTurnFileChangeTracker` for per-tool and whole-turn diffs.
+Text snapshot capture skips files larger than 1 MiB and retains at most 8,388,608 text characters
+per tracker across before/after snapshots. Reads are bounded even if a file grows during capture.
+Oversized or budget-exhausted snapshots preserve existence and path information with an explicit
+`File content diff omitted` notice; uncaptured text is never treated as known equal content.
+Generated diffs retain complete per-file blocks up to 1,048,576 characters, reserving space for a
+`Remaining file diffs omitted` notice when further blocks do not fit. Both tool details and
+`DiffUpdated` events use these bounded diffs before JSON serialization. These are inspection limits,
+not mutation/permission limits: file operations are unchanged, and omitted content is not stored
+elsewhere or recoverable from the journal. Use Git or another external diff for complete inspection.
+
 ## Built-in local tools
 
 CodeAlta-runtime providers can receive host-injected tools. Current built-ins are:
