@@ -1062,7 +1062,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
     }
 
     [TestMethod]
-    public async Task ModelDiscovery_UsesCodexEndpointAndFiltersUnsupportedModels()
+    public async Task ModelDiscovery_UsesCodexEndpointAndKeepsListedSubscriptionOnlyModels()
     {
         using var temp = TempDirectory.Create();
         await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
@@ -1087,7 +1087,9 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             CreateProviderDescriptor(),
             CancellationToken.None).ConfigureAwait(false);
 
-        Assert.AreEqual(2, models.Count);
+        Assert.AreEqual(
+            "gpt-5.3-codex|subscription-only-codex|websocket-only-codex",
+            string.Join('|', models.Select(static model => model.Id)));
         Assert.AreEqual("gpt-5.3-codex", models[0].Id);
         Assert.AreEqual("Codex model", models[0].DisplayName);
         Assert.AreEqual("codex-endpoint", models[0].Capabilities?["source"]);
@@ -1102,8 +1104,10 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.AreEqual(true, models[0].Capabilities?["supportsImageDetailOriginal"]);
         Assert.AreEqual(false, models[0].Capabilities?["useResponsesLite"]);
         Assert.AreEqual("\"models-fixture-etag\"", models[0].Capabilities?["etag"]);
-        Assert.AreEqual("websocket-only-codex", models[1].Id);
-        Assert.AreEqual(true, models[1].Capabilities?["requiresWebSocket"]);
+        Assert.AreEqual("Subscription Only Codex", models[1].DisplayName);
+        Assert.AreEqual(false, models[1].Capabilities?["supportedInApi"]);
+        Assert.AreEqual("websocket-only-codex", models[2].Id);
+        Assert.AreEqual(true, models[2].Capabilities?["requiresWebSocket"]);
         Assert.AreEqual(
             "https://api.openai.com/v1/models",
             handler.RequestUris[0].ToString());
@@ -1405,8 +1409,9 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             CreateProviderDescriptor(),
             CancellationToken.None).ConfigureAwait(false);
 
-        Assert.AreEqual(1, models.Count);
-        Assert.AreEqual("gpt-5.3-codex", models[0].Id);
+        Assert.AreEqual(
+            "gpt-5.3-codex|subscription-only-codex",
+            string.Join('|', models.Select(static model => model.Id)));
     }
 
     [TestMethod]
@@ -1435,7 +1440,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             CancellationToken.None).ConfigureAwait(false);
 
         Assert.AreEqual(
-            "gpt-5.3-codex|websocket-only-codex",
+            "gpt-5.3-codex|subscription-only-codex|websocket-only-codex",
             string.Join('|', models.Select(static model => model.Id)));
         Assert.IsFalse(models.Any(static model => model.Id == "hidden-codex"));
     }
@@ -1794,9 +1799,20 @@ public sealed class OpenAICodexSubscriptionPipelineTests
                       "context_window": 200000
                     },
                     {
-                      "id": "unsupported-codex",
+                      "slug": "subscription-only-codex",
+                      "display_name": "Subscription Only Codex",
                       "supported_in_api": false,
-                      "listable": true
+                      "visibility": "list"
+                    },
+                    {
+                      "slug": "hide-visibility-codex",
+                      "supported_in_api": true,
+                      "visibility": "hide"
+                    },
+                    {
+                      "slug": "none-visibility-codex",
+                      "supported_in_api": false,
+                      "visibility": "none"
                     },
                     {
                       "id": "hidden-codex",

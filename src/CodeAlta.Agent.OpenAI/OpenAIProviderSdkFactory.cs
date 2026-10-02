@@ -270,9 +270,11 @@ internal static class OpenAIProviderSdkFactory
         ModelProviderRuntimeDescriptor providerDescriptor,
         OpenAICodexSubscriptionOptions options)
     {
+        // `supported_in_api` describes API-key availability. ChatGPT plan tokens use the account-specific
+        // catalog, so (like Codex in ChatGPT mode and the token-sharing docs) only visibility gates the picker.
         var includeWebSocketRequiredModels = AllowsWebSocketRequiredModels(options);
         var supportedModels = discoveredModels
-            .Where(model => model.SupportedInApi && (includeWebSocketRequiredModels || !model.RequiresWebSocket))
+            .Where(model => includeWebSocketRequiredModels || !model.RequiresWebSocket)
             .GroupBy(static model => model.Id, StringComparer.OrdinalIgnoreCase)
             .Select(static group => group.First())
             .ToArray();
