@@ -46,12 +46,11 @@ test("project/session workflow labels translate while literal titles, paths and 
 test("inventory labels translate in six languages while status codes and English-like values stay literal", () => {
   for (const locale of locales) {
     for (const key of ["Provider management", "Model catalog", "Agent prompts", "MCP Servers", "Configured providers",
-      "Search models", "Search MCP servers", "Adapter type", "Cached availability", "Effective agent prompt body",
+      "Search models", "Adapter type", "Cached availability",
       "Search agent prompts", "Next Send agent prompt selection", "No agent prompts match this search.",
       "Inspect supplied tool record", "Supplied record provenance", "Copy supplied tool JSON", "Display excerpt; Copy retains the supplied JSON.",
       "Observed prompt (choices snapshot, not live execution)", "Local next-Send prompt", "Retained original Send prompt",
-      "Use model for next Send", "Use prompt for next Send", "Loading MCP configuration.",
-      "Content truncated to 2,048 characters. This is not the full prompt."] as const) {
+      "Use model for next Send", "Use prompt for next Send"] as const) {
       assert.ok(translate(locale, key));
       if (locale !== "en") assert.notEqual(translate(locale, key), key);
     }
@@ -108,11 +107,9 @@ test("all six shell dictionaries are complete immutable plain-text messages with
   assert.equal(translate("unknown", "Settings"), "Settings");
 });
 
-test("management labels translate without translating confirmation bytes or literal author data", () => {
+test("management labels translate without translating confirmation bytes", () => {
   for (const locale of locales) {
-    for (const key of ["Raw skill candidates", "Scan raw candidates", "Search observed candidates", "Metadata status", "Omitted path",
-      "Create an agent prompt source", "Publication scope", "Composition mode", "Review creation", "Confirm create only", "Keep draft",
-      "Batch session deletion", "Select visible eligible", "Confirm exact batch deletion", "Stop after pending original", "uncertain"] as const) {
+    for (const key of ["Keep draft", "Batch session deletion", "Select visible eligible", "Confirm exact batch deletion", "Stop after pending original", "uncertain"] as const) {
       if (locale !== "en") assert.notEqual(translate(locale, key), key, `${locale}: ${key}`);
       else assert.equal(translate(locale, key), key);
     }
@@ -120,10 +117,6 @@ test("management labels translate without translating confirmation bytes or lite
       const confirmation = `DELETE ${count}`;
       assert.ok(translate(locale, "Type {confirmation} to permanently delete exactly these reviewed session histories", { confirmation }).includes(confirmation));
     }
-    const literal = "  Settings <Unknown> 日本語 {scope}  ";
-    const presentation = translate(locale, "Earlier {phase}: {id} ({scope})", { phase: translate(locale, "created"), id: literal, scope: "user_alta" });
-    assert.ok(presentation.includes(literal)); assert.ok(presentation.endsWith("(user_alta)"));
-    assert.ok(translate(locale, "Publish {file} to {scope} agent prompts, mode {mode}?", { file: "settings.prompt.md", scope: literal, mode: "append" }).includes("append"));
   }
 });
 

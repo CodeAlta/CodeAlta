@@ -5,8 +5,7 @@ CodeAlta is a terminal workspace for agentic coding. It brings model-provider se
 The desktop WebView supports local shell language selection in Settings → Appearance
 for English, Spanish, French, German, Japanese and Simplified Chinese. This is a
 bounded navigation/Settings/shortcut Help, composer, action-palette, session-tab
-and saved-session browsing/inspection translation, plus static Skills, create-only
-prompt, batch-deletion, Reminder, caller-ask, Settings inventory and static project/session workflow controls—not full UI localization;
+and saved-session browsing/inspection translation, plus batch-deletion, Reminder, caller-ask, Settings inventory and static project/session workflow controls—not full UI localization;
 see [scope and limitations](doc/webview-localization.md).
 Static About/log/reference translation and its reference-preview lifetime publication
 correction have scoped independent acceptance; the separate split-layout cleanup
@@ -61,9 +60,7 @@ Owned Desktop new-session and local text-draft creation offer a [bounded cached 
 
 Owned Desktop Send supports [pasted image attachments](doc/prompt-images.md) with previews, editable local display titles, removal and explicitly observed model capability, without the former tiny byte, count and dimension caps. Browser-exposed PNG, JPEG, WebP, GIF and BMP clipboard files are decoded and normalized to PNG; source metadata and animation are not retained. The owned RPC transport allows 128 MiB frames including base64/JSON overhead; browser and provider constraints still apply. Image-only normal Send accepts exactly empty text with retained attachments; whitespace-only and empty text-only Send remain refused. The explicit owned new-session draft can retain and safely copy images into a confirmed empty new session draft, never auto-Send; images remain window-memory only and storage failure retains the source with an uncertainty notice. Normalized bytes travel as typed images, not Markdown; Queue/Steer and archived/catalog-only composers refuse attachments. This path does not add native clipboard qualification or URL/path access.
 
-Desktop **Settings → Skills** provides [explicit bounded raw candidate inspection](doc/skills-inspection.md) for verified project/user CodeAlta roots, with local search and metadata details. These are raw files—not loaded, enabled or active skills—and ignored paths may appear. No source/config editing or activation is offered.
-
-Desktop **Settings → Agent prompts** supports [bounded create-only authoring](doc/prompt-creation.md) with explicit project/user-global scope, composition acknowledgement and review. Existing sources are never overwritten; creation does not automatically refresh, apply a prompt or change a pending Send. Existing-source edit/delete and system-prompt management are not exposed.
+Desktop **Settings → Skills**, **Agent prompts**, **MCP Servers** and **Plugins** are editable pages; see the [desktop notes](src/CodeAlta/README.md).
 
 Owned Desktop mode automatically approves tool permissions by default, matching TUI AutoApprove: commands and file writes run with the host's privileges, not in a root sandbox. Explicit `--review-owned-command-permissions` instead enables plain-command review with **Allow once / Deny / Cancel** and denies unsupported permissions. **Observe retained decision** checks the original response locally across selection changes, without resending it; renderer reload loses that record. See the [owned-mode safety and usage notes](src/CodeAlta/README.md#explicit-owned-text-submission).
 
@@ -100,9 +97,9 @@ On the Reminders page, Ctrl+Enter invokes the existing Create button only when f
 
 In the Desktop regular composer (owned or catalog/archived draft-only), typing `?` into an **exactly empty** prompt opens keyboard help; typing `/` opens the existing implemented-actions palette. These are transient keyboard shortcuts, not slash-command execution. Pasted text, composition, selection replacement and nonempty drafts remain literal; the expanded editor and other search/input fields do not use these shortcuts. Draft-only scopes can navigate/help but cannot gain mutation permissions from the palette.
 
-The palette also exposes eligible Skills inspection and last-observed usage, plus
+The palette also exposes Skills Settings and last-observed usage, plus
 existing Open Project and Help. Outside text in the workspace, Ctrl+G then Ctrl+K
-opens eligible Skills Settings without scanning; Ctrl+G then Ctrl+L opens Application
+opens Skills Settings; Ctrl+G then Ctrl+L opens Application
 Logs. Usage reuses its existing guarded modal; Ctrl+G then Ctrl+U remains Context state
 because of the TUI mapping conflict. See [bounded command access](doc/command-access.md)
 for scope, validation and remaining qualification gaps.

@@ -28,11 +28,10 @@ Saved-session browsing, Session Info and the usage inspector also translate thei
 static labels, counts, scope/sort controls, explanations, refresh/Copy controls and
 accessible names. Runtime badges translate static unknown/stale presentation and
 the explicit refresh button, not controller-produced observations or summaries.
-The existing Skills raw-candidate inspection, create-only agent-prompt form and
-sequential batch-deletion panel also translate static headings, controls, help,
-field/metadata labels, review/discard/confirmation explanations and accessible
-names. Closed batch outcome discriminants and known earlier prompt phases have
-translated presentation; raw controller messages and backend codes remain literal.
+The sequential batch-deletion panel also translates static headings, controls, help,
+review/confirmation explanations and accessible names. Closed batch outcome
+discriminants have translated presentation; raw controller messages and backend
+codes remain literal.
 Reminder and caller-ask panels translate static labels, help, actions, accessible
 names, retained-original controls, finite local validation/read notices and explicit
 known UI states. Caller asks are not provider user-input or permission approvals.

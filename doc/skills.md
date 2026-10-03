@@ -88,7 +88,7 @@ Available actions:
 
 The scaffold creates `SKILL.md` plus empty `scripts/`, `references/`, and `assets/` directories, then opens `SKILL.md` in the editor.
 
-The Desktop **Settings → Skills** page instead offers [explicit bounded raw candidate/metadata inspection](skills-inspection.md). It does not expose the terminal management/activation actions or effective discovery semantics described above.
+The Desktop **Settings → Skills** page lists the discovered skills with a switch per skill, a filter, **Enable all** / **Disable all** and **New skill**; see the [desktop notes](../src/CodeAlta/README.md).
 
 ## Live-tool commands
 

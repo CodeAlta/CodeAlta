@@ -7,7 +7,7 @@ export async function inventoryLanguages(evaluate: (expression: string) => Promi
   await paint();
   await evaluate(`void(window.inventoryKept={main:document.querySelector('main'),focus:document.activeElement,calls:JSON.stringify(${calls}),
     controls:[...document.querySelectorAll('main input,main select,main button')].map(n=>({n,value:n.value,disabled:n.disabled,pressed:n.getAttribute('aria-pressed')})),
-    literal:[...document.querySelectorAll(${JSON.stringify('.model-catalog-providers button strong,.model-catalog-list button strong,.model-catalog-detail h3,.prompt-catalog-body' + (literalSelector ? `,${literalSelector}` : ""))})].map(n=>({n,text:n.textContent}))})`);
+    literal:[...document.querySelectorAll(${JSON.stringify('.model-catalog-providers button strong,.model-catalog-list button strong,.model-catalog-detail h3' + (literalSelector ? `,${literalSelector}` : ""))})].map(n=>({n,text:n.textContent}))})`);
   for (const locale of locales) {
     await evaluate(`inventoryLanguage('${locale}')`); await paint();
     assert.equal(await evaluate(`document.querySelector('main').getAttribute('aria-label')===${JSON.stringify(translate(locale, title))}`), true);

@@ -2,7 +2,7 @@
 
 The owned writable composer retains its quick prompt selector and adds **Search
 agent prompts**, also available as **Next Send agent prompt selection** in Commands.
-Settings → Agent Prompts remains the separate inventory/body inspection route.
+Settings → Agent Prompts remains the separate prompt management page.
 
 The chooser uses only the composer's already observed `SessionChoicesResponse`.
 It performs no catalog refresh, body lookup or provider call. Search is bounded to

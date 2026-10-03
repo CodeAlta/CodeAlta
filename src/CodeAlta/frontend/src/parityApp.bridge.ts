@@ -13,9 +13,6 @@ function rejectService(service: string) {
   } });
 }
 export const applicationLogs = rejectService("applicationLogs");
-export const promptCreation = rejectService("promptCreation");
-export const mcpInventory = rejectService("mcpInventory");
-export const skillsInspection = rejectService("skillsInspection");
 export const reminder = rejectService("reminder");
 export const workspace = {
   ...demo.workspace,

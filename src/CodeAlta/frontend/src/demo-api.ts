@@ -71,9 +71,6 @@ export const modelCatalog = Object.freeze({
   probe: async () => ({ status: "unconfigured", epoch: null, providerId: null, availability: "Unknown" }),
   models: async () => ({ status: "unconfigured", epoch: null, providerId: null, availability: "Unknown", models: [], truncated: false }),
 });
-export const promptCatalog = Object.freeze({
-  list: async () => ({ status: "unconfigured", epoch: null, sessionId: "", prompts: [], truncated: false }),
-});
 export const workspace = Object.freeze({
   snapshot: async () => snapshot,
   history: async (request: HistoryRequest): Promise<HistoryResponse> => ({

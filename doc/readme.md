@@ -16,7 +16,7 @@ Provider/timeline localization and its scroll correction are independently accep
 Settings inventory translation is also independently accepted. Static project/session
 workflow translation awaits independent review.
 See [WebView shell language](webview-localization.md) for the bounded local-language
-shell/composer/palette/tab/browsing/inspection and static Skills/prompt-creation/
+shell/composer/palette/tab/browsing/inspection and static
 batch-deletion/Reminder/caller-ask/Settings inventory/project-session workflow controls, persistence semantics, untranslated areas and
 review limitations.
 Static About/log/reference presentation and its native-modal lifetime publication
@@ -55,10 +55,6 @@ Read the documents in this order when onboarding or reviewing architecture-sensi
 The isolated desktop boot entrypoint and its test-owned native fixtures are described in [desktop native qualification](desktop-native-qualification.md), including preserved M0 evidence and explicit platform gaps.
 
 The scoped [Desktop prompt-image path](prompt-images.md) documents PNG paste/preview/removal, editable local display titles, observed capability, typed owned image-only Send and its retention/filesystem limits.
-
-The [Desktop raw Skills inspector](skills-inspection.md) documents explicit host-derived roots, bounded metadata, omissions and original-read lifetime; it is not effective discovery or activation parity.
-
-The [Desktop create-only agent prompt author](prompt-creation.md) documents explicit scope/review, shared non-overwriting publication, precedence and retained original outcomes. Existing-source CRUD remains separate.
 
 ```mermaid
 flowchart TD

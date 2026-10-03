@@ -1,14 +1,14 @@
 # Bounded Desktop command access
 
 The Desktop implemented-actions palette and shortcut Help share registry metadata for
-Skills inspection, current-process Application Logs, last-observed session usage,
+Skills Settings, current-process Application Logs, last-observed session usage,
 Open Project and Help. Search accepts translated labels in en/es/fr/de/ja/zh-CN and
 canonical English labels/aliases (`skill`, `logs`, `show_logs`, `context_usage`,
 `open_project`, `help`). Action IDs remain stable and are never translated.
 
 | Surface | Access | Boundary |
 | --- | --- | --- |
-| Skills | Palette; Ctrl+G then Ctrl+K outside text in the workspace | Verified owned selected scope only through these entry points. Opens the existing Settings section; no scan until explicit Scan. Not effective skill discovery/activation/management. |
+| Skills | Palette; Ctrl+G then Ctrl+K outside text in the workspace | Verified owned selected scope only through these entry points. Opens the existing Settings section. |
 | Application Logs | Palette; Ctrl+G then Ctrl+L outside text in the workspace | Existing Settings log panel and explicit read/clear semantics. Current-process captured memory, not logfile browsing. |
 | Usage | Palette; existing composer icon | Exact eligible owned writable session and connected, enabled original trigger. Invokes the existing modal/read path; one explicit-open read, no search/hover/locale probes. |
 | Open Project | Palette; existing Ctrl+O outside text | Existing saved-project/import dialog and handlers; navigation is not import authority. |

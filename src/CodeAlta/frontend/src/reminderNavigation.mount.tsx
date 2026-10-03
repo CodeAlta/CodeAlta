@@ -2,7 +2,6 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { ReminderPanel } from "./ReminderPanel";
-import { McpServersPanel } from "./McpServersPanel";
 import { CommandPalette } from "./CommandPalette";
 import { paletteAvailable, paletteShortcut, restorePaletteFocus, type PaletteAction, type PaletteContext } from "./paletteActions";
 import { createReminderActions } from "./reminderActions";
@@ -156,11 +155,7 @@ function App() {
       read={readReminders}
       readDetail={async request => ({ status: "missing_reminder", epoch: request.expectedEpoch, sessionId: request.sessionId,
         reminderId: request.reminderId, content: null, delaySeconds: null, repeatCount: null, editRevision: null })} />}
-    {view === "mcp" && <McpServersPanel target={epoch ? { epoch, sessionId: session, projectId: project } : null}
-      read={async request => ({ status: "ok", epoch: request.expectedEpoch, sessionId: request.sessionId,
-        projectId: project, servers: [], sources: project ? ["Global: read", "Project: read"] : ["Global: read"],
-        omitted: 0, policyReadError: false })} />}
-    {view !== "workspace" && view !== "reminders" && view !== "mcp" && <main aria-label={view}>{view}</main>}
+    {view !== "workspace" && view !== "reminders" && <main aria-label={view}>{view}</main>}
     {paletteOpen && captured.current && <CommandPalette available={id => ["sessionInfo", "focusPrompt", "settings", "providers", "models", "prompts", "logs", "mcp", "reminders"].includes(id)}
       onClose={closePalette} onChoose={id => {
         const action = id as PaletteAction;

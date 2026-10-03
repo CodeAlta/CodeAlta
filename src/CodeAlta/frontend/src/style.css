@@ -10,13 +10,6 @@
 .app-dialog.tool-record-dialog { width: min(48rem, calc(100vw - 2rem)); max-height: 85dvh; overflow: auto; text-align: start; }
 .tool-record-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 35dvh; overflow: auto; }
 .tool-record-dialog code, .tool-record-dialog h2 { overflow-wrap: anywhere; }
-.skills-inspection { min-width: 0; overflow-wrap: anywhere; }
-.skills-inspection label { display: block; margin-block: .75rem; }
-.skills-inspection select, .skills-inspection input { max-width: 100%; }
-.skills-inspection ul { padding-inline-start: 1.25rem; }
-.skills-inspection li { margin-block: .35rem; }
-.skills-inspection li button { max-width: 100%; white-space: normal; text-align: start; overflow-wrap: anywhere; }
-.skills-inspection dd { margin-inline-start: 1rem; white-space: pre-wrap; }
 .prompt-image-attachments { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; padding: 4px 6px 6px; overflow-wrap: anywhere; }
 .prompt-image-attachments > p { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; }
 .prompt-image-tile { position: relative; }
@@ -499,7 +492,6 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .model-catalog-next button { margin-top: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--panel-2); cursor: pointer; }
 .model-catalog-next button:disabled { opacity: .55; cursor: not-allowed; }
 .model-catalog-page p[role="alert"] { color: var(--red); }
-.prompt-catalog-body { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 20rem; overflow: auto; }
 .reminder-page .model-catalog-results label { margin: 14px 0 5px; }
 .reminder-page .model-catalog-results textarea, .reminder-page .model-catalog-results input { display: block; width: 100%; padding: 9px; }
 .reminder-page .model-catalog-results textarea { min-height: 90px; resize: vertical; }
@@ -724,13 +716,6 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
   .prompt-options > * { flex: 0 0 130px; }
   .shortcut-dialog dl { grid-template-columns: 1fr; }
 }
-
-.prompt-creation { padding: 20px; min-width: 0; border-bottom: 1px solid var(--line); }
-.prompt-creation fieldset { display: grid; gap: 10px; min-width: 0; border: 1px solid var(--line); }
-.prompt-creation label { display: grid; gap: 5px; min-width: 0; }
-.prompt-creation input:not([type="checkbox"]), .prompt-creation textarea, .prompt-creation select { width: 100%; min-width: 0; max-width: 100%; }
-.prompt-creation pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
-.prompt-creation p { overflow-wrap: anywhere; }
 
 .queue-intent-compact { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; min-width: 0; padding: .5rem; border: 1px solid var(--line); border-radius: .4rem; }
 .queue-intent-preview { min-width: 0; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

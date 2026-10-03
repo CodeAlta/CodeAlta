@@ -1,6 +1,6 @@
 // Isolated bridge for mounting the actual main.tsx in a local browser test.
 // No native bridge or user data is touched.
-import type { HistoryRequest, HistoryResponse, SessionDisplayItem, SessionDisplayRequest, ReminderListRequest, ReminderListResponse, WorkspaceArchiveProjectRequest, SessionRuntimeScopedRequest, SkillsScanRequest, SkillsScanResponse } from "#neoastra";
+import type { HistoryRequest, HistoryResponse, SessionDisplayItem, SessionDisplayRequest, ReminderListRequest, ReminderListResponse, WorkspaceArchiveProjectRequest, SessionRuntimeScopedRequest } from "#neoastra";
 import type { SessionPermissionsRequest, SessionPermissionResolveRequest } from "#neoastra";
 import type { SessionRuntimeStateRequest, SessionRuntimeStateResponse } from "#neoastra";
 import type { SessionReceiptRequest, SessionReceiptPage, SessionCancelQueueRequest, SessionAdmission } from "#neoastra";
@@ -53,11 +53,6 @@ function releaseCurrentCall(call: typeof currentReads[number], attachmentGenerat
   call.resolve(call.response);
 }
 const runtimeReads: Array<{ request: SessionRuntimeScopedRequest; signal: AbortSignal; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
-const skillReads: Array<{ request: SkillsScanRequest; resolve: (value: SkillsScanResponse) => void; reject: (error: Error) => void }> = [];
-const promptCreates: Array<{ request: unknown; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
-const promptReads: unknown[] = [];
-export const promptCreation = { create: (request: unknown) => new Promise((resolve, reject) => { promptCreates.push({ request, resolve, reject }); }) };
-export const skillsInspection = { scan: (request: SkillsScanRequest) => new Promise<SkillsScanResponse>((resolve, reject) => { skillReads.push({ request, resolve, reject }); }) };
 const sends: unknown[] = [];
 const sendFailures: Array<() => void> = [];
 const displayCalls: SessionDisplayRequest[] = [];
@@ -134,7 +129,7 @@ Object.assign(window, { settingsShellFixture: { calls, rpcCalls, sends, choiceRe
   displayCalls, displayCleanup, notesCalls, lateDisplayAttempts, reminderReads, reminderSaves, reminderDetails, reminderSaveLists, projectNameReads, referenceReads,
   reminderEvidence: () => reminderTrace.map(({ signal, ...entry }) => ({ ...entry, aborted: signal?.aborted ?? null })),
   displayEvidence: () => displayAttempts.map(({ signal, ...attempt }) => ({ ...attempt, aborted: signal.aborted })),
-  referenceObservations, archives, retainedQueueCalls, retainedCancelCalls, queueReceiptReads, currentReads, runtimeReads, skillReads, promptCreates, promptReads, permissionReads, permissionDecisions, permissionEntry,
+  referenceObservations, archives, retainedQueueCalls, retainedCancelCalls, queueReceiptReads, currentReads, runtimeReads, permissionReads, permissionDecisions, permissionEntry,
   releaseCurrent(index = currentReads.length - 1, attachmentGeneration = "7") {
     const call = currentReads[index];
     // StrictMode may have detached the original waiter before its queued replacement can start.
@@ -147,15 +142,6 @@ Object.assign(window, { settingsShellFixture: { calls, rpcCalls, sends, choiceRe
     sessionId: call.request.sessionId, entries: [{ ...inputEntry, handle: { ...inputEntry.handle, sessionId: call.request.sessionId } }], hasMore: false }); },
   releasePermissions() { const call = permissionReads.at(-1)!; call.resolve({ status: "ok", hostEpoch: epoch,
     sessionId: call.request.sessionId, entries: [{ ...permissionEntry, handle: { ...permissionEntry.handle, sessionId: call.request.sessionId } }], hasMore: false }); },
-  releaseSkills(index = skillReads.length - 1, mode = "parsed") {
-    const { request, resolve, reject } = skillReads[index];
-    if (mode === "error") { reject(new Error("fixture transport error")); return; }
-    resolve({ status: mode === "unknown" ? "metadata_unavailable" : "ok", hostEpoch: epoch, request,
-      traversalStatus: mode === "unknown" ? null : "complete", diagnostics: mode === "unknown" ? "none" : "None", entriesVisited: mode === "unknown" ? 0 : 2, directoriesOpened: mode === "unknown" ? 0 : 1,
-      metadataBytesRead: mode === "unknown" ? 0 : 50, responseOmitted: 0, candidates: mode === "empty" || mode === "unknown" ? [] : [
-        { id: "0", relativePath: "example/SKILL.md", status: "parsed", diagnostic: "none", name: "example", description: "Example raw metadata" },
-        { id: "1", relativePath: "bad/SKILL.md", status: "unsupported", diagnostic: "yaml_feature", name: null, description: null }] });
-  },
   releaseRuntime(index = runtimeReads.length - 1, mode = "active") {
     const { request, resolve } = runtimeReads[index];
     resolve({ status: mode === "error" ? "read_failed" : "ok", hostEpoch: epoch, sessionId: request.sessionId, scope: request.scope,
@@ -277,9 +263,6 @@ models: async () => ({ status: "ok", epoch, providerId: "fixture", availability:
     { id: "old", name: "Old model", description: null, efforts: [], defaultEffort: null, contextTokens: null,
       inputTokens: null, outputTokens: null, reasoning: false, tools: null, structuredOutput: null, imageInput: null }] }),
   probe: (request: unknown) => { probes.push(request); return new Promise(() => {}); } };
-export const promptCatalog = { list: async () => { promptReads.push({}); return { status: "ok", epoch, sessionId: "one", truncated: false,
-  prompts: [{ id: "plan", name: "Plan", description: null, builtIn: true, appended: false, bodyTruncated: false, body: "Plan", scope: "BuiltIn" }] }; } };
-export const mcpInventory = { list: unavailable };
 export const reminder = { list: (request: ReminderListRequest, options: { signal: AbortSignal }) =>
   localStorage.getItem("layoutFixtureSave") === "true"
     ? (reminderSaveLists.push(request), traceReminder("list", request, options.signal).completed = true, Promise.resolve({ status: "ok", epoch: request.expectedEpoch, sessionId: request.sessionId,
@@ -370,8 +353,8 @@ export const sessionUserInput = {
 };
 
 // Observe every fake bridge invocation; language changes must not start backend work.
-for (const [name, service] of Object.entries({ boot, workspace, configuration, applicationLogs, modelCatalog, promptCatalog,
-  promptCreation, skillsInspection, mcpInventory, reminder, sessionDisplay, sessionRuntimeState, sessionUsage,
+for (const [name, service] of Object.entries({ boot, workspace, configuration, applicationLogs, modelCatalog,
+  reminder, sessionDisplay, sessionRuntimeState, sessionUsage,
   sessionPermissions, sessionOperations, sessionAsks, sessionNotes, sessionUserInput })) {
   for (const [method, invoke] of Object.entries(service)) {
     Object.defineProperty(service, method, { value: (...args: unknown[]) => {

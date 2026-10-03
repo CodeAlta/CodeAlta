@@ -234,7 +234,7 @@ test("mounted workspace dispatches reminders, session info and implemented palet
     await evaluate("document.querySelector('#palette-search').focus()");
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
-    assert.equal(await wait("document.querySelector('main[aria-label=\"MCP Servers\"] h1')?.textContent === 'MCP Servers'"), "ready");
+    assert.equal(await wait("document.querySelector('main[aria-label=\"mcp\"]')?.textContent === 'mcp'"), "ready");
     assert.equal(await evaluate("!!document.querySelector('.command-palette')"), false);
     assert.equal(await evaluate("window.reminderNavigationFixture.writes.length"), 1);
     await evaluate("document.querySelector('[aria-label=\"Open command palette\"]').click()");
