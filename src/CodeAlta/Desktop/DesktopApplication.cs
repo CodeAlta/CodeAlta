@@ -202,6 +202,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddGlobalConfigService(new GlobalConfigService(new CodeAltaConfigStore(catalog), host.ModelProviderRegistry, options.CatalogRoot!, epoch));
                     builder.AddMcpServersService(new McpServersService(host.ProjectCatalog, epoch, roots.Home));
                     builder.AddAgentPromptsService(new AgentPromptsService(host.ProjectCatalog, epoch));
+                    // The standard launch has no explicit discovery home: common skills come from the profile, like the TUI.
+                    builder.AddSkillsService(new SkillsService(host.ProjectCatalog, host.SkillCatalog,
+                        roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), epoch));
                     builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
                     providers = new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch);
                     _ = providers.StartInitialization(); // Retained and joined by providers.DrainAsync.
@@ -351,6 +354,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddGlobalConfigService(new GlobalConfigService());
             builder.AddMcpServersService(new McpServersService());
             builder.AddAgentPromptsService(new AgentPromptsService());
+            builder.AddSkillsService(new SkillsService());
             builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
             builder.AddModelCatalogService(new ModelCatalogService());
             builder.AddPromptCatalogService(new PromptCatalogService());
