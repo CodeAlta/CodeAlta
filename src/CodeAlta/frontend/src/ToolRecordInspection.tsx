@@ -1,3 +1,5 @@
+import { Button } from "@blueprintjs/core";
+import { AppWindowSurface } from "./AppWindow";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { ToolRecord } from "./toolRecords";
 import { createPaletteFocusRestoration } from "./paletteActions";
@@ -67,17 +69,18 @@ export function ToolRecordInspection({ record, canInspect }: { record: ToolRecor
         }
         if (event.key === "Escape") { event.preventDefault(); close(); }
       }}>
-      <header><h2 id={id}>{t("Inspect supplied tool record")}</h2><button ref={closeButton} type="button" aria-label={t("Close")} onClick={() => { if (active.current === review) close(); }}><AppIcon name="close" size={18} /></button></header>
-      <p><code>{record.name ?? t("Unknown")}</code></p>
+      <AppWindowSurface storageKey="codealta.desktop.window.tool-record.v1" title={<><AppIcon name="tool" size={14} /> {record.name ?? t("Unknown")}</>} titleId={id} preferredSize={viewport => ({ width: Math.min(900, viewport.width - 40), height: Math.min(640, viewport.height - 40) })}
+        onClose={() => { if (active.current === review) close(); }} closeLabel={t("Close")} closeRef={closeButton}
+        headerActions={<Button variant="minimal" size="small" className="tool-record-copy" icon={<AppIcon name={copied ? "check" : "copy"} size={15} />}
+          aria-label={t("Copy supplied tool JSON")} title={t("Copy supplied tool JSON")} disabled={retired || !allowed()} onClick={async event => {
+            if (event.defaultPrevented || !event.currentTarget.isConnected || !current(review)) return;
+            try { await navigator.clipboard.writeText(record.raw); if (current(review)) setCopied(true); }
+            catch { /* No retry or detached feedback. Original raw Copy remains available. */ }
+          }} />}>
       <div className="dialog-panes">{record.fields.map(field => <section className="detail-pane" key={field.path}><h3><code>{field.path}</code></h3>
         <CodePreview field={field.path} text={field.text} />
       </section>)}</div>
-      <button type="button" className="tool-record-copy" disabled={retired || !allowed()} onClick={async event => {
-        if (event.defaultPrevented || !event.currentTarget.isConnected || !current(review)) return;
-        try { await navigator.clipboard.writeText(record.raw); if (current(review)) setCopied(true); }
-        catch { /* No retry or detached feedback. Original raw Copy remains available. */ }
-      }}>{t("Copy supplied tool JSON")}</button>
-      {copied && <p role="status">{t("Copied")}</p>}
-    </dialog>}
+      <span role="status" className="sr-only">{copied ? t("Copied") : ""}</span>
+    </AppWindowSurface></dialog>}
   </>;
 }

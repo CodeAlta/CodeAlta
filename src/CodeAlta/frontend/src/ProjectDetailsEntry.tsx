@@ -1,3 +1,4 @@
+import { AppWindowSurface } from "./AppWindow";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { WorkspaceProject, WorkspaceSnapshot } from "#neoastra";
 import { savedProjectSelection } from "./savedProjectSelection";
@@ -71,8 +72,8 @@ export function ProjectDetailsDialog({ project, snapshot, isCurrent, onClose }: 
       else composingEscape.current = true;
     }} onKeyUp={() => { composingEscape.current = false; }} onCompositionEnd={() => { composingEscape.current = false; }}
     onCancel={event => { event.preventDefault(); if (!composingEscape.current) close(); }}>
-    <header><div><span className="eyebrow">{t("Selected project")}</span><h2 id="project-details-title">{t("Project details")}</h2></div>
-      <button autoFocus type="button" className="icon-button" aria-label={t("Close project details")} onClick={close}><AppIcon name="close" size={16} /></button></header>
+    <AppWindowSurface storageKey="codealta.desktop.window.project-details.v1" title={t("Project details")} titleId="project-details-title" preferredSize={viewport => ({ width: Math.min(600, viewport.width - 40), height: Math.min(520, viewport.height - 40) })}
+      onClose={close} closeLabel={t("Close project details")}>
     <p id="project-details-description" className="muted-text">{t("Read-only saved catalog snapshot. Branch, tags, description and source metadata are not available here.")}</p>
     <dl className="session-info-fields project-details-fields" tabIndex={0} aria-label={t("Recorded project information")}>
       <div><dt>{t("Project ID")}</dt><dd><code>{project.id}</code></dd></div>
@@ -89,7 +90,7 @@ export function ProjectDetailsDialog({ project, snapshot, isCurrent, onClose }: 
     </span>}</span><span><button type="button" className="quiet-button" disabled={copyBusy} onClick={() => void copy("ID")}>{t("Copy project ID")}</button>{" "}
       <button type="button" className="quiet-button" disabled={copyBusy} onClick={() => void copy("path")}>{t("Copy project path")}</button>{" "}
       <button type="button" className="quiet-button" onClick={close}>{t("Close")}</button></span></footer>
-  </dialog>;
+  </AppWindowSurface></dialog>;
 }
 
 export function ProjectDetailsEntry({ context, getCurrent }: { context: ProjectDetailsContext; getCurrent: () => ProjectDetailsContext }) {

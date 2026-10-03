@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { Button, ButtonGroup, Callout, Tag } from "@blueprintjs/core";
+import { AppIcon } from "./AppIcon";
 import type { ReminderDetailRequest, ReminderDetailResponse, ReminderListRequest, ReminderListResponse } from "#neoastra";
 import type { ReminderTarget, createReminderActions } from "./reminderActions";
-import { reminderDelaySeconds } from "./reminderDuration";
+import { formatReminderDelay, reminderDelaySeconds } from "./reminderDuration";
 import { validReminderList } from "./reminderListObservation";
 import { useShellLanguage } from "./shellLanguage";
 
 type DetailNotice = "Host identity changed. Reload required." | "Reminder is unavailable or was deleted. Refresh the list."
   | "Reminder host is closed. Reload required." | "Reminder detail could not be read. Refresh the list to try again."
   | "Reminder changed, finished or was deleted. Refresh before saving again; your edit draft is retained.";
+// Pending-selection marker for switching from a dirty edit to the create form.
+const newSelection = "\u0000new";
 type ReadNotice = { kind: "changed" } | { kind: "failed" } | { kind: "unavailable"; status: string };
 
 export function ReminderPanel({ target, read, readDetail, actions, mutationAllowed, canMutate, readOnly = false }: {
@@ -24,7 +28,7 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
   const [page, setPage] = useState<ReminderListResponse>();
   const [error, setError] = useState<ReadNotice | null>(null);
   const [content, setContent] = useState("");
-  const [delay, setDelay] = useState("300");
+  const [delay, setDelay] = useState("5m");
   const [repeat, setRepeat] = useState("1");
   const [selected, setSelected] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState("");
@@ -42,7 +46,7 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
   const refreshTrigger = useRef<HTMLButtonElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const saveTrigger = useRef<HTMLButtonElement>(null);
-  const confirmationTrigger = useRef<HTMLInputElement>(null);
+  const confirmationTrigger = useRef<HTMLButtonElement>(null);
   const selectionVersion = useRef(0);
   const [reload, setReload] = useState(0);
   const latest = useRef(target);
@@ -121,16 +125,18 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
       actions.get(target)?.pending || actions.get(target)?.hold || actions.isFull(target) ||
       shownDetail.content == null || shownDetail.delaySeconds == null || shownDetail.repeatCount == null ||
       (discard && confirmLoad !== row.id)) return;
-    if (!discard && (content !== "" || delay !== "300" || repeat !== "1")) { setConfirmLoad(row.id); return; }
-    setContent(shownDetail.content); setDelay(String(shownDetail.delaySeconds)); setRepeat(String(shownDetail.repeatCount));
+    if (!discard && (content !== "" || delay !== "5m" || repeat !== "1")) { setConfirmLoad(row.id); return; }
+    setContent(shownDetail.content); setDelay(formatReminderDelay(shownDetail.delaySeconds)); setRepeat(String(shownDetail.repeatCount));
     setConfirmLoad(null);
+    // Show the filled Create form, unless that would drop an unsaved message edit.
+    if (!dirtyEdit) { selectionVersion.current++; setSelected(null); setConfirmation(""); setEditor(undefined); }
   }
   async function create() {
     if (!target || !canMutate() || !content.trim() || content.length > 4096 || delaySeconds === null || !validRepeat || blocked) return;
     const captured = target;
     if (await actions.submit(captured, { expectedEpoch: captured.epoch, sessionId: captured.sessionId,
       content, delaySeconds, repeatCount: Number(repeat) }, "create") &&
-      latest.current?.epoch === captured.epoch && latest.current.sessionId === captured.sessionId) setReload(n => n + 1);
+      latest.current?.epoch === captured.epoch && latest.current.sessionId === captured.sessionId) { setContent(""); setReload(n => n + 1); }
   }
   async function remove() {
     if (!target || !canMutate() || !row || confirmation !== row.id || blocked) return;
@@ -162,7 +168,7 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
     const source = event.target;
     if (!(source instanceof HTMLElement) || !panelRef.current?.contains(source) ||
       event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 ||
-      document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') ||
+      Array.from(document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]')).some(modal => !modal.contains(panelRef.current)) ||
       confirmLoad !== null || confirmSelection !== null || confirmDiscardEdit ||
       !target || !mutationAllowed || !canMutate()) return;
     const editing = !!source.closest("input, textarea, select, [contenteditable]");
@@ -191,95 +197,142 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
     }
     if (handled) { event.preventDefault(); event.stopPropagation(); }
   }
-  return <main ref={panelRef} onKeyDown={panelKeyDown} className="configuration-page reminder-page" aria-label={t("Reminders")}>
-    <header className="page-heading"><span className="eyebrow">{t("Desktop / Reminders")}</span><h1>{t("Reminders")}</h1>
-      <p>{t("Delayed prompts for the selected session. Schedules are in memory only and are lost when the host stops. At firing, the owned host attempts one Send; busy, unavailable or failed sends are not retried. Completion means the attempt finished, not that the agent answered.")}</p></header>
-    {!target ? <p role="status">{t("Select an owned session to manage its reminders.")}</p> : <>
-      {!mutationAllowed && <p role="alert">{readOnly
+  const stateLabel = (state: string) => state === "active" || state === "completed" ? t(state) : state;
+  const dueText = (value: string | null | undefined) => {
+    if (!value) return t("None");
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  };
+  function startNew() {
+    if (selected === null) { contentRef.current?.focus(); return; }
+    if (dirtyEdit) { setConfirmSelection(newSelection); return; }
+    selectionVersion.current++;
+    setSelected(null); setConfirmation(""); setConfirmLoad(null); setDetail(undefined); setDetailError(null);
+    setEditor(undefined); setConfirmSelection(null); setConfirmDiscardEdit(false);
+  }
+  return <main ref={panelRef} onKeyDown={panelKeyDown} className="reminder-page" aria-label={t("Reminders")}>
+    {!target ? <Callout role="status" compact>{t("Select an owned session to manage its reminders.")}</Callout> : <>
+      <div className="reminder-toolbar">
+        <div className="reminder-summary">
+          {active ? <><Tag minimal round intent={active.activeCount ? "primary" : "none"}>{t("{count} active", { count: active.activeCount })}</Tag>
+            <Tag minimal round>{t("{count} completed", { count: active.completedCount })}</Tag></>
+            : !error && <span role="status" className="bp6-text-muted">{t("Loading reminders.")}</span>}
+          <code className="reminder-session" title={t("Session:") + " " + target.sessionId}>{target.sessionId}</code>
+        </div>
+        <Button ref={refreshTrigger} variant="minimal" icon={<AppIcon name="refresh" size={15} />} data-epoch={target.epoch} data-session-id={target.sessionId}
+          aria-label={t("Refresh reminders")} title={t("Refresh reminders")} onClick={() => setReload(n => n + 1)} />
+        <Button intent="primary" icon={<AppIcon name="plus" size={15} />} text={t("New reminder")} disabled={!mutationAllowed} onClick={startNew} />
+      </div>
+      {!mutationAllowed && <Callout role="alert" compact intent="warning">{readOnly
         ? t("Archived project is read-only. Retained evidence can be inspected, but no Save, Create, Delete or shortcut write is available.")
-        : t("Host identity is invalidated. Reload before changing reminders.")}</p>}
-      <p>{t("Session:")} <code>{target.sessionId}</code>.</p>
-      <button ref={refreshTrigger} type="button" data-epoch={target.epoch} data-session-id={target.sessionId}
-        onClick={() => setReload(n => n + 1)}>{t("Refresh reminders")}</button>
-      {error && <p role="alert" className="error-text">{error.kind === "changed" ? t("Host identity changed. Reload required.") : error.kind === "failed" ? t("Reminder list could not be read.") : t("Reminder list unavailable ({status}).", { status: error.status })}</p>}
-      {!active && !error && <p role="status">{t("Loading reminders.")}</p>}
-      {operation && <p role={operation.hold ? "alert" : "status"}>{operation.message}</p>}
-      {full && <p role="alert">{t("Pending or uncertain reminder admissions fill this window. No operation was retried or evicted.")}</p>}
+        : t("Host identity is invalidated. Reload before changing reminders.")}</Callout>}
+      {error && <Callout role="alert" compact intent="danger">{error.kind === "changed" ? t("Host identity changed. Reload required.") : error.kind === "failed" ? t("Reminder list could not be read.") : t("Reminder list unavailable ({status}).", { status: error.status })}</Callout>}
+      {operation && !operation.pending && operation.status !== "ok" && <Callout role="alert" compact intent="warning">{operation.message}</Callout>}
+      {full && <Callout role="alert" compact intent="warning">{t("Pending or uncertain reminder admissions fill this window. No operation was retried or evicted.")}</Callout>}
       {retainedSave && <section className="reminder-recovery" aria-label={t("Retained reminder Save")}>
-        <h2>{t(operation?.pending ? "Pending reminder Save" : "Uncertain reminder Save")}</h2>
+        <h3>{t(operation?.pending ? "Pending reminder Save" : "Uncertain reminder Save")}</h3>
         <p>{t("This exact Save may already have committed. Refresh only observes the schedule; it does not retry, rebase or retarget this request.")}</p>
-        <p>{t("Host epoch:")} <code>{retainedSave.expectedEpoch}</code>. {t("Session:")} <code>{retainedSave.sessionId}</code>.
-          {t("Reminder ID:")} <code>{retainedSave.reminderId}</code>. {t("Original edit revision:")} <code>{retainedSave.editRevision}</code>.</p>
+        <p>{t("Reminder ID:")} <code>{retainedSave.reminderId}</code>. {t("Original edit revision:")} <code>{retainedSave.editRevision}</code>.</p>
         <pre aria-label={t("Retained Save full message")}>{retainedSave.content}</pre>
       </section>}
       {orphanDraft && <section className="reminder-recovery" aria-label={t("Unsaved reminder edit recovery")}>
-        <h2>{t("Unsaved reminder edit")}</h2>
+        <h3>{t("Unsaved reminder edit")}</h3>
         <p>{t("The original detail is unavailable. This is local draft text, not a confirmed Save. Refresh does not resubmit it.")}</p>
-        <p>{t("Host epoch:")} <code>{orphanDraft.base.epoch}</code>. {t("Session:")} <code>{orphanDraft.base.sessionId}</code>.
-          {t("Reminder ID:")} <code>{orphanDraft.base.reminderId}</code>. {t("Original edit revision:")} <code>{orphanDraft.base.editRevision}</code>.</p>
+        <p>{t("Reminder ID:")} <code>{orphanDraft.base.reminderId}</code>. {t("Original edit revision:")} <code>{orphanDraft.base.editRevision}</code>.</p>
         <pre aria-label={t("Unsaved edit full message")}>{orphanDraft.text}</pre>
-        {!operation?.pending && !operation?.hold && <>
-          <button type="button" onClick={() => setConfirmDiscardEdit(true)}>{t("Discard unsaved edit")}</button>
-          {confirmDiscardEdit && <p role="alert">{t("Discard unsaved message changes?")}
-            <button type="button" onClick={() => { setEditor(undefined); setConfirmDiscardEdit(false); }}>{t("Confirm discard edit")}</button>{" "}
-            <button type="button" onClick={() => setConfirmDiscardEdit(false)}>{t("Keep edit draft")}</button></p>}
-        </>}
+        {!operation?.pending && !operation?.hold && <div className="reminder-actions">
+          {confirmDiscardEdit ? <><span role="alert">{t("Discard unsaved message changes?")}</span>
+            <Button size="small" intent="danger" text={t("Confirm discard edit")} onClick={() => { setEditor(undefined); setConfirmDiscardEdit(false); }} />
+            <Button size="small" text={t("Keep edit draft")} onClick={() => setConfirmDiscardEdit(false)} /></>
+            : <Button size="small" text={t("Discard unsaved edit")} onClick={() => setConfirmDiscardEdit(true)} />}
+        </div>}
       </section>}
-      {active && <div className="model-catalog-layout"><section className="model-catalog-providers" aria-label={t("Reminder list")}>
-        <h2>{t("Schedules")}</h2><p role="status">{t("As of refresh: {active} active, {completed} completed.", { active: active.activeCount, completed: active.completedCount })}</p>
-        {active.reminders.length === 0 && <p>{t("No reminders for this session.")}</p>}
-        {active.reminders.map(item => <button type="button" key={item.id} aria-pressed={selected === item.id}
-          onClick={() => choose(item.id)}>
-          <strong>{t("Preview:")} {item.preview}</strong><small>{t("{state} · {fired}/{repeat} attempts · {id}", { state: item.state === "active" || item.state === "completed" ? t(item.state) : item.state, fired: item.firedCount, repeat: item.repeatCount, id: item.id })}</small>
-        </button>)}
-        {confirmSelection && <p role="alert">{t("Discard the unsaved reminder message draft to switch selection?")}
-          <button type="button" onClick={() => choose(confirmSelection, true)}>{t("Discard edit and switch")}</button>{" "}
-          <button type="button" onClick={() => setConfirmSelection(null)}>{t("Keep edit draft")}</button></p>}
-      </section><section className="model-catalog-results" aria-label={t("Reminder details and creation")}>
-        <h2>{t("Create reminder")}</h2><p>{t("Ctrl+Enter creates only from the Create message, delay, repeat or button; Enter in the message inserts a line.")}</p>
-        <label htmlFor="reminder-content">{t("Prompt to send")}</label>
-        <textarea ref={contentRef} id="reminder-content" value={content} maxLength={4096} onChange={event => { setContent(event.target.value); setConfirmLoad(null); }} />
-        <label htmlFor="reminder-delay">{t("Delay: whole seconds (1–86400) or invariant HH:mm:ss / d.HH:mm:ss")}</label>
-        <input ref={delayRef} id="reminder-delay" type="text" maxLength={24} value={delay} onChange={event => { setDelay(event.target.value); setConfirmLoad(null); }} />
-        <label htmlFor="reminder-repeat">{t("Total attempts (1–20)")}</label>
-        <input ref={repeatRef} id="reminder-repeat" type="number" min="1" max="20" step="1" value={repeat} onChange={event => { setRepeat(event.target.value); setConfirmLoad(null); }} />
-        {delaySeconds === null && <p role="alert">{t("Enter 1–86400 whole seconds or HH:mm:ss (00–23 hours), optionally prefixed with d. (e.g. 1.00:00:00). Fractions are not accepted.")}</p>}
-        {!validRepeat && <p role="alert">{t("Enter a whole repeat count between 1 and 20.")}</p>}
-        <button ref={createTrigger} type="button" data-epoch={target.epoch} data-session-id={target.sessionId}
-          disabled={blocked || !content.trim() || content.length > 4096 || delaySeconds === null || !validRepeat}
-          onClick={() => void create()}>{t("Create reminder")}</button>
-        {row && <section className="selected-reminder" aria-label={t("Selected reminder")}><h3>{t("Selected reminder")}</h3>
-          <p>{t("{id} · {state} · {fired}/{repeat} attempts · every {delay} seconds.", { id: row.id, state: row.state === "active" || row.state === "completed" ? t(row.state) : row.state, fired: row.firedCount, repeat: row.repeatCount, delay: row.delaySeconds })}</p>
-          <p>{t("Next due: {due}. Last send exit code: {code}.", { due: row.dueAt ?? t("None"), code: row.lastExitCode ?? t("None") })}
-            {row.lastError && ` ${t("Last error:")} ${row.lastError}`}</p>
-          {!shownDetail && !detailError && <p role="status">{t("Loading full reminder message.")}</p>}
-          {detailError && <p role="alert">{t(detailError)}</p>}
-          {shownDetail && <><h4>{t("Full scheduled message")}</h4>
-            <p aria-label={t("Full reminder message")} style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{shownDetail.content}</p>
-            <label htmlFor="reminder-edit">{t("Edit full reminder message (active schedule only)")}</label>
-            <textarea ref={editorRef} id="reminder-edit" data-epoch={target.epoch} data-session-id={target.sessionId}
-              data-reminder-id={row.id} maxLength={4096} value={editor?.text ?? ""}
-              disabled={blocked || row.state !== "active"} onChange={event => { setEditor(previous => previous && { ...previous, text: event.target.value }); setConfirmDiscardEdit(false); }} />
-            <button ref={saveTrigger} type="button" data-epoch={target.epoch} data-session-id={target.sessionId}
-              data-reminder-id={row.id} data-edit-revision={editor?.base.editRevision ?? ""}
-              disabled={blocked || row.state !== "active" || !dirtyEdit || !editor?.text.trim() ||
-              editor.text.length > 4096 || editor.base.editRevision !== shownDetail.editRevision}
-              onClick={() => void save()}>{t("Save message")}</button>
-            {dirtyEdit && <><button type="button" disabled={blocked} onClick={() => setConfirmDiscardEdit(true)}>{t("Discard edit draft")}</button>
-              {confirmDiscardEdit && <p role="alert">{t("Discard unsaved message changes?")}
-                <button type="button" disabled={blocked} onClick={() => { setEditor({ base: shownDetail, text: shownDetail.content! }); setConfirmDiscardEdit(false); }}>{t("Confirm discard edit")}</button>{" "}
-                <button type="button" onClick={() => setConfirmDiscardEdit(false)}>{t("Keep edit draft")}</button></p>}</>}
-            <p>{t("Saved edits affect only future captured deliveries, not already-admitted sends. Saving does not change the delay, repeat count, due time or attempts. Completed reminders cannot be edited.")}</p>
-            <button type="button" disabled={blocked} onClick={() => useAsNew(false)}>{t("Use as new reminder")}</button>
-            {confirmLoad === row.id && <p role="alert">{t("The Create form has edits. Discard them to load this reminder without changing its schedule.")}
-              <button type="button" disabled={blocked} onClick={() => useAsNew(true)}>{t("Discard draft and use reminder")}</button>{" "}
-              <button type="button" onClick={() => setConfirmLoad(null)}>{t("Keep draft")}</button></p>}</>}
-          <label htmlFor="reminder-confirm">{t("To delete, type the exact reminder ID")}</label>
-          <input ref={confirmationTrigger} id="reminder-confirm" data-epoch={target.epoch} data-session-id={target.sessionId}
-            data-reminder-id={row.id} value={confirmation} onChange={event => setConfirmation(event.target.value)} />
-          <button type="button" disabled={blocked || confirmation !== row.id} onClick={() => void remove()}>{t("Delete confirmed reminder")}</button>
-          <p>{t("Deletion cannot retract an already captured delivery or a submitted run.")}</p></section>}
-      </section></div>}
+      {active && <div className="reminder-layout">
+        <section className="reminder-list" aria-label={t("Reminder list")}>
+          {active.reminders.length === 0 && <p className="reminder-empty">{t("No reminders for this session.")}</p>}
+          {active.reminders.map(item => <button type="button" key={item.id} className="reminder-row" data-state={item.state} aria-pressed={selected === item.id}
+            title={item.id} onClick={() => choose(item.id)}>
+            <span className="reminder-row-preview">{item.preview}</span>
+            <span className="reminder-row-meta"><span className="reminder-state" data-state={item.state}>{stateLabel(item.state)}</span>
+              <span>{t("{fired}/{repeat} sent · every {delay}", { fired: item.firedCount, repeat: item.repeatCount, delay: formatReminderDelay(item.delaySeconds) })}</span></span>
+          </button>)}
+          {confirmSelection && <Callout role="alert" compact intent="warning" className="reminder-confirm">{t("Discard the unsaved reminder message draft to switch selection?")}
+            <div className="reminder-actions">
+              <Button size="small" intent="danger" text={t("Discard edit and switch")} onClick={() => {
+                if (confirmSelection === newSelection) { setEditor(undefined); setConfirmSelection(null); selectionVersion.current++; setSelected(null); setConfirmation(""); setDetail(undefined); setDetailError(null); setConfirmDiscardEdit(false); }
+                else choose(confirmSelection, true);
+              }} />
+              <Button size="small" text={t("Keep edit draft")} onClick={() => setConfirmSelection(null)} /></div></Callout>}
+        </section>
+        {!row ? <section className="reminder-editor" aria-label={t("Reminder details and creation")}>
+          <h3>{t("New reminder")}</h3>
+          <label htmlFor="reminder-content">{t("Prompt to send")}</label>
+          <textarea ref={contentRef} id="reminder-content" className="bp6-input reminder-message" value={content} maxLength={4096} disabled={!mutationAllowed}
+            placeholder={t("Message sent to this session when the reminder fires")} onChange={event => { setContent(event.target.value); setConfirmLoad(null); }} />
+          <div className="reminder-schedule">
+            <div className="reminder-field"><label htmlFor="reminder-delay">{t("Delay")}</label>
+              <div className="reminder-delay">
+                <input ref={delayRef} id="reminder-delay" className="bp6-input" type="text" maxLength={24} value={delay} aria-invalid={delaySeconds === null} disabled={!mutationAllowed}
+                  onChange={event => { setDelay(event.target.value); setConfirmLoad(null); }} />
+                <ButtonGroup>{[["5m", 300], ["15m", 900], ["1h", 3600], ["4h", 14400]].map(([label, seconds]) =>
+                  <Button key={label} size="small" variant="outlined" active={delaySeconds === seconds} disabled={!mutationAllowed} text={label} onClick={() => { setDelay(String(label)); setConfirmLoad(null); }} />)}</ButtonGroup>
+              </div></div>
+            <div className="reminder-field"><label htmlFor="reminder-repeat">{t("Attempts")}</label>
+              <input ref={repeatRef} id="reminder-repeat" className="bp6-input" type="number" min="1" max="20" step="1" value={repeat} aria-invalid={!validRepeat} disabled={!mutationAllowed}
+                onChange={event => { setRepeat(event.target.value); setConfirmLoad(null); }} /></div>
+          </div>
+          {delaySeconds === null ? <p role="alert" className="reminder-problem">{t("Enter a delay between 1 second and 24 hours, e.g. 5m, 1h 30m, 90s or HH:mm:ss.")}</p>
+            : <p className="reminder-hint">{t("Fires every {delay}, {count} time(s).", { delay: formatReminderDelay(delaySeconds), count: validRepeat ? repeat : "?" })}</p>}
+          {!validRepeat && <p role="alert" className="reminder-problem">{t("Enter a whole repeat count between 1 and 20.")}</p>}
+          <div className="reminder-actions">
+            <Button ref={createTrigger} intent="primary" icon={<AppIcon name="reminder" size={15} />} data-epoch={target.epoch} data-session-id={target.sessionId}
+              disabled={blocked || !content.trim() || content.length > 4096 || delaySeconds === null || !validRepeat}
+              text={t("Create reminder")} title={"Ctrl+Enter"} onClick={() => void create()} />
+          </div>
+        </section> : <section className="reminder-editor selected-reminder" aria-label={t("Selected reminder")}>
+          <header className="reminder-editor-heading"><h3>{t("Selected reminder")}</h3>
+            <span className="reminder-state" data-state={row.state}>{stateLabel(row.state)}</span></header>
+          <dl className="reminder-facts">
+            <div><dt>{t("Attempts")}</dt><dd>{row.firedCount} / {row.repeatCount}</dd></div>
+            <div><dt>{t("Delay")}</dt><dd>{formatReminderDelay(row.delaySeconds)}</dd></div>
+            <div><dt>{t("Next due")}</dt><dd>{dueText(row.dueAt)}</dd></div>
+            <div><dt>{t("Last send exit code")}</dt><dd>{row.lastExitCode ?? t("None")}</dd></div>
+          </dl>
+          {row.lastError && <Callout compact intent="danger">{t("Last error:")} {row.lastError}</Callout>}
+          {!shownDetail && !detailError && <p role="status" className="reminder-hint">{t("Loading full reminder message.")}</p>}
+          {detailError && <Callout role="alert" compact intent="warning">{t(detailError)}</Callout>}
+          {shownDetail && <>
+            <label htmlFor="reminder-edit">{t(row.state === "active" ? "Message" : "Message (completed reminders cannot be edited)")}</label>
+            <textarea ref={editorRef} id="reminder-edit" className="bp6-input reminder-message" aria-label={t("Full reminder message")} data-epoch={target.epoch} data-session-id={target.sessionId}
+              data-reminder-id={row.id} maxLength={4096} value={editor?.text ?? ""} readOnly={row.state !== "active"}
+              disabled={blocked && row.state === "active"} onChange={event => { setEditor(previous => previous && { ...previous, text: event.target.value }); setConfirmDiscardEdit(false); }} />
+            <div className="reminder-actions">
+              <Button ref={saveTrigger} intent="primary" data-epoch={target.epoch} data-session-id={target.sessionId}
+                data-reminder-id={row.id} data-edit-revision={editor?.base.editRevision ?? ""}
+                disabled={blocked || row.state !== "active" || !dirtyEdit || !editor?.text.trim() ||
+                editor.text.length > 4096 || editor.base.editRevision !== shownDetail.editRevision}
+                text={t("Save message")} onClick={() => void save()} />
+              {dirtyEdit && (confirmDiscardEdit ? <><span role="alert">{t("Discard unsaved message changes?")}</span>
+                <Button size="small" intent="danger" disabled={blocked} text={t("Confirm discard edit")} onClick={() => { setEditor({ base: shownDetail, text: shownDetail.content! }); setConfirmDiscardEdit(false); }} />
+                <Button size="small" text={t("Keep edit draft")} onClick={() => setConfirmDiscardEdit(false)} /></>
+                : <Button variant="minimal" disabled={blocked} text={t("Discard edit draft")} onClick={() => setConfirmDiscardEdit(true)} />)}
+              <span className="reminder-spacer" />
+              <Button variant="outlined" icon={<AppIcon name="copy" size={15} />} disabled={blocked} text={t("Use as new reminder")} onClick={() => useAsNew(false)} />
+            </div>
+            {confirmLoad === row.id && <Callout role="alert" compact intent="warning">{t("The Create form has edits. Discard them to load this reminder without changing its schedule.")}
+              <div className="reminder-actions"><Button size="small" intent="danger" disabled={blocked} text={t("Discard draft and use reminder")} onClick={() => useAsNew(true)} />
+                <Button size="small" text={t("Keep draft")} onClick={() => setConfirmLoad(null)} /></div></Callout>}
+          </>}
+          <div className="reminder-actions reminder-danger">
+            {confirmation === row.id ? <><span role="alert">{t("Delete this reminder?")}</span>
+              <Button size="small" intent="danger" disabled={blocked} text={t("Delete reminder")} onClick={() => void remove()} />
+              <Button size="small" text={t("Cancel")} onClick={() => setConfirmation("")} /></>
+              : <Button ref={confirmationTrigger} variant="outlined" intent="danger" icon={<AppIcon name="trash" size={15} />} data-epoch={target.epoch} data-session-id={target.sessionId}
+                data-reminder-id={row.id} disabled={blocked} text={t("Delete reminder")} onClick={() => setConfirmation(row.id)} />}
+          </div>
+        </section>}
+      </div>}
+      <p className="reminder-note">{t("Reminders are kept in memory and are lost when CodeAlta stops.")}</p>
     </>}
   </main>;
 }

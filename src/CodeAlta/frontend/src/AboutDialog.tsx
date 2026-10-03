@@ -1,3 +1,4 @@
+import { AppWindowSurface } from "./AppWindow";
 import { useLayoutEffect, useRef } from "react";
 import type { BootStatus } from "#neoastra";
 import { AppIcon } from "./AppIcon";
@@ -61,8 +62,8 @@ export function AboutDialog({ status, bootError, demo, onClose }: {
       else composingEscape.current = true;
     }} onKeyUp={() => { composingEscape.current = false; }} onCompositionEnd={() => { composingEscape.current = false; }}
     onCancel={event => { event.preventDefault(); if (!composingEscape.current) close(); }}>
-    <header><div><span className="eyebrow">{t("Desktop")}</span><h2 id="about-title">{t("About CodeAlta")}</h2></div>
-      <button type="button" autoFocus className="icon-button" aria-label={t("Close About")} onClick={close}><AppIcon name="close" size={16} /></button></header>
+    <AppWindowSurface storageKey="codealta.desktop.window.about.v1" title={t("About CodeAlta")} titleId="about-title" preferredSize={viewport => ({ width: Math.min(560, viewport.width - 40), height: Math.min(480, viewport.height - 40) })}
+      onClose={close} closeLabel={t("Close About")}>
     <p id="about-description" className="muted-text">{t(mode)}</p>
     <dl className="session-info-fields" tabIndex={0} aria-label={t("Running host build information")}>
       <div><dt>{t("Product")}</dt><dd>{product ?? t("Not available from the running host")}</dd></div>
@@ -71,5 +72,5 @@ export function AboutDialog({ status, bootError, demo, onClose }: {
     </dl>
     <p className="muted-text">{t("Update checks, downloads and installation are not supported in this desktop view. No update status is known.")}</p>
     <footer><button type="button" className="quiet-button" onClick={close}>{t("Close")}</button></footer>
-  </dialog>;
+  </AppWindowSurface></dialog>;
 }

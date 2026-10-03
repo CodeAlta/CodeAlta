@@ -1,3 +1,4 @@
+import { AppWindowSurface } from "./AppWindow";
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { useShellLanguage } from "./shellLanguage";
 
@@ -21,7 +22,8 @@ export function RemindersDialog({ children, onClose }: { children: ReactNode; on
       else onClose();
     }} onKeyUp={() => { composing.current = false; }} onCompositionEnd={() => { composing.current = false; }}
     onCancel={event => { event.preventDefault(); if (!composing.current) onClose(); }}>
-    <header><h2 id="reminders-dialog-title">{t("Reminders")}</h2><button ref={close} type="button" className="quiet-button" onClick={onClose}>{t("Close")}</button></header>
+    <AppWindowSurface storageKey="codealta.desktop.window.reminders.v1" title={t("Reminders")} titleId="reminders-dialog-title" preferredSize={viewport => ({ width: Math.min(920, viewport.width - 40), height: Math.min(700, viewport.height - 40) })}
+      onClose={onClose} closeLabel={t("Close")} closeRef={close}>
     {children}
-  </dialog>;
+  </AppWindowSurface></dialog>;
 }

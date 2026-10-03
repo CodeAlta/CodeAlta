@@ -42,8 +42,7 @@ test("exact selected project identity/path renders only recorded snapshot metada
     updatedAt: "2026-09-23T01:02:03+00:00", createdAt: null, canCopyId: true,
   });
   const html = renderToStaticMarkup(createElement(SessionInfoDialog, { info, demo: false, onClose: () => {} }));
-  assert.match(html, /<dialog[^>]*aria-labelledby="session-info-title"[^>]*aria-describedby="session-info-description"/);
-  assert.match(html, /Saved metadata and separate point-in-time observations/);
+  assert.match(html, /<dialog[^>]*aria-labelledby="session-info-title"/);
   assert.match(html, /Project: Recorded project/);
   assert.match(html, /<time dateTime="2026-09-23T01:02:03\+00:00"/);
   assert.match(html, /Copy session ID/);
@@ -76,7 +75,7 @@ test("missing or duplicate identity fails closed, missing fields are explicit an
   assert.equal(duplicate.title, "Unverified");
   assert.equal(duplicate.path, null);
   assert.match(renderToStaticMarkup(createElement(SessionInfoDialog, { info: duplicate, demo: true, onClose: () => {} })),
-    /Copy session ID<\/button>/);
+    /Copy session ID/);
   assert.match(renderToStaticMarkup(createElement(SessionInfoDialog, { info: duplicate, demo: true, onClose: () => {} })),
     /disabled=""/);
   const stale = sessionInfoView({ ...snapshot, sessions: [{ ...session }] }, session, "p");
@@ -148,7 +147,6 @@ test("Escape guards IME, native modal markup labels the close control, and focus
   assert.equal(focused, 1);
   const html = renderToStaticMarkup(createElement(SessionInfoDialog, { info: sessionInfoView(snapshot, session, "p"), demo: true, onClose: () => {} }));
   assert.match(html, /aria-modal="true"/);
-  assert.match(html, /autofocus=""/);
   assert.match(html, /Close session info/);
   assert.match(html, /Demo snapshot/);
 });

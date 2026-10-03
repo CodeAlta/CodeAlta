@@ -51,17 +51,26 @@ internal sealed class SessionUsageService
                 || usage.LastOperation is { } operation && (operation.InputTokens is < 0 || operation.OutputTokens is < 0
                     || operation.CacheReadTokens is < 0 || operation.CacheWriteTokens is < 0 || operation.CachedInputTokens is < 0
                     || operation.ReasoningTokens is < 0 || operation.Cost is { } cost && (!double.IsFinite(cost) || cost < 0)
-                    || operation.DurationMs is { } duration && (!double.IsFinite(duration) || duration < 0))))
+                    || operation.DurationMs is { } duration && (!double.IsFinite(duration) || duration < 0))
+                || usage.Window is { } envelope && (envelope.TotalContextEnvelope is <= 0 || envelope.MaxOutputTokens is <= 0 || !Label(envelope.Label))
+                || usage.LastOperation is { } labels && !(Label(labels.Model) && Label(labels.ReasoningEffort) && Label(labels.Initiator) && Label(labels.Label))
+                || usage.RateLimits is { } rates && !(Label(rates.Name) && Label(rates.PlanType) && ValidRate(rates.Primary) && ValidRate(rates.Secondary))
+                || usage.SessionTotal is { } totals && (totals.TotalTokens < 0 || totals.InputTokens < 0 || totals.OutputTokens < 0
+                    || totals.CachedInputTokens < 0 || totals.ReasoningTokens < 0)))
                 return Error("read_failed", id);
             SessionUsageObservation? observation = usage is null ? null : new(
                 Decimal(usage.Sequence), usage.SourceUpdatedAt?.ToString("O", CultureInfo.InvariantCulture),
                 usage.EventTimestamp?.ToString("O", CultureInfo.InvariantCulture), usage.Scope.ToString(), usage.Source.ToString(),
-                usage.Window is { } w ? new SessionUsageWindow(NullableDecimal(w.CurrentTokens), NullableDecimal(w.TokenLimit), w.MessageCount) : null,
+                usage.Window is { } w ? new SessionUsageWindow(NullableDecimal(w.CurrentTokens), NullableDecimal(w.TokenLimit), w.MessageCount,
+                    w.Label, NullableDecimal(w.TotalContextEnvelope), NullableDecimal(w.MaxOutputTokens)) : null,
                 usage.LastOperation is { } o ? new SessionUsageOperation(NullableDecimal(o.InputTokens), NullableDecimal(o.OutputTokens),
                     NullableDecimal(o.CacheReadTokens), NullableDecimal(o.CacheWriteTokens), NullableDecimal(o.CachedInputTokens),
                     NullableDecimal(o.ReasoningTokens), o.Cost?.ToString("R", CultureInfo.InvariantCulture),
-                    o.DurationMs?.ToString("R", CultureInfo.InvariantCulture)) : null,
-                usage.HadInvalidValues, usage.HadOmittedData);
+                    o.DurationMs?.ToString("R", CultureInfo.InvariantCulture), o.Model, o.ReasoningEffort, o.Initiator, o.Label) : null,
+                usage.HadInvalidValues, usage.HadOmittedData,
+                usage.RateLimits is { } limits ? new SessionUsageRateLimits(limits.Name, limits.PlanType, RateWindow(limits.Primary), RateWindow(limits.Secondary)) : null,
+                usage.SessionTotal is { } total ? new SessionUsageTotals(Decimal(total.TotalTokens), Decimal(total.InputTokens),
+                    Decimal(total.OutputTokens), Decimal(total.CachedInputTokens), Decimal(total.ReasoningTokens)) : null);
             var response = new SessionUsageResponse(state.Status, _epoch, id, state.RuntimeInstanceId.ToString("D"),
                 Decimal(state.AttachmentGeneration.Value), Decimal(state.OmittedUsageEvents), observation);
             return JsonSerializer.SerializeToUtf8Bytes(response, DesktopJsonContext.Default.SessionUsageResponse).Length <= MaximumResponseBytes
@@ -77,6 +86,13 @@ internal sealed class SessionUsageService
         or "transition" or "stale_attachment" or "metadata_missing" or "metadata_incomplete" or "metadata_invalid"
         or "metadata_mismatch" or "missing_project" or "ambiguous_project" or "incomplete_project"
         or "invalid_project" or "archived_project" or "read_failed";
+    private static SessionUsageRateWindow? RateWindow(SessionRuntimeUsageRateWindow? window) => window is { } value
+        ? new(value.UsedPercent, value.ResetsAt?.ToString("O", CultureInfo.InvariantCulture), NullableDecimal(value.WindowDurationMinutes)) : null;
+    private static bool ValidRate(SessionRuntimeUsageRateWindow? window) => window is not { } value
+        || value.UsedPercent is null or (>= 0 and <= 100) && value.WindowDurationMinutes is null or >= 0;
+    // Provider text is bounded by the runtime owner; refuse anything else instead of forwarding it.
+    private static bool Label(string? value) => value is null
+        || value.Length is > 0 and <= SessionRuntimeUsageObservation.MaximumTextLength && Text(value) && !value.Any(char.IsControl);
     private static string Decimal(long value) => value.ToString(CultureInfo.InvariantCulture);
     private static string? NullableDecimal(long? value) => value?.ToString(CultureInfo.InvariantCulture);
     private static bool ProjectId(string? value) => value is { Length: 36 } && Guid.TryParseExact(value, "D", out var id)
@@ -109,7 +125,12 @@ internal sealed record SessionUsageResponse(string Status, string HostEpoch, str
     string? AttachmentGeneration, string? OmittedUsageEvents, SessionUsageObservation? Observation);
 internal sealed record SessionUsageObservation(string Sequence, string? SourceUpdatedAt, string? EventTimestamp,
     string Scope, string Source, SessionUsageWindow? Window, SessionUsageOperation? LastOperation,
-    bool HadInvalidValues, bool HadOmittedData);
-internal sealed record SessionUsageWindow(string? CurrentTokens, string? TokenLimit, int? MessageCount);
+    bool HadInvalidValues, bool HadOmittedData, SessionUsageRateLimits? RateLimits = null, SessionUsageTotals? SessionTotal = null);
+internal sealed record SessionUsageWindow(string? CurrentTokens, string? TokenLimit, int? MessageCount,
+    string? Label = null, string? TotalContextEnvelope = null, string? MaxOutputTokens = null);
 internal sealed record SessionUsageOperation(string? InputTokens, string? OutputTokens, string? CacheReadTokens,
-    string? CacheWriteTokens, string? CachedInputTokens, string? ReasoningTokens, string? Cost, string? DurationMs);
+    string? CacheWriteTokens, string? CachedInputTokens, string? ReasoningTokens, string? Cost, string? DurationMs,
+    string? Model = null, string? ReasoningEffort = null, string? Initiator = null, string? Label = null);
+internal sealed record SessionUsageRateLimits(string? Name, string? PlanType, SessionUsageRateWindow? Primary, SessionUsageRateWindow? Secondary);
+internal sealed record SessionUsageRateWindow(int? UsedPercent, string? ResetsAt, string? WindowDurationMinutes);
+internal sealed record SessionUsageTotals(string TotalTokens, string InputTokens, string OutputTokens, string CachedInputTokens, string ReasoningTokens);

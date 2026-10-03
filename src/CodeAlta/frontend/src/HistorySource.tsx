@@ -1,3 +1,4 @@
+import { AppWindowSurface } from "./AppWindow";
 import { useLayoutEffect, useRef, useState } from "react";
 import { workspace, type HistoryRevision, type HistorySourceResponse } from "#neoastra";
 import { loadHistorySource } from "./loadHistorySource";
@@ -61,7 +62,8 @@ export function HistorySource({ target, canInspect, onClose }: { target: History
       event.stopPropagation();
       if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault();
     }}>
-    <header><strong>{t("Full raw record · UTF-8 JSON source")}</strong> <button ref={closeButton} type="button" aria-label={t("Close source")} title={t("Close source")} onClick={() => { retire(); onClose(); }}><AppIcon name="close" size={18} /></button></header>
+    <AppWindowSurface storageKey="codealta.desktop.window.history-source.v1" title={t("Full raw record · UTF-8 JSON source")} preferredSize={viewport => ({ width: Math.min(900, viewport.width - 40), height: Math.min(640, viewport.height - 40) })}
+      onClose={() => { retire(); onClose(); }} closeLabel={t("Close source")} closeRef={closeButton}>
     <p>{t("One chunk at a time, at most 16 KiB. Copy copies only the displayed chunk.")}</p>
     <p>{t("Record bytes")}: {target.start}–{target.end}; {t("Chunk offset")}: {offset}</p>
     {retired && <p role="alert">{t("Source review expired. Close and reopen from the history row.")}</p>}
@@ -77,5 +79,5 @@ export function HistorySource({ target, canInspect, onClose }: { target: History
         if (current() && controller.current === read && !read.signal.aborted) setCopied(true);
       }, () => {});
     }}>{t(copied ? "Chunk copied" : "Copy chunk")}</button>
-  </dialog>;
+  </AppWindowSurface></dialog>;
 }

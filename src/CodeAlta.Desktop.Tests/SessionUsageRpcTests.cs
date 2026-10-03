@@ -48,6 +48,48 @@ public sealed class SessionUsageRpcTests
     }
 
     [TestMethod]
+    public async Task ModelLimitsRateWindowsAndSessionTotalsAreProjectedAndUnboundedTextIsRefused()
+    {
+        var reset = new DateTimeOffset(2026, 9, 25, 12, 0, 0, TimeSpan.Zero);
+        var usage = new SessionRuntimeUsageObservation(1, null, null, AgentUsageScope.CurrentWindow, AgentUsageSource.CodexTokenCountEvent,
+            new(100, 1000, 3, "Active context window", 1200, 200),
+            new(10, 20, null, null, 5, 7, null, 1500, "gpt-test", "high", "agent", "Last turn"), false, false,
+            new("Codex", "pro", new(40, reset, 300), new(null, null, null)), new(900, 500, 300, 60, 40));
+        var request = new SessionUsageRequest(Epoch, "session", "global", null, null);
+        var service = new SessionUsageService((_, _, _, _, _) => Task.FromResult(new OwnedUsageReadResult("ok", Guid.NewGuid(), "session", 1, usage, 0)), Epoch);
+        var observation = (await service.ReadAsync(request, default)).Observation!;
+        Assert.AreEqual("Active context window", observation.Window!.Label);
+        Assert.AreEqual("1200", observation.Window.TotalContextEnvelope);
+        Assert.AreEqual("200", observation.Window.MaxOutputTokens);
+        Assert.AreEqual("gpt-test", observation.LastOperation!.Model);
+        Assert.AreEqual("high", observation.LastOperation.ReasoningEffort);
+        Assert.AreEqual("agent", observation.LastOperation.Initiator);
+        Assert.AreEqual("Last turn", observation.LastOperation.Label);
+        Assert.AreEqual("Codex", observation.RateLimits!.Name);
+        Assert.AreEqual("pro", observation.RateLimits.PlanType);
+        Assert.AreEqual(40, observation.RateLimits.Primary!.UsedPercent);
+        Assert.AreEqual("2026-09-25T12:00:00.0000000+00:00", observation.RateLimits.Primary.ResetsAt);
+        Assert.AreEqual("300", observation.RateLimits.Primary.WindowDurationMinutes);
+        Assert.IsNull(observation.RateLimits.Secondary!.UsedPercent);
+        Assert.AreEqual("900", observation.SessionTotal!.TotalTokens);
+        Assert.AreEqual("40", observation.SessionTotal.ReasoningTokens);
+
+        // The runtime owner bounds provider text; anything else is refused rather than forwarded.
+        foreach (var bad in new[]
+        {
+            usage with { LastOperation = usage.LastOperation!.Value with { Model = new string('m', SessionRuntimeUsageObservation.MaximumTextLength + 1) } },
+            usage with { Window = usage.Window!.Value with { Label = "line\nbreak" } },
+            usage with { RateLimits = usage.RateLimits! with { Primary = new(101, null, null) } },
+            usage with { SessionTotal = new(-1, 0, 0, 0, 0) },
+            usage with { Window = usage.Window!.Value with { MaxOutputTokens = 0 } },
+        })
+        {
+            var refused = new SessionUsageService((_, _, _, _, _) => Task.FromResult(new OwnedUsageReadResult("ok", Guid.NewGuid(), "session", 1, bad, 0)), Epoch);
+            Assert.AreEqual("read_failed", (await refused.ReadAsync(request, default)).Status);
+        }
+    }
+
+    [TestMethod]
     public async Task NoObservationTransitionsAndFaultsNeverImplyZero()
     {
         var service = new SessionUsageService((_, _, _, _, _) => Task.FromResult(new OwnedUsageReadResult("no_observation", Guid.NewGuid(), "session", 1, null, 0)), Epoch);

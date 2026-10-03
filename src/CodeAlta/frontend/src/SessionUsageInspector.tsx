@@ -1,130 +1,196 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
-import { Button } from "@blueprintjs/core";
-import { sessionUsage, type SessionUsageResponse } from "#neoastra";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Button, Callout, Tag } from "@blueprintjs/core";
+import { sessionUsage, type SessionUsageObservation, type SessionUsageRateWindow, type SessionUsageResponse } from "#neoastra";
 import { AppIcon } from "./AppIcon";
+import { AppWindow } from "./AppWindow";
+import { compactTokens, contextSegments, contextUsage, groupedTokens, mergeUsageObservation, operationSegments, persistedContextUsage,
+  persistedOperation, persistedUsageFields, rateWindowSummary, usageIntent, usageMarkdown, type UsageSegment } from "./contextUsage";
 import { usageMessage, validateUsage, type UsageTarget } from "./sessionUsage";
 import type { createMutationCapability } from "./sessionOperations";
-import { createPaletteFocusRestoration } from "./paletteActions";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
 
-export function SessionUsageInspector({ target, capability }: {
+const minimumReadInterval = 4000;
+const segmentLabels: Record<string, MessageKey> = { active: "Active context", headroom: "Input headroom", input: "Input", output: "Output",
+  cacheRead: "Cache read", cacheWrite: "Cache write", cachedInput: "Cached input", reasoning: "Reasoning" };
+
+/** A proportional stacked bar with its legend (value and share per slice), the TUI's breakdown chart. */
+function UsageBreakdown({ segments, label }: { segments: readonly UsageSegment[]; label: string }) {
+  const { t } = useShellLanguage();
+  if (!segments.length) return null;
+  return <div className="usage-breakdown" role="img" aria-label={`${label}: ${segments.map(segment => `${t(segmentLabels[segment.key])} ${groupedTokens(segment.tokens)} (${segment.share}%)`).join(", ")}`}>
+    <div className="usage-breakdown-bar" aria-hidden="true">{segments.map(segment =>
+      <span key={segment.key} data-segment={segment.key} style={{ flexGrow: Math.max(segment.share, .6) }} />)}</div>
+    <ul className="usage-breakdown-legend" aria-hidden="true">{segments.map(segment => <li key={segment.key} data-segment={segment.key}>
+      <span className="usage-breakdown-dot" /><span>{t(segmentLabels[segment.key])}</span>
+      <strong>{groupedTokens(segment.tokens)}</strong><small>{segment.share}%</small></li>)}</ul>
+  </div>;
+}
+
+function UsageCard({ title, aside, children }: { title: ReactNode; aside?: ReactNode; children: ReactNode }) {
+  return <section className="usage-card"><header><h3>{title}</h3>{aside && <span className="usage-card-aside">{aside}</span>}</header>{children}</section>;
+}
+
+/**
+ * Compact context-usage meter for the composer bar, with a details window that carries what the TUI
+ * usage popup shows: context pressure, the last operation's token breakdown, rate limits and the
+ * provider's session totals. It reads the last observed usage when the session is shown and again
+ * (at most every few seconds) when `refreshKey` changes; until the host has an observation it falls
+ * back to the last persisted usage record of the loaded timeline.
+ */
+export function SessionUsageInspector({ target, capability, refreshKey, persisted, provider, model }: {
   target: UsageTarget; capability: ReturnType<typeof createMutationCapability>;
+  /** Changes when a new observation is likely (run state or live revision). */
+  refreshKey?: string;
+  /** Text of the newest persisted usage record in the loaded timeline, if any. */
+  persisted?: string | null;
+  /** Session provider and selected model, shown until an operation reports its own model. */
+  provider?: string | null; model?: string | null;
 }) {
   const { t } = useShellLanguage();
-  const show = (value: string | number | null) => value === null ? t("Unknown") : String(value);
   const trigger = useRef<HTMLButtonElement>(null);
-  const dialog = useRef<HTMLDialogElement>(null);
-  const closeButton = useRef<HTMLButtonElement>(null);
   const request = useRef<AbortController | null>(null);
-  const [focusRestoration] = useState(createPaletteFocusRestoration);
-  const current = useRef(false);
-  const composingEscape = useRef(false);
+  const lastRead = useRef(0);
+  const runtime = useRef<string | null>(null);
+  // Fields accumulate across the events of one attachment; a new attachment starts over.
+  const attachment = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
-  const [status, setStatus] = useState<MessageKey | { raw: string }>("No read requested.");
+  const [copied, setCopied] = useState<boolean | null>(null);
+  const [status, setStatus] = useState<MessageKey | { raw: string } | null>(null);
   const [snapshot, setSnapshot] = useState<SessionUsageResponse | null>(null);
+  const [observation, setObservation] = useState<SessionUsageObservation | null>(null);
   const allowed = useSyncExternalStore(capability.subscribe, capability.canMutate);
-  useLayoutEffect(() => {
-    if (!open || !allowed) return;
-    const element = dialog.current;
-    element?.showModal();
-    const button = closeButton.current;
-    if (allowed && current.current && capability.canMutate() && element?.isConnected && element.open && element.matches(":modal") &&
-      button?.isConnected && element.contains(button) && !button.disabled && !element.closest("[inert], [hidden]") &&
-      !Array.from(document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]')).some(other => other !== element)) button.focus();
-    return () => { if (element?.open) element.close(); };
-  }, [open, allowed]);
-  useEffect(() => () => { current.current = false; request.current?.abort(); focusRestoration.cancel(); }, [focusRestoration]);
-  useEffect(() => {
-    if (allowed) return;
-    focusRestoration.cancel();
-    current.current = false;
-    request.current?.abort();
-    setOpen(false);
-    setSnapshot(null);
-  }, [allowed, focusRestoration]);
-  function close() {
-    current.current = false;
-    request.current?.abort();
-    request.current = null;
-    setOpen(false);
-    setSnapshot(null);
-    const button = trigger.current;
-    focusRestoration.schedule(button, () => !!button && !current.current && capability.canMutate() && trigger.current === button && !button.disabled,
-      () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
-  }
+
   function read() {
-    if (!current.current || !capability.canMutate()) return;
+    if (!capability.canMutate()) return;
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
+    lastRead.current = Date.now();
     setPending(true);
-    setSnapshot(null); // A failed refresh must not leave the prior observation looking current.
-    setStatus("Reading last-observed usage…");
     void sessionUsage.read({ expectedHostEpoch: target.epoch, sessionId: target.sessionId,
       scope: target.scope, projectId: target.projectId, expectedProjectPath: target.expectedProjectPath },
     { signal: controller.signal, timeoutMilliseconds: 15000 }).then(value => {
-      if (!current.current || request.current !== controller || controller.signal.aborted) return;
-      if (value.status === "stale_epoch" || value.hostEpoch !== target.epoch) {
-        capability.observe({ status: "stale_epoch", epoch: value.hostEpoch });
-        if (!capability.canMutate()) return;
-      }
+      if (request.current !== controller || controller.signal.aborted) return;
+      if (value.status === "stale_epoch" || value.hostEpoch !== target.epoch) capability.observe({ status: "stale_epoch", epoch: value.hostEpoch });
       if (!capability.canMutate()) return;
       const verified = validateUsage(target, value);
-      if (!verified) { setStatus("Invalid or foreign usage response; no observation established."); return; }
-      if (snapshotRuntime.current && verified.runtimeInstanceId && verified.runtimeInstanceId !== snapshotRuntime.current) {
+      if (!verified) { setSnapshot(null); setObservation(null); setStatus("Invalid or foreign usage response; no observation established."); return; }
+      if (runtime.current && verified.runtimeInstanceId && verified.runtimeInstanceId !== runtime.current) {
         capability.observe({ status: "stale_runtime", epoch: target.epoch });
-        setStatus("Runtime changed; reload before reading usage."); return;
+        setSnapshot(null); setObservation(null); setStatus("Runtime changed; reload before reading usage."); return;
       }
-      if (verified.runtimeInstanceId) snapshotRuntime.current = verified.runtimeInstanceId;
+      if (verified.runtimeInstanceId) runtime.current = verified.runtimeInstanceId;
       setSnapshot(verified);
-      setStatus(verified.status === "ok" ? "Last observed on this attachment; not current occupancy or a cumulative total."
-        : { raw: usageMessage(verified.status) });
+      setStatus(verified.status === "ok" ? null : { raw: usageMessage(verified.status) });
+      const identity = verified.attachmentGeneration ? `${verified.runtimeInstanceId}:${verified.attachmentGeneration}` : null;
+      if (verified.status === "ok" && verified.observation) {
+        const sameAttachment = attachment.current === identity;
+        attachment.current = identity;
+        const incoming = verified.observation;
+        setObservation(previous => sameAttachment ? mergeUsageObservation(previous, incoming) : incoming);
+      } else if (identity && attachment.current !== identity) {
+        attachment.current = identity; setObservation(null);
+      }
     }).catch(() => {
-      if (current.current && request.current === controller && !controller.signal.aborted)
-        setStatus("Usage read failed; no observation established. Refresh explicitly if needed.");
-    }).finally(() => { if (current.current && request.current === controller) setPending(false); });
+      // A failed refresh keeps the previous observation; the details window says the read failed.
+      if (request.current === controller && !controller.signal.aborted) setStatus("Usage read failed; no observation established. Refresh explicitly if needed.");
+    }).finally(() => { if (request.current === controller) setPending(false); });
   }
-  const snapshotRuntime = useRef<string | null>(null);
-  function openDialog() {
-    if (!capability.canMutate() || current.current || !trigger.current?.isConnected || trigger.current.disabled ||
-      trigger.current.closest("[inert], [hidden]") || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
-    focusRestoration.cancel();
-    current.current = true;
-    snapshotRuntime.current = null;
-    setOpen(true);
-    read();
+  // Read when shown and whenever the refresh key changes, but never more often than the minimum interval.
+  useEffect(() => {
+    if (!allowed) return;
+    const wait = Math.max(0, lastRead.current + minimumReadInterval - Date.now());
+    const timer = setTimeout(read, wait);
+    return () => clearTimeout(timer);
+  }, [allowed, refreshKey]);
+  useEffect(() => () => request.current?.abort(), []);
+  useEffect(() => { if (!allowed) { request.current?.abort(); setOpen(false); setSnapshot(null); setObservation(null); attachment.current = null; } }, [allowed]);
+  useEffect(() => { if (copied === null) return; const timer = setTimeout(() => setCopied(null), 2500); return () => clearTimeout(timer); }, [copied]);
+
+  const observed = contextUsage(observation?.window?.currentTokens, observation?.window?.tokenLimit);
+  const usage = observed ?? persistedContextUsage(persisted);
+  const fromHistory = !observed && !!usage;
+  const percent = usage?.percent ?? null;
+  const intent = usageIntent(percent);
+  const summary = usage ? `${compactTokens(usage.used)}${usage.limit ? ` / ${compactTokens(usage.limit)}` : ""}` : null;
+  const label = usage
+    ? t("Context usage: {summary}", { summary: percent === null ? summary! : `${Math.round(percent)}% · ${summary}` })
+    : t("Context usage unknown");
+  const operation = observation?.lastOperation ?? persistedOperation(persisted);
+  const history = new Map(persistedUsageFields(persisted).map(field => [field.label.toLowerCase(), field.value]));
+  const savedMessages = history.get("messages in context");
+  const messages = observation?.window?.messageCount ?? (savedMessages && /^\d+$/.test(savedMessages) ? Number(savedMessages) : null);
+  const modelName = operation?.model ?? model ?? null;
+  const limits = observation?.rateLimits ?? null;
+  const total = observation?.sessionTotal ?? null;
+  const updated = observation?.sourceUpdatedAt ?? observation?.eventTimestamp ?? null;
+  const updatedTime = updated && !Number.isNaN(new Date(updated).getTime()) ? new Date(updated).toLocaleTimeString([], { hour12: false }) : null;
+  const envelope = [observation?.window?.totalContextEnvelope && t("context window {tokens} tokens", { tokens: groupedTokens(observation.window.totalContextEnvelope) }),
+    observation?.window?.maxOutputTokens && t("max output {tokens} tokens", { tokens: groupedTokens(observation.window.maxOutputTokens) })].filter(Boolean).join("; ");
+  const operationFacts = operation ? [operation.reasoningEffort && t("effort {effort}", { effort: operation.reasoningEffort }),
+    operation.initiator && t("initiator {initiator}", { initiator: operation.initiator }),
+    operation.durationMs && Number.isFinite(Number(operation.durationMs)) && t("duration {duration} ms", { duration: String(Math.round(Number(operation.durationMs))) }),
+    operation.cost && t("cost {cost}", { cost: operation.cost })].filter((value): value is string => !!value) : [];
+  const rate = (window: SessionUsageRateWindow) => rateWindowSummary(window, { used: value => t("{percent}% used", { percent: value }),
+    window: minutes => t("{minutes}m window", { minutes }), resets: time => t("resets {time}", { time }) });
+  const rateRow = (name: MessageKey, window: SessionUsageRateWindow | null | undefined) => window && <div className="usage-rate">
+    <span className="usage-rate-name">{t(name)}</span>
+    <span className="usage-rate-bar" data-intent={usageIntent(window.usedPercent ?? null)} aria-hidden="true"><span style={{ width: `${window.usedPercent ?? 0}%` }} /></span>
+    <span className="usage-rate-text">{rate(window) || "—"}</span></div>;
+  async function copy() {
+    const markdown = usageMarkdown({ provider: provider ?? null, model: modelName, usage, messages, window: observation?.window ?? null,
+      operation, rateLimits: limits, sessionTotal: total });
+    try { await navigator.clipboard.writeText(markdown); setCopied(true); } catch { setCopied(false); }
   }
-  const observation = snapshot?.status === "ok" ? snapshot.observation : null;
+  const operations = operationSegments(operation);
   return <>
-    <Button ref={trigger} id="session-usage-trigger" data-usage-target={JSON.stringify(target)} variant="minimal" icon={<AppIcon name="usage" size={16} />} disabled={!allowed} aria-label={t("Inspect last-observed session usage")}
-      aria-haspopup="dialog" aria-expanded={open && allowed} title={t("Inspect last-observed usage (explicit read)")} onClick={openDialog} />
-    {open && allowed && <dialog ref={dialog} className="app-dialog session-usage-dialog" aria-modal="true"
-      aria-labelledby="session-usage-title" aria-describedby="session-usage-description"
-      onKeyDown={event => { event.stopPropagation(); if (event.key !== "Escape") return;
-        event.preventDefault(); if (!event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) close();
-        else composingEscape.current = true;
-      }} onKeyUp={() => { composingEscape.current = false; }}
-      onCompositionEnd={() => { composingEscape.current = false; }}
-      onCancel={event => { event.preventDefault(); if (!composingEscape.current) close(); }}>
-      <header><div><span className="eyebrow">{t("Owned session")}</span><h2 id="session-usage-title">{t("Last-observed usage")}</h2></div>
-        <button ref={closeButton} type="button" className="icon-button" aria-label={t("Close usage inspector")} onClick={close}><AppIcon name="close" size={16} /></button></header>
-      <p id="session-usage-description" className="muted-text">{t("One admitted provider event, not a live context measurement, complete history or inferred total. Unknown is not zero.")}</p>
-      <p role="status">{typeof status === "string" ? t(status) : status.raw}</p>
-      {observation && <dl className="session-info-fields session-usage-fields" tabIndex={0} aria-label={t("Last-observed usage fields")}>
-        <div><dt>{t("Attachment / event sequence")}</dt><dd><code>{snapshot?.attachmentGeneration}</code> / <code>{observation.sequence}</code></dd></div>
-        <div><dt>{t("Source / reported scope")}</dt><dd>{observation.source} / {observation.scope}</dd></div>
-        <div><dt>{t("Usage source time / event time")}</dt><dd>{show(observation.sourceUpdatedAt)} / {show(observation.eventTimestamp)}</dd></div>
-        <div><dt>{t("Reported window tokens / limit / messages")}</dt><dd>{show(observation.window?.currentTokens ?? null)} / {show(observation.window?.tokenLimit ?? null)} / {show(observation.window?.messageCount ?? null)}</dd></div>
-        <div><dt>{t("Last-operation input / output")}</dt><dd>{show(observation.lastOperation?.inputTokens ?? null)} / {show(observation.lastOperation?.outputTokens ?? null)}</dd></div>
-        <div><dt>{t("Last-operation cache read / write / reused input / reasoning")}</dt><dd>{show(observation.lastOperation?.cacheReadTokens ?? null)} / {show(observation.lastOperation?.cacheWriteTokens ?? null)} / {show(observation.lastOperation?.cachedInputTokens ?? null)} / {show(observation.lastOperation?.reasoningTokens ?? null)}</dd></div>
-        <div><dt>{t("Last-operation reported cost (currency unspecified) / duration (ms)")}</dt><dd>{show(observation.lastOperation?.cost ?? null)} / {show(observation.lastOperation?.durationMs ?? null)}</dd></div>
-        <div><dt>{t("Invalid values / omitted data / mismatched usage callbacks")}</dt><dd>{t(observation.hadInvalidValues ? "Yes" : "No")} / {t(observation.hadOmittedData ? "Yes" : "No")} / {snapshot?.omittedUsageEvents}</dd></div>
-      </dl>}
-      {snapshot?.status === "no_observation" && <p>{t("Attachment {attachment}; no admitted usage event. Mismatched usage callbacks: {count}.", { attachment: snapshot.attachmentGeneration ?? t("Unknown"), count: snapshot.omittedUsageEvents ?? t("Unknown") })}</p>}
-      <footer><span>{t("Point-in-time; external metadata changes can race this read.")}</span><span><button type="button" className="quiet-button" disabled={pending} onClick={read}>{t("Refresh usage")}</button>{" "}
-        <button type="button" className="quiet-button" onClick={close}>{t("Close")}</button></span></footer>
-    </dialog>}
+    <Button ref={trigger} id="session-usage-trigger" data-usage-target={JSON.stringify(target)} variant="minimal" className="context-usage" data-intent={intent}
+      disabled={!allowed} aria-label={label} aria-haspopup="dialog" aria-expanded={open && allowed} title={label} onClick={() => { if (capability.canMutate()) { setOpen(true); read(); } }}>
+      <span className="context-usage-meter" aria-hidden="true"><span style={{ width: `${percent ?? 0}%` }} /></span>
+      <span className="context-usage-text">{usage ? percent === null ? summary : `${Math.round(percent)}%` : <AppIcon name="usage" size={15} />}</span>
+      {usage && percent !== null && <span className="context-usage-tokens">{summary}</span>}
+    </Button>
+    {open && allowed && <AppWindow storageKey="codealta.desktop.window.usage.v2" className="session-usage-dialog" titleId="session-usage-title" title={t("Context usage")}
+      preferredSize={viewport => ({ width: Math.min(620, viewport.width - 40), height: Math.min(720, viewport.height - 40) })} minimumSize={{ width: 400, height: 320 }}
+      onClose={() => setOpen(false)} closeLabel={t("Close usage inspector")}
+      onCancel={event => { event.preventDefault(); setOpen(false); }} onKeyDown={event => event.stopPropagation()}
+      headerActions={<>
+        <Button variant="minimal" size="small" icon={<AppIcon name={copied ? "check" : "copy"} size={15} />} aria-label={t("Copy as Markdown")} title={t("Copy as Markdown")} onClick={() => void copy()} />
+        <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={15} />} disabled={pending} aria-label={t("Refresh usage")} title={t("Refresh usage")} onClick={read} /></>}>
+      <div className="context-usage-details">
+        <header className="context-usage-subject">
+          <div><strong>{provider ?? t("session provider")}</strong><span>{modelName ?? t("Provider default")}</span></div>
+          <div>{fromHistory && <Tag minimal round>{t("From saved history")}</Tag>}
+            {updatedTime && <span className="bp6-text-muted">{t("updated {time}", { time: updatedTime })}</span>}
+            <span role="status" className="bp6-text-muted">{copied === true ? t("Usage copied.") : copied === false ? t("Clipboard unavailable; nothing copied.") : ""}</span></div>
+        </header>
+        <UsageCard title={t("Context window")} aside={messages !== null && t("{count} messages", { count: messages })}>
+          <div className="context-usage-headline" data-intent={intent}><strong>{percent === null ? "—" : `${percent.toFixed(1)}%`}</strong>
+            <span>{usage ? usage.limit ? t("{used} / {limit} input tokens", { used: groupedTokens(usage.used), limit: groupedTokens(usage.limit) })
+              : t("{used} tokens", { used: groupedTokens(usage.used) }) : t("Waiting for usage data from the active session.")}</span></div>
+          <UsageBreakdown segments={contextSegments(usage)} label={t("Context window")} />
+          {envelope && <p className="usage-card-note">{t("Indicative model limits")}: {envelope}</p>}
+        </UsageCard>
+        {operation && <UsageCard title={operation.label ?? t("Last operation")} aside={operationFacts.join(" · ")}>
+          {operations.length ? <UsageBreakdown segments={operations} label={operation.label ?? t("Last operation")} />
+            : <p className="usage-card-note">{t("No token counts were reported for this operation.")}</p>}
+        </UsageCard>}
+        {limits && <UsageCard title={t("Limits")} aside={`${limits.name ?? t("Rate limits")} · ${limits.planType ?? t("plan unknown")}`}>
+          {rateRow("Primary", limits.primary)}{rateRow("Secondary", limits.secondary)}
+        </UsageCard>}
+        {total && <UsageCard title={t("Session total")} aside={t("{used} tokens", { used: groupedTokens(total.totalTokens) })}>
+          <dl className="context-usage-grid">
+            <div><dt>{t("Input")}</dt><dd>{groupedTokens(total.inputTokens)}</dd></div>
+            <div><dt>{t("Output")}</dt><dd>{groupedTokens(total.outputTokens)}</dd></div>
+            <div><dt>{t("Cached input")}</dt><dd>{groupedTokens(total.cachedInputTokens)}</dd></div>
+            <div><dt>{t("Reasoning")}</dt><dd>{groupedTokens(total.reasoningTokens)}</dd></div>
+          </dl>
+        </UsageCard>}
+        {status && !fromHistory && snapshot?.status !== "no_observation" && snapshot?.status !== "missing_session"
+          && <Callout compact intent="warning" role="status">{typeof status === "string" ? t(status) : status.raw}</Callout>}
+      </div>
+    </AppWindow>}
   </>;
 }

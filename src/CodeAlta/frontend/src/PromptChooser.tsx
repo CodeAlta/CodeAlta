@@ -1,3 +1,4 @@
+import { AppWindowSurface } from "./AppWindow";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { SessionChoicesResponse, SessionSelection } from "#neoastra";
 import { boundedModelChoices } from "./ModelChooser";
@@ -94,7 +95,8 @@ export function PromptChooser({ disabled, capture }: { disabled: boolean; captur
         if (event.key === "Escape") { event.preventDefault(); close(); }
         else if (event.key === "Enter" && !(event.target instanceof HTMLButtonElement)) event.preventDefault();
       }}>
-      <header><h2 id="prompt-chooser-title">{t("Next Send agent prompt selection")}</h2><button type="button" onClick={close}>{t("Close")}</button></header>
+      <AppWindowSurface storageKey="codealta.desktop.window.prompt-chooser.v1" title={t("Next Send agent prompt selection")} titleId="prompt-chooser-title" preferredSize={viewport => ({ width: Math.min(680, viewport.width - 40), height: Math.min(600, viewport.height - 40) })}
+        onClose={close} closeLabel={t("Close")}>
       <p>{t("Cached session choices only. Apply changes only the next Send; Close discards edits.")}</p>
       <p>{t("Observed prompt (choices snapshot, not live execution)")}: <code>{review.source.choices.current?.agentPromptId}</code></p>
       <p>{t("Local next-Send prompt")}: <code>{review.source.selection.agentPromptId}</code></p>
@@ -114,6 +116,6 @@ export function PromptChooser({ disabled, capture }: { disabled: boolean; captur
         if (!draft || !current(review) || !review.source.apply(draft)) { review.valid = false; setFailed(true); return; }
         close();
       }}>{t("Use prompt for next Send")}</button>
-    </dialog>}
+    </AppWindowSurface></dialog>}
   </>;
 }

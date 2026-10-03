@@ -1,3 +1,4 @@
+import { AppWindowSurface } from "./AppWindow";
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { createQueueSubmissions } from "./sessionQueue";
 import { retainedQueueEvidence } from "./retainedQueueEvidence";
@@ -90,7 +91,8 @@ function QueueIntentDialog({ review, current, close }: { review: Review; current
       } else if ((event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) && ["Enter", " "].includes(event.key)) event.preventDefault();
     }} onKeyUp={() => { composing.current = false; }} onCompositionEnd={() => { composing.current = false; }}
     onCancel={event => { event.preventDefault(); if (!composing.current) close(true); }}>
-    <header><h2 id="queue-intent-title">{t("Retained queue intent")}</h2><button type="button" onClick={() => close(true)}>{t("Close")}</button></header>
+    <AppWindowSurface storageKey="codealta.desktop.window.queue-intent.v1" title={t("Retained queue intent")} titleId="queue-intent-title" preferredSize={viewport => ({ width: Math.min(600, viewport.width - 40), height: Math.min(480, viewport.height - 40) })}
+      onClose={() => close(true)} closeLabel={t("Close")}>
     <p>{t("Local unresolved originals only; not live queue inventory or settled text. Reservation is not execution or durable storage. Existing controls retain all retry, cancellation and receipt-refresh authority.")}</p>
     {queue && <><h3>{t("Host-only Queue")}</h3><p>{t(queue.inFlight ? "Exact-request waiter pending" : "Outcome unknown · manual recovery")}</p>
       <dl className="session-info-fields">{Object.entries(queue.request).filter(([key]) => key !== "text").map(([key, value]) => <div key={key}><dt>{key}</dt><dd><code>{value}</code></dd></div>)}</dl>
@@ -100,5 +102,5 @@ function QueueIntentDialog({ review, current, close }: { review: Review; current
       <pre tabIndex={0}>{JSON.stringify(value.intent, null, 2)}</pre>
     </section>)}
     <footer><span role="status">{feedback && t(feedback)}</span>{queue && <button type="button" className="quiet-button queue-intent-copy" onClick={() => void copy()}>{t("Copy text")}</button>}</footer>
-  </dialog>;
+  </AppWindowSurface></dialog>;
 }

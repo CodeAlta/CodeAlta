@@ -63,6 +63,30 @@ internal sealed class ReminderService : IAsyncDisposable, IAltaReminderDelivery
         catch (Exception) { return new("read_failed", _epoch, request!.SessionId, [], 0, 0); }
     }
 
+    // Which sessions currently have active reminders, for indicators outside the selected session.
+    // Bounded by create admission (256 retained rows in total); no message text leaves the host.
+    [NeoRpcMethod("active")]
+    public ReminderActiveResponse Active(ReminderActiveRequest request, CancellationToken cancellationToken)
+    {
+        if (!Identity(request?.ExpectedEpoch)) return new("invalid_request", _epoch, []);
+        if (request!.ExpectedEpoch != _epoch) return new("stale_epoch", _epoch, []);
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            lock (_gate)
+            {
+                if (_closed) return new("closed", _epoch, []);
+                var sessions = _reminders.List(null, includeCompleted: false)
+                    .Where(row => row.State == AltaReminderStates.Active)
+                    .GroupBy(row => row.TargetSessionId, StringComparer.Ordinal)
+                    .Select(group => new ReminderActiveSession(group.Key, group.Count(), group.Min(row => row.DueAt)))
+                    .OrderBy(row => row.SessionId, StringComparer.Ordinal).ToArray();
+                return new("ok", _epoch, sessions);
+            }
+        }
+        catch (Exception) { return new("read_failed", _epoch, []); }
+    }
+
     [NeoRpcMethod("detail")]
     public async Task<ReminderDetailResponse> Detail(ReminderDetailRequest request, CancellationToken cancellationToken)
     {
@@ -234,6 +258,9 @@ internal sealed class ReminderService : IAsyncDisposable, IAltaReminderDelivery
 }
 
 internal sealed record ReminderListRequest(string ExpectedEpoch, string SessionId);
+internal sealed record ReminderActiveRequest(string ExpectedEpoch);
+internal sealed record ReminderActiveResponse(string Status, string Epoch, IReadOnlyList<ReminderActiveSession> Sessions);
+internal sealed record ReminderActiveSession(string SessionId, int ActiveCount, DateTimeOffset? NextDueAt);
 internal sealed record ReminderDetailRequest(string ExpectedEpoch, string SessionId, string ReminderId);
 internal sealed record ReminderDetailResponse(string Status, string Epoch, string? SessionId, string? ReminderId,
     string? Content, int? DelaySeconds, int? RepeatCount, string? EditRevision);

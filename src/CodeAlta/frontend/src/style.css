@@ -1086,11 +1086,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .panel-title .rail-action.bp6-button { width: 26px; min-width: 26px; height: 26px; min-height: 26px; padding: 0; color: var(--muted); }
 .panel-title .rail-action.bp6-button:hover, .panel-title .bp6-popover-open > .rail-action.bp6-button { color: var(--text); }
 .ide-shell .project-filter { flex: 0 0 auto; margin: 2px 4px 6px; }
-.ide-shell .session-navigation-options.bp6-button { position: absolute; top: -27px; right: 25px; z-index: 4; width: 22px; min-width: 22px; height: 22px; min-height: 22px; padding: 0; opacity: 0; }
-.ide-shell .project-session-branch:hover .session-navigation-options.bp6-button, .ide-shell .session-navigation-options.bp6-button:focus-visible,
-.ide-shell .bp6-popover-open > .session-navigation-options.bp6-button { opacity: 1; }
-.session-options { display: grid; gap: 6px; width: 260px; padding: 8px; }
-.session-options .bp6-menu { min-width: 0; padding: 0; background: transparent; }
+.ide-shell .session-search.bp6-input-group { margin: 2px 6px 4px 22px; }
 /* Dot-matrix activity spinner: eight dots on the perimeter of a 3x3 grid, lit in a rotating trail. */
 .activity-spinner { --activity-size: 14px; flex: 0 0 auto; display: inline-grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr); gap: calc(var(--activity-size) * .12); width: var(--activity-size); height: var(--activity-size); color: var(--accent); vertical-align: middle; }
 .activity-spinner > i { border-radius: 1px; background: currentColor; opacity: .14; animation: activity-dot .8s steps(1, end) infinite; }
@@ -1105,7 +1101,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 @keyframes activity-dot { 0% { opacity: 1; } 12.5% { opacity: .72; } 25% { opacity: .46; } 37.5% { opacity: .28; } 50%, 100% { opacity: .14; } }
 @media (prefers-reduced-motion: reduce) { .activity-spinner > i { animation: none; opacity: .6; } }
 .session-running .activity-spinner, .flexlayout__tab_button_leading .activity-spinner { margin-inline: 2px; }
-.ide-shell .project-filter .bp6-icon, .session-options .bp6-input-group .bp6-icon { color: var(--muted); }
+.ide-shell .project-filter .bp6-icon, .ide-shell .session-search .bp6-icon { color: var(--muted); }
 /* Desktop-style windows: a full-viewport modal layer hosting one movable, resizable surface (react-rnd). */
 .app-window-layer { position: fixed; inset: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; overflow: hidden; color: var(--text); background: transparent; }
 .app-window-layer::backdrop { background: rgba(0, 0, 0, .5); backdrop-filter: blur(3px); }
@@ -1175,3 +1171,162 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .settings-dialog-content .model-catalog-all .model-catalog-grid { max-width: 100%; overflow: hidden; border: 1px solid var(--line); border-radius: 4px; }
 .settings-dialog-content .model-catalog-all .model-catalog-results input[type="search"] { width: 100%; padding: 6px 9px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--panel-2); color: var(--text); }
 .settings-dialog-content .model-catalog-all .model-catalog-detail { padding: 14px 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+
+/* Native dialogs that host a window surface are a transparent full-viewport layer: the surface
+   (react-rnd) is the visible window, so the dialog's own box, padding and scrolling are dropped. */
+dialog:is(.app-dialog, .session-browser):has(> .app-window) { position: fixed; inset: 0; display: block; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; overflow: hidden; color: var(--text); background: transparent; box-shadow: none; text-align: start; }
+dialog:is(.app-dialog, .session-browser):has(> .app-window):not([open]) { display: none; }
+dialog:is(.app-dialog, .session-browser):has(> .app-window)::backdrop { background: rgba(0, 0, 0, .5); backdrop-filter: blur(3px); }
+dialog:has(> .app-window) > .app-window > .app-window-body { gap: 10px; padding: 14px 16px; overflow: auto; }
+dialog:has(> .app-window) > .app-window > .app-window-body > * { flex-shrink: 0; min-width: 0; }
+dialog:has(> .app-window) > .app-window > .app-window-body > :is(p, h3, dl, pre, section) { margin: 0; }
+dialog:has(> .app-window) > .app-window > .app-window-body > footer { position: sticky; bottom: -14px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin: auto -16px -14px; padding: 10px 16px; border-top: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font-size: 12px; }
+dialog:has(> .app-window) > .app-window > .app-window-body > footer > span:last-child { display: flex; flex-wrap: wrap; gap: 6px; margin-inline-start: auto; }
+dialog:has(> .app-window) > .app-window > .app-window-body > pre,
+dialog:has(> .app-window) > .app-window > .app-window-body > .detail-pane { flex: 1 1 auto; min-height: 80px; max-height: none; overflow: auto; }
+dialog:has(> .app-window) .app-window-body pre { max-height: none; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); }
+dialog:has(> .app-window) .app-window-body h3 { margin: 4px 0 0; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+dialog.session-info-dialog:has(> .app-window) .app-window-body > section { display: grid; gap: 6px; }
+dialog.session-info-dialog:has(> .app-window) .session-info-fields { margin: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+dialog.session-info-dialog:has(> .app-window) .session-info-fields > div { display: grid; grid-template-columns: minmax(120px, 34%) minmax(0, 1fr); gap: 12px; padding: 6px 10px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+dialog.session-info-dialog:has(> .app-window) .session-info-fields > div:last-child { border-bottom: 0; }
+dialog.session-info-dialog:has(> .app-window) .session-info-fields dt { color: var(--muted); }
+dialog.session-info-dialog:has(> .app-window) .session-info-fields dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+dialog.session-info-dialog:has(> .app-window) .session-info-fields dd small { display: block; color: var(--muted); }
+
+/* Composer: compact context-usage meter and its details window. */
+.context-usage.bp6-button { gap: 6px; min-height: 26px; padding: 2px 8px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.context-usage .bp6-button-text { display: inline-flex; align-items: center; gap: 6px; }
+.context-usage-meter { position: relative; display: block; width: 44px; height: 6px; overflow: hidden; border-radius: 3px; background: color-mix(in srgb, var(--text) 14%, transparent); }
+.context-usage-meter > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--accent); transition: width .3s ease; }
+.context-usage[data-intent="warning"] .context-usage-meter > span { background: #d1980b; }
+.context-usage[data-intent="danger"] .context-usage-meter > span { background: var(--red); }
+.context-usage-text { color: var(--text); font-weight: 600; }
+.context-usage[data-intent="warning"] .context-usage-text { color: #d1980b; }
+.context-usage[data-intent="danger"] .context-usage-text { color: var(--red); }
+.context-usage-tokens { color: var(--muted); }
+.context-usage-details { display: flex; flex-direction: column; gap: 14px; padding: 16px 18px; overflow: auto; }
+.context-usage-window { display: grid; gap: 8px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 6%, var(--panel)), var(--panel)); }
+.context-usage-headline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+.context-usage-headline strong { font-size: 30px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1; }
+.context-usage-headline > span:not(.bp6-tag) { color: var(--muted); font-variant-numeric: tabular-nums; }
+.context-usage-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin: 0; }
+.context-usage-grid > div { display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); }
+.context-usage-grid dt, .context-usage-meta dt { color: var(--muted); font-size: 11px; }
+.context-usage-grid dd { margin: 0; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.context-usage-meta { display: grid; gap: 6px; margin: 0; }
+.context-usage-meta > div { display: grid; grid-template-columns: minmax(140px, 40%) minmax(0, 1fr); gap: 12px; }
+.context-usage-meta dd { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.context-usage-note { margin: 0; font-size: 11.5px; }
+
+/* Explorer marker for sessions and scopes with active reminders. */
+.reminder-badge { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px; margin-inline-start: 4px; color: var(--accent); font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+/* Reminders window: toolbar, schedule list and a create/edit pane. */
+dialog.reminders-dialog:has(> .app-window) > .app-window > .app-window-body { padding: 0; }
+.reminder-page { flex: 1 1 auto; display: flex; flex-direction: column; gap: 10px; min-height: 0; padding: 12px 16px; overflow: auto; }
+.reminder-page > * { flex-shrink: 0; }
+.reminder-toolbar { display: flex; align-items: center; gap: 8px; }
+.reminder-summary { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.reminder-session { min-width: 0; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.reminder-page > .reminder-layout { flex: 1 1 auto; display: grid; grid-template-columns: minmax(200px, 280px) minmax(0, 1fr); gap: 12px; min-height: 220px; }
+.reminder-list { display: flex; flex-direction: column; min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.app-dialog .reminder-list > button.reminder-row { display: grid; gap: 4px; width: 100%; padding: 9px 12px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; text-align: start; }
+.app-dialog .reminder-list > button.reminder-row:hover { background: var(--panel-3); }
+.app-dialog .reminder-list > button.reminder-row[aria-pressed="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.reminder-row-preview { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 13px; overflow-wrap: anywhere; }
+.reminder-row[data-state="completed"] .reminder-row-preview { color: var(--muted); }
+.reminder-row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--muted); font-size: 11px; }
+.reminder-state { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; text-transform: capitalize; color: var(--muted); }
+.reminder-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.reminder-state[data-state="active"] { color: var(--green); }
+.reminder-empty { margin: auto; padding: 18px; color: var(--muted); font-size: 12.5px; text-align: center; }
+.reminder-confirm { margin: 8px; }
+.reminder-editor { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; padding: 12px 14px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.reminder-editor > * { flex-shrink: 0; }
+dialog:has(> .app-window) .app-window-body :is(.reminder-editor, .reminder-recovery) h3 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text); }
+.reminder-editor-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.reminder-editor label { color: var(--muted); font-size: 11.5px; font-weight: 600; }
+.reminder-editor textarea.reminder-message { flex: 1 1 96px; width: 100%; min-height: 96px; padding: 8px 10px; resize: none; font-size: 13px; line-height: 1.5; }
+.reminder-schedule { display: flex; flex-wrap: wrap; gap: 10px 18px; }
+.reminder-field { display: grid; gap: 4px; }
+.reminder-delay { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.reminder-delay input { width: 110px; }
+#reminder-repeat { width: 80px; }
+.reminder-editor input[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--red); }
+.reminder-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.reminder-spacer { flex: 1 1 auto; }
+.reminder-danger { margin-top: 2px; padding-top: 10px; border-top: 1px solid var(--line); }
+.reminder-hint, .reminder-note { margin: 0; color: var(--muted); font-size: 11.5px; }
+.reminder-problem { margin: 0; color: var(--red); font-size: 12px; }
+.reminder-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin: 0; }
+.reminder-facts > div { display: grid; gap: 2px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); }
+.reminder-facts dt { color: var(--muted); font-size: 11px; }
+.reminder-facts dd { margin: 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.reminder-recovery { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 8px; }
+.reminder-recovery p { margin: 0; font-size: 12px; }
+@media (max-width: 720px) { .reminder-page > .reminder-layout { grid-template-columns: minmax(0, 1fr); } }
+
+/* Context usage window: subject line, cards and the breakdown charts (context pressure, last operation, limits). */
+.context-usage-details { --usage-active: var(--accent); --usage-headroom: color-mix(in srgb, var(--text) 16%, transparent);
+  --usage-input: #4c90f0; --usage-output: #32a467; --usage-cacheRead: #13c9ba; --usage-cacheWrite: #ec9a3c; --usage-cachedInput: #9881f3; --usage-reasoning: #f0b726; gap: 12px; }
+.context-usage-subject { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; }
+.context-usage-subject > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; min-width: 0; font-size: 12px; }
+.context-usage-subject strong { font-size: 15px; }
+.context-usage-subject > div:first-child > span { color: var(--muted); overflow-wrap: anywhere; }
+.usage-card { display: grid; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.usage-card > header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.session-usage-dialog .usage-card h3 { margin: 0; font-size: 11.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.usage-card-aside { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.usage-card-note { margin: 0; color: var(--muted); font-size: 11.5px; }
+.context-usage-headline[data-intent="warning"] strong { color: #d1980b; }
+.context-usage-headline[data-intent="danger"] strong { color: var(--red); }
+.usage-breakdown { display: grid; gap: 8px; }
+.usage-breakdown-bar { display: flex; gap: 2px; height: 10px; overflow: hidden; border-radius: 5px; }
+.usage-breakdown-bar > span { flex: 0 0 0; min-width: 3px; background: var(--muted); }
+.usage-breakdown-legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 4px 16px; margin: 0; padding: 0; list-style: none; }
+.usage-breakdown-legend li { display: grid; grid-template-columns: 9px minmax(0, 1fr) auto 44px; align-items: baseline; gap: 7px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.usage-breakdown-legend li > span:nth-child(2) { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-breakdown-legend strong { font-weight: 600; }
+.usage-breakdown-legend small { color: var(--muted); text-align: end; }
+.usage-breakdown-dot { width: 9px; height: 9px; border-radius: 2px; background: var(--muted); }
+.usage-breakdown [data-segment="active"]:is(span, li) :is(.usage-breakdown-dot), .usage-breakdown-bar > [data-segment="active"] { background: var(--usage-active); }
+.usage-breakdown [data-segment="headroom"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="headroom"] { background: var(--usage-headroom); }
+.usage-breakdown [data-segment="input"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="input"] { background: var(--usage-input); }
+.usage-breakdown [data-segment="output"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="output"] { background: var(--usage-output); }
+.usage-breakdown [data-segment="cacheRead"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="cacheRead"] { background: var(--usage-cacheRead); }
+.usage-breakdown [data-segment="cacheWrite"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="cacheWrite"] { background: var(--usage-cacheWrite); }
+.usage-breakdown [data-segment="cachedInput"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="cachedInput"] { background: var(--usage-cachedInput); }
+.usage-breakdown [data-segment="reasoning"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="reasoning"] { background: var(--usage-reasoning); }
+.context-usage[data-intent] .context-usage-meter > span, .context-usage-headline { transition: color .2s ease; }
+.usage-rate { display: grid; grid-template-columns: 84px minmax(60px, 1fr) minmax(0, 2fr); align-items: center; gap: 10px; font-size: 12px; }
+.usage-rate-name { color: var(--muted); }
+.usage-rate-bar { position: relative; height: 6px; overflow: hidden; border-radius: 3px; background: var(--usage-headroom); }
+.usage-rate-bar > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--accent); }
+.usage-rate-bar[data-intent="warning"] > span { background: #d1980b; }
+.usage-rate-bar[data-intent="danger"] > span { background: var(--red); }
+.usage-rate-text { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.usage-card .context-usage-grid > div { background: var(--panel); }
+.context-usage-provenance { font-size: 12px; }
+.context-usage-provenance > summary { cursor: pointer; color: var(--muted); user-select: none; }
+.context-usage-provenance > summary:hover { color: var(--text); }
+.context-usage-provenance[open] > summary { margin-bottom: 8px; }
+.context-usage-provenance .context-usage-note { margin-top: 8px; }
+
+/* Session info window: field tables without the legacy inner padding, and a quiet provenance note. */
+dialog.session-info-dialog:has(> .app-window) .session-info-fields { display: block; padding: 0; overflow: visible; }
+dialog.session-info-dialog:has(> .app-window) .session-info-fields dt { margin: 0; font-size: 12px; }
+dialog.session-info-dialog:has(> .app-window) .session-info-fields dd { font-size: 12.5px; white-space: normal; }
+dialog.session-info-dialog:has(> .app-window) .app-window-body > section > p, .session-info-note { margin: 0; color: var(--muted); font-size: 11.5px; }
+/* Timeline inspection windows (details, file change, tool record, raw source): panes fill the window and scroll together. */
+dialog:has(> .app-window) > .app-window > .app-window-body > .dialog-panes { flex: 1 1 auto; min-height: 0; gap: 10px; overflow: auto; }
+dialog:has(> .app-window) .dialog-panes .detail-pane { max-height: none; overflow: visible; }
+dialog:has(> .app-window) .dialog-panes .detail-pane > h3 { margin: 0 0 6px; text-transform: none; letter-spacing: 0; font-size: 12px; }
+dialog:has(> .app-window) .dialog-panes .detail-pane:only-child { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+dialog:has(> .app-window) .dialog-panes .detail-pane:only-child > :is(pre, .code-preview) { flex: 1 1 auto; min-height: 0; overflow: auto; }
+dialog:has(> .app-window) [data-file-diff] { padding: 10px 12px; font-size: 12px; line-height: 1.55; tab-size: 4; }
+dialog:has(> .app-window) .file-dialog-summary { gap: 8px; }
+dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--text); text-transform: capitalize; }
+dialog.tool-record-dialog:has(> .app-window) .app-window-body > p:first-child code { padding: 2px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); font-size: 12.5px; }
+dialog:has(> .app-window) .tool-record-copy { align-self: flex-start; }
+
+.app-window-titlebar h2 > svg { vertical-align: -2px; margin-inline-end: 4px; color: var(--muted); }

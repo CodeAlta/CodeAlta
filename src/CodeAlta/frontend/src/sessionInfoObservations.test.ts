@@ -14,7 +14,8 @@ const runtime = (): SessionRuntimeScopedResponse => ({ status: "ok", hostEpoch: 
 const usage = (): SessionUsageResponse => ({ status: "ok", hostEpoch: epoch, sessionId: "saved", runtimeInstanceId: epoch,
   attachmentGeneration: "2", omittedUsageEvents: "3", observation: { sequence: "4", scope: "LastOperation", source: "LocalProviderUsage",
     sourceUpdatedAt: null, eventTimestamp: "2026-01-01T00:00:00Z", hadInvalidValues: true, hadOmittedData: true,
-    window: { currentTokens: "0", tokenLimit: null, messageCount: 0 }, lastOperation: null } });
+    window: { currentTokens: "0", tokenLimit: null, messageCount: 0, label: null, totalContextEnvelope: null, maxOutputTokens: null },
+    lastOperation: null, rateLimits: null, sessionTotal: null } });
 const read = (state = runtime(), value = usage()) => readSessionInfoObservations(target, async () => state, async () => value, new AbortController().signal, () => true);
 
 test("info keeps observed configuration, current/pending prompts and usage provenance distinct; zero is not unknown", async () => {
@@ -31,7 +32,7 @@ test("info keeps observed configuration, current/pending prompts and usage prove
 test("info refuses cross-read attachment, host, scope and invalid usage instead of merging", async () => {
   for (const value of [{ ...usage(), attachmentGeneration: "3" }, { ...usage(), hostEpoch: "other" },
     { ...usage(), observation: { ...usage().observation!, source: "invented" } },
-    { ...usage(), observation: { ...usage().observation!, window: { currentTokens: "-1", tokenLimit: null, messageCount: null } } }]) {
+    { ...usage(), observation: { ...usage().observation!, window: { currentTokens: "-1", tokenLimit: null, messageCount: null, label: null, totalContextEnvelope: null, maxOutputTokens: null } } }]) {
     const result = await read(runtime(), value);
     assert.match(JSON.stringify(result), /Unavailable/);
     assert.doesNotMatch(JSON.stringify(result), /observed-model/);

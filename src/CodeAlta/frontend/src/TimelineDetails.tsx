@@ -1,3 +1,4 @@
+import { AppWindowSurface } from "./AppWindow";
 import { useLayoutEffect, useRef } from "react";
 import type { TimelineItem } from "./timeline";
 import { MarkdownContent } from "./MarkdownContent";
@@ -27,7 +28,8 @@ export function TimelineDetails({ item, current, onClose }: { item: TimelineItem
     onClose={event => { if (!event.currentTarget.open) onClose(); }} onCancel={event => { event.preventDefault(); if (!composing.current) onClose(); }}
     onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
     onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); if (!event.repeat && !composing.current && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) onClose(); } }}>
-    <header><h2>{item.title}</h2><button ref={close} type="button" aria-label={t("Close")} title={t("Close")} onClick={onClose}><AppIcon name="close" size={18} /></button></header>
+    <AppWindowSurface storageKey="codealta.desktop.window.timeline-details.v1" title={item.title} preferredSize={viewport => ({ width: Math.min(900, viewport.width - 40), height: Math.min(640, viewport.height - 40) })}
+      onClose={onClose} closeLabel={t("Close")} closeRef={close}>
     <div className="dialog-panes">
     {item.summary && <section className="detail-pane"><CodePreview text={item.summary} /></section>}
     {item.markdown && item.category !== "file" && <section className="detail-pane"><MarkdownContent source={item.markdown} timelineCodeBlocks /></section>}
@@ -36,5 +38,5 @@ export function TimelineDetails({ item, current, onClose }: { item: TimelineItem
     {item.toolOutput && ![...(item.toolFields ?? []), ...(item.toolRecord?.fields ?? [])].some(field => field.text.includes(item.toolOutput!)) && <section className="detail-pane"><CodePreview text={item.toolOutput} /></section>}
     {item.details && !["tool", "file"].includes(item.category) && <section className="detail-pane"><pre>{item.details}</pre></section>}
     </div>
-  </dialog>;
+  </AppWindowSurface></dialog>;
 }

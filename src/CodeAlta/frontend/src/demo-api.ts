@@ -135,3 +135,8 @@ export const plugins = Object.freeze({
   list: async () => ({ status: "unavailable", projectId: null, plugins: [], omitted: 0 }),
   setEnabled: async () => ({ status: "unavailable", message: null }),
 });
+// The demo has no reminder worker.
+export const reminder = Object.freeze({
+  active: async () => ({ status: "unavailable", epoch: "demo", sessions: [] }),
+  list: unavailable, detail: unavailable, create: unavailable, save: unavailable, delete: unavailable,
+});

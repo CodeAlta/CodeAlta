@@ -1,3 +1,4 @@
+import { AppWindowSurface } from "./AppWindow";
 import { HTMLSelect } from "@blueprintjs/core";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { WorkspaceSnapshot } from "#neoastra";
@@ -62,7 +63,8 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
         event.preventDefault(); setSelected(Math.max(0, Math.min(rows.length - 1, selected + (event.key === "ArrowDown" ? 1 : -1))));
       } else if (event.key === "Enter") { event.preventDefault(); activate(selected); }
     }}>
-    <header><h2 id="session-browser-title">{t("Browse saved sessions")}</h2><button type="button" onClick={close}>{t("Close")}</button></header>
+    <AppWindowSurface storageKey="codealta.desktop.window.session-browser.v1" title={t("Browse saved sessions")} titleId="session-browser-title" preferredSize={viewport => ({ width: Math.min(900, viewport.width - 40), height: Math.min(680, viewport.height - 40) })}
+      onClose={close} closeLabel={t("Close")}>
     <label>{t("Scope")} <HTMLSelect aria-label={t("Session browser scope")} value={scope === null ? "global" : "project"} onChange={event => { batch?.owner.invalidate(); observations?.store.invalidate(); setScope(event.target.value === "global" ? null : projectId); setSelected(0); }}>
       {projectId !== null && <option value="project">{t("Selected project: {name}", { name: project.length === 1 ? project[0].name : t("ambiguous or missing") })}{project[0]?.archived ? t(" (archived, read-only)") : ""}</option>}
       <option value="global">{t("Global sessions")}</option>
@@ -96,5 +98,5 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
       {!rows.length && <p>{t("No matching saved sessions in the loaded scope.")}</p>}
     </div>
     <p>{t("Up/Down then Enter from search to open; Escape closes. Filtering never selects a session. Archived projects open read-only.")}</p>
-  </dialog>;
+  </AppWindowSurface></dialog>;
 }

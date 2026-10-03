@@ -1,3 +1,4 @@
+import { AppWindowSurface } from "./AppWindow";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { FileChanges } from "./fileChanges";
 import { useShellLanguage } from "./shellLanguage";
@@ -52,12 +53,13 @@ export function FileChangeInspection({ changes, canInspect }: { changes: FileCha
           onClick={event => { if (!composing.current && isDialogBackdrop(event)) close(); }}
           onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
           onCancel={event => { event.preventDefault(); if (!composing.current) close(); }} onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); if (!composing.current && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && !event.repeat) close(); } }}>
-          <header><h2 id={`${id}-title`}>{row.path}</h2><button type="button" aria-label={t("Close")} onClick={close}><AppIcon name="close" size={18} /></button></header>
+          <AppWindowSurface storageKey="codealta.desktop.window.file-change.v1" title={row.path} titleId={`${id}-title`} preferredSize={viewport => ({ width: Math.min(980, viewport.width - 40), height: Math.min(700, viewport.height - 40) })}
+            onClose={close} closeLabel={t("Close")}>
           <div className="file-dialog-summary"><span>{row.kind}</span>{row.counts && <span className="file-counts"><b>+{row.counts.added}</b> <em>-{row.counts.removed}</em></span>}</div>
           {row.diff !== null ? <pre data-file-diff>{row.diff.split("\n").filter(line => !/^(?:@@|diff --git |index |--- |\+\+\+ )/.test(line)).map((line, index, lines) => <span key={index}
             className={line.startsWith("+") ? "diff-added" : line.startsWith("-") ? "diff-removed" : line.startsWith("@@") ? "diff-hunk" : undefined}>
             {line}{index < lines.length - 1 ? "\n" : ""}</span>)}</pre> : <p>{t("No supported per-file diff supplied; original record details remain available.")}</p>}
-        </dialog>}
+        </AppWindowSurface></dialog>}
       </li>;
     })}</ul>
   </section>;

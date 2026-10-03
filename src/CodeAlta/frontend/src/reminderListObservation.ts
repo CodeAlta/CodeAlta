@@ -6,8 +6,8 @@ import { selectedSessionInfoAvailable } from "./sessionInfo";
 // project does not establish the selected persisted owner even if its session ID is present.
 export function verifiedReminderCountTarget(snapshot: WorkspaceSnapshot, session: WorkspaceSession,
   projectId: string | null): boolean {
-  if (snapshot.sessionsTruncated || snapshot.projectsTruncated ||
-    !selectedSessionInfoAvailable(snapshot, session, projectId)) return false;
+  // A truncated catalog still lists this exact session once; the host reads reminders by session id.
+  if (!selectedSessionInfoAvailable(snapshot, session, projectId)) return false;
   if (projectId === null) return session.scopeKind === "global" && session.projectId === null;
   return session.scopeKind === "project" && session.projectId === projectId &&
     snapshot.projects.filter(project => project.id === projectId).length === 1 &&

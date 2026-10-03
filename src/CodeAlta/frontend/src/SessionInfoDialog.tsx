@@ -1,10 +1,12 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { AppWindowSurface } from "./AppWindow";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Button } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import { copySessionId, dismissSessionInfoOnKey, type SessionInfoView } from "./sessionInfo";
 import { sessionRuntimeState, sessionUsage } from "#neoastra";
 import type { RuntimeTarget } from "./runtimeObservations";
 import { readSessionInfoObservations, unavailableInfoObservations, type InfoField, type InfoObservations } from "./sessionInfoObservations";
-import { canonicalInfoCopy, infoDescription, infoDemoDescription, infoUsageDescription, infoFieldLabel } from "./sessionInfoPresentation";
+import { canonicalInfoCopy, infoDemoDescription, infoFieldLabel } from "./sessionInfoPresentation";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
 
@@ -90,12 +92,21 @@ export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime
     } catch { if (valid()) unavailable("Error: read failed; no observation established."); }
     finally { if (valid()) setPending(false); }
   }
+  // Show the observed details as soon as the window opens (and again for a changed selection); the title-bar
+  // button reads them again. Nothing is polled.
+  const refreshOnOpen = useRef(refresh);
+  refreshOnOpen.current = refresh;
+  useEffect(() => { void refreshOnOpen.current(); }, [lifetime?.revision, target === null, target?.request.sessionId, target?.request.expectedHostEpoch, demo]);
+  const recorded = (value: string) => {
+    const date = new Date(value);
+    return <time dateTime={value} title={value}>{Number.isNaN(date.getTime()) ? value : date.toLocaleString()}</time>;
+  };
   const fields = (rows: readonly InfoField[]) => <dl className="session-info-fields" tabIndex={0}>{rows.map(([label, value]) => {
     const key = infoFieldLabel(label);
     return <div key={label}><dt>{key ? t(key) : label}</dt><dd>{notice ? t(notice) : value}</dd></div>;
   })}</dl>;
 
-  return <dialog ref={dialog} className="app-dialog session-info-dialog" aria-modal="true" aria-labelledby="session-info-title" aria-describedby="session-info-description"
+  return <dialog ref={dialog} className="app-dialog session-info-dialog" aria-modal="true" aria-labelledby="session-info-title"
     onKeyDown={event => {
       event.stopPropagation(); // Do not run shell chords while this native modal is open.
       if ((event.key === "Enter" || event.key === " ") && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.repeat)) {
@@ -108,9 +119,10 @@ export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime
     }}
     onKeyUp={() => { composingEscape.current = false; }} onCompositionEnd={() => { composingEscape.current = false; }}
     onCancel={event => { event.preventDefault(); if (!composingEscape.current) close(); }}>
-    <header><div><span className="eyebrow">{t("Selected session")}</span><h2 id="session-info-title">{t("Session info")}</h2></div>
-      <button autoFocus type="button" className="icon-button" aria-label={t("Close session info")} onClick={close}><AppIcon name="close" size={16} /></button></header>
-    <p id="session-info-description" className="muted-text" data-info-copy>{t(demo ? infoDemoDescription : infoDescription)}</p>
+    <AppWindowSurface storageKey="codealta.desktop.window.session-info.v1" title={t("Session info")} titleId="session-info-title" preferredSize={viewport => ({ width: Math.min(640, viewport.width - 40), height: Math.min(720, viewport.height - 40) })}
+      onClose={close} closeLabel={t("Close session info")}
+      headerActions={<Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={15} />} disabled={!target || demo || pending || !canRead()}
+        aria-label={t("Refresh observed details")} title={t("Refresh observed details")} onClick={() => void refresh()} />}>
     <section data-info-copy aria-labelledby="session-info-saved"><h3 id="session-info-saved">{t("Saved metadata")}</h3>
     <dl className="session-info-fields" tabIndex={0} aria-label={t("Recorded session information")}>
       <div><dt>{t("Session ID")}</dt><dd><code>{info.id || t("Not recorded")}</code></dd></div>
@@ -118,21 +130,19 @@ export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime
       <div><dt>{t("Scope")}</dt><dd>{info.scope}{info.scopeWarning && <small>{info.scopeWarning}</small>}</dd></div>
       <div><dt>{t("Recorded working directory")}</dt><dd>{info.path ?? t("Not recorded or unverified")}</dd></div>
       <div><dt>{t("Provider")}</dt><dd>{info.provider ?? t("Not recorded or unverified")}</dd></div>
-      <div><dt>{t("Saved update")}</dt><dd>{info.updatedAt ? <time dateTime={info.updatedAt}>{info.updatedAt}</time> : t("Not recorded or unverified")}</dd></div>
-      <div><dt>{t("Recorded creation time")}</dt><dd>{info.createdAt ? <time dateTime={info.createdAt}>{info.createdAt}</time> : t("Not recorded or unavailable")}</dd></div>
+      <div><dt>{t("Saved update")}</dt><dd>{info.updatedAt ? recorded(info.updatedAt) : t("Not recorded or unverified")}</dd></div>
+      <div><dt>{t("Recorded creation time")}</dt><dd>{info.createdAt ? recorded(info.createdAt) : t("Not recorded or unavailable")}</dd></div>
     </dl>
     </section>
     <section data-info-copy aria-labelledby="session-info-runtime"><h3 id="session-info-runtime">{t("Observed runtime configuration")}</h3>
       {fields(observations.runtime)}</section>
     <section data-info-copy aria-labelledby="session-info-usage"><h3 id="session-info-usage">{t("Last-observed usage")}</h3>
-      <p>{t(infoUsageDescription)}</p>
       {fields(observations.usage)}</section>
-    <p role="status">{t(pending ? "Reading observed details…" : "No automatic polling. Refresh explicitly.")}</p>
-    <div><button type="button" className="quiet-button" disabled={!target || demo || pending || !canRead()} onClick={() => void refresh()}>{t("Refresh observed details")}</button></div>
-    <footer><span>{feedback && <span role={feedback === "copied" ? "status" : "alert"}>
+    {demo && <p className="session-info-note" data-info-copy>{t(infoDemoDescription)}</p>}
+    <footer><span>{pending && <span role="status">{t("Reading observed details…")}</span>}{feedback && <span role={feedback === "copied" ? "status" : "alert"}>
       {t(feedback === "unavailable" ? "Clipboard unavailable; nothing copied." : copyDetails ? feedback === "copied" ? "Displayed details copied." : "Could not copy displayed details." : feedback === "copied" ? "Session ID copied." : "Could not copy session ID.")}
-    </span>}</span><span><button type="button" className="quiet-button" disabled={!info.canCopyId || pending} title={t("Copy uses canonical English labels and literal data; maximum 32768 characters.")} onClick={() => void copy(true)}>{t("Copy displayed details")}</button>
-      <button type="button" className="quiet-button" disabled={!info.canCopyId} onClick={() => void copy()}>{t("Copy session ID")}</button>{" "}
-      <button type="button" className="quiet-button" onClick={close}>{t("Close")}</button></span></footer>
-  </dialog>;
+    </span>}</span><span><Button icon={<AppIcon name="copy" size={15} />} disabled={!info.canCopyId || pending} title={t("Copy uses canonical English labels and literal data; maximum 32768 characters.")} text={t("Copy displayed details")} onClick={() => void copy(true)} />
+      <Button disabled={!info.canCopyId} text={t("Copy session ID")} onClick={() => void copy()} />
+      <Button intent="primary" text={t("Close")} onClick={close} /></span></footer>
+  </AppWindowSurface></dialog>;
 }

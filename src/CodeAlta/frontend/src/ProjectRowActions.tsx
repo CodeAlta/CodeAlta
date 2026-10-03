@@ -7,11 +7,20 @@ import { isSessionContextKey } from "./sessionRowActions";
 import { SessionTabMenu } from "./SessionTabMenu";
 import { useShellLanguage } from "./shellLanguage";
 
+/** Session actions of one scope (a project, or the global "Other sessions" scope when the id is null). */
+export type ScopeSessionActions = {
+  /** Whether a session can be created in this scope right now. */
+  canCreate: (projectId: string | null) => boolean;
+  create: (projectId: string | null) => void;
+  search: (projectId: string | null) => void;
+  browse: (projectId: string | null) => void;
+};
 export type ProjectRowAuthority = {
   current: () => ProjectRowContext;
   open: (id: string) => void;
   rename: () => void;
   archive: () => void;
+  sessions?: ScopeSessionActions;
 };
 type Review = { project: WorkspaceProject; context: ProjectRowContext; origin: HTMLButtonElement;
   row: HTMLLIElement; details: boolean; opening: boolean };
@@ -73,6 +82,15 @@ export function ProjectRowActions({ project, authority, children }: {
     document.addEventListener("pointerdown", pointer);
     return () => { review.current = null; document.removeEventListener("beforetoggle", modal, true); document.removeEventListener("pointerdown", pointer); };
   }, []);
+  function sessionAction(kind: "create" | "search" | "browse", original: Review) {
+    const value = review.current;
+    const owner = latest.current;
+    if (!value || value !== original || value.details || !owner?.sessions || !current(value)
+      || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')
+      || !projectRowAccess(value.project, owner.current()).open || kind === "create" && !owner.sessions.canCreate(value.project.id)) return;
+    dismiss();
+    owner.sessions[kind](value.project.id);
+  }
   function action(kind: "open" | "details" | "rename" | "archive", original: Review) {
     const value = review.current;
     const owner = latest.current;
@@ -105,6 +123,12 @@ export function ProjectRowActions({ project, authority, children }: {
       // The menu closes before it runs the chosen entry; dismiss afterwards so the entry still sees its review.
       onClose={() => queueMicrotask(() => { if (review.current === visible) dismiss(); })}
       items={[
+        ...(authority?.sessions ? [
+          { key: "create", label: t("New session"), icon: "newSession" as const, disabled: !authority.sessions.canCreate(project.id), onSelect: () => sessionAction("create", visible) },
+          { key: "search", label: `${t("Search sessions")}…`, icon: "search" as const, onSelect: () => sessionAction("search", visible) },
+          { key: "browse", label: t("Browse saved sessions"), icon: "browse" as const, onSelect: () => sessionAction("browse", visible) },
+          { key: "project", divider: true as const },
+        ] : []),
         { key: "open", label: t("Open"), icon: "open", onSelect: () => action("open", visible) },
         { key: "details", label: t("Details"), icon: "info", onSelect: () => action("details", visible) },
         { key: "rename", label: t("Rename project…"), icon: "edit", disabled: !access?.rename, onSelect: () => action("rename", visible) },

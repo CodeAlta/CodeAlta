@@ -58,6 +58,33 @@ public sealed class ReminderRpcTests
     }
 
     [TestMethod]
+    public async Task ActiveListsOnlySessionsWithActiveRemindersWithoutMessageText()
+    {
+        using var clock = new LiteralClock();
+        await using var service = new ReminderService("epoch", (id, _) => Task.FromResult(id is "one" or "two"),
+            _ => throw new AssertFailedException("No delivery expected."), clock);
+        Assert.AreEqual(0, service.Active(new("epoch"), default).Sessions.Count);
+        Assert.AreEqual("stale_epoch", service.Active(new("other"), default).Status);
+        Assert.AreEqual("invalid_request", service.Active(new(" "), default).Status);
+        Assert.AreEqual("ok", (await service.Create(new("epoch", "one", "private first", 60, 1), default)).Status);
+        Assert.AreEqual("ok", (await service.Create(new("epoch", "one", "private second", 120, 2), default)).Status);
+        var removed = await service.Create(new("epoch", "two", "private third", 30, 1), default);
+        var active = service.Active(new("epoch"), default);
+        Assert.AreEqual("ok", active.Status);
+        CollectionAssert.AreEqual(new[] { "one", "two" }, active.Sessions.Select(row => row.SessionId).ToArray());
+        Assert.AreEqual(2, active.Sessions[0].ActiveCount);
+        Assert.AreEqual(1, active.Sessions[1].ActiveCount);
+        var due = (await service.List(new("epoch", "one"), default)).Reminders.Min(row => row.DueAt);
+        Assert.AreEqual(due, active.Sessions[0].NextDueAt);
+        Assert.IsFalse(System.Text.Json.JsonSerializer.Serialize(active, DesktopJsonContext.Default.ReminderActiveResponse).Contains("private", StringComparison.Ordinal));
+        Assert.AreEqual("ok", service.Delete(new("epoch", "two", removed.ReminderId!, removed.ReminderId!), default).Status);
+        CollectionAssert.AreEqual(new[] { "one" }, service.Active(new("epoch"), default).Sessions.Select(row => row.SessionId).ToArray());
+        await Assert.ThrowsAsync<OperationCanceledException>(() => Task.Run(() => service.Active(new("epoch"), new CancellationToken(true))));
+        service.CloseAdmission();
+        Assert.AreEqual("closed", service.Active(new("epoch"), default).Status);
+    }
+
+    [TestMethod]
     public async Task SaveWaitingForSessionReadCannotPassClosedAdmission()
     {
         using var clock = new LiteralClock();

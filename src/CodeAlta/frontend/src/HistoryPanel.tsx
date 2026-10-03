@@ -6,7 +6,7 @@ import { historyCanRetry, historyMessage, historySettled, loadHistory, mergeHist
 import { liveTextItem, liveToolItem } from "./liveTimeline";
 import { orderTimelineRows, reconcileTimeline } from "./reconcileTimeline";
 import { groupTimelineTools } from "./toolGroups";
-import { latestNotes } from "./timeline";
+import { latestNotes, latestUsageText } from "./timeline";
 import { TimelineMessage } from "./TimelineMessage";
 import { useShellLanguage } from "./shellLanguage";
 import { HistorySource, type HistorySourceTarget } from "./HistorySource";
@@ -24,9 +24,11 @@ function revisionOf(cursor: HistoryRequest["cursor"]): string | null {
   return cursor?.version === 2 ? JSON.stringify([cursor.length, cursor.lastWriteUtcTicks]) : null;
 }
 
-export function History({ sessionId, observing = true, onNotesChange, onSettled, onBeforeOlder, onAfterOlder, onNewerOmitted, onNavigationReset,
+export function History({ sessionId, observing = true, onNotesChange, onUsageChange, onSettled, onBeforeOlder, onAfterOlder, onNewerOmitted, onNavigationReset,
   newestRequest, onNewestResult, live, read, canInspect, outgoing = [], onAcknowledgeOutgoing, messageCount }: {
   sessionId: string; onNotesChange: (markdown: string) => void; onSettled: () => void;
+  /** Reports the newest persisted usage record text of the loaded window. */
+  onUsageChange?: (text: string | null) => void;
   observing?: boolean;
   onBeforeOlder: () => void; onAfterOlder: () => void; live: SessionDisplayView | null;
   onNewerOmitted?: (value: boolean) => void;
@@ -110,6 +112,8 @@ export function History({ sessionId, observing = true, onNotesChange, onSettled,
     // Earlier pages can contain older notes, not the current note. Never promote them to latest.
     if (!timeline?.newerOmitted) onNotesChange(latestNotes(timeline?.entries ?? []));
   }, [timeline, onNotesChange]);
+  const usageText = timeline && !timeline.newerOmitted ? latestUsageText(timeline.entries) : null;
+  useEffect(() => { if (timeline && !timeline.newerOmitted) onUsageChange?.(usageText); }, [usageText, timeline?.sessionId, onUsageChange]);
   const current = state?.request === request ? state : undefined;
   const liveRefresh = useRef<{ revision: string | undefined; ready: boolean; retry: boolean; refresh: () => void }>(null);
   liveRefresh.current = { revision: live?.revision,

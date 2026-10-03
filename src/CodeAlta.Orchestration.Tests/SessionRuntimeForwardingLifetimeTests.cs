@@ -321,6 +321,46 @@ public sealed class SessionRuntimeForwardingLifetimeTests
     });
 
     [TestMethod]
+    public Task UsageState_RetainsBoundedModelLimitsAndProviderTotalsOfTheLastEventOnly() => Fixture.Run(async f =>
+    {
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        var reset = new DateTimeOffset(2026, 9, 25, 12, 0, 0, TimeSpan.Zero);
+        await f.EmitAndObserve(AgentSessionUpdateKind.UsageUpdated, null, usage: new AgentSessionUsage(
+            Window: new AgentWindowUsageSnapshot(100, 1000, 3, "Active context window", 1200, 200),
+            LastOperation: new AgentOperationUsageSnapshot("gpt-test", 10, 20, ReasoningEffort: "high", Initiator: "agent", Label: "Last turn"),
+            RateLimits: new AgentRateLimitSummary("Codex", "pro", new AgentRateLimitWindow(40, reset, 300), new AgentRateLimitWindow(140, null, -1)),
+            Details: new CodexSessionUsageDetails(TotalUsage: new CodexTokenUsage(60, 500, 300, 40, 900))), timestamp: DateTimeOffset.UnixEpoch);
+        var observation = (await f.Wait(f.Runtime.GetUsageStateAsync(f.Session.SessionId))).Observation!;
+        Assert.AreEqual("Active context window", observation.Window?.Label);
+        Assert.AreEqual(1200L, observation.Window?.TotalContextEnvelope);
+        Assert.AreEqual(200L, observation.Window?.MaxOutputTokens);
+        Assert.AreEqual("gpt-test", observation.LastOperation?.Model);
+        Assert.AreEqual("high", observation.LastOperation?.ReasoningEffort);
+        Assert.AreEqual("agent", observation.LastOperation?.Initiator);
+        Assert.AreEqual("Last turn", observation.LastOperation?.Label);
+        Assert.AreEqual("Codex", observation.RateLimits?.Name);
+        Assert.AreEqual("pro", observation.RateLimits?.PlanType);
+        Assert.AreEqual(new SessionRuntimeUsageRateWindow(40, reset, 300), observation.RateLimits?.Primary);
+        // Out-of-range limit values are omitted and flagged, never clamped.
+        Assert.AreEqual(new SessionRuntimeUsageRateWindow(null, null, null), observation.RateLimits?.Secondary);
+        Assert.IsTrue(observation.HadInvalidValues);
+        Assert.AreEqual(new SessionRuntimeUsageTotals(900, 500, 300, 60, 40), observation.SessionTotal);
+        Assert.IsFalse(observation.HadOmittedData);
+
+        // The next event replaces the observation; nothing is carried forward, and unretained details are flagged.
+        await f.EmitAndObserve(AgentSessionUpdateKind.UsageUpdated, null, usage: new AgentSessionUsage(
+            LastOperation: new AgentOperationUsageSnapshot("line\nbreak", ParentToolCallId: "call"),
+            Details: new CodexSessionUsageDetails(ModelContextWindow: 5)), timestamp: DateTimeOffset.UnixEpoch);
+        var next = (await f.Wait(f.Runtime.GetUsageStateAsync(f.Session.SessionId))).Observation!;
+        Assert.IsNull(next.Window);
+        Assert.IsNull(next.RateLimits);
+        Assert.IsNull(next.SessionTotal);
+        Assert.IsNull(next.LastOperation?.Model);
+        Assert.IsTrue(next.HadOmittedData);
+        Assert.IsFalse(next.HadInvalidValues);
+    });
+
+    [TestMethod]
     public Task UsageState_IsolatedFromOtherSessionsAndRetiredCallbacks() => Fixture.Run(async f =>
     {
         var second = f.NewSession();

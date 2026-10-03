@@ -39,7 +39,7 @@ import { useShellLanguage } from "./shellLanguage";
 import type { ClipboardEvent } from "react";
 import type { SessionSteerRequest } from "#neoastra";
 
-export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true }: {
+export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount, activeReminderCount = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true }: {
   active?: boolean;
   observing?: boolean;
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
@@ -48,6 +48,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   liveState?: DisplayState | null;
   timelineNotices?: HTMLElement | null;
   usageTarget?: UsageTarget | null;
+  persistedUsage?: string | null;
   infoControl?: ReactNode;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
   permissionReviewer: ReturnType<typeof createPermissionReviewer> | null;
@@ -61,6 +62,8 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   remindersTrigger?: Ref<HTMLButtonElement>;
   compactTrigger?: Ref<HTMLButtonElement>;
   onOpenReminders?: () => void;
+  /** Active reminders of this session as last reported by the host for the explorer markers; null while unknown. */
+  activeReminderCount?: number | null;
   onOpenHelp?: () => void;
   onOpenPalette?: () => void;
   onOpenCatalog?: (page: "models" | "prompts" | "providers") => void;
@@ -209,10 +212,12 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       }).catch(() => { /* An error is unknown, never an observed zero or an automatic retry. */ });
     return () => { controller.abort(); reminderRevision.current++; };
   }, [epoch, sessionId, !!onOpenReminders, readReminderCount, reminderActions, reminderReload, invalidEpoch, observing]);
-  const observedReminderCount = !invalidEpoch && readReminderCount && reminderActions &&
+  const listedReminderCount = !invalidEpoch && readReminderCount && reminderActions &&
     !reminderOperation?.pending && !reminderOperation?.hold && reminderObservation?.epoch === epoch &&
     reminderObservation.sessionId === sessionId && reminderObservation.reload === reminderReload &&
     reminderObservation.operation === reminderOperation ? reminderObservation.count : null;
+  // The host-wide marker read follows every reminder change; the per-session list read covers the time before it.
+  const observedReminderCount = invalidEpoch ? null : activeReminderCount ?? listedReminderCount;
   const reminderLabel = observedReminderCount === null ? t("Reminders for selected session: active count unknown")
     : t("Reminders for selected session: {count} active at last observation; may have changed", { count: observedReminderCount });
   const scope = useRef<AbortController | null>(null);
@@ -699,7 +704,9 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       <ObservationStatus unavailable={!invalidEpoch && (receiptUnavailable || runtimeState?.kind === "error")} />
       <span className="sr-only">{t("Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer")}</span>
       {infoControl}
-      {usageTarget && <SessionUsageInspector key={JSON.stringify(usageTarget)} target={usageTarget} capability={capability} />}
+      {usageTarget && <SessionUsageInspector key={JSON.stringify(usageTarget)} target={usageTarget} capability={capability} persisted={persistedUsage}
+        provider={selected?.providerKey ?? observedProvider ?? null} model={selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : null}
+        refreshKey={`${observing}:${composerBusy}:${runtimeState?.kind === "ready" ? runtimeState.snapshot.entry?.activeRunId ?? "" : ""}:${liveState?.snapshot?.revision ?? ""}`} />}
       {onOpenReminders && <Button ref={remindersTrigger} variant="minimal" icon={<AppIcon name="reminder" size={16} />} data-reminder-count=""
         disabled={invalidEpoch} aria-label={reminderLabel} title={`${reminderLabel} (Ctrl+G, Ctrl+D)`}
         onClick={onOpenReminders}><span className="reminder-count" aria-hidden="true">{observedReminderCount ?? "?"}</span></Button>}

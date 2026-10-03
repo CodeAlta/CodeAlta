@@ -16,8 +16,8 @@ test("reminder count target requires one exact selected persisted project/global
   assert.equal(verifiedReminderCountTarget({ ...snapshot, projects: [{ ...snapshot.projects[0], archived: true }] }, session, "p"), false);
   assert.equal(verifiedReminderCountTarget({ ...snapshot, projects: [...snapshot.projects, { ...snapshot.projects[0] }] }, session, "p"), false);
   assert.equal(verifiedReminderCountTarget({ ...snapshot, sessions: [session, { ...session }] }, session, "p"), false);
-  assert.equal(verifiedReminderCountTarget({ ...snapshot, projectsTruncated: true }, session, "p"), false);
-  assert.equal(verifiedReminderCountTarget({ ...snapshot, sessionsTruncated: true }, session, "p"), false);
+  assert.equal(verifiedReminderCountTarget({ ...snapshot, projectsTruncated: true, sessionsTruncated: true }, session, "p"), true,
+    "a truncated catalog still identifies the selected session exactly");
   const global = { ...session, scopeKind: "global", projectId: null };
   assert.equal(verifiedReminderCountTarget({ ...snapshot, sessions: [global] }, global, null), true);
   assert.equal(verifiedReminderCountTarget({ ...snapshot, sessions: [global] }, global, "p"), false);

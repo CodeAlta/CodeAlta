@@ -42,6 +42,8 @@ import { archivedProjectScope, ReminderScopeGate, SessionComposerGate } from "./
 import { RemindersDialog } from "./RemindersDialog";
 import { ArchivedActionRecovery } from "./ArchivedActionRecovery";
 import { createReminderActions } from "./reminderActions";
+import { activeReminderCounts, sameActiveReminders, scopeReminderCount, type ActiveReminders } from "./activeReminders";
+import { ReminderBadge } from "./ReminderBadge";
 import { verifiedReminderCountTarget } from "./reminderListObservation";
 import { applyCatalogNextSend, applyPromptNextSend, createNextSendSelectionStore } from "./nextSendSelection";
 import { createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
@@ -673,6 +675,22 @@ function App() {
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const connected = !!status?.hostAvailable;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
+  // Explorer markers for sessions with active reminders: read when the host is ready, after every reminder
+  // change made here, and on a slow interval because reminders also fire and complete on their own.
+  const [activeReminders, setActiveReminders] = useState<ActiveReminders | null>(null);
+  const reminderEpoch = owned ? status!.hostEpoch! : null;
+  useEffect(() => {
+    if (!reminderEpoch) { setActiveReminders(null); return; }
+    let alive = true;
+    const read = () => void reminder.active({ expectedEpoch: reminderEpoch }, { timeoutMilliseconds: 15000 }).then(value => {
+      const counts = alive ? activeReminderCounts(value, reminderEpoch) : null;
+      if (counts) setActiveReminders(previous => previous && sameActiveReminders(previous, counts) ? previous : counts);
+    }).catch(() => { /* Unknown keeps the last markers; the next read corrects them. */ });
+    read();
+    const timer = setInterval(read, 20000);
+    const unsubscribe = reminderActions.subscribe(read);
+    return () => { alive = false; clearInterval(timer); unsubscribe(); };
+  }, [reminderEpoch, reminderActions]);
   const draftChoices = useNewSessionChoices(status?.hostEpoch, projectId, selectedProject?.path ?? null,
     creatingProvider, configurationState.snapshot, owned && sessionId === null && view === "workspace" && !settingsOpen
       && !!snapshot?.configured && (projectId === null || !!selectedProject && !selectedProject.archived), mutation?.capability);
@@ -774,7 +792,7 @@ function App() {
     else if (action === "nextTab" || action === "previousTab" || action === "closeTab" || action === "reopenTab") tabCommand(action);
     else if (action === "reminders") invokeComposerControl(remindersTrigger.current);
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
-    else if (action === "focusSearch") setSessionOptionsOpen(true); // The popover focuses its search field when it opens.
+    else if (action === "focusSearch") showSessionSearch();
     else { navigate(action === "settings" ? "appearance" : action); settingsOrigin.current = paletteOrigin.current; }
   });
 
@@ -873,7 +891,7 @@ function App() {
     else if (action === "settings" || action === "plugins") navigate(action === "plugins" ? "mcp" : "appearance");
     else if (action === "toggleNotes") setNotesVisible(value => !value);
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
-    else if (action === "focusSearch") setSessionOptionsOpen(true); // The popover focuses its search field when it opens.
+    else if (action === "focusSearch") showSessionSearch();
     else if (action === "focusProjects") {
       if (!railVisible) toggleProjects();
       else focusVisibleProject(projectRail.current, projectFilterInput.current);
@@ -925,6 +943,20 @@ function App() {
   useLayoutEffect(() => {
     if (dialog === "reminders" && !remindersCurrent) setDialog(null);
   }, [dialog, remindersCurrent]);
+
+  // The inline session search field mounts focused; when it is already shown, focus it again.
+  function showSessionSearch() { setSessionOptionsOpen(true); searchInput.current?.focus(); }
+  function scopeCanCreateSession(id: string | null) {
+    const project = id === null ? undefined : snapshot?.projects.find(value => value.id === id);
+    return owned && !!snapshot && !creatingBusy && (id === null || !!project && !project.archived);
+  }
+  // One menu per scope row: the session actions first select that scope, then act on it.
+  function scopeSessionAction(id: string | null, kind: "create" | "search" | "browse") {
+    if (id !== selectedScope.current) selectProject(id);
+    if (kind === "browse") openSessionBrowser();
+    else if (kind === "search") showSessionSearch();
+    else if (scopeCanCreateSession(id)) { setCreatingVisible(true); setCreatingMessage(""); }
+  }
 
   function toggleProjects() {
     if (railVisible) {
@@ -1491,7 +1523,8 @@ function App() {
             {projectId !== null && ` ${t("The selected project and session remain open.")}`}
           </p>}
           {snapshot && <ProjectRailRows projects={projectListing?.projects ?? []} selectedId={projectId} onSelect={selectProject} children={sessions}
-            activity={id => <RunningSessionBadge controls={runtimeObservationControls()} projectId={id} />}
+            activity={id => <><RunningSessionBadge controls={runtimeObservationControls()} projectId={id} />
+              <ReminderBadge count={activeReminders ? scopeReminderCount(activeReminders, snapshot, id) : 0} /></>}
             canRename={owned} renameBusy={projectRenameBusy || !mutation?.capability.canMutate()} onRename={() => void beginProjectRename()}
             actions={{ current: () => ({ ...currentProjectDetailsContext(),
               active: creationAlive.current && currentView.current === "workspace" && !settingsVisible.current && !!projectRail.current && !projectRail.current.hidden,
@@ -1499,7 +1532,9 @@ function App() {
               canMutate: owned && !!mutation?.capability.canMutate(),
               locked: projectRenamePending.current || !!uncertainProjectRename.current || projectRenameLocked
                 || !!projectRenameTarget || projectArchive.locked || !!projectOpening.getSnapshot() }),
-              open: selectProject, rename: () => void beginProjectRename(), archive: () => setDialog("archive") }} />}
+              open: selectProject, rename: () => void beginProjectRename(), archive: () => setDialog("archive"),
+              sessions: { canCreate: scopeCanCreateSession, create: id => scopeSessionAction(id, "create"),
+                search: id => scopeSessionAction(id, "search"), browse: id => scopeSessionAction(id, "browse") } }} />}
           {projectArchive.records.length > 0 && <button type="button" className="quiet-button" onClick={() => setDialog("archive")}>{t("Archive operation evidence")}</button>}
           {projectRenameTarget && projectId === projectRenameTarget.id && currentHostEpoch.current === projectRenameTarget.epoch &&
             <div className="project-rename" role="group" aria-label={t("Rename project {name}", { name: projectRenameTarget.name })}>
@@ -1519,20 +1554,14 @@ function App() {
           splitter={<PaneSplitter className="session-splitter" label={t("Resize Explorer")} value={ideWidth.width} hidden={narrow || !railVisible}
             onResize={delta => setIdeWidth(value => resizeIdeWidth(value, delta))} onReset={() => setIdeWidth({ width: 272, full: false })} />}
           sessions={<aside className="session-rail" aria-label={t("Sessions")} ref={sessionRail} hidden={!railVisible}>
-          <Popover placement="bottom-end" isOpen={sessionOptionsOpen} onInteraction={setSessionOptionsOpen} popoverClassName="session-options-popover"
-            content={<div className="session-options">
-              <InputGroup inputRef={searchInput} size="small" type="search" leftIcon={<AppIcon name="search" size={14} className={Classes.ICON} />} value={search}
-                onChange={event => setSearch(event.target.value)} placeholder={t("Search sessions")} aria-label={t("Search sessions")} />
-              <Menu aria-label={t("Sessions")}>
-                <MenuItem icon={<AppIcon name="newSession" size={15} />} text={t("Create session")} title={t("Create session in selected scope")}
-                  disabled={!owned || !snapshot || !!selectedProject?.archived || projectId !== null && !selectedProject || creatingBusy}
-                  onClick={() => { setCreatingVisible(value => !value); setCreatingMessage(""); }} />
-                <MenuItem icon={<AppIcon name="browse" size={15} />} text={t("Browse saved sessions")} disabled={!snapshot} onClick={openSessionBrowser} />
-              </Menu>
-            </div>}>
-            <Button variant="minimal" size="small" className="session-navigation-options" icon={<AppIcon name="ellipsis" size={16} />}
-              aria-label={t("Sessions")} title={notice || t("Sessions")} />
-          </Popover>
+          {(sessionOptionsOpen || search !== "") && <InputGroup inputRef={searchInput} className="session-search" size="small" type="search" autoFocus
+            leftIcon={<AppIcon name="search" size={14} className={Classes.ICON} />} value={search} title={notice || undefined}
+            onChange={event => setSearch(event.target.value)} placeholder={t("Search sessions")} aria-label={t("Search sessions")}
+            onKeyDown={event => { if (event.key === "Escape" && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
+              event.preventDefault(); event.stopPropagation(); setSearch(""); setSessionOptionsOpen(false);
+            } }}
+            rightElement={<Button variant="minimal" size="small" icon={<AppIcon name="close" size={14} />} aria-label={t("Clear filter")} title={t("Clear filter")}
+              onClick={() => { setSearch(""); setSessionOptionsOpen(false); }} />} />}
           {creatingVisible && <div className="session-create">
             <label>{selectedProject ? t("New session in {name}", { name: selectedProject.name }) : t("New global session")}
               <input value={creatingTitle} maxLength={256} disabled={creatingBusy} placeholder={t("Title (optional)")} onChange={event => setCreatingTitle(event.target.value)} /></label>
@@ -1584,6 +1613,7 @@ function App() {
                 <AppIcon name="assistant" size={13} /><span className="session-title">{depth > 0 && <span aria-hidden="true">↳ </span>}{diagnostic && <span aria-hidden="true">⚠ </span>}{session.title}</span>
                 <SessionDraftBadge active={draftIndicators.visible(session.id, sessionId)} />
                 {snapshot && <RunningSessionBadge controls={runtimeObservationControls()} tab={{ projectId, sessionId: session.id, path: session.workspacePath }} />}
+                <ReminderBadge count={activeReminders?.get(session.id) ?? 0} />
                 <span className="session-meta"><span>{session.providerKey ?? t("No provider")}</span><SessionTime value={session.updatedAt} now={clock} /></span>
               </button>
               <span id={`session-tooltip-${index}`} role="tooltip" className="session-tooltip"
@@ -1653,6 +1683,7 @@ function App() {
                 onComposerHeight={height => setComposerHeights(sizes => rememberComposerHeight(sizes, composerSizeKey(status?.hostEpoch ?? null, tab.projectId, row.id), height))}
                 onOpenCatalog={navigate} onOpenReminders={openSelectedReminders} onOpenHelp={openHelp} onOpenPalette={openPalette}
                 readReminders={readReminders} reminderActions={reminderActions} status={status} mutation={mutation}
+                activeReminderCount={activeReminders ? activeReminders.get(row.id) ?? 0 : null}
                 submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} draftIndicators={draftIndicators}
                 askActions={askActions} display={owners.display} scrollMemory={scrollMemory} runtimeReader={owners.runtimeReader}
                 permissionReviewer={owners.permissionReviewer} inputReviewer={owners.inputReviewer} configuration={configurationState.snapshot}
@@ -1894,7 +1925,9 @@ function createSessionPaneOwners() {
   };
 }
 
-function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader }: {
+function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null }: {
+  /** Active reminders of this session as last reported by the host; null while unknown. */
+  activeReminderCount?: number | null;
   notesReader: ReturnType<typeof createNotesReader>;
   observing?: boolean;
   active?: boolean; notesToggle?: boolean; onActivate?: () => void;
@@ -1932,6 +1965,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   timelineCommand: RefObject<TimelineCommand | null>;
 }) {
   const { t, locale: languageLocale } = useShellLanguage();
+  const [persistedUsage, setPersistedUsage] = useState<string | null>(null);
   const localInfoTrigger = useRef<HTMLButtonElement>(null), localRemindersTrigger = useRef<HTMLButtonElement>(null), localCompactTrigger = useRef<HTMLButtonElement>(null);
   const infoTrigger = active ? sharedInfoTrigger : localInfoTrigger;
   const remindersTrigger = active ? sharedRemindersTrigger : localRemindersTrigger;
@@ -2008,7 +2042,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
           onWheel={event => { newest.cancel(); timeline.wheel(event); }} onKeyDown={timeline.keyDown}
           onPointerDown={event => { newest.cancel(); timeline.pointerDown(event); }}
           onPointerMove={timeline.pointerMove} onPointerUp={timeline.pointerEnd} onPointerCancel={timeline.pointerEnd}>
-        <History observing={observing} sessionId={session.id} messageCount={session.messageCount} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onSettled={() => {
+        <History observing={observing} sessionId={session.id} messageCount={session.messageCount} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onUsageChange={setPersistedUsage} onSettled={() => {
           timeline.settled(); if (!newest.pending()) timeline.pauseIfUnfollowed();
         }}
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}
@@ -2040,11 +2074,11 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
         <SessionComposerGate snapshot={snapshot} projectId={selectedProjectId} session={session}
           epoch={ownedHost ? status!.hostEpoch! : null}
           owned={status?.hostEpoch && mutation ? <OwnedSessionPanel observing={observing} active={active} sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
-              usageTarget={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? {
+              persistedUsage={persistedUsage} usageTarget={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? {
                 epoch: status.hostEpoch, sessionId: session.id, scope: selectedProjectId === null ? "global" : "project",
                 projectId: selectedProjectId, expectedProjectPath: selectedProjectId === null ? null : session.workspacePath } : null}
               onOpenCatalog={onOpenCatalog} timelineNotices={timelineNotices} liveState={ownedSession ? live : null} inputLifetime={infoLifetime} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} infoControl={infoControl} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
-              reminderActions={reminderActions} readReminderCount={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? readReminders : undefined} /> : null}
+              activeReminderCount={activeReminderCount} reminderActions={reminderActions} readReminderCount={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? readReminders : undefined} /> : null}
           readOnly={<ReadOnlyComposer active={active} sessionId={session.id} provider={session.providerKey} draftIndicators={draftIndicators} infoControl={infoControl} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
               reason={archivedScope ? t("Archived project; this session is read-only. Sending is unavailable.") : undefined} />}
           recovery={ownedHost ? <ArchivedActionRecovery epoch={status!.hostEpoch!} sessionId={session.id} submissions={submissions}

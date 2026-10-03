@@ -22,6 +22,12 @@ const date = (value: unknown) => value === null || typeof value === "string" && 
 const finiteText = (value: unknown) => value === null || typeof value === "string" && value.length <= 32 &&
   /^(?:0|[1-9]\d*)(?:\.\d+)?(?:E[+-]?\d+)?$/.test(value) && Number.isFinite(Number(value));
 
+// Provider text the host retains: bounded, single-line. Absent and null both mean "not reported".
+const label = (value: unknown) => value == null || typeof value === "string" && value.length > 0 && value.length <= 128 && !/[\u0000-\u001f\u007f]/.test(value);
+const rateWindow = (value: unknown) => value == null || object(value) &&
+  (value.usedPercent == null || typeof value.usedPercent === "number" && Number.isInteger(value.usedPercent) && value.usedPercent >= 0 && value.usedPercent <= 100) &&
+  date(value.resetsAt ?? null) && optionalDecimal(value.windowDurationMinutes ?? null);
+
 // Never coerce an Int64 through Number. Failure replies have no observation or attachment identity.
 export function validateUsage(target: UsageTarget, input: unknown): SessionUsageResponse | null {
   if (!object(input) || input.hostEpoch !== target.epoch || input.sessionId !== target.sessionId ||
@@ -38,12 +44,23 @@ export function validateUsage(target: UsageTarget, input: unknown): SessionUsage
   if (usage.window !== null) {
     if (!object(usage.window) || !optionalDecimal(usage.window.currentTokens) || !optionalDecimal(usage.window.tokenLimit, true) ||
       !(usage.window.messageCount === null || typeof usage.window.messageCount === "number" &&
-        Number.isInteger(usage.window.messageCount) && usage.window.messageCount >= 0 && usage.window.messageCount <= 2147483647)) return null;
+        Number.isInteger(usage.window.messageCount) && usage.window.messageCount >= 0 && usage.window.messageCount <= 2147483647) ||
+      !label(usage.window.label) || !optionalDecimal(usage.window.totalContextEnvelope ?? null, true) ||
+      !optionalDecimal(usage.window.maxOutputTokens ?? null, true)) return null;
   }
   if (usage.lastOperation !== null) {
     if (!object(usage.lastOperation) || !["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens",
       "cachedInputTokens", "reasoningTokens"].every(key => optionalDecimal((usage.lastOperation as Record<string, unknown>)[key])) ||
-      !finiteText(usage.lastOperation.cost) || !finiteText(usage.lastOperation.durationMs)) return null;
+      !finiteText(usage.lastOperation.cost) || !finiteText(usage.lastOperation.durationMs) ||
+      !["model", "reasoningEffort", "initiator", "label"].every(key => label((usage.lastOperation as Record<string, unknown>)[key]))) return null;
+  }
+  if (usage.rateLimits != null) {
+    if (!object(usage.rateLimits) || !label(usage.rateLimits.name) || !label(usage.rateLimits.planType) ||
+      !rateWindow(usage.rateLimits.primary) || !rateWindow(usage.rateLimits.secondary)) return null;
+  }
+  if (usage.sessionTotal != null) {
+    if (!object(usage.sessionTotal) || !["totalTokens", "inputTokens", "outputTokens", "cachedInputTokens", "reasoningTokens"]
+      .every(key => decimal((usage.sessionTotal as Record<string, unknown>)[key]))) return null;
   }
   return input as unknown as SessionUsageResponse;
 }

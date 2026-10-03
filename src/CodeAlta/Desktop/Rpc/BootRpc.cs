@@ -126,6 +126,8 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 [JsonSerializable(typeof(CodeAlta.Plugin.Mcp.McpInventoryServer))]
 [JsonSerializable(typeof(PromptCatalogEntry))]
 [JsonSerializable(typeof(ReminderListRequest))]
+[JsonSerializable(typeof(ReminderActiveRequest))]
+[JsonSerializable(typeof(ReminderActiveResponse))]
 [JsonSerializable(typeof(ReminderDetailRequest))]
 [JsonSerializable(typeof(ReminderDetailResponse))]
 [JsonSerializable(typeof(ReminderCreateRequest))]

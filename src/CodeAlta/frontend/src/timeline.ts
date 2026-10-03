@@ -330,6 +330,15 @@ function stringAt(root: JsonObject | null, ...path: string[]): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+/** Text of the newest persisted usage record in the loaded window, or null. */
+export function latestUsageText(entries: HistoryResponse["entries"]): string | null {
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index];
+    if (entry.eventType === "sessionUpdate" && entry.text?.includes("**Context:**")) return entry.text;
+  }
+  return null;
+}
+
 export function latestNotes(entries: HistoryResponse["entries"]): string {
   let markdown = "";
   for (const entry of entries) {
