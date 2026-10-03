@@ -1,7 +1,4 @@
-import { AppWindowSurface } from "./AppWindow";
-import { useLayoutEffect, useRef } from "react";
 import type { BootStatus } from "#neoastra";
-import { AppIcon } from "./AppIcon";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
 
@@ -40,40 +37,4 @@ export function AboutSettings({ status, bootError, demo }: { status: BootStatus 
       <div><dt>{t("Mode")}</dt><dd>{t(about.mode)}</dd></div>
     </dl>
   </main>;
-}
-
-export function AboutDialog({ status, bootError, demo, onClose }: {
-  status: BootStatus | undefined; bootError: boolean; demo: boolean; onClose: () => void;
-}) {
-  const { t } = useShellLanguage();
-  const dialog = useRef<HTMLDialogElement>(null);
-  const closing = useRef(false);
-  const composingEscape = useRef(false);
-  useLayoutEffect(() => {
-    const element = dialog.current;
-    element?.showModal();
-    return () => { if (element?.open) element.close(); };
-  }, []);
-  function close() { if (!closing.current) { closing.current = true; onClose(); } }
-
-  const about = aboutFacts(status, bootError, demo);
-  return <dialog ref={dialog} className="app-dialog session-info-dialog about-dialog" aria-modal="true"
-    aria-labelledby="about-title"
-    onKeyDown={event => {
-      event.stopPropagation();
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      if (!event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && !event.repeat) close();
-      else composingEscape.current = true;
-    }} onKeyUp={() => { composingEscape.current = false; }} onCompositionEnd={() => { composingEscape.current = false; }}
-    onCancel={event => { event.preventDefault(); if (!composingEscape.current) close(); }}>
-    <AppWindowSurface storageKey="codealta.desktop.window.about.v1" title={t("About CodeAlta")} titleId="about-title" preferredSize={viewport => ({ width: Math.min(560, viewport.width - 40), height: Math.min(480, viewport.height - 40) })}
-      onClose={close} closeLabel={t("Close About")}>
-    <dl className="session-info-fields" tabIndex={0} aria-label={t("Running host build information")}>
-      <div><dt>{t("Product")}</dt><dd>{about.product ?? "CodeAlta"}</dd></div>
-      <div><dt>{t("Version")}</dt><dd>{about.version ?? t("Development build")}</dd></div>
-      {about.build && <div><dt>{t("Build metadata")}</dt><dd>{about.build}</dd></div>}
-      <div><dt>{t("Mode")}</dt><dd>{t(about.mode)}</dd></div>
-    </dl>
-  </AppWindowSurface></dialog>;
 }

@@ -177,26 +177,6 @@ test("production composer usage inspector reads only on intent and fences late/f
       window.requestAnimationFrame=callback=>{window.usageCloseFrames.push(callback); return 123456;};
       document.querySelector('${modal} button[aria-label="Close usage inspector"]').click()`);
     assert.equal(await wait(`!document.querySelector('${modal}')`), true);
-    await evaluate("window.requestAnimationFrame=window.usageOriginalFrame; document.querySelector('.project-rail .icon-label-button').click()");
-    assert.equal(await wait("document.querySelector('.settings-dialog')?.open"), true);
-    await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button')].find(button=>button.textContent==='About').click()");
-    assert.equal(await wait("document.querySelector('.settings-dialog-navigation button[aria-current=page]')?.textContent==='About' && !!document.querySelector('.settings-dialog-content .settings-card button')"), true);
-    await evaluate("document.querySelector('.settings-dialog-content .settings-card button').click()");
-    assert.equal(await wait("document.querySelector('.about-dialog')?.open"), true);
-    assert.equal(await evaluate(`(() => { for(const callback of window.usageCloseFrames) callback(performance.now());
-      return document.querySelector('.about-dialog')?.open && document.activeElement?.closest('.about-dialog')!==null; })()`), true,
-      "a deferred usage close may not steal focus from nested About in Settings");
-    await evaluate("document.querySelector('.about-dialog [aria-label=\"Close About\"]').click()");
-    await wait("!document.querySelector('.about-dialog')");
-    await evaluate("document.querySelector('[aria-label=\"Close settings\"]').click()");
-    assert.equal(await wait("!document.querySelector('.settings-dialog')"), true);
-
-    await evaluate(`document.querySelector('${trigger}').click()`);
-    assert.equal(await wait(`document.querySelector('${modal}')?.open`), true);
-    await evaluate(`window.usageOriginalFrame=requestAnimationFrame; window.usageCloseFrames=[];
-      window.requestAnimationFrame=callback=>{window.usageCloseFrames.push(callback); return 123456;};
-      document.querySelector('${modal} button[aria-label="Close usage inspector"]').click()`);
-    assert.equal(await wait(`!document.querySelector('${modal}')`), true);
     await evaluate(`window.requestAnimationFrame=window.usageOriginalFrame;
       document.querySelector('.activity-rail button[aria-label="Open command palette"]').click()`);
     assert.equal(await wait("document.querySelector('.command-palette')?.open"), true);

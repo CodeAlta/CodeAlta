@@ -99,8 +99,8 @@ import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from ".
 import { workflowNotice, type WorkflowNotice } from "./workflowNotice";
 import { translate, type MessageKey } from "./localization";
 import { ApplicationLogsPanel } from "./ApplicationLogsPanel";
-import { AboutDialog, AboutSettings } from "./AboutDialog";
-import { ProjectDetailsEntry, type ProjectDetailsContext } from "./ProjectDetailsEntry";
+import { AboutSettings } from "./AboutDialog";
+import type { ProjectDetailsContext } from "./ProjectDetailsEntry";
 import { createApplicationLogClearActions } from "./applicationLogClear";
 import { SessionInfoDialog, type SessionInfoLifetime } from "./SessionInfoDialog";
 import { selectedSessionInfoAvailable, selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
@@ -235,22 +235,9 @@ function App() {
   const { projectSort, setProjectSort, theme, setTheme, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount } = useWindowPreferences();
   const [sessionExpansion, setSessionExpansion] = useState<{ projectId: string | null; search: string; extra: number } | null>(null);
   const [notesVisible, setNotesVisible] = useState(true);
-  const [dialog, writeDialog] = useState<"project" | "help" | "about" | "sessions" | "archive" | "reminders" | null>(null);
+  const [dialog, writeDialog] = useState<"project" | "help" | "sessions" | "archive" | "reminders" | null>(null);
   function setDialog(value: typeof dialog) { batchDeletion.invalidate(); invalidateCreation(); writeDialog(value); }
   const helpOrigin = useRef<{ element: HTMLElement | null; view: View; sessionId: string | null; scope: string | null } | null>(null);
-  const aboutOrigin = useRef<{ element: HTMLElement | null; view: View } | null>(null);
-  function openAbout(element: HTMLElement | null) {
-    if (dialog || document.querySelector('dialog[open]:not(.settings-dialog), [role="dialog"][aria-modal="true"]:not(.settings-dialog)')) return;
-    focusRestoration.cancel();
-    aboutOrigin.current = { element, view: currentView.current };
-    setDialog("about");
-  }
-  function closeAbout() {
-    const origin = aboutOrigin.current;
-    setDialog(null);
-    focusRestoration.schedule(origin?.element ?? null, () => currentView.current === origin?.view,
-      () => !!document.querySelector('dialog[open]:not(.settings-dialog), [role="dialog"][aria-modal="true"]:not(.settings-dialog)'));
-  }
   const [paletteOpen, writePaletteOpen] = useState(false);
   function setPaletteOpen(value: boolean) { invalidateCreation(true); writePaletteOpen(value); }
   const paletteOrigin = useRef<HTMLElement | null>(null);
@@ -1779,7 +1766,6 @@ function App() {
           || !browserActivation(currentSnapshot.current, tab, browserCapture.revision, browserRevision.current)) return false;
         selectSessionTab(tab); setDialog(null); return true;
       }} />}
-    {dialog === "about" && <AboutDialog status={status} bootError={!!error} demo={demoMode} onClose={closeAbout} />}
     <ProjectArchiveDialog owner={projectArchive} open={dialog === "archive" && !settingsOpen && view === "workspace"} close={() => setDialog(null)}
       current={() => {
         const matches = currentSnapshot.current?.projects.filter(project => project.id === selectedScope.current);

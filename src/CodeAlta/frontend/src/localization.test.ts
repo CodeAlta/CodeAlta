@@ -9,19 +9,19 @@ import { inventoryNotice } from "./inventoryNotice";
 import { workflowNotice } from "./workflowNotice";
 import { ProjectRailRows } from "./ProjectRailRows";
 import { ShellLanguageContext } from "./shellLanguage";
-import { AboutDialog } from "./AboutDialog";
+import { AboutSettings } from "./AboutDialog";
 
 test("support labels translate while recorded host identity and confirmation bytes stay literal", () => {
   for (const locale of locales) {
-    for (const key of ["About CodeAlta", "Refresh logs", "Clear captured messages…", "Check reference metadata", "Close references", "Path metadata observed; Send revalidates", "Raw prompt reference preview"] as const) {
+    for (const key of ["Refresh logs", "Clear captured messages…", "Check reference metadata", "Close references", "Path metadata observed; Send revalidates", "Raw prompt reference preview"] as const) {
       if (locale !== "en") assert.notEqual(translate(locale, key), key);
     }
     assert.ok(translate(locale, "Type {confirmation} to confirm", { confirmation: "CLEAR CAPTURED LOGS" }).includes("CLEAR CAPTURED LOGS"));
     const markup = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: () => {} } },
-      createElement(AboutDialog, { demo: false, bootError: false, onClose: () => assert.fail("render cannot close"),
+      createElement(AboutSettings, { demo: false, bootError: false,
         status: { productName: "Settings", version: "1.2.3+Copy", state: "owned-text-only", hostAvailable: true, hostEpoch: "Close",
           commandReviewEnabled: false, ownedAsksEnabled: false, ownedUserInputEnabled: false } })));
-    assert.ok(markup.includes("<dd>Settings</dd>") && markup.includes("<dd>1.2.3+Copy</dd>") && markup.includes("<dd>Copy</dd>"));
+    assert.ok(markup.includes("<strong>Settings</strong>") && markup.includes("<dd>1.2.3+Copy</dd>") && markup.includes("<dd>Copy</dd>"));
   }
 });
 
