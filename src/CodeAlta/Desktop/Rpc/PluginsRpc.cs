@@ -3,7 +3,6 @@ using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
 using NeoAstra.Rpc;
 using Tomlyn;
-using Tomlyn.Model;
 
 namespace CodeAlta.Desktop.Rpc;
 
@@ -126,15 +125,16 @@ internal sealed class PluginsService
         {
             lock (_gate)
             {
-                // A missing global file means the bundled template, exactly as the configuration editor reads it.
-                var path = projectScope ? Path.Combine(project.Root!, ".alta", "config.toml") : _store.ConfigPath;
-                var content = projectScope ? (File.Exists(path) ? File.ReadAllText(path) : string.Empty) : _store.LoadGlobalConfigContent();
-                var updated = WithEnabled(content, request.Id!, request.Enabled);
-                // Provider completeness is a rule of the global file only; a project file just has to parse.
-                if (updated is null || (!projectScope && !CodeAltaConfigStore.ValidateGlobalConfigContent(updated, path).IsValid)) return new("config_invalid", null);
-                if (projectScope) _ = _store.LoadProject(project.Root);
-                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                File.WriteAllText(path, updated);
+                if (projectScope)
+                {
+                    _store.SaveProjectPluginEnabled(project.Root!, request.Id!, request.Enabled);
+                }
+                else
+                {
+                    // A missing global file means the bundled template, exactly as the configuration editor reads it.
+                    _store.EnsureGlobalConfigExists();
+                    _store.SaveGlobalPluginEnabled(request.Id!, request.Enabled);
+                }
             }
 
             return new("ok", null);
@@ -147,26 +147,6 @@ internal sealed class PluginsService
         {
             return new("write_failed", null);
         }
-    }
-
-    // Edits the table model rather than the typed document, which keeps only the settings it knows:
-    // saving through it would drop every other plugin setting, such as the MCP server policy.
-    private static string? WithEnabled(string content, string id, bool enabled)
-    {
-        var root = string.IsNullOrWhiteSpace(content) ? new TomlTable() : TomlSerializer.Deserialize<TomlTable>(content) ?? new TomlTable();
-        if (Child(root, "plugins") is not { } plugins || Child(plugins, id) is not { } plugin) return null;
-        plugin["enabled"] = enabled;
-        return TomlSerializer.Serialize(root);
-    }
-
-    // The existing table under a key (ids are matched without case, like the configuration), a new one, or null when the key holds a value.
-    private static TomlTable? Child(TomlTable parent, string key)
-    {
-        var existing = parent.Keys.FirstOrDefault(candidate => string.Equals(candidate, key, StringComparison.OrdinalIgnoreCase));
-        if (existing is not null) return parent[existing] as TomlTable;
-        var table = new TomlTable();
-        parent[key] = table;
-        return table;
     }
 
     private static bool? Configured(CodeAltaConfigDocument? document, string id)

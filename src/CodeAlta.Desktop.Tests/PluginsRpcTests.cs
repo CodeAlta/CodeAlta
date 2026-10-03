@@ -108,10 +108,10 @@ public sealed class PluginsRpcTests
         Assert.IsTrue(CodeAltaConfigStore.ValidateGlobalConfigContent(File.ReadAllText(fixture.GlobalConfig)).IsValid);
         var store = new CodeAltaConfigStore(fixture.Projects.Options);
         Assert.AreEqual(false, store.LoadGlobal().Plugins!["sample-plugin"].Enabled);
-        CollectionAssert.AreEquivalent(
-            template.LoadGlobalProviderDefinitions(includeDisabled: true).Select(provider => provider.ProviderKey).ToArray(),
-            store.LoadGlobalProviderDefinitions(includeDisabled: true).Select(provider => provider.ProviderKey).ToArray(),
-            "The providers of the template the editor shows for a missing file are not lost.");
+        static string[] Effective(CodeAltaConfigStore source) => source.LoadGlobalProviderDefinitions(includeDisabled: true)
+            .Select(provider => provider.ProviderKey + "\n" + Tomlyn.TomlSerializer.Serialize(provider)).ToArray();
+        CollectionAssert.AreEquivalent(Effective(template), Effective(store),
+            "The providers of the template the editor shows for a missing file are not lost or changed.");
     }
 
     [TestMethod]
