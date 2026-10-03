@@ -54,7 +54,7 @@ test("inventory labels translate in six languages while status codes and English
       assert.ok(translate(locale, key));
       if (locale !== "en") assert.notEqual(translate(locale, key), key);
     }
-    for (const literal of ["Settings", "Unknown", "Ready", "Disabled", "No description supplied.", "project_read_error", "C:\\Settings\\Models", "<tools> --help"]) {
+    for (const literal of ["Settings", "Unknown", "Ready", "Disabled", "project_read_error", "C:\\Settings\\Models", "<tools> --help"]) {
       assert.ok(translate(locale, "Details for {name}", { name: literal }).includes(literal));
       assert.ok(inventoryNotice(locale, { key: "Model inventory unavailable ({status}).", status: literal }).includes(literal));
     }

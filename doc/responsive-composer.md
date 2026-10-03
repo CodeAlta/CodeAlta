@@ -23,15 +23,6 @@ visible content pane and is reached by scrolling. Resizing, scrolling and
 language changes do not submit work, transfer drafts, replace original requests
 or unlock uncertain operations.
 
-Actual-App fake-bridge regressions cover 750x485 and 390x500, transitions to/from
-1120x800, catalog/local/owned native literal editing and selection, keyboard
-action reachability, minimum manual resize/reset, expanded editor, light/dark,
-and Settings language transitions with original image Send and pending/uncertain
-prompt creation retained. Geometry checks intersect every clipping ancestor
-(stopping at native modal top-layer dialogs), rather than trusting the editor's
-own nonzero dimensions. Headless browser tests are not native WebView2, touch,
-virtual-keyboard, arbitrary zoom or all-language layout qualification.
-
 Evidence: `tmp/short-composer-20260927/REPORT.md`. Earlier localization clipping
 diagnostics remain under `tmp/localization-20260927/`; their short-window
 limitation is addressed by this follow-up, not by enlarging the test viewport.

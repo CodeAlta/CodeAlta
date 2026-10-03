@@ -250,8 +250,8 @@ the current implementation. Logs are bounded in-memory capture, not logfile brow
 or tailing. Localization adds none of these missing features. Reads and clear requests
 remain explicit; query debounce and expected scope/input/focus/ABA guards are unchanged.
 
-The original pending-preview regression remains in `settingsShell.test.ts` at its
-original order. Native child-dialog `beforetoggle` invalidation previously changed
+The original pending-preview regression lived in `settingsShell.test.ts`, which was
+later removed together with the shell layout it drove. Native child-dialog `beforetoggle` invalidation previously changed
 only the synchronous generation ref; a later unrelated App render could first publish
 that older lifetime to reference consumers and cancel a newer preview. The authorized
 correction keeps synchronous invalidation and every existing current/capture check,
