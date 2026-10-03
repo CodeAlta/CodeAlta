@@ -50,6 +50,7 @@ export function History({ sessionId, observing = true, onNotesChange, onSettled,
   const retainedStart = useRef<string | undefined>(undefined);
   const requestedNewest = useRef<number | null>(null);
   const readingRevision = useRef<{ generation: number; revision: string | null } | null>(null);
+  const merged = useRef<HistoryRequest | null>(null);
   const beforeOlder = useRef(onBeforeOlder);
   beforeOlder.current = onBeforeOlder;
   const request = target.request;
@@ -77,7 +78,9 @@ export function History({ sessionId, observing = true, onNotesChange, onSettled,
   });
   useLayoutEffect(() => { onNavigationReset?.(target.generation, target.explicitNewest); }, [target, onNavigationReset]);
   useEffect(() => {
-    if (!observing) return;
+    // Becoming visible again resumes the page chain; it never replays a merged page. A merged
+    // page's cursor no longer continues the window, so replaying it would replace the loaded timeline.
+    if (!observing || merged.current === request) return;
     const abort = new AbortController();
     void loadHistory(read, request, abort.signal, value => {
       if (value.kind === "ready") {
@@ -91,6 +94,7 @@ export function History({ sessionId, observing = true, onNotesChange, onSettled,
       }
       setState(value);
       if (value.kind === "ready") {
+        merged.current = value.request;
         if (target.explicitOlder) beforeOlder.current();
         const update = (current: typeof window) => ({
           timeline: mergeHistoryPage(current?.timeline, value.request, value.page, target.explicitOlder, retainedStart.current),

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { HistoryResponse } from "#neoastra";
-import { loadHistory, historyCanRetry, historyMessage, historySettled, mergeHistoryPage, type HistoryState } from "./history";
+import type { HistoryRequest, HistoryResponse } from "#neoastra";
+import { loadHistory, historyCanRetry, historyMessage, historySettled, mergeHistoryPage, type HistoryState, type HistoryTimeline } from "./history";
 
 const page: HistoryResponse = { status: "ok", entries: [], next: null, tailOmitted: false };
 const request = { sessionId: "s", cursor: null };
@@ -71,6 +71,52 @@ test("an uneven initial page keeps the newest 1,000 and rewinds the older cursor
     { ...page, entries: [entry(1)] }).entries.length, 1, "forward cursors cannot merge into the reverse window");
   assert.equal(mergeHistoryPage(older, { sessionId: "other", cursor: older.next },
     { ...page, entries: [entry(1)] }).sessionId, "other");
+});
+
+test("replaying an already merged page keeps the loaded window", () => {
+  const entry = (index: number): HistoryResponse["entries"][number] => ({
+    offset: `${index * 200}`, eventType: "contentCompleted", providerId: "p", sessionId: "runtime", runId: null,
+    timestamp: "2026-01-01T00:00:00Z", kind: index === 120 ? "User" : "Assistant", phase: null, contentId: `${index}`,
+    activityId: null, parentActivityId: null, interactionId: null, name: null, text: `turn-${index}`, details: null,
+    tool: null, files: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false,
+  });
+  const revision = { sessionId: "s", length: "70000", lastWriteUtcTicks: "7" };
+  const read = (cursor: HistoryRequest["cursor"]) => {
+    const end = cursor ? Number(cursor.offset) / 200 : 350;
+    const start = Math.max(0, end - 100);
+    return { ...page, revision, entries: Array.from({ length: end - start }, (_, i) => entry(start + i)),
+      next: start ? { version: 2, ...revision, offset: `${start * 200}` } : null };
+  };
+  // The latest turn starts three reverse pages back, at the user prompt in the last page read.
+  const requests: HistoryRequest[] = [];
+  let timeline: HistoryTimeline | undefined;
+  while (!timeline?.turnReached) {
+    requests.push({ sessionId: "s", cursor: timeline?.next ?? null });
+    timeline = mergeHistoryPage(timeline, requests.at(-1)!, read(requests.at(-1)!.cursor));
+  }
+  assert.deepEqual(requests.map(value => value.cursor?.offset ?? "end"), ["end", "50000", "30000"]);
+  assert.equal(timeline.entries.length, 230);
+  // A pane that becomes visible again can ask for a page it already merged: neither the page
+  // holding the turn boundary nor an intermediate page may replace the newer loaded rows.
+  for (const replayed of [requests[2], requests[1]]) {
+    const replay = mergeHistoryPage(timeline, replayed, read(replayed.cursor), false, timeline.entries[0].offset);
+    assert.equal(replay.entries.length, 230);
+    assert.equal(replay.entries[0].text, "turn-120");
+    assert.equal(replay.entries.at(-1)?.text, "turn-349");
+    assert.deepEqual(replay.next, timeline.next);
+  }
+  // The same holds after an explicit older page, and once the whole journal is loaded (no older cursor).
+  let older = mergeHistoryPage(timeline, { sessionId: "s", cursor: timeline.next }, read(timeline.next), true);
+  assert.equal(older.entries.length, 330);
+  assert.equal(mergeHistoryPage(older, requests[2], read(requests[2].cursor), true).entries.length, 330);
+  const last = { sessionId: "s", cursor: older.next };
+  older = mergeHistoryPage(older, last, read(last.cursor), true);
+  assert.equal(older.next, null);
+  assert.equal(older.entries.length, 350);
+  assert.equal(mergeHistoryPage(older, last, read(last.cursor), true).entries.length, 350);
+  // Another journal revision is never a replay: it starts afresh.
+  const changed = { sessionId: "s", cursor: { ...requests[2].cursor!, lastWriteUtcTicks: "8" } };
+  assert.equal(mergeHistoryPage(timeline, changed, read(changed.cursor), true).entries.length, 100);
 });
 
 test("selection loads persisted history", async () => {

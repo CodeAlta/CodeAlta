@@ -48,6 +48,14 @@ export function mergeHistoryPage(previous: HistoryTimeline | undefined, request:
   const retained = cursor?.version === 2 && current?.version === 2 && previous?.sessionId === request.sessionId
     && cursor.sessionId === current.sessionId && cursor.length === current.length
     && cursor.lastWriteUtcTicks === current.lastWriteUtcTicks && cursor.offset === current.offset ? previous : undefined;
+  // A reverse cursor of the same journal revision that lies above the window's older boundary (or any
+  // such cursor once the journal start is loaded) replays a merged page: it must not replace newer rows.
+  const loaded = current?.version === 2 ? current : current === null ? previous?.revision : undefined;
+  if (!retained && previous && cursor?.version === 2 && loaded && previous.sessionId === request.sessionId
+    && cursor.sessionId === loaded.sessionId && cursor.length === loaded.length && cursor.lastWriteUtcTicks === loaded.lastWriteUtcTicks
+    // Offsets are canonical decimal strings: a longer one, or a greater one of equal length, is higher.
+    && (current === null || cursor.offset.length > current!.offset.length
+      || cursor.offset.length === current!.offset.length && cursor.offset > current!.offset)) return previous;
   const accumulated = retained?.entries ?? [];
   const offsets = new Set(accumulated.map(entry => entry.offset));
   const entries: HistoryResponse["entries"][number][] = [];

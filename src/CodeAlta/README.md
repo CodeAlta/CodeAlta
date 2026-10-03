@@ -129,7 +129,9 @@ existing bounded identities, with compact status/close chrome and secondary Reop
 The tab menu uses themed Blueprint controls with an opaque popup and keyboard navigation.
 Open sessions retain independent display/runtime/review/notes owners and drafts. Hidden panes
 pause automatic history, live, runtime, receipt, Ask, notes and choice reads until visible again;
-visible split panes continue observing. Hiding a pane does not cancel admitted commands. The focused pane
+visible split panes continue observing. A pane that becomes visible again keeps its loaded timeline
+without reading history again; only an interrupted page chain continues with its next page.
+Hiding a pane does not cancel admitted commands. The focused pane
 owns global composer shortcuts. Running indicators in the project/session sidebar refresh in bounded
 batches, prioritizing visible and open sessions (at most 32 verified sessions per batch). Missing or
 stale observations never imply idle or authorize mutations. Provider switching remains blocked
