@@ -25,6 +25,13 @@ public sealed class OwnedSessionCommandServiceTests
         File.WriteAllText(path, "disposable\nreference");
         var scope = new OwnedProjectReferenceScope(project.Id, project.ProjectPath);
         var search = await f.Observe(f.Host.Commands.SearchReferencesAsync(scope, f.SessionId, "reference", CancellationToken.None));
+        // The index is built in the background: a caller asks again while the folder is still being read.
+        for (var attempt = 0; attempt < 100 && search.Status == "indexing"; attempt++)
+        {
+            await Task.Delay(50);
+            search = await f.Observe(f.Host.Commands.SearchReferencesAsync(scope, f.SessionId, "reference", CancellationToken.None));
+        }
+        Assert.AreEqual("ok", search.Status);
         Assert.AreEqual("reference.txt", search.Items.Single().Path);
         Assert.AreEqual("resolved", (await f.Observe(f.Host.Commands.ObserveReferencesAsync(scope, f.SessionId, "@reference.txt:1-2", CancellationToken.None))).Items.Single().Status);
         Assert.AreEqual("resolved", (await f.Observe(f.Host.Commands.ObserveReferencesAsync(scope, null, "@reference.txt", CancellationToken.None))).Items.Single().Status);
@@ -78,6 +85,24 @@ public sealed class OwnedSessionCommandServiceTests
         await f.Observe(queued.Receipt.Completion);
         f.Provider.ReleaseSend.TrySetResult();
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(receipt.Completion)).Outcome);
+    });
+
+    [TestMethod]
+    public Task SelectionWithoutModel_KeepsTheSessionModelInsteadOfSendingNone() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        Assert.IsNotNull(choices);
+        // What the desktop sends for "Provider default": a prompt choice with no model and no effort.
+        var selection = new OwnedSessionSelection(choices.Current.ProviderKey, "plan", null, null);
+        var admission = f.AdmitSend(new OwnedTextSendRequest("default-model-send", f.SessionId, "input") { Selection = selection });
+        Assert.IsNotNull(admission.Receipt);
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, admission.Receipt, "default model send");
+        Assert.AreEqual("fixture-model", f.Provider.Options!.Model);
+        var runtime = await f.Observe(f.Host.RuntimeService.GetCurrentStateAsync(f.SessionId));
+        Assert.AreEqual("plan", runtime.Entry!.AgentPromptId);
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(admission.Receipt.Completion)).Outcome);
     });
 
     [TestMethod]

@@ -61,6 +61,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity, reviewOwnedCommandPermissions, enableOwnedAsks, enableOwnedUserInput)
         {
             SelectionModels = modelProviderInitializationService.GetModelsAsync,
+            ProjectFileSearch = projectFileSearchService,
             ObservedImageModels = provider => modelProviderInitializationService.CurrentStates
                 .FirstOrDefault(state => state.ProviderId == provider && state.Descriptor.IsEnabled
                     && state.Availability == ModelProviderAvailability.Ready)?.Models ?? [],

@@ -3,6 +3,7 @@ using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Desktop.Rpc;
 
@@ -150,14 +151,19 @@ internal sealed partial class WorkspaceService
                 || session.ProjectRef != project?.Id || session.WorkingDirectory != (project?.ProjectPath ?? _importCatalog!.Options.GlobalRoot)
                 || !ValidScopeValue(session.WorkingDirectory, 4096))
             {
+                if (LogManager.IsInitialized)
+                    LogManager.GetLogger("CodeAlta.Desktop.Rpc").Error(
+                        $"Session creation returned an unexpected scope: kind={session.Kind} project={session.ProjectRef ?? "none"} directory={session.WorkingDirectory}");
                 completion.TrySetResult(Reply("create_unconfirmed"));
                 return;
             }
             completion.TrySetResult(Reply("ok", session.SessionId, session.WorkingDirectory));
         }
-        catch (Exception)
+        catch (Exception failure)
         {
             // A journal/provider write may have committed before failure. Never retry or claim no creation.
+            if (LogManager.IsInitialized)
+                LogManager.GetLogger("CodeAlta.Desktop.Rpc").Error(failure, "Session creation failed");
             completion.TrySetResult(Reply("create_unconfirmed"));
         }
         finally { lock (_sessionGate) { if (ReferenceEquals(_sessionWork, completion.Task)) _sessionWork = null; } }

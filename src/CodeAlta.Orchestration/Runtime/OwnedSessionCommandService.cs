@@ -39,6 +39,13 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     private readonly OriginalInvocation _permissionShutdown = new();
     private readonly OriginalInvocation _askDrain = new();
     private readonly BoundedPromptReferences _references = new();
+    private IndexedPromptReferences? _indexedReferences;
+
+    /// <summary>The shared indexed project file search used by the reference picker; without it a bounded folder scan is used.</summary>
+    public IProjectFileSearchService? ProjectFileSearch
+    {
+        init => _indexedReferences = value is null ? null : new IndexedPromptReferences(value);
+    }
 
     /// <summary>Searches a verified nonarchived project without creating a session or provider.</summary>
     /// <param name="scope">Expected project identity.</param><param name="sessionId">Optional exact session identity.</param>
@@ -58,7 +65,11 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 return new("scope_missing", [], false);
         }
         lock (_gate) { if (_closed || _retained) return new("closed", [], false); }
-        return _references.Search(project!.ProjectPath, query, cancellationToken);
+        if (_indexedReferences is null) return _references.Search(project!.ProjectPath, query, cancellationToken);
+        try { return await _indexedReferences.SearchAsync(project!.ProjectPath, query, cancellationToken).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        // The index is a convenience: an unreadable folder still gets the bounded scan's answer.
+        catch (Exception) { return _references.Search(project!.ProjectPath, query, cancellationToken); }
     }
 
     private static bool ReferenceScopeMatches(OwnedProjectReferenceScope scope, ProjectDescriptor? project)
@@ -787,10 +798,14 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 var saved = await new PromptImageAttachmentStore(_catalog).SaveAsync(session, attachments, operation.Execution.Token).ConfigureAwait(false);
                 input = new AgentInput(input.Items.Concat(saved.Select(image => new AgentInputItem.LocalImage(image.Path, image.Title, image.MediaType))).ToArray());
             }
+            // A selection without a model means "the provider's default": for the session's own provider that
+            // is the model the session already runs with, never an empty model name.
+            var keepsSessionModel = selection is { ModelId: null }
+                && string.Equals(selection.ProviderKey, session.ResolvedProviderKey, StringComparison.Ordinal);
             var policy = SessionExecutionPolicy.CaptureSession(
                 session, project, _catalog.GlobalRoot, default,
-                selection is null ? session.ModelId : selection.ModelId,
-                selection is null ? session.ReasoningEffort : selection.ReasoningEffort,
+                selection is null || keepsSessionModel ? session.ModelId : selection.ModelId,
+                selection is null || keepsSessionModel ? session.ReasoningEffort : selection.ReasoningEffort,
                 selection?.AgentPromptId ?? session.AgentPromptId);
             var options = SessionExecutionPolicy.BuildOptions(
                 policy, [],
@@ -991,6 +1006,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             launch = new(TaskCreationOptions.RunContinuationsAsynchronously);
             _disposeTask = DisposeCoreAsync(operations, steers, compacts, abortRuns, queues, deleteWork, launch.Task);
             disposal = _disposeTask;
+            // Stops any folder traversal still feeding the reference index; it completes synchronously.
+            _ = _indexedReferences?.DisposeAsync().AsTask();
         }
         // Release every control before joining any of them. No cancellation callback runs under _gate.
         try { Asks.CloseAdmission(); }

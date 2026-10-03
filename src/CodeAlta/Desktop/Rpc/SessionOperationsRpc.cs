@@ -111,7 +111,12 @@ internal sealed class SessionOperationsService
             }, cancellationToken)); }
             catch (ArgumentException) { return new("invalid_request", _epoch, null); }
             catch (OperationCanceledException) { throw; }
-            catch (Exception) { return new("admission_failed", _epoch, null); }
+            catch (Exception failure)
+            {
+                // The page only sees an uncertain admission; record why, without prompt text.
+                if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Desktop.Rpc").Error(failure, "Send admission failed");
+                return new("admission_failed", _epoch, null);
+            }
         }
     }
 
@@ -130,7 +135,7 @@ internal sealed class SessionOperationsService
         try
         {
             var result = await _commands.SearchReferencesAsync(new(request.ProjectId, request.ProjectPath), request.SessionId, request.Query, cancellationToken).ConfigureAwait(false);
-            return new(result.Status, _epoch, result.Items.Select(item => new SessionReferenceMatch(item.Path, item.Directory, item.Recent)).ToArray(), result.Omitted);
+            return new(result.Status, _epoch, result.Items.Select(item => new SessionReferenceMatch(item.Path, item.Directory, item.Recent)).ToArray(), result.Omitted, result.Indexed);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception) { return new("read_error", _epoch, [], true); }
@@ -456,7 +461,7 @@ internal sealed record SessionSendRequest(string ExpectedEpoch, string ClientReq
 internal sealed record SessionReferenceScope(string ProjectId, string ProjectPath);
 internal sealed record SessionReferenceSearchRequest(string ExpectedEpoch, string ProjectId, string ProjectPath, string? SessionId, string Query);
 internal sealed record SessionReferenceMatch(string Path, bool Directory, bool Recent);
-internal sealed record SessionReferenceSearchResponse(string Status, string? Epoch, IReadOnlyList<SessionReferenceMatch> Items, bool Omitted);
+internal sealed record SessionReferenceSearchResponse(string Status, string? Epoch, IReadOnlyList<SessionReferenceMatch> Items, bool Omitted, int Indexed = 0);
 internal sealed record SessionReferenceObservationRequest(string ExpectedEpoch, string ProjectId, string ProjectPath, string? SessionId, string Text);
 internal sealed record SessionReferenceSpan(int Start, int Length, string Status);
 internal sealed record SessionReferenceObservationResponse(string Status, string? Epoch, IReadOnlyList<SessionReferenceSpan> Items, bool Omitted);

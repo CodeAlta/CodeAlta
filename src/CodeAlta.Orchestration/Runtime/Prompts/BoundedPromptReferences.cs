@@ -152,8 +152,10 @@ internal sealed class BoundedPromptReferences
 public sealed record OwnedReferenceMatch(string Path, bool Directory, bool Recent);
 
 /// <summary>A bounded metadata search, with explicit incomplete/error status.</summary>
-/// <param name="Status">Search status.</param><param name="Items">At most 64 matches.</param><param name="Omitted">Whether results may be omitted.</param>
-public sealed record OwnedReferenceSearchResult(string Status, IReadOnlyList<OwnedReferenceMatch> Items, bool Omitted);
+/// <param name="Status">Search status; "indexing" means the folder is still being read and more matches may follow.</param>
+/// <param name="Items">At most 64 matches.</param><param name="Omitted">Whether results may be omitted.</param>
+/// <param name="Indexed">How many files and folders the index currently holds; zero for the bounded fallback search.</param>
+public sealed record OwnedReferenceSearchResult(string Status, IReadOnlyList<OwnedReferenceMatch> Items, bool Omitted, int Indexed = 0);
 
 /// <summary>A UTF-16 raw-prompt span observed by the dispatch parser and bounded path policy.</summary>
 /// <param name="Start">Start offset.</param><param name="Length">Span length.</param><param name="Status">Resolved metadata, unresolved literal, or escaped at sign.</param>
