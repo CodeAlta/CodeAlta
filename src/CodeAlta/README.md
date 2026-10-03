@@ -346,7 +346,8 @@ The **Skills** Settings section lists discovered skills (project, user, plugin a
 switch per skill, a filter, **Enable all** / **Disable all** for the shown skills, and **New skill**,
 which creates `<name>/SKILL.md` under the global or project skills folder. The **Plugins** Settings
 section has a switch per plugin, including the built-in MCP, GitHub and Statistics plugins; a change
-applies the next time CodeAlta starts. With an unarchived project selected, both pages can store a
+applies the next time CodeAlta starts, except for the Statistics rows described below, which follow
+the switch from their next read on. With an unarchived project selected, both pages can store a
 change globally or for that project. Every Settings section has its own icon in the sidebar.
 
 The **Reminders** session tool is available only with a selected owned session. Its window lists that
@@ -398,6 +399,23 @@ While a session works, an activity spinner shows in three places: before the tit
 row and on its project's row in the Explorer, and in the status line above the prompt. For a session
 open in a visible pane the three follow the run itself and start and stop together. Sessions that are
 not open are checked every five seconds, so their Explorer spinner can lag by that much.
+
+### Turn statistics
+
+When a turn ends, the built-in Statistics plugin adds a **Turn statistics** row after it, as in the
+terminal UI: duration, input and output tokens (the provider's totals when it reports them, an
+estimate otherwise), tool calls with their total time, and compactions. The row's **Details** button
+opens the full tables: sizes of the prompt, answer, reasoning and tool traffic, latencies and speeds,
+the provider's usage figures, and one line per tool bucket. The rows are not stored in the session;
+they are computed from its events each time, so earlier turns get theirs when **Load previous
+messages** brings them into view, and a failed turn has one too.
+
+The desktop app does not start the plugin runtime, so source plugins cannot add rows of their own yet.
+The host runs the Statistics projection itself through the `sessionPluginEvents.read` RPC: it reads
+the journal backwards from its end until the oldest turn shown is complete (at most 64 pages of 100
+records; a turn that begins further back gets no row) and returns at most 32 rows, newest kept.
+With the Statistics plugin turned off in **Settings > Plugins**, the next read (the next turn, or
+reopening the session) returns no rows.
 
 ### Commands, help and keyboard shortcuts
 

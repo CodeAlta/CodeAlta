@@ -684,6 +684,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .message-file, .ide-shell .message-plan { --card-color: var(--green); }
 .ide-shell .message-error { --card-color: var(--red); }
 .ide-shell .message-status { --card-color: var(--green); }
+.ide-shell .message-plugin { --card-color: var(--bp-palette-gold-4); }
 .ide-shell .message-heading { min-height: 22px; gap: 8px; margin-bottom: 4px; font-size: 12px; }
 .ide-shell .message-heading strong { color: var(--card-color, var(--text)); }
 .ide-shell .message-heading > span:first-child { display: inline-flex; flex-shrink: 0; gap: 6px; max-width: 45%; overflow: hidden; white-space: nowrap; }

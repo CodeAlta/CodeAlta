@@ -1,12 +1,13 @@
 import { matchesOutgoingText } from "./outgoingEcho";
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { workspace, type HistoryRequest, type SessionDisplayView } from "#neoastra";
+import { workspace, type HistoryRequest, type SessionDisplayView, type SessionPluginEvent } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { historyCanRetry, historyMessage, historySettled, loadHistory, mergeHistoryPage, type HistoryState, type HistoryTimeline } from "./history";
 import { liveTextItem, liveToolItem } from "./liveTimeline";
 import { orderTimelineRows, reconcileTimeline } from "./reconcileTimeline";
 import { groupTimelineTools } from "./toolGroups";
 import { latestNotes, latestUsageText } from "./timeline";
+import { pluginEventItems, pluginEventsWindow, type PluginEventsRead } from "./pluginEvents";
 import { TimelineMessage } from "./TimelineMessage";
 import { useShellLanguage } from "./shellLanguage";
 import { HistorySource, type HistorySourceTarget } from "./HistorySource";
@@ -25,7 +26,7 @@ function revisionOf(cursor: HistoryRequest["cursor"]): string | null {
 }
 
 export function History({ sessionId, observing = true, onNotesChange, onUsageChange, onSettled, onBeforeOlder, onAfterOlder, onNewerOmitted, onNavigationReset,
-  newestRequest, onNewestResult, live, read, canInspect, outgoing = [], onAcknowledgeOutgoing, messageCount }: {
+  newestRequest, onNewestResult, live, read, readPluginEvents, canInspect, outgoing = [], onAcknowledgeOutgoing, messageCount }: {
   sessionId: string; onNotesChange: (markdown: string) => void; onSettled: () => void;
   /** Reports the newest persisted usage record text of the loaded window. */
   onUsageChange?: (text: string | null) => void;
@@ -36,6 +37,8 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
   newestRequest?: RefObject<NewestHistoryRequest | null>;
   onNewestResult?: (result: NewestHistoryResult) => void;
   read: typeof workspace.historyTail;
+  /** Reads the cards plugins derive from the finished turns of the loaded window, such as turn statistics. */
+  readPluginEvents?: PluginEventsRead;
   canInspect?: () => boolean;
   outgoing?: readonly OutgoingMessage[];
   onAcknowledgeOutgoing?: (keys: readonly string[]) => void;
@@ -114,6 +117,23 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
   }, [timeline, onNotesChange]);
   const usageText = timeline && !timeline.newerOmitted ? latestUsageText(timeline.entries) : null;
   useEffect(() => { if (timeline && !timeline.newerOmitted) onUsageChange?.(usageText); }, [usageText, timeline?.sessionId, onUsageChange]);
+  // Plugin cards follow the window: they are read again when a turn ends or older history is loaded, and
+  // the previous ones stay until the new answer arrives.
+  const [pluginCards, setPluginCards] = useState<{ sessionId: string; events: readonly SessionPluginEvent[] }>();
+  const pluginWindow = timeline && !timeline.newerOmitted ? pluginEventsWindow(timeline.entries) : null;
+  const pluginKey = pluginWindow?.key, pluginFrom = pluginWindow?.notBefore;
+  useEffect(() => {
+    if (!readPluginEvents || !observing || !pluginKey || !pluginFrom) return;
+    const abort = new AbortController();
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const load = (attempt: number) => void readPluginEvents(pluginFrom, abort.signal).then(events => {
+      if (abort.signal.aborted) return;
+      if (events === "retry") { if (attempt < 2) retry = setTimeout(() => load(attempt + 1), 1000); }
+      else if (events) setPluginCards({ sessionId, events });
+    }, () => { /* The timeline stays as it is without the cards. */ });
+    load(0);
+    return () => { abort.abort(); clearTimeout(retry); };
+  }, [readPluginEvents, observing, sessionId, pluginKey, pluginFrom]);
   const current = state?.request === request ? state : undefined;
   const liveRefresh = useRef<{ revision: string | undefined; ready: boolean; retry: boolean; refresh: () => void }>(null);
   liveRefresh.current = { revision: live?.revision,
@@ -197,8 +217,12 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
     items.push({ source: "history", key: `outgoing:${echo.key}`, item: { ...item,
       subtitle: echo.state === "sending" ? "Sending…" : echo.state === "failed" ? "Failed" : echo.state === "uncertain" ? "Pending" : null } });
   }
+  if (pluginCards?.sessionId === sessionId && timeline && !timeline.newerOmitted) {
+    for (const item of pluginEventItems(pluginCards.events, timeline.entries[0]?.timestamp)) items.push({ source: "history", key: item.key, item });
+  }
   orderTimelineRows(items);
-  const olderCount = messageCount == null ? null : Math.max(0, messageCount - items.filter(row => row.source === "history" && !row.key.startsWith("outgoing:")).length);
+  const olderCount = messageCount == null ? null : Math.max(0, messageCount - items.filter(row => row.source === "history"
+    && !row.key.startsWith("outgoing:") && !row.key.startsWith("plugin:")).length);
   return <section className="conversation history" aria-label={t("Session timeline")}
     data-window-ready={current?.kind === "ready" && window?.generation === target.generation && historySettled(current, timeline)}>
     {!timeline && (!current || current.kind === "loading") && <p role="status">{t("Loading the latest persisted history.")}</p>}

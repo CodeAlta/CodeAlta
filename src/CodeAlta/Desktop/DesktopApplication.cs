@@ -213,6 +213,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionOperationsService(operations);
                     builder.AddSessionAsksService(asks);
                     builder.AddSessionNotesService(new SessionNotesService(host.WorkspaceReads, host.RuntimeService, epoch));
+                    builder.AddSessionPluginEventsService(new SessionPluginEventsService(host.WorkspaceReads, host.ProjectCatalog, epoch));
                     builder.AddSessionUserInputService(new SessionUserInputService(host.RuntimeService.Permissions, epoch, options.EnableOwnedUserInput));
                     builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));
                     builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(host.RuntimeService, epoch));
@@ -348,6 +349,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddAgentPromptsService(new AgentPromptsService());
             builder.AddSkillsService(new SkillsService());
             builder.AddPluginsService(new PluginsService());
+            builder.AddSessionPluginEventsService(new SessionPluginEventsService());
             builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
             builder.AddModelCatalogService(new ModelCatalogService());
             await using var rpc = builder.Build();

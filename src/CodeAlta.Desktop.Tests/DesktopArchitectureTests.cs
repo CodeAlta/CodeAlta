@@ -25,7 +25,7 @@ public sealed class DesktopArchitectureTests
             if (reference.Name!.StartsWith("XenoAtom", StringComparison.Ordinal))
                 Assert.AreEqual("XenoAtom.Logging", reference.Name, "Desktop may log without referencing terminal presentation libraries.");
             if (reference.Name.StartsWith("CodeAlta", StringComparison.Ordinal))
-                Assert.IsTrue(reference.Name is "CodeAlta.Catalog" or "CodeAlta.Agent" or "CodeAlta.Hosting" or "CodeAlta.Orchestration" or "CodeAlta.LiveTool" or "CodeAlta.Plugins" or "CodeAlta.Plugins.Abstractions" or "CodeAlta.Plugin.Mcp" or "CodeAlta.Plugin.GitHub", reference.Name);
+                Assert.IsTrue(reference.Name is "CodeAlta.Catalog" or "CodeAlta.Agent" or "CodeAlta.Hosting" or "CodeAlta.Orchestration" or "CodeAlta.LiveTool" or "CodeAlta.Plugins" or "CodeAlta.Plugins.Abstractions" or "CodeAlta.Plugin.Mcp" or "CodeAlta.Plugin.GitHub" or "CodeAlta.Plugin.Statistics", reference.Name);
             Assert.AreNotEqual("altatui", reference.Name);
         }
     }

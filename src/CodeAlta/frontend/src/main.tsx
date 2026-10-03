@@ -1,12 +1,12 @@
 import { Button, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext } from "@blueprintjs/core";
 import { connect, onDiagnostic } from "@neoastra/client";
 import { rpcFailureCode } from "./rpcDiagnostics";
-import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
+import { StrictMode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
-  sessionAsks, sessionNotes, sessionUserInput, type BootStatus,
+  sessionAsks, sessionNotes, sessionPluginEvents, sessionUserInput, type BootStatus,
   type ReminderListRequest,
   type ReminderListResponse,
   type ReminderDetailRequest,
@@ -97,6 +97,7 @@ import { GeneralSettings } from "./GeneralSettings";
 import { createHostLiveness, hostPingInterval, hostPingTimeout } from "./hostLiveness";
 import { installKeyboardClickGuard } from "./keyboardClickGuard";
 import { closeApplicationWindow, useWindowTitleBar, WindowBrand, WindowControls } from "./windowChrome";
+import { createPluginEventsRead } from "./pluginEvents";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
 import { workflowNotice, type WorkflowNotice } from "./workflowNotice";
 import { translate, type MessageKey } from "./localization";
@@ -1920,6 +1921,10 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   const archivedScope = archivedProjectScope(snapshot, selectedProjectId);
   const ownedHost = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
   const ownedSession = ownedHost && !archivedScope;
+  const pluginEpoch = ownedHost ? status!.hostEpoch! : null;
+  const readPluginEvents = useMemo(() => pluginEpoch === null ? undefined
+    : createPluginEventsRead(sessionPluginEvents.read, { epoch: pluginEpoch, sessionId: session.id, projectId: selectedProjectId }),
+  [pluginEpoch, session.id, selectedProjectId]);
   const infoControl = <Button ref={infoTrigger} variant="minimal" className="session-info-trigger" icon={<AppIcon name="info" size={16} />}
     aria-label={t("Session info")} title={`${t("Session info")} (Ctrl+G, Ctrl+T)`} aria-haspopup="dialog" aria-expanded={infoOpen}
     onClick={openInfo} />;
@@ -1941,7 +1946,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
         }}
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}
           onNavigationReset={resetMessageNotice} newestRequest={newest.requestRef} onNewestResult={newest.onResult}
-          read={readTimeline}
+          read={readTimeline} readPluginEvents={readPluginEvents}
           outgoing={ownedSession && status?.hostEpoch ? submissions.outgoing(status.hostEpoch, session.id) : []}
           onAcknowledgeOutgoing={submissions.acknowledgeOutgoing}
           live={ownedSession ? live?.snapshot?.session ?? null : null} />

@@ -101,7 +101,7 @@ export function TimelineMessage({ item, canInspect, historySource, onOpenSource,
     }, 1600);
   }
   const hasDetails = !!(body || item.detailMarkdown || item.details || item.metadata.length);
-  const compact = ["status", "reasoning", "tool", "file", "prompt"].includes(item.category);
+  const compact = ["status", "reasoning", "tool", "file", "prompt", "plugin"].includes(item.category);
   const excerpt = (item.summary || body || item.detailMarkdown || "").split(/\r?\n\s*\r?\n/)[0];
   const codePreview = item.category === "tool" && item.summaryIsCode
     ? commandPreview(excerpt) : null;

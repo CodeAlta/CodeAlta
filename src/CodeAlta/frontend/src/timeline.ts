@@ -8,7 +8,7 @@ export type HistoryEntry = HistoryResponse["entries"][number];
 export type TimelineItem = Readonly<{
   key: string;
   eventType: string;
-  category: "user" | "assistant" | "reasoning" | "tool" | "file" | "status" | "prompt" | "plan" | "notes" | "error";
+  category: "user" | "assistant" | "reasoning" | "tool" | "file" | "status" | "prompt" | "plan" | "notes" | "error" | "plugin";
   icon: IconName;
   title: string;
   subtitle: string | null;
