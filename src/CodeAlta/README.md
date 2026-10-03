@@ -128,9 +128,9 @@ before creation. Selecting an existing session tab or sidebar session removes it
 panes, drafts and split geometry are retained, rather than replaced with a project placeholder.
 The welcome view renders the same 3-D FIGlet/ASCII logo asset as the TUI, with the project name,
 folder and launch guidance below it. Its composer uses the same surface, status line, editor,
-toolbar, expansion and keyboard handling as existing sessions. **Start session** (or Enter) retains
-the guarded create-and-transfer flow: review the transferred prompt in the created session before
-normal Send. Agent/model/reasoning choices are available before creation in the same shared
+toolbar, expansion and keyboard handling as existing sessions. **Start session** (or Enter) creates
+the session, moves the prompt into it and sends it in one step; a text-only prompt needs no second
+Enter. Agent/model/reasoning choices are available before creation in the same shared
 selector rows as an existing session. Agent choices use the exact project/global prompt catalog;
 model choices load for the selected enabled provider. These are local preferences, revalidated
 against the created session before transfer, not authority to send or switch a running provider.
@@ -165,11 +165,16 @@ fixture failures are preserved, not reported as fixed. See the
 [current runnable checkpoint and verification gaps](../../doc/desktop-ide-checkpoint.md).
 The earlier single-pane session-tab candidate passed 33 scoped functional tests. The split-pane
 follow-up adds regression coverage but is build-verified only; mounted-lifetime qualification remains pending.
-The native @ reference-palette candidate replaces inline results with a bounded, separate
-query and literal file/folder paths. Selection revalidates the captured input after native
-close before inserting; nothing is sent or uploaded. Its 20 scoped functional tests, strict
-TypeScript and desktop/frontend builds pass. Independent source/functional review passed;
-mounted focus/IME qualification remains pending. Catalog/global/unverified inputs gain no search authority.
+Typing `@` at a word start in a prompt opens the **Project files** window. It lists the project's
+files and folders from the same index as the TUI (`.gitignore`-aware, recently used first, fuzzy-ranked
+as the query grows, at most 64 rows) with a colored icon per file type, the name and its folder.
+Up/Down, PageUp/PageDown and Home/End move the selection, Enter replaces the `@query` with a
+Markdown link (`[name](relative/path)`) and Escape leaves the text as typed. Typing `#` the same
+way opens **GitHub issues** for the project's `github.com` remote: issue number, title, state and
+last update, most recently updated first, 50 at most. The search field matches a number or title
+words, **Include closed** (`Ctrl+I`) filters closed issues, and Enter inserts `[#123](url)`.
+The token comes from `GITHUB_TOKEN`, `GH_TOKEN` or `gh auth token`; pull requests are not listed.
+Both windows are resizable and remember their size. Catalog-only and unverified inputs have no picker.
 
 **Settings → Overview → General → Appearance & navigator** manages the local dark/light theme,
 project sorting and desktop project-rail collapse. The rail's Sort projects selector and
@@ -376,12 +381,37 @@ finished, not that the agent responded. A deletion cannot retract an already cap
 or an admitted run. Counts are point-in-time as of Refresh; a lost mutation response is held as
 uncertain for that host/session, with no automatic retry. Catalog-only mode cannot schedule work.
 
-The **Commands** button or `Ctrl+P` outside editors and dialogs opens a searchable palette of
-implemented navigation and inspection actions. Arrow keys choose a result, Enter opens it and
-Escape closes the palette. Session Info requires a verified selected session; Reminders requires
-an exact owned session with a mutable host. Selection-sensitive actions are rechecked on activation.
-This palette also opens About; it does not expose Send, deletion, configuration writes, Skills or plugin management,
-and is not the full TUI command/shortcut set.
+### Commands, help and keyboard shortcuts
+
+The desktop app uses the TUI's key map. `Ctrl+P` (or `/` in an empty prompt, or the search icon on
+the activity rail) opens the **command palette**: every command with its slash name, description and
+shortcut, grouped by category and searchable by any of them; Enter runs the selected command and
+commands that cannot run right now are dimmed. `F1` (or `?` in an empty prompt) opens **Commands and
+shortcuts**, a filterable window listing the same commands by category.
+
+| Keys | Command |
+|---|---|
+| `Ctrl+P`, `F1` | Command palette, help |
+| `Ctrl+O` | Open project |
+| `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+PageUp` / `Ctrl+PageDown`) | Previous / next tab |
+| `Ctrl+W`, `Ctrl+Shift+T` | Close tab, reopen the last closed tab |
+| `Enter`, `Ctrl+Enter`, `Shift+Enter` | Send, steer the running turn, new line |
+| `Alt+Up` / `Alt+Down` in the prompt | Previous / next prompt sent from this window |
+| `F6`, `Ctrl+T` | Full prompt editor, next agent prompt |
+| `F8`, `F10`, `Ctrl+F11` | Abort the running turn, clear the queue, compact |
+| `F3` / `F4`, `Ctrl+F3` / `Ctrl+F4` | Previous / next message, first / latest message |
+| `Ctrl+Alt+B`, `Ctrl+F` | Browse sessions, filter the project's sessions |
+| `Alt+Up` / `Alt+Down`, `Alt+Left` / `Alt+Right` outside text | Previous / next session, previous / next project |
+| `Ctrl+Shift+N` | Show or hide the session notes |
+| `Ctrl+G` then `Ctrl+P` / `Ctrl+S` / `Ctrl+G` | Go to prompt, go to sidebar, toggle the navigator |
+| `Ctrl+G` then `Ctrl+T` / `Ctrl+U` / `Ctrl+D` | Session info, context usage, reminders |
+| `Ctrl+G` then `Ctrl+W` / `Ctrl+R` / `Ctrl+O` / `Ctrl+H` | Settings, providers, models, agent prompts |
+| `Ctrl+G` then `Ctrl+K` / `Ctrl+N` / `Ctrl+Y` / `Ctrl+L` / `Ctrl+A` | Skills, plugins, MCP servers, logs, about |
+
+The second stroke of a `Ctrl+G` chord works with or without `Ctrl` held. Shortcuts work while the
+prompt editor has focus; the ones marked "outside text" stay ordinary caret keys in text fields. An
+open window keeps the keyboard, except that the Settings window follows the commands that move to
+another Settings page.
 
 ## Browse a task-owned catalog copy
 
@@ -410,8 +440,9 @@ Cache/read failures are surfaced; the desktop does not substitute a header scan.
 The screen shows a bounded persisted snapshot, project/session selection and metadata, not
 live run status. Wire responses are capped at 200 projects and 500 sessions with a truncation
 notice; these limits do not bound the underlying catalog load or implement paging/history.
-In **Open project** (`Ctrl+O`), search the saved-project list by name or full path; use Up/Down
-and Enter or click a row. It uses deterministic name order, **not** last-active or recent order.
+**Open project** (`Ctrl+O`) is a resizable window: search the saved-project list by name or full
+path, use Up/Down and Enter or click a row, and Escape closes it. A folder that is not yet a project
+is added from the path field underneath. It uses deterministic name order, **not** last-active or recent order.
 Navigation requires the row's unique, unchanged ID/path/name/archive state in the current bounded
 snapshot. It selects existing sessions without importing, creating a runtime, or discarding their
 drafts. Archived projects are labeled and their sessions open read-only; a catalog-only launch

@@ -1,4 +1,4 @@
-import { Button, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, Popover } from "@blueprintjs/core";
+import { Button, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, Popover } from "@blueprintjs/core";
 import { connect, onDiagnostic } from "@neoastra/client";
 import { rpcFailureCode } from "./rpcDiagnostics";
 import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
@@ -61,7 +61,7 @@ import { UserInputPanel } from "./UserInputPanel";
 import { LiveSessionPanel } from "./LiveSessionPanel";
 import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePosition, timelineNotice, type TimelineNotice, type MessageNavigation } from "./timelineScroll";
 import type { ShortcutAction } from "./shortcuts";
-import { dispatchWorkspaceShortcut, workspaceEditingSelector, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
+import { workspaceEditingSelector } from "./workspaceShortcutDispatch";
 import { activateContextShortcut } from "./contextShortcut";
 import { createDraftIndicators, draftStorageKey, persistDraft, restoreDraft, transferPromptDraft } from "./promptDraft";
 import { SessionDraftBadge } from "./SessionDraftBadge";
@@ -106,7 +106,9 @@ import { createApplicationLogClearActions } from "./applicationLogClear";
 import { SessionInfoDialog, type SessionInfoLifetime } from "./SessionInfoDialog";
 import { selectedSessionInfoAvailable, selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
 import { CommandPalette } from "./CommandPalette";
-import { commandAccessChord, commandAccessHelp, createPaletteFocusRestoration, paletteAvailable, paletteShortcut, type PaletteAction, type PaletteContext } from "./paletteActions";
+import { CommandHelp } from "./CommandHelp";
+import { resolveCommandKey, type CommandId } from "./commandRegistry";
+import { createPaletteFocusRestoration } from "./paletteActions";
 import "normalize.css";
 import "@blueprintjs/core/lib/css/blueprint.css";
 import "flexlayout-react/style/light.css";
@@ -132,7 +134,6 @@ function App() {
   // Original create presentation authority only; never a backend receipt or retry grant.
   const creationGeneration = useRef(0);
   const commandGeneration = useRef(0);
-  const commandPrefix = useRef<PaletteContext | null>(null);
   const [, publishModalGeneration] = useState(0);
   // Saved-browser/palette captures are invalidated synchronously at catalog,
   // host and navigation transitions, including ABA before React commits.
@@ -175,9 +176,10 @@ function App() {
   const localDraftStorageKey = `codealta.desktop.localPrompt.${JSON.stringify(projectId)}`;
   if (!localDrafts.current.has(draftScope)) localDrafts.current.set(draftScope,
     { text: restoreDraft(() => localStorage.getItem(localDraftStorageKey), draftScope), revision: 0 });
-  const localDraft = localDrafts.current.get(draftScope)!;
-  const [draftHandoffNotice, setDraftHandoffNotice] = useState("");
-  const [draftHandoffEvidence, setDraftHandoffEvidence] = useState<Array<{ scope: string; text: string; revision: number; epoch: string | undefined; target: SessionTarget; providerId: string | null; imageTitles: readonly string[]; outcome: string; result?: string }>>([]);
+  const localDraft = localDrafts.current.get(draftScope)!;  const [draftHandoffNotice, setDraftHandoffNotice] = useState("");
+  // A prompt typed in the New session tab is sent as soon as its session exists and holds the text.
+  const autoSend = useRef<{ sessionId: string; text: string } | null>(null);
+
   function editLocalDraft(text: string) {
     const current = localDrafts.current.get(draftScope)!;
     localDrafts.current.set(draftScope, { text, revision: current.revision + 1 });
@@ -252,9 +254,10 @@ function App() {
   }
   const [paletteOpen, writePaletteOpen] = useState(false);
   function setPaletteOpen(value: boolean) { invalidateCreation(true); writePaletteOpen(value); }
-  const paletteCapture = useRef<PaletteContext | null>(null);
   const paletteOrigin = useRef<HTMLElement | null>(null);
-  const palettePending = useRef<{ action: PaletteAction; captured: PaletteContext } | null>(null);
+  const palettePending = useRef<CommandId | null>(null);
+  // True after Ctrl+G, until the second stroke of the chord.
+  const commandChord = useRef(false);
   const [configurationState, setConfigurationState] = useState<{ snapshot?: ConfigurationSnapshot; error?: string }>({});
   const initialSelectionMade = useRef(false);
   useEffect(() => {
@@ -396,7 +399,6 @@ function App() {
   const remindersOrigin = useRef<{ element: HTMLButtonElement; lifetime: SessionInfoLifetime } | null>(null);
   const compactTrigger = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
-  const shortcutState = useRef<WorkspaceShortcutState>({ chordPending: false, sessionInfoPrefix: null, reminderPrefix: null });
   const timelineCommand = useRef<TimelineCommand | null>(null);
   const [paneLayout, setPaneLayout] = useState(() => restorePaneLayout(() => localStorage.getItem(paneLayoutStorageKey), window.innerWidth));
   const [workspaceWidth, setWorkspaceWidth] = useState(window.innerWidth);
@@ -708,36 +710,10 @@ function App() {
     return current() ? current : null;
   }, () => { localImageGeneration.current++; }, language.locale);
 
-  function paletteContext(): PaletteContext {
-    const selection = selectedSessionInfoSelection(snapshot, selectedSession, projectId,
-      selectedSessionId.current, selectedScope.current);
-    const usage = workspaceShell.current?.querySelector<HTMLButtonElement>("#session-usage-trigger");
-    const usageReady = !!usage?.isConnected && !usage.disabled && usage.getAttribute("aria-expanded") === "false";
-    const modelChooser = workspaceShell.current?.querySelector<HTMLButtonElement>("#next-send-model-chooser");
-    const promptChooser = workspaceShell.current?.querySelector<HTMLButtonElement>("#next-send-prompt-chooser");
-    return { workspace: currentView.current === "workspace", selection,
-      commandGeneration: commandGeneration.current,
-      accessScope: usage?.dataset.usageTarget,
-      usageReady, usageTrigger: usage, skillsReady: usageReady && currentProjectWritable(),
-      modelChooserTrigger: modelChooser, modelChooserReady: !!modelChooser?.isConnected && !modelChooser.disabled && modelChooser.getAttribute("aria-expanded") === "false",
-      promptChooserTrigger: promptChooser, promptChooserReady: !!promptChooser?.isConnected && !promptChooser.disabled && promptChooser.getAttribute("aria-expanded") === "false",
-      shellReady: currentView.current === "workspace" && !dialog && !settingsVisible.current,
-      epoch: owned && mutation?.capability.canMutate() ? status?.hostEpoch ?? null : null,
-      infoReady: !!sessionInfoTrigger.current?.isConnected && !sessionInfoTrigger.current.disabled &&
-        sessionInfoTrigger.current.getAttribute("aria-expanded") === "false",
-      promptReady: !!document.querySelector("#session-prompt, #catalog-prompt"),
-      localDraftScope: sessionId === null ? draftScope : undefined,
-      searchReady: !!sessionRail.current?.isConnected, browserScope: snapshot ? JSON.stringify([browserRevision.current, projectId, status?.hostEpoch, status?.hostAvailable, mutation?.capability.canMutate()]) : undefined,
-      tabSelection: tabs.active ? tabKey(tabs.active) : null,
-      runtimeScope: owned && mutation?.capability.canMutate() && tabs.open.length ? JSON.stringify([browserRevision.current, currentHostEpoch.current, tabs.open.map(tabKey)]) : undefined,
-      tabsReady: !!snapshot && tabs.open.length > 0, reopenReady: !!snapshot && tabs.closed.length > 0 };
-  }
-
   function openPalette() {
     if (paletteOpen || dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
     focusRestoration.cancel();
     paletteOrigin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    paletteCapture.current = paletteContext();
     setPaletteOpen(true);
   }
 
@@ -749,10 +725,11 @@ function App() {
       () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
   }
 
-  function choosePalette(action: PaletteAction) {
-    if (!paletteCapture.current || !paletteAvailable(action, paletteCapture.current, paletteContext())) return;
+  // The chosen command runs once the palette's modal dialog has closed (see the layout effect below).
+  function choosePalette(command: CommandId) {
+    if (!commandAvailable(command)) return;
     focusRestoration.cancel();
-    palettePending.current = { action, captured: paletteCapture.current };
+    palettePending.current = command;
     setPaletteOpen(false);
   }
 
@@ -770,74 +747,96 @@ function App() {
 
   useLayoutEffect(() => {
     if (paletteOpen || !palettePending.current) return;
-    const { action, captured } = palettePending.current;
+    const command = palettePending.current;
     palettePending.current = null;
-    if (dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') ||
-      !paletteAvailable(action, captured, paletteContext())) return;
-    if (action === "about") { navigate("about"); settingsOrigin.current = paletteOrigin.current; aboutOrigin.current = { element: null, view: currentView.current }; setDialog("about"); return; }
-    if (action === "sessionInfo") invokeComposerControl(sessionInfoTrigger.current);
-    else if (action === "chooseModel") invokeComposerControl(workspaceShell.current?.querySelector<HTMLButtonElement>("#next-send-model-chooser"));
-    else if (action === "choosePrompt") invokeComposerControl(workspaceShell.current?.querySelector<HTMLButtonElement>("#next-send-prompt-chooser"));
-    else if (action === "usage") invokeComposerControl(workspaceShell.current?.querySelector<HTMLButtonElement>("#session-usage-trigger"));
-    else if (action === "openProject" || action === "help") { paletteOrigin.current?.focus(); runShortcut(action); }
-    else if (action === "browseSessions") openSessionBrowser();
-    else if (action === "refreshStatuses") runtimeObservationControls().refresh(tabs.open);
-    else if (action === "nextTab" || action === "previousTab" || action === "closeTab" || action === "reopenTab") tabCommand(action);
-    else if (action === "reminders") invokeComposerControl(remindersTrigger.current);
-    else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
-    else if (action === "focusSearch") showSessionSearch();
-    else { navigate(action === "settings" ? "appearance" : action); settingsOrigin.current = paletteOrigin.current; }
+    // Give focus back to where the palette was opened from, so focus-relative commands act on it.
+    if (paletteOrigin.current?.isConnected) paletteOrigin.current.focus();
+    runCommand(command);
   });
 
+  // Session-scoped commands need an open session; everything else is always offered.
+  function commandAvailable(command: CommandId): boolean {
+    const session = view === "workspace" && !!selectedSession;
+    const ownedSession = session && owned;
+    switch (command) {
+      case "sessionInfo": case "messagePrevious": case "messageNext": case "messageFirst": case "messageLatest": case "toggleNotes": return session;
+      case "usage": case "reminders": case "compact": case "abort": case "clearQueue": case "nextPrompt": case "modelSelector": case "send": case "steer": return ownedSession;
+      case "expandPrompt": case "focusPrompt": return view === "workspace";
+      case "closeTab": case "previousTab": case "nextTab": return tabs.open.length > 0;
+      case "reopenTab": return tabs.closed.length > 0;
+      case "refreshStatuses": return owned && tabs.open.length > 0;
+      case "newSession": return owned && !!snapshot && !selectedProject?.archived;
+      case "renameProject": return owned && !!selectedProject && !selectedProject.archived;
+      default: return true;
+    }
+  }
+
+  // Commands the active session's composer carries out itself.
+  function composerCommand(command: "send" | "abort" | "clearQueue" | "nextPrompt") {
+    window.dispatchEvent(new CustomEvent("codealta:composer", { detail: command }));
+  }
+  const activeComposerControl = (selector: string) => Array.from(workspaceShell.current?.querySelectorAll<HTMLButtonElement>(selector) ?? [])
+    .find(button => button.offsetParent !== null);
+
+  function runCommand(command: CommandId) {
+    if (!commandAvailable(command)) return;
+    // Settings is a modal window: only commands that move to another Settings page run while it is open.
+    const pages: Partial<Record<CommandId, View>> = { settings: "appearance", about: "about", skills: "skills", plugins: "plugins", mcp: "mcp",
+      config: "config", prompts: "prompts", providers: "providers", models: "models", logs: "logs" };
+    if (pages[command]) { navigate(pages[command]!); return; }
+    if (settingsVisible.current) return;
+    switch (command) {
+      case "help": openHelp(); break;
+      case "palette": openPalette(); break;
+      case "openProject": setDialog("project"); break;
+      case "newSession": selectProject(projectId); requestAnimationFrame(() => document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt")?.focus()); break;
+      case "focusSidebar": runShortcut("focusProjects"); break;
+      case "toggleNavigator": toggleProjects(); break;
+      case "modelSelector": invokeComposerControl(activeComposerControl(".composer-selection")); break;
+      case "usage": invokeComposerControl(activeComposerControl("#session-usage-trigger")); break;
+      case "searchSessions": runShortcut("focusSearch"); break;
+      case "refreshStatuses": runtimeObservationControls().refresh(tabs.open); break;
+      case "send": case "abort": case "clearQueue": case "nextPrompt": composerCommand(command); break;
+      case "steer": break;
+      // The remaining commands share their implementation with the older shortcut actions of the same name.
+      default: runShortcut(command as ShortcutAction);
+    }
+  }
+
   useEffect(() => {
-    function keyDown(event: globalThis.KeyboardEvent) {
-      const chordAction = commandAccessChord(event.key.toLowerCase());
-      const captured = commandPrefix.current;
-      commandPrefix.current = null;
-      const modal = !!dialog || !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]');
-      const targetElement = event.target instanceof HTMLElement ? event.target : null;
-      const accessAllowed = !modal && view === "workspace" && !!targetElement && workspaceShell.current?.contains(targetElement)
-        && !targetElement.closest(workspaceEditingSelector)
-        && event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey
-        && !event.isComposing && event.keyCode !== 229 && !event.repeat && !event.defaultPrevented;
-      if (captured && chordAction) {
-        shortcutState.current.chordPending = false;
-        if (accessAllowed && paletteAvailable(chordAction, captured, paletteContext())) {
-          event.preventDefault(); navigate(chordAction === "skills" ? "skills" : "logs");
-        }
-        return; // Never consume an unavailable suffix (Ctrl+L remains a browser command).
-      }
-      if (accessAllowed && event.key.toLowerCase() === "g") commandPrefix.current = paletteContext();
-      if (paletteShortcut(event, paletteOpen || !!dialog || !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'))) {
-        event.preventDefault(); openPalette(); return;
-      }
-      const target = event.target as HTMLElement | null;
+    // Capture phase: the prompt editor (Monaco) must not see keys that belong to a command.
+    function commandKey(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") { commandChord.current = false; return; }
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const settingsOnly = settingsVisible.current && !dialog && !paletteOpen
+        && document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]').length === 1;
+      const modal = paletteOpen || !!dialog || !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]');
+      if (modal && !settingsOnly) { commandChord.current = false; return; }
+      const focus = target?.closest("#session-prompt, #catalog-prompt") ? "prompt" : target?.closest(workspaceEditingSelector) ? "text" : "none";
+      // "?" outside text opens help, as it does when typed into an empty prompt.
+      const resolved = focus === "none" && !commandChord.current && event.key === "?" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.repeat
+        ? { command: "help" as CommandId, chord: false, handled: true }
+        : resolveCommandKey(event, commandChord.current, focus);
+      commandChord.current = resolved.chord;
+      if (!resolved.handled) return;
+      event.preventDefault(); event.stopPropagation();
+      if (resolved.command) runCommand(resolved.command);
+    }
+    // Bubble phase: Escape reaches here only when nothing inside (a popover, the editor) used it.
+    function escapeKey(event: globalThis.KeyboardEvent) {
+      const target = event.target instanceof HTMLElement ? event.target : null;
       if (target && workspaceShell.current?.contains(target) && !target.closest(workspaceEditingSelector) &&
         !event.isComposing && event.keyCode !== 229 && !event.defaultPrevented &&
         ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key))
         timelineCommand.current?.cancelLatest();
-      const infoSelection = selectedSessionInfoSelection(snapshot, selectedSession, projectId,
-        selectedSessionId.current, selectedScope.current);
-      const focusedProject = !!(view === "workspace" && owned && selectedProject && !selectedProject.archived
-        && target?.closest('button[aria-pressed="true"]') === projectRail.current?.querySelector('button[aria-pressed="true"]'));
-      dispatchWorkspaceShortcut(event, shortcutState.current, {
-        workspaceActive: view === "workspace", workspaceShell: workspaceShell.current,
-        modalOpen: !!dialog || !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'),
-        selectedProjectFocused: focusedProject, infoTrigger: sessionInfoTrigger.current,
-        reminderTrigger: remindersTrigger.current, compactTrigger: compactTrigger.current,
-        infoSelection,
-        selection: owned && currentProjectWritable() && status?.hostEpoch && infoSelection ? { epoch: status.hostEpoch, ...infoSelection } : null,
-        messageAvailable: !!infoSelection && timelineCommand.current?.sessionId === infoSelection.sessionId
-          && timelineCommand.current.projectId === infoSelection.projectId
-          && timelineCommand.current.epoch === (status?.hostEpoch ?? null) && timelineCommand.current.ready(),
-        latestAvailable: !!infoSelection && timelineCommand.current?.sessionId === infoSelection.sessionId
-          && timelineCommand.current.projectId === infoSelection.projectId
-          && timelineCommand.current.epoch === (status?.hostEpoch ?? null) && timelineCommand.current.latestReady(),
-        run: runShortcut,
-      });
+      if (event.key !== "Escape" || event.isComposing || event.keyCode === 229 || event.defaultPrevented || event.repeat
+        // An open window closes itself on Escape (its own cancel handling).
+        || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+      event.preventDefault(); runShortcut("escape");
     }
-    window.addEventListener("keydown", keyDown);
-    return () => window.removeEventListener("keydown", keyDown);
+    window.addEventListener("keydown", commandKey, true);
+    window.addEventListener("keydown", escapeKey);
+    return () => { window.removeEventListener("keydown", commandKey, true); window.removeEventListener("keydown", escapeKey); };
   });
 
   function runShortcut(action: ShortcutAction) {
@@ -881,7 +880,7 @@ function App() {
     else if (action === "models") navigate("models");
     else if (action === "prompts") navigate("prompts");
     else if (action === "providers") navigate("providers");
-    else if (action === "settings" || action === "plugins") navigate(action === "plugins" ? "mcp" : "appearance");
+    else if (action === "settings" || action === "plugins") navigate(action === "plugins" ? "plugins" : "appearance");
     else if (action === "toggleNotes") setNotesVisible(value => !value);
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
     else if (action === "focusSearch") showSessionSearch();
@@ -1201,12 +1200,7 @@ function App() {
     invalidateCreation(); // Deliberate capture fences any outstanding local paste.
     const handoff = fromDraft ? { scope: draftScope, ...localDraft, imageKey: localImageKey, images: localImages.images,
       imageGeneration: localImageGeneration.current, selection: { ...draftChoices.value } } : null;
-    const evidenceIndex = draftHandoffEvidence.length;
-    const recordHandoff = (outcome: string) => {
-      if (!handoff) return;
-      setDraftHandoffNotice(outcome);
-      setDraftHandoffEvidence(records => records.map((record, index) => index === evidenceIndex ? { ...record, outcome } : record));
-    };
+    const recordHandoff = (outcome: string) => { if (handoff) setDraftHandoffNotice(outcome); };
     creationPending.current = true;
     creationHeld.current = true;
     setCreationLocked(true);
@@ -1215,10 +1209,6 @@ function App() {
       ? { scope: "project", projectId: selectedProject.id, projectPath: selectedProject.path } : { scope: "global" };
     const generation = creationGeneration.current;
     const epoch = status?.hostEpoch;
-    // Do not retain additional binary copies in the unbounded historical text-evidence list.
-    // The shared eight-draft owner retains the source; the one original owns its captured snapshot.
-    if (handoff) setDraftHandoffEvidence(records => [...records, { scope: handoff.scope, text: handoff.text, revision: handoff.revision,
-      imageTitles: handoff.images.map(image => image.title), epoch, target, providerId, outcome: "Pending; nothing sent." }]);
     const sessionAtAdmission = sessionId;
     const capability = mutation.capability;
     const isCurrent = () => creationAlive.current && generation === creationGeneration.current
@@ -1238,8 +1228,6 @@ function App() {
     try {
       const result = await createSession(epoch, target, handoff ? null : creatingTitle.trim() || null, capability, providerId);
       if (!creationAlive.current) return;
-      if (handoff) setDraftHandoffEvidence(records => records.map((record, index) => index === evidenceIndex
-        ? { ...record, result: result.kind === "created" ? `Returned session: ${result.id}` : `Create status: ${result.code}` } : record));
       if (result.kind === "created") {
         if (!isCurrent()) { setCreatingMessage(completedElsewhere); recordHandoff(completedElsewhere + " Original draft retained; nothing sent."); return; }
         // Acquire without publishing: a late create-specific read cannot overwrite a newer
@@ -1282,7 +1270,10 @@ function App() {
               recordHandoff("Session created, but draft choices could not be verified. Original draft retained; nothing sent.");
               return;
             }
-            recordHandoff("Draft copied to the verified session. Review it and use normal Send. Original local draft retained.");
+            recordHandoff("");
+            if (handoff.images.length === 0 && handoff.text.trim()) autoSend.current = { sessionId: selection.sessionId, text: handoff.text };
+            // The session now owns the text; the New session tab starts empty again.
+            if (handoff.scope === draftScope && localDrafts.current.get(draftScope)?.revision === handoff.revision) editLocalDraft("");
           }
           publishWorkspaceState({ kind: "ready", snapshot: fresh });
           creationHeld.current = false;
@@ -1654,7 +1645,9 @@ function App() {
             newSessionLabel={t("New session — {project}", { project: selectedProject?.name ?? t("Global") })}
             renderSession={(tab, visible) => {
               const row = snapshot && resolveSessionTab(snapshot, tab);
-              if (!row || !snapshot) return null;
+              if (!snapshot) return null;
+              if (!row) return <NonIdealState className="session-unavailable" icon={<AppIcon name="error" size={32} />} title={t("Session unavailable")}
+                description={t("This session is no longer in the catalog. Close the tab or refresh the projects.")} />;
               const ownerKey = JSON.stringify([status?.hostEpoch, tabKey(tab), row.createdAt]);
               let owners = sessionPaneOwners.get(ownerKey);
               if (!owners) { owners = createSessionPaneOwners(); sessionPaneOwners.set(ownerKey, owners); }
@@ -1673,6 +1666,7 @@ function App() {
                 onOpenCatalog={navigate} onOpenReminders={openSelectedReminders} onOpenHelp={openHelp} onOpenPalette={openPalette}
                 readReminders={readReminders} reminderActions={reminderActions} status={status} mutation={mutation}
                 activeReminderCount={activeReminders ? activeReminders.get(row.id) ?? 0 : null}
+                autoSend={autoSend.current?.sessionId === row.id ? { text: autoSend.current.text, consume: () => { autoSend.current = null; } } : null}
                 submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} draftIndicators={draftIndicators}
                 askActions={askActions} display={owners.display} scrollMemory={scrollMemory} runtimeReader={owners.runtimeReader}
                 permissionReviewer={owners.permissionReviewer} inputReviewer={owners.inputReviewer} configuration={configurationState.snapshot}
@@ -1689,12 +1683,6 @@ function App() {
           <div id="active-session-content" className="active-session-content">
           {error && <div className="banner banner-error" role="alert">{error}</div>}
           {draftHandoffNotice && <p role="status" className="notice">{draftHandoffNotice}</p>}
-          {draftHandoffEvidence.length > 0 && <details className="notice"><summary>{t("Draft creation evidence (this window)")}</summary>
-            {draftHandoffEvidence.map((record, index) => <section key={index}><p>{record.scope} · host {record.epoch} · {record.target.scope === "project" ? record.target.projectPath : "Global"} · {record.providerId ?? t("Default or first enabled provider")} · input revision {record.revision}: {record.outcome}</p>
-              {record.imageTitles.length > 0 && <p>{t("PNG attachments")}: {record.imageTitles.join(" · ")}</p>}
-              {record.result && <p>{record.result}</p>}
-               <textarea aria-label={t("Original creation draft {number}", { number: index + 1 })} readOnly value={record.text} /></section>)}
-          </details>}
           {!selectedSession
             ? <NewSessionWorkspace key={draftScope} project={selectedProject}
                 preferredHeight={composerHeights.get(composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope))}
@@ -1709,7 +1697,7 @@ function App() {
                       {draftChoices.failed && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />} disabled={creatingBusy || creationLocked}
                         aria-label={t("Refresh composer choices")} title={t("Refresh composer choices")} onClick={draftChoices.refresh} />}
                      <Button intent="primary" icon={<AppIcon name="send" size={16} />} disabled={newPromptDisabled}
-                       aria-label={t("Start session")} title={t("Create a session and review this prompt before sending.")}
+                       aria-label={t("Start session")} title={t("Start the session and send (Enter)")}
                        onClick={() => void createSelectedSession(true)} />
                      {creatingBusy && <Button variant="minimal" icon={<AppIcon name="stop" size={16} />} aria-label={t("Cancel transfer")}
                        onClick={() => { invalidateCreation(); setDraftHandoffNotice("Transfer canceled locally. Creation may still complete; original text retained. Inspect sessions; nothing sent."); }} />}
@@ -1775,7 +1763,7 @@ function App() {
         if (!fresh?.configured || signal.aborted || !mutation?.capability.canMutate() ||
           currentHostEpoch.current !== original.epoch || selectedScope.current !== previousScope ||
           selectedSessionId.current !== previousSession || projectOpening.getSnapshot() !== original
-          || !fresh.projects.some(project => project.id === id && project.path === path)) return false;
+          || !fresh.projects.some(project => project.id === id)) return false;
         selectedScope.current = id;
         setProjectId(id);
         const nextSession = sessionsForProject(fresh, id)[0]?.id ?? null;
@@ -1784,7 +1772,7 @@ function App() {
         navigate("workspace");
         return true;
       }} onClose={() => setDialog(null)} />}
-    {dialog === "help" && <ShortcutHelp onClose={closeHelp} />}
+    {dialog === "help" && <CommandHelp onClose={closeHelp} />}
     {dialog === "sessions" && browserCapture && <SessionBrowser snapshot={browserCapture.snapshot} projectId={browserCapture.projectId} observations={runtimeObservationControls()} recentCount={recentSessionCount} activeSessionId={sessionId} batch={batchDeleteControls()}
       stale={browserCapture.revision !== browserRevision.current || browserCapture.hostReady !== (mutation?.capability.canMutate() ?? false) || view !== "workspace" || settingsOpen}
       close={() => setDialog(null)} open={tab => {
@@ -1807,8 +1795,7 @@ function App() {
         if (creationAlive.current && currentHostEpoch.current === epoch && mutation.capability.canMutate() && version === browserRevision.current && fresh.configured)
           publishWorkspaceState({ kind: "ready", snapshot: fresh });
       }} />
-    {paletteOpen && paletteCapture.current && <CommandPalette context={paletteContext()} captured={paletteCapture.current}
-      onChoose={choosePalette} onClose={dismissPalette} />}
+    {paletteOpen && <CommandPalette available={commandAvailable} onChoose={choosePalette} onClose={dismissPalette} />}
   </div></ShellLanguageContext.Provider>;
 }
 
@@ -1864,7 +1851,9 @@ function createSessionPaneOwners() {
   };
 }
 
-function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null }: {
+function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null }: {
+  /** A draft prompt to send once this session's composer holds it. */
+  autoSend?: { text: string; consume: () => void } | null;
   /** Active reminders of this session as last reported by the host; null while unknown. */
   activeReminderCount?: number | null;
   notesReader: ReturnType<typeof createNotesReader>;
@@ -2017,7 +2006,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
                 epoch: status.hostEpoch, sessionId: session.id, scope: selectedProjectId === null ? "global" : "project",
                 projectId: selectedProjectId, expectedProjectPath: selectedProjectId === null ? null : session.workspacePath } : null}
               onOpenCatalog={onOpenCatalog} timelineNotices={timelineNotices} liveState={ownedSession ? live : null} inputLifetime={infoLifetime} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} infoControl={infoControl} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
-              activeReminderCount={activeReminderCount} reminderActions={reminderActions} readReminderCount={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? readReminders : undefined} /> : null}
+              activeReminderCount={activeReminderCount} autoSend={autoSend} reminderActions={reminderActions} readReminderCount={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? readReminders : undefined} /> : null}
           readOnly={<ReadOnlyComposer active={active} sessionId={session.id} provider={session.providerKey} draftIndicators={draftIndicators} infoControl={infoControl} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
               reason={archivedScope ? t("Archived project; this session is read-only. Sending is unavailable.") : undefined} />}
           recovery={ownedHost ? <ArchivedActionRecovery epoch={status!.hostEpoch!} sessionId={session.id} submissions={submissions}
@@ -2065,38 +2054,6 @@ function ConfigurationPanel({ preferences }: { preferences: Parameters<typeof Ge
 }
 
 function StatusPill({ label }: { label: string }) { return <span className="status-pill">{label}</span>; }
-
-function ShortcutHelp({ onClose }: { onClose: () => void }) {
-  const { t } = useShellLanguage();
-  const shortcuts = [
-    ["Ctrl+Alt+B outside text", "Browse saved sessions (Ctrl+E remains reserved for TUI Edit File)"],
-    ["Ctrl+F", "Search sessions"], ["Alt+↑ / Alt+↓", "Previous / next session"],
-    ["Alt+← / Alt+→", "Previous / next project"], ["Ctrl+,", "Configuration"], ["Ctrl+P", "Implemented actions palette"],
-    ["Ctrl+Shift+N", "Toggle Alta notes"],
-    ["Ctrl+Alt+Left / Right (or Ctrl+PageUp / PageDown)", "Previous / next tab including the local prompt draft, outside text"],
-    ["Ctrl+W outside text", "Close saved tab only; prompt draft cannot close; does not stop or delete session"],
-    ["Prompt draft", "Local per project/global scope. Create and transfer explicitly, then review and Send; navigation never creates a session."],
-    ["Ctrl+Shift+T outside text", "Reopen last closed session tab"],
-    ["Ctrl+G, Ctrl+P", "Focus prompt"], ["Ctrl+G, Ctrl+S", "Focus projects"], ["Ctrl+G, Ctrl+R", "Providers"],
-    ["Ctrl+G, Ctrl+O", "Models"], ["Ctrl+G, Ctrl+H", "Agent prompts"], ["Ctrl+G, Ctrl+U", "Context state"],
-    ["Ctrl+G, Ctrl+T", "Selected session info (saved metadata; explicit observed runtime/usage refresh)"],
-    ["Ctrl+G, Ctrl+D", "Reminders (selected owned workspace session only)"],
-    ["? in empty regular prompt", "Keyboard shortcuts"],
-    ["/ in empty regular prompt", "Implemented actions palette (not slash-command execution)"],
-    ["Escape", "Close / cancel"], ["Enter / Shift+Enter", "Send / new line in prompt"],
-    ["F3 / F4", "Previous / next retained user or assistant message"],
-    ["Ctrl+F3", "First retained message (not journal first)"],
-    ["Ctrl+F4", "Refresh newest persisted history, then follow on success"],
-    ["Ctrl+F11", "Attempt compaction of the observed idle attachment (selected owned session only)"],
-    ["F6", "Expand prompt (owned session)"], ["Ctrl+Enter", "Steer in regular prompt; close in expanded editor; Create only inside the Reminders Create form"],
-  ] as const;
-  return <div className="dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <section className="app-dialog shortcut-dialog" role="dialog" aria-modal="true" aria-labelledby="shortcut-title">
-      <header><div><span className="eyebrow">{t("Keyboard first")}</span><h2 id="shortcut-title">{t("Shortcuts")}</h2></div><button autoFocus type="button" className="icon-button" aria-label={t("Close")} title={t("Close")} onClick={onClose}><AppIcon name="close" size={16} /></button></header>
-      <dl>{shortcuts.map(([keys, label]) => <div key={keys}><dt>{keys === "Prompt draft" ? t("Prompt draft") : keys.replace("outside text", t("outside text")).replace("in empty regular prompt", t("in empty regular prompt"))}</dt><dd>{t(label)}</dd></div>)}{commandAccessHelp.map(command => <div key={command.id}><dt>{command.shortcut ? `${command.shortcut} · ${t("outside text")}` : t("Command palette")}</dt><dd>{t(command.label)}</dd></div>)}</dl>
-    </section>
-  </div>;
-}
 
 function LoadingRows() { return <div className="loading-rows"><span /><span /><span /></div>; }
 function EmptyWorkspace({ workspaceState }: { workspaceState: WorkspaceState }) {

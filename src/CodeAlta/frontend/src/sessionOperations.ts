@@ -4,7 +4,8 @@ import { createImageDrafts, freezeImages, validImages } from "./promptImages";
 import { diagnosticRequestId, rpcFailureCode } from "./rpcDiagnostics";
 
 type WaitOptions = { signal: AbortSignal; timeoutMilliseconds: number };
-export type SubmissionResult = SessionAdmission | { status: "uncertain"; epoch: string; receipt: null };
+/** `reason` says why an admission stayed unconfirmed: the host's status, or the transport failure code. */
+export type SubmissionResult = SessionAdmission | { status: "uncertain"; epoch: string; receipt: null; reason?: string };
 
 export function createMutationCapability(epoch: string) {
   let valid = true;
@@ -210,18 +211,19 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
       let result: SubmissionResult = { status: "uncertain", epoch: captured.expectedEpoch, receipt: null };
       try {
         console.info("[CodeAlta Send] dispatch", { requestId: diagnosticId });
-        entry.waiter = invokeSend(captured, { signal, timeoutMilliseconds: 8_000 });
+        entry.waiter = invokeSend(captured, { signal, timeoutMilliseconds: 30_000 });
         const admission = await entry.waiter;
         if (observeAdmission(admission, capability) && !signal.aborted && capability.canSubmit(captured) && admission.epoch === captured.expectedEpoch) {
           if ((["accepted", "replay"].includes(admission.status) && admission.receipt && matchesSend(captured, admission.receipt)) || definiteRefusal(admission, false)) {
             sends.delete(key); result = admission;
-          }
+          } else result = { status: "uncertain", epoch: captured.expectedEpoch, receipt: null, reason: admission.status };
         } else if (!signal.aborted && !capability.canMutate()) result = { status: "stale_epoch", epoch: captured.expectedEpoch, receipt: null };
       } catch (error) {
         console.warn("[CodeAlta Send] transport failure; original request retained, not replayed", {
           requestId: diagnosticId, code: rpcFailureCode(error), elapsedMs: Date.now() - started, aborted: signal.aborted,
         });
         // Transport failure/cancellation is not non-admission. Preserve exact uncertainty.
+        result = { status: "uncertain", epoch: captured.expectedEpoch, receipt: null, reason: rpcFailureCode(error) };
       }
       finally {
         console.info("[CodeAlta Send] settled", { requestId: diagnosticId, uncertain: result.status === "uncertain", elapsedMs: Date.now() - started });

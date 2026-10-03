@@ -70,7 +70,7 @@ function Window() {
   return <div className="app-shell"><header className="topbar"><button id="commands" type="button" onClick={openPalette}>Commands</button>
     <button id="settings" type="button" onClick={() => setView("configuration")}>Settings</button></header>
     {view === "configuration" && <main className="configuration-page"><div className="settings-grid"><button type="button" className="quiet-button" onClick={event => openAbout(event.currentTarget)}>Open About</button></div></main>}
-    {palette && captured.current && <CommandPalette context={context} captured={captured.current} onChoose={choose} onClose={dismissPalette} />}
+    {palette && captured.current && <CommandPalette available={id => id === "about"} onChoose={id => choose(id as PaletteAction)} onClose={dismissPalette} />}
     {about && <AboutDialog status={status} bootError={error} demo={demo} onClose={closeAbout} />}
   </div>;
 }

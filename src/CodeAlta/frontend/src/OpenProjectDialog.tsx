@@ -3,7 +3,10 @@ import type { WorkspaceDirectoryCompletionRequest, WorkspaceDirectoryCompletionR
 import type { createMutationCapability } from "./sessionOperations";
 import { canImportCheckedFolder, projectOpeningMessage, type createProjectOpening } from "./projectOpening";
 import { savedProjectSelection, type SavedProjectIdentity } from "./savedProjectSelection";
+import { Button, Checkbox, InputGroup, Tag } from "@blueprintjs/core";
+import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
+import { AppWindow } from "./AppWindow";
 import { folderCompletionRequest, projectFolderCompletion } from "./directoryCompletion";
 import { useShellLanguage } from "./shellLanguage";
 import { workflowNotice, type WorkflowNotice } from "./workflowNotice";
@@ -111,13 +114,7 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, getCurr
       if (!projected) { setSuggestMessage({ key: "Folder suggestions returned an invalid or foreign response. Request again explicitly if needed." }); return; }
       if (projected.status === "complete" || projected.status === "incomplete") {
         setSuggestions({ request, paths: projected.directories, revision, scope });
-        setSuggestMessage({ parts: [
-          { key: projected.directories.length ? "Observed {count} matching folders" : "No matching folders observed", parameters: { count: projected.directories.length } },
-          { key: "({entries} entries inspected).", parameters: { entries: projected.entriesVisited } },
-          { key: projected.status === "incomplete" ? "Incomplete observed subset; other folders may exist." : "Enumeration completed." },
-          ...(projected.omittedUnsafeEntries ? [{ key: "Unsafe entries were omitted." as const }] : []),
-          { key: "Suggestions do not establish ownership or importability." },
-        ] });
+        setSuggestMessage(projected.directories.length ? "" : { key: "No matching folders observed" });
       } else setSuggestMessage({ key: ({ invalid_request: "The folder/prefix is not canonical or supported by the host.",
         missing: "The directory is missing.", not_directory: "The path is not a directory.", denied: "Directory access was denied.",
         read_error: "The directory could not be read safely.", unconfigured: "Folder suggestions are unavailable on this host.",
@@ -147,7 +144,7 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, getCurr
     setConfirmed(false);
     setMessage("");
     setNotice("");
-    setSuggestMessage({ key: "Folder inserted into the draft. Check folder and explicitly confirm before importing." });
+    setSuggestMessage("");
   }
   useLayoutEffect(() => {
     const list = results.current;
@@ -232,86 +229,79 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, getCurr
     else if (opening.getSnapshot()) setNotice({ key: "Could not refresh the project list. The captured import remains retained." });
     else setMessage({ key: "Could not refresh the project list. No import was requested." });
   }
-  return <div className="dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}>
-    <section className="app-dialog" role="dialog" aria-modal="true" aria-labelledby="open-project-title"
-      onKeyDown={event => {
-        event.stopPropagation();
-        if (event.defaultPrevented || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
-        if (event.key === "Escape") { event.preventDefault(); close(); }
-        else if (event.key === "Tab") {
-          const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled])'));
-          if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls.at(-1)?.focus(); }
-          else if (!event.shiftKey && document.activeElement === controls.at(-1)) { event.preventDefault(); controls[0]?.focus(); }
-        }
-      }}>
-      <header><div><span className="eyebrow">{t("Workspace")}</span><h2 id="open-project-title">{t("Open project")}</h2></div><button type="button" className="icon-button" aria-label={t("Close")} title={t("Close")} onClick={close}><AppIcon name="close" size={16} /></button></header>
-      <label htmlFor="saved-project-filter">{t("Find a saved project by name or full path")}</label>
-      <input autoFocus id="saved-project-filter" type="search" role="combobox" aria-autocomplete="list"
-        aria-expanded={matches.length > 0} aria-controls="saved-project-results"
-        aria-activedescendant={index >= 0 ? `saved-project-${index}` : undefined} value={filter}
-        onChange={event => { setFilter(event.target.value); setActive(0); }} onKeyDown={savedKeys} placeholder={t("Saved project name or path")} />
-      <div ref={results} id="saved-project-results" className="dialog-list" role="listbox" aria-label={t("Saved projects (name order)")}>
-        {matches.map((project, i) => <button type="button" role="option" id={`saved-project-${i}`} key={`${project.id}:${project.path}:${i}`}
-          aria-selected={i === index} onFocus={() => setActive(i)} onMouseEnter={() => setActive(i)} onClick={() => choose(project)}
-          onKeyDown={event => { if (event.key === "Enter" && !event.repeat && !event.defaultPrevented && !event.nativeEvent.isComposing
-            && event.nativeEvent.keyCode !== 229 && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
-            event.preventDefault(); choose(project); } }}
-          disabled={busy || refreshFailed || !!importEvidence}>
-          <span className="project-icon">{project.name.slice(0, 1).toUpperCase()}</span><span><strong>{project.name}{project.archived ? ` ${t("(archived, read-only)")}` : ""}</strong><small title={project.path}>{project.path}</small></span>
-        </button>)}
-        {matches.length === 0 && <p role="status">{t(filter.trim() ? "No saved projects match this name or path." : "No saved projects in this snapshot.")}</p>}
-      </div>
-      {snapshot?.projectsTruncated && <p role="status" className="muted-text">{t("Saved project snapshot is truncated; omitted projects cannot be searched here. Refresh to inspect the current bounded list.")}</p>}
-      {!snapshot && <p role="alert">{t("The saved project list is unavailable. Refresh projects before selecting.")}</p>}
-      {refreshFailed && <p role="alert">{t("Saved selection is paused after a failed refresh. Retry Refresh projects before selecting.")}</p>}
-      {importEvidence && <p role={importEvidence.kind === "pending" ? "status" : "alert"}>
-        {t("Captured import {state} for host", { state: importEvidence.kind })} <code>{importEvidence.epoch}</code>, {t("requested")} <code>{importEvidence.requestedPath}</code>,
-        {t("verified folder")} <code>{importEvidence.path}</code>{importEvidence.projectId && <>, {t("Project ID")} <code>{importEvidence.projectId}</code></>}.
-        {" "}{t(importEvidence.kind === "pending" ? "Wait for the original request. No saved selection or new folder request is available."
-          : "Inspect the catalog; no navigation, new request or retry will run in this window. Reload the app only after resolving this exact outcome.")}
-      </p>}
-      {!canImport && <p className="muted-text">{t("Adding a folder requires the desktop app.")}</p>}
-      {canImport && <div className="project-import">
-        <label htmlFor="project-folder-path">{t("Add a different existing folder (requires trust confirmation)")}</label>
-        <input id="project-folder-path" aria-label={t("Absolute folder path to check")} value={query} disabled={busy || !!importEvidence}
+  const locked = busy || refreshFailed || !!importEvidence;
+  return <AppWindow storageKey="codealta.desktop.window.open-project.v1" className="open-project-dialog" titleId="open-project-title"
+    title={<><AppIcon name="open" size={14} /> {t("Open project")}</>}
+    preferredSize={viewport => ({ width: Math.min(780, viewport.width - 40), height: Math.min(620, viewport.height - 40) })} minimumSize={{ width: 440, height: 340 }}
+    onClose={close} closeLabel={t("Close")} onCancel={event => { event.preventDefault(); close(); }}
+    // Escape closes the window even from the search field, where it would otherwise only clear the text.
+    onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape" && !event.nativeEvent.isComposing) { event.preventDefault(); close(); } }}
+    onOpened={() => document.getElementById("saved-project-filter")?.focus()}
+    headerActions={<><span className="reference-status" role="status">{busy && <ActivitySpinner size={12} />}{matches.length === 1 ? t("1 project") : t("{count} projects", { count: matches.length })}</span>
+      <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={14} />} disabled={busy} aria-label={t("Refresh projects")} title={t("Refresh projects")} onClick={() => void refreshList()} /></>}>
+    <InputGroup id="saved-project-filter" className="reference-search" type="search" role="combobox" aria-autocomplete="list" spellCheck={false}
+      leftIcon={<AppIcon name="search" size={15} className="bp6-icon" />} aria-label={t("Find a saved project by name or full path")}
+      aria-expanded={matches.length > 0} aria-controls="saved-project-results"
+      aria-activedescendant={index >= 0 ? `saved-project-${index}` : undefined} value={filter}
+      onChange={event => { setFilter(event.target.value); setActive(0); }} onKeyDown={savedKeys} placeholder={t("Saved project name or path")} />
+    <div ref={results} id="saved-project-results" className="reference-list" role="listbox" aria-label={t("Saved projects (name order)")}>
+      {matches.map((project, i) => <div role="option" id={`saved-project-${i}`} key={`${project.id}:${project.path}:${i}`} className="reference-row"
+        aria-selected={i === index} aria-disabled={locked} title={project.path}
+        onMouseMove={() => { if (i !== index) setActive(i); }} onClick={() => { if (!locked) choose(project); }}>
+        <span className="reference-icon" data-file-tone={project.archived ? "muted" : "gold"}><AppIcon name="folder" size={16} /></span>
+        <span className="reference-name">{project.name}</span>
+        {project.archived ? <Tag minimal>{t("Archived")}</Tag> : <span />}
+        <span className="reference-parent">{project.path}</span>
+      </div>)}
+      {matches.length === 0 && <p className="reference-empty" role="status">{t(filter.trim() ? "No saved projects match this name or path." : "No saved projects in this snapshot.")}</p>}
+    </div>
+    {!snapshot && <p role="alert" className="open-project-notice error-text">{t("The saved project list is unavailable. Refresh projects before selecting.")}</p>}
+    {refreshFailed && <p role="alert" className="open-project-notice error-text">{t("Saved selection is paused after a failed refresh. Retry Refresh projects before selecting.")}</p>}
+    {importEvidence && <p className="open-project-notice" role={importEvidence.kind === "pending" ? "status" : "alert"}>
+      {t("Captured import {state} for host", { state: importEvidence.kind })} <code>{importEvidence.epoch}</code>, {t("requested")} <code>{importEvidence.requestedPath}</code>,
+      {t("verified folder")} <code>{importEvidence.path}</code>{importEvidence.projectId && <>, {t("Project ID")} <code>{importEvidence.projectId}</code></>}.
+    </p>}
+    {canImport && <div className="project-import">
+      <div className="project-import-row">
+        <InputGroup id="project-folder-path" fill aria-label={t("Absolute folder path to check")} value={query} disabled={busy || !!importEvidence} spellCheck={false}
+          leftIcon={<AppIcon name="plus" size={15} className="bp6-icon" />}
           onChange={event => { editRevision.current++; draftNow.current = event.target.value; setQuery(event.target.value);
             clearSuggestions(); setPreview(undefined); setConfirmed(false); setMessage(""); setNotice(""); }}
           onKeyDown={event => { if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing
             || event.nativeEvent.keyCode === 229 || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
             if (event.key === "ArrowDown" && visibleSuggestions?.paths.length) {
               event.preventDefault(); document.querySelector<HTMLElement>('#folder-suggestions [role="option"]')?.focus();
-            } else if (event.key === "Enter") { event.preventDefault(); void checkPath(); } }} placeholder={t("Absolute folder path")} />
-        <button type="button" className="quiet-button" disabled={busy || suggestBusy || !!importEvidence || !query.trim()} onClick={() => void checkPath()}>{t("Check folder")}</button>
-        <button type="button" className="quiet-button" disabled={busy || suggestBusy || !!importEvidence || !query || !canImport || !allowCompletion || getCurrentEpoch() !== epoch}
-          onClick={() => void suggest()}>{t("Suggest folders")}</button>
-        {suggestBusy && <p role="status">{t("Reading folders…")}</p>}
-        {suggestMessage && <p role="status" id="folder-suggestion-status">{workflowNotice(locale, suggestMessage)}</p>}
-        {visibleSuggestions && visibleSuggestions.paths.length > 0 && <div id="folder-suggestions" className="dialog-list" role="listbox" aria-label={t("Observed folder suggestions")}>
-          {visibleSuggestions.paths.map((path, i) => <button type="button" role="option" key={path} aria-selected={i === suggestActive}
-            onFocus={() => setSuggestActive(i)} onMouseEnter={() => setSuggestActive(i)}
-            onClick={event => { if (!event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) insertSuggestion(path); }}
-            onKeyDown={event => {
-              if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
-                || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) {
-                if (event.key === "Enter" || event.key === " ") event.preventDefault();
-                return;
-              }
-              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                event.preventDefault(); const next = (i + (event.key === "ArrowDown" ? 1 : visibleSuggestions.paths.length - 1)) % visibleSuggestions.paths.length;
-                setSuggestActive(next); event.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="option"]')[next]?.focus();
-              } else if (event.key === "Enter") { event.preventDefault(); insertSuggestion(path); }
-            }}><small title={path}>{path}</small></button>)}
-        </div>}
-        {preview && <><p>{t("Existing folder:")} <code>{preview.path}</code></p>
-          <label><input type="checkbox" checked={confirmed} disabled={busy || !!importEvidence} onChange={event => setConfirmed(event.target.checked)} /> {t("I trust this folder and want to add it to the active project catalog.")}</label>
-          <button type="button" className="quiet-button" disabled={!!importEvidence || !canImportCheckedFolder(preview, confirmed, busy, canImport)} onClick={() => void importPath()}>{t("Import and open folder")}</button></>}
+            } else if (event.key === "Enter") { event.preventDefault(); void checkPath(); } }} placeholder={t("Add a folder: absolute path")} />
+        <Button disabled={busy || suggestBusy || !!importEvidence || !query || !canImport || !allowCompletion || getCurrentEpoch() !== epoch}
+          loading={suggestBusy} onClick={() => void suggest()}>{t("Suggest folders")}</Button>
+        <Button disabled={busy || suggestBusy || !!importEvidence || !query.trim()} onClick={() => void checkPath()}>{t("Check folder")}</Button>
+      </div>
+      {suggestMessage && <p role="status" id="folder-suggestion-status" className="bp6-text-muted">{workflowNotice(locale, suggestMessage)}</p>}
+      {visibleSuggestions && visibleSuggestions.paths.length > 0 && <div id="folder-suggestions" className="dialog-list" role="listbox" aria-label={t("Observed folder suggestions")}>
+        {visibleSuggestions.paths.map((path, i) => <button type="button" role="option" key={path} aria-selected={i === suggestActive}
+          onFocus={() => setSuggestActive(i)} onMouseEnter={() => setSuggestActive(i)}
+          onClick={event => { if (!event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) insertSuggestion(path); }}
+          onKeyDown={event => {
+            if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
+              || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) {
+              if (event.key === "Enter" || event.key === " ") event.preventDefault();
+              return;
+            }
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault(); const next = (i + (event.key === "ArrowDown" ? 1 : visibleSuggestions.paths.length - 1)) % visibleSuggestions.paths.length;
+              setSuggestActive(next); event.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="option"]')[next]?.focus();
+            } else if (event.key === "Enter") { event.preventDefault(); insertSuggestion(path); }
+          }}><AppIcon name="folder" size={14} /><small title={path}>{path}</small></button>)}
       </div>}
-      {busy && <p role="status">{t("Checking or importing the folder…")}</p>}
-      {notice && <p role="status">{workflowNotice(locale, notice)}</p>}
-      {message && <p role="alert" className="error-text">{workflowNotice(locale, message)}</p>}
-      <footer><span><kbd>Ctrl</kbd>+<kbd>O</kbd> · <kbd>Esc</kbd></span><span>
-        <button type="button" className="quiet-button" disabled={busy} onClick={() => void refreshList()}>{t("Refresh projects")}</button>{" "}
-        <button type="button" className="quiet-button" onClick={close}>{t("Cancel")}</button></span></footer>
-    </section>
-  </div>;
+      {preview && <div className="project-import-row project-import-confirm">
+        <Checkbox checked={confirmed} disabled={busy || !!importEvidence} onChange={event => setConfirmed(event.currentTarget.checked)}
+          label={t("I trust this folder and want to add it to the active project catalog.")} />
+        <code title={preview.path}>{preview.path}</code>
+        <Button intent="primary" disabled={!!importEvidence || !canImportCheckedFolder(preview, confirmed, busy, canImport)} onClick={() => void importPath()}>{t("Import and open folder")}</Button>
+      </div>}
+    </div>}
+    {notice && <p role="status" className="open-project-notice">{workflowNotice(locale, notice)}</p>}
+    {message && <p role="alert" className="open-project-notice error-text">{workflowNotice(locale, message)}</p>}
+    <footer className="reference-hint"><span><kbd>↑</kbd><kbd>↓</kbd> {t("move")}</span><span><kbd>Enter</kbd> {t("open")}</span><span><kbd>Esc</kbd> {t("close")}</span></footer>
+  </AppWindow>;
 }

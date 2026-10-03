@@ -8,6 +8,7 @@ import { AppIcon } from "./AppIcon";
 import { ComposerSurface } from "./ComposerSurface";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
+import { GitHubIssuePicker } from "./GitHubIssuePicker";
 import { useShellLanguage } from "./shellLanguage";
 
 export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason, infoControl, onOpenHelp, onOpenPalette, localDraft, localImages, active = true }: {
@@ -62,6 +63,7 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
         }
       }, placeholder: t("Ask CodeAlta to work on this project…") }}>
         {localDraft && !expanded && <ProjectReferencePicker text={text} edit={edit} input={promptInput} />}
+        {localDraft && !expanded && <GitHubIssuePicker edit={edit} input={promptInput} />}
         <details className="composer-draft-info"><summary aria-label={t("Draft information")} title={t("Draft information")}><AppIcon name="info" size={16} /></summary><p id={`catalog-draft-status-${sessionId}`} role="status">{reason ?? t("Sending requires the desktop app.")}</p></details>
         {infoControl}
         <Button id={active ? "expand-session-prompt" : `expand-session-prompt-${sessionId}`} variant="minimal" icon={<AppIcon name="expand" size={16} />} aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => setExpanded(true)} />

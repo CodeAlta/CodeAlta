@@ -6,6 +6,7 @@ import { formatThinkingElapsed, useThinkingElapsed } from "./thinkingElapsed";
 import type { DisplayState } from "./sessionDisplay";
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from "react";
 import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectReferencePicker";
+import { GitHubIssuePicker } from "./GitHubIssuePicker";
 import { modelCatalog, sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
 import { activateSessionModels } from "./activateSessionModels";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, refreshSubmissions, type createOwnedSubmissions } from "./sessionOperations";
@@ -20,6 +21,7 @@ import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft
 import { AppIcon } from "./AppIcon";
 import { showContextAction } from "./workspacePresentation";
 import type { PromptInput } from "./PromptEditor";
+import { createPromptHistory, noPromptRecall, recallPrompt } from "./promptHistory";
 import { changeSelection, validSelection } from "./sessionSelection";
 import { ProviderChooser } from "./ProviderChooser";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
@@ -39,7 +41,24 @@ import { useShellLanguage } from "./shellLanguage";
 import type { ClipboardEvent } from "react";
 import type { SessionSteerRequest } from "#neoastra";
 
-export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount, activeReminderCount = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true }: {
+// Sent prompts of this window, for Alt+Up / Alt+Down in the prompt editor.
+const promptHistory = createPromptHistory();
+
+/** What to tell the user when a Send was not accepted; the prompt stays in the composer in every case. */
+export function sendFailureMessage(status: string, reason?: string): string {
+  switch (status) {
+    case "uncertain": return reason === "admission_failed" ? "The send could not start (Settings → Application Logs has the reason). Check the timeline before sending it again."
+      : `CodeAlta did not confirm this send${reason ? ` (${reason})` : ""}. Check the timeline before sending it again.`;
+    case "busy": return "The session is busy. Wait for the current turn, or queue the prompt.";
+    case "invalid_request": return "The prompt or the selected model was not accepted.";
+    case "conflict": return "This prompt was already sent with different content.";
+    case "capacity": return "Too many requests are pending. Wait for one to finish.";
+    case "closed": case "stale_epoch": return "CodeAlta restarted. Reload the window to continue.";
+    default: return `The send was not accepted (${status}).`;
+  }
+}
+
+export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount, activeReminderCount = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true }: {
   active?: boolean;
   observing?: boolean;
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
@@ -62,6 +81,8 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   remindersTrigger?: Ref<HTMLButtonElement>;
   compactTrigger?: Ref<HTMLButtonElement>;
   onOpenReminders?: () => void;
+  /** A prompt from the New session tab: sent once, when this composer holds exactly that text and its choices are validated. */
+  autoSend?: { text: string; consume: () => void } | null;
   /** Active reminders of this session as last reported by the host for the explorer markers; null while unknown. */
   activeReminderCount?: number | null;
   onOpenHelp?: () => void;
@@ -83,10 +104,20 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   const restoredText = useRef(text);
   useLayoutEffect(() => { draftIndicators.clear(sessionId); }, [draftIndicators, sessionId, epoch]);
   function editText(value: string) {
+    recall.current = noPromptRecall;
     inputRevision.current++;
     latestText.current = value;
     const editGeneration = draftIndicators.edit(sessionId, value, restoredText.current);
     setDraft({ text: value, editGeneration });
+  }
+  const recall = useRef(noPromptRecall);
+  function recallSentPrompt(direction: -1 | 1) {
+    const next = recallPrompt(promptHistory.list(sessionId), recall.current, direction, latestText.current);
+    if (!next) return false;
+    const state = next.state;
+    editText(next.text);
+    recall.current = state;
+    return true;
   }
   function clearText() {
     latestText.current = "";
@@ -416,19 +447,49 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       console.warn("[CodeAlta Send] blocked: invalid request or revoked capability"); return;
     }
     draftIndicators.clear(sessionId);
+    promptHistory.add(sessionId, request.text);
     setSubmittedThinking({ key: request.clientRequestId, runId: null });
     setMessage("Ready to send to this owned session.");
     void submissions.submit(request, signal, capability, result => {
       observeEpoch(result);
       if (!["accepted", "replay"].includes(result.status) || result.receipt?.state === "terminal") setSubmittedThinking(null);
-      setMessage(result.status === "accepted" || result.status === "replay"
-        ? "Ready to send to this owned session."
-        : `Submission: ${result.status}. Refresh receipts before considering an explicit retry.`);
+      setMessage(result.status === "accepted" || result.status === "replay" ? "Ready to send to this owned session." : sendFailureMessage(result.status, "reason" in result ? result.reason : undefined));
       if (result.status === "accepted" || result.status === "replay") void runtimeScope.current?.refresh(true);
-      if ((!retained || !request.images?.length) && (result.status === "accepted" || result.status === "replay") && !signal.aborted && inputRevision.current === revision
+      if ((!retained || !request.images?.length) && (result.status === "accepted" || result.status === "replay") && !signal.aborted
+        // The composer still holds exactly what was sent (a choices refresh alone also bumps the revision).
+        && (inputRevision.current === revision || latestText.current === request.text)
         && imageOwner.get(imageKey) === capturedImages) { clearText(); imageOwner.replace(imageKey, capturedImages, []); }
     });
   }
+  // Commands addressed to the active session's composer (keyboard shortcuts and the command palette).
+  useEffect(() => {
+    if (!active) return;
+    const run = (event: Event) => {
+      const command = (event as CustomEvent<string>).detail;
+      if (invalidEpoch) return;
+      if (command === "send") submit();
+      else if (command === "abort") { if (composerBusy || availableAbortRun || pendingAbortRun) abortRun(); }
+      else if (command === "clearQueue") { for (const item of queue.composer.list(epoch, sessionId)) queue.composer.remove(item); }
+      else if (command === "nextPrompt") {
+        const prompts = activeChoices?.prompts ?? [];
+        if (prompts.length > 1 && selected && !selectionDisabled)
+          select("agentPromptId", prompts[(prompts.findIndex(prompt => prompt.id === selected.agentPromptId) + 1) % prompts.length].id);
+      }
+    };
+    window.addEventListener("codealta:composer", run);
+    return () => window.removeEventListener("codealta:composer", run);
+  });
+  // One shot per mounted composer: the parent's marker is a ref, so this prop outlives its consumption.
+  const autoSent = useRef(false);
+  useEffect(() => {
+    if (!autoSend || autoSent.current || text !== autoSend.text || pending || invalidEpoch || !scope.current || scope.current.signal.aborted
+      || !choices || choices.status !== "ok" || choices.epoch !== epoch || choices.sessionId !== sessionId) return;
+    const latest = selections.current(epoch, sessionId);
+    if ((latest || selection) && (!validSelection(choices, latest ?? selection!) || latest && selection !== latest)) return;
+    autoSent.current = true;
+    autoSend.consume();
+    submit();
+  }, [autoSend, text, choices, selection, pending, invalidEpoch]);
   async function refresh(offset = 0) {
     const signal = scope.current?.signal;
     if (!signal) return;
@@ -655,6 +716,12 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     expandedEditor={expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
     editor={{ id: active ? "session-prompt" : `session-prompt-${sessionId}`, ref: promptInput, onPaste: pasteImages, label: t("Message"), value: pending?.request.text ?? text, disabled: !!pending || invalidEpoch || expanded,
       onChange: editText, onCompositionStart: () => { inputRevision.current++; }, placeholder: t("Ask CodeAlta to work on this project…"), onKeyDown: event => {
+        if (event.altKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && (event.key === "ArrowUp" || event.key === "ArrowDown")
+          && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
+          event.preventDefault(); event.stopPropagation();
+          recallSentPrompt(event.key === "ArrowUp" ? -1 : 1);
+          return;
+        }
         if (dispatchTransientComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
           altKey: event.altKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing,
           keyCode: event.nativeEvent.keyCode, repeat: event.repeat, defaultPrevented: event.defaultPrevented },
@@ -698,6 +765,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       reasoning={<ReasoningSlider value={selected?.reasoningEffort ?? null} efforts={efforts} disabled={selectionDisabled}
         onChange={value => select("reasoningEffort", value)} />} />}>
       {!pending && !expanded && !invalidEpoch && <ProjectReferencePicker text={text} edit={editText} input={promptInput} />}
+      {!pending && !expanded && !invalidEpoch && <GitHubIssuePicker edit={editText} input={promptInput} />}
       <ActiveProviderStatus epoch={epoch} onOpen={() => onOpenCatalog?.("providers")} />
       {(!activeChoices?.models.length || choicesNotice.includes("could not")) && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />}
         disabled={invalidEpoch || !!pending || loadingChoices} aria-label={t("Refresh composer choices")} title={t("Refresh composer choices")} onClick={loadModelChoices} />}

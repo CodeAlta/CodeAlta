@@ -161,8 +161,9 @@ function App() {
         projectId: project, servers: [], sources: project ? ["Global: read", "Project: read"] : ["Global: read"],
         omitted: 0, policyReadError: false })} />}
     {view !== "workspace" && view !== "reminders" && view !== "mcp" && <main aria-label={view}>{view}</main>}
-    {paletteOpen && captured.current && <CommandPalette captured={captured.current} context={paletteContext()}
-      onClose={closePalette} onChoose={action => {
+    {paletteOpen && captured.current && <CommandPalette available={id => ["sessionInfo", "focusPrompt", "settings", "providers", "models", "prompts", "logs", "mcp", "reminders"].includes(id)}
+      onClose={closePalette} onChoose={id => {
+        const action = id as PaletteAction;
         if (!captured.current || !paletteAvailable(action, captured.current, paletteContext())) return;
         pending.current = { action, context: captured.current }; setPaletteOpen(false);
       }} />}

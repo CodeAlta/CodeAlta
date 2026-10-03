@@ -122,7 +122,7 @@ test("close-time invalidation prevents insertion and focus admission; valid own 
 });
 
 test("bounded search observations reject wrong epoch, unsafe paths, duplicates and excess rows", () => {
-  const page: SessionReferenceSearchResponse = { status: "ok", epoch: "e", omitted: false,
+  const page: SessionReferenceSearchResponse = { status: "ok", epoch: "e", omitted: false, indexed: 1,
     items: [{ path: "src/a.ts", directory: false, recent: false }] };
   assert.equal(validReferenceSearch(page, "e"), true);
   assert.equal(validReferenceSearch({ ...page, status: "incomplete", omitted: true }, "e"), true);

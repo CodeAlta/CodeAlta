@@ -1,8 +1,14 @@
-import { createContext, useContext, useId, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { usePromptPicker } from "./promptPicker";
+import { InputGroup } from "@blueprintjs/core";
 import { sessionOperations, type SessionReferenceSearchRequest, type SessionReferenceSearchResponse } from "#neoastra";
-import { captureReferenceInput, closeReferencePopup, createReferenceSearchFence, referencePopupReadiness, referencePopupKey, validReferenceSearch, type ReferencePopupLifetime } from "./referencePopup";
-import { ProjectReferencePresentation } from "./ProjectReferencePresentation";
+import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
+import { AppWindowSurface } from "./AppWindow";
+import { fileAppearance, splitProjectPath } from "./fileAppearance";
+import { activeProjectReference, insertProjectReference } from "./projectReferences";
+import { ProjectReferencePresentation } from "./ProjectReferencePresentation";
+import { validReferenceSearch, type ReferencePopupLifetime } from "./referencePopup";
 import { useShellLanguage } from "./shellLanguage";
 import type { PromptInput } from "./PromptEditor";
 
@@ -12,198 +18,109 @@ export const ProjectReferenceContext = createContext<(Omit<SessionReferenceSearc
   capturePopup?: () => ReferencePopupLifetime;
 }) | null>(null);
 
+const pageStep = 8;
+
+/**
+ * The `@` file picker of a prompt editor. Typing `@` at a word start opens a search window listing the
+ * project's files and folders (recently used first, then fuzzy-ranked as the query grows); Enter
+ * replaces the `@query` with a Markdown link to the selected item, Escape leaves the text as typed.
+ */
 export function ProjectReferencePicker({ text, edit, input, compact = true }: {
   text: string; edit: (text: string) => void; input: RefObject<PromptInput | null>; compact?: boolean;
 }) {
   const { t } = useShellLanguage();
   const scope = useContext(ProjectReferenceContext);
-  const identity = JSON.stringify(scope && [scope.expectedEpoch, scope.projectId, scope.projectPath, scope.sessionId]);
-  const latest = useRef({ text, scope, identity }); latest.current = { text, scope, identity };
-  const revision = useRef(0);
-  const [interaction, setInteraction] = useState(0);
-  const engaged = useRef(false);
-  const composing = useRef(false);
-  const dialog = useRef<HTMLDialogElement>(null);
+  const latest = useRef({ scope }); latest.current = { scope };
   const search = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLDivElement>(null);
   const listId = useId();
-  const dismissed = useRef("");
-  const frame = useRef<number | null>(null);
-  const controller = useRef<AbortController | null>(null);
-  const [searchFence] = useState(createReferenceSearchFence);
-  const handoff = useRef<"open" | "closed" | null>(null);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
   const [page, setPage] = useState<SessionReferenceSearchResponse | null>(null);
-  const pageCurrent = useRef<(() => boolean) | null>(null);
   const [failed, setFailed] = useState(false);
-  type Review = { source: NonNullable<ReturnType<typeof captureReferenceInput>>; lifetime: ReferencePopupLifetime;
-    scope: NonNullable<typeof scope>; parent: HTMLDialogElement | null; identity: string; key: string };
-  const active = useRef<Review | null>(null);
-  const [review, setReview] = useState<Review | null>(null);
-  function cancelFocus() { if (frame.current !== null) cancelAnimationFrame(frame.current); frame.current = null; }
-  function abortRead() { pageCurrent.current = null; searchFence.cancel(); controller.current?.abort(); controller.current = null; }
-  function readInput() {
-    const element = input.current;
-    return { node: element, connected: !!element?.isConnected, disabled: !element || element.disabled,
-      text: element?.value ?? "", start: element?.selectionStart ?? 0, end: element?.selectionEnd ?? 0, revision: revision.current };
-  }
-  function foreignModal(value: Review) {
-    return Array.from(document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]'))
-      .some(element => element !== dialog.current && element !== value.parent);
-  }
-  function readiness(value: Review) {
-    return referencePopupReadiness(() => active.current === value && value.identity === latest.current.identity && value.source.current()
-      && latest.current.text === value.source.original.text && !foreignModal(value)
-      && (!value.parent || value.parent.open && value.parent.isConnected), () => composing.current);
-  }
-  function current(value: Review) { return readiness(value).current(); }
-  function ready(value: Review) { return readiness(value).ready(); }
-  function finish(next?: { text: string; caret: number }) {
-    const value = active.current;
-    if (!value) return;
-    const restore = ready(value);
-    abortRead(); cancelFocus(); engaged.current = false; dismissed.current = value.key;
-    let closed = false;
-    handoff.current = "closed";
-    if (dialog.current?.open) {
-      closed = restore && closeReferencePopup(value.lifetime, () => ready(value), () => dialog.current?.close());
-      if (dialog.current.open) dialog.current.close();
-    }
-    handoff.current = null;
-    active.current = null; setReview(null); setPage(null);
-    if (!restore || !closed) { value.lifetime.retire(); return; }
-    const expectedText = next?.text ?? value.source.original.text;
-    if (next) edit(next.text);
-    frame.current = requestAnimationFrame(() => {
-      frame.current = null;
-      const element = input.current;
-      if (!active.current && !composing.current && value.lifetime.current() && value.identity === latest.current.identity
-        && element === value.source.original.node && element?.isConnected && !element.disabled && !element.closest("[inert]")
-        && revision.current === value.source.original.revision && element.value === expectedText && !foreignModal(value)
-        && (!value.parent || value.parent.open && value.parent.isConnected)) {
-        element.focus(); element.setSelectionRange(next?.caret ?? value.source.original.start, next?.caret ?? value.source.original.end);
-      }
-      value.lifetime.retire();
-    });
-  }
+  const [attempt, setAttempt] = useState(0);
+  const { trigger, dialog, close } = usePromptPicker({ input, edit, enabled: !!scope, detect: activeProjectReference, focus: search,
+    onOpen: value => { setQuery(value.query); setSelected(0); setPage(null); setFailed(false); } });
+  const open = !!trigger;
+
   function choose(index: number) {
-    const value = active.current;
-    if (!value || !ready(value) || !pageCurrent.current?.() || !page || !["ok", "incomplete", "read_error"].includes(page.status)) return;
-    const row = page.items[index];
-    const next = row && value.source.choose(row.path, row.directory);
-    if (next) finish(next);
+    const row = page?.items[index];
+    const element = input.current;
+    if (!row || !trigger || !element || element.value !== trigger.text) return;
+    const next = insertProjectReference(trigger.text, trigger.start, trigger.end, row.path, row.directory);
+    if (next) close(next);
   }
-  useLayoutEffect(() => {
-    const element = input.current;
-    if (!element) return;
-    let selection = `${element.selectionStart}:${element.selectionEnd}`;
-    const interact = () => {
-      const next = `${element.selectionStart}:${element.selectionEnd}`;
-      if (next !== selection) { selection = next; revision.current++; cancelFocus(); }
-      if (element.contains(document.activeElement)) { engaged.current = true; setInteraction(value => value + 1); }
-    };
-    const edited = () => { revision.current++; cancelFocus(); interact(); };
-    const begin = () => { composing.current = true; edited(); };
-    const end = () => { composing.current = false; interact(); };
-    element.addEventListener("input", edited); element.addEventListener("compositionstart", begin); element.addEventListener("compositionend", end);
-    for (const name of ["click", "keyup", "select"]) element.addEventListener(name, interact);
-    return () => {
-      element.removeEventListener("input", edited); element.removeEventListener("compositionstart", begin); element.removeEventListener("compositionend", end);
-      for (const name of ["click", "keyup", "select"]) element.removeEventListener(name, interact);
-    };
-  }, [input]);
-  useLayoutEffect(() => {
-    const transition = (event: Event) => {
-      if (!(event.target instanceof HTMLDialogElement)) return;
-      const own = event.target === dialog.current && (event as ToggleEvent).newState === (handoff.current === "open" ? "open" : handoff.current === "closed" ? "closed" : "");
-      if (own) return;
-      cancelFocus(); abortRead();
-      if (active.current) { active.current.lifetime.retire(); setFailed(true); setPage(null); }
-    };
-    document.addEventListener("beforetoggle", transition, true);
-    return () => { cancelFocus(); abortRead(); active.current?.lifetime.retire(); active.current = null;
-      document.removeEventListener("beforetoggle", transition, true); };
-  }, []);
-  useLayoutEffect(() => {
-    if (active.current || !engaged.current || composing.current || !scope?.capturePopup) return;
-    const original = readInput();
-    const element = input.current;
-    const key = JSON.stringify([identity, original.text, original.start, original.end, original.revision]);
-    if (!element || !element.contains(document.activeElement) || original.text !== text || dismissed.current === key) return;
-    const parent = element.closest("dialog");
-    if (Array.from(document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]')).some(node => node !== parent)) return;
-    const lifetime = scope.capturePopup();
-    const source = captureReferenceInput(original, readInput, lifetime);
-    if (!source) return;
-    cancelFocus(); engaged.current = false;
-    const value = { source, scope, lifetime, parent, identity, key };
-    active.current = value; setReview(value); setQuery(source.span.query); setSelected(0); setPage(null); setFailed(false);
-  }, [text, interaction, identity]);
-  useLayoutEffect(() => {
-    if (!review) return;
-    const element = dialog.current!;
-    handoff.current = "open";
-    const opened = review.lifetime.open(() => element.showModal());
-    handoff.current = null;
-    if (opened && current(review)) { if (ready(review)) search.current?.focus(); }
-    else { review.lifetime.retire(); setFailed(true); }
-    return () => { if (element.open) element.close(); };
-  }, [review]);
-  useLayoutEffect(() => {
-    if (review && !failed && !current(review)) { abortRead(); review.lifetime.retire(); setFailed(true); setPage(null); }
-  });
-  useLayoutEffect(() => {
-    abortRead(); setPage(null); setSelected(0);
-    if (!review || failed || !ready(review)) return;
-    const abort = new AbortController(); controller.current = abort;
-    const valid = searchFence.capture(() => !abort.signal.aborted && ready(review));
+
+  // Search as the query changes; while the project is still being indexed, ask again for the growing result.
+  useEffect(() => {
+    const current = latest.current.scope;
+    if (!open || !current) return;
+    const controller = new AbortController();
     const timer = setTimeout(() => {
-      if (!valid()) return;
-      const { observe, lifetime: _lifetime, capturePopup: _capture, ...request } = review.scope;
-      void sessionOperations.searchReferences({ ...request, query }, { signal: abort.signal, timeoutMilliseconds: 3000 }).then(value => {
-        if (!valid()) return;
+      const { observe, lifetime: _lifetime, capturePopup: _capture, ...request } = current;
+      void sessionOperations.searchReferences({ ...request, query }, { signal: controller.signal, timeoutMilliseconds: 8000 }).then(value => {
+        if (controller.signal.aborted) return;
         observe?.(value);
-        if (!valid()) return;
-        pageCurrent.current = valid;
-        setPage(validReferenceSearch(value, review.scope.expectedEpoch) ? value
-          : { status: "read_error", epoch: review.scope.expectedEpoch, items: [], omitted: true });
-      }).catch(() => { if (valid()) setPage({ status: "read_error", epoch: review.scope.expectedEpoch, items: [], omitted: true }); });
-    }, 150);
-    return () => { clearTimeout(timer); abort.abort(); };
-    // Locale/chrome renders do not refresh a query or reissue metadata reads.
-  }, [review, query, failed, interaction]);
-  const presentation = <ProjectReferencePresentation text={text} input={input} scope={scope} />;
-  return <>{!compact && presentation}
-    {!scope && !compact && <p role="status">{t("@ search requires an owned, verified project. References resolve only on normal Send after creation and transfer; file contents are not uploaded.")}</p>}
-    {review && <dialog ref={dialog} className="app-dialog reference-palette" aria-modal="true" aria-labelledby={`${listId}-title`}
-      onClose={() => { if (active.current === review) finish(); }} onCancel={event => { event.preventDefault(); if (!composing.current) finish(); }}
-      onCompositionStart={() => { composing.current = true; abortRead(); setPage(null); }}
-      onCompositionEnd={() => { composing.current = false; setInteraction(value => value + 1); }}
+        if (!validReferenceSearch(value, current.expectedEpoch) || !["ok", "indexing", "incomplete"].includes(value.status)) { setFailed(true); setPage(null); return; }
+        setFailed(false); setPage(value);
+        setSelected(index => Math.min(index, Math.max(0, value.items.length - 1)));
+      }).catch(() => { if (!controller.signal.aborted) { setFailed(true); setPage(null); } });
+    }, attempt === 0 ? 60 : 350);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [open, query, attempt]);
+  useEffect(() => {
+    if (!open || page?.status !== "indexing" || attempt >= 60) return;
+    setAttempt(value => value + 1);
+  }, [page]);
+  useEffect(() => { setAttempt(0); }, [query, open]);
+  useLayoutEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" }); }, [selected, page]);
+
+  const count = page?.items.length ?? 0;
+  const move = (delta: number) => setSelected(index => Math.max(0, Math.min(count - 1, index + delta)));
+  const matches = count === 1 ? t("1 match · {count} indexed", { count: page?.indexed ?? 0 })
+    : t(count >= 64 ? "Top {shown} matches · {count} indexed" : "{shown} matches · {count} indexed", { shown: count, count: page?.indexed ?? 0 });
+  const status = failed ? t("Project files could not be read.")
+    : !page ? t("Loading project files…")
+    : page.status === "indexing" ? t("Indexing project… {count} indexed", { count: page.indexed })
+    : count === 0 ? t("No files or folders match.")
+    : matches;
+  const project = scope ? scope.projectPath.replace(/[\\/]+$/u, "").split(/[\\/]/u).at(-1) ?? "" : "";
+  return <>{!compact && <ProjectReferencePresentation text={text} input={input} scope={scope} />}
+    {trigger && <dialog ref={dialog} className="app-dialog reference-palette" aria-modal="true" aria-labelledby={`${listId}-title`}
+      onCancel={event => { event.preventDefault(); close(); }}
       onKeyDown={event => {
         event.stopPropagation();
-        const action = referencePopupKey({ ...event, isComposing: composing.current || event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode });
-        if (event.key === "Enter" && action === "choose" && event.target !== search.current
-          && !(event.target as HTMLElement).closest('[role="option"]')) return;
-        if (event.key === "Enter" || event.key === "Escape" || action === "next" || action === "previous") event.preventDefault();
-        if (action === "cancel") finish();
-        else if ((action === "next" || action === "previous") && page?.items.length) setSelected(value => (value + (action === "next" ? 1 : -1) + page.items.length) % page.items.length);
-        else if (action === "choose") choose(selected);
+        if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.ctrlKey || event.altKey || event.metaKey) return;
+        const handled = event.key === "ArrowDown" ? (move(1), true) : event.key === "ArrowUp" ? (move(-1), true)
+          : event.key === "PageDown" ? (move(pageStep), true) : event.key === "PageUp" ? (move(-pageStep), true)
+          : event.key === "Home" && event.target !== search.current ? (setSelected(0), true)
+          : event.key === "End" && event.target !== search.current ? (setSelected(Math.max(0, count - 1)), true)
+          : event.key === "Enter" ? (choose(selected), true) : event.key === "Escape" ? (close(), true) : false;
+        if (handled) event.preventDefault();
       }}>
-      <header><h2 id={`${listId}-title`}>{t("Project references")}</h2><button type="button" onClick={() => finish()}>{t("Close references")}</button></header>
-      <p className="reference-context"><code>{review.scope.projectPath}</code> · <code>{review.scope.sessionId ?? t("Prompt draft")}</code></p>
-      <label>{t("Project file matches")}<input ref={search} type="search" maxLength={256} value={query} role="combobox" aria-expanded="true"
-        aria-controls={listId} aria-activedescendant={page?.items[selected] ? `${listId}-${selected}` : undefined}
-        onChange={event => { abortRead(); setPage(null); setQuery(event.target.value); }} /></label>
-      <p role="status">{failed ? t("Reference source changed. Close and reopen from the original input.") : !page ? t("Searching bounded project metadata…")
-        : <>{page.status}{page.omitted ? ` · ${t("results omitted")}` : ""}{page.status === "ok" && !page.items.length ? ` · ${t("No reference matches.")}` : ""}</>}</p>
-      <div id={listId} role="listbox" aria-label={t("Project file matches")} className="reference-palette-list">
-        {!failed && page?.items.map((row, index) => <button type="button" role="option" id={`${listId}-${index}`} key={row.path}
-          aria-selected={index === selected} disabled={!["ok", "incomplete", "read_error"].includes(page.status)} className={row.directory ? "reference-folder" : "reference-file"}
-          onFocus={() => setSelected(index)} onClick={() => choose(index)}>
-          <AppIcon name={row.directory ? "folder" : "file"} size={16} /><span className="reference-path">{row.path}{row.directory ? "/" : ""}</span>
-          {row.recent && <small>{t("Recent")}</small>}</button>)}
-      </div>
-      <p>{t("References resolve on normal Send; queue/steer remain literal.")}</p>
+      <AppWindowSurface storageKey="codealta.desktop.window.references.v1" titleId={`${listId}-title`}
+        title={<><AppIcon name="folder" size={14} /> {t("Project files")}{project && <span className="reference-project"> · {project}</span>}</>}
+        preferredSize={viewport => ({ width: Math.min(760, viewport.width - 40), height: Math.min(480, viewport.height - 40) })}
+        minimumSize={{ width: 380, height: 240 }} onClose={() => close()} closeLabel={t("Close")}
+        headerActions={<span className="reference-status" role="status">{page?.status === "indexing" && <ActivitySpinner size={12} />}{status}</span>}>
+        <InputGroup inputRef={search} className="reference-search" type="search" maxLength={256} value={query} spellCheck={false}
+          leftIcon={<AppIcon name="search" size={15} className="bp6-icon" />} placeholder={t("Search files and folders…")}
+          role="combobox" aria-expanded="true" aria-controls={listId} aria-label={t("Search files and folders…")}
+          aria-activedescendant={page?.items[selected] ? `${listId}-${selected}` : undefined}
+          onChange={event => { setQuery(event.target.value); setSelected(0); }} />
+        <div id={listId} ref={list} role="listbox" aria-label={t("Project files")} className="reference-list">
+          {page?.items.map((row, index) => { const look = fileAppearance(row.path, row.directory); const { name, parent } = splitProjectPath(row.path);
+            return <div role="option" id={`${listId}-${index}`} key={row.path} aria-selected={index === selected} className="reference-row" title={row.path}
+              onMouseMove={() => { if (index !== selected) setSelected(index); }} onClick={() => choose(index)}>
+              <span className="reference-icon" data-file-tone={look.tone}><AppIcon name={look.icon} size={16} /></span>
+              <span className="reference-name">{name}{row.directory ? "/" : ""}</span>
+              {row.recent && <span className="reference-recent" title={t("Recent")}><AppIcon name="history" size={12} /></span>}
+              <span className="reference-parent">{parent}</span>
+            </div>; })}
+          {page && count === 0 && page.status !== "indexing" && <p className="reference-empty">{t("No files or folders match.")}</p>}
+        </div>
+        <footer className="reference-hint"><span><kbd>↑</kbd><kbd>↓</kbd> {t("move")}</span><span><kbd>Enter</kbd> {t("insert link")}</span><span><kbd>Esc</kbd> {t("close")}</span></footer>
+      </AppWindowSurface>
     </dialog>}
   </>;
 }

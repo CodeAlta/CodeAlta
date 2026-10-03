@@ -13,7 +13,7 @@ export function validReferenceSpans(text: string, spans: readonly { start: numbe
 // no filesystem inference or change to host reference authority.
 export function activeProjectReference(text: string, caret: number) {
   const before = text.slice(0, caret);
-  const match = /(?:^|[\s(])@("[^"\r\n]*|[^@\s":\r\n]*)$/u.exec(before);
+  const match = /(?:^|[\s(\[{"'<])@("[^"\r\n]*|[^@\s":\r\n]*)$/u.exec(before);
   if (!match) return null;
   const query = match[1].replace(/^"/u, "");
   if (query.length > 256) return null;
