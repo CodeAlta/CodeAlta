@@ -58,8 +58,8 @@ copy action. Internal raw persistence records are not shown as empty provider ca
 LF/CRLF journals, with a 128 KiB record limit; unsupported or oversized records are not
 silently skipped. If the journal changes, restart history rather than refreshing the catalog.
 
-The explicit catalog-only mode includes an editable session-scoped prompt draft and a bottom-left Alta
-notes Markdown pane, but it remains intentionally read-only. The project picker opens projects already
+The explicit catalog-only mode includes an editable session-scoped prompt draft and a top-right Alta
+notes Markdown overlay, but it remains intentionally read-only. The project picker opens projects already
 in that catalog; it does not add an arbitrary folder. Use the Shortcuts dialog (`F1`) to discover
 navigation, search, prompt, notes and configuration shortcuts. Agent-prompt/model/reasoning values in
 the compact composer strip are current-session status, not editable selections in this development version.
@@ -158,14 +158,17 @@ share the composer surface, editor, toolbar and resizable divider. **Start sessi
 creates a session and transfers the draft; review it before normal Send. Provider selection is
 available before creation; session model/agent/reasoning choices become available after creation.
 Open tabs are workspace-wide, so sessions from different projects retain their panes and drafts.
-Drag session tabs to pane/workspace edges for horizontal or vertical splits and two or more
-simultaneous session panes. Running indicators refresh automatically for bounded batches of verified
+Drag session tabs along their strip to reorder, to pane edges for horizontal or vertical splits, or
+to a pane's center to merge. A highlighted target previews the drop; Escape cancels. The tab menu's
+**Split session right/below** actions also work by keyboard when the pane contains multiple tabs.
+This drag follow-up is build-verified; native acceptance is still pending. Running indicators refresh automatically for bounded batches of verified
 sessions, prioritizing visible/open sessions (up to 32); unknown or stale status is not proof of idle.
 
-In owned-host mode, each session's **Alta notes** dock automatically reads current durable notes
+In owned-host mode, each session's **Alta notes** overlay automatically reads current durable notes
 without starting a provider and renders the complete text as Markdown. Empty notes start collapsed;
-content opens the dock by default. Resize its divider, collapse its tab, or drag it to the left/right
-border of that session. Reads refresh every ten seconds after completion. The read remains bounded
+content opens the overlay by default. Use its labelled disclosure/collapse buttons at the top right
+above the timeline. Notes stay with their session pane, with no nested dock, notes splitter or loss of
+composer space. Collapsing notes is respected on subsequent reads. Reads refresh every ten seconds after completion. The read remains bounded
 at 16,384 UTF-16 units; oversized notes are refused without truncation, and read failure is distinct
 from empty notes. Switching sessions does not stop an already-started read. Editing is not provided.
 

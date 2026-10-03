@@ -236,7 +236,10 @@ h1, h2, h3, p { margin-top: 0; }
 .session-dock { position: absolute; inset: 0; }
 .session-dock[hidden] { display: none; }
 .session-tab-content { height: 100%; min-width: 0; min-height: 0; overflow: hidden; overflow-anchor: none; }
-.session-dock, .session-notes-dock { --flexlayout-splitter-size: 8px; --flexlayout-splitter-active-size: 8px; }
+.session-dock { --flexlayout-splitter-size: 8px; --flexlayout-splitter-active-size: 8px; }
+.session-tabs .flexlayout__tab_button { touch-action: none; }
+.session-tabs[data-dragging="true"] { user-select: none; cursor: grabbing; }
+.session-drop-preview { position: absolute; z-index: 20; pointer-events: none; border: 2px solid var(--accent); background: var(--accent-soft); }
 .session-running { color: var(--green); flex: 0 0 auto; font-size: 11px; }
 .new-session-welcome { container-type: inline-size; padding: 0 8px; }
 .welcome-content { min-height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 24px 0; text-align: center; color: var(--muted); }
@@ -248,7 +251,16 @@ h1, h2, h3, p { margin-top: 0; }
 @keyframes alta-logo-colors { to { background-position: 300% 0; } }
 @media (prefers-reduced-motion: reduce) { .logo-alta { animation: none; } }
 @media (forced-colors: active) { .logo-alta { background: none; color: CanvasText; animation: none; } }
-.session-notes-dock .notes-pane { min-width: 0; margin: 0; border-radius: 0; overflow: auto; }
+.session-timeline-area { position: relative; flex: 1 1 0; display: flex; min-width: 0; min-height: 0; }
+.session-notes-overlay { position: absolute; top: 8px; right: 12px; z-index: 4; max-width: calc(100% - 24px); max-height: calc(100% - 16px); }
+.session-notes-overlay[data-collapsed="false"] { width: 320px; height: min(60%, 320px); min-height: min(96px, calc(100% - 16px)); }
+.session-notes-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--panel); box-shadow: var(--shadow); font-size: 11px; }
+.session-notes-content { display: flex; height: 100%; min-height: 0; }
+.session-notes-content[hidden], .session-notes-toggle[hidden] { display: none; }
+.session-timeline-area .session-notes-overlay .notes-pane { width: 100%; min-width: 0; min-height: 0; max-height: none; flex-shrink: 1; margin: 0; border-radius: 6px; box-shadow: var(--shadow); }
+.session-notes-overlay .notes-pane > header { flex-wrap: wrap; }
+.session-notes-overlay .notes-pane > header > span:last-child { display: flex; margin-left: auto; }
+.notes-collapse-icon { transform: rotate(180deg); }
 .session-tabs .active-session-content { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 .active-session-content > .session-workspace { flex: 1 1 0; }
 .session-tabs .session-tab-label { display: block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

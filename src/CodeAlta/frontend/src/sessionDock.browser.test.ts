@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 
 const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
-test("temporary project tab, portal-mounted composer resizing and nested-pane session drops", { skip: !edge, timeout: 90_000 }, async () => {
+test("temporary project tab, composer resizing, pointer splits and session-local notes overlays", { skip: !edge, timeout: 90_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-session-dock-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -99,25 +99,47 @@ test("temporary project tab, portal-mounted composer resizing and nested-pane se
     await resize();
     await evaluate("[...document.querySelectorAll('.session-dock [data-session-node]')].find(n=>n.textContent.startsWith('one -')).closest('[role=tab]').click()");
     assert.equal(await wait("!document.querySelector('#flexlayout-tabbutton-session-draft') && !!document.querySelector('#session-prompt')"), true);
-    // Real DragEvents go through production tab/notes/session handlers. In particular,
-    // the target is inside the nested notes layout, not the outer tab strip.
-    const drop = (edge: "right" | "bottom") => evaluate(`(()=>{
+    // Trusted mouse input exercises pointer capture and movement; synthetic HTML5
+    // DragEvents cannot establish whether tab dragging works in the native host.
+    await evaluate("window.nativeTabDrags=0;document.addEventListener('dragstart',e=>{if(e.target.closest('[role=tab]'))window.nativeTabDrags++})");
+    const drop = async (edge: "right" | "bottom", cancel = false) => {
+      const points = await evaluate(`(()=>{
       const source=[...document.querySelectorAll('.session-dock [data-session-node]')].find(n=>n.textContent.startsWith('two -')).closest('[role=tab]');
       const pane=document.querySelector('.session-workspace[data-active=true]'),r=pane.getBoundingClientRect(),s=source.getBoundingClientRect();
-      const x=${edge === "right" ? "r.right-6" : "r.x+r.width/2"},y=${edge === "bottom" ? "r.bottom-6" : "r.y+r.height/2"},target=document.elementFromPoint(x,y),dataTransfer=new DataTransfer();
-      source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer,clientX:s.x+10,clientY:s.y+10}));
-      for(const type of ['dragenter','dragover','drop'])target.dispatchEvent(new DragEvent(type,{bubbles:true,cancelable:true,dataTransfer,clientX:x,clientY:y}));
-      source.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer}));return !!target.closest('.session-notes-dock');
-    })()`);
-    assert.equal(await drop("right"), true);
+      return {start:{x:s.x+20,y:s.y+s.height/2},end:{x:${edge === "right" ? "r.right-6" : "r.x+r.width/2"},y:${edge === "bottom" ? "r.bottom-6" : "r.y+r.height/2"}}};
+      })()`) as { start: { x: number; y: number }; end: { x: number; y: number } };
+      await command("Input.dispatchMouseEvent", { type: "mousePressed", ...points.start, button: "left", buttons: 1, clickCount: 1 });
+      await command("Input.dispatchMouseEvent", { type: "mouseMoved", ...points.end, buttons: 1 });
+      assert.equal(await wait("!!document.querySelector('.session-drop-preview')"), true);
+      if (cancel) {
+        await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+        await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+      }
+      await command("Input.dispatchMouseEvent", { type: "mouseReleased", ...points.end, button: "left", clickCount: 1 });
+      assert.equal(await wait("!document.querySelector('.session-drop-preview')"), true);
+    };
+    await drop("right", true);
+    assert.equal(await evaluate("[...document.querySelectorAll('.session-workspace')].filter(n=>n.getBoundingClientRect().height>0).length"), 1);
+    await drop("right");
     assert.equal(await wait("[...document.querySelectorAll('.session-workspace')].filter(n=>n.getBoundingClientRect().height>0).length===2"), true);
+    assert.equal(await evaluate("window.nativeTabDrags"), 0);
+    // Notes overlay the timeline, never create a nested dock or steal editor space.
+    const composerBefore = await evaluate("document.querySelector('.session-workspace[data-active=true] .composer-region').getBoundingClientRect().height");
+    await evaluate("document.querySelector('.session-workspace[data-active=true] .session-notes-toggle').click()");
+    assert.equal(await wait("document.querySelector('.session-workspace[data-active=true] .session-notes-overlay')?.dataset.collapsed==='false'"), true);
+    assert.equal(await evaluate(`(()=>{const pane=document.querySelector('.session-workspace[data-active=true]'),overlay=pane.querySelector('.session-notes-overlay'),r=overlay.getBoundingClientRect(),t=pane.querySelector('.session-timeline-area').getBoundingClientRect();
+      return r.x>=t.x && r.right<=t.right && r.y>=t.y && r.bottom<=t.bottom && !pane.querySelector('.flexlayout__layout') && [...document.querySelectorAll('.session-notes-overlay')].filter(n=>n.dataset.collapsed==='false').length===1})()`), true);
+    assert.equal(await evaluate("document.querySelector('.session-workspace[data-active=true] .composer-region').getBoundingClientRect().height"), composerBefore);
+    await evaluate("document.querySelector('.session-workspace[data-active=true] [aria-label=\"Collapse Alta notes\"]').click()");
+    assert.equal(await wait("document.querySelector('.session-workspace[data-active=true] .session-notes-toggle')?.getAttribute('aria-expanded')==='false'"), true);
     await project("Project");
     assert.equal(await wait("!!document.querySelector('#flexlayout-tabbutton-session-draft')"), true);
     await session("one");
     assert.equal(await wait("!document.querySelector('#flexlayout-tabbutton-session-draft')"), true);
-    assert.equal(await drop("bottom"), true);
+    await drop("bottom");
     const panes = await evaluate("[...document.querySelectorAll('.session-workspace')].filter(n=>n.getBoundingClientRect().height>0).map(n=>n.getBoundingClientRect().toJSON())") as { x: number; y: number }[];
     assert.equal(panes.length, 2); assert.ok(Math.abs(panes[0].y - panes[1].y) > 100);
+    assert.equal(await evaluate("dockKept.one===document.querySelector('#session-prompt-one') && dockKept.two===document.querySelector('#session-prompt')"), true);
     assert.equal(await evaluate("settingsShellFixture.sends.length"), 0);
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });

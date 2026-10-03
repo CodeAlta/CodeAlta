@@ -1,4 +1,29 @@
-# Temporary new-session tabs and drag integration (2026-10-03)
+# Pointer session docking and notes overlays (2026-10-03)
+
+The user reports that tab dragging remained broken after the earlier build-only fixes below.
+Local FlexLayout 0.11.1 source and installed 0.11.0 declarations/implementation confirm native
+HTML5 tab dragging. NeoAstra 0.2.1's Windows backend replaces WebView2 OLE drop targets for host
+drops, a source-supported conflict hypothesis, not a runtime-proven incident diagnosis.
+Session tab dragging now uses pointer capture, public pane geometry and guarded `Actions.moveNode`:
+strip insertion/reorder, center merge and four pane-edge splits have a preview. Selection happens
+only on release; Escape, blur, lost capture, teardown and expired identity/lifetime cancel. Tab menus
+offer keyboard right/below splits. Model listeners synchronize App focus after the accepted mutation.
+No native host/upstream changes, synthetic HTML5 drag workaround or provider operation is involved.
+
+The nested notes FlexLayout is removed. Each session's top-right timeline overlay retains its
+reader, sanitized Markdown, refresh/copy/clear controls and uncertain-clear evidence while collapsed.
+Empty-to-content auto-opening does not undo manual collapse on every poll. Disclosure/collapse
+buttons are localized and labelled; notes neither shrink the timeline nor enter composer measurements.
+Session activation, independent owners, editor/Ask drafts and exact-request recovery are unchanged.
+
+Regression fixtures now cover directional/merge/reorder geometry, rejected drop targets and trusted
+pointer input instead of synthetic DragEvents, cancellation, retained editor roots and overlay geometry.
+Verification is build-only at the user's request: fixtures compile but tests and browser/native/provider
+acceptance are not run. Frontend production/TypeScript, integrated Release desktop, desktop test-project
+compilation, isolated browser-fixture bundling and Lunet website builds pass. The existing Vite
+large-chunk advisory remains. Both fixes are delivered together, excluding local config and generated bridge sources.
+
+# Temporary new-session tabs and drag integration (2026-10-03, earlier)
 
 Supersedes the project-placeholder behavior below. A project selection opens one temporary
 new-session node, reused across projects and removed by existing-session selection. Real session

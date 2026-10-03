@@ -20,14 +20,14 @@ export function sessionTabPresentation(state: SessionTabs, snapshot: WorkspaceSn
 
 export function createSessionTabModel() {
   return Model.fromJson({ global: {
-    enableEdgeDock: true, enableEdgeDockIndicators: true,
+    enableEdgeDock: false, enableEdgeDockIndicators: false,
     tabEnableDrag: true, tabEnableRename: false, tabEnablePin: false,
     tabEnableFloat: false, tabEnableFloatIcon: false,
     tabEnablePopout: false, tabEnablePopoutIcon: false, tabEnablePopoutOverlay: false,
     // Keep open panes mounted so in-flight waits and editor drafts survive tab changes.
     tabEnableRenderOnDemand: false, tabEnableScrollbars: false,
     tabSetEnableClose: true, tabSetEnableCloseButton: false, tabSetEnableDeleteWhenEmpty: true,
-    tabSetEnableDivide: true, tabSetEnableDrag: true, tabSetEnableDrop: true,
+    tabSetEnableDivide: true, tabSetEnableDrag: false, tabSetEnableDrop: true,
     tabSetEnableMaximize: false, tabSetEnableActiveIcon: false, tabSetEnableTabGroups: false,
   }, borders: [], layout: { type: "row", id: "session-tabs-row", children: [
     { type: "tabset", id: panelId, selected: 0, children: [] },

@@ -65,14 +65,15 @@ open. Use the overlay's sections and Back to settings control, Escape or Close s
 at narrow widths it uses viewport margins and scrolls internally. Configuration, Providers,
 Models, Agent prompts, MCP Servers and Logs are **not** workspace tabs. Session tabs belong to the
 global workspace, not the selected project: sessions from different projects can stay open together.
-Drag a tab along the tab strip to reorder it, or to a pane/workspace edge to create a split view
+Drag a tab along the tab strip to reorder it, to a pane edge to create a split view, or to its center to merge
 (up to 32 open sessions); drag the divider between panes to resize them. The presentation uses
 stable content slots and one vertical Explorer with Projects above Sessions. Its width is locally
 saved (220–360 pixels); the full-content button hides it without discarding the restore width.
 Settings and the command palette are on the activity rail. The compact composer keeps secondary
 actions under **More composer actions**, with retained-request recovery separate. Alta notes belong
-to each session, start closed when empty, and open when meaningful content arrives. Their FlexLayout
-border tab can be dragged left or right, resized, or collapsed. Existing session-keyed transitions and
+to each session, start collapsed when empty, and open when meaningful content arrives. A small disclosure
+at the top right of the timeline expands/collapses their overlay without resizing the timeline or composer.
+There is no nested notes dock or notes divider. Existing session-keyed transitions and
 draft/uncertain-action guards remain in place.
 
 Queued text and steering use compact rows outside and above the prompt card. **Enqueue** makes
@@ -114,9 +115,11 @@ toolbar, expansion and keyboard handling as existing sessions. **Start session**
 the guarded create-and-transfer flow: review the transferred prompt in the created session before
 normal Send. Model/agent/reasoning choices remain unavailable until the session is created; the
 provider can be chosen before creation. The prompt's divider
-reserves space within its own pane, independently of tab and notes dividers. Sizing observes the
-actual portal DOM mount, including late-mounted panes. Nested notes drag events bubble to the
-outer session layout; FlexLayout's controller ownership keeps notes/session drops separate.
+reserves space within its own pane, independently of session dividers. Sizing observes the
+actual portal DOM mount, including late-mounted panes. Session tab dragging uses pointer capture
+and public FlexLayout move actions, avoiding native HTML5 drag/drop handling. A highlighted target
+previews the split/merge/insertion, and Escape or loss of capture cancels. The tab menu's **Split session
+right/below** actions provide a keyboard alternative when a pane contains multiple session tabs.
 Real FlexLayout session tabs project
 existing bounded identities, with compact status/close chrome and secondary Reopen/Refresh menus.
 Open sessions retain independent display/runtime/review/notes owners and drafts; the focused pane
@@ -721,7 +724,9 @@ does not reveal a lost outcome. Closing the application or cancelling the origin
 invalidates pending attempts; host restart restores no old input authority. Native UI and configured-provider
 qualification remain incomplete.
 
-Each open owned-host session has a read-only **Alta notes** dock. It reads current durable notes
+Each open owned-host session has a read-only **Alta notes** overlay at the top right above its timeline.
+It travels with that session pane, starts collapsed when empty, and can be expanded/collapsed with its
+labelled buttons or the existing notes shortcut. It does not consume composer space. It reads current durable notes
 automatically, refreshes every ten seconds after the previous read completes, and supports explicit
 **Refresh notes**. It displays the latest stored notes as sanitized Markdown. Complete notes up to
 16,384 UTF-16 units are shown without truncation; larger or invalid text produces an error. Empty

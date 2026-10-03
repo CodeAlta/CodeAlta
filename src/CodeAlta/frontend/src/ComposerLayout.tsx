@@ -16,7 +16,7 @@ export function useComposerLayout(preferredHeight: number | undefined, onHeight:
       const style = getComputedStyle(workspace);
       let chromeHeight = 0;
       for (const child of Array.from(workspace.children)) {
-        if (!(child instanceof HTMLElement) || child.classList.contains("timeline-scroll") || child === region) continue;
+        if (!(child instanceof HTMLElement) || child.classList.contains("timeline-scroll") || child.classList.contains("session-timeline-area") || child === region) continue;
         const childStyle = getComputedStyle(child);
         if (childStyle.display === "none" || childStyle.position === "fixed" || childStyle.position === "absolute") continue;
         chromeHeight += child.offsetHeight + parseFloat(childStyle.marginTop) + parseFloat(childStyle.marginBottom);

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { Actions, DockLocation, TabNode } from "flexlayout-react";
+import { Actions, DockLocation, TabNode, TabSetNode } from "flexlayout-react";
+import { sessionTabDrop } from "./sessionTabDrag";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { closeSessionTab, emptySessionTabs, openSessionTab, sessionTabLimit, type SessionTab } from "./sessionTabs";
 import { createSessionTabModel, ownsSessionTabContent, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation } from "./sessionTabLayout";
@@ -14,6 +15,58 @@ const snapshot: WorkspaceSnapshot = { configured: true, projectsTruncated: false
   })) };
 const label = (value: SessionTab | null) => value?.sessionId ?? "Prompt draft";
 const both = () => openSessionTab(openSessionTab(emptySessionTabs(), tab("one")), tab("two"));
+
+test("pointer drop geometry splits in all four directions, merges and reorders through public actions", () => {
+  for (const [x, y, location] of [[10, 200, DockLocation.LEFT], [590, 200, DockLocation.RIGHT],
+    [300, 10, DockLocation.TOP], [300, 390, DockLocation.BOTTOM], [300, 200, DockLocation.CENTER]] as const) {
+    const model = createSessionTabModel(), state = both();
+    reconcileSessionTabModel(model, state, label);
+    const source = model.getNodeById(sessionNodeId(tab("two"))) as TabNode;
+    const target = source.getParent() as TabSetNode;
+    const drop = sessionTabDrop(source, target, { x: 0, y: 0, width: 600, height: 400 }, { x, y });
+    assert.equal(drop?.location, location);
+    assert.ok(drop && sessionLayoutActionAllowed(model, drop.action, state, snapshot, () => true));
+    model.doAction(drop!.action);
+    assert.equal(model.getNodeById(source.getId()), source);
+    assert.equal(model.getActiveTabset()?.getSelectedNode(), source);
+    assert.equal(source.getParent() === target, location === DockLocation.CENTER);
+  }
+  const model = createSessionTabModel(), state = both();
+  reconcileSessionTabModel(model, state, label);
+  const source = model.getNodeById(sessionNodeId(tab("two"))) as TabNode;
+  const target = source.getParent() as TabSetNode;
+  const rect = { x: 0, y: 0, width: 600, height: 400 };
+  const reorder = sessionTabDrop(source, target, rect, { x: 10, y: 10 }, { index: 0, rect: { x: 0, y: 0, width: 3, height: 30 } });
+  assert.equal(reorder?.location, DockLocation.CENTER);
+  model.doAction(reorder!.action);
+  assert.equal(target.getTabNodes()[0], source);
+  model.doAction(Actions.moveNode(source.getId(), target.getId(), DockLocation.RIGHT, -1, true));
+  const merge = sessionTabDrop(source, target, rect, { x: 300, y: 200 });
+  model.doAction(merge!.action);
+  assert.equal(source.getParent(), target);
+  assert.equal(model.getRootRow()!.getChildren().length, 1);
+});
+
+test("pointer drops refuse outside/zero geometry, temporary tabs, lone self splits and disabled targets", () => {
+  const model = createSessionTabModel();
+  reconcileSessionTabModel(model, { ...both(), active: null }, label);
+  const source = model.getNodeById(sessionNodeId(tab("one"))) as TabNode;
+  const target = source.getParent() as TabSetNode;
+  const draft = model.getNodeById(sessionDraftNodeId) as TabNode;
+  const rect = { x: 0, y: 0, width: 600, height: 400 };
+  assert.equal(sessionTabDrop(draft, target, rect, { x: 590, y: 200 }), null);
+  for (const point of [{ x: -1, y: 200 }, { x: 601, y: 200 }, { x: 300, y: 401 }])
+    assert.equal(sessionTabDrop(source, target, rect, point), null);
+  assert.equal(sessionTabDrop(source, target, { ...rect, width: 0 }, { x: 0, y: 0 }), null);
+  model.doAction(Actions.updateNodeAttributes(target.getId(), { enableDivide: false }));
+  assert.equal(sessionTabDrop(source, target, rect, { x: 590, y: 200 }), null);
+  model.doAction(Actions.updateNodeAttributes(target.getId(), { enableDrop: false }));
+  assert.equal(sessionTabDrop(source, target, rect, { x: 300, y: 200 }), null);
+  const lone = createSessionTabModel();
+  reconcileSessionTabModel(lone, openSessionTab(emptySessionTabs(), tab("one")), label);
+  const only = lone.getNodeById(sessionNodeId(tab("one"))) as TabNode;
+  assert.equal(sessionTabDrop(only, only.getParent() as TabSetNode, rect, { x: 590, y: 200 }), null);
+});
 
 test("projects reuse one temporary new-session tab without replacing real panes or split geometry", () => {
   const other = { projectId: "q", sessionId: "other", path: "/q" };
@@ -239,11 +292,13 @@ test("installed 0.11 content memoization requires eager hidden factory invalidat
   assert.match(component, /onModelChange=/);
   assert.doesNotMatch(component, /hidden=\{!state\.open\.length\}/);
   assert.doesNotMatch(component, /hidden=\{!state\.active\}/);
-  assert.match(component, /if \(action\) \{ model\.doAction\(action\); changed\(action\); \}/);
+  assert.match(component, /if \(accepted\) model\.doAction\(accepted\)/);
   assert.match(component, /isComposing.*keyCode === 229.*repeat/);
-  const notes = readFileSync(new URL("./SessionNotesDock.tsx", import.meta.url), "utf8");
-  assert.match(notes, /tabEnableScrollbars: false/);
-  for (const event of ["onDragEnter", "onDragLeave", "onDragOver", "onDrop"])
-    assert.ok(!notes.includes(`${event}={event => event.stopPropagation()}`));
+  const notes = readFileSync(new URL("./SessionNotesOverlay.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(notes, /flexlayout-react|<Layout/);
+  assert.match(notes, /hidden=\{collapsed\}/);
+  assert.match(notes, /aria-expanded=\{!collapsed\}/);
+  assert.match(component, /onPointerDownCapture=\{drag\.down\}/);
+  assert.match(component, /onDragStartCapture=/);
   assert.doesNotMatch(component, /getMoveableElement|appendChild|setAttribute|createRoot/);
 });

@@ -54,7 +54,7 @@ import { createAbortRunSubmissions } from "./sessionAbortRun";
 import { createQueueSubmissions } from "./sessionQueue";
 import { AskPanel } from "./AskPanel";
 import { askWireRequest, createAskActions } from "./sessionAsks";
-import { SessionNotesDock } from "./SessionNotesDock";
+import { SessionNotesOverlay } from "./SessionNotesOverlay";
 import { RunningSessionBadge } from "./RuntimeObservation";
 import { createNotesReader } from "./sessionNotes";
 import { createUserInputReviewer } from "./sessionUserInput";
@@ -1943,15 +1943,14 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   const infoControl = <button ref={infoTrigger} type="button" className="composer-icon-button session-info-trigger"
     aria-label={t("Session info")} title={`${t("Session info")} (Ctrl+G, Ctrl+T)`} aria-haspopup="dialog" aria-expanded={infoOpen}
     onClick={openInfo}><AppIcon name="info" size={16} /></button>;
-  return <SessionNotesDock sessionId={session.id} epoch={ownedSession ? status?.hostEpoch : undefined} capability={mutation?.capability}
-    fallbackMarkdown={historyNotes} toggle={active ? notesToggle : undefined} reader={notesReader} onActivate={onActivate}>
-    <div className="session-workspace" data-active={active} ref={composer.workspaceRef}>
+  return <div className="session-workspace" data-active={active} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       lifetime={infoLifetime} canRead={() => !!mutation?.capability.canMutate()}
       target={ownedSession && !demoMode && mutation?.capability.canMutate() ? runtimeTarget(snapshot, { sessionId: session.id, projectId: selectedProjectId, path: session.workspacePath }, status?.hostEpoch ?? undefined) : null} />}
     {demoMode
       ? <DemoConversation session={session} />
       : <>
+        <div className="session-timeline-area">
         <div className="timeline-scroll" ref={timeline.elementRef}
           onScroll={event => { newest.onScroll(); if (!newest.pending()) timeline.scroll(event.currentTarget); }}
           onWheel={event => { newest.cancel(); timeline.wheel(event); }} onKeyDown={timeline.keyDown}
@@ -1976,6 +1975,9 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
         </>
         : null}
         </div>
+        <SessionNotesOverlay sessionId={session.id} epoch={ownedSession ? status?.hostEpoch : undefined} capability={mutation?.capability}
+          fallbackMarkdown={historyNotes} toggle={active ? notesToggle : undefined} reader={notesReader} />
+        </div>
         {!timeline.following && <button type="button" className="timeline-bottom-button" onClick={() => { newest.cancel(); timeline.jump(); }}><AppIcon name="arrowDown" size={14} />{t(newerOmitted ? "Bottom of retained window (not newest)" : "Jump to latest visible")}</button>}
         {messageNotice && <p role="status" className="detail timeline-navigation-notice">{timelineNotice(languageLocale, messageNotice)}</p>}
         <div className="composer-resize-bar" ref={composer.barRef}>
@@ -1998,7 +2000,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
             asks={askActions} inputs={inputReviewer} permissions={permissionReviewer} /> : null} />
         </div>
       </>}
-  </div></SessionNotesDock>;
+  </div>;
 }
 
 function DemoConversation({ session }: { session: WorkspaceSession }) {
