@@ -186,6 +186,54 @@ public sealed class GlobalConfigRpcTests
         CollectionAssert.DoesNotContain(fixture.Registry.ListProviders(includeDisabled: true).Select(provider => provider.ProviderId.Value).ToArray(), "extra");
     }
 
+    // Settings the provider form never shows and the typed configuration document does not model.
+    private const string UnmodeledSettings = """
+
+
+        [plugins.mcp]
+        enabled = false
+        tool_timeout_ms = 1234
+
+        [plugins.mcp.servers.files]
+        enabled = false
+
+        [future_section]
+        answer = 42
+        """;
+
+    [TestMethod]
+    public async Task SaveProviderAndDeleteProvider_KeepSettingsOutsideTheProviderForm()
+    {
+        await using var fixture = new Fixture(ProvidersConfig + UnmodeledSettings);
+        void AssertKept(string step)
+        {
+            var text = File.ReadAllText(fixture.ConfigPath);
+            StringAssert.Contains(text, "tool_timeout_ms = 1234", step);
+            StringAssert.Contains(text, "[plugins.mcp.servers.files]", step);
+            StringAssert.Contains(text, "[future_section]", step);
+            StringAssert.Contains(text, "answer = 42", step);
+            StringAssert.Contains(text, "network_timeout_seconds = 77", step);
+            Assert.AreEqual(false, fixture.Store.LoadGlobal().Plugins!["mcp"].Enabled, step);
+        }
+
+        var listed = fixture.Service.Providers(new(Epoch));
+        var edited = fixture.Service.SaveProvider(new(Epoch, listed.Revision, "local",
+            new("local", "openai-chat", true, "Local renamed", "model-b", null, "http://127.0.0.1:9999/v1", null, null, false), false, false));
+        Assert.AreEqual("ok", edited.Status, edited.Message);
+        AssertKept("after editing a provider");
+
+        var added = fixture.Service.SaveProvider(new(Epoch, edited.Revision, null,
+            new("extra", "openai-chat", true, "Extra", "model-x", null, "http://127.0.0.1:9998/v1", null, "extra-secret", false), true, false));
+        Assert.AreEqual("ok", added.Status, added.Message);
+        Assert.AreEqual("extra", fixture.Service.Providers(new(Epoch)).DefaultProvider);
+        AssertKept("after adding a default provider");
+
+        var deleted = fixture.Service.DeleteProvider(new(Epoch, added.Revision, "extra", false));
+        Assert.AreEqual("ok", deleted.Status, deleted.Message);
+        Assert.IsFalse(fixture.Service.Providers(new(Epoch)).Providers.Any(provider => provider.Key == "extra"));
+        AssertKept("after deleting a provider");
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly string _root = Path.Combine(Path.GetTempPath(), "CodeAlta-global-config-" + Guid.NewGuid().ToString("N"));
@@ -196,9 +244,11 @@ public sealed class GlobalConfigRpcTests
             var options = new CatalogOptions { GlobalRoot = _root };
             ConfigPath = options.ConfigPath;
             if (config is not null) File.WriteAllText(ConfigPath, config);
-            Service = new GlobalConfigService(new CodeAltaConfigStore(options), Registry, _root, Epoch);
+            Store = new CodeAltaConfigStore(options);
+            Service = new GlobalConfigService(Store, Registry, _root, Epoch);
         }
 
+        public CodeAltaConfigStore Store { get; }
         public ModelProviderRegistry Registry { get; } = new();
         public GlobalConfigService Service { get; }
         public string ConfigPath { get; }
