@@ -200,6 +200,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddWorkspaceService(workspace);
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime));
                     builder.AddGlobalConfigService(new GlobalConfigService(new CodeAltaConfigStore(catalog), host.ModelProviderRegistry, options.CatalogRoot!, epoch));
+                    builder.AddMcpServersService(new McpServersService(host.ProjectCatalog, epoch, roots.Home));
                     builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
                     providers = new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch);
                     _ = providers.StartInitialization(); // Retained and joined by providers.DrainAsync.
@@ -347,6 +348,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddWorkspaceService(new WorkspaceService(options.CatalogRoot));
             builder.AddConfigurationService(new ConfigurationService(options.CatalogRoot!));
             builder.AddGlobalConfigService(new GlobalConfigService());
+            builder.AddMcpServersService(new McpServersService());
             builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
             builder.AddModelCatalogService(new ModelCatalogService());
             builder.AddPromptCatalogService(new PromptCatalogService());

@@ -108,3 +108,14 @@ export const globalConfig = Object.freeze({
   saveProvider: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
   deleteProvider: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
 });
+
+// The demo has no host to edit: every Settings editor reports itself unavailable.
+export const mcpServers = Object.freeze({
+  list: async () => ({
+    status: "unavailable", projectId: null, servers: [], globalConfigState: null, projectConfigState: null,
+    mcpEnabled: false, policyReadError: false, omitted: 0,
+  }),
+  save: async () => ({ status: "unavailable", message: null }),
+  remove: async () => ({ status: "unavailable", message: null }),
+  setEnabled: async () => ({ status: "unavailable", message: null }),
+});
