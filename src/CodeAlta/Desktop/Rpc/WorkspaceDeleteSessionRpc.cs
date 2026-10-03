@@ -33,7 +33,7 @@ internal sealed partial class WorkspaceService
         lock (_sessionGate)
         {
             if (_sessionsClosed) return Reply("closed");
-            if (_deleteWork is not null || _renameWork is not null || _promptCreateWork is { IsCompleted: false }) return Reply("busy");
+            if (_deleteWork is not null || _renameWork is not null) return Reply("busy");
             var completion = new TaskCompletionSource<WorkspaceDeleteSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
             _deleteWork = work = completion.Task;
             _ = DeleteSessionOwnedAsync(request, completion);

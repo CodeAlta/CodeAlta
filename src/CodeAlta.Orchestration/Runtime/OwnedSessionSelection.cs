@@ -1,5 +1,4 @@
 using CodeAlta.Agent;
-using CodeAlta.Orchestration.Runtime.SystemPrompts;
 
 namespace CodeAlta.Orchestration.Runtime;
 
@@ -24,11 +23,6 @@ public sealed record OwnedModelChoice(string Id, string Name, IReadOnlyList<Agen
 /// <param name="Models">Models exposed by the session provider.</param>
 public sealed record OwnedSelectionChoices(OwnedSessionSelection Current, IReadOnlyList<OwnedPromptChoice> Prompts, IReadOnlyList<OwnedModelChoice> Models);
 
-/// <summary>Host-resolved project scope for an existing owned session; a null path denotes global scope.</summary>
-/// <param name="ProjectDirectory">Catalog project path, or null for an unscoped session.</param>
-/// <param name="ProjectId">Catalog project identity, or null for an unscoped session.</param>
-public sealed record OwnedMcpScope(string? ProjectDirectory, string? ProjectId);
-
 public sealed partial class OwnedSessionCommandService
 {
     /// <summary>Reads effective prompt choices for a draft's exact catalog scope without creating a session or provider.</summary>
@@ -46,35 +40,6 @@ public sealed partial class OwnedSessionCommandService
         cancellationToken.ThrowIfCancellationRequested();
         return _runtime.ListOwnedPrompts(project?.ProjectPath).Where(p => p.PromptName.Length <= 256).Take(64)
             .Select(p => new OwnedPromptChoice(p.PromptName, Bound(p.DisplayName))).ToArray();
-    }
-
-    /// <summary>Resolves an owned session's exact catalog project; null result means unavailable, not global.</summary>
-    /// <exception cref="ArgumentException">The session identity is blank.</exception>
-    /// <exception cref="OperationCanceledException">The caller cancels the read.</exception>
-    public async Task<OwnedMcpScope?> GetMcpScopeAsync(string sessionId, CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        lock (_gate) { if (_closed || _retained) return null; }
-        var session = await _runtime.ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
-        if (session is null) return null;
-        if (string.IsNullOrWhiteSpace(session.ProjectRef)) return new OwnedMcpScope(null, null);
-        var project = await _projects.GetByIdAsync(session.ProjectRef, cancellationToken).ConfigureAwait(false);
-        return project is null ? null : new OwnedMcpScope(project.ProjectPath, project.Id);
-    }
-
-    /// <summary>Reads effective prompts only in the resolved owned session's host-authorized project scope.</summary>
-    /// <exception cref="ArgumentException">The session identity is blank.</exception>
-    /// <exception cref="OperationCanceledException">The caller cancels its read.</exception>
-    public async Task<IReadOnlyList<AgentPromptDescriptor>?> GetPromptCatalogAsync(string sessionId, CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        lock (_gate) { if (_closed || _retained) return null; }
-        var session = await _runtime.ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
-        if (session is null) return null;
-        var project = string.IsNullOrWhiteSpace(session.ProjectRef) ? null
-            : await _projects.GetByIdAsync(session.ProjectRef, cancellationToken).ConfigureAwait(false);
-        if (!string.IsNullOrWhiteSpace(session.ProjectRef) && project is null) return null;
-        return _runtime.ListOwnedPrompts(project?.ProjectPath);
     }
 
     /// <summary>Reads bounded choices for an existing session, probing its configured provider if needed.</summary>

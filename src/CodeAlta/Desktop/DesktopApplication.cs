@@ -104,7 +104,6 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         SessionAsksService? asks = null;
         ReminderService? reminders = null;
         GithubIssuesService? githubIssues = null;
-        PromptCreationService? promptCreation = null;
         ModelCatalogService? providers = null;
         WorkspaceService? workspace = null;
         NeoWindow? window = null;
@@ -126,7 +125,6 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     operations?.CloseAdmission();
                     asks?.CloseAdmission();
                     reminders?.CloseAdmission();
-                    promptCreation?.CloseAdmission();
                     providers?.CloseAdmission();
                     closeRequested.TrySetResult();
                     if (!shutdownUnconfirmed) window.Title = "CodeAlta — shutdown pending; lease retained";
@@ -158,7 +156,6 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 await workspacePrepared.Task;
                 if (workspace is not null) await Task.WhenAll(workspace.CloseImportsAsync(), workspace.CloseSessionsAsync());
                 if (reminders is not null) await reminders.DisposeAsync();
-                if (promptCreation is not null) await promptCreation.DrainAsync();
                 if (providers is not null) await providers.DrainAsync();
             });
             await AwaitOwnedAsync(_hostCreation, window);
@@ -170,7 +167,6 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 operations = new SessionOperationsService(host.Commands, epoch);
                 asks = new SessionAsksService(host.Commands.Asks, epoch);
                 reminders = new ReminderService(host.WorkspaceReads, host.Commands, epoch);
-                promptCreation = new PromptCreationService(host.ProjectCatalog, host.SessionViewCatalog.JournalStore, epoch, workspace);
                 workspacePrepared.TrySetResult();
                 var assets = Path.Combine(AppContext.BaseDirectory, "assets");
                 var manifest = NeoAssetManifest.Load(Path.Combine(assets, "neoastra-assets.json"));
@@ -211,9 +207,6 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     providers = new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch);
                     _ = providers.StartInitialization(); // Retained and joined by providers.DrainAsync.
                     builder.AddModelCatalogService(providers);
-                    builder.AddPromptCatalogService(new PromptCatalogService(host.Commands, epoch));
-                    builder.AddPromptCreationService(promptCreation);
-                    builder.AddMcpInventoryService(new McpInventoryService(host.Commands, epoch, roots.Home));
                     builder.AddReminderService(reminders);
                     githubIssues = new GithubIssuesService(host.ProjectCatalog, epoch);
                     builder.AddGithubIssuesService(githubIssues);
@@ -224,7 +217,6 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));
                     builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(host.RuntimeService, epoch));
                     builder.AddSessionUsageService(new SessionUsageService(host.RuntimeService, epoch));
-                    builder.AddSkillsInspectionService(new SkillsInspectionService(host.ProjectCatalog, host.SessionViewCatalog.JournalStore, epoch));
                     builder.AddSessionPermissionsService(new SessionPermissionsService(host.RuntimeService.Permissions, epoch, options.ReviewOwnedCommandPermissions));
                     var rpc = builder.Build();
                     rpcLifetime = rpc;
@@ -260,7 +252,6 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         operations?.CloseAdmission();
         asks?.CloseAdmission();
         reminders?.CloseAdmission();
-        promptCreation?.CloseAdmission();
         providers?.CloseAdmission();
         if (_closeFlow is not null)
         {
@@ -363,7 +354,6 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddPluginsService(new PluginsService());
             builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
             builder.AddModelCatalogService(new ModelCatalogService());
-            builder.AddPromptCatalogService(new PromptCatalogService());
             await using var rpc = builder.Build();
             window.Show();
             await using var view = await environment.CreateWebViewAsync(NeoAstraHost.FillWindow(window), new NeoAstraOptions

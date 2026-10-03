@@ -15,7 +15,7 @@ internal sealed partial class WorkspaceService
     // Access only under _importGate (also used by session creation).
     private bool CatalogAdmissionClosed => _importsClosed || _sessionsClosed;
     private bool CatalogAdmissionBusy => _sessionWork is not null || _archiveWork is not null || _importWork is not null
-        || _projectReadWork is not null || _projectRenameWork is not null || _promptCreateWork is { IsCompleted: false };
+        || _projectReadWork is not null || _projectRenameWork is not null;
 
     internal WorkspaceService(OwnedSessionWorkspace reads, ProjectCatalog catalog, string epoch) : this(reads)
     {
@@ -86,10 +86,9 @@ internal sealed partial class WorkspaceService
         Task? rename;
         Task? completion;
         Task? archive;
-        Task? promptCreate;
-        lock (_importGate) { _importsClosed = true; work = _importWork; read = _projectReadWork; rename = _projectRenameWork; completion = _directoryCompletionWork; archive = _archiveWork; promptCreate = _promptCreateWork; }
+        lock (_importGate) { _importsClosed = true; work = _importWork; read = _projectReadWork; rename = _projectRenameWork; completion = _directoryCompletionWork; archive = _archiveWork; }
         await Task.WhenAll(work ?? Task.CompletedTask, read ?? Task.CompletedTask, rename ?? Task.CompletedTask,
-            completion ?? Task.CompletedTask, archive ?? Task.CompletedTask, promptCreate ?? Task.CompletedTask).ConfigureAwait(false);
+            completion ?? Task.CompletedTask, archive ?? Task.CompletedTask).ConfigureAwait(false);
     }
 
     private async Task ImportAsync(string path, string requestedPath, TaskCompletionSource<WorkspaceOpenProjectResponse> completion)
