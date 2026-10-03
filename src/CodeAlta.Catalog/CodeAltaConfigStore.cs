@@ -741,7 +741,7 @@ public sealed class CodeAltaConfigStore
         var options = TomlSerializerOptions.Default with
         {
             SourceName = path,
-            // Carries the comments of the settings that stay in place.
+            // Carries the end-of-line comments of the settings that stay in place; full-line comments are not kept.
             MetadataStore = new TomlMetadataStore(),
             NewLine = existing.Contains("\r\n", StringComparison.Ordinal) ? TomlNewLineKind.CrLf : TomlNewLineKind.Lf,
         };
