@@ -2,7 +2,7 @@ import { matchesOutgoingText } from "./outgoingEcho";
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { workspace, type HistoryRequest, type SessionDisplayView } from "#neoastra";
 import { AppIcon } from "./AppIcon";
-import { historyMessage, historySettled, loadHistory, mergeHistoryPage, type HistoryState, type HistoryTimeline } from "./history";
+import { historyCanRetry, historyMessage, historySettled, loadHistory, mergeHistoryPage, type HistoryState, type HistoryTimeline } from "./history";
 import { liveTextItem, liveToolItem } from "./liveTimeline";
 import { orderTimelineRows, reconcileTimeline } from "./reconcileTimeline";
 import { groupTimelineTools } from "./toolGroups";
@@ -108,9 +108,9 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
   const liveRefresh = useRef<{ revision: string | undefined; ready: boolean; retry: boolean; refresh: () => void }>(null);
   liveRefresh.current = { revision: live?.revision,
     ready: (current?.kind === "ready" && window?.generation === target.generation && historySettled(current, window?.timeline)
-      || current?.kind === "error" && current.code === "history_changed")
+      || historyCanRetry(current))
       && !target.explicitOlder && !timeline?.newerOmitted && !sourceTarget && (canInspect?.() ?? true),
-    retry: current?.kind === "error" && current.code === "history_changed",
+    retry: historyCanRetry(current),
     refresh: () => { refreshNewest(false); } };
   useEffect(() => {
     let refreshed: string | undefined;

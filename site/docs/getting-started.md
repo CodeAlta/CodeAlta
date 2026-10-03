@@ -151,8 +151,10 @@ can read retained same-host state but does not recreate lost intent, and restart
 This restricted workflow provides no general LiveTool dispatch, attached files or provider-input
 activation. Continue using `altatui` for complete agent workflows.
 
-Clicking a project opens a blank timeline with a bottom prompt and an animated CodeAlta wordmark;
-there is no separate prompt-draft tab. Drag session tabs to the workspace edges for two or more
+Clicking a project opens a blank timeline with a bottom prompt and an animated CodeAlta wordmark
+in the focused pane; there is no separate prompt-draft tab. Open tabs are workspace-wide, so sessions
+from different projects remain open and their tab strips and other split panes stay visible when
+you switch projects. Click a session tab to return to it. Drag session tabs to the workspace edges for two or more
 simultaneous session panes. Running indicators refresh automatically for bounded batches of verified
 sessions, prioritizing visible/open sessions (up to 32); unknown or stale status is not proof of idle.
 
@@ -165,9 +167,14 @@ from empty notes. Switching sessions does not stop an already-started read. Edit
 
 If Send stops working, preserve developer-console entries beginning `[CodeAlta Send]` or
 `[CodeAlta RPC]` and the matching application-log `Send reached backend` UUID. These diagnostics
-omit prompt and credential contents. The current NeoAstra request-ID lifetime limit is mitigated,
-not eliminated; a timeout is uncertainty, never permission for automatic resend. See the
+omit prompt and credential contents. NeoAstra 0.2.1 uses bounded completed-request history and reports
+active-ID capacity separately from duplicates; a timeout is uncertainty, never permission for automatic resend. See the
 [desktop troubleshooting notes](https://github.com/CodeAlta/CodeAlta/blob/main/src/CodeAlta/README.md).
+
+The running spinner is independent of live transcript delivery. Temporary history-read errors can
+recover through bounded live-revision refresh without discarding already-loaded rows or replacing
+an explicitly older view. If live observation itself fails, use **Reconnect live activity** when offered;
+do not retry Send merely because messages stopped appearing.
 
 For supported **nonsecret provider input**, separately add `--enable-owned-user-input` to the complete
 owned-mode command. It is off by default and does not approve commands or files. **Never enter secrets**:

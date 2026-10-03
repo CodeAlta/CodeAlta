@@ -220,7 +220,7 @@ h1, h2, h3, p { margin-top: 0; }
 .workspace-layout { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0;
   --flexlayout-color-text: var(--text); --flexlayout-color-background: transparent;
   --flexlayout-color-base: transparent; --flexlayout-color-1: transparent; }
-.session-content-layout { grid-area: session-content; --flexlayout-splitter-size: 0px; --flexlayout-splitter-active-size: 0px; }
+.session-content-layout { grid-area: session-content; }
 /* Public classNameMapper replaces the library input surface. App's existing
    pointer-captured control owns the 8px space inside the rail slot instead. */
 .session-content-library-divider { display: none; }
@@ -235,6 +235,9 @@ h1, h2, h3, p { margin-top: 0; }
 .session-tabs { flex: 1; min-width: 0; min-height: 0; }
 .session-dock { position: absolute; inset: 0; }
 .session-dock[hidden] { display: none; }
+.session-tab-content, .session-tab-workspace { height: 100%; min-width: 0; min-height: 0; overflow: hidden; overflow-anchor: none; }
+.session-tab-workspace[hidden] { display: none; }
+.session-dock, .session-notes-dock { --flexlayout-splitter-size: 8px; --flexlayout-splitter-active-size: 8px; }
 .session-running { color: var(--green); flex: 0 0 auto; font-size: 11px; }
 .blank-project-logo { flex: 1; min-height: 100px; display: flex; justify-content: center; align-items: center; gap: .2em; font-size: clamp(28px, 5vw, 72px); font-weight: 800; letter-spacing: -.04em; text-shadow: 2px 3px 0 var(--line); user-select: none; }
 .logo-alta { background: linear-gradient(110deg, #37b4ed, #c46af3, #ffb34c, #37b4ed); background-size: 300% 100%; background-clip: text; color: transparent; text-shadow: none; animation: alta-logo-colors 9s linear infinite; }

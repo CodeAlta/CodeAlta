@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Actions, Layout, PopupMenu, TabNode, type Action, type PopupMenuEntry } from "flexlayout-react";
+import { Actions, Layout, PopupMenu, type Action, type PopupMenuEntry } from "flexlayout-react";
 import { useShellLanguage } from "./shellLanguage";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { resolveSessionTab, type SessionTab, type SessionTabs as Tabs } from "./sessionTabs";
 import { RuntimeObservationBadge, type RuntimeObservationControls } from "./RuntimeObservation";
-import { createSessionTabModel, ownsSessionTabContent, reconcileSessionTabModel, sessionNodeId, sessionTabAction } from "./sessionTabLayout";
+import { createSessionTabModel, ownsSessionTabContent, reconcileSessionTabModel, sessionBlankNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction } from "./sessionTabLayout";
 
 export function SessionTabLabel({ label, path, dirty }: { label: string; path: string | null; dirty: boolean }) {
   const { t } = useShellLanguage();
@@ -35,19 +35,25 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
     return () => alive.current && current();
   }
   function dispatch(action: Action, current = guard()) {
-    if (current() && [Actions.MOVE_NODE, Actions.SET_ACTIVE_TABSET].includes(action.type)) {
-      const moved = model.getNodeById(action.data.fromNode ?? action.data.tabsetNode);
-      const selected = moved instanceof TabNode ? moved : moved?.getChildren().find(node => node instanceof TabNode && node.isSelected());
-      const tab = state.open.find(tab => sessionNodeId(tab) === selected?.getId());
-      if (tab && snapshot && resolveSessionTab(snapshot, tab)) select(tab);
-      return action;
-    }
-    if (current() && action.type === Actions.ADJUST_WEIGHTS) return action;
+    if (sessionLayoutActionAllowed(model, action, state, snapshot, current)) return action;
     const intent = sessionTabAction(action, state, snapshot, current);
-    if (intent?.kind === "select") select(intent.tab);
-    else if (intent?.kind === "close") close(intent.tab);
-    // Never let FlexLayout select/delete independently of App acceptance.
+    if (intent?.kind === "close") close(intent.tab);
+    // App must accept closing a session; unsupported actions never reach the model.
     return undefined;
+  }
+  function changed(action: Action) {
+    if (![Actions.SELECT_TAB, Actions.MOVE_NODE, Actions.SET_ACTIVE_TABSET].includes(action.type)) return;
+    const selected = model.getActiveTabset()?.getSelectedNode();
+    if (!selected) return;
+    const intent = sessionTabAction(Actions.selectTab(selected.getId()), state, snapshot, guard());
+    if (intent?.kind === "select" && (!state.active || sessionNodeId(state.active) !== selected.getId())) select(intent.tab);
+  }
+  function returnToSession(target: HTMLElement) {
+    if (state.active || target.closest(".flexlayout__tab_button_trailing")) return;
+    const id = target.closest('[role="tab"]')?.querySelector<HTMLElement>('[data-session-node]')?.dataset.sessionNode;
+    if (!id) return;
+    const intent = sessionTabAction(Actions.selectTab(id), state, snapshot, guard());
+    if (intent?.kind === "select") select(intent.tab);
   }
   function more(anchor: HTMLElement) {
     const current = guard();
@@ -59,21 +65,25 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
         onSelect: () => { if (current()) observations?.refresh(state.open); } },
     ] });
   }
-  return <div className="session-tabs workspace-layout" ref={root} onKeyDownCapture={event => {
+  return <div className="session-tabs workspace-layout" ref={root} onClickCapture={event => returnToSession(event.target as HTMLElement)} onKeyDownCapture={event => {
     // Do not intercept the editor inside a factory; only the tab/menu chrome.
     const target = event.target as HTMLElement;
     if (!target.closest('[role="tablist"], [role="menu"], .session-tab-more')) return;
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.repeat) {
       event.preventDefault(); event.stopPropagation();
+    } else if (!state.active && event.key === "Enter" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
+      && target.closest('[role="tab"]')) {
+      returnToSession(target); event.preventDefault(); event.stopPropagation();
     }
   }}>
-    <div className="session-dock" hidden={!state.active}><Layout model={model} supportsPopout={false} invalidateTabContentOnParentRender={true}
+    <div className="session-dock" hidden={!state.open.length}><Layout model={model} supportsPopout={false} invalidateTabContentOnParentRender={true}
       keyMap={{ closeTab: undefined, renameTab: undefined, focusTabToggle: undefined,
         focusNextTabset: undefined, focusPreviousTabset: undefined, closeOverlayBorder: undefined }}
-      onAction={action => dispatch(action)} onContextMenu={(_node, event) => event.preventDefault()}
+      onAction={action => dispatch(action)} onModelChange={(_model, action) => changed(action)}
+      onContextMenu={(_node, event) => event.preventDefault()}
       onRenderTab={(node, values) => {
         const tab = state.open.find(value => sessionNodeId(value) === node.getId());
-        values.content = <SessionTabLabel label={label(tab ?? null)} path={tab?.path ?? null} dirty={!!tab && dirty(tab.sessionId)} />;
+        values.content = <span data-session-node={node.getId()}><SessionTabLabel label={label(tab ?? null)} path={tab?.path ?? null} dirty={!!tab && dirty(tab.sessionId)} /></span>;
         if (tab) values.leading = <>
           {observations && <RuntimeObservationBadge controls={observations} tab={tab} compact />}
         </>;
@@ -85,14 +95,21 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
         if (!current()) return;
         setMenu({ anchor: event.currentTarget as HTMLElement, current, items: items.map(item => ({
           key: item.node.getId(), label: item.node.getName(),
-          onSelect: () => dispatch(Actions.selectTab(item.node.getId()), current),
+          onSelect: () => {
+            const action = dispatch(Actions.selectTab(item.node.getId()), current);
+            // PopupMenu is outside Layout's onAction pipeline; apply the accepted action here.
+            if (action) model.doAction(action);
+          },
         })) });
       }}
       factory={node => {
         const tab = state.open.find(tab => sessionNodeId(tab) === node.getId());
-        return tab && renderSession ? renderSession(tab) : ownsSessionTabContent(node.getId(), state) ? children : null;
+        if (!tab || !renderSession) return ownsSessionTabContent(node.getId(), state) ? children : null;
+        const blank = node.getId() === sessionBlankNodeId(model, state);
+        return <div className="session-tab-content"><div className="session-tab-workspace" hidden={blank}>{renderSession(tab)}</div>
+          {blank && children}</div>;
       }} /></div>
-    {!state.active && children}
+    {!state.open.length && children}
     {menu && <PopupMenu anchor={menu.anchor} items={menu.items} title={t("Open sessions")}
       container={root.current ?? undefined} onClose={() => setMenu(null)} />}
   </div>;

@@ -18,7 +18,7 @@ Chrome/WebView2; there is no direct native clipboard reader. Conversion errors n
 that the selected model lacks image support. Animation is reduced to one frame and source
 metadata is not retained.
 
-`CodeAlta` is the native desktop .NET tool (`alta`), built with published NeoAstra 0.2.0,
+`CodeAlta` is the native desktop .NET tool (`alta`), built with published NeoAstra 0.2.1,
 generated RPC, React/strict TypeScript and packaged local Vite assets. Node/npm is needed
 only to build. The installed application has no UI server or external asset origin.
 
@@ -63,8 +63,10 @@ Settings opens a modal overlay approximately 80% of the desktop viewport; the se
 composer draft and timeline remain mounted underneath but cannot be interacted with while it is
 open. Use the overlay's sections and Back to settings control, Escape or Close settings to return;
 at narrow widths it uses viewport margins and scrolls internally. Configuration, Providers,
-Models, Agent prompts, MCP Servers and Logs are **not** workspace tabs. Session tabs can be dragged
-to workspace edges to create multiple simultaneous panes (up to 32 open sessions). The presentation uses
+Models, Agent prompts, MCP Servers and Logs are **not** workspace tabs. Session tabs belong to the
+global workspace, not the selected project: sessions from different projects can stay open together.
+Drag a tab along the tab strip to reorder it, or to a pane/workspace edge to create a split view
+(up to 32 open sessions); drag the divider between panes to resize them. The presentation uses
 stable content slots and one vertical Explorer with Projects above Sessions. Its width is locally
 saved (220–360 pixels); the full-content button hides it without discarding the restore width.
 Settings and the command palette are on the activity rail. The compact composer keeps secondary
@@ -91,19 +93,22 @@ prolonged unavailability shows a small status indicator rather than raw timeline
 For a Send lockup, preserve the developer-console entries prefixed `[CodeAlta Send]` and
 `[CodeAlta RPC]`. They report composer guards, dispatch, safe framework error codes, elapsed time
 and UUID request keys, never prompt text or provider credentials. Match a dispatch key with
-`Send reached backend (<key>)` in application logs. `duplicate_request` can mean NeoAstra's
-window-lifetime request-ID budget is exhausted, not that CodeAlta replayed the prompt;
+`Send reached backend (<key>)` in application logs. With NeoAstra 0.2.1, `duplicate_request`
+means an active or retained completed request identity was reused;
 `too_many_requests` means admission/rate/channel pressure; `connection_closed` means transport
 loss. An uncancelled eight-second `operation_canceled` wait is consistent with the client timeout.
-The one-million-ID limit is still finite: upstream must support safe completed-ID retirement or
-document/RPC renewal with distinct replay protection and a specific capacity error. No automatic
+Completed request identities now use bounded fingerprint history rather than accumulating ID strings
+for the document lifetime. `request_id_capacity_exhausted` separately identifies capacity pinned by
+active work/subscriptions; it is not a duplicate. No automatic
 reload, capability reset or mutation retry is performed. Inspect receipts before deliberate retry.
 
 Reminders is a guarded selected-session native-modal popup, not a Settings section or replacement
 workspace. Closing it does not cancel an admitted action or retry an uncertain Save; original
 request evidence remains owned by the application. The underlying workspace stays mounted.
 Clicking a project opens a blank timeline with a bottom prompt and animated CodeAlta wordmark
-(stationary with reduced motion); there is no draft tab. Real FlexLayout session tabs project
+(stationary with reduced motion) in the focused pane without hiding the open tab strips or discarding
+other split panes. Click a session tab to return to it; there is no draft tab. The prompt's divider
+reserves space within its own pane, independently of tab and notes dividers. Real FlexLayout session tabs project
 existing bounded identities, with compact status/close chrome and secondary Reopen/Refresh menus.
 Open sessions retain independent display/runtime/review/notes owners and drafts; the focused pane
 owns global composer shortcuts. Running indicators in the project/session sidebar refresh in bounded
@@ -111,7 +116,11 @@ batches, prioritizing visible and open sessions (at most 32 verified sessions pe
 stale observations never imply idle or authorize mutations. Provider switching remains blocked
 on failed-switch persistence/recovery semantics. Timeline loading now supports records up to
 8 MiB, with bounded previews and an explicit raw-source inspector showing at most 16 KiB per
-chunk. Previously loaded rows survive later page errors with a partial-state notice. The window
+chunk. Previously loaded rows survive later page errors with a partial-state notice. Temporary history-read
+failures can resume the existing live-revision refresh, with at most two retries for an unchanged live
+revision. Explicitly older views and source inspection are not replaced by this recovery. The spinner
+uses independent runtime observations; if the live display channel fails, use **Reconnect live activity**
+when offered, not Send retry. A spinner alone does not prove that transcript updates are arriving. The window
 is bounded to 1,000 events, 2 Mi text units or 32 automatic pages; load older explicitly to continue.
 Larger records produce an explicit error, not a silent skip. Visual/browser acceptance is deferred; known browser
 fixture failures are preserved, not reported as fixed. See the

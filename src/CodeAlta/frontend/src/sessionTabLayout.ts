@@ -1,4 +1,4 @@
-import { Actions, DockLocation, Model, TabNode, type Action } from "flexlayout-react";
+import { Actions, DockLocation, Model, RowNode, TabNode, TabSetNode, type Action } from "flexlayout-react";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { openSessionTab, reconcileSessionTabs, resolveSessionTab, selectedTab, sessionTabLimit, tabKey, type SessionTab, type SessionTabs } from "./sessionTabs";
 
@@ -67,4 +67,36 @@ export function sessionTabAction(action: Action, state: SessionTabs, snapshot: W
 
 export function ownsSessionTabContent(id: string, state: SessionTabs) {
   return !!state.active && id === sessionNodeId(state.active);
+}
+
+// Layout owns geometry and must apply accepted GUI actions before App projects focus.
+// Unrecognized/mutation actions still cannot bypass catalog or captured-lifetime checks.
+export function sessionLayoutActionAllowed(model: Model, action: Action, state: SessionTabs,
+  snapshot: WorkspaceSnapshot | undefined, current: () => boolean): boolean {
+  if (!current() || !snapshot) return false;
+  const valid = (node: TabNode) => !!sessionTabAction(Actions.selectTab(node.getId()), state, snapshot, current);
+  if (action.type === Actions.SELECT_TAB) return !!sessionTabAction(action, state, snapshot, current);
+  if (action.type === Actions.ADJUST_WEIGHTS) return model.getNodeById(action.data.nodeId) instanceof RowNode;
+  if (action.type === Actions.SET_ACTIVE_TABSET) {
+    const node = model.getNodeById(action.data.tabsetNode);
+    const selected = node instanceof TabSetNode ? node.getSelectedNode() : undefined;
+    return !!selected && valid(selected);
+  }
+  if (action.type !== Actions.MOVE_NODE) return false;
+  const source = model.getNodeById(action.data.fromNode);
+  const target = model.getNodeById(action.data.toNode);
+  if (!(target instanceof RowNode || target instanceof TabSetNode)) return false;
+  return source instanceof TabNode ? valid(source)
+    : source instanceof TabSetNode && source.getTabNodes().length > 0 && source.getTabNodes().every(valid);
+}
+
+// A project prompt is presentation in the focused pane, not a project-scoped tab/model.
+// Keep all session headers and other split panes available while the prompt is shown.
+export function sessionBlankNodeId(model: Model, state: SessionTabs): string | undefined {
+  if (state.active) return undefined;
+  const node = model.getActiveTabset()?.getSelectedNode();
+  if (node) return node.getId();
+  let first: string | undefined;
+  model.visitNodes(node => { if (first === undefined && node instanceof TabNode && node.isSelected()) first = node.getId(); });
+  return first;
 }

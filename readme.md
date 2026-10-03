@@ -26,7 +26,9 @@ acceptance remain unqualified, and the full redesign is unfinished.
 
 The desktop timeline now reads journal records up to 8 MiB with bounded previews and explicit
 16 KiB raw-source chunks. Later page errors preserve already loaded rows with a partial-history
-notice. Records above the ceiling remain explicit errors; journals are never rewritten.
+notice. Temporary history-read failures remain eligible for bounded live-revision refresh without
+replacing explicitly older views. The running spinner is independent of transcript delivery; a stalled
+timeline is not permission to retry Send. Records above the ceiling remain explicit errors; journals are never rewritten.
 
 The desktop uses Monaco Markdown editors for inline and expanded prompts (the expanded
 editor has no preview). The running-agent stop control is icon-only, with an accessible label
@@ -66,7 +68,7 @@ Unsubmitted ask text/choices now survive explicit same-head refreshes while that
 Validated multi-question asks have local Previous/Next controls with current position/title; answers persist across question changes and only the existing explicit Answer submits every question. Navigation does not submit, advance automatically, or add global shortcuts.
 Captured pending/uncertain ask answers remain separately inspectable from the immutable action owner (literal text, indexes and original target/action identity) across reads and same-host panel remounts. The panel does not infer missing question wording or call a failed read pending; local draft discard cannot acknowledge owner evidence.
 
-Owned Desktop mode opens a blank timeline and bottom prompt when selecting a project, without a draft tab. Session tabs can be dragged into multiple simultaneous panes. Each session owns a resizable, collapsible **Alta notes** dock that opens when content arrives and can move left or right. Durable notes refresh automatically without starting a provider and render as sanitized Markdown up to 16,384 UTF-16 units; oversized notes are refused rather than truncated, and read failure is not reported as empty notes. Sidebar running indicators are bounded observations, not mutation authority. See the [desktop diagnostics and limitations](src/CodeAlta/README.md) if Send stops responding.
+Owned Desktop mode opens a blank timeline and bottom prompt in the focused pane when selecting a project, without a draft tab. Session tabs are workspace-wide: tabs from different projects remain open and visible when switching projects. Tabs can be reordered or dragged into multiple simultaneous panes, with resizable dividers. Each session owns a resizable, collapsible **Alta notes** dock that opens when content arrives and can move left or right. Durable notes refresh automatically without starting a provider and render as sanitized Markdown up to 16,384 UTF-16 units; oversized notes are refused rather than truncated, and read failure is not reported as empty notes. Sidebar running indicators are bounded observations, not mutation authority. See the [desktop diagnostics and limitations](src/CodeAlta/README.md) if Send stops responding.
 
 Live-display reconnect waits for the previous observation's successful cleanup; cleanup failure blocks reopening in that view. Runtime refreshes retain only one frontend waiter and the latest explicit pending refresh. Valid late host/runtime changes disable shared mutation controls, but observation refresh/reload does not prove backend termination or recover missing history and effects.
 

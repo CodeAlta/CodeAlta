@@ -1,3 +1,30 @@
+# Workspace docking and live-history recovery (2026-10-03)
+
+Fixes regressions in the split-session presentation below. Session tabs are workspace-global:
+project selection keeps the dock/model, open factories and split geometry, showing the project
+prompt in the focused pane without removing its mounted session. Accepted FlexLayout actions
+reach the model before App focus synchronization. Overflow-menu selection explicitly applies
+its accepted action; closing retains App authorization and lifetime/catalog checks.
+
+Reviewed installed FlexLayout 0.11 documentation, basic/external-drag/sublayout examples and
+action dispatch. Independent per-session notes layouts isolate bubbling drag events. Session
+and notes dividers no longer inherit zero-width Explorer settings; the timeline/composer owns
+its own scrolling. Composer bounds use the containing viewport and fixed chrome, not moving
+splitter coordinates, and hidden/unplaced panes cannot save a zero-height preference.
+
+Live-message investigation: spinner polling is independent of the display channel and journal
+refresh. A transient `read_failed` previously disabled automatic journal refresh; it now uses the
+existing bounded live-revision retries, preserving prior rows and explicit older/source views.
+The user's actual stall has not been reproduced. The inspected NeoAstra request-ID patch does
+not change channel delivery; its completed-ID retirement addresses the earlier exhaustion issue.
+A failed display channel still requires explicit reconnect; no mutation retry is introduced.
+
+Regression coverage added for global cross-project split geometry, admitted GUI actions,
+composer bounds and transient history recovery. Verification remains builds only at user request:
+tests and browser/native/provider acceptance are not executed. Frontend production/TypeScript,
+Release desktop, desktop test-project compilation and Lunet site builds pass; Vite retains the
+existing large-bundle advisory. Generated bridge source and unrelated local state are excluded.
+
 # Split session panes and transport diagnostics (2026-09-29)
 
 Supersedes the historical single-active-workspace/draft-tab descriptions below. Project selection

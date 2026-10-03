@@ -1,11 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { HistoryResponse } from "#neoastra";
-import { loadHistory, historyMessage, historySettled, mergeHistoryPage, type HistoryState } from "./history";
+import { loadHistory, historyCanRetry, historyMessage, historySettled, mergeHistoryPage, type HistoryState } from "./history";
 
 const page: HistoryResponse = { status: "ok", entries: [], next: null, tailOmitted: false };
 const request = { sessionId: "s", cursor: null };
 const signal = { aborted: false } as AbortSignal;
+
+test("transient history read failure remains eligible for bounded live-refresh recovery", async () => {
+  const states: HistoryState[] = [];
+  await loadHistory(async () => { throw new Error("private transport failure"); }, request, signal, state => states.push(state));
+  assert.equal(historyCanRetry(states.at(-1)), true);
+  assert.equal(historyCanRetry({ kind: "error", request, code: "history_changed" }), true);
+  await loadHistory(async () => page, request, signal, state => states.push(state));
+  assert.equal(historyCanRetry(states.at(-1)), false);
+  assert.equal(historyCanRetry({ kind: "loading", request }), false);
+  assert.equal(historyCanRetry(undefined), false);
+  for (const code of ["missing_session", "outside_root", "invalid_cursor", "corrupt_record", "wire_limit", "timeline_record_too_large"])
+    assert.equal(historyCanRetry({ kind: "error", request, code }), false);
+});
 
 test("reverse pages retain the latest user prompt across the 1,000-event window and preserve an older cursor", () => {
   const entries = Array.from({ length: 1205 }, (_, index) => ({

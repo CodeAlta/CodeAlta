@@ -67,7 +67,7 @@ import { activateContextShortcut } from "./contextShortcut";
 import { createDraftIndicators, draftStorageKey, persistDraft, restoreDraft, transferPromptDraft } from "./promptDraft";
 import { SessionDraftBadge } from "./SessionDraftBadge";
 import { collapsedSessionWidth, constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizeCollapsedSessionPane, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
-import { composerBounds, composerSizeKey, rememberComposerHeight, resizeComposerHeight } from "./composerHeight";
+import { composerAvailableHeight, composerBounds, composerSizeKey, rememberComposerHeight, resizeComposerHeight } from "./composerHeight";
 import { AppIcon } from "./AppIcon";
 import { sessionTime } from "./sessionTime";
 import { createProjectOpening } from "./projectOpening";
@@ -1890,6 +1890,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   const resizeBar = useRef<HTMLDivElement>(null);
   const composerRegion = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState({ available: 0, rendered: 0 });
+  const [messageNotice, setMessageNotice] = useState<TimelineNotice>(null);
   useLayoutEffect(() => {
     const workspace = workspaceElement.current;
     const scroller = timeline.elementRef.current;
@@ -1897,29 +1898,37 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
     const region = composerRegion.current;
     if (!workspace || !scroller || !bar || !region) return;
     const measure = () => {
-      const available = Math.max(0, Math.floor(workspace.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top
-        - (bar.getBoundingClientRect().top - scroller.getBoundingClientRect().bottom) - bar.getBoundingClientRect().height
-        - parseFloat(getComputedStyle(workspace).paddingBottom)));
+      const style = getComputedStyle(workspace);
+      let chromeHeight = 0;
+      for (const child of Array.from(workspace.children)) {
+        if (!(child instanceof HTMLElement) || child === scroller || child === region) continue;
+        const childStyle = getComputedStyle(child);
+        if (childStyle.display === "none" || childStyle.position === "fixed" || childStyle.position === "absolute") continue;
+        chromeHeight += child.offsetHeight + parseFloat(childStyle.marginTop) + parseFloat(childStyle.marginBottom);
+      }
+      const available = composerAvailableHeight(workspace.clientHeight,
+        parseFloat(style.paddingTop) + parseFloat(style.paddingBottom), chromeHeight);
       const rendered = Math.round(region.getBoundingClientRect().height);
       setLayout(old => old.available === available && old.rendered === rendered ? old : { available, rendered });
     };
     const observer = new ResizeObserver(measure);
-    for (const element of [workspace, scroller, bar, region]) observer.observe(element);
+    for (const element of [workspace, ...Array.from(workspace.children)]) observer.observe(element);
     measure();
     return () => observer.disconnect();
-  }, [timeline.elementRef]);
+  }, [timeline.elementRef, infoOpen, timeline.following, messageNotice]);
   const bounds = composerBounds(layout.available);
   const visibleComposerHeight = preferredComposerHeight === undefined ? undefined : resizeComposerHeight(preferredComposerHeight, 0, bounds);
   const pendingComposerHeight = useRef<number | null>(null);
   useLayoutEffect(() => { pendingComposerHeight.current = null; }, [preferredComposerHeight]);
   const resizeComposer = (delta: number) => {
+    // Hidden/unplaced FlexLayout panes have no viewport yet. Never save a zero-height preference.
+    if (layout.available <= 0) return;
     const base = pendingComposerHeight.current ?? (preferredComposerHeight === undefined
       ? composerRegion.current?.getBoundingClientRect().height ?? layout.rendered : visibleComposerHeight!);
     const next = resizeComposerHeight(base, delta, bounds);
     pendingComposerHeight.current = next;
     onComposerHeight(next);
   };
-  const [messageNotice, setMessageNotice] = useState<TimelineNotice>(null);
   const [newerOmitted, setNewerOmitted] = useState(false);
   const newest = useExplicitNewestHistory(session.id, selectedProjectId, status?.hostEpoch ?? null, timeline, setMessageNotice);
   // Stable across History's auto-pages; do not cancel an admitted request on a parent render.

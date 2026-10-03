@@ -1,5 +1,11 @@
 export type ComposerBounds = Readonly<{ min: number; max: number }>;
 
+// Measure from the containing viewport, not current timeline/splitter coordinates:
+// FlexLayout can reparent a pane and its outer scroller can retain a scroll offset.
+export function composerAvailableHeight(viewportHeight: number, padding: number, chromeHeight: number): number {
+  return Math.max(0, Math.floor(viewportHeight - padding - chromeHeight));
+}
+
 // Available is the space below the timeline's top, excluding header, notices and handle.
 export function composerBounds(available: number): ComposerBounds {
   const space = Math.max(0, Math.floor(available));

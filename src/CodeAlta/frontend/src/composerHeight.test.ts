@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { composerBounds, resizeComposerHeight, composerSizeKey, rememberComposerHeight } from "./composerHeight";
+import { composerAvailableHeight, composerBounds, resizeComposerHeight, composerSizeKey, rememberComposerHeight } from "./composerHeight";
+
+test("composer space is viewport-based and does not shrink as its splitter moves", () => {
+  const available = composerAvailableHeight(600, 4, 8);
+  assert.equal(available, 588);
+  const bounds = composerBounds(available);
+  const enlarged = resizeComposerHeight(200, 100, bounds);
+  assert.equal(enlarged, 300);
+  assert.equal(resizeComposerHeight(enlarged, -100, bounds), 200);
+  assert.equal(composerAvailableHeight(180, 4, 24), 152);
+  assert.equal(composerAvailableHeight(0, 4, 8), 0);
+});
 
 test("composer reservation fits short viewports without destroying the requested height", () => {
   assert.deepEqual(composerBounds(420), { min: 120, max: 324 });

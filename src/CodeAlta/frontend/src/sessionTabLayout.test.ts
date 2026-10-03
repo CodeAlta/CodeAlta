@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { Actions, DockLocation, TabNode } from "flexlayout-react";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { closeSessionTab, emptySessionTabs, openSessionTab, sessionTabLimit, type SessionTab } from "./sessionTabs";
-import { createSessionTabModel, ownsSessionTabContent, reconcileSessionTabModel, sessionNodeId, sessionTabAction, sessionTabPresentation } from "./sessionTabLayout";
+import { createSessionTabModel, ownsSessionTabContent, reconcileSessionTabModel, sessionBlankNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation } from "./sessionTabLayout";
 
 const tab = (id: string) => ({ projectId: "p", sessionId: id, path: "/p" });
 const snapshot: WorkspaceSnapshot = { configured: true, projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false,
@@ -14,6 +14,60 @@ const snapshot: WorkspaceSnapshot = { configured: true, projectsTruncated: false
   })) };
 const label = (value: SessionTab | null) => value?.sessionId ?? "Prompt draft";
 const both = () => openSessionTab(openSessionTab(emptySessionTabs(), tab("one")), tab("two"));
+
+test("project prompts keep the global dock and cross-project session nodes and split geometry", () => {
+  const other = { projectId: "q", sessionId: "other", path: "/q" };
+  const catalog = { ...snapshot, projects: [...snapshot.projects, { id: "q", name: "Other project", path: "/q", archived: false }],
+    sessions: [...snapshot.sessions, { ...snapshot.sessions[0], id: "other", projectId: "q", workspacePath: "/q" }] };
+  const model = createSessionTabModel();
+  let state = openSessionTab(both(), other);
+  reconcileSessionTabModel(model, state, label);
+  const one = model.getNodeById(sessionNodeId(tab("one"))) as TabNode;
+  const otherNode = model.getNodeById(sessionNodeId(other)) as TabNode;
+  model.doAction(Actions.moveNode(otherNode.getId(), one.getParent()!.getId(), DockLocation.RIGHT, -1, true));
+  const parents = [one.getParent(), otherNode.getParent()];
+  for (const projectId of ["p", "q", null, "p"]) {
+    state = sessionTabPresentation(state, catalog, projectId, null);
+    reconcileSessionTabModel(model, state, label);
+    assert.equal(state.open.length, 3);
+    assert.equal(state.active, null);
+    assert.equal(sessionBlankNodeId(model, state), otherNode.getId());
+    assert.equal(model.getNodeById(one.getId()), one);
+    assert.equal(model.getNodeById(otherNode.getId()), otherNode);
+    assert.deepEqual([one.getParent(), otherNode.getParent()], parents);
+  }
+  const returned = sessionTabPresentation(state, catalog, "p", "one");
+  assert.equal(returned.open.length, 3);
+  assert.equal(sessionBlankNodeId(model, returned), undefined);
+});
+
+test("GUI moves/selects/weights are admitted to FlexLayout before App focus, with lifetime and scope guards", () => {
+  const model = createSessionTabModel();
+  const state = both();
+  reconcileSessionTabModel(model, state, label);
+  const one = model.getNodeById(sessionNodeId(tab("one"))) as TabNode;
+  const two = model.getNodeById(sessionNodeId(tab("two"))) as TabNode;
+  const move = Actions.moveNode(one.getId(), two.getParent()!.getId(), DockLocation.RIGHT, -1, true);
+  assert.equal(sessionLayoutActionAllowed(model, move, state, snapshot, () => true), true);
+  assert.equal(sessionLayoutActionAllowed(model, move, state, snapshot, () => false), false);
+  assert.equal(sessionLayoutActionAllowed(model, move, state, { ...snapshot, sessions: [] }, () => true), false);
+  model.doAction(move);
+  assert.notEqual(one.getParent(), two.getParent());
+  assert.equal(model.getActiveTabset()?.getSelectedNode(), one);
+  const activate = Actions.setActiveTabset(two.getParent()!.getId());
+  assert.equal(sessionLayoutActionAllowed(model, activate, state, snapshot, () => true), true);
+  model.doAction(activate);
+  assert.equal(model.getActiveTabset()?.getSelectedNode(), two);
+  const select = Actions.selectTab(one.getId());
+  assert.equal(sessionLayoutActionAllowed(model, select, state, snapshot, () => true), true);
+  assert.equal(sessionLayoutActionAllowed(model,
+    Actions.moveNode(two.getParent()!.getId(), one.getParent()!.getId(), DockLocation.BOTTOM, -1), state, snapshot, () => true), true);
+  assert.equal(sessionLayoutActionAllowed(model, Actions.adjustWeights("session-tabs-row", [50, 50]), state, snapshot, () => true), true);
+  for (const action of [Actions.moveNode("notes", two.getParent()!.getId(), DockLocation.RIGHT, -1),
+    Actions.moveNode(one.getId(), "missing", DockLocation.RIGHT, -1), Actions.deleteTab(one.getId()),
+    Actions.renameTab(one.getId(), "Renamed"), Actions.setActiveTabset("missing")])
+    assert.equal(sessionLayoutActionAllowed(model, action, state, snapshot, () => true), false);
+});
 
 test("three simultaneously selected split panes survive reconciliation and closing one", () => {
   const model = createSessionTabModel();
@@ -161,6 +215,14 @@ test("installed 0.11 content memoization requires eager hidden factory invalidat
   assert.match(component, /invalidateTabContentOnParentRender=\{true\}/);
   assert.match(component, /ownsSessionTabContent\(node\.getId\(\), state\) \? children : null/);
   assert.match(component, /onShowOverflowMenu=/);
+  assert.match(component, /onModelChange=/);
+  assert.match(component, /hidden=\{!state\.open\.length\}/);
+  assert.doesNotMatch(component, /hidden=\{!state\.active\}/);
+  assert.match(component, /if \(action\) model\.doAction\(action\)/);
   assert.match(component, /isComposing.*keyCode === 229.*repeat/);
+  const notes = readFileSync(new URL("./SessionNotesDock.tsx", import.meta.url), "utf8");
+  assert.match(notes, /tabEnableScrollbars: false/);
+  for (const event of ["onDragEnter", "onDragLeave", "onDragOver", "onDrop"])
+    assert.ok(notes.includes(`${event}={event => event.stopPropagation()}`));
   assert.doesNotMatch(component, /getMoveableElement|appendChild|setAttribute|createRoot/);
 });

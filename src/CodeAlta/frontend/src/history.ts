@@ -34,6 +34,12 @@ export function historySettled(state: HistoryState | undefined, timeline: Histor
     && (timeline.next === null || timeline.limitReached || timeline.turnReached === true));
 }
 
+// Only transient reads/revision changes can resume automatic latest-window reads.
+// Missing/invalid/corrupt journals need manual action; callers still fence scope/older views.
+export function historyCanRetry(state: HistoryState | undefined): boolean {
+  return state?.kind === "error" && (state.code === "history_changed" || state.code === "read_failed");
+}
+
 export function mergeHistoryPage(previous: HistoryTimeline | undefined, request: HistoryRequest, page: TimelinePage,
   explicitOlder = false, retainedStart?: string): HistoryTimeline {
   const current = previous?.next;
