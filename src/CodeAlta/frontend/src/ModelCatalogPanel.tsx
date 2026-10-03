@@ -1,4 +1,6 @@
 import { HTMLSelect } from "@blueprintjs/core";
+import { Cell, Column, Regions, SelectionModes, Table2 } from "@blueprintjs/table";
+import "@blueprintjs/table/lib/css/table.css";
 import { useEffect, useRef, useState } from "react";
 import type { ModelCatalogModelsRequest, ModelCatalogModelsResponse, ModelCatalogProvidersRequest, ModelCatalogProvidersResponse, SessionChoicesRequest, SessionChoicesResponse, SessionSelection } from "#neoastra";
 import type { CatalogNextSendTarget, NextSendResult, createNextSendSelectionStore } from "./nextSendSelection";
@@ -122,6 +124,9 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
   }
   const present = (value: number | string | null) => value == null ? t("Unknown") : String(value);
   const flag = (value: boolean | null) => t(value == null ? "Unknown" : value ? "Yes" : "No");
+  const count = (value: number | string | null) => value == null ? "" : typeof value === "number" ? value.toLocaleString(locale) : String(value);
+  const mark = (value: boolean | null) => value == null ? "" : value ? "✓" : "–";
+  const selectedRow = selected ? visible.findIndex(model => model.id === selected.id) : -1;
   return <main className="configuration-page model-catalog-page" aria-label={t("Model catalog")}>
     <header className="page-heading"><span className="eyebrow">{t("Desktop / Models")}</span><h1>{t("Model catalog")}</h1>
       <p>{t("Host-reported models. Only the selected session's next Send model can change here; authentication and global defaults cannot.")}</p></header>
@@ -144,8 +149,23 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
             {activePage && <>
               {activePage.models.length === 0 && <p role="status">{t("This provider reported no models. A configured default is not inventory.")}</p>}
               {activePage.models.length > 0 && visible.length === 0 && <p role="status">{t("No models match this search.")}</p>}
-              <div className="model-catalog-list">{visible.map(model => <button type="button" key={model.id} aria-pressed={selected?.id === model.id}
-                onClick={() => setModelId(model.id)}><strong>{model.name}</strong><small>{model.id}</small></button>)}</div>
+              {visible.length > 0 && <div className="model-catalog-grid" style={{ height: Math.min(346, 50 + visible.length * 28) }}>
+                <Table2 numRows={visible.length} enableRowHeader={false} enableMultipleSelection={false} defaultRowHeight={28}
+                  columnWidths={[180, 170, 112, 100, 108, 88, 64, 92, 104]} selectionModes={SelectionModes.ROWS_AND_CELLS}
+                  selectedRegionTransform={region => region.rows ? Regions.row(region.rows[0]) : region}
+                  selectedRegions={selectedRow >= 0 ? [Regions.row(selectedRow)] : []}
+                  onSelection={regions => { const row = regions[0]?.rows?.[0]; if (row !== undefined && visible[row]) setModelId(visible[row].id); }}>
+                  <Column name={t("Model")} cellRenderer={row => <Cell><strong>{visible[row].name}</strong></Cell>} />
+                  <Column name={t("ID")} cellRenderer={row => <Cell className="bp6-monospace-text">{visible[row].id}</Cell>} />
+                  <Column name={t("Context tokens")} cellRenderer={row => <Cell>{count(visible[row].contextTokens)}</Cell>} />
+                  <Column name={t("Input tokens")} cellRenderer={row => <Cell>{count(visible[row].inputTokens)}</Cell>} />
+                  <Column name={t("Output tokens")} cellRenderer={row => <Cell>{count(visible[row].outputTokens)}</Cell>} />
+                  <Column name={t("Reasoning")} cellRenderer={row => <Cell>{mark(visible[row].reasoning)}</Cell>} />
+                  <Column name={t("Tools")} cellRenderer={row => <Cell>{mark(visible[row].tools)}</Cell>} />
+                  <Column name={t("Image input")} cellRenderer={row => <Cell>{mark(visible[row].imageInput)}</Cell>} />
+                  <Column name={t("Default effort")} cellRenderer={row => <Cell>{visible[row].defaultEffort ?? ""}</Cell>} />
+                </Table2>
+              </div>}
               {activePage.truncated && <p role="status">{t("Showing {count} reported models; others are omitted by the bounded inventory.", { count: activePage.models.length })}</p>}
             </>}
             {selected && <article className="model-catalog-detail" aria-label={t("Details for {name}", { name: selected.name })}><h3>{selected.name}</h3><p><code>{selected.id}</code></p>

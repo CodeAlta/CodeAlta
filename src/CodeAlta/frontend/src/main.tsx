@@ -1718,7 +1718,7 @@ function App() {
           && currentHostEpoch.current === target.request.expectedHostEpoch && capability.canMutate() };
       }} />
       : settingsSection === "config" ? <ConfigEditorPanel epoch={owned ? status!.hostEpoch : null} onApplied={() => void refreshConfiguration()} />
-      : settingsSection === "logs" ? <>{settingsCard("logs")}
+      : settingsSection === "logs" ? <>
         <ApplicationLogsPanel clearActions={logClearActions} read={demoMode
           ? async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }) : applicationLogs.read} /></>
       : settingsSection === "providers" ? owned && status?.hostEpoch
@@ -1729,7 +1729,7 @@ function App() {
       : settingsSection === "mcp" ? <McpServersPanel target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
         ? { sessionId: selectedSession.id, epoch: status!.hostEpoch!, projectId: selectedSession.projectId ?? null } : null}
         read={mcpInventory.list} />
-      : settingsSection === "prompts" ? <>{settingsCard("prompts")}
+      : settingsSection === "prompts" ? <>
         <PromptCreationPanel owner={promptCreator} capture={() => {
           if (!owned || !mutation?.capability.canMutate() || !snapshot?.configured || snapshot.projectsTruncated || snapshot.sessionsTruncated
             || snapshot.displayTextTruncated || !selectedSession || !settingsVisible.current || currentSettingsSection.current !== "prompts") return null;
@@ -2098,15 +2098,6 @@ function ConfigurationPanel({ page, status, selectedSession, configurationState,
     {page === "appearance" && <header className="page-heading"><span className="eyebrow">{t("Desktop")}</span><h1>{t("Appearance")}</h1><p>{t("Personalize this window and project navigator.")}</p></header>}
     <div className="settings-grid">
       {page === "appearance" && <GeneralSettings {...preferences} />}
-      {page === "logs" && <section className="settings-card"><div className="settings-icon"><AppIcon name="history" size={19} /></div><div><h2>Application Logs</h2><p>Read a bounded snapshot of this process's in-memory desktop logs. No log files are opened.</p></div></section>}
-      {page === "providers" && <section className="settings-card"><div className="settings-icon"><AppIcon name="model" size={19} /></div><div><h2>Providers</h2><p>Current session provider: <strong>{selectedSession?.providerKey ?? "not recorded"}</strong>.</p>
-        {configurationState.error && <p className="error-text">{configurationState.error}</p>}
-        {!inventory && !configurationState.error && <p>Loading configured providers…</p>}
-        {inventory && inventory.providers.length === 0 && <p>No provider inventory is exposed in this launch mode.</p>}
-        {inventory?.providers.map(provider => <div className="inventory-row" key={provider.id}><span><strong>{provider.name}</strong><small>{provider.type} · {provider.defaultModel ?? "No default model"}</small></span><StatusPill label={provider.enabled ? "Enabled" : "Disabled"} /></div>)}
-        {inventory?.providersTruncated && <p className="muted-text">Showing the first 32 configured providers.</p>}
-      </div></section>}
-      {page === "prompts" && <section className="settings-card"><div className="settings-icon"><AppIcon name="prompt" size={19} /></div><div><h2>Agent prompts</h2><p>Inspect effective host prompts for the selected session and choose its next Send prompt.</p><StatusPill label={status?.hostAvailable ? "Session state available" : "Catalog history available"} /></div></section>}
       {page === "plugins" && <section className="settings-card"><div className="settings-icon">⬡</div><div><h2>Plugins &amp; MCP</h2><p>Configured plugin policy is visible in catalog mode. Active state is shown only when the owned runtime has started that plugin.</p>
         <div className="inventory-row"><span><strong>MCP servers</strong><small>Model Context Protocol runtime state</small></span><StatusPill label={mcp ? mcp.state : inventory?.pluginRuntimeAvailable ? "Not configured" : "Runtime not started"} /></div>
         {inventory?.plugins.map(plugin => <div className="inventory-row" key={plugin.id}><span><strong>{plugin.name}</strong><small>{plugin.version ?? "No version"} · {plugin.contributionCount} contributions</small></span><StatusPill label={plugin.state} /></div>)}

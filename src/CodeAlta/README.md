@@ -246,8 +246,9 @@ submissions may authenticate or use configured provider storage/network. It adds
 state to `.alta` and performs no storage migration. Help/version and rejected arguments do not initialize
 native services or create storage. Explicit catalog and scoped-owned options retain stricter validation.
 
-The **Models** Settings section (or `Ctrl+G`, then `Ctrl+O`) opens a read-only model catalog in owned
-mode. Select a registered provider to request its actual host-reported models; search their names,
+The **Models** Settings section (or `Ctrl+G`, then `Ctrl+O`) opens a model catalog in owned
+mode. Select a registered provider to request its actual host-reported models, shown as a grid with
+resizable columns (name, ID, token limits, capabilities, default effort); search their names,
 IDs and descriptions and open a model for supported efforts, capabilities and token limits. Provider
 reads are capped at 32 and model reads at 128 and 96 KiB serialized, with omitted results identified; availability and
 missing metadata, including pricing not reported by this inventory, remain explicit. Loading a
