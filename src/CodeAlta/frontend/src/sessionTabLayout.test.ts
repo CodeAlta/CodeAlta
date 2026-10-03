@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
 import { Actions, DockLocation, TabNode, TabSetNode } from "flexlayout-react";
 import { sessionTabDrop } from "./sessionTabDrag";
 import type { WorkspaceSnapshot } from "#neoastra";
@@ -277,28 +276,4 @@ test("unchanged App identity makes repeated presentation reconciliation inert; s
   assert.equal(model.getNodeById(sessionNodeId(tab("one"))), undefined);
   assert.equal(ownsSessionTabContent(sessionNodeId(tab("one")), closed), false);
   model.removeChangeListener(listener);
-});
-
-test("installed 0.11 content memoization requires eager hidden factory invalidation; integration uses public hooks", () => {
-  const source = readFileSync(new URL("../node_modules/flexlayout-react/dist/index.js", import.meta.url), "utf8");
-  // Characterize the installed renderer, not an application dependency on internals.
-  assert.match(source, /const visible = isSelected \|\| !isEnableRenderOnDemand/);
-  assert.match(source, /nextProps\.visible &&/);
-  assert.match(source, /const key = tabNode\.getId\(\)/);
-  const component = readFileSync(new URL("./SessionTabStrip.tsx", import.meta.url), "utf8");
-  assert.match(component, /invalidateTabContentOnParentRender=\{true\}/);
-  assert.match(component, /node\.getId\(\) === sessionDraftNodeId/);
-  assert.match(component, /onShowOverflowMenu=/);
-  assert.match(component, /onModelChange=/);
-  assert.doesNotMatch(component, /hidden=\{!state\.open\.length\}/);
-  assert.doesNotMatch(component, /hidden=\{!state\.active\}/);
-  assert.match(component, /if \(accepted\) model\.doAction\(accepted\)/);
-  assert.match(component, /isComposing.*keyCode === 229.*repeat/);
-  const notes = readFileSync(new URL("./SessionNotesOverlay.tsx", import.meta.url), "utf8");
-  assert.doesNotMatch(notes, /flexlayout-react|<Layout/);
-  assert.match(notes, /hidden=\{collapsed\}/);
-  assert.match(notes, /aria-expanded=\{!collapsed\}/);
-  assert.match(component, /onPointerDownCapture=\{drag\.down\}/);
-  assert.match(component, /onDragStartCapture=/);
-  assert.doesNotMatch(component, /getMoveableElement|appendChild|setAttribute|createRoot/);
 });

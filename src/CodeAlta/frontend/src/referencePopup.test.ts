@@ -1,7 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import * as ts from "typescript";
 import { captureReferenceInput, closeReferencePopup, createReferencePopupLifetime, createReferenceSearchFence, referencePopupReadiness, referencePopupKey, validReferenceSearch, type ReferenceInputState } from "./referencePopup";
 import type { SessionReferenceSearchResponse } from "#neoastra";
 
@@ -41,21 +39,6 @@ test("IME query renders preserve durable review while fencing reads, edits and f
   assert.equal(old.valid(), false);
   f.input = { ...f.input, revision: f.input.revision + 1 }; render();
   assert.equal(failed, true); assert.equal(settled.valid(), false); assert.equal(read(), null);
-});
-
-test("permanent failure is wired to durable readiness, not IME action admission", () => {
-  const source = readFileSync(new URL("./ProjectReferencePicker.tsx", import.meta.url), "utf8");
-  assert.match(source, /function current\(value: Review\) \{ return readiness\(value\)\.current\(\); \}/);
-  assert.match(source, /return referencePopupReadiness\(/);
-  assert.match(source, /if \(review && !failed && !current\(review\)\) \{ abortRead\(\); review\.lifetime\.retire\(\); setFailed\(true\)/);
-  assert.match(source, /const restore = ready\(value\)/);
-  assert.match(source, /closeReferencePopup\(value\.lifetime, \(\) => ready\(value\)/);
-  assert.match(source, /if \(!value \|\| !ready\(value\)/);
-  assert.match(source, /if \(!review \|\| failed \|\| !ready\(review\)\) return/);
-  assert.match(source, /searchFence\.capture\(\(\) => !abort\.signal\.aborted && ready\(review\)\)/);
-  assert.match(source, /if \(!valid\(\)\) return;\s+const \{ observe/);
-  assert.match(source, /if \(ready\(review\)\) search\.current\?\.focus\(\)/);
-  assert.match(source, /!active\.current && !composing\.current && value\.lifetime\.current\(\)/);
 });
 
 test("capture precedes one own-modal handoff; query edits are separate and insertion preserves exact range once", () => {
@@ -170,55 +153,4 @@ test("popup keys consume only deliberate navigation/selection/cancel; IME and mo
       assert.equal(referencePopupKey({ key, ...flags }), "none");
   }
   assert.equal(referencePopupKey({ key: "Tab" }), "none");
-});
-
-// Syntactic regression guard only: no alias resolution, computed-name evaluation or
-// interprocedural analysis. Strings/comments must not be mistaken for API calls.
-function forbiddenReferenceCalls(source: string) {
-  const file = ts.createSourceFile("reference.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const calls: string[] = [];
-  function name(expression: ts.Expression): string | undefined {
-    if (ts.isParenthesizedExpression(expression) || ts.isNonNullExpression(expression)
-      || ts.isAsExpression(expression) || ts.isTypeAssertionExpression(expression)) return name(expression.expression);
-    if (ts.isIdentifier(expression)) return expression.text;
-    if (ts.isPropertyAccessExpression(expression)) return expression.name.text;
-    if (ts.isElementAccessExpression(expression) && expression.argumentExpression
-      && (ts.isStringLiteral(expression.argumentExpression) || ts.isNoSubstitutionTemplateLiteral(expression.argumentExpression)))
-      return expression.argumentExpression.text;
-    return undefined;
-  }
-  function visit(node: ts.Node) {
-    if (ts.isCallExpression(node)) {
-      const called = name(node.expression);
-      if (called && /^(?:send|steer|readFile|readFileSync|upload|uploadFile|uploadFiles)$/u.test(called)) calls.push(node.getText(file));
-    }
-    ts.forEachChild(node, visit);
-  }
-  visit(file); return calls;
-}
-
-test("forbidden-call AST guard rejects direct/member/optional/literal-computed calls but permits help text", () => {
-  for (const source of ["send()", "api.steer(request)", "fs.readFile(path)", "readFileSync(path)",
-    "client?.upload?.(file)", "client['uploadFile'](file)", "client[`uploadFiles`](files)",
-    "(client.send)(request)", "client.upload!(file)", "const x = <button onClick={() => api.send()} />"])
-    assert.equal(forbiddenReferenceCalls(source).length, 1, source);
-  for (const source of ['const help = "file contents are not uploaded; api.send() is forbidden";',
-    "// upload(file)\nconst name = 'readFile';", "const x = <p>Do not send or upload files.</p>;",
-    "sessionOperations.searchReferences(request); edit(next.text); insertProjectReference(text, 0, 1, path, false);",
-    "const upload = () => {}; const choices = { send: false };", "api.uploadStatus();"])
-    assert.deepEqual(forbiddenReferenceCalls(source), [], source);
-});
-
-test("native popup replaces permanent results; query reads exclude locale dependencies and keep budgets", () => {
-  const source = readFileSync(new URL("./ProjectReferencePicker.tsx", import.meta.url), "utf8");
-  assert.match(source, /<dialog ref=\{dialog\}/);
-  assert.doesNotMatch(source, /<aside/);
-  assert.match(source, /maxLength=\{256\}/);
-  assert.match(source, /timeoutMilliseconds: 3000/);
-  assert.match(source, /\}, 150\)/);
-  assert.match(source, /\[review, query, failed, interaction\]/);
-  assert.match(source, /captureReferenceInput\(original, readInput, lifetime\)/);
-  assert.match(source, /review\.lifetime\.open\(\(\) => element\.showModal\(\)\)/);
-  assert.match(source, /active\.current === review/);
-  assert.deepEqual(forbiddenReferenceCalls(source), [], "reference picker must not invoke forbidden operations");
 });

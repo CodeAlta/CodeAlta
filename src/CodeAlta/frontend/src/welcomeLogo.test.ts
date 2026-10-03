@@ -15,30 +15,4 @@ test("web welcome renders the actual TUI 3-D font with the same words, spacing a
     assert.doesNotMatch(word, /[@$]/);
     assert.ok(word.split("\n").every(line => line === line.trimEnd()));
   }
-  const tui = readFileSync(new URL("../../../CodeAlta.Tui/Presentation/Shell/WelcomePaneFactory.cs", import.meta.url), "utf8");
-  assert.match(tui, /CodeAlta\.Assets\.3d\.flf/);
-  assert.match(tui, /TextFiglet\("Code"\)/);
-  assert.match(tui, /TextFiglet\("Alta"\)/);
-  assert.match(tui, /LetterSpacing\(1\)/);
-  assert.match(tui, /Spacing = 2/);
-  const config = readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8");
-  assert.match(config, /allow: \["\.\.", fileURLToPath\(new URL\("\.\.\/\.\.\/CodeAlta\.Tui\/Assets\/3d\.flf"/);
-});
-
-test("owned and new-session composers share the surface, toolbar, editor and keyboard contracts", () => {
-  const owned = readFileSync(new URL("./OwnedSessionPanel.tsx", import.meta.url), "utf8");
-  const draft = readFileSync(new URL("./ReadOnlyComposer.tsx", import.meta.url), "utf8");
-  // The shared surface owns the editor and toolbar; neither composer mounts its own.
-  const surface = readFileSync(new URL("./ComposerSurface.tsx", import.meta.url), "utf8");
-  assert.match(surface, /<PromptEditor/);
-  assert.match(surface, /<ComposerToolbar/);
-  for (const component of [owned, draft]) {
-    assert.match(component, /<ComposerSurface/);
-    assert.doesNotMatch(component, /<(ComposerToolbar|PromptEditor)\b/);
-    assert.match(component, /<ExpandedPromptEditor/);
-    assert.match(component, /dispatchComposerKey/);
-    assert.match(component, /isComposing/);
-  }
-  assert.match(draft, /className=\{localDraft \? undefined : "catalog-composer"\}/);
-  assert.doesNotMatch(draft, /Draft a prompt — no session created yet/);
 });

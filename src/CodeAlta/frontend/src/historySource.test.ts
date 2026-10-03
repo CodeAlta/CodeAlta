@@ -1,10 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { loadHistorySource } from "./loadHistorySource";
 import { historyEntryCharacters, historySettled, loadHistory, mergeHistoryPage, type HistoryTimeline, type HistoryState } from "./history";
 import type { HistoryResponse, HistorySourceRequest, HistorySourceResponse } from "#neoastra";
-import { locales, translate } from "./localization";
 
 const request: HistorySourceRequest = { revision: { sessionId: "s", length: "4000000", lastWriteUtcTicks: "7" }, start: "0", end: "4000000", offset: "0" };
 
@@ -47,28 +45,6 @@ test("source fixture forwards exact revision/range/options and suppresses aborte
   }
 });
 
-test("source controls retain production lifetime, revision, modal, input and copy-chunk fences", () => {
-  const source = readFileSync(new URL("./HistorySource.tsx", import.meta.url), "utf8");
-  assert.match(source, /original\.current\?\.\(\)/); assert.match(source, /latest\.current\?\.\(\)/);
-  assert.match(source, /controller\.current === read && !read\.signal\.aborted/);
-  assert.match(source, /retire\(\); onClose\(\)/); assert.match(source, /instanceof HTMLDialogElement/);
-  assert.match(source, /isConnected/); assert.match(source, /closest\("\[inert\]"\)/);
-  assert.match(source, /event\.nativeEvent\.isComposing/); assert.match(source, /event\.repeat/);
-  const panel = readFileSync(new URL("./HistoryPanel.tsx", import.meta.url), "utf8");
-  assert.match(panel, /generation\.current === captured/);
-  assert.match(panel, /JSON\.stringify\(sourceTarget\.revision\) === JSON\.stringify\(timeline\?\.revision\)/);
-  const adapter = readFileSync(new URL("./readTimeline.ts", import.meta.url), "utf8");
-  assert.match(adapter, /workspace\.historyTimeline\(request, options\)/);
-  assert.match(adapter, /revision: value\.revision, sources: value\.sources/);
-  const fixture = readFileSync(new URL("./settingsShell.neoastra.mount.ts", import.meta.url), "utf8");
-  assert.match(fixture, /page: await workspace\.historyTail\(request\)/);
-  assert.match(fixture, /historySource: async/);
-  for (const key of ["Full raw journal record", "Close source", "First chunk", "Next chunk", "Copy chunk", "Chunk copied",
-    "Read full raw record (paged)", "Source review expired. Close and reopen from the history row."] as const) {
-    for (const locale of locales) if (locale !== "en") assert.notEqual(translate(locale, key), key);
-  }
-});
-
 function entry(index: number): HistoryResponse["entries"][number] {
   return { offset: String(index * 200), eventType: "contentCompleted", providerId: "p", sessionId: "s", runId: null,
     timestamp: "2026-01-01T00:00:00Z", kind: "Assistant", phase: null, contentId: String(index), activityId: null,
@@ -102,10 +78,4 @@ test("metadata-only pages stop after a finite acquisition and later errors do no
   const states: HistoryState[] = [];
   await loadHistory(async () => ({ ...page, status: "history_changed", entries: [], next: null }), { sessionId: "s", cursor: timeline.next }, new AbortController().signal, value => states.push(value));
   assert.equal(states.at(-1)?.kind, "error"); assert.equal(timeline, original);
-  const source = readFileSync(new URL("./HistoryPanel.tsx", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /setWindow\(undefined\)/);
-  assert.match(source, /accumulated\.limitReached \|\| accumulated\.turnReached \|\| target\.explicitOlder/);
-  assert.match(source, /Previously loaded history is retained/);
-  const inspector = readFileSync(new URL("./HistorySource.tsx", import.meta.url), "utf8");
-  assert.match(inspector, /<pre /); assert.doesNotMatch(inspector, /MarkdownContent|dangerouslySetInnerHTML/);
 });

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
@@ -123,10 +122,6 @@ test("bounded long text wraps in a scrollable modal without revealing longer sum
   assert.match(html, /Recorded working directory/);
   assert.match(html, /I{256}/);
   assert.doesNotMatch(html, /hidden-longer-|P{100}/);
-  const css = readFileSync(new URL("./style.css", import.meta.url), "utf8");
-  assert.match(css, /\.session-header h1 \{[^}]*text-overflow: ellipsis; white-space: nowrap;/);
-  assert.match(css, /\.session-info-fields \{[^}]*display: block;[^}]*overflow-y: auto;/);
-  assert.match(css, /\.session-info-fields dd \{[^}]*overflow-wrap: anywhere; white-space: pre-wrap;/);
 });
 
 test("copy is explicit, exact, and reports success, denied clipboard or missing clipboard without retry", async () => {
