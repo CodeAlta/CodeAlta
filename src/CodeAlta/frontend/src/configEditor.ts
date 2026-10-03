@@ -18,7 +18,7 @@ export function canSaveConfig(baseline: ConfigBaseline | null, content: string, 
 export function configSaveNotice(result: Pick<GlobalConfigSaveResponse, "status" | "providersApplied">, applied: boolean): ConfigNotice {
   switch (result.status) {
     case "ok": return applied
-      ? { key: "Saved. {count} providers applied.", parameters: { count: result.providersApplied }, intent: "success" }
+      ? { key: "Saved. Providers applied: {count}.", parameters: { count: result.providersApplied }, intent: "success" }
       : { key: "Saved. Providers are unchanged until they are applied or the app restarts.", intent: "success" };
     case "apply_failed": return { key: "Saved, but the providers could not be applied. Restart CodeAlta to load them.", intent: "warning" };
     case "invalid": return { key: "The configuration is invalid; nothing was saved.", intent: "danger" };

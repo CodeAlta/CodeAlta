@@ -277,8 +277,20 @@ launch. The result is a completed initialization/probe, not proof of authenticat
 connection, and arbitrary provider error messages/URLs/categories are not shown. An abandoned
 probe is still joined by the host before disposal; do not assume its outcome from a timed-out
 browser request. Catalog-only mode lists saved descriptors read-only without runtime tests.
-Provider enablement, defaults and other provider settings are edited as text in **Settings →
-Configuration file** (below); this section has no form editor and no sign-in flows yet.
+In an owned launch the **Providers** section is an editor: the configured definitions (including
+disabled ones) are listed on the left with their cached availability and the configured default, and
+the selected one has a form for its key, adapter type, enabled state, display name, default model,
+reasoning effort, API URL, API key environment variable and API key, plus **Use as the default
+provider**. **Add provider** starts a new definition and the trash button removes one after
+confirmation. **Save and apply** writes the global `config.toml` and re-registers the providers in
+the running host; it is refused as a conflict when the file changed on disk since the page read it.
+A stored API key is never sent to the page: leaving the field blank keeps it, and **Remove the
+stored key** clears it. Settings the form does not show (timeouts, request overrides, compaction and
+so on) are preserved, but this structured save rewrites the file without its comments and blank
+lines, exactly like the TUI's provider dialog; use **Configuration file** to keep hand formatting.
+Account sign-in for Codex, Copilot and xAI is still done from `altatui`. The default provider shown
+here is `[chat] default_provider`; the host's own inventory marks every registered provider as
+default, so it is not used for that.
 
 **Settings → Configuration file** edits the global `config.toml` (providers and their credentials,
 the default provider, plugin and skill policy) in an owned launch. The text is validated shortly

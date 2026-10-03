@@ -76,6 +76,7 @@ import { validSelection } from "./sessionSelection";
 import { AppIcon } from "./AppIcon";
 import { AppWindow } from "./AppWindow";
 import { ConfigEditorPanel } from "./ConfigEditorPanel";
+import { ProviderSettings } from "./ProviderSettings";
 import { sessionTime } from "./sessionTime";
 import { createProjectOpening } from "./projectOpening";
 import { OpenProjectDialog } from "./OpenProjectDialog";
@@ -1720,10 +1721,11 @@ function App() {
       : settingsSection === "logs" ? <>{settingsCard("logs")}
         <ApplicationLogsPanel clearActions={logClearActions} read={demoMode
           ? async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }) : applicationLogs.read} /></>
-      : settingsSection === "providers" ? <>{settingsCard("providers")}
-        <ProvidersPanel epoch={owned ? status!.hostEpoch : null}
-        read={modelCatalog.providers} probe={modelCatalog.probe} catalogProviders={configurationState.snapshot?.providers} holds={providerProbeHolds}
-        onOpenModels={() => navigate("models")} /></>
+      : settingsSection === "providers" ? owned && status?.hostEpoch
+        ? <ProviderSettings epoch={status.hostEpoch} readRuntime={modelCatalog.providers} probe={modelCatalog.probe}
+          onOpenModels={() => navigate("models")} onOpenConfiguration={() => navigate("config")} onApplied={() => void refreshConfiguration()} />
+        : <ProvidersPanel epoch={null} read={modelCatalog.providers} probe={modelCatalog.probe} catalogProviders={configurationState.snapshot?.providers}
+          holds={providerProbeHolds} onOpenModels={() => navigate("models")} />
       : settingsSection === "mcp" ? <McpServersPanel target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
         ? { sessionId: selectedSession.id, epoch: status!.hostEpoch!, projectId: selectedSession.projectId ?? null } : null}
         read={mcpInventory.list} />

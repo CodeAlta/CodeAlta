@@ -1,0 +1,198 @@
+import { useEffect, useRef, useState } from "react";
+import { Button, Callout, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, NonIdealState, Popover, Section, SectionCard, Switch, Tag, type Intent } from "@blueprintjs/core";
+import { globalConfig, type GlobalConfigProvidersResponse, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse,
+  type ModelCatalogProvidersRequest, type ModelCatalogProvidersResponse } from "#neoastra";
+import { ActivitySpinner } from "./ActivitySpinner";
+import { AppIcon } from "./AppIcon";
+import { configReadNotice, configSaveNotice, type ConfigNotice } from "./configEditor";
+import { providerEdit, providerForm, providerFormDirty, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
+import { useShellLanguage } from "./shellLanguage";
+
+type CallOptions = { signal: AbortSignal; timeoutMilliseconds: number };
+const newProvider = "\u0000new";
+
+/**
+ * Settings page for model providers: the configured definitions on the left, an edit form on the right.
+ * Saving writes the global configuration and re-registers the providers in the running host.
+ */
+export function ProviderSettings({ epoch, config = globalConfig, readRuntime, probe, onOpenModels, onOpenConfiguration, onApplied }: {
+  epoch: string; config?: Pick<typeof globalConfig, "providers" | "saveProvider" | "deleteProvider">;
+  readRuntime: (request: ModelCatalogProvidersRequest, options: CallOptions) => Promise<ModelCatalogProvidersResponse>;
+  probe: (request: ModelCatalogProbeRequest, options: CallOptions) => Promise<ModelCatalogProbeResponse>;
+  onOpenModels: () => void; onOpenConfiguration: () => void; onApplied?: () => void;
+}) {
+  const { t } = useShellLanguage();
+  const [listing, setListing] = useState<GlobalConfigProvidersResponse | null>(null);
+  const [availability, setAvailability] = useState<ReadonlyMap<string, string>>(new Map());
+  const [selected, setSelected] = useState<string | null>(null);
+  const [form, setForm] = useState<ProviderForm | null>(null);
+  const [notice, setNotice] = useState<ConfigNotice | null>(null);
+  const [diagnostic, setDiagnostic] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [probing, setProbing] = useState(false);
+  const [generation, setGeneration] = useState(0);
+  const alive = useRef(true);
+  // After a save, select the saved provider once the refreshed listing arrives.
+  const selectAfterLoad = useRef<string | null>(null);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    void Promise.all([
+      config.providers({ expectedEpoch: epoch }, { signal: controller.signal, timeoutMilliseconds: 15000 }),
+      // Runtime availability is decoration: a failed read only leaves the status tags unknown.
+      readRuntime({ expectedEpoch: epoch }, { signal: controller.signal, timeoutMilliseconds: 15000 }).catch(() => null),
+    ]).then(([value, runtime]) => {
+      if (controller.signal.aborted) return;
+      const failure = configReadNotice(value.status);
+      if (failure) { setListing(null); setNotice(failure); return; }
+      setListing(value);
+      setAvailability(new Map(runtime?.status === "ok" && runtime.epoch === epoch ? runtime.providers.map(provider => [provider.id.toLowerCase(), provider.availability]) : []));
+      const wanted = selectAfterLoad.current; selectAfterLoad.current = null;
+      setSelected(current => {
+        const key = wanted ?? current;
+        const next = key && key !== newProvider && value.providers.some(provider => provider.key === key) ? key : value.providers[0]?.key ?? null;
+        setForm(next ? providerForm(value.providers.find(provider => provider.key === next)!, value.defaultProvider, value.providerTypes) : null);
+        return next;
+      });
+    }).catch(() => { if (!controller.signal.aborted) { setListing(null); setNotice(configReadNotice("read_failed")); } })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [config, readRuntime, epoch, generation]);
+
+  const providers = listing?.providers ?? [];
+  const original = selected && selected !== newProvider ? providers.find(provider => provider.key === selected) ?? null : null;
+  const baseline = listing && selected ? providerForm(original, listing.defaultProvider, listing.providerTypes) : null;
+  const dirty = !!form && !!baseline && providerFormDirty(form, baseline);
+  const problem = form ? validateProviderForm(form, providers, original?.key ?? null) : null;
+  const status = (key: string, enabled: boolean): { label: string; intent: Intent } => {
+    if (!enabled) return { label: t("Disabled"), intent: "none" };
+    const value = availability.get(key.toLowerCase());
+    return { label: value ?? t("Not loaded"), intent: value === "Ready" ? "success" : value === "Failed" || value === "Unsupported" ? "danger" : value ? "warning" : "none" };
+  };
+  function choose(key: string) {
+    if (busy || key === selected || !listing) return;
+    setSelected(key); setNotice(null); setDiagnostic(null);
+    setForm(providerForm(key === newProvider ? null : providers.find(provider => provider.key === key) ?? null, listing.defaultProvider, listing.providerTypes));
+  }
+  const edit = (change: Partial<ProviderForm>) => setForm(current => current ? { ...current, ...change } : current);
+
+  async function settle(run: () => Promise<{ status: string; message: string | null; providersApplied: number }>, select: string | null) {
+    setBusy(true); setNotice(null); setDiagnostic(null);
+    try {
+      const result = await run();
+      if (!alive.current) return;
+      setNotice(configSaveNotice(result, true)); setDiagnostic(result.message);
+      if (result.status === "ok" || result.status === "apply_failed") { selectAfterLoad.current = select; setGeneration(value => value + 1); onApplied?.(); }
+    } catch {
+      if (alive.current) setNotice({ key: "The save did not complete; reload to see what is on disk.", intent: "danger" });
+    } finally { if (alive.current) setBusy(false); }
+  }
+  function save() {
+    if (!form || !listing || problem || busy) return;
+    const wire = providerEdit(form);
+    void settle(() => config.saveProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, originalKey: original?.key ?? null,
+      provider: wire, makeDefault: form.makeDefault, applyProviders: true }, { timeoutMilliseconds: 60000 }), wire.key);
+  }
+  function remove() {
+    if (!original || !listing || busy) return;
+    void settle(() => config.deleteProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, key: original.key, applyProviders: true },
+      { timeoutMilliseconds: 60000 }), null);
+  }
+  async function test() {
+    if (!original || probing || dirty) return;
+    setProbing(true); setNotice(null); setDiagnostic(null);
+    try {
+      const reply = await probe({ expectedEpoch: epoch, providerId: original.key }, { signal: new AbortController().signal, timeoutMilliseconds: 45000 });
+      if (!alive.current) return;
+      if (reply.status === "ok" && reply.epoch === epoch) {
+        setAvailability(current => new Map(current).set(original.key.toLowerCase(), reply.availability));
+        setNotice({ key: "Completed test for {id}: {availability}. This is provider initialization, not an authentication guarantee.",
+          parameters: { id: original.key, availability: reply.availability }, intent: reply.availability === "Ready" ? "success" : "warning" });
+      } else setNotice({ key: reply.status === "busy" ? "A provider test is already running. Try again after it settles." : "Provider test could not be confirmed.", intent: "warning" });
+    } catch { if (alive.current) setNotice({ key: "Provider test could not be confirmed.", intent: "warning" }); }
+    finally { if (alive.current) setProbing(false); }
+  }
+
+  return <main className="configuration-page provider-settings" aria-label={t("Provider management")}>
+    <header className="page-heading provider-settings-heading">
+      <div><span className="eyebrow">{t("Agent & models")}</span><h1>{t("Providers")}</h1>
+        <p>{t("Model providers CodeAlta can use. Saving writes the global configuration and applies it to the running app.")}</p></div>
+      <div className="provider-settings-actions">
+        {(loading || busy) && <ActivitySpinner size={14} />}
+        <Button icon={<AppIcon name="refresh" size={15} />} disabled={loading || busy} onClick={() => setGeneration(value => value + 1)}>{t("Reload")}</Button>
+        <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!listing || busy} onClick={() => choose(newProvider)}>{t("Add provider")}</Button>
+      </div>
+    </header>
+    {notice && <Callout intent={notice.intent} compact role={notice.intent === "success" ? "status" : "alert"}>
+      {t(notice.key, notice.parameters)}{diagnostic && <div className="config-editor-diagnostic">{diagnostic}</div>}</Callout>}
+    {!listing ? <NonIdealState icon={loading ? <ActivitySpinner size={28} /> : <AppIcon name="model" size={36} />}
+        title={t(loading ? "Loading configured providers." : "Provider configuration unavailable")} />
+      : <div className="provider-settings-layout">
+        <CardList compact className="provider-settings-list" aria-label={t("Configured providers")}>
+          {providers.map(provider => { const state = status(provider.key, provider.enabled); return <Card key={provider.key} interactive selected={selected === provider.key}
+            aria-current={selected === provider.key ? "true" : undefined} onClick={() => choose(provider.key)}>
+            <span className="provider-settings-name"><strong>{provider.effectiveName}</strong><small>{provider.key} · {provider.type}</small></span>
+            <span className="provider-settings-tags">{provider.key === listing.defaultProvider && <Tag minimal round intent="primary">{t("Default")}</Tag>}
+              <Tag minimal round intent={state.intent}>{state.label}</Tag></span>
+          </Card>; })}
+          {selected === newProvider && <Card interactive selected><span className="provider-settings-name"><strong>{form?.displayName || t("New provider")}</strong>
+            <small>{form?.key || "…"} · {form?.type}</small></span><Tag minimal round intent="warning">{t("Unsaved changes")}</Tag></Card>}
+          {providers.length === 0 && selected !== newProvider && <Card><span className="bp6-text-muted">{t("No providers are configured yet.")}</span></Card>}
+        </CardList>
+        {form && <Section className="provider-settings-form" title={original ? original.effectiveName : t("New provider")}
+          subtitle={original ? `${original.key} · ${original.type}` : t("Not saved yet")}
+          rightElement={<Switch checked={form.enabled} disabled={busy} label={t("Enabled")} alignIndicator="end"
+            onChange={event => edit({ enabled: event.currentTarget.checked, makeDefault: event.currentTarget.checked && form.makeDefault })} />}>
+          <SectionCard className="provider-settings-fields">
+            <FormGroup label={t("Provider key")} labelFor="provider-key" helperText={original ? t("Sessions refer to a provider by its key; renaming it does not update them.") : undefined}>
+              <InputGroup id="provider-key" value={form.key} disabled={busy} maxLength={64} spellCheck={false} onChange={event => edit({ key: event.target.value })} placeholder="my-provider" /></FormGroup>
+            <FormGroup label={t("Adapter type")} labelFor="provider-type">
+              <HTMLSelect id="provider-type" fill value={form.type} disabled={busy} onChange={event => edit({ type: event.target.value })}
+                options={[...new Set([form.type, ...listing.providerTypes])]} /></FormGroup>
+            <FormGroup label={t("Display name")} labelFor="provider-name">
+              <InputGroup id="provider-name" value={form.displayName} disabled={busy} onChange={event => edit({ displayName: event.target.value })} placeholder={original?.effectiveName ?? ""} /></FormGroup>
+            <FormGroup label={t("Default model")} labelFor="provider-model">
+              <InputGroup id="provider-model" value={form.model} disabled={busy} spellCheck={false} onChange={event => edit({ model: event.target.value })} placeholder={t("Provider default")} /></FormGroup>
+            <FormGroup label={t("Reasoning")} labelFor="provider-reasoning">
+              <HTMLSelect id="provider-reasoning" fill value={form.reasoningEffort} disabled={busy} onChange={event => edit({ reasoningEffort: event.target.value })}>
+                <option value="">{t("Model default")}</option>
+                {[...new Set([...(form.reasoningEffort ? [form.reasoningEffort] : []), ...listing.reasoningEfforts])].map(effort => <option key={effort} value={effort}>{effort}</option>)}
+              </HTMLSelect></FormGroup>
+            <FormGroup label={t("API URL")} labelFor="provider-url">
+              <InputGroup id="provider-url" value={form.apiUrl} disabled={busy} spellCheck={false} onChange={event => edit({ apiUrl: event.target.value })}
+                placeholder={original?.effectiveApiUrl ?? "https://"} /></FormGroup>
+            {usesAccountSignIn(form.type)
+              ? <Callout compact className="provider-settings-wide" icon={<AppIcon name="info" size={16} />}>{t("This provider signs in with its account. Sign in from the terminal app (altatui); the desktop app uses the same stored credentials.")}</Callout>
+              : <>
+                <FormGroup label={t("API key environment variable")} labelFor="provider-key-env" helperText={t("Preferred: the key stays out of the configuration file.")}>
+                  <InputGroup id="provider-key-env" value={form.apiKeyEnv} disabled={busy} spellCheck={false} onChange={event => edit({ apiKeyEnv: event.target.value })} placeholder="MY_PROVIDER_API_KEY" /></FormGroup>
+                <FormGroup label={t("API key")} labelFor="provider-secret" helperText={original?.hasApiKey ? t("A key is stored in the configuration file. Leave blank to keep it.") : t("Stored as plain text in the configuration file.")}>
+                  <InputGroup id="provider-secret" type="password" autoComplete="off" value={form.apiKey} disabled={busy || form.clearApiKey}
+                    onChange={event => edit({ apiKey: event.target.value })} placeholder={original?.hasApiKey ? "••••••••" : ""} />
+                  {original?.hasApiKey && <Checkbox checked={form.clearApiKey} disabled={busy} label={t("Remove the stored key")}
+                    onChange={event => edit({ clearApiKey: event.currentTarget.checked, apiKey: "" })} />}</FormGroup>
+              </>}
+            <Checkbox className="provider-settings-wide" checked={form.makeDefault} disabled={busy || !form.enabled} label={t("Use as the default provider for new sessions")}
+              onChange={event => edit({ makeDefault: event.currentTarget.checked })} />
+          </SectionCard>
+          <SectionCard className="provider-settings-footer">
+            {problem && dirty && <span className="provider-settings-problem" role="alert">{t(problem)}</span>}
+            <Button intent="primary" disabled={!dirty || !!problem || busy} onClick={save}>{t("Save and apply")}</Button>
+            <Button disabled={!dirty || busy} onClick={() => { if (baseline) setForm(baseline); }}>{t("Revert")}</Button>
+            <span className="provider-settings-spacer" />
+            {original && <Button icon={probing ? <ActivitySpinner size={14} /> : <AppIcon name="check" size={15} />} disabled={!original.enabled || probing || busy || dirty}
+              title={dirty ? t("Save before testing.") : undefined} onClick={() => void test()}>{t(probing ? "Testing selected provider…" : "Test selected provider")}</Button>}
+            <Button icon={<AppIcon name="model" size={15} />} onClick={onOpenModels}>{t("Browse models")}</Button>
+            <Button variant="minimal" icon={<AppIcon name="edit" size={15} />} onClick={onOpenConfiguration} title={t("Every other provider setting is in the configuration file.")}>{t("Configuration file")}</Button>
+            {original && <Popover placement="top-end" content={<div className="provider-settings-confirm"><p>{t("Remove {name} from the configuration? Sessions that use it keep their history.", { name: original.effectiveName })}</p>
+              <Button intent="danger" disabled={busy} onClick={remove}>{t("Remove provider")}</Button></div>}>
+              <Button variant="minimal" intent="danger" icon={<AppIcon name="trash" size={15} />} disabled={busy} aria-label={t("Remove provider")} title={t("Remove provider")} />
+            </Popover>}
+          </SectionCard>
+        </Section>}
+      </div>}
+  </main>;
+}

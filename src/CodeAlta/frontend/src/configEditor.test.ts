@@ -24,7 +24,7 @@ test("every save and read outcome has a translated notice and only success is re
     assert.equal(notice.intent === "success", status === "ok", status);
     for (const locale of locales) if (locale !== "en") assert.notEqual(translate(locale, notice.key, notice.parameters), notice.key);
   }
-  assert.match(translate("en", configSaveNotice({ status: "ok", providersApplied: 3 }, true).key, { count: 3 }), /3 providers applied/);
+  assert.match(translate("en", configSaveNotice({ status: "ok", providersApplied: 3 }, true).key, { count: 3 }), /Providers applied: 3/);
   assert.equal(configReadNotice("ok"), null);
   for (const status of ["unavailable", "stale_epoch", "too_large", "read_failed"]) {
     const notice = configReadNotice(status)!;

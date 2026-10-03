@@ -104,4 +104,7 @@ export const globalConfig = Object.freeze({
   read: async () => ({ status: "unavailable", content: null, revision: null }),
   validate: async () => ({ valid: true, message: null, line: null, column: null }),
   save: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
+  providers: async () => ({ status: "unavailable", revision: null, defaultProvider: null, providers: [], providerTypes: [], reasoningEfforts: [] }),
+  saveProvider: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
+  deleteProvider: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
 });

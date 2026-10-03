@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using CodeAlta.Agent;
@@ -119,6 +120,150 @@ internal sealed class GlobalConfigService
         }
     }
 
+    /// <summary>Lists the configured provider definitions, including disabled ones, without their secrets.</summary>
+    [NeoRpcMethod("providers")]
+    public GlobalConfigProvidersResponse Providers(GlobalConfigProvidersRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_store is null) return new("unavailable", null, null, [], ProviderTypes, ReasoningEfforts);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null, null, [], ProviderTypes, ReasoningEfforts);
+        try
+        {
+            lock (_gate)
+            {
+                var revision = Revision(_store.LoadGlobalConfigContent());
+                var document = _store.LoadGlobal();
+                var raw = RawDefinitions(document).ToDictionary(static value => value.ProviderKey, StringComparer.OrdinalIgnoreCase);
+                var providers = _store.LoadGlobalProviderDefinitions(includeDisabled: true).Take(MaximumProviders)
+                    .Select(effective =>
+                    {
+                        raw.TryGetValue(effective.ProviderKey, out var definition);
+                        return new GlobalConfigProvider(
+                            Bound(effective.ProviderKey)!, Bound(effective.ProviderType) ?? string.Empty, effective.Enabled != false,
+                            Bound(definition?.DisplayName), Bound(effective.DisplayName) ?? effective.ProviderKey,
+                            Bound(definition?.Model), Bound(definition?.ReasoningEffort),
+                            Bound(definition?.ApiUrl), Bound(effective.ApiUrl), Bound(definition?.ApiKeyEnv),
+                            !string.IsNullOrEmpty(definition?.ApiKey));
+                    }).ToArray();
+                return new("ok", revision, Bound(document.Chat?.DefaultProvider?.Trim().ToLowerInvariant()), providers, ProviderTypes, ReasoningEfforts);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
+        {
+            return new("read_failed", null, null, [], ProviderTypes, ReasoningEfforts);
+        }
+    }
+
+    /// <summary>
+    /// Adds or updates one provider definition, leaving every setting the form does not show untouched,
+    /// optionally makes it the default provider, and optionally re-registers the providers.
+    /// </summary>
+    [NeoRpcMethod("saveProvider")]
+    public GlobalConfigSaveResponse SaveProvider(GlobalConfigSaveProviderRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var edit = request.Provider;
+        var key = edit?.Key?.Trim().ToLowerInvariant();
+        if (edit is null || string.IsNullOrEmpty(key) || key.Length > 64 || !key.All(static character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_'))
+            return new("invalid", null, "A provider key uses letters, digits, '-' or '_' (at most 64).", null, null, 0);
+        if (new[] { edit.DisplayName, edit.Model, edit.ReasoningEffort, edit.ApiUrl, edit.ApiKeyEnv, edit.ApiKey, edit.Type }.Any(static value => value?.Length > 2048))
+            return new("invalid", null, "A provider field is too long.", null, null, 0);
+        return Mutate(request.ExpectedEpoch, request.ExpectedRevision, request.ApplyProviders, (store, definitions) =>
+        {
+            var original = request.OriginalKey?.Trim();
+            var definition = string.IsNullOrEmpty(original) ? null
+                : definitions.FirstOrDefault(value => string.Equals(value.ProviderKey, original, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrEmpty(original) && definition is null) return "The provider no longer exists in the configuration.";
+            if (definitions.Any(value => value != definition && string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase)))
+                return "Another provider already uses this key.";
+            if (definition is null) definitions.Add(definition = new CodeAltaProviderDocument());
+            definition.ProviderKey = key;
+            definition.ProviderType = Optional(edit.Type) ?? definition.ProviderType;
+            definition.Enabled = edit.Enabled;
+            definition.DisplayName = Optional(edit.DisplayName);
+            definition.Model = Optional(edit.Model);
+            definition.ReasoningEffort = Optional(edit.ReasoningEffort);
+            definition.ApiUrl = Optional(edit.ApiUrl);
+            definition.ApiKeyEnv = Optional(edit.ApiKeyEnv);
+            // A null key keeps the stored secret; the form never receives it back.
+            if (edit.ClearApiKey) definition.ApiKey = null;
+            else if (!string.IsNullOrEmpty(edit.ApiKey)) definition.ApiKey = edit.ApiKey;
+            store.SaveGlobalProviderDefinitions(definitions);
+            if (request.MakeDefault && edit.Enabled) store.SaveGlobalDefaultProvider(key);
+            return null;
+        });
+    }
+
+    /// <summary>Removes one provider definition and optionally re-registers the remaining providers.</summary>
+    [NeoRpcMethod("deleteProvider")]
+    public GlobalConfigSaveResponse DeleteProvider(GlobalConfigDeleteProviderRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Mutate(request.ExpectedEpoch, request.ExpectedRevision, request.ApplyProviders, (store, definitions) =>
+        {
+            if (definitions.RemoveAll(value => string.Equals(value.ProviderKey, request.Key?.Trim(), StringComparison.OrdinalIgnoreCase)) == 0)
+                return "The provider no longer exists in the configuration.";
+            store.SaveGlobalProviderDefinitions(definitions);
+            return null;
+        });
+    }
+
+    // Runs one structured provider edit under the same epoch, revision and apply rules as a text save.
+    private GlobalConfigSaveResponse Mutate(string? expectedEpoch, string? expectedRevision, bool applyProviders,
+        Func<CodeAltaConfigStore, List<CodeAltaProviderDocument>, string?> edit)
+    {
+        if (_store is null || _registry is null) return Failure("unavailable");
+        if (!string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal)) return Failure("stale_epoch");
+        lock (_gate)
+        {
+            try
+            {
+                if (!string.Equals(Revision(_store.LoadGlobalConfigContent()), expectedRevision, StringComparison.Ordinal)) return Failure("conflict");
+                var refusal = edit(_store, RawDefinitions(_store.LoadGlobal()).ToList());
+                if (refusal is not null) return new("invalid", null, refusal, null, null, 0);
+            }
+            catch (Exception exception) when (exception is InvalidDataException or InvalidOperationException or ArgumentException)
+            {
+                // The store validates the complete definition set before writing.
+                return new("invalid", null, Bound(exception.Message), null, null, 0);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return Failure("write_failed");
+            }
+
+            string revision;
+            try { revision = Revision(_store.LoadGlobalConfigContent()); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException) { return Failure("write_failed"); }
+            if (!applyProviders) return new("ok", revision, null, null, null, 0);
+            try
+            {
+                return new("ok", revision, null, null, null, ApplyProviders(_store, _registry, _stateRoot!));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException)
+            {
+                return new("apply_failed", revision, null, null, null, 0);
+            }
+        }
+    }
+
+    // The definitions exactly as written in the file: no defaults are filled in, so saving them back adds none.
+    private static IEnumerable<CodeAltaProviderDocument> RawDefinitions(CodeAltaConfigDocument document)
+    {
+        foreach (var (key, definition) in document.Providers ?? [])
+        {
+            definition.ProviderKey = key;
+            yield return definition;
+        }
+    }
+
+    private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private const int MaximumProviders = 64;
+    private static readonly ImmutableArray<string> ProviderTypes =
+        ["openai-chat", "openai-responses", "azure-openai", "anthropic", "google-genai", "vertex-ai", "mistral", "codex", "copilot", "xai"];
+    private static readonly ImmutableArray<string> ReasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+
     /// <summary>
     /// Re-registers the enabled provider definitions and unregisters providers that are no longer
     /// configured or enabled, like the TUI's provider refresh.
@@ -155,3 +300,15 @@ internal sealed record GlobalConfigValidateRequest(string? Content);
 internal sealed record GlobalConfigValidationResponse(bool Valid, string? Message, int? Line, int? Column);
 internal sealed record GlobalConfigSaveRequest(string? ExpectedEpoch, string? Content, string? ExpectedRevision, bool ApplyProviders);
 internal sealed record GlobalConfigSaveResponse(string Status, string? Revision, string? Message, int? Line, int? Column, int ProvidersApplied);
+internal sealed record GlobalConfigProvidersRequest(string? ExpectedEpoch);
+internal sealed record GlobalConfigProvidersResponse(string Status, string? Revision, string? DefaultProvider,
+    IReadOnlyList<GlobalConfigProvider> Providers, IReadOnlyList<string> ProviderTypes, IReadOnlyList<string> ReasoningEfforts);
+
+/// <summary>One configured provider: values as written (null when the file leaves them to defaults) plus effective display values.</summary>
+internal sealed record GlobalConfigProvider(string Key, string Type, bool Enabled, string? DisplayName, string EffectiveName,
+    string? Model, string? ReasoningEffort, string? ApiUrl, string? EffectiveApiUrl, string? ApiKeyEnv, bool HasApiKey);
+internal sealed record GlobalConfigProviderEdit(string? Key, string? Type, bool Enabled, string? DisplayName, string? Model,
+    string? ReasoningEffort, string? ApiUrl, string? ApiKeyEnv, string? ApiKey, bool ClearApiKey);
+internal sealed record GlobalConfigSaveProviderRequest(string? ExpectedEpoch, string? ExpectedRevision, string? OriginalKey,
+    GlobalConfigProviderEdit? Provider, bool MakeDefault, bool ApplyProviders);
+internal sealed record GlobalConfigDeleteProviderRequest(string? ExpectedEpoch, string? ExpectedRevision, string? Key, bool ApplyProviders);
