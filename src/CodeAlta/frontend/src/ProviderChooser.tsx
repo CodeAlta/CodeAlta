@@ -3,12 +3,15 @@ import { HTMLSelect } from "@blueprintjs/core";
 import { sessionOperations, type SessionProviderChoices } from "#neoastra";
 import { useShellLanguage } from "./shellLanguage";
 
-export function ProviderChooser({ epoch, sessionId, providerKey, disabled, current, onSelected }: {
+export function ProviderChooser({ epoch, sessionId, providerKey, disabled, current, onSelected, onBusyChange }: {
   epoch: string; sessionId: string; providerKey: string; disabled: boolean;
   current: () => boolean; onSelected: () => Promise<void>;
+  /** Reports an admitted switch so a hosting popover can stay mounted until it settles. */
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const { t } = useShellLanguage();
   const [busy, setBusy] = useState(false);
+  useLayoutEffect(() => { onBusyChange?.(busy); return () => { if (busy) onBusyChange?.(false); }; }, [busy]);
   const [choices, setChoices] = useState<SessionProviderChoices | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const scope = useRef<AbortController | null>(null), submitting = useRef(false);

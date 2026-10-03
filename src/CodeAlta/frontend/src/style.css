@@ -136,9 +136,10 @@ code, pre { font-family: var(--bp-typography-family-mono); }
 .content { grid-area: content; }
 .project-rail[hidden], .session-rail[hidden], .pane-splitter[hidden] { display: none; }
 .project-rail, .session-rail { min-width: 0; min-height: 0; overflow: hidden; background: var(--panel); }
-.pane-splitter { position: relative; z-index: 2; width: 8px; cursor: col-resize; touch-action: none; background: var(--line); }
-.pane-splitter::before { content: ""; position: absolute; inset: 0 -3px; }
-.pane-splitter span { position: absolute; top: 50%; left: 2px; width: 4px; height: 38px; border-radius: 3px; background: transparent; transform: translateY(-50%); }
+/* Thin, transparent separators: only the grip is drawn; the pseudo-element widens the pointer target. */
+.pane-splitter { position: relative; z-index: 2; width: 5px; cursor: col-resize; touch-action: none; background: transparent; }
+.pane-splitter::before { content: ""; position: absolute; inset: 0 -4px; }
+.pane-splitter span { position: absolute; top: 50%; left: 1px; width: 3px; height: 32px; border-radius: 3px; background: var(--line-strong); transform: translateY(-50%); transition: background-color .12s ease; }
 .pane-splitter:hover span, .pane-splitter:focus-visible span { background: var(--accent); }
 .pane-splitter:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .project-rail { display: flex; flex-direction: column; overflow-y: auto; padding: 18px 12px 12px; }
@@ -310,9 +311,9 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .timeline-scroll { flex: 1 1 0; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 0 0; line-height: 1.5; }
 .composer-resize-bar { flex: 0 0 auto; display: flex; align-items: center; min-height: 4px; margin: 0 4px; }
 .composer-resize-bar .quiet-button { flex: 0 0 auto; padding: 2px 7px; font-size: 11px; }
-.composer-splitter { flex: 1 1 auto; position: relative; height: 8px; cursor: row-resize; touch-action: none; }
-.composer-splitter::before { content: ""; position: absolute; inset: -3px 0; }
-.composer-splitter span { display: block; width: 38px; height: 4px; margin: 2px auto; border-radius: 4px; background: var(--line-strong); }
+.composer-splitter { flex: 1 1 auto; position: relative; height: 5px; cursor: row-resize; touch-action: none; }
+.composer-splitter::before { content: ""; position: absolute; inset: -4px 0; }
+.composer-splitter span { display: block; width: 32px; height: 3px; margin: 1px auto; border-radius: 3px; background: var(--line-strong); transition: background-color .12s ease; }
 .composer-splitter:hover span, .composer-splitter:focus-visible span { background: var(--accent); }
 .composer-splitter:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .composer-region { flex: 0 1 auto; min-height: 0; min-width: 0; overflow-y: auto; }
@@ -770,7 +771,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 /* IDE presentation: stable workspace slot, one hierarchical Explorer. */
 .app-shell.ide-shell { grid-template-rows: 36px minmax(0, 1fr); }
 .ide-shell .topbar { min-height: 34px; padding: 3px 10px; }
-.ide-shell .workspace-shell { position: relative; grid-template-columns: 44px var(--explorer-width, 272px) 5px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); grid-template-areas: "activity sessions explorer-resize content"; height: 100%; }
+.ide-shell .workspace-shell { position: relative; grid-template-columns: 44px min(var(--explorer-width, 272px), 60vw) 5px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); grid-template-areas: "activity sessions explorer-resize content"; height: 100%; }
 .ide-shell .workspace-shell:not(.project-rail-open) { grid-template-columns: 44px 0 0 minmax(0, 1fr); }
 .ide-shell .activity-rail { grid-area: activity; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 2px; border-right: 1px solid var(--line); background: var(--panel); }
 .ide-shell .activity-settings { margin-top: auto; }
@@ -1078,3 +1079,26 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 @media (hover: none) {
   .ide-shell .message-actions > button, .ide-shell .session-actions-trigger, .ide-shell .project-actions-trigger { opacity: 1; pointer-events: auto; }
 }
+
+/* Composer bar: one selection chip that opens a Blueprint popover form, and a split Send button.
+   The popover renders in a portal outside .ide-shell, so its rules are not shell-scoped. */
+.ide-shell .composer-toolbar { align-items: center; }
+.composer-selection.bp6-button { min-width: 0; max-width: 100%; padding: 3px 9px; border: 1px solid transparent; border-radius: 999px; color: var(--muted); font-size: 12px; }
+.composer-selection.bp6-button:hover, .bp6-popover-open > .composer-selection.bp6-button, .composer-selection.bp6-button[aria-expanded="true"] { border-color: var(--line-strong); color: var(--text); }
+.composer-selection .bp6-button-text { display: flex; align-items: center; gap: 12px; min-width: 0; overflow: hidden; }
+.composer-selection-part { display: inline-flex; align-items: center; gap: 5px; min-width: 0; white-space: nowrap; }
+.composer-selection-part > span { overflow: hidden; text-overflow: ellipsis; }
+.composer-selection-part svg { flex: 0 0 auto; color: var(--accent); }
+.composer-selection-separator { opacity: .55; }
+.composer-selection-form { display: grid; width: min(420px, calc(100vw - 32px)); padding: 14px 16px 10px; }
+.composer-selection-form .bp6-form-group { margin: 0 0 12px; }
+.composer-selection-form .bp6-label { color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+.composer-selection-form .provider-chooser { display: flex; }
+.composer-selection-form .current-provider { flex: 1 1 auto; max-width: none; }
+.composer-reasoning-slider { padding: 2px 16px 0; }
+.composer-reasoning-slider .bp6-slider { min-width: 0; height: 36px; }
+.composer-reasoning-slider .bp6-slider-label { font-size: 11px; white-space: nowrap; }
+.composer-reasoning-static { color: var(--muted); font-size: 12px; }
+.composer-selection-links { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 -6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.composer-send-group.bp6-button-group { flex: 0 0 auto; }
+.composer-send-group .composer-send-options.bp6-button { min-width: 22px; padding: 0 3px; }

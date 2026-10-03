@@ -111,10 +111,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         var bodyFailed = false;
         try
         {
-            window = application.CreateWindow(new NeoWindowOptions
+            window = application.CreateWindow(DesktopWindowPlacement.Apply(new NeoWindowOptions
             {
-                Label = "main", Title = "CodeAlta — starting owned text-only host", Width = 1000, Height = 760, IsVisible = false,
-            });
+                Label = "main", Title = "CodeAlta — starting owned text-only host", IsVisible = false,
+            }));
             application.MainWindow = window;
             window.Closed += (_, _) => closed.TrySetResult();
             window.CloseRequested += request =>
@@ -326,10 +326,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
     {
         try
         {
-            await using var window = application.CreateWindow(new NeoWindowOptions
+            await using var window = application.CreateWindow(DesktopWindowPlacement.Apply(new NeoWindowOptions
             {
-                Label = "main", Title = "CodeAlta — in development", Width = 1000, Height = 760, IsVisible = false,
-            });
+                Label = "main", Title = "CodeAlta — in development", IsVisible = false,
+            }));
             application.MainWindow = window;
             var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             window.Closed += (_, _) => closed.TrySetResult();

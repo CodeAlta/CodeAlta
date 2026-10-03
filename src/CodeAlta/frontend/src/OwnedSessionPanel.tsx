@@ -1,4 +1,4 @@
-import { Button, Checkbox, HTMLSelect, Spinner } from "@blueprintjs/core";
+import { Button, HTMLSelect, Spinner } from "@blueprintjs/core";
 import { createPortal } from "react-dom";
 import { PromptImageAttachments } from "./PromptImageAttachments";
 import { formatThinkingElapsed, useThinkingElapsed } from "./thinkingElapsed";
@@ -22,7 +22,7 @@ import type { PromptInput } from "./PromptEditor";
 import { changeSelection, validSelection } from "./sessionSelection";
 import { ProviderChooser } from "./ProviderChooser";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
-import { ComposerSurface, ComposerSelectionFields } from "./ComposerSurface";
+import { ComposerSurface, ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import type { createReminderActions } from "./reminderActions";
@@ -94,6 +94,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   const referenceScope = useContext(ProjectReferenceContext);
   const [expanded, setExpanded] = useState(false);
   const [enqueue, setEnqueue] = useState(false);
+  const [providerBusy, setProviderBusy] = useState(false);
   const [receiptUnavailable, setReceiptUnavailable] = useState(false);
   const stagedRevision = useSyncExternalStore(queue.composer.subscribe, queue.composer.getSnapshot);
   const queueRevision = useSyncExternalStore(queue.subscribe, queue.getSnapshot);
@@ -657,7 +658,11 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
           isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode,
            repeat: event.repeat, defaultPrevented: event.defaultPrevented }, submit, () => steer(true))) { event.preventDefault(); event.stopPropagation(); }
       } }}
-    options={<ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog}
+    options={<ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog} locked={providerBusy}
+      summary={{ agent: activeChoices?.prompts.find(p => p.id === selected?.agentPromptId)?.name ?? selected?.agentPromptId ?? "…",
+        provider: selected?.providerKey ?? t("session provider"),
+        model: selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "Provider default"),
+        reasoning: selected?.reasoningEffort ?? t("Default") }}
       agent={<HTMLSelect fill id={`composer-agent-${sessionId}`} aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
         {!activeChoices?.prompts.some(p => p.id === selected?.agentPromptId) && <option value={selected?.agentPromptId ?? ""}>{selected?.agentPromptId ?? t("Loading…")}</option>}
         {activeChoices?.prompts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -667,6 +672,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
           || runtimeState.snapshot.coordinatorTransitionInProgress || !!runtimeState.snapshot.entry?.activeRunId
           || !!runtimeState.snapshot.entry?.queueDrainInProgress || !!runtimeState.snapshot.entry?.isRetiring}
         current={() => capability.canMutate() && !pending && !scope.current?.signal.aborted}
+        onBusyChange={setProviderBusy}
         onSelected={async () => {
           const signal = scope.current?.signal;
           const value = await sessions.choices({ expectedEpoch: epoch, sessionId }, { signal });
@@ -683,11 +689,8 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
         {selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) && <option value={selected.modelId}>{loadingChoices ? t("Loading…") : `${selected.modelId} · ${t("Unverified")}`}</option>}
         {activeChoices?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
       </HTMLSelect>}
-      reasoning={<HTMLSelect fill id={`composer-reasoning-${sessionId}`} aria-label={t("Reasoning")} value={selected?.reasoningEffort ?? ""} disabled={selectionDisabled || efforts.length === 0} onChange={event => select("reasoningEffort", event.target.value)} title={t("Supported reasoning effort for the selected model")}>
-        <option value="">{t("Model default")}</option>
-        {selected?.reasoningEffort && !efforts.includes(selected.reasoningEffort) && <option value={selected.reasoningEffort}>{selected.reasoningEffort} · {t("Unverified")}</option>}
-        {efforts.map(e => <option key={e} value={e}>{e}</option>)}
-      </HTMLSelect>} />}>
+      reasoning={<ReasoningSlider value={selected?.reasoningEffort ?? null} efforts={efforts} disabled={selectionDisabled}
+        onChange={value => select("reasoningEffort", value)} />} />}>
       {!pending && !expanded && !invalidEpoch && <ProjectReferencePicker text={text} edit={editText} input={promptInput} />}
       <ActiveProviderStatus epoch={epoch} onOpen={() => onOpenCatalog?.("providers")} />
       {(!activeChoices?.models.length || choicesNotice.includes("could not")) && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />}
@@ -719,7 +722,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
         title={pendingCompact ? `${t("Manual retry of exact compaction:")} ${t("epoch")} ${pendingCompact.request.expectedEpoch}, ${t("session")} ${pendingCompact.request.sessionId}, ${t("runtime")} ${pendingCompact.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingCompact.request.expectedAttachmentGeneration}, ${t("request")} ${pendingCompact.request.clientRequestId}`
           : t("Compact observed idle attachment (Ctrl+F11; point-in-time idle observation permits only an attempt; provider must prove idle)")}>
         <AppIcon name="compact" size={16} /></Button>
-      <Checkbox className="composer-enqueue" checked={enqueue} disabled={invalidEpoch || !!pending || images.length > 0} label={t("Enqueue")} onChange={event => setEnqueue(event.currentTarget.checked)} />
+      <SendSplitButton enqueue={enqueue && images.length === 0} onEnqueueChange={setEnqueue} enqueueDisabled={images.length > 0} optionsDisabled={invalidEpoch || !!pending}>
       {(composerBusy || availableAbortRun || pendingAbortRun) ? <Button intent="danger" icon={<AppIcon name="stop" size={16} fill="currentColor" />} onClick={abortRun}
         disabled={invalidEpoch || !!pendingAbortRun?.inFlight || (pendingAbortRun
           ? !capability.canSubmit(pendingAbortRun.request) : !availableAbortRun || !capability.canSubmit(availableAbortRun))}
@@ -727,7 +730,8 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
         aria-describedby="observed-run-cancellation-help"
         title={pendingAbortRun ? `${t("Manual retry of exact cancellation:")} ${t("epoch")} ${pendingAbortRun.request.expectedEpoch}, ${t("session")} ${pendingAbortRun.request.sessionId}, ${t("runtime")} ${pendingAbortRun.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingAbortRun.request.expectedAttachmentGeneration}, ${t("run")} ${pendingAbortRun.request.expectedRunId}, ${t("request")} ${pendingAbortRun.request.clientRequestId}`
           : t("Cancel observed run {run} (point-in-time runtime observation, not original Send Abort; signalling does not confirm completion)", { run: availableAbortRun?.expectedRunId ?? "" })} />
-      : <Button aria-label={t(pending ? "Retry exact request" : "Send")} title={t(pending ? "Retry exact request" : "Send")} intent="primary" icon={<AppIcon name={pending ? "refresh" : "send"} size={16} />} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || captureSubmission(epoch, sessionId, text, "availability", images.length ? selected : null, null, images) === null)} onClick={submit} />}
+      : <Button aria-label={t(pending ? "Retry exact request" : enqueue && images.length === 0 ? "Enqueue" : "Send")} title={t(pending ? "Retry exact request" : enqueue && images.length === 0 ? "Enqueue until idle" : "Send")} intent="primary" icon={<AppIcon name={pending ? "refresh" : enqueue && images.length === 0 ? "queue" : "send"} size={16} />} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || captureSubmission(epoch, sessionId, text, "availability", images.length ? selected : null, null, images) === null)} onClick={submit} />}
+      </SendSplitButton>
     </ComposerSurface>
     <span id="observed-run-cancellation-help" className="sr-only">{t("Targets a point-in-time observed run, not the original Send receipt. Cancellation signalled does not confirm run completion. Retained requests are only retried manually against their original target after the previous wait settles.")}</span>
     <span id="observed-steering-help" className="sr-only">{t("Uses current composer text and the point-in-time observed run. Admission is not run completion. Retained steering is reviewed or retried separately, never from this button.")}</span>

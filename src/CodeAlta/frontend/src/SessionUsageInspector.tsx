@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Button } from "@blueprintjs/core";
 import { sessionUsage, type SessionUsageResponse } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { usageMessage, validateUsage, type UsageTarget } from "./sessionUsage";
@@ -97,9 +98,8 @@ export function SessionUsageInspector({ target, capability }: {
   }
   const observation = snapshot?.status === "ok" ? snapshot.observation : null;
   return <>
-    <button ref={trigger} id="session-usage-trigger" data-usage-target={JSON.stringify(target)} type="button" className="composer-icon-button" disabled={!allowed} aria-label={t("Inspect last-observed session usage")}
-      aria-haspopup="dialog" aria-expanded={open && allowed} title={t("Inspect last-observed usage (explicit read)")} onClick={openDialog}>
-      <AppIcon name="usage" size={16} /></button>
+    <Button ref={trigger} id="session-usage-trigger" data-usage-target={JSON.stringify(target)} variant="minimal" icon={<AppIcon name="usage" size={16} />} disabled={!allowed} aria-label={t("Inspect last-observed session usage")}
+      aria-haspopup="dialog" aria-expanded={open && allowed} title={t("Inspect last-observed usage (explicit read)")} onClick={openDialog} />
     {open && allowed && <dialog ref={dialog} className="app-dialog session-usage-dialog" aria-modal="true"
       aria-labelledby="session-usage-title" aria-describedby="session-usage-description"
       onKeyDown={event => { event.stopPropagation(); if (event.key !== "Escape") return;

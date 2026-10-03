@@ -71,7 +71,7 @@ import { composerSizeKey, rememberComposerHeight } from "./composerHeight";
 import { ComposerSplitter, useComposerLayout } from "./ComposerLayout";
 import { NewSessionWorkspace } from "./NewSessionWorkspace";
 import { useNewSessionChoices } from "./newSessionChoices";
-import { ComposerSelectionFields } from "./ComposerSurface";
+import { ComposerSelectionFields, ReasoningSlider } from "./ComposerSurface";
 import { validSelection } from "./sessionSelection";
 import { AppIcon } from "./AppIcon";
 import { sessionTime } from "./sessionTime";
@@ -90,7 +90,7 @@ import { SessionActionMenu } from "./SessionActionMenu";
 import { isSessionContextKey, restoreSessionMenuFocus, sessionActionAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
 import { projectRailProjection, type ProjectSort } from "./projectRail";
 import { ProjectRailRows } from "./ProjectRailRows";
-import { parseIdeWidth, persistIdeWidth, resizeIdeWidth } from "./ideWidth";
+import { maximumIdeWidth, minimumIdeWidth, parseIdeWidth, persistIdeWidth, resizeIdeWidth } from "./ideWidth";
 import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./projectRailVisibility";
 import { useWindowPreferences } from "./windowPreferences";
 import { GeneralSettings } from "./GeneralSettings";
@@ -1148,6 +1148,10 @@ function App() {
         invalidateCreation(); draftChoices.change(field, next);
       };
       return <ComposerSelectionFields sessionId="new" onOpenCatalog={navigate}
+        summary={{ agent: draftChoices.prompts.find(prompt => prompt.id === value.agentPromptId)?.name ?? t(draftChoices.loadingPrompts ? "Loading…" : "Host default"),
+          provider: creatingProvider || t("Default"),
+          model: value.modelId ? draftChoices.models.find(model => model.id === value.modelId)?.name ?? value.modelId : t(draftChoices.loadingModels ? "Loading…" : "Provider default"),
+          reasoning: value.reasoningEffort ?? t("Default") }}
         agent={<HTMLSelect fill id="composer-agent-new" aria-label={t("Agent prompt")} value={value.agentPromptId}
           disabled={locked || draftChoices.loadingPrompts || !draftChoices.prompts.length} onChange={event => change("agentPromptId", event.target.value)}>
           {!draftChoices.prompts.some(prompt => prompt.id === value.agentPromptId) && <option value={value.agentPromptId}>{t(draftChoices.loadingPrompts ? "Loading…" : "Host default")}</option>}
@@ -1159,10 +1163,8 @@ function App() {
           {value.modelId && !draftChoices.models.some(model => model.id === value.modelId) && <option value={value.modelId}>{value.modelId} · {t("Unverified")}</option>}
           {draftChoices.models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
         </HTMLSelect>}
-        reasoning={<HTMLSelect fill id="composer-reasoning-new" aria-label={t("Reasoning")} value={value.reasoningEffort ?? ""}
-          disabled={locked || !efforts.length} onChange={event => change("reasoningEffort", event.target.value)}>
-          <option value="">{t("Model default")}</option>{efforts.map(effort => <option key={effort} value={effort}>{effort}</option>)}
-        </HTMLSelect>} />;
+        reasoning={<ReasoningSlider value={value.reasoningEffort ?? null} efforts={efforts} disabled={locked}
+          onChange={next => change("reasoningEffort", next)} />} />;
     }
     return <div className="creation-provider">
       <label><span>{t("Provider for new session")}</span>
@@ -1982,9 +1984,9 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   const archivedScope = archivedProjectScope(snapshot, selectedProjectId);
   const ownedHost = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
   const ownedSession = ownedHost && !archivedScope;
-  const infoControl = <button ref={infoTrigger} type="button" className="composer-icon-button session-info-trigger"
+  const infoControl = <Button ref={infoTrigger} variant="minimal" className="session-info-trigger" icon={<AppIcon name="info" size={16} />}
     aria-label={t("Session info")} title={`${t("Session info")} (Ctrl+G, Ctrl+T)`} aria-haspopup="dialog" aria-expanded={infoOpen}
-    onClick={openInfo}><AppIcon name="info" size={16} /></button>;
+    onClick={openInfo} />;
   return <div className="session-workspace" data-active={active} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       lifetime={infoLifetime} canRead={() => !!mutation?.capability.canMutate()}
@@ -2184,7 +2186,7 @@ function PaneSplitter({ className, hidden, label, value, onResize, onReset }: {
       onReset();
     }
   }
-  return <div className={`pane-splitter ${className}`} hidden={hidden} role="separator" aria-label={label} aria-orientation="vertical" aria-valuenow={value} aria-valuemin={220} aria-valuemax={360}
+  return <div className={`pane-splitter ${className}`} hidden={hidden} role="separator" aria-label={label} aria-orientation="vertical" aria-valuenow={value} aria-valuemin={minimumIdeWidth} aria-valuemax={maximumIdeWidth}
     tabIndex={0} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={pointerEnd}
     onDoubleClick={onReset} onKeyDown={keyDown}><span /></div>;
 }

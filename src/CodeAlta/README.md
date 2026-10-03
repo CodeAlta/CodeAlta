@@ -68,7 +68,7 @@ global workspace, not the selected project: sessions from different projects can
 Drag a tab along the tab strip to reorder it, to a pane edge to create a split view, or to its center to merge
 (up to 32 open sessions); drag the divider between panes to resize them. The presentation uses
 stable content slots and one vertical Explorer with Projects above Sessions. Its width is locally
-saved (220–360 pixels); the full-content button hides it without discarding the restore width.
+saved (220–720 pixels, never more than 60% of the window); the full-content button hides it without discarding the restore width.
 Settings and the command palette are on the activity rail. The compact composer keeps secondary
 actions under **More composer actions**, with retained-request recovery separate. Alta notes belong
 to each session, start collapsed when empty, and open when meaningful content arrives. A small disclosure
@@ -76,12 +76,15 @@ at the top right of the timeline expands/collapses their overlay without resizin
 There is no nested notes dock or notes divider. Existing session-keyed transitions and
 draft/uncertain-action guards remain in place.
 
-Queued text and steering use compact rows outside and above the prompt card. **Enqueue** makes
-Send stage text for the next idle observation; queued rows expose repeat count, editing, steering
+Queued text and steering use compact rows outside and above the prompt card. The Send button is a
+split button: its caret chooses the default action, **Send now** or **Enqueue until idle**, which
+stages text for the next idle observation; queued rows expose repeat count, editing, steering
 and deletion. Claimed requests retain their exact targets and keys; uncertain outcomes require
 explicit retry, and receipt-confirmed consumption removes the row. Staged rows are app-memory
-only, not durable across reloads. Image prompts still use immediate Send. **Agent→** and
-**Model→** open their catalog windows; enabled-provider readiness appears in the bottom bar.
+only, not durable across reloads. Image prompts still use immediate Send. The bottom bar shows the
+next-Send agent prompt, provider, model and reasoning effort as one clickable summary; it opens a
+popover to change them (reasoning is a stepped slider over the model's supported efforts) and to
+browse the agent-prompt and model catalogs. Enabled-provider readiness appears in the same bar.
 The expanded prompt editor retains file insertion without reference-inspection diagnostics.
 
 The provider indicator is a compact active-provider count, green when ready and orange when
@@ -224,6 +227,9 @@ dotnet build -c Release
 ./CodeAlta/bin/Release/net10.0/alta.exe --version
 ./CodeAlta/bin/Release/net10.0/alta.exe
 ```
+
+The main window opens centered at 80% of the primary work area on Windows; other platforms use a
+centered 1280×860 window until NeoAstra exposes display metrics.
 
 No-argument startup derives a stable WebView data directory from the platform's local application-data
 location, composes the owned host for the current directory, and uses the current `~/.alta` catalog.
