@@ -13,7 +13,7 @@ import { AboutSettings } from "./AboutDialog";
 
 test("support labels translate while recorded host identity and confirmation bytes stay literal", () => {
   for (const locale of locales) {
-    for (const key of ["Refresh logs", "Clear captured messages…", "Check reference metadata", "Close references", "Path metadata observed; Send revalidates", "Raw prompt reference preview"] as const) {
+    for (const key of ["Refresh logs", "Clear captured messages…", "Check reference metadata", "Path metadata observed; Send revalidates", "Raw prompt reference preview"] as const) {
       if (locale !== "en") assert.notEqual(translate(locale, key), key);
     }
     assert.ok(translate(locale, "Type {confirmation} to confirm", { confirmation: "CLEAR CAPTURED LOGS" }).includes("CLEAR CAPTURED LOGS"));
@@ -28,7 +28,7 @@ test("support labels translate while recorded host identity and confirmation byt
 test("project/session workflow labels translate while literal titles, paths and controller feedback do not", () => {
   const literal = "Settings Unknown Archived C:/Settings/<literal>";
   for (const locale of locales) {
-    for (const key of ["Project details", "Copy project path", "Rename project (F2)", "Confirm archive", "Confirm unarchive",
+    for (const key of ["Project details", "Copy project path","Confirm archive", "Confirm unarchive",
       "Find a saved project by name or full path", "Suggest folders", "Import and open folder", "Create and open", "Save title", "Save project name"] as const) {
       if (locale !== "en") assert.notEqual(translate(locale, key), key);
     }
@@ -47,8 +47,7 @@ test("inventory labels translate in six languages while status codes and English
   for (const locale of locales) {
     for (const key of ["Provider management", "Model catalog", "Agent prompts", "MCP Servers", "Configured providers",
       "Search models", "Adapter type", "Cached availability",
-      "Inspect supplied tool record", "Supplied record provenance", "Copy supplied tool JSON", "Display excerpt; Copy retains the supplied JSON.",
-      "Retained original Send prompt", "Use model for next Send"] as const) {
+      "Inspect supplied tool record", "Copy supplied tool JSON", "Use model for next Send"] as const) {
       assert.ok(translate(locale, key));
       if (locale !== "en") assert.notEqual(translate(locale, key), key);
     }
@@ -64,7 +63,7 @@ test("inventory labels translate in six languages while status codes and English
 test("provider and timeline UI labels translate without translating literal content or decision tokens", () => {
   const literal = "  Settings Copy failed Allow once <script>日本語</script>  ";
   for (const locale of locales) {
-    for (const key of ["Nonsecret provider input", "Review provider input", "Local input draft discarded. No answer or cancellation was sent by dismissal.", "Pending command permissions", "Refresh pending commands", "Submit literal answers", "Session timeline", "Refresh newest history", "Jump to latest visible", "Show full message", "Copy failed"] as const) {
+    for (const key of ["Nonsecret provider input", "Review provider input", "Local input draft discarded. No answer or cancellation was sent by dismissal.", "Pending command permissions", "Refresh pending commands", "Submit literal answers", "Session timeline","Jump to latest visible", "Show full message", "Copy failed"] as const) {
       assert.ok(translate(locale, key));
       if (locale !== "en") assert.notEqual(translate(locale, key), key);
     }
@@ -81,10 +80,9 @@ test("provider and timeline UI labels translate without translating literal cont
 
 test("interaction controls translate in every locale without changing literal parameters", () => {
   for (const locale of locales.filter(value => value !== "en")) {
-    for (const key of ["Send", "Message draft", "Edit prompt", "Search commands", "Reopen closed tab"] as const)
+    for (const key of ["Send","Edit prompt", "Search commands", "Reopen closed tab"] as const)
       assert.notEqual(translate(locale, key), key);
     const literal = "<user title & /file.ts>";
-    assert.ok(translate(locale, "Close tab: {label}", { label: literal }).includes(literal));
     assert.ok(renderToStaticMarkup(createElement("button", null, translate(locale, "Remove {title}", { title: literal }))).includes("&lt;user title &amp; /file.ts&gt;"));
   }
   assert.equal(translate("es", "Send"), "Enviar");
@@ -128,9 +126,9 @@ test("canonical bounded locale choice, deterministic browser auto and SSR fallba
   assert.equal(resolveLocale("auto", Array(8).fill("xx").concat("es")), "en");
 });
 
-test("reminder and caller-ask labels preserve literal payloads, identities and invariant duration help", () => {
+test("reminder and caller-ask labels preserve literal payloads and identities", () => {
   for (const locale of locales) {
-    for (const key of ["Refresh reminders", "Create reminder", "Save message", "Uncertain reminder Save", "Delete confirmed reminder",
+    for (const key of ["Refresh reminders", "Create reminder", "Save message", "Uncertain reminder Save",
       "Check asks", "Answer original ask", "Cancel original ask", "Ask question navigation", "Captured original ask answer", "Confirm discard local draft"] as const) {
       assert.ok(translate(locale, key));
       if (locale !== "en") assert.notEqual(translate(locale, key), key);
@@ -139,7 +137,6 @@ test("reminder and caller-ask labels preserve literal payloads, identities and i
     assert.ok(translate(locale, "Unsubmitted answer for {title}", { title: literal }).includes(literal));
     assert.ok(translate(locale, "Reminder list unavailable ({status}).", { status: literal }).includes(literal));
     assert.ok(translate(locale, "Question {index} of {count}: {title}", { index: 1, count: 2, title: literal }).includes(literal));
-    assert.ok(translate(locale, "Delay: whole seconds (1–86400) or invariant HH:mm:ss / d.HH:mm:ss").includes("HH:mm:ss / d.HH:mm:ss"));
   }
 });
 

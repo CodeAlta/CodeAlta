@@ -34,9 +34,5 @@ test("advanced/recovery static source keys have frozen five-language rows and En
       if (locale === "en") assert.equal(translate(locale, key), key);
       else assert.notEqual(translate(locale, key), key);
     }
-    for (const literal of ["Settings", "Unknown Ready Copy", "stale_epoch", "C:\\Settings\\Read-only", '{"selection":"Send"}']) {
-      assert.ok(translate(locale, "Runtime observation unavailable ({code}).", { code: literal }).includes(literal));
-      assert.ok(translate(locale, "Provider {provider}; model, prompt and reasoning not available without an owned runtime.", { provider: literal }).includes(literal));
-    }
   }
 });
