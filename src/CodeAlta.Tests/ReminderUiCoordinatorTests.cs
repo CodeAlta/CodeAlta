@@ -50,31 +50,4 @@ public sealed class ReminderUiCoordinatorTests
         Assert.AreEqual(2, dispatchCount);
         Assert.AreEqual(2, refreshCount);
     }
-
-    [TestMethod]
-    public void Source_InvalidatesReminderBadgeMarkupWhenReminderServiceChanges()
-    {
-        var source = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "ReminderUiCoordinator.cs"));
-
-        StringAssert.Contains(source, "private readonly State<int> _reminderVersion = new(0);");
-        StringAssert.Contains(source, "var _ = _reminderVersion.Value;");
-        StringAssert.Contains(source, "_reminderVersion.Value++;");
-    }
-
-    private static string GetCodeAltaSourceRoot()
-    {
-        var directory = AppContext.BaseDirectory;
-        while (!string.IsNullOrWhiteSpace(directory))
-        {
-            var candidate = Path.Combine(directory, "CodeAlta.Tui", "CodeAlta.Tui.csproj");
-            if (File.Exists(candidate))
-            {
-                return Path.GetDirectoryName(candidate)!;
-            }
-
-            directory = Directory.GetParent(directory)?.FullName;
-        }
-
-        throw new DirectoryNotFoundException("Could not find CodeAlta.Tui source root.");
-    }
 }

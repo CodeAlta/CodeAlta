@@ -200,41 +200,6 @@ public sealed class SessionDisplayRpcTests
         Assert.AreEqual(2, item.Session.ToolActivities.Length); // No mutation of the earlier replacement.
     }
 
-    [TestMethod]
-    [Ignore("Brittle source-text inspection is not a functional desktop acceptance test.")]
-    public void GeneratedChannel_IsOwnedOnly_AndUsesDisplayWithoutOriginalEventOrStoreReads()
-    {
-        string Read(string path) => File.ReadAllText(Path.Combine(DesktopArchitectureTests.SourceRoot, "CodeAlta", path));
-        var app = Read("Desktop/DesktopApplication.cs");
-        var registration = "builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));";
-        Assert.AreEqual(1, app.Split(registration, StringSplitOptions.None).Length - 1);
-        var ownedStart = app.IndexOf("private async ValueTask RunOwnedAsync", StringComparison.Ordinal);
-        var readOnlyStart = app.IndexOf("private async ValueTask RunAsync", StringComparison.Ordinal);
-        Assert.IsTrue(app.IndexOf(registration, StringComparison.Ordinal) > ownedStart);
-        Assert.IsTrue(app.IndexOf(registration, StringComparison.Ordinal) < readOnlyStart);
-        StringAssert.Contains(app, "MaximumChannelsPerSession = 2, MaximumUnacknowledgedChannelItems = 2");
-        var service = Read("Desktop/Rpc/SessionDisplayRpc.cs");
-        StringAssert.Contains(service, "display.ObserveAsync(cancellationToken)");
-        foreach (var forbidden in new[] { "StreamEventsAsync", "SessionRuntimeEvent", "CodeAltaHost", "File.", "Directory.", "ReadHistory", "AdmitSend", "Exception.Message" })
-            Assert.IsFalse(service.Contains(forbidden, StringComparison.Ordinal), forbidden);
-        using var manifest = JsonDocument.Parse(Read("obj/neoastra/neoastra.manifest.json"));
-        var command = manifest.RootElement.GetProperty("services").EnumerateArray().Single(s => s.GetProperty("name").GetString() == "display")
-            .GetProperty("commands").EnumerateArray().Single();
-        Assert.AreEqual("observe", command.GetProperty("name").GetString());
-        Assert.IsTrue(command.GetProperty("channel").GetBoolean());
-        Assert.AreEqual(typeof(SessionDisplayItem).FullName, command.GetProperty("response").GetString());
-        var generated = Read("obj/neoastra/neoastra.ts");
-        StringAssert.Contains(generated, "Promise<AsyncIterable<SessionDisplayItem>>");
-        StringAssert.Contains(generated, "readonly \"revision\": string | null");
-        StringAssert.Contains(Read("frontend/src/main.tsx"), "createSessionDisplayStore(sessionDisplay.observe)");
-        StringAssert.Contains(Read("frontend/src/OwnedSessionPanel.tsx"), "<LiveSessionPanel store={display} hostEpoch={epoch} sessionId={sessionId} capability={capability} />");
-        StringAssert.Contains(Read("frontend/src/LiveSessionPanel.tsx"), "Reload the Desktop UI before continuing");
-        StringAssert.Contains(Read("frontend/src/LiveSessionPanel.tsx"), "disabled={!canMutate || state?.code === \"stale_epoch\" || state?.cleanupBlocked}");
-        StringAssert.Contains(Read("frontend/src/LiveSessionPanel.tsx"), "store.select(hostEpoch, sessionId, capability.observe)");
-        StringAssert.Contains(Read("frontend/src/LiveSessionPanel.tsx"), "owned.selection.detach()");
-        StringAssert.Contains(Read("frontend/src/LiveSessionPanel.tsx"), "useSyncExternalStore(capability.subscribe, capability.canMutate)");
-    }
-
     private static SessionAgentEvent Text(string session, string text) => new(session,
         new AgentContentDeltaEvent(new ModelProviderId("fake"), session, DateTimeOffset.UtcNow, new AgentRunId("run"),
             AgentContentKind.Assistant, "content", null, text));

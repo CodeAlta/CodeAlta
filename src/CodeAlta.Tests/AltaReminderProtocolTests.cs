@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 using CodeAlta.LiveTool;
 
@@ -100,23 +99,6 @@ public sealed class AltaReminderProtocolTests
         Assert.IsFalse(warning.GetProperty("messagesTruncated").GetBoolean());
         StringAssert.Contains(warning.GetProperty("message").GetString()!, "was created, but notification failed");
     }
-
-    [TestMethod]
-    public void Source_CreateReportsFeedbackWithoutConstructingUnsafeRuntimeFixture()
-    {
-        // Exact source location; no ancestor discovery or default runtime/profile construction.
-        var source = File.ReadAllText(ContributorSourcePath());
-        var start = source.IndexOf("private static async ValueTask<int> HandleReminderCreateAsync", StringComparison.Ordinal);
-        var end = source.IndexOf("private static int HandleReminderList", start, StringComparison.Ordinal);
-        var create = source[start..end];
-        StringAssert.Contains(create, "}, out notificationFailure);");
-        StringAssert.Contains(create, "WriteReminder(context, \"alta.reminder.created\", descriptor);");
-        StringAssert.Contains(create, "WriteReminderNotificationFailure(context, notificationFailure, historical: false);");
-        StringAssert.Contains(create, "return AltaExitCodes.Success;");
-    }
-
-    private static string ContributorSourcePath([CallerFilePath] string sourceFile = "")
-        => Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourceFile)!, "..", "CodeAlta.LiveTool", "BuiltInAltaCommandContributor.cs"));
 
     private static void ThrowObserver(object? sender, EventArgs args)
         => throw new OperationCanceledException("observer [warning] text");

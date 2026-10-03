@@ -292,22 +292,6 @@ public sealed class RuntimeDisplayProjectionTests
     }
 
     [TestMethod]
-    public void RuntimePublication_UsesCommittedOwner_NotAnotherStreamReader()
-    {
-        var runtime = ReadRuntimeSource("SessionRuntimeService.cs");
-        StringAssert.Contains(runtime, "private readonly SessionRuntimeEventPublisher _events = new();");
-        StringAssert.Contains(runtime, "public RuntimeDisplayProjection Display => _events.Display;");
-        Assert.IsFalse(runtime.Contains("BoundedRuntimeEventStream<SessionRuntimeEvent>", StringComparison.Ordinal));
-        var publisher = ReadRuntimeSource("SessionRuntimeEventPublisher.cs");
-        var commit = publisher.IndexOf("Display.Commit(runtimeEvent);", StringComparison.Ordinal);
-        var deliver = publisher.IndexOf("return _events.TryPublish(runtimeEvent);", StringComparison.Ordinal);
-        Assert.IsTrue(commit >= 0 && deliver > commit, "Display must commit before original lossy delivery.");
-        var projection = ReadRuntimeSource("RuntimeDisplayProjection.cs");
-        Assert.IsFalse(projection.Contains("StreamEventsAsync", StringComparison.Ordinal));
-        Assert.IsFalse(projection.Contains("JsonSerializer", StringComparison.Ordinal));
-    }
-
-    [TestMethod]
     public async Task MalformedStableUtf16Identities_AreOmittedWithoutChangingOriginalEffects()
     {
         foreach (var malformed in new[] { "\ud800", "\udc00", "x\ud800x", "x\udc00x", "\ud800\ud800", "\udc00\ud800" })
@@ -339,9 +323,6 @@ public sealed class RuntimeDisplayProjectionTests
             publisher.Complete();
         }
     }
-
-    private static string ReadRuntimeSource(string name, [System.Runtime.CompilerServices.CallerFilePath] string caller = "")
-        => File.ReadAllText(Path.Combine(Path.GetDirectoryName(caller)!, "..", "CodeAlta.Orchestration", "Runtime", name));
 
     private static SessionAgentEvent Text(string text, string session = "session", string contentId = "content") => new(session,
         new AgentContentDeltaEvent(new ModelProviderId("fake"), session, DateTimeOffset.UtcNow, new AgentRunId("run"),

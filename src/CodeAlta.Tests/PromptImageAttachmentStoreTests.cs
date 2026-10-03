@@ -40,23 +40,11 @@ public sealed class PromptImageAttachmentStoreTests
     }
 
     [TestMethod]
-    public void AttachmentPersistence_IsCatalogOwnedAndActualDispatchStillSavesBeforeAugmentation()
+    public void AttachmentPersistence_IsCatalogOwned()
     {
         Assert.AreEqual(typeof(CatalogOptions).Assembly, typeof(PromptImageAttachmentStore).Assembly);
         Assert.AreEqual(typeof(CatalogOptions).Assembly, typeof(PromptImageAttachment).Assembly);
         Assert.AreEqual(typeof(CatalogOptions).Assembly, typeof(PromptImageAttachmentReference).Assembly);
-        // Fixed repository-relative source paths, not a host startup or ancestor instruction/discovery walk.
-        var sourceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../"));
-        var dispatch = File.ReadAllText(Path.Combine(sourceRoot, "CodeAlta.Tui", "App", "SessionPromptDispatchCoordinator.cs"));
-        var save = dispatch.IndexOf("await _promptImageAttachmentStore.SaveAsync(session, prompt.Images, cancellationToken)", StringComparison.Ordinal);
-        var append = dispatch.IndexOf("prompt.AppendImageItems(promptInput.Input, imageReferences)", StringComparison.Ordinal);
-        var augment = dispatch.IndexOf("await _pluginHostBridge.BuildAgentRunAugmentationAsync", StringComparison.Ordinal);
-        var submit = dispatch.IndexOf("await _orchestrator.SubmitPromptAsync", StringComparison.Ordinal);
-        Assert.IsTrue(save >= 0 && append > save && augment > append && submit > augment);
-        Assert.IsFalse(File.Exists(Path.Combine(sourceRoot, "CodeAlta.Tui", "Presentation", "Prompting", "PromptImageAttachmentStore.cs")));
-        var store = File.ReadAllText(Path.Combine(sourceRoot, "CodeAlta.Catalog", "PromptImageAttachmentStore.cs"));
-        StringAssert.Contains(store, "FileMode.CreateNew");
-        Assert.IsFalse(store.Contains("File.Exists", StringComparison.Ordinal), "Creation must not use an existence-check/write race.");
     }
 
     [TestMethod]

@@ -178,23 +178,4 @@ public sealed class SessionPermissionsRpcTests
         await Assert.ThrowsAsync<OperationCanceledException>(() => service.ListAsync(new(Epoch, "session"), listCancellation.Token));
         await Assert.ThrowsAsync<OperationCanceledException>(() => service.ResolveAsync(new(Epoch, handle, "allow_once"), resolveCancellation.Token));
     }
-
-    [TestMethod]
-    [Ignore("Brittle source-text inspection is not a functional desktop acceptance test.")]
-    public void OwnedRegistrationAndGeneratedContract_UseOnlyNarrowMailboxAdapters()
-    {
-        string Read(string path) => File.ReadAllText(Path.Combine(DesktopArchitectureTests.SourceRoot, "CodeAlta", path));
-        var app = Read("Desktop/DesktopApplication.cs");
-        var registration = "builder.AddSessionPermissionsService(new SessionPermissionsService(host.RuntimeService.Permissions, epoch, options.ReviewOwnedCommandPermissions));";
-        Assert.AreEqual(1, app.Split(registration, StringSplitOptions.None).Length - 1);
-        Assert.IsTrue(app.IndexOf(registration, StringComparison.Ordinal) > app.IndexOf("private async ValueTask RunOwnedAsync", StringComparison.Ordinal));
-        Assert.IsTrue(app.IndexOf(registration, StringComparison.Ordinal) < app.IndexOf("private async ValueTask RunAsync", StringComparison.Ordinal));
-        StringAssert.Contains(app, "ReviewOwnedCommandPermissions = options.ReviewOwnedCommandPermissions");
-        StringAssert.Contains(Read("Desktop/Rpc/SessionPermissionsRpc.cs"), "permissions.ListOwnedCommandsAsync, permissions.ResolveOwnedCommandAsync");
-        using var manifest = JsonDocument.Parse(Read("obj/neoastra/neoastra.manifest.json"));
-        var commands = manifest.RootElement.GetProperty("services").EnumerateArray().Single(service => service.GetProperty("name").GetString() == "sessionPermissions")
-            .GetProperty("commands").EnumerateArray().ToArray();
-        CollectionAssert.AreEquivalent(new[] { "list", "resolve" }, commands.Select(command => command.GetProperty("name").GetString()!).ToArray());
-        Assert.IsTrue(commands.All(command => !command.TryGetProperty("channel", out var channel) || !channel.GetBoolean()));
-    }
 }

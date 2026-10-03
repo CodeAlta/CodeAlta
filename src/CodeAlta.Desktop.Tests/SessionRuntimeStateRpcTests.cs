@@ -161,35 +161,4 @@ public sealed class SessionRuntimeStateRpcTests
         Assert.AreEqual("9223372036854775807", generation.GetString());
         Assert.AreEqual(text, response.Entry!.PendingAgentPromptId);
     }
-
-    [TestMethod]
-    [Ignore("Brittle source-text inspection is not a functional desktop acceptance test.")]
-    public void UnaryQuery_IsRegisteredOnlyForOwnedDesktop_AndUsesActualRuntime()
-    {
-        string Read(string path) => File.ReadAllText(Path.Combine(DesktopArchitectureTests.SourceRoot, "CodeAlta", path));
-        var app = Read("Desktop/DesktopApplication.cs");
-        var registration = "builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(host.RuntimeService, epoch));";
-        Assert.AreEqual(1, app.Split(registration, StringSplitOptions.None).Length - 1);
-        Assert.IsTrue(app.IndexOf(registration, StringComparison.Ordinal) > app.IndexOf("private async ValueTask RunOwnedAsync", StringComparison.Ordinal));
-        Assert.IsTrue(app.IndexOf(registration, StringComparison.Ordinal) < app.IndexOf("private async ValueTask RunAsync", StringComparison.Ordinal));
-        StringAssert.Contains(Read("Desktop/Rpc/SessionRuntimeStateRpc.cs"), "runtime.GetCurrentStateAsync");
-        StringAssert.Contains(Read("frontend/src/main.tsx"), "useState(() => createRuntimeStateReader(sessionRuntimeState.current))");
-        StringAssert.Contains(Read("frontend/src/OwnedSessionPanel.tsx"), "runtimeReader.forSelection({ expectedHostEpoch: epoch, sessionId }, controller.signal, setRuntimeState, capability.observe)");
-        StringAssert.Contains(Read("frontend/src/OwnedSessionPanel.tsx"), "useSyncExternalStore(capability.subscribe, capability.canMutate)");
-        using var manifest = JsonDocument.Parse(Read("obj/neoastra/neoastra.manifest.json"));
-        var command = manifest.RootElement.GetProperty("services").EnumerateArray().Single(s => s.GetProperty("name").GetString() == "runtimeState")
-            .GetProperty("commands").EnumerateArray().Single();
-        Assert.AreEqual("current", command.GetProperty("name").GetString());
-        Assert.IsFalse(command.TryGetProperty("channel", out var channel) && channel.GetBoolean());
-        var runtime = File.ReadAllText(Path.Combine(DesktopArchitectureTests.SourceRoot, "CodeAlta.Orchestration", "Runtime", "SessionRuntimeService.cs"));
-        var start = runtime.IndexOf("public async Task<SessionRuntimeCurrentState> GetCurrentStateAsync", StringComparison.Ordinal);
-        var end = runtime.IndexOf("public async Task<bool> HasActiveRunAsync", start, StringComparison.Ordinal);
-        var query = runtime[start..end];
-        StringAssert.Contains(query, "AdmitAsync(() => GetCurrentStateOwnedBodyAsync(sessionId), cancellationToken)");
-        StringAssert.Contains(query, "_sessionActors.TryGet(sessionId, out var actor)");
-        StringAssert.Contains(query, "actor.QueryAsync");
-        StringAssert.Contains(query, "CancellationToken.None");
-        foreach (var forbidden in new[] { "GetActorForWork(", "GetOrCreate(", "_sessionViewCatalog.", "_agentHub.", "_projectCatalog.", "Display.", "ReadLatestLocalStateAsync(" })
-            Assert.IsFalse(query.Contains(forbidden, StringComparison.Ordinal), forbidden);
-    }
 }

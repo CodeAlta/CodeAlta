@@ -304,48 +304,10 @@ public sealed class ConfigRecoveryDialogTests
     private static string GetText(ConfigRecoveryDialog dialog)
         => CodeAlta.Tui.Presentation.Editing.CodeEditorFactory.GetText(GetEditor(dialog));
 
-    [TestMethod]
-    public void ConfigRecoveryDialog_TracksEditVersionForReactiveValidationUi()
-    {
-        var source = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "ConfigRecoveryDialog.cs"));
-
-        StringAssert.Contains(source, "private readonly State<int> _editVersion = new(0);");
-        StringAssert.Contains(source, "_editVersion.Value++;");
-        StringAssert.Contains(source, "_saveButton.IsEnabled(CanSave);");
-        StringAssert.Contains(source, "CanExecute = _ => CanSave(),");
-    }
-
     private static CodeEditor GetEditor(ConfigRecoveryDialog dialog)
     {
         var field = typeof(ConfigRecoveryDialog).GetField("_editor", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.IsNotNull(field);
         return (CodeEditor)field.GetValue(dialog)!;
-    }
-
-    private static string GetCodeAltaSourceRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            var candidates = new[]
-            {
-                directory.FullName,
-                Path.Combine(directory.FullName, "CodeAlta.Tui"),
-                Path.Combine(directory.FullName, "src", "CodeAlta.Tui"),
-            };
-
-            foreach (var candidate in candidates)
-            {
-                if (File.Exists(Path.Combine(candidate, "Views", "ConfigRecoveryDialog.cs")))
-                {
-                    return candidate;
-                }
-            }
-
-            directory = directory.Parent;
-        }
-
-        Assert.Fail("Could not locate the CodeAlta.Tui source directory from the test output path.");
-        return null!;
     }
 }

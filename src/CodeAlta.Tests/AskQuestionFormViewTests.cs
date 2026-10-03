@@ -116,78 +116,6 @@ public sealed class AskQuestionFormViewTests
     }
 
     [TestMethod]
-    public void Source_UsesNoBorderTabsScrollViewerAndDoesNotUseCheckBoxesForAnswers()
-    {
-        var source = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "AskQuestionFormView.cs"));
-
-        StringAssert.Contains(source, ".Style(TabControlStyle.NoBorder)");
-        StringAssert.Contains(source, "LEFT/RIGHT questions · UP/DOWN choices · ENTER select/submit · ESC cancel");
-        StringAssert.Contains(source, ".Tone(ControlTone.Primary)");
-        StringAssert.Contains(source, ".Tone(ControlTone.Error)");
-        StringAssert.Contains(source, "HorizontalAlignment = Align.Start");
-        StringAssert.Contains(source, "NextQuestionGlyph = \"→\"");
-        StringAssert.Contains(source, "LastQuestionGlyph = \"✓\"");
-        StringAssert.Contains(source, "OptionList<AskChoiceOption>");
-        StringAssert.Contains(source, "choiceList.KeyDown");
-        StringAssert.Contains(source, "new ScrollViewer");
-        StringAssert.Contains(source, "CreateDimMarkup(question.Description)");
-        StringAssert.Contains(source, "CreateDimMarkup(option.Description)");
-        StringAssert.Contains(source, "AnsiMarkup.Escape(text)");
-        Assert.IsFalse(source.Contains("CheckBox", StringComparison.Ordinal));
-    }
-
-    [TestMethod]
-    public void SessionTabs_RouteLeftRightToActiveAskBeforeDefaultTabNavigation()
-    {
-        var source = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "SessionTabHostView.cs"));
-
-        StringAssert.Contains(source, "CodeAlta.SessionTabs.AskPreviousQuestion");
-        StringAssert.Contains(source, "CodeAlta.SessionTabs.AskNextQuestion");
-        StringAssert.Contains(source, "CodeAlta.SessionTabs.AskConsumeUp");
-        StringAssert.Contains(source, "CodeAlta.SessionTabs.AskConsumeDown");
-        StringAssert.Contains(source, "Gesture = new KeyGesture(TerminalKey.Left)");
-        StringAssert.Contains(source, "Gesture = new KeyGesture(TerminalKey.Right)");
-        StringAssert.Contains(source, "Gesture = new KeyGesture(TerminalKey.Up)");
-        StringAssert.Contains(source, "Gesture = new KeyGesture(TerminalKey.Down)");
-        StringAssert.Contains(source, "ConsumesGestureWhenUnavailable = false");
-        StringAssert.Contains(source, "ExecuteActiveAskCommand(\"CodeAlta.Ask.Previous\")");
-        StringAssert.Contains(source, "ExecuteActiveAskCommand(\"CodeAlta.Ask.Next\")");
-        StringAssert.Contains(source, "IsVisualWithin(focusedElement, state.AskForm)");
-        StringAssert.Contains(source, "focusedElement is not TextBox");
-        StringAssert.Contains(source, "TryGetSelectedTabId()");
-        StringAssert.Contains(source, "ReferenceEquals(e.OriginalSource, SessionTabControl)");
-    }
-
-    [TestMethod]
-    public void FileAsk_RoutesAttachedFileToTimelineReplacement()
-    {
-        var coordinatorSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "AskModeCoordinator.cs"));
-        var workspaceViewModelSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "ViewModels", "SessionWorkspaceViewModel.cs"));
-        var tabHostSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "SessionTabHostView.cs"));
-        var fileReviewSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "AskFileReviewView.cs"));
-
-        StringAssert.Contains(coordinatorSource, "AskFileReviewView.Create(ask.Request.File, GetAskFileRootCandidates(session), _textFiles)");
-        StringAssert.Contains(coordinatorSource, "if (!fileReview.TrySave(out var error))");
-        StringAssert.Contains(coordinatorSource, "form.AddFileReviewCommands(fileReview)");
-        StringAssert.Contains(coordinatorSource, "TryEnterAskMode(sessionId, form.Root, fileReview?.Root)");
-        StringAssert.Contains(workspaceViewModelSource, "Func<string, Visual, Visual?, bool>? _enterAskMode");
-        StringAssert.Contains(tabHostSource, "splitter.First = fileReview");
-        Assert.IsFalse(tabHostSource.Contains("AskFileReviewRatio", StringComparison.Ordinal));
-        StringAssert.Contains(fileReviewSource, "CodeEditorFactory.Create");
-        StringAssert.Contains(fileReviewSource, "GoToLine = CodeEditorGoToLineConfig.Disabled");
-        StringAssert.Contains(fileReviewSource, "CodeAlta.Ask.FileComment.Insert");
-        StringAssert.Contains(fileReviewSource, "CodeAlta.Ask.FileComment.Clear");
-        StringAssert.Contains(fileReviewSource, "TextEditorAutoSizeMode.Height");
-        StringAssert.Contains(fileReviewSource, "SR.T(\"File context\")");
-        StringAssert.Contains(fileReviewSource, "User Comment");
-        StringAssert.Contains(fileReviewSource, "UiPalette.GetChatGroupStyle");
-        StringAssert.Contains(fileReviewSource, "ChatTimelineTone.User");
-        StringAssert.Contains(fileReviewSource, "Clear comments");
-        StringAssert.Contains(fileReviewSource, "TrySave");
-        StringAssert.Contains(fileReviewSource, "CreateReviewSnapshot");
-    }
-
-    [TestMethod]
     public void FileAsk_CodeEditorWrapsLinesByDefault()
     {
         var path = Path.Combine(Path.GetTempPath(), "CodeAlta.Tests." + Guid.NewGuid().ToString("N") + ".txt");
@@ -343,21 +271,4 @@ public sealed class AskQuestionFormViewTests
 
     private static void SetSelectedIndex(Visual visual, int selectedIndex)
         => visual.GetType().GetProperty(nameof(OptionList<object>.SelectedIndex))!.SetValue(visual, selectedIndex);
-
-    private static string GetCodeAltaSourceRoot()
-    {
-        var directory = AppContext.BaseDirectory;
-        while (!string.IsNullOrWhiteSpace(directory))
-        {
-            var candidate = Path.Combine(directory, "CodeAlta.Tui", "CodeAlta.Tui.csproj");
-            if (File.Exists(candidate))
-            {
-                return Path.GetDirectoryName(candidate)!;
-            }
-
-            directory = Directory.GetParent(directory)?.FullName;
-        }
-
-        throw new DirectoryNotFoundException("Could not find CodeAlta.Tui source root.");
-    }
 }

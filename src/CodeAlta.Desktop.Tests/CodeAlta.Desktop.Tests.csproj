@@ -10,12 +10,5 @@
     <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
     <ProjectReference Include="../CodeAlta/CodeAlta.csproj" />
     <ProjectReference Include="../CodeAlta.Plugin.Mcp/CodeAlta.Plugin.Mcp.csproj" />
-    <Compile Include="../CodeAlta.Tests/SourceTestText.cs" Link="SourceTestText.cs" />
-    <Compile Include="../CodeAlta.Tests/OwnedSessionAskSourceInverse.cs" Link="OwnedSessionAskSourceInverse.cs" />
-    <Compile Include="../CodeAlta.Tests/OwnedSessionNotesSourceInverse.cs" Link="OwnedSessionNotesSourceInverse.cs" />
-    <Compile Include="../CodeAlta.Tests/OwnedSessionUserInputSourceInverse.cs" Link="OwnedSessionUserInputSourceInverse.cs" />
-    <Compile Include="../CodeAlta.Tests/RuntimeFileSearchInvalidationSourceInverse.cs" Link="RuntimeFileSearchInvalidationSourceInverse.cs" />
-    <Compile Include="../CodeAlta.Tests/PluginAgentEventOwnershipSourceInverse.cs" Link="PluginAgentEventOwnershipSourceInverse.cs" />
-    <Compile Include="../CodeAlta.Tests/RuntimePluginLiveEventSourceInverse.cs" Link="RuntimePluginLiveEventSourceInverse.cs" />
   </ItemGroup>
 </Project>

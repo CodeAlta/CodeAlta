@@ -41,24 +41,6 @@ public sealed class ProgramThreadGuardTests
     }
 
     [TestMethod]
-    [Ignore("Code-shape preservation check; disabled in favor of behavioral coverage.")]
-    public void ProgramSource_VerifiesRunAsyncStartsOnMainThread()
-    {
-        var programSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Program.cs"));
-
-        Assert.IsTrue(programSource.Contains("var mainThreadId = Environment.CurrentManagedThreadId;", StringComparison.Ordinal));
-        Assert.IsTrue(programSource.Contains("Program.ThrowIfCurrentThreadIsNotMainThread(mainThreadId);", StringComparison.Ordinal));
-        Assert.IsTrue(programSource.Contains("Program.StartPluginRuntimeForCommandLine(args, CancellationToken.None);", StringComparison.Ordinal));
-        Assert.IsTrue(programSource.Contains("return command.RunAsync(args).AsTask().GetAwaiter().GetResult();", StringComparison.Ordinal));
-        Assert.IsTrue(programSource.Contains("ReportCommandLinePluginStartup(result, stopwatch.Elapsed, pluginBootstrapOptions);", StringComparison.Ordinal));
-        Assert.IsTrue(programSource.Contains("LogManager.GetLogger(\"CodeAlta.Program\").Error(ex, \"Top-level exception\");", StringComparison.Ordinal));
-        Assert.IsFalse(programSource.Contains("await Program.StartPluginRuntimeForCommandLineAsync", StringComparison.Ordinal));
-        Assert.IsFalse(programSource.Contains("return await command.RunAsync(args)", StringComparison.Ordinal));
-        Assert.IsTrue(programSource.Contains("internal partial class Program", StringComparison.Ordinal));
-        Assert.IsTrue(programSource.Contains("internal static void ThrowIfCurrentThreadIsNotMainThread(int mainThreadId)", StringComparison.Ordinal));
-    }
-
-    [TestMethod]
     public void CanStartPluginRuntimeBeforeConfigRecovery_MalformedGlobalConfig_ReturnsFalse()
     {
         var homeRoot = Path.Combine(Path.GetTempPath(), "CodeAlta.Tests", Guid.NewGuid().ToString("N"));
@@ -94,35 +76,6 @@ public sealed class ProgramThreadGuardTests
                 Directory.Delete(homeRoot, recursive: true);
             }
         }
-    }
-
-    private static string GetCodeAltaSourceRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            var candidates = new[]
-            {
-                directory.FullName,
-                Path.Combine(directory.FullName, "CodeAlta.Tui"),
-                Path.Combine(directory.FullName, "src", "CodeAlta.Tui"),
-            };
-
-            foreach (var candidate in candidates)
-            {
-                if (File.Exists(Path.Combine(candidate, "CodeAlta.Tui.csproj")) &&
-                    Directory.Exists(Path.Combine(candidate, "App")) &&
-                    Directory.Exists(Path.Combine(candidate, "Views")))
-                {
-                    return candidate;
-                }
-            }
-
-            directory = directory.Parent;
-        }
-
-        Assert.Fail("Could not locate the CodeAlta.Tui source directory from the test output path.");
-        return null!;
     }
 
     private static void InvokeGuard(int mainThreadId)
