@@ -14,6 +14,10 @@ public sealed class OwnedWorkspaceTimelineTests
     public async Task TimelineAndSource_ShareAdmission_RetainCanceledWait_AndJoinOnClose()
     {
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // The owner launches each admitted read asynchronously after releasing its gate, so the literal
+        // callbacks run concurrently on pool threads: publish them under a lock and signal the eighth start.
+        var actualGate = new object();
+        var eightStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var actual = new List<Task>();
         var waits = new List<Task>();
         var caller = new CancellationTokenSource();
@@ -22,12 +26,12 @@ public sealed class OwnedWorkspaceTimelineTests
             (id, cursor, token) =>
             {
                 Assert.AreEqual("selected", id); Assert.IsNull(cursor); Assert.AreEqual(CancellationToken.None, token);
-                var read = Timeline(); actual.Add(read); return read;
+                return Track(Timeline());
             }, (value, start, end, offset, token) =>
             {
                 Assert.AreSame(revision, value); Assert.AreEqual((0L, 100L, 0L), (start, end, offset));
                 Assert.AreEqual(CancellationToken.None, token);
-                var read = Source(); actual.Add(read); return read;
+                return Track(Source());
             });
         Task? close = null;
         try
@@ -35,12 +39,14 @@ public sealed class OwnedWorkspaceTimelineTests
             Assert.ThrowsExactly<ArgumentException>(() => owner.ReadTimelinePageAsync(" ", null, default));
             Assert.ThrowsExactly<ArgumentException>(() => owner.ReadHistorySourceAsync(revision with { SessionId = " " }, 0, 100, 0, default));
             Assert.ThrowsExactly<OperationCanceledException>(() => owner.ReadTimelinePageAsync("selected", null, new CancellationToken(true)));
-            Assert.AreEqual(0, actual.Count);
+            Assert.AreEqual(0, ActualCount());
             var canceled = owner.ReadHistorySourceAsync(revision, 0, 100, 0, caller.Token); waits.Add(canceled);
             for (var i = 0; i < 7; i++) waits.Add(owner.ReadTimelinePageAsync("selected", null, default));
             var cancel = caller.CancelAsync(); waits.Add(cancel); await cancel;
             await Assert.ThrowsAsync<OperationCanceledException>(() => canceled);
-            Assert.AreEqual(8, actual.Count);
+            // The canceled wait does not cancel its admitted read: all eight actual reads still start.
+            await eightStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.AreEqual(8, ActualCount());
             Assert.ThrowsExactly<InvalidOperationException>(() => owner.ReadHistorySourceAsync(revision, 0, 100, 0, default));
             Assert.ThrowsExactly<InvalidOperationException>(() => owner.ReadHistoryPageAsync("selected", null, default));
             close = owner.DisposeAsync().AsTask();
@@ -56,10 +62,23 @@ public sealed class OwnedWorkspaceTimelineTests
             close ??= owner.DisposeAsync().AsTask();
             // Start independent finite observations before joining; canceled caller wait is expected,
             // original callbacks and owner drain must succeed before disposing caller resources.
-            var actualObservers = actual.Append(close).Select(task => task.WaitAsync(TimeSpan.FromSeconds(5))).ToArray();
+            // A read that starts after this snapshot is still joined by the owner drain observed below.
+            Task[] started;
+            lock (actualGate) started = actual.ToArray();
+            var actualObservers = started.Append(close).Select(task => task.WaitAsync(TimeSpan.FromSeconds(5))).ToArray();
             var waitObservers = waits.Select(ObserveWait).ToArray();
             await Task.WhenAll(actualObservers.Concat(waitObservers));
             caller.Dispose();
+        }
+        int ActualCount() { lock (actualGate) return actual.Count; }
+        Task<T> Track<T>(Task<T> read)
+        {
+            lock (actualGate)
+            {
+                actual.Add(read);
+                if (actual.Count == 8) eightStarted.TrySetResult();
+            }
+            return read;
         }
         async Task<AgentSessionHistoryPage> Timeline() { await release.Task; return new([], null, false); }
         async Task<AgentHistorySourceChunk> Source() { await release.Task; return new("literal", null); }
