@@ -7,6 +7,21 @@ export type RuntimeTarget = Readonly<{ tab: SessionTab; request: SessionRuntimeS
 export type RuntimeObservation = Readonly<{ label: string; details: string; stale?: boolean; epoch?: string; runtime?: string; attachment?: string; activity?: SessionRuntimeActivityResponse; running?: boolean; projectId?: string | null }>;
 type Read = (request: SessionRuntimeScopedRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<SessionRuntimeScopedResponse>;
 export const maximumRuntimeRows = 32;
+type LiveRun = Readonly<{ running: boolean; projectId: string | null }>;
+export type RuntimeObservationState = Readonly<{ rows: ReadonlyMap<string, RuntimeObservation>; summary: string; live: ReadonlyMap<string, LiveRun> }>;
+
+/** Whether a session is working: what its open panel reports wins over the last polled observation. */
+export function sessionRunning(state: RuntimeObservationState, tab: SessionTab): boolean {
+  const key = tabKey(tab), row = state.rows.get(key);
+  return state.live.get(key)?.running ?? (!!row?.running && !row.stale);
+}
+
+/** Whether any known session of a project (or global session, for null) is working. */
+export function projectRunning(state: RuntimeObservationState, projectId: string | null): boolean {
+  for (const run of state.live.values()) if (run.running && run.projectId === projectId) return true;
+  for (const [key, row] of state.rows) if (row.projectId === projectId && row.running && !row.stale && !state.live.has(key)) return true;
+  return false;
+}
 
 export function runtimeTarget(snapshot: WorkspaceSnapshot | undefined, tab: SessionTab, epoch: string | undefined): RuntimeTarget | null {
   if (!snapshot || !epoch || snapshot.sessions.filter(row => row.id === tab.sessionId).length !== 1) return null;
@@ -37,9 +52,9 @@ export function createRuntimeObservations(read: Read) {
   let generation = 0;
   let abort: AbortController | undefined;
   let fences = new Map<string, RuntimeObservation>();
-  let state: Readonly<{ rows: ReadonlyMap<string, RuntimeObservation>; summary: string }> = { rows: new Map(), summary: "Not observed. Refresh explicitly; no polling." };
+  let state: RuntimeObservationState = { rows: new Map(), summary: "Not observed. Refresh explicitly; no polling.", live: new Map() };
   const listeners = new Set<() => void>();
-  const publish = (rows: ReadonlyMap<string, RuntimeObservation>, summary: string) => { state = { rows, summary }; for (const listener of listeners) listener(); };
+  const publish = (rows: ReadonlyMap<string, RuntimeObservation>, summary: string, live = state.live) => { state = { rows, summary, live }; for (const listener of listeners) listener(); };
   function invalidate() {
     generation++; abort?.abort(); abort = undefined;
     if (state.rows.size) publish(new Map([...state.rows].map(([key, row]) => [key, { ...row,
@@ -49,13 +64,24 @@ export function createRuntimeObservations(read: Read) {
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     getSnapshot: () => state,
     invalidate,
+    /** Records what the open panel of a session sees of its run; null when the panel stops watching. */
+    setLive(tab: SessionTab, running: boolean | null) {
+      const key = tabKey(tab), current = state.live.get(key);
+      if (running === null ? !current : current?.running === running) return;
+      const live = new Map(state.live);
+      if (running === null) live.delete(key); else live.set(key, { running, projectId: tab.projectId });
+      publish(state.rows, state.summary, live);
+    },
     async refresh(targets: readonly RuntimeTarget[], omitted = 0) {
+      const before = state.rows;
       invalidate(); const version = generation; const controller = new AbortController(); abort = controller;
       const unique = new Map(targets.map(target => [tabKey(target.tab), target]));
       const selected = [...unique.values()].slice(0, maximumRuntimeRows);
       fences = new Map(selected.flatMap(target => { const key = tabKey(target.tab); const prior = fences.get(key); return prior ? [[key, prior] as const] : []; }));
       const missing = omitted + targets.length - selected.length;
-      const rows = new Map<string, RuntimeObservation>(selected.map(target => [tabKey(target.tab), { label: "Loading observation…", details: "Explicit read only; no permission implied." }]));
+      // A row keeps its last known activity while it reloads, so a running indicator does not blink on every refresh.
+      const rows = new Map<string, RuntimeObservation>(selected.map(target => { const key = tabKey(target.tab), prior = before.get(key);
+        return [key, { label: "Loading observation…", details: "Explicit read only; no permission implied.", running: prior?.running, projectId: prior?.projectId }]; }));
       const summary = (count: number) => `${count}/${selected.length} observed responses; ${missing} omitted/unverified (maximum 32 per refresh). Not atomic across actors; never a recentness or liveness report.`;
       publish(rows, summary(0));
       let completed = 0;

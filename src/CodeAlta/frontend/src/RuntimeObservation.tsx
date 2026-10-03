@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { tabKey, type SessionTab } from "./sessionTabs";
-import type { createRuntimeObservations } from "./runtimeObservations";
+import { projectRunning, sessionRunning, type createRuntimeObservations } from "./runtimeObservations";
 import { useShellLanguage } from "./shellLanguage";
 
 export type RuntimeObservationControls = { store: ReturnType<typeof createRuntimeObservations>; enabled: boolean; canObserve: (tab: SessionTab) => boolean; refresh: (tabs: readonly SessionTab[]) => void };
@@ -10,31 +10,26 @@ export type RuntimeObservationControls = { store: ReturnType<typeof createRuntim
 export function RunningSessionBadge({ controls, tab, projectId }: { controls: RuntimeObservationControls; tab?: SessionTab; projectId?: string | null }) {
   const { t } = useShellLanguage();
   const state = useSyncExternalStore(controls.store.subscribe, controls.store.getSnapshot);
-  const rows = tab ? [state.rows.get(tabKey(tab))] : [...state.rows.values()].filter(row => row.projectId === projectId);
-  if (!controls.enabled || tab && !controls.canObserve(tab) || !rows.some(row => row?.running && !row.stale)) return null;
+  if (!controls.enabled || (tab ? !controls.canObserve(tab) || !sessionRunning(state, tab) : !projectRunning(state, projectId ?? null))) return null;
   return <span className="session-running"><ActivitySpinner size={12} label={t("Running")} /></span>;
 }
 
-/** Tab-title activity: a spinner while the session runs, otherwise the compact observation dot. */
+/** Tab-title activity: a spinner while the session runs, nothing otherwise. */
 export function SessionTabActivity({ controls, tab }: { controls: RuntimeObservationControls; tab: SessionTab }) {
   const { t } = useShellLanguage();
   const state = useSyncExternalStore(controls.store.subscribe, controls.store.getSnapshot);
-  const row = state.rows.get(tabKey(tab));
-  if (controls.enabled && controls.canObserve(tab) && row?.running && !row.stale)
-    return <span className="runtime-observation runtime-observation-compact" title={`${row.label}\n${row.details}`}><ActivitySpinner size={12} label={t("Running")} /></span>;
-  return <RuntimeObservationBadge controls={controls} tab={tab} compact />;
+  if (!controls.enabled || !controls.canObserve(tab) || !sessionRunning(state, tab)) return null;
+  return <span className="session-running"><ActivitySpinner size={12} label={t("Running")} /></span>;
 }
 
-export function RuntimeObservationBadge({ controls, tab, compact = false }: { controls: RuntimeObservationControls; tab: SessionTab; compact?: boolean }) {
+export function RuntimeObservationBadge({ controls, tab }: { controls: RuntimeObservationControls; tab: SessionTab }) {
   const { t } = useShellLanguage();
   const state = useSyncExternalStore(controls.store.subscribe, controls.store.getSnapshot);
   const row = state.rows.get(tabKey(tab));
   const eligible = controls.enabled && controls.canObserve(tab);
   const label = !eligible ? t("Unknown · archived/unverified or unavailable") : row ? `${row.stale ? t("Stale · ") : ""}${row.label}` : t("Unknown · not observed");
-  return <span className={`runtime-observation${compact ? " runtime-observation-compact" : ""}`} aria-label={compact ? label : undefined}
-    title={`${label}\n${eligible && row ? row.details : t("Not observed; archived/catalog-only/unverified rows are not queried. Never permission to send or abort.")}`}>
-    {compact ? (eligible && row && !row.stale ? "●" : "○") : label}
-  </span>;
+  return <span className="runtime-observation"
+    title={`${label}\n${eligible && row ? row.details : t("Not observed; archived/catalog-only/unverified rows are not queried. Never permission to send or abort.")}`}>{label}</span>;
 }
 
 export function RuntimeObservationRefresh({ controls, tabs, disabled = false }: { controls: RuntimeObservationControls; tabs: readonly SessionTab[]; disabled?: boolean }) {

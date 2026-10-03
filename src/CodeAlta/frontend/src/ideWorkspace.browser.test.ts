@@ -96,20 +96,6 @@ test("actual IDE workspace geometry and width changes retain the mounted compose
       if (width === 1120) { assert.ok(geometry.composer.height <= 132, "idle composer <=132px"); assert.ok(geometry.timeline.height >= geometry.workspace.height * .55, "timeline >=55% workspace"); }
       assert.ok(geometry.timeline.height > 0, "timeline remains reachable");
       assert.ok(geometry.composer.bottom <= height, `composer bottom ${geometry.composer.bottom} <= viewport ${height}`);
-      await evaluate(`window.matrixKept={input:document.querySelector('#session-prompt'),timeline:document.querySelector('.timeline-scroll'),
-        draft:document.querySelector('#session-prompt').value,selection:[document.querySelector('#session-prompt').selectionStart,document.querySelector('#session-prompt').selectionEnd],
-        calls:JSON.stringify(settingsShellFixture.rpcCalls),streams:JSON.stringify(settingsShellFixture.displayEvidence())};
-        document.querySelector('.timeline-width-toggle').click()`); await frames();
-      const expanded = await evaluate(`({timeline:document.querySelector('.timeline-scroll').getBoundingClientRect().toJSON(),
-        content:document.querySelector('.content').getBoundingClientRect().toJSON(),scroll:document.documentElement.scrollWidth})`);
-      assert.equal(expanded.timeline.width, expanded.content.width, `full bounds ${width}/${theme}/${locale}: ${JSON.stringify(expanded)}`);
-      assert.ok(expanded.scroll <= width, `full width page overflow: ${JSON.stringify(expanded)}`);
-      await evaluate("document.querySelector('.timeline-width-toggle').click()"); await frames();
-      const retained = await evaluate(`({input:matrixKept.input===document.querySelector('#session-prompt'),timeline:matrixKept.timeline===document.querySelector('.timeline-scroll'),
-        draft:matrixKept.draft===document.querySelector('#session-prompt').value,selection:JSON.stringify(matrixKept.selection)===JSON.stringify([document.querySelector('#session-prompt').selectionStart,document.querySelector('#session-prompt').selectionEnd]),
-        calls:matrixKept.calls===JSON.stringify(settingsShellFixture.rpcCalls),streams:matrixKept.streams===JSON.stringify(settingsShellFixture.displayEvidence()),
-        restoredWidth:document.querySelector('.timeline-scroll').getBoundingClientRect().width})`);
-      assert.deepEqual(retained, {input:true,timeline:true,draft:true,selection:true,calls:true,streams:true,restoredWidth:geometry.timeline.width}, `restore lifetime ${width}/${theme}/${locale}: ${JSON.stringify(retained)}`);
       if (width < 875) {
         await evaluate("document.querySelector('.activity-rail button').click()"); await frames();
         const explorer = await evaluate(`(()=>{const rail=document.querySelector('.session-rail'),slot=document.querySelector('.session-content-rail-slot');
@@ -128,24 +114,8 @@ test("actual IDE workspace geometry and width changes retain the mounted compose
         await evaluate("document.querySelector('.project-sort-controls > summary').click();document.querySelector('.activity-rail button').click()"); await frames();
       }
     }
-    await evaluate(`window.restoreEvidence=[];window.captureRestore=(stage)=>{const shell=document.querySelector('.workspace-shell');
-      const timeline=document.querySelector('.timeline-scroll');restoreEvidence.push({stage,viewport:[innerWidth,innerHeight],
-        savedWidth:window.ideKept?.width,currentWidth:timeline.getBoundingClientRect().width,sameTimeline:window.ideKept?.timeline===timeline,
-        shell:shell.className,columns:getComputedStyle(shell).gridTemplateColumns,railHidden:document.querySelector('#project-rail').hidden,
-        full:document.querySelector('.timeline-width-toggle').getAttribute('aria-pressed')})}`);
     await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 750, deviceScaleFactor: 1, mobile: false });
     await evaluate("workflowLanguage('en')"); await frames();
-    await evaluate("window.ideKept={input:document.querySelector('#session-prompt'),calls:JSON.stringify(settingsShellFixture.rpcCalls),timeline:document.querySelector('.timeline-scroll'),width:document.querySelector('.timeline-scroll').getBoundingClientRect().width};captureRestore('capture');captureRestore('before-click');document.querySelector('.timeline-width-toggle').click()"); await frames();
-    assert.equal(await evaluate("ideKept.input===document.querySelector('#session-prompt') && ideKept.calls===JSON.stringify(settingsShellFixture.rpcCalls) && document.querySelector('.session-content-rail-slot').hidden && document.querySelector('#project-rail').hidden"), true);
-    const fullBounds = await evaluate("({timeline:document.querySelector('.timeline-scroll').getBoundingClientRect().toJSON(),content:document.querySelector('.content').getBoundingClientRect().toJSON()})");
-    assert.equal(fullBounds.timeline.width, fullBounds.content.width, `full content bounds: ${JSON.stringify(fullBounds)}`);
-    await evaluate("document.querySelector('.timeline-width-toggle').click()"); await frames();
-    assert.equal(await evaluate("ideKept.input===document.querySelector('#session-prompt') && ideKept.calls===JSON.stringify(settingsShellFixture.rpcCalls)"), true);
-    await evaluate("captureRestore('after-restore')");
-    const restoreEvidence = await evaluate("restoreEvidence");
-    t.diagnostic(JSON.stringify({ restoreEvidence }));
-    await writeFile(join(evidence, `restore-diagnostic-${stamp}.json`), JSON.stringify(restoreEvidence, null, 2));
-    assert.equal(await evaluate("ideKept.timeline===document.querySelector('.timeline-scroll') && ideKept.width===document.querySelector('.timeline-scroll').getBoundingClientRect().width"), true, "timeline identity and width restored");
     await evaluate(`window.scrollEvidence=[];window.captureScroll=(stage)=>{const el=document.querySelector('.timeline-scroll');const bounds=el.getBoundingClientRect();
       const row=[...el.querySelectorAll('[data-message-key],.timeline-message')].find(n=>n.getBoundingClientRect().bottom>bounds.top);
       scrollEvidence.push({stage,probe:window.ideScrollProbe?.(),scrollTop:el.scrollTop,scrollHeight:el.scrollHeight,clientHeight:el.clientHeight,

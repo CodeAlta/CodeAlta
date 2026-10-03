@@ -1,5 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AppIcon } from "./AppIcon";
+import { AppWindow } from "./AppWindow";
 import { commandKeys, searchCommands, type CommandDefinition, type CommandId } from "./commandRegistry";
 import { useShellLanguage } from "./shellLanguage";
 
@@ -13,28 +14,27 @@ export function KeyGesture({ gesture }: { gesture: string }) {
 
 /**
  * The command palette (Ctrl+P, or "/" in an empty prompt): search by slash name, label or description
- * and run a command with Enter. Commands that cannot run right now are listed but dimmed.
+ * and run a command with Enter. Commands that cannot run right now are listed but dimmed. It is a
+ * movable, resizable window like the others; its place and size are remembered.
  */
 export function CommandPalette({ available, onChoose, onClose }: {
   available: (id: CommandId) => boolean; onChoose: (id: CommandId) => void; onClose: () => void;
 }) {
   const { t } = useShellLanguage();
-  const dialog = useRef<HTMLDialogElement>(null);
+  const search = useRef<HTMLInputElement>(null);
   const results = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const matches = useMemo(() => searchCommands(query, command => t(command.label), command => t(command.description)), [query, t]);
   const index = Math.max(0, Math.min(active, matches.length - 1));
   const grouped = query.trim() === "";
-  useLayoutEffect(() => {
-    const element = dialog.current;
-    element?.showModal();
-    return () => { if (element?.open) element.close(); };
-  }, []);
   useLayoutEffect(() => { results.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" }); }, [index, query]);
   const run = (command: CommandDefinition | undefined) => { if (command && available(command.id)) onChoose(command.id); };
   const move = (delta: number) => { if (matches.length) setActive((index + delta + matches.length * pageStep) % matches.length); };
-  return <dialog ref={dialog} className="command-palette" aria-modal="true" aria-label={t("Command Palette")}
+  return <AppWindow storageKey="codealta.desktop.window.palette.v1" className="command-palette" titleId="palette-title"
+    title={<><AppIcon name="search" size={14} /> {t("Command Palette")}</>}
+    preferredSize={viewport => ({ width: Math.min(820, viewport.width - 32), height: Math.min(560, viewport.height - 64) })}
+    minimumSize={{ width: 380, height: 220 }} onClose={onClose} closeLabel={t("Close")} onOpened={() => search.current?.focus()}
     onClick={event => { if (event.target === event.currentTarget) onClose(); }}
     onCancel={event => { event.preventDefault(); onClose(); }}
     onKeyDown={event => {
@@ -47,9 +47,8 @@ export function CommandPalette({ available, onChoose, onClose }: {
         : event.key === "Enter" ? (run(matches[index]), true) : false;
       if (handled) event.preventDefault();
     }}>
-    <div className="command-palette-surface">
       <div className="command-palette-search"><AppIcon name="search" size={16} />
-        <input autoFocus id="palette-search" type="text" role="combobox" aria-autocomplete="list" aria-expanded="true" spellCheck={false}
+        <input ref={search} id="palette-search" type="text" role="combobox" aria-autocomplete="list" aria-expanded="true" spellCheck={false}
           aria-controls="palette-results" aria-activedescendant={matches[index] ? `palette-option-${matches[index].id}` : undefined}
           placeholder={t("Type a command…")} aria-label={t("Search commands")} value={query}
           onChange={event => { setQuery(event.target.value); setActive(0); }} /></div>
@@ -65,6 +64,5 @@ export function CommandPalette({ available, onChoose, onClose }: {
           </div></div>)}
         {!matches.length && <p className="command-palette-empty" role="status">{t("No command matches.")}</p>}
       </div>
-    </div>
-  </dialog>;
+  </AppWindow>;
 }

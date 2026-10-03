@@ -58,7 +58,7 @@ export function sendFailureMessage(status: string, reason?: string): string {
   }
 }
 
-export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount, activeReminderCount = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true }: {
+export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount, activeReminderCount = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true }: {
   active?: boolean;
   observing?: boolean;
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
@@ -80,6 +80,8 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   configuration?: ConfigurationSnapshot;
   remindersTrigger?: Ref<HTMLButtonElement>;
   compactTrigger?: Ref<HTMLButtonElement>;
+  /** Reports whether this session is working while the panel watches it, and null once it no longer does. */
+  onRunActivity?: (running: boolean | null) => void;
   onOpenReminders?: () => void;
   /** A prompt from the New session tab: sent once, when this composer holds exactly that text and its choices are validated. */
   autoSend?: { text: string; consume: () => void } | null;
@@ -350,6 +352,12 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   }, [page, runtimeState, invalidEpoch, sessionId, submittedThinking]);
   const composerBusy = !invalidEpoch && (!!pending?.inFlight || !!submittedThinking || runActive);
   const thinkingSeconds = useThinkingElapsed(composerBusy);
+  const runActivity = useRef(onRunActivity); runActivity.current = onRunActivity;
+  useEffect(() => {
+    if (!observing) return;
+    runActivity.current?.(composerBusy);
+    return () => runActivity.current?.(null);
+  }, [composerBusy, observing, sessionId]);
   const mcpPlugin = configuration?.plugins.find(plugin => `${plugin.id} ${plugin.name}`.toLowerCase().includes("mcp"));
   const canCaptureSteer = captureSteering(epoch, sessionId, observedTarget, steerText, "availability") !== null;
   const availableComposerSteer = captureSteering(epoch, sessionId, observedTarget, text, "availability");

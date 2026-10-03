@@ -107,14 +107,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         ModelCatalogService? providers = null;
         WorkspaceService? workspace = null;
         NeoWindow? window = null;
-        IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null;
+        IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null, chromeLifetime = null;
         var bodyFailed = false;
         try
         {
-            window = application.CreateWindow(DesktopWindowPlacement.Apply(new NeoWindowOptions
-            {
-                Label = "main", Title = "CodeAlta — starting owned text-only host", IsVisible = false,
-            }));
+            window = application.CreateWindow(DesktopWindowChrome.WindowOptions());
             application.MainWindow = window;
             window.Closed += (_, _) => closed.TrySetResult();
             window.CloseRequested += request =>
@@ -181,7 +178,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 {
                     // Leave room for ordinary pasted images and their base64/JSON overhead.
                     // Owned-only host-wide inbound UTF-8 framing cap, not a per-image/response limit.
-                    var builder = new NeoRpcBuilder(new NeoRpcOptions
+                    var chrome = await DesktopWindowChrome.StartAsync(application, options.DataRoot);
+                    chromeLifetime = chrome;
+                    var builder = new NeoRpcBuilder(chrome.Authorize(new NeoRpcOptions
                     {
                         ContractHash = NeoRpcGeneratedContract.Hash, Release = true, MaximumFrameBytes = 128 * 1024 * 1024,
                         MaximumChannelsPerSession = 34, MaximumUnacknowledgedChannelItems = 2,
@@ -192,7 +191,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         // concurrent calls. Background observations exhaust its 4096 default.
                         MaximumRetainedRequestIds = 1_000_000,
                         DiagnosticSink = new DesktopRpcDiagnostics(),
-                    });
+                    }));
+                    chrome.AddHandlers(builder);
                     builder.AddBootService(new BootService(epoch, options.ReviewOwnedCommandPermissions, options.EnableOwnedUserInput));
                     builder.AddWorkspaceService(workspace);
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime));
@@ -220,12 +220,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionPermissionsService(new SessionPermissionsService(host.RuntimeService.Permissions, epoch, options.ReviewOwnedCommandPermissions));
                     var rpc = builder.Build();
                     rpcLifetime = rpc;
-                    var creatingView = environment.CreateWebViewAsync(NeoAstraHost.FillWindow(window), new NeoAstraOptions
-                    {
-                        ViewLabel = "main",
-                        BridgePolicy = OperatingSystem.IsLinux() ? NeoBridgePolicy.TrustEntireView : NeoBridgePolicy.TrustedOrigins,
-                        BridgeOrigins = OperatingSystem.IsLinux() ? [] : ["app://codealta"],
-                    });
+                    var creatingView = environment.CreateWebViewAsync(NeoAstraHost.FillWindow(window), DesktopWindowChrome.ViewOptions());
                     var view = await creatingView;
                     viewLifetime = view;
                     if (!closeRequested.Task.IsCompleted)
@@ -273,12 +268,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             GC.KeepAlive(bindingLifetime);
             GC.KeepAlive(viewLifetime);
             GC.KeepAlive(rpcLifetime);
+            GC.KeepAlive(chromeLifetime);
             GC.KeepAlive(environmentLifetime);
             GC.KeepAlive(window);
             return; // No native-resource disposal, lease release or ForceShutdown on this path.
         }
         var nativeFailed = false;
-        foreach (var resource in new[] { bindingLifetime, viewLifetime, rpcLifetime, environmentLifetime })
+        foreach (var resource in new[] { bindingLifetime, viewLifetime, rpcLifetime, chromeLifetime, environmentLifetime })
         {
             if (resource is null) continue;
             try
@@ -297,6 +293,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             GC.KeepAlive(bindingLifetime);
             GC.KeepAlive(viewLifetime);
             GC.KeepAlive(rpcLifetime);
+            GC.KeepAlive(chromeLifetime);
             GC.KeepAlive(environmentLifetime);
             GC.KeepAlive(window);
             return;
@@ -328,10 +325,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
     {
         try
         {
-            await using var window = application.CreateWindow(DesktopWindowPlacement.Apply(new NeoWindowOptions
-            {
-                Label = "main", Title = "CodeAlta — in development", IsVisible = false,
-            }));
+            await using var window = application.CreateWindow(DesktopWindowChrome.WindowOptions());
             application.MainWindow = window;
             var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             window.Closed += (_, _) => closed.TrySetResult();
@@ -343,7 +337,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 UserDataRoot = Path.Combine(options.DataRoot, "webview"),
                 CustomSchemes = [NeoCustomScheme.Application("app", new NeoManifestResourceProvider(assets, manifest))],
             });
-            var builder = new NeoRpcBuilder(new NeoRpcOptions { ContractHash = NeoRpcGeneratedContract.Hash, Release = true });
+            await using var chrome = await DesktopWindowChrome.StartAsync(application, options.DataRoot);
+            var builder = new NeoRpcBuilder(chrome.Authorize(new NeoRpcOptions { ContractHash = NeoRpcGeneratedContract.Hash, Release = true }));
+            chrome.AddHandlers(builder);
             builder.AddBootService(new BootService());
             builder.AddWorkspaceService(new WorkspaceService(options.CatalogRoot));
             builder.AddConfigurationService(new ConfigurationService(options.CatalogRoot!));
@@ -356,12 +352,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddModelCatalogService(new ModelCatalogService());
             await using var rpc = builder.Build();
             window.Show();
-            await using var view = await environment.CreateWebViewAsync(NeoAstraHost.FillWindow(window), new NeoAstraOptions
-            {
-                ViewLabel = "main",
-                BridgePolicy = OperatingSystem.IsLinux() ? NeoBridgePolicy.TrustEntireView : NeoBridgePolicy.TrustedOrigins,
-                BridgeOrigins = OperatingSystem.IsLinux() ? [] : ["app://codealta"],
-            });
+            await using var view = await environment.CreateWebViewAsync(NeoAstraHost.FillWindow(window), DesktopWindowChrome.ViewOptions());
             view.NavigationRequested = request => ValueTask.FromResult(new NeoNavigationDecision(
                 IsApplicationDocument(request.Uri) ? NeoDecisionAction.Allow : NeoDecisionAction.Cancel));
             view.NewWindowRequested = static _ => ValueTask.FromResult(new NeoNewWindowDecision(NeoDecisionAction.Cancel));

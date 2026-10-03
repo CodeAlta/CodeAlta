@@ -10,7 +10,7 @@ export type CommandId =
   | "usage" | "sessionInfo" | "reminders" | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest"
   | "expandPrompt" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "clearQueue" | "compact"
   | "newSession" | "browseSessions" | "searchSessions" | "toggleNotes" | "previousSession" | "nextSession"
-  | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses";
+  | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses" | "exit";
 export type CommandCategory = "General" | "Prompt" | "Session" | "Navigation" | "Inspection";
 export type CommandDefinition = Readonly<{
   id: CommandId;
@@ -39,6 +39,7 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "openProject", name: "open", label: "Open", description: "Open a project by name or folder.", category: "General", keys: ["Ctrl+O"], search: "project folder open_project open_folder" },
   { id: "newSession", name: "new_session", label: "New Session", description: "Start a new session in the selected project.", category: "General", search: "create session draft" },
   { id: "about", name: "about", label: "About", description: "Show the version of CodeAlta.", category: "General", keys: ["Ctrl+G Ctrl+A"] },
+  { id: "exit", name: "exit", label: "Exit", description: "Close CodeAlta.", category: "General", keys: ["Ctrl+Q"], search: "quit close" },
   { id: "skills", name: "skills", label: "Skills", description: "Enable, disable and create skills.", category: "General", keys: ["Ctrl+G Ctrl+K"], search: "skill" },
   { id: "plugins", name: "plugins", label: "Plugins", description: "Enable or disable plugins.", category: "General", keys: ["Ctrl+G Ctrl+N"], search: "plugin" },
   { id: "mcp", name: "mcp", label: "MCP Servers", description: "Add and edit Model Context Protocol servers.", category: "General", keys: ["Ctrl+G Ctrl+Y"], search: "model context protocol servers tools" },

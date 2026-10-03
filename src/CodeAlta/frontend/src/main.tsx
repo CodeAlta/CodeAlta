@@ -90,11 +90,13 @@ import { SessionTabMenu } from "./SessionTabMenu";
 import { isSessionContextKey, restoreSessionMenuFocus, sessionActionAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
 import { projectRailProjection } from "./projectRail";
 import { ProjectRailRows } from "./ProjectRailRows";
-import { maximumIdeWidth, minimumIdeWidth, parseIdeWidth, persistIdeWidth, resizeIdeWidth } from "./ideWidth";
+import { defaultIdeWidth, maximumIdeWidth, minimumIdeWidth, parseIdeWidth, persistIdeWidth, resizeIdeWidth } from "./ideWidth";
 import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./projectRailVisibility";
 import { useWindowPreferences } from "./windowPreferences";
 import { GeneralSettings } from "./GeneralSettings";
 import { createHostLiveness, hostPingInterval, hostPingTimeout } from "./hostLiveness";
+import { installKeyboardClickGuard } from "./keyboardClickGuard";
+import { closeApplicationWindow, useWindowTitleBar, WindowBrand, WindowControls } from "./windowChrome";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
 import { workflowNotice, type WorkflowNotice } from "./workflowNotice";
 import { translate, type MessageKey } from "./localization";
@@ -149,6 +151,7 @@ function App() {
   const [error, setError] = useState<string>();
   const [hostLiveness] = useState(() => createHostLiveness(() => boot.status({}, { timeoutMilliseconds: hostPingTimeout })));
   const hostSilent = useSyncExternalStore(hostLiveness.subscribe, hostLiveness.getSnapshot);
+  const windowSnapshot = useWindowTitleBar();
   const [workspaceState, setWorkspaceState] = useState<WorkspaceState>({ kind: "loading" });
   const currentSnapshot = useRef<WorkspaceSnapshot | undefined>(undefined);
   const projectInspection = useRef({ version: 0, ready: false });
@@ -396,7 +399,7 @@ function App() {
   });
   const [widthSaved, setWidthSaved] = useState(true);
   useEffect(() => { setWidthSaved(persistIdeWidth(value => localStorage.setItem("codealta.desktop.ide-width.v1", value), ideWidth)); }, [ideWidth]);
-  const railVisible = projectRailVisible(railState, narrow) && !ideWidth.full;
+  const railVisible = projectRailVisible(railState, narrow);
   const detailsPaneVisible = !(narrow && railVisible);
   const currentDetailsPaneVisible = useRef(detailsPaneVisible);
   currentDetailsPaneVisible.current = detailsPaneVisible;
@@ -660,7 +663,6 @@ function App() {
   }, [menuTarget, renamingId, deletingId, narrow, railVisible]);
   useEffect(() => { if (menuTarget && !activeMenu) setMenuTarget(null); }, [menuTarget, activeMenu]);
   const notice = snapshot ? workspaceNotice(snapshot) : null;
-  const connected = !!status?.hostAvailable;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
   // Explorer markers for sessions with active reminders: read when the host is ready, after every reminder
   // change made here, and on a slow interval because reminders also fire and complete on their own.
@@ -772,6 +774,7 @@ function App() {
 
   function runCommand(command: CommandId) {
     if (!commandAvailable(command)) return;
+    if (command === "exit") { closeApplicationWindow(); return; }
     // Settings is a modal window: only commands that move to another Settings page run while it is open.
     const pages: Partial<Record<CommandId, View>> = { settings: "appearance", about: "about", skills: "skills", plugins: "plugins", mcp: "mcp",
       config: "config", prompts: "prompts", providers: "providers", models: "models", logs: "logs" };
@@ -799,6 +802,10 @@ function App() {
     // Capture phase: the prompt editor (Monaco) must not see keys that belong to a command.
     function commandKey(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape") { commandChord.current = false; return; }
+      // Exit is global, as in the terminal UI: it also works while a window of the app is open.
+      if (!commandChord.current && resolveCommandKey(event, false, "none").command === "exit") {
+        event.preventDefault(); event.stopPropagation(); closeApplicationWindow(); return;
+      }
       const target = event.target instanceof HTMLElement ? event.target : null;
       const settingsOnly = settingsVisible.current && !dialog && !paletteOpen
         && document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]').length === 1;
@@ -1409,37 +1416,26 @@ function App() {
     || !!selectedProject?.archived || projectId !== null && !selectedProject || (!localDraft.text.trim() && !localImages.images.length)
     || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim());
   return <ShellLanguageContext.Provider value={language}><div className="app-shell ide-shell">
-    <header className="topbar">
-      <div className="brand"><span className="brand-mark">A</span><span>CodeAlta</span><small>{demoMode ? "interactive preview" : "desktop"}</small>
-      </div>
-      {!widthSaved && <span role="status">{t("Width preference could not be saved; current layout stays available.")}</span>}
-      {hostSilent ? <div className="connection connection-error connection-silent" role="alert">
-        <span className="connection-dot" />
-        {t("CodeAlta is not responding.")}
-        <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button>
-      </div>
-      : <div className={`connection ${error ? "connection-error" : connected ? "connection-live" : "connection-readonly"}`}>
-        <span className="connection-dot" />
-        {error ? "Bridge unavailable" : demoMode ? "Local demo" : connected ? "Runtime connected" : "Catalog only"}
-      </div>}
-    </header>
+    {(hostSilent || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
+      {hostSilent && <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
+        <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button></div>}
+      {!widthSaved && <div className="shell-notice" role="status">{t("Width preference could not be saved; current layout stays available.")}</div>}
+    </div>}
 
     {dialog === "reminders" && remindersCurrent && <RemindersDialog onClose={closeReminders}><ReminderScopeGate snapshot={snapshot} projectId={projectId}
           session={selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId ? selectedSession : undefined}
           epoch={owned && (currentProjectWritable() || !!snapshot && archivedProjectScope(snapshot, projectId)) ? status!.hostEpoch! : null}
           read={readReminders} readDetail={readReminderDetail} actions={reminderActions} mutationAllowed={!!mutation?.capability.canMutate()}
           canMutate={() => !!mutation?.capability.canMutate()} /></RemindersDialog>}
-      <div className={`workspace-shell${railVisible ? " project-rail-open" : ""}${ideWidth.full ? " full-content-width" : ""}`} ref={workspaceShell} style={{
+      <div className={`workspace-shell${railVisible ? " project-rail-open" : ""}`} ref={workspaceShell} style={{
           "--explorer-width": `${ideWidth.width}px`,
           "--project-pane-width": `${visiblePaneLayout.projects}px`,
           "--session-pane-width": `${visibleSessionWidth}px`,
         } as CSSProperties}>
+        <WindowBrand />
+        <WindowControls snapshot={windowSnapshot} />
         <nav className="activity-rail" aria-label={t("Workspace navigation")}>
-          <Button ref={projectRailToggle} variant="minimal" active={railVisible} icon={<AppIcon name="folder" size={20} />} aria-label={t("Explorer")} title={t("Explorer")} aria-expanded={railVisible} aria-controls="project-rail" onClick={() => { setIdeWidth(value => ({ ...value, full: false })); toggleProjects(); }} />
-          <Button variant="minimal" active={ideWidth.full} icon={<AppIcon name={ideWidth.full ? "compact" : "expand"} size={20} />} className="timeline-width-toggle" aria-label={t(ideWidth.full ? "Restore Explorer width" : "Use full content width")}
-            title={t(ideWidth.full ? "Restore Explorer width" : "Use full content width")} aria-pressed={ideWidth.full}
-            onClick={() => setIdeWidth(value => ({ ...value, full: !value.full }))} />
-          <Button variant="minimal" disabled={!sessionId} icon={<AppIcon name="notes" size={20} />} aria-label={t("Alta notes")} title={t("Alta notes")} onClick={() => setNotesVisible(value => !value)} />
+          <Button ref={projectRailToggle} variant="minimal" active={railVisible} icon={<AppIcon name="folder" size={20} />} aria-label={t("Explorer")} title={t("Explorer")} aria-expanded={railVisible} aria-controls="project-rail" onClick={toggleProjects} />
           <Button variant="minimal" icon={<AppIcon name="search" size={20} />} aria-label={t("Open command palette")} aria-haspopup="dialog" title={`${t("Open command palette")} (Ctrl+P)`} onClick={openPalette} />
           <Button variant="minimal" icon={<AppIcon name="settings" size={20} />} className="activity-settings" aria-label={t("Settings & extensions")} title={t("Settings & extensions")} onClick={() => navigate("appearance")} />
         </nav>
@@ -1501,7 +1497,7 @@ function App() {
           {projectRenameLocked && <button type="button" className="quiet-button" onClick={() => void refreshProjectRename()}>{t("Refresh project name (no retry)")}</button>}
         </aside>}
           splitter={<PaneSplitter className="session-splitter" label={t("Resize Explorer")} value={ideWidth.width} hidden={narrow || !railVisible}
-            onResize={delta => setIdeWidth(value => resizeIdeWidth(value, delta))} onReset={() => setIdeWidth({ width: 272, full: false })} />}
+            onResize={delta => setIdeWidth(value => resizeIdeWidth(value, delta))} onReset={() => setIdeWidth(defaultIdeWidth)} />}
           sessions={<aside className="session-rail" aria-label={t("Sessions")} ref={sessionRail} hidden={!railVisible}>
           {(sessionOptionsOpen || search !== "") && <InputGroup inputRef={searchInput} className="session-search" size="small" type="search" autoFocus
             leftIcon={<AppIcon name="search" size={14} className={Classes.ICON} />} value={search} title={notice || undefined}
@@ -1625,7 +1621,7 @@ function App() {
                 ? { expectedEpoch: status.hostEpoch, projectId: tab.projectId, projectPath: tab.path!, sessionId: row.id,
                   lifetime: creationGeneration.current, capturePopup: captureReferenceLifetime,
                   observe: value => mutation?.capability.observe(value) } : null}>
-              <SessionWorkspace session={row} snapshot={snapshot} selectedProjectId={tab.projectId} notesReader={owners.notesReader} observing={visible && view === "workspace" && !settingsOpen}
+              <SessionWorkspace session={row} snapshot={snapshot} selectedProjectId={tab.projectId} onRunActivity={running => runtimeObservations.setLive(tab, running)} notesReader={owners.notesReader} observing={visible && view === "workspace" && !settingsOpen}
                 active={tab.sessionId === sessionId} notesToggle={notesVisible} onActivate={() => { if (sessionId !== tab.sessionId) selectSessionTab(tab); }}
                 infoTrigger={sessionInfoTrigger} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger}
                 infoLifetime={{ revision: 0, current: () => !!currentSnapshot.current && !!resolveSessionTab(currentSnapshot.current, tab)
@@ -1819,7 +1815,9 @@ function createSessionPaneOwners() {
   };
 }
 
-function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null }: {
+function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity }: {
+  /** Reports whether the session is working while its panel watches it. */
+  onRunActivity?: (running: boolean | null) => void;
   /** A draft prompt to send once this session's composer holds it. */
   autoSend?: { text: string; consume: () => void } | null;
   /** Active reminders of this session as last reported by the host; null while unknown. */
@@ -1969,7 +1967,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
           style={composer.height === undefined ? undefined : { height: composer.height }}>
         <SessionComposerGate snapshot={snapshot} projectId={selectedProjectId} session={session}
           epoch={ownedHost ? status!.hostEpoch! : null}
-          owned={status?.hostEpoch && mutation ? <OwnedSessionPanel observing={observing} active={active} sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
+          owned={status?.hostEpoch && mutation ? <OwnedSessionPanel observing={observing} active={active} onRunActivity={onRunActivity} sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
               persistedUsage={persistedUsage} usageTarget={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? {
                 epoch: status.hostEpoch, sessionId: session.id, scope: selectedProjectId === null ? "global" : "project",
                 projectId: selectedProjectId, expectedProjectPath: selectedProjectId === null ? null : session.workspacePath } : null}
@@ -2065,4 +2063,5 @@ function PaneSplitter({ className, hidden, label, value, onResize, onReset }: {
     onDoubleClick={onReset} onKeyDown={keyDown}><span /></div>;
 }
 
+installKeyboardClickGuard(window);
 createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);

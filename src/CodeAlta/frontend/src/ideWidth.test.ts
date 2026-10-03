@@ -2,21 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { parseIdeWidth, resizeIdeWidth, persistIdeWidth } from "./ideWidth";
 
-test("Explorer width is bounded, full-content preserves its restore width and malformed storage is refused", () => {
-  assert.deepEqual(parseIdeWidth(null), { width: 272, full: false });
-  for (const value of ['{bad', 'null', '[]', '{"projects":280,"sessions":420}', '{"width":300}', '{"width":300,"full":"true"}'])
-    assert.deepEqual(parseIdeWidth(value), { width: 272, full: false });
-  assert.deepEqual(parseIdeWidth('{"width":999,"full":false}'), { width: 720, full: false });
-  assert.deepEqual(parseIdeWidth('{"width":600,"full":false}'), { width: 600, full: false });
-  assert.deepEqual(parseIdeWidth('{"width":1,"full":false}'), { width: 220, full: false });
-  assert.deepEqual(parseIdeWidth('{"width":300.6,"full":false}'), { width: 301, full: false });
-  assert.deepEqual(parseIdeWidth('{"width":300,"full":true}'), { width: 300, full: true });
-  assert.deepEqual(parseIdeWidth('{"width":"300","full":true}'), { width: 272, full: false });
-  assert.deepEqual(resizeIdeWidth({ width: 272, full: true }, 200), { width: 472, full: false });
-  assert.deepEqual(resizeIdeWidth({ width: 700, full: true }, 200), { width: 720, full: false });
-  assert.deepEqual(resizeIdeWidth({ width: 272, full: false }, -200), { width: 220, full: false });
-  assert.equal(persistIdeWidth(() => { throw new Error("storage denied"); }, { width: 272, full: true }), false);
+test("Explorer width is bounded and malformed storage is refused", () => {
+  assert.deepEqual(parseIdeWidth(null), { width: 272 });
+  for (const value of ['{bad', 'null', '[]', '{"projects":280,"sessions":420}', '{"width":"300"}'])
+    assert.deepEqual(parseIdeWidth(value), { width: 272 });
+  assert.deepEqual(parseIdeWidth('{"width":999}'), { width: 720 });
+  assert.deepEqual(parseIdeWidth('{"width":600}'), { width: 600 });
+  assert.deepEqual(parseIdeWidth('{"width":1}'), { width: 220 });
+  assert.deepEqual(parseIdeWidth('{"width":300.6}'), { width: 301 });
+  // A value saved when the Explorer could also be collapsed from here keeps its width.
+  assert.deepEqual(parseIdeWidth('{"width":300,"full":true}'), { width: 300 });
+  assert.deepEqual(resizeIdeWidth({ width: 272 }, 200), { width: 472 });
+  assert.deepEqual(resizeIdeWidth({ width: 700 }, 200), { width: 720 });
+  assert.deepEqual(resizeIdeWidth({ width: 272 }, -200), { width: 220 });
+  assert.equal(persistIdeWidth(() => { throw new Error("storage denied"); }, { width: 272 }), false);
   let saved = "legacy";
-  assert.equal(persistIdeWidth(value => { saved = value; }, { width: 304, full: true }), true);
-  assert.equal(saved, '{"width":304,"full":true}');
+  assert.equal(persistIdeWidth(value => { saved = value; }, { width: 304 }), true);
+  assert.equal(saved, '{"width":304}');
 });

@@ -50,6 +50,10 @@
   --green: var(--bp-palette-green-4);
   --red: var(--bp-palette-red-4);
   --shadow: var(--bp-surface-shadow-3);
+  --inline-code-text: var(--bp-palette-red-4);
+  --inline-code-surface: color-mix(in srgb, var(--bp-palette-white) 9%, transparent);
+  --inline-code-line: color-mix(in srgb, var(--bp-palette-white) 13%, transparent);
+  --scrim: rgba(0, 0, 0, .38);
 }
 
 :root[data-theme="light"] {
@@ -65,15 +69,20 @@
   --accent-strong: var(--bp-palette-blue-2);
   --green: var(--bp-palette-green-3);
   --red: var(--bp-palette-red-3);
+  --inline-code-text: var(--bp-palette-red-2);
+  --inline-code-surface: color-mix(in srgb, var(--bp-palette-black) 5%, transparent);
+  --inline-code-line: color-mix(in srgb, var(--bp-palette-black) 11%, transparent);
+  --scrim: rgba(255, 255, 255, .5);
 }
 
-* { box-sizing: border-box; scrollbar-color: var(--line-strong) transparent; scrollbar-width: auto; }
+* { box-sizing: border-box; }
 html, body, #root { min-width: 320px; width: 100%; height: 100%; min-height: 0; margin: 0; }
 body { background: var(--bg); color: var(--text); font-family: var(--bp-typography-family-default); font-size: var(--bp-typography-size-body-medium); line-height: var(--bp-typography-line-height-default); overflow: hidden; }
-*::-webkit-scrollbar { width: 12px; height: 12px; }
-*::-webkit-scrollbar-track { background: color-mix(in srgb, var(--panel) 75%, transparent); }
-*::-webkit-scrollbar-thumb { min-height: 30px; border: 3px solid transparent; border-radius: 999px; background: var(--line-strong); background-clip: padding-box; }
-*::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: padding-box; }
+/* Slim rounded scrollbars without arrow buttons; a standard scrollbar-color would bring the platform ones back. */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track, *::-webkit-scrollbar-corner { background: transparent; }
+*::-webkit-scrollbar-thumb { min-height: 30px; border: 3px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--text) 22%, transparent); background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--text) 40%, transparent); background-clip: padding-box; }
 button, input, textarea { font: inherit; }
 button { color: inherit; }
 input:not([type="checkbox"]):not([type="radio"]), textarea { color: var(--text); background: var(--panel-2); border: 1px solid var(--line-strong); border-radius: 7px; }
@@ -81,11 +90,7 @@ input:disabled, textarea:disabled { color: var(--muted); background: var(--panel
 button:not(.bp6-button):focus-visible, input:focus, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 code, pre { font-family: var(--bp-typography-family-mono); }
 
-.app-shell { height: 100vh; min-height: 0; display: grid; grid-template-rows: 58px minmax(0, 1fr); overflow: hidden; background: var(--bg); }
-.topbar { height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 18px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 94%, transparent); }
-.brand { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
-.brand small { color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .03em; text-transform: uppercase; }
-.brand-mark { display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--bp-surface-border-radius); color: var(--bp-palette-white); font-weight: 600; background: var(--bp-intent-primary-rest); }
+.app-shell { height: 100vh; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr); overflow: hidden; background: var(--bg); }
 .settings-dialog-body { display: flex; flex: 1; min-height: 0; min-width: 0; }
 .settings-dialog-navigation { flex: 0 0 200px; overflow-y: auto; padding: 15px 12px; border-right: 1px solid var(--line); }
 .settings-dialog-group + .settings-dialog-group { margin-top: 14px; }
@@ -97,11 +102,6 @@ code, pre { font-family: var(--bp-typography-family-mono); }
 .settings-dialog-content > .configuration-page { height: auto; overflow: visible; padding: 24px; }
 .settings-dialog-content > .settings-card-page + .configuration-page { padding-top: 18px; }
 .settings-dialog-content > :not(.configuration-page) { padding: 24px; }
-.connection { justify-self: end; display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
-.connection-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 3px color-mix(in srgb, var(--muted) 15%, transparent); }
-.connection-live .connection-dot, .connection-readonly .connection-dot { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 15%, transparent); }
-.connection-error .connection-dot { background: var(--red); }
-.connection-silent { color: var(--text); font-weight: 600; }
 
 .workspace-shell { min-width: 0; min-height: 0; display: grid; grid-template-columns: var(--project-pane-width, 240px) 8px minmax(calc(var(--session-pane-width, 310px) + 488px), 1fr); grid-template-areas: "projects project-resize session-content"; overflow: hidden; }
 .workspace-shell:not(.project-rail-open) { grid-template-columns: 0 0 minmax(calc(var(--session-pane-width, 310px) + 488px), 1fr); }
@@ -222,8 +222,7 @@ h1, h2, h3, p { margin-top: 0; }
 .notes-collapse-icon { transform: rotate(180deg); }
 .session-tabs .active-session-content { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 .active-session-content > .session-workspace { flex: 1 1 0; }
-.session-tabs .session-tab-label { display: block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-tabs .runtime-observation-compact { padding: 0 3px; border: 0; font-size: 11px; }
+.session-tabs .session-tab-label { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-tab-more { padding: 2px 8px; }
 .session-tab-popup { position: fixed; z-index: 1000; max-width: calc(100vw - 8px); max-height: calc(100dvh - 8px); overflow: auto;
   padding: 4px; border: 1px solid var(--line); border-radius: var(--bp-surface-border-radius); background: var(--panel); color: var(--text); box-shadow: var(--shadow); }
@@ -285,9 +284,9 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .markdown-content ul, .markdown-content ol { margin: 8px 0; padding-left: 24px; }
 .markdown-content li + li { margin-top: 3px; }
 .markdown-content blockquote { margin: 10px 0; padding: 2px 12px; border-left: 3px solid var(--accent); color: var(--muted); }
-.markdown-content code { padding: 1px 4px; border-radius: 4px; background: var(--panel-3); font-size: .92em; }
+.markdown-content code { padding: 1px 5px; border: 1px solid var(--inline-code-line); border-radius: 5px; color: var(--inline-code-text); background: var(--inline-code-surface); font-size: .9em; }
 .markdown-content pre { margin: 10px 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace; font-size: 12px; white-space: pre; }
-.markdown-content pre code { padding: 0; background: transparent; font-size: inherit; }
+.markdown-content pre code { padding: 0; border: 0; color: inherit; background: transparent; font-size: inherit; }
 .markdown-content table { width: 100%; margin: 10px 0; border-collapse: collapse; font-size: 12px; }
 .markdown-content th, .markdown-content td { padding: 6px 8px; border: 1px solid var(--line); text-align: left; }
 .markdown-content th { background: var(--panel-2); }
@@ -321,7 +320,6 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .composer { flex: 0 0 auto; position: relative; margin: 10px 4px 0; border: 1px solid var(--line-strong); border-radius: 14px; background: color-mix(in srgb, var(--panel-2) 96%, transparent); box-shadow: var(--shadow); overflow: hidden; }
 .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 65%, var(--line)); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow); }
 .session-browser { width: min(720px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); box-sizing: border-box; overflow: auto; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
-.session-browser::backdrop { background: #0008; }
 .session-browser header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .session-browser label { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
 .session-browser input, .session-browser select { min-width: 0; width: 100%; box-sizing: border-box; }
@@ -487,14 +485,12 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .permission-review-dialog pre, .permission-review-dialog dd, .permission-review-dialog p { white-space: pre-wrap; overflow-wrap: anywhere; }
 .permission-review-dialog dd { margin-left: 12px; }
 .permission-review-dialog footer { flex-wrap: wrap; gap: 8px; }
-.permission-review-dialog::backdrop { background: rgba(0, 0, 0, .62); }
 .provider-input-dialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); box-sizing: border-box; color: var(--text); overflow-y: auto; }
 .provider-input-dialog > * { flex-shrink: 0; min-width: 0; }
 .provider-input-dialog pre, .provider-input-dialog dd, .provider-input-dialog p, .provider-input-dialog button { white-space: pre-wrap; overflow-wrap: anywhere; }
 .provider-input-dialog dd { margin-left: 12px; }
 .provider-input-dialog fieldset { min-width: 0; border: 0; padding: 0; }
 .provider-input-dialog textarea { display: block; width: 100%; box-sizing: border-box; }
-.provider-input-dialog::backdrop { background: rgba(0, 0, 0, .62); }
 .file-change-inspection { min-width: 0; }
 .file-change-inspection ul { padding-left: 18px; }
 .file-change-inspection button { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; }
@@ -504,10 +500,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .session-info-dialog section h3 { margin: 12px 0 4px; font-size: 14px; }
 .session-info-dialog section p { font-size: 12px; color: var(--muted); }
 .session-usage-dialog { width: min(510px, calc(100vw - 32px)); max-height: min(640px, calc(100dvh - 32px)); color: var(--text); }
-.session-usage-dialog::backdrop { background: rgba(0, 0, 0, .62); }
 .session-usage-dialog > p { margin: 0 0 10px; font-size: 12px; overflow-wrap: anywhere; }
 .session-usage-dialog > footer { gap: 12px; flex-wrap: wrap; }
-.session-info-dialog::backdrop { background: rgba(0, 0, 0, .62); }
 .session-info-dialog > p { margin: 0 0 12px; font-size: 12px; }
 .session-info-fields { display: block; min-height: 0; overflow-y: auto; margin: 0; padding: 0 4px 0 0; }
 .session-info-fields > div { padding: 8px 0; border-bottom: 1px solid var(--line); }
@@ -551,15 +545,10 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 }
 
 @media (max-width: 875px) {
-  .brand small { display: none; }
-  .brand { flex-wrap: wrap; }
-  .topbar { position: sticky; top: 0; z-index: 5; height: auto; min-height: 58px; padding-block: 10px; }
   .settings-dialog-navigation { flex-basis: clamp(120px, 32%, 180px); padding: 12px 6px; }
   .settings-dialog-group h3 { padding-inline: 6px; }
   .settings-dialog-navigation button { padding-inline: 6px; overflow-wrap: anywhere; }
   .settings-dialog-content > .configuration-page, .settings-dialog-content > :not(.configuration-page) { padding: 14px; }
-  .connection { display: none; }
-  .app-shell { grid-template-rows: auto minmax(0, 1fr); }
   .workspace-shell, .workspace-shell:not(.project-rail-open) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(340px, 45vh) minmax(0, 1fr); grid-template-areas: "session-content" "session-content"; height: auto; }
   .workspace-shell.project-rail-open { grid-template-areas: "projects" "session-content"; }
   .session-content-rail-slot { grid-template-columns: minmax(0, 1fr); grid-template-areas: "sessions"; }
@@ -584,9 +573,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 }
 
 /* IDE presentation: stable workspace slot, one hierarchical Explorer. */
-.app-shell.ide-shell { grid-template-rows: 36px minmax(0, 1fr); }
-.ide-shell .topbar { min-height: 34px; padding: 3px 10px; }
-.ide-shell .workspace-shell { position: relative; grid-template-columns: 44px min(var(--explorer-width, 272px), 60vw) 5px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); grid-template-areas: "activity sessions explorer-resize content"; height: 100%; }
+.ide-shell .workspace-shell { position: relative; grid-template-columns: 44px min(var(--explorer-width, 272px), 60vw) 5px minmax(0, 1fr); grid-template-rows: var(--titlebar-height) minmax(0, 1fr); grid-template-areas: "brand brand brand content" "activity sessions explorer-resize content"; height: 100%; }
 .ide-shell .workspace-shell:not(.project-rail-open) { grid-template-columns: 44px 0 0 minmax(0, 1fr); }
 .ide-shell .activity-rail { grid-area: activity; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 2px; border-right: 1px solid var(--line); background: var(--panel); }
 .ide-shell .activity-settings { margin-top: auto; }
@@ -599,7 +586,6 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .project-rail, .ide-shell .session-rail { width: 100%; min-width: 0; min-height: 0; padding: 4px; overflow: auto; }
 .ide-shell .project-rail { border-bottom: 1px solid var(--line); }
 .ide-shell .project-rail .panel-title { padding: 2px 6px; min-height: 28px; }
-.ide-shell .full-content-width .content { padding-left: 0; padding-right: 0; }
 .ide-shell .active-session-content > .session-workspace { min-height: 0; }
 .ide-shell .session-workspace { width: 100%; min-width: 0; margin-left: 0; margin-right: 0; }
 .ide-shell .session-list { display: block; }
@@ -618,12 +604,11 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .composer-actions-menu[open] > div { position: absolute; z-index: 20; right: 6px; bottom: 40px; max-height: min(360px, 65vh); max-width: min(450px, 85vw); overflow: auto; padding: 8px; display: flex; flex-wrap: wrap; gap: 6px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 4px 20px #0004; }
 .ide-shell .composer-notice { margin: 2px 0; }
 @media (max-width: 875px) {
-  .ide-shell .workspace-shell, .ide-shell .workspace-shell:not(.project-rail-open) { grid-template-columns: 44px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); grid-template-areas: "activity content"; height: 100%; }
+  .ide-shell .workspace-shell, .ide-shell .workspace-shell:not(.project-rail-open) { grid-template-columns: 44px minmax(0, 1fr); grid-template-rows: var(--titlebar-height) minmax(0, 1fr); grid-template-areas: "brand content" "activity content"; height: 100%; }
   .ide-shell .project-rail { position: static; width: 100%; height: 100%; background: var(--panel); }
-  .ide-shell .session-content-rail-slot { position: absolute; z-index: 30; top: 0; bottom: 0; height: auto; left: 40px; width: min(320px, calc(100% - 40px)); background: var(--panel); box-shadow: var(--shadow); }
+  .ide-shell .session-content-rail-slot { position: absolute; z-index: 30; top: var(--titlebar-height); bottom: 0; height: auto; left: 44px; width: min(320px, calc(100% - 40px)); background: var(--panel); box-shadow: var(--shadow); }
   .ide-shell .session-rail { height: auto; }
   .ide-shell .prompt-options { max-width: calc(100vw - 155px); }
-  .ide-shell .brand small, .ide-shell .connection { font-size: 10px; }
 }
 
 /* Public FlexLayout theme variables inherit the selected application palette. */
@@ -639,8 +624,6 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
   --flexlayout-color-focus: var(--accent); --flexlayout-color-overflow: var(--muted);
   --flexlayout-font-size: var(--bp-typography-size-body-medium);
 }
-.ide-shell .flexlayout__tab_button { padding: 6px 9px; border-right: 1px solid var(--line); }
-.ide-shell .flexlayout__tab_button--selected { box-shadow: inset 0 2px var(--accent); }
 .ide-shell .timeline-scroll, .ide-shell .active-session-content { overflow-x: hidden; min-width: 0; }
 .ide-shell .messages { grid-template-columns: minmax(0, 1fr); }
 .ide-shell .timeline-message { min-width: 0; max-width: 100%; box-sizing: border-box; overflow-wrap: anywhere; }
@@ -653,8 +636,6 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .project-session-branch { position: relative; }
 .ide-shell .owned-session .prompt-options { display: flex; flex-wrap: nowrap; align-items: center; }
 .ide-shell .composer-toolbar .history-controls { gap: 7px; }
-.ide-shell .topbar { min-height: 36px; height: 36px; font-size: var(--bp-typography-size-body-medium); }
-.ide-shell .brand-mark { width: 22px; height: 22px; border-radius: var(--bp-surface-border-radius); font-size: var(--bp-typography-size-body-medium); }
 .ide-shell .project-rail { display: flex; flex-direction: column; height: 100%; padding: 4px; }
 .ide-shell .project-list { flex: 1 1 auto; overflow-y: auto; min-height: 0; padding: 0; }
 .ide-shell .nav-list > li { margin: 0; }
@@ -883,9 +864,10 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 @media (prefers-reduced-motion: reduce) { .activity-spinner > i { animation: none; opacity: .6; } }
 .session-running .activity-spinner, .flexlayout__tab_button_leading .activity-spinner { margin-inline: 2px; }
 .ide-shell .project-filter .bp6-icon, .ide-shell .session-search .bp6-icon { color: var(--muted); }
+/* The page behind a modal window is dimmed, never blurred: it stays readable. */
+dialog::backdrop { background: var(--scrim); }
 /* Desktop-style windows: a full-viewport modal layer hosting one movable, resizable surface (react-rnd). */
 .app-window-layer { position: fixed; inset: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; overflow: hidden; color: var(--text); background: transparent; }
-.app-window-layer::backdrop { background: rgba(0, 0, 0, .5); backdrop-filter: blur(3px); }
 .app-window { display: flex !important; flex-direction: column; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow), 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent), 0 0 42px color-mix(in srgb, var(--accent) 10%, transparent); }
 .app-window-titlebar { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; padding: 4px 8px 4px 16px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, var(--panel)), var(--panel)); cursor: move; user-select: none; }
 .app-window-titlebar h2 { min-width: 0; margin: 0; overflow: hidden; font-size: 14px; font-weight: 600; letter-spacing: .01em; text-overflow: ellipsis; white-space: nowrap; }
@@ -956,7 +938,6 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
    (react-rnd) is the visible window, so the dialog's own box, padding and scrolling are dropped. */
 dialog:is(.app-dialog, .session-browser):has(> .app-window) { position: fixed; inset: 0; display: block; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; overflow: hidden; color: var(--text); background: transparent; box-shadow: none; text-align: start; }
 dialog:is(.app-dialog, .session-browser):has(> .app-window):not([open]) { display: none; }
-dialog:is(.app-dialog, .session-browser):has(> .app-window)::backdrop { background: rgba(0, 0, 0, .5); backdrop-filter: blur(3px); }
 dialog:has(> .app-window) > .app-window > .app-window-body { gap: 10px; padding: 14px 16px; overflow: auto; }
 dialog:has(> .app-window) > .app-window > .app-window-body > * { flex-shrink: 0; min-width: 0; }
 dialog:has(> .app-window) > .app-window > .app-window-body > :is(p, h3, dl, pre, section) { margin: 0; }
@@ -1188,10 +1169,8 @@ dialog:has(> .app-window) > .app-window > .app-window-body > footer.reference-hi
 [data-file-tone="pink"] { color: #d98ad6; }
 [data-file-tone="muted"] { color: var(--muted); }
 
-/* Command palette: a search field over one list, anchored near the top like an editor's quick open. */
-dialog.command-palette { width: min(760px, calc(100vw - 32px)); max-width: none; max-height: none; margin: 11vh auto 0; padding: 0; border: 0; background: transparent; color: var(--text); overflow: visible; }
-dialog.command-palette::backdrop { background: rgba(0, 0, 0, .45); }
-.command-palette-surface { display: flex; flex-direction: column; max-height: min(620px, calc(100dvh - 11vh - 32px)); border: 1px solid var(--line-strong); border-radius: 10px; background: var(--panel); box-shadow: 0 24px 60px rgba(0, 0, 0, .5); overflow: hidden; }
+/* Command palette: a search field over one list. */
+dialog.command-palette > .app-window > .app-window-body { gap: 0; padding: 0; overflow: hidden; }
 .command-palette-search { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); color: var(--muted); }
 .command-palette-search input#palette-search { flex: 1; min-width: 0; height: auto; padding: 0; border: 0; border-radius: 0; outline: 0; background: transparent; color: var(--text); font-size: 15px; box-shadow: none; }
 .command-palette-results { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 6px 6px; }
@@ -1255,3 +1234,54 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body {
 .open-project-dialog #folder-suggestions { max-height: 150px; min-height: 0; margin: 0; overflow-y: auto; }
 .open-project-dialog #folder-suggestions > button { padding: 4px 8px; border-radius: 5px; }
 .open-project-notice { margin: 0; padding: 4px 14px; font-size: 12px; overflow-wrap: anywhere; }
+
+/* Chromeless window: the page draws the title bar. The application mark sits over the Explorer column and the
+   session tab strips along the top edge continue it up to the window controls. */
+.ide-shell { --titlebar-height: var(--neoastra-titlebar-height, 38px); --titlebar-inset-end: var(--neoastra-titlebar-inset-right, 0px); --brand-width: 132px; }
+.ide-shell .workspace-shell:has(> .window-controls) { --titlebar-inset-end: 138px; }
+.window-brand { grid-area: brand; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 0 12px 0 calc(11px + var(--neoastra-titlebar-inset-left, 0px)); overflow: hidden; background: var(--panel); white-space: nowrap; }
+.window-brand-mark { flex: none; width: 22px; height: 22px; }
+.window-brand-name { font-size: 13px; font-weight: 600; letter-spacing: .01em; }
+:root[data-neoastra-window-focused="false"] .window-brand-name { color: var(--muted); }
+/* Without the Explorer the mark keeps its name and the first tab strip starts after it. */
+.ide-shell .workspace-shell:not(.project-rail-open) .window-brand { position: relative; z-index: 1; width: var(--brand-width); }
+.ide-shell .workspace-shell:not(.project-rail-open) .flexlayout__tabset_tabbar_outer[data-titlebar-start] { padding-left: calc(var(--brand-width) - 44px); }
+.window-controls { position: absolute; z-index: 40; top: 0; right: 0; display: flex; height: var(--titlebar-height); }
+.window-controls > button { display: grid; place-items: center; width: 46px; height: 100%; padding: 0; border: 0; color: var(--text); background: transparent; }
+.window-controls > button:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
+.window-controls > .window-close:hover { color: var(--bp-palette-white); background: var(--bp-palette-red-3); }
+.window-controls svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1; }
+.shell-notices { position: fixed; z-index: 60; top: calc(var(--titlebar-height) + 8px); left: 50%; transform: translateX(-50%); display: grid; gap: 6px; width: max-content; max-width: calc(100vw - 32px); }
+.shell-notice { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); font-size: 12px; }
+.shell-notice[role="alert"] { border-color: color-mix(in srgb, var(--red) 55%, var(--line)); }
+/* Windows, menus and popovers that reach into the title bar stay clickable there. */
+.app-window, dialog[open]:not(.app-window-layer), .bp6-overlay-content, .bp6-toast, .session-tab-popup { app-region: no-drag; }
+
+/* Session tabs: browser-style tabs resting on the content they select. */
+.ide-shell .flexlayout__tabset_tabbar_outer_top { height: 34px; padding: 0; align-items: stretch; border-bottom: 0; background: var(--panel); box-shadow: inset 0 -1px var(--line); font-size: 12px; }
+.ide-shell .flexlayout__tabset_tabbar_outer_top[data-neoastra-drag-region] { height: var(--titlebar-height); }
+.ide-shell .flexlayout__tabset_tabbar_outer_top[data-titlebar-end] { padding-right: var(--titlebar-inset-end); }
+.ide-shell .flexlayout__tabset_tabbar_inner { align-items: stretch; }
+.ide-shell .flexlayout__tabset_tabbar_inner_tab_container { align-items: flex-end; padding: 0 6px; border-top: 0; }
+.ide-shell .flexlayout__tabset_tab_divider { align-self: center; width: 1px; height: 14px; margin: 0 1px 2px; background: var(--line); }
+.ide-shell .flexlayout__tab_button { app-region: no-drag; position: relative; height: calc(100% - 6px); min-width: 0; max-width: 240px; gap: 6px; padding: 0 6px 0 10px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; background: transparent; }
+.ide-shell .flexlayout__tab_button--unselected:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.ide-shell .flexlayout__tab_button--selected { border-color: var(--line); background: var(--bg); }
+.ide-shell .flexlayout__tabset-selected .flexlayout__tab_button--selected::before { content: ""; position: absolute; top: -1px; left: 8px; right: 8px; height: 2px; border-radius: 0 0 2px 2px; background: var(--accent); }
+.ide-shell .flexlayout__tab_button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.ide-shell .flexlayout__tab_button_leading:empty { display: none; }
+.ide-shell .flexlayout__tab_button_content { min-width: 0; overflow: hidden; }
+.ide-shell .flexlayout__tab_button_content > span { display: block; min-width: 0; }
+.ide-shell .flexlayout__tab_button_trailing { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; color: var(--muted); }
+.ide-shell .flexlayout__tab_button_trailing:hover { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }
+.ide-shell .flexlayout__tab_toolbar { align-self: center; padding: 0 6px; }
+
+/* Explorer rows: hover, selection and the focus ring cover the whole row, actions included, and the ring stays
+   inside the row instead of spilling over its neighbours. */
+.ide-shell .project-rail button:not(.bp6-button):focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.ide-shell .project-action-row, .ide-shell .session-row { border-radius: 4px; }
+.ide-shell .project-action-row:hover, .ide-shell .session-row:hover { background: var(--panel-2); }
+.ide-shell .project-action-row:has(> button[aria-pressed="true"]), .ide-shell .session-row:has(> button[aria-pressed="true"]) { background: var(--accent-soft); }
+.ide-shell .project-action-row > button:first-child, .ide-shell .session-row > button:first-child { border-color: transparent; background: transparent; }
+.ide-shell .project-action-row:has(> button:first-child:focus-visible), .ide-shell .session-row:has(> button:first-child:focus-visible) { outline: 1px solid var(--accent); outline-offset: -1px; }
+.ide-shell .project-rail .project-action-row > button:first-child:focus-visible, .ide-shell .project-rail .session-row > button:first-child:focus-visible { outline: 0; }

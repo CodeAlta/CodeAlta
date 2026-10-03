@@ -18,7 +18,7 @@ Chrome/WebView2; there is no direct native clipboard reader. Conversion errors n
 that the selected model lacks image support. Animation is reduced to one frame and source
 metadata is not retained.
 
-`CodeAlta` is the native desktop .NET tool (`alta`), built with published NeoAstra 0.2.1,
+`CodeAlta` is the native desktop .NET tool (`alta`), built with published NeoAstra 0.3.1,
 generated RPC, React/strict TypeScript and packaged local Vite assets. Node/npm is needed
 only to build. The installed application has no UI server or external asset origin.
 
@@ -70,8 +70,8 @@ global workspace, not the selected project: sessions from different projects can
 Drag a tab along the tab strip to reorder it, to a pane edge to create a split view, or to its center to merge
 (up to 32 open sessions); drag the divider between panes to resize them. The presentation uses
 stable content slots and one vertical Explorer with Projects above Sessions. Its width is locally
-saved (220–720 pixels, never more than 60% of the window); the full-content button hides it without discarding the restore width.
-Settings and the command palette are on the activity rail. The compact composer keeps secondary
+saved (220–720 pixels, never more than 60% of the window); the Explorer button on the activity rail hides it without discarding the width.
+The command palette and Settings are the other two buttons of the activity rail. The compact composer keeps secondary
 actions under **More composer actions**, with retained-request recovery separate. Alta notes belong
 to each session, start collapsed when empty, and open when meaningful content arrives. A small disclosure
 at the top right of the timeline expands/collapses their floating panel without resizing the timeline or
@@ -105,7 +105,7 @@ prolonged unavailability shows a small status indicator rather than raw timeline
 For a Send lockup, preserve the developer-console entries prefixed `[CodeAlta Send]` and
 `[CodeAlta RPC]`. They report composer guards, dispatch, safe framework error codes, elapsed time
 and UUID request keys, never prompt text or provider credentials. Match a dispatch key with
-`Send reached backend (<key>)` in application logs. With NeoAstra 0.2.1, `duplicate_request`
+`Send reached backend (<key>)` in application logs. With NeoAstra 0.3.1, `duplicate_request`
 means an active or retained completed request identity was reused;
 `too_many_requests` means admission/rate/channel pressure; `connection_closed` means transport
 loss. An uncancelled eight-second `operation_canceled` wait is consistent with the client timeout.
@@ -242,6 +242,17 @@ dotnet build -c Release
 
 The main window opens centered at 80% of the primary work area on Windows; other platforms use a
 centered 1280×860 window until NeoAstra exposes display metrics.
+
+The window has no separate title bar: the page draws it. The CodeAlta mark and name sit at the top
+left, the session tabs continue the same strip, and the platform's minimize, maximize and close
+buttons stay at the top right. Drag the mark or any empty part of a tab strip along the top edge to
+move the window, and double-click it to maximize or restore; tabs and buttons in that strip keep
+their own clicks and drags. With the Explorer hidden the tabs start right after the name. In a split
+layout only the panes along the top edge are part of the title bar.
+
+The view is an application shell rather than a browser page: the browser's own find, print, reload
+and zoom shortcuts, its context menu and its status bubble are turned off, so those keys reach
+CodeAlta's commands. Text-editing keys work as usual.
 
 No-argument startup derives a stable WebView data directory from the platform's local application-data
 location, composes the owned host for the current directory, and uses the current `~/.alta` catalog.
@@ -381,17 +392,26 @@ finished, not that the agent responded. A deletion cannot retract an already cap
 or an admitted run. Counts are point-in-time as of Refresh; a lost mutation response is held as
 uncertain for that host/session, with no automatic retry. Catalog-only mode cannot schedule work.
 
+### Running sessions
+
+While a session works, an activity spinner shows in three places: before the title of its tab, on its
+row and on its project's row in the Explorer, and in the status line above the prompt. For a session
+open in a visible pane the three follow the run itself and start and stop together. Sessions that are
+not open are checked every five seconds, so their Explorer spinner can lag by that much.
+
 ### Commands, help and keyboard shortcuts
 
 The desktop app uses the TUI's key map. `Ctrl+P` (or `/` in an empty prompt, or the search icon on
 the activity rail) opens the **command palette**: every command with its slash name, description and
 shortcut, grouped by category and searchable by any of them; Enter runs the selected command and
-commands that cannot run right now are dimmed. `F1` (or `?` in an empty prompt) opens **Commands and
+commands that cannot run right now are dimmed. The palette is a window like Settings: drag its title
+bar to move it and its edges to resize it. `F1` (or `?` in an empty prompt) opens **Commands and
 shortcuts**, a filterable window listing the same commands by category.
 
 | Keys | Command |
 |---|---|
 | `Ctrl+P`, `F1` | Command palette, help |
+| `Ctrl+Q` | Exit (`/exit`); works from any window |
 | `Ctrl+O` | Open project |
 | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+PageUp` / `Ctrl+PageDown`) | Previous / next tab |
 | `Ctrl+W`, `Ctrl+Shift+T` | Close tab, reopen the last closed tab |
@@ -415,17 +435,17 @@ another Settings page.
 
 ### When the host stops responding
 
-The title bar shows the connection to the host. The window pings the host every 10 seconds; when
-three pings in a row get no answer it shows **CodeAlta is not responding.** with a **Reload**
-button instead of the connection state. Reloading the window opens a new RPC session with the same
-host; sessions keep running and prompt drafts are restored, but image drafts and requests that were
-still waiting for an answer are lost. The message goes away by itself if the host answers again.
+The window pings the host every 10 seconds; when three pings in a row get no answer it shows
+**CodeAlta is not responding.** with a **Reload** button under the title bar. Reloading the window
+opens a new RPC session with the same host; sessions keep running and prompt drafts are restored, but
+image drafts and requests that were still waiting for an answer are lost. The message goes away by
+itself if the host answers again.
 
 The host side of an RPC session can be closed without the page being told, after which every request
-is dropped and only times out. NeoAstra 0.2.1 does this when the page closes a channel (the live view
-of a session, closed whenever its pane goes away) at the moment one of the channel's items is being
-posted: the canceled post is treated as a transport failure and cancels the whole session. That is a
-defect in `NeoRpcSession.SendRawAsync`; until the package is fixed, reloading is the way back.
+is dropped and only times out. NeoAstra 0.2.1 did this when the page closed a channel (the live view
+of a session, closed whenever its pane goes away) at the moment one of the channel's items was being
+posted; NeoAstra 0.3.1 no longer treats that canceled post as a transport failure. The notice stays
+as the way back from any other loss of the session.
 
 ## Browse a task-owned catalog copy
 

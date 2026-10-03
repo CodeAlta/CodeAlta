@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { SessionRuntimeScopedResponse } from "#neoastra";
-import { createRuntimeObservations, projectRuntimeObservation, type RuntimeTarget } from "./runtimeObservations";
+import { createRuntimeObservations, projectRunning, projectRuntimeObservation, sessionRunning, type RuntimeTarget } from "./runtimeObservations";
 import { tabKey } from "./sessionTabs";
 
 const target = (id = "one"): RuntimeTarget => ({ tab: { sessionId: id, projectId: null, path: null },
@@ -70,4 +70,36 @@ test("wrong scope and older attachment facts are refused, with fences retained a
   await owner.refresh([target()]); assert.equal(row()?.label, "Stale attachment");
   value = { ...reply(), observation: { ...reply().observation!, runtimeInstanceId: "wrong" } };
   await owner.refresh([target()]); assert.equal(row()?.label, "Error · runtime identity changed");
+});
+
+test("a row keeps its activity while it reloads, and an open panel's report wins over the polled one", async () => {
+  let value = reply();
+  let release: (() => void) | undefined;
+  const owner = createRuntimeObservations(async () => { if (release === undefined) return value; await new Promise<void>(resolve => { release = resolve; }); return value; });
+  const tab = target().tab, running = () => sessionRunning(owner.getSnapshot(), tab);
+  assert.equal(running(), false);
+  await owner.refresh([target()]);
+  assert.equal(running(), true); assert.equal(projectRunning(owner.getSnapshot(), null), true);
+  assert.equal(projectRunning(owner.getSnapshot(), "other"), false);
+
+  value = { ...reply(), observation: { ...reply().observation!, entry: { ...reply().observation!.entry!, activeRunId: null } } };
+  release = () => { };
+  const reloading = owner.refresh([target()]);
+  assert.equal(owner.getSnapshot().rows.get(tabKey(tab))?.label, "Loading observation…");
+  assert.equal(running(), true, "still shown as running until the new answer arrives");
+  release(); await reloading;
+  assert.equal(running(), false);
+
+  owner.setLive(tab, true);
+  assert.equal(running(), true); assert.equal(projectRunning(owner.getSnapshot(), null), true);
+  let notified = 0;
+  owner.subscribe(() => { notified++; });
+  owner.setLive(tab, true); assert.equal(notified, 0, "an unchanged report publishes nothing");
+  owner.setLive(tab, false); assert.equal(running(), false); assert.equal(notified, 1);
+  owner.setLive(tab, null);
+  release = undefined; value = reply();
+  await owner.refresh([target()]);
+  assert.equal(running(), true, "without a panel the polled observation decides");
+  owner.setLive(tab, false);
+  assert.equal(running(), false); assert.equal(projectRunning(owner.getSnapshot(), null), false);
 });

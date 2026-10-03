@@ -52,6 +52,7 @@ const bootStatus: BootStatus = {
   version: "local preview",
 };
 
+export const neoRpcContractHash = "demo";
 export const boot = Object.freeze({ status: async () => bootStatus });
 export const configuration = Object.freeze({ snapshot: async (): Promise<ConfigurationSnapshot> => ({
   providerRuntimeAvailable: true,

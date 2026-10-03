@@ -11,9 +11,13 @@ import EditorWorker from "monaco-editor/editor/editor.worker.js?worker";
 // Vite emits a same-origin worker: no CDN, inline script, eval or blob CSP exception.
 globalThis.MonacoEnvironment = Object.freeze({ getWorker: () => new EditorWorker() });
 
+// Inline code in Markdown stands out in the same red as in the rendered messages (Blueprint red 4 / red 2).
+monaco.editor.defineTheme("codealta-dark", { base: "vs-dark", inherit: true, colors: {}, rules: [{ token: "variable.md", foreground: "e76a6e" }] });
+monaco.editor.defineTheme("codealta-light", { base: "vs", inherit: true, colors: {}, rules: [{ token: "variable.md", foreground: "ac2f33" }] });
+
 /** Keeps Monaco's theme in step with the shell theme; returns the disposer. */
 export function followShellTheme(): () => void {
-  const apply = () => monaco.editor.setTheme(document.documentElement.dataset.theme === "light" ? "vs" : "vs-dark");
+  const apply = () => monaco.editor.setTheme(document.documentElement.dataset.theme === "light" ? "codealta-light" : "codealta-dark");
   apply();
   const observer = new MutationObserver(apply);
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });

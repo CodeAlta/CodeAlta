@@ -31,6 +31,30 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
   const alive = useRef(true);
   const [menu, setMenu] = useState<{ anchor: HTMLElement; items: SessionMenuEntry[]; current: () => boolean } | null>(null);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  // The tab bars along the top edge of the dock are the window's title bar: their empty space moves the
+  // window, and the first and last one leave room for the application mark and the window controls.
+  const markTitleBar = useRef(() => { });
+  useLayoutEffect(() => {
+    const host = root.current;
+    if (!host) return;
+    let frame = 0;
+    const mark = () => {
+      frame = 0;
+      const bounds = host.getBoundingClientRect();
+      host.querySelectorAll<HTMLElement>(".flexlayout__tabset_tabbar_outer").forEach(bar => {
+        const box = bar.getBoundingClientRect();
+        const top = box.width > 0 && Math.abs(box.top - bounds.top) < 2;
+        bar.toggleAttribute("data-neoastra-drag-region", top);
+        bar.toggleAttribute("data-titlebar-start", top && Math.abs(box.left - bounds.left) < 2);
+        bar.toggleAttribute("data-titlebar-end", top && Math.abs(box.right - bounds.right) < 2);
+      });
+    };
+    markTitleBar.current = () => { frame ||= requestAnimationFrame(mark); };
+    mark();
+    const resized = new ResizeObserver(markTitleBar.current);
+    resized.observe(host);
+    return () => { markTitleBar.current = () => { }; cancelAnimationFrame(frame); resized.disconnect(); };
+  }, []);
   const label = (tab: SessionTab | null) => tab ? `${snapshot && resolveSessionTab(snapshot, tab)?.title || t("Unavailable session")} - ${
     tab.projectId === null ? t("Global") : snapshot?.projects.find(project => project.id === tab.projectId)?.name ?? t("Unavailable project")}` : newSessionLabel ?? t("New session");
   useLayoutEffect(() => { reconcileSessionTabModel(model, state, label); });
@@ -52,6 +76,7 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
     return undefined;
   }
   function changed(action: Action) {
+    markTitleBar.current();
     if (![Actions.SELECT_TAB, Actions.MOVE_NODE, Actions.SET_ACTIVE_TABSET].includes(action.type)) return;
     const selected = model.getActiveTabset()?.getSelectedNode();
     if (!selected) return;
@@ -120,9 +145,7 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
         if (node.getId() === sessionDraftNodeId) { values.content = <span data-session-node={node.getId()}>{label(null)}</span>; return; }
         const tab = state.open.find(value => sessionNodeId(value) === node.getId());
         values.content = <span data-session-node={node.getId()}><SessionTabLabel label={label(tab ?? null)} path={tab?.path ?? null} dirty={!!tab && dirty(tab.sessionId)} /></span>;
-        if (tab) values.leading = <>
-          {observations && <SessionTabActivity controls={observations} tab={tab} />}
-        </>;
+        if (tab && observations) values.leading = <SessionTabActivity controls={observations} tab={tab} />;
       }}
       onRenderTabSet={(node, values) => values.buttons.push(<Button key="more" variant="minimal" size="small" className="session-tab-more"
         icon={<AppIcon name="ellipsis" size={16} />} aria-label={t("Open sessions")} aria-haspopup="menu"
