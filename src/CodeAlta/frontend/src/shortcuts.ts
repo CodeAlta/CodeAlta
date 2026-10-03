@@ -1,9 +1,8 @@
 export type ShortcutAction =
-  | "openProject" | "focusProjects" | "focusSessions" | "focusPrompt" | "focusSearch" | "browseSessions"
+  | "focusProjects" | "focusPrompt" | "focusSearch" | "browseSessions"
   | "nextProject" | "previousProject" | "nextSession" | "previousSession"
   | "nextTab" | "previousTab" | "closeTab" | "reopenTab"
-  | "settings" | "providers" | "models" | "prompts" | "context" | "plugins"
-  | "toggleNotes" | "help" | "escape" | "expandPrompt" | "renameProject" | "sessionInfo" | "reminders"
+  | "toggleNotes" | "escape" | "expandPrompt" | "renameProject" | "sessionInfo" | "reminders"
   | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest" | "compact";
 
 export type ShortcutKey = Readonly<{ key: string; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean;

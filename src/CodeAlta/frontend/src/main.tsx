@@ -61,7 +61,6 @@ import { UserInputPanel } from "./UserInputPanel";
 import { LiveSessionPanel } from "./LiveSessionPanel";
 import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePosition, timelineNotice, type TimelineNotice, type MessageNavigation } from "./timelineScroll";
 import { workspaceEditingSelector, type ShortcutAction } from "./shortcuts";
-import { activateContextShortcut } from "./contextShortcut";
 import { createDraftIndicators, draftStorageKey, persistDraft, restoreDraft, transferPromptDraft } from "./promptDraft";
 import { SessionDraftBadge } from "./SessionDraftBadge";
 import { collapsedSessionWidth, constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizeCollapsedSessionPane, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
@@ -855,18 +854,12 @@ function App() {
     else if (action === "expandPrompt") {
       if (!dialog) invokeComposerControl(workspaceShell.current?.querySelector<HTMLButtonElement>("#expand-session-prompt"));
     }
-    else if (action === "openProject") setDialog("project");
     else if (action === "renameProject") void beginProjectRename();
-    else if (action === "help") openHelp();
     else if (action === "escape") {
       if (dialog === "help") closeHelp();
       else if (railVisible && projectRail.current?.contains(document.activeElement)) toggleProjects();
       else { setDialog(null); (document.activeElement as HTMLElement | null)?.blur(); }
     }
-    else if (action === "models") navigate("models");
-    else if (action === "prompts") navigate("prompts");
-    else if (action === "providers") navigate("providers");
-    else if (action === "settings" || action === "plugins") navigate(action === "plugins" ? "plugins" : "appearance");
     else if (action === "toggleNotes") setNotesVisible(value => !value);
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
     else if (action === "focusSearch") showSessionSearch();
@@ -874,8 +867,6 @@ function App() {
       if (!railVisible) toggleProjects();
       else focusVisibleProject(projectRail.current, projectFilterInput.current);
     }
-    else if (action === "focusSessions" && !(narrow && railVisible))
-      sessionRail.current?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]')?.focus();
     else if (action === "nextProject" || action === "previousProject") {
       if (!projects.length || !railVisible) return;
       const index = projects.findIndex(project => project.id === projectId);
@@ -890,9 +881,6 @@ function App() {
       const next = visibleSessions[(index + (action === "nextSession" ? 1 : -1) + visibleSessions.length) % visibleSessions.length].id;
       selectedSessionId.current = next;
       setSessionId(next);
-    } else if (action === "context") {
-      if (workspaceShell.current?.querySelector(".owned-session #refresh-session-context")) activateContextShortcut(workspaceShell.current);
-      else navigate("appearance");
     }
   }
 
