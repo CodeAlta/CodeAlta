@@ -151,10 +151,14 @@ can read retained same-host state but does not recreate lost intent, and restart
 This restricted workflow provides no general LiveTool dispatch, attached files or provider-input
 activation. Continue using `altatui` for complete agent workflows.
 
-Clicking a project opens a blank timeline with a bottom prompt and an animated CodeAlta wordmark
-in the focused pane; there is no separate prompt-draft tab. Open tabs are workspace-wide, so sessions
-from different projects remain open and their tab strips and other split panes stay visible when
-you switch projects. Click a session tab to return to it. Drag session tabs to the workspace edges for two or more
+Clicking a project opens one temporary **New session** tab. Selecting another project reuses it;
+selecting an existing session tab or sidebar session removes it. The welcome view uses the TUI's
+ASCII CodeAlta logo and names the folder where the session will start. New and existing sessions
+share the composer surface, editor, toolbar and resizable divider. **Start session** (or Enter)
+creates a session and transfers the draft; review it before normal Send. Provider selection is
+available before creation; session model/agent/reasoning choices become available after creation.
+Open tabs are workspace-wide, so sessions from different projects retain their panes and drafts.
+Drag session tabs to pane/workspace edges for horizontal or vertical splits and two or more
 simultaneous session panes. Running indicators refresh automatically for bounded batches of verified
 sessions, prioritizing visible/open sessions (up to 32); unknown or stale status is not proof of idle.
 

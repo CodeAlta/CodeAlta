@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { Actions, DockLocation, TabNode } from "flexlayout-react";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { closeSessionTab, emptySessionTabs, openSessionTab, sessionTabLimit, type SessionTab } from "./sessionTabs";
-import { createSessionTabModel, ownsSessionTabContent, reconcileSessionTabModel, sessionBlankNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation } from "./sessionTabLayout";
+import { createSessionTabModel, ownsSessionTabContent, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation } from "./sessionTabLayout";
 
 const tab = (id: string) => ({ projectId: "p", sessionId: id, path: "/p" });
 const snapshot: WorkspaceSnapshot = { configured: true, projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false,
@@ -15,7 +15,7 @@ const snapshot: WorkspaceSnapshot = { configured: true, projectsTruncated: false
 const label = (value: SessionTab | null) => value?.sessionId ?? "Prompt draft";
 const both = () => openSessionTab(openSessionTab(emptySessionTabs(), tab("one")), tab("two"));
 
-test("project prompts keep the global dock and cross-project session nodes and split geometry", () => {
+test("projects reuse one temporary new-session tab without replacing real panes or split geometry", () => {
   const other = { projectId: "q", sessionId: "other", path: "/q" };
   const catalog = { ...snapshot, projects: [...snapshot.projects, { id: "q", name: "Other project", path: "/q", archived: false }],
     sessions: [...snapshot.sessions, { ...snapshot.sessions[0], id: "other", projectId: "q", workspacePath: "/q" }] };
@@ -26,19 +26,40 @@ test("project prompts keep the global dock and cross-project session nodes and s
   const otherNode = model.getNodeById(sessionNodeId(other)) as TabNode;
   model.doAction(Actions.moveNode(otherNode.getId(), one.getParent()!.getId(), DockLocation.RIGHT, -1, true));
   const parents = [one.getParent(), otherNode.getParent()];
+  let draft: TabNode | undefined;
   for (const projectId of ["p", "q", null, "p"]) {
     state = sessionTabPresentation(state, catalog, projectId, null);
     reconcileSessionTabModel(model, state, label);
     assert.equal(state.open.length, 3);
     assert.equal(state.active, null);
-    assert.equal(sessionBlankNodeId(model, state), otherNode.getId());
+    const current = model.getNodeById(sessionDraftNodeId) as TabNode;
+    assert.ok(current);
+    draft ??= current;
+    assert.equal(current, draft);
+    assert.equal(model.getActiveTabset()?.getSelectedNode(), current);
+    assert.equal(current.isEnableDrag(), false);
     assert.equal(model.getNodeById(one.getId()), one);
     assert.equal(model.getNodeById(otherNode.getId()), otherNode);
     assert.deepEqual([one.getParent(), otherNode.getParent()], parents);
   }
   const returned = sessionTabPresentation(state, catalog, "p", "one");
   assert.equal(returned.open.length, 3);
-  assert.equal(sessionBlankNodeId(model, returned), undefined);
+  reconcileSessionTabModel(model, returned, label);
+  assert.equal(model.getNodeById(sessionDraftNodeId), undefined);
+  assert.equal(model.getActiveTabset()?.getSelectedNode(), one);
+  assert.deepEqual([one.getParent(), otherNode.getParent()], parents);
+  assert.equal(returned.closed.some(tab => tab.sessionId === sessionDraftNodeId), false);
+});
+
+test("empty workspaces have a real new-session tab; starting a session removes it", () => {
+  const model = createSessionTabModel();
+  reconcileSessionTabModel(model, emptySessionTabs(), label);
+  const draft = model.getNodeById(sessionDraftNodeId) as TabNode;
+  assert.equal(draft.isSelected(), true);
+  assert.equal(draft.isEnableClose(), false);
+  reconcileSessionTabModel(model, openSessionTab(emptySessionTabs(), tab("one")), label);
+  assert.equal(model.getNodeById(sessionDraftNodeId), undefined);
+  assert.equal(model.getActiveTabset()?.getSelectedNode()?.getId(), sessionNodeId(tab("one")));
 });
 
 test("GUI moves/selects/weights are admitted to FlexLayout before App focus, with lifetime and scope guards", () => {
@@ -108,7 +129,7 @@ test("public model has only draggable session identities, retaining nodes across
   assert.equal(two.getName(), "two localized");
   assert.equal(two.isSelected(), true);
   reconcileSessionTabModel(model, { ...state, active: null }, label);
-  assert.equal(model.getNodeById("session-draft"), undefined);
+  assert.ok(model.getNodeById(sessionDraftNodeId));
   assert.equal(model.getNodeById(two.getId()), two);
 });
 
@@ -213,16 +234,16 @@ test("installed 0.11 content memoization requires eager hidden factory invalidat
   assert.match(source, /const key = tabNode\.getId\(\)/);
   const component = readFileSync(new URL("./SessionTabStrip.tsx", import.meta.url), "utf8");
   assert.match(component, /invalidateTabContentOnParentRender=\{true\}/);
-  assert.match(component, /ownsSessionTabContent\(node\.getId\(\), state\) \? children : null/);
+  assert.match(component, /node\.getId\(\) === sessionDraftNodeId/);
   assert.match(component, /onShowOverflowMenu=/);
   assert.match(component, /onModelChange=/);
-  assert.match(component, /hidden=\{!state\.open\.length\}/);
+  assert.doesNotMatch(component, /hidden=\{!state\.open\.length\}/);
   assert.doesNotMatch(component, /hidden=\{!state\.active\}/);
-  assert.match(component, /if \(action\) model\.doAction\(action\)/);
+  assert.match(component, /if \(action\) \{ model\.doAction\(action\); changed\(action\); \}/);
   assert.match(component, /isComposing.*keyCode === 229.*repeat/);
   const notes = readFileSync(new URL("./SessionNotesDock.tsx", import.meta.url), "utf8");
   assert.match(notes, /tabEnableScrollbars: false/);
   for (const event of ["onDragEnter", "onDragLeave", "onDragOver", "onDrop"])
-    assert.ok(notes.includes(`${event}={event => event.stopPropagation()}`));
+    assert.ok(!notes.includes(`${event}={event => event.stopPropagation()}`));
   assert.doesNotMatch(component, /getMoveableElement|appendChild|setAttribute|createRoot/);
 });

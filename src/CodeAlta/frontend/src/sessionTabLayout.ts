@@ -3,6 +3,8 @@ import type { WorkspaceSnapshot } from "#neoastra";
 import { openSessionTab, reconcileSessionTabs, resolveSessionTab, selectedTab, sessionTabLimit, tabKey, type SessionTab, type SessionTabs } from "./sessionTabs";
 
 const panelId = "session-tabs-panel";
+// Presentation only: never persisted in the session list, recent history or draft owners.
+export const sessionDraftNodeId = "session-draft";
 export const sessionNodeId = (tab: SessionTab) => `session:${tabKey(tab)}`;
 
 // Project App's selection synchronously: its persistence effect can lag a render.
@@ -36,11 +38,9 @@ export function createSessionTabModel() {
 export function reconcileSessionTabModel(model: Model, state: SessionTabs, label: (tab: SessionTab | null) => string) {
   const open = state.open.slice(0, sessionTabLimit);
   const ids = new Set(open.map(sessionNodeId));
+  if (!state.active) ids.add(sessionDraftNodeId);
   const existing: TabNode[] = [];
   model.visitNodes(node => { if (node instanceof TabNode) existing.push(node); });
-  for (const node of existing) {
-    if (!ids.has(node.getId())) model.doAction(Actions.deleteTab(node.getId()));
-  }
   for (const tab of open) {
     const id = sessionNodeId(tab);
     const name = label(tab);
@@ -48,7 +48,22 @@ export function reconcileSessionTabModel(model: Model, state: SessionTabs, label
     if (!node) model.doAction(Actions.addTab({ type: "tab", id, name, component: "session" }, model.getActiveTabset()?.getId() ?? panelId, DockLocation.CENTER, -1, false));
     else if (node instanceof TabNode && node.getName() !== name) model.doAction(Actions.renameTab(id, name));
   }
-  const active = state.active ? sessionNodeId(state.active) : "";
+  if (!state.active) {
+    const name = label(null);
+    const draft = model.getNodeById(sessionDraftNodeId);
+    if (!draft) model.doAction(Actions.addTab({ type: "tab", id: sessionDraftNodeId, name, component: "new-session",
+      enableDrag: false, enableClose: open.length > 0 }, model.getActiveTabset()?.getId() ?? panelId, DockLocation.CENTER, -1, true));
+    else if (draft instanceof TabNode) {
+      if (draft.getName() !== name) model.doAction(Actions.renameTab(sessionDraftNodeId, name));
+      if (draft.isEnableClose() !== (open.length > 0)) model.doAction(Actions.updateNodeAttributes(sessionDraftNodeId, { enableClose: open.length > 0 }));
+    }
+  }
+  // Add the replacement before removing the last tab of a tabset: FlexLayout may
+  // otherwise delete the target tabset when a lone temporary tab becomes a session.
+  for (const node of existing) {
+    if (!ids.has(node.getId())) model.doAction(Actions.deleteTab(node.getId()));
+  }
+  const active = state.active ? sessionNodeId(state.active) : sessionDraftNodeId;
   const node = ids.has(active) ? model.getNodeById(active) : undefined;
   if (node instanceof TabNode && !node.isSelected()) model.doAction(Actions.selectTab(node.getId()));
   if (node instanceof TabNode && node.getParent() && model.getActiveTabset() !== node.getParent())
@@ -74,8 +89,10 @@ export function ownsSessionTabContent(id: string, state: SessionTabs) {
 export function sessionLayoutActionAllowed(model: Model, action: Action, state: SessionTabs,
   snapshot: WorkspaceSnapshot | undefined, current: () => boolean): boolean {
   if (!current() || !snapshot) return false;
-  const valid = (node: TabNode) => !!sessionTabAction(Actions.selectTab(node.getId()), state, snapshot, current);
-  if (action.type === Actions.SELECT_TAB) return !!sessionTabAction(action, state, snapshot, current);
+  const valid = (node: TabNode) => node.getId() === sessionDraftNodeId && !state.active
+    || !!sessionTabAction(Actions.selectTab(node.getId()), state, snapshot, current);
+  if (action.type === Actions.SELECT_TAB) return action.data.tabNode === sessionDraftNodeId && !state.active
+    || !!sessionTabAction(action, state, snapshot, current);
   if (action.type === Actions.ADJUST_WEIGHTS) return model.getNodeById(action.data.nodeId) instanceof RowNode;
   if (action.type === Actions.SET_ACTIVE_TABSET) {
     const node = model.getNodeById(action.data.tabsetNode);
@@ -86,17 +103,7 @@ export function sessionLayoutActionAllowed(model: Model, action: Action, state: 
   const source = model.getNodeById(action.data.fromNode);
   const target = model.getNodeById(action.data.toNode);
   if (!(target instanceof RowNode || target instanceof TabSetNode)) return false;
-  return source instanceof TabNode ? valid(source)
-    : source instanceof TabSetNode && source.getTabNodes().length > 0 && source.getTabNodes().every(valid);
-}
-
-// A project prompt is presentation in the focused pane, not a project-scoped tab/model.
-// Keep all session headers and other split panes available while the prompt is shown.
-export function sessionBlankNodeId(model: Model, state: SessionTabs): string | undefined {
-  if (state.active) return undefined;
-  const node = model.getActiveTabset()?.getSelectedNode();
-  if (node) return node.getId();
-  let first: string | undefined;
-  model.visitNodes(node => { if (first === undefined && node instanceof TabNode && node.isSelected()) first = node.getId(); });
-  return first;
+  const movable = (node: TabNode) => node.getId() !== sessionDraftNodeId && valid(node);
+  return source instanceof TabNode ? movable(source)
+    : source instanceof TabSetNode && source.getTabNodes().length > 0 && source.getTabNodes().every(movable);
 }

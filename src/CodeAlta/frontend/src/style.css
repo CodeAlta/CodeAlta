@@ -235,17 +235,22 @@ h1, h2, h3, p { margin-top: 0; }
 .session-tabs { flex: 1; min-width: 0; min-height: 0; }
 .session-dock { position: absolute; inset: 0; }
 .session-dock[hidden] { display: none; }
-.session-tab-content, .session-tab-workspace { height: 100%; min-width: 0; min-height: 0; overflow: hidden; overflow-anchor: none; }
-.session-tab-workspace[hidden] { display: none; }
+.session-tab-content { height: 100%; min-width: 0; min-height: 0; overflow: hidden; overflow-anchor: none; }
 .session-dock, .session-notes-dock { --flexlayout-splitter-size: 8px; --flexlayout-splitter-active-size: 8px; }
 .session-running { color: var(--green); flex: 0 0 auto; font-size: 11px; }
-.blank-project-logo { flex: 1; min-height: 100px; display: flex; justify-content: center; align-items: center; gap: .2em; font-size: clamp(28px, 5vw, 72px); font-weight: 800; letter-spacing: -.04em; text-shadow: 2px 3px 0 var(--line); user-select: none; }
+.new-session-welcome { container-type: inline-size; padding: 0 8px; }
+.welcome-content { min-height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 24px 0; text-align: center; color: var(--muted); }
+.welcome-content p { max-width: 100%; margin: 4px 0; overflow-wrap: anywhere; }
+.welcome-content .welcome-subtitle { margin: 18px 0 12px; color: var(--text); }
+.blank-project-logo { display: flex; justify-content: center; align-items: start; gap: 2ch; font: clamp(3px, 1.8cqw, 12px)/1 "Cascadia Code", Consolas, monospace; color: var(--text); user-select: none; }
+.blank-project-logo pre { margin: 0; font: inherit; white-space: pre; }
 .logo-alta { background: linear-gradient(110deg, #37b4ed, #c46af3, #ffb34c, #37b4ed); background-size: 300% 100%; background-clip: text; color: transparent; text-shadow: none; animation: alta-logo-colors 9s linear infinite; }
 @keyframes alta-logo-colors { to { background-position: 300% 0; } }
 @media (prefers-reduced-motion: reduce) { .logo-alta { animation: none; } }
 @media (forced-colors: active) { .logo-alta { background: none; color: CanvasText; animation: none; } }
 .session-notes-dock .notes-pane { min-width: 0; margin: 0; border-radius: 0; overflow: auto; }
-.session-tabs .active-session-content { height: 100%; }
+.session-tabs .active-session-content { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+.active-session-content > .session-workspace { flex: 1 1 0; }
 .session-tabs .session-tab-label { display: block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-tabs .runtime-observation-compact { padding: 0 3px; border: 0; font-size: 11px; }
 .session-tab-more { padding: 2px 8px; }
@@ -511,6 +516,11 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .owned-session .history-controls { flex: 0 1 auto; flex-wrap: wrap; gap: 3px; margin: 0; min-width: 0; }
 .owned-session .history-controls button:not(.bp6-button) { min-height: 30px; margin: 0; padding: 5px 8px; }
 .owned-session .history-controls .composer-icon-button { display: grid; place-items: center; width: 30px; padding: 4px; }
+.composer-draft-info { position: relative; }
+.composer-draft-info > summary { display: grid; place-items: center; padding: 5px; cursor: pointer; list-style: none; }
+.composer-draft-info > summary::-webkit-details-marker { display: none; }
+.composer-draft-info > p { width: min(320px, 60vw); margin: 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.owned-session .catalog-diagnostics { margin: 4px 0; color: var(--muted); font-size: 11px; }
 .owned-session .history-controls [data-reminder-count] { display: inline-flex; align-items: center; gap: 2px; width: auto; }
 .owned-session .reminder-count { font-size: 10px; line-height: 1; font-weight: 700; }
 .owned-session .history-controls .primary-button:disabled { border-color: var(--line-strong); color: var(--muted); background: var(--panel-3); }

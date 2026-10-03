@@ -1,6 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { composerAvailableHeight, composerBounds, resizeComposerHeight, composerSizeKey, rememberComposerHeight } from "./composerHeight";
+
+test("sizing binds when the portal DOM mounts, not just when the owner component mounts", () => {
+  const source = readFileSync(new URL("./ComposerLayout.tsx", import.meta.url), "utf8");
+  assert.match(source, /\[workspace, workspaceRef\] = useState<HTMLDivElement \| null>\(null\)/);
+  assert.match(source, /\}, \[workspace\]\)/);
+  assert.match(source, /new ResizeObserver\(measure\)/);
+  assert.match(source, /new MutationObserver\(changed\)/);
+  assert.match(source, /layout\.available <= 0/);
+  for (const file of ["main.tsx", "NewSessionWorkspace.tsx"]) {
+    const component = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
+    assert.match(component, /ref=\{composer\.workspaceRef\}/);
+    assert.match(component, /<ComposerSplitter \{\.\.\.composer\.splitter\}/);
+  }
+});
 
 test("composer space is viewport-based and does not shrink as its splitter moves", () => {
   const available = composerAvailableHeight(600, 4, 8);

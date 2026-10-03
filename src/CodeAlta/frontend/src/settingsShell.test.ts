@@ -26,7 +26,7 @@ test("production shell settings overlay keeps the session workspace mounted and 
   let lastExpression = "";
   try {
     await build({ entryPoints: [fileURLToPath(new URL("./main.tsx", import.meta.url))],
-      outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife", loader: { ".css": "empty" },
+      outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife", loader: { ".css": "empty", ".flf": "text" },
       define: { "import.meta.env.VITE_DEMO_MODE": '"false"' },
       plugins: [{ name: "isolated-bridge", setup(bundle) {
         bundle.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("./settingsShell.neoastra.mount.ts", import.meta.url)) }));

@@ -39,11 +39,9 @@ export function SessionNotesDock({ sessionId, epoch, capability, fallbackMarkdow
     model.doAction(Actions.renameTab("notes", t("Alta notes")));
     model.doAction(Actions.renameTab("conversation", t("Session timeline")));
   }, [locale, model]);
-  // Independent notes models must not send their drag events to the outer session Layout.
-  // The outer model's drag overlay owns session drags; this controller owns notes drags only.
-  return <div className="session-notes-dock workspace-layout" onFocusCapture={onActivate} onPointerDownCapture={onActivate}
-    onDragEnter={event => event.stopPropagation()} onDragLeave={event => event.stopPropagation()}
-    onDragOver={event => event.stopPropagation()} onDrop={event => event.stopPropagation()}><Layout model={model} supportsPopout={false}
+  // FlexLayout checks the drag's owning model/controller. Let events bubble so an
+  // outer session drag can reach its drop overlay even when it enters a notes pane.
+  return <div className="session-notes-dock workspace-layout" onFocusCapture={onActivate} onPointerDownCapture={onActivate}><Layout model={model} supportsPopout={false}
     invalidateTabContentOnParentRender={true} factory={node => node.getId() === "conversation" ? children
       : <NotesPanel epoch={epoch} sessionId={sessionId} reader={reader} capability={capability}
           fallbackMarkdown={fallbackMarkdown} docked onContent={showContent} preferredHeight={400}

@@ -1,4 +1,4 @@
-import { Button, Classes, HTMLSelect } from "@blueprintjs/core";
+import { Button, Classes, FormGroup, HTMLSelect } from "@blueprintjs/core";
 import { connect, onDiagnostic } from "@neoastra/client";
 import { rpcFailureCode } from "./rpcDiagnostics";
 import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
@@ -67,7 +67,9 @@ import { activateContextShortcut } from "./contextShortcut";
 import { createDraftIndicators, draftStorageKey, persistDraft, restoreDraft, transferPromptDraft } from "./promptDraft";
 import { SessionDraftBadge } from "./SessionDraftBadge";
 import { collapsedSessionWidth, constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizeCollapsedSessionPane, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
-import { composerAvailableHeight, composerBounds, composerSizeKey, rememberComposerHeight, resizeComposerHeight } from "./composerHeight";
+import { composerSizeKey, rememberComposerHeight } from "./composerHeight";
+import { ComposerSplitter, useComposerLayout } from "./ComposerLayout";
+import { NewSessionWorkspace } from "./NewSessionWorkspace";
 import { AppIcon } from "./AppIcon";
 import { sessionTime } from "./sessionTime";
 import { createProjectOpening } from "./projectOpening";
@@ -1120,20 +1122,30 @@ function App() {
     } finally { projectRenameRefreshPending.current = false; }
   }
 
-  function creationProviderChoice() {
+  function creationProviderChoice(compact = false) {
     const inventory = configurationState.snapshot;
     const providers = inventory?.providerRuntimeAvailable ? inventory.providers.slice(0, 32).filter(provider => provider.enabled
       && provider.id.length > 0 && provider.id.length <= 256 && provider.id === provider.id.trim()
       && !/[\u0000-\u001f\u007f-\u009f\ud800-\udfff]/u.test(provider.id)
       && inventory.providers.filter(other => other.id === provider.id).length === 1) : [];
+    const select = <HTMLSelect fill value={creatingProvider} aria-label={t("Provider for new session")} disabled={creatingBusy || creationLocked || !owned} onChange={event => setCreatingProvider(event.target.value)}
+      title={t("Cached enabled providers only; enabled does not mean ready or capable. Create may initialize a provider.")}>
+      <option value="">{t("Default or first enabled provider")}</option>
+      {creatingProvider && !providers.some(provider => provider.id === creatingProvider) && <option value={creatingProvider} disabled>{creatingProvider}</option>}
+      {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.id}</option>)}
+    </HTMLSelect>;
+    if (compact) return <>
+      <FormGroup className="composer-field" label={<Button variant="minimal" onClick={() => navigate("prompts")}>{t("Agent→")}</Button>}>
+        <HTMLSelect fill aria-label={t("Agent prompt")} disabled title={t("Session choices become available after creation.")}><option>{t("Host default")}</option></HTMLSelect>
+      </FormGroup>
+      <FormGroup className="composer-field composer-model-field" label={<Button variant="minimal" onClick={() => navigate("models")}>{t("Model→")}</Button>}>
+        <div className="composer-model-options">{select}<HTMLSelect fill aria-label={t("Model")} disabled title={t("Session choices become available after creation.")}><option>{t("Provider default")}</option></HTMLSelect></div>
+      </FormGroup>
+      <FormGroup className="composer-field"><HTMLSelect fill aria-label={t("Reasoning")} disabled title={t("Session choices become available after creation.")}><option>{t("Model default")}</option></HTMLSelect></FormGroup>
+    </>;
     return <div className="creation-provider">
       <label><span>{t("Provider for new session")}</span>
-        <HTMLSelect value={creatingProvider} disabled={creatingBusy || !owned} onChange={event => setCreatingProvider(event.target.value)}>
-          <option value="">{t("Default or first enabled provider")}</option>
-          {creatingProvider && !providers.some(provider => provider.id === creatingProvider)
-            && <option value={creatingProvider} disabled>{creatingProvider}</option>}
-          {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.id}</option>)}
-        </HTMLSelect>
+        {select}
       </label>
       <small>{t("Cached enabled providers only; enabled does not mean ready or capable. Create may initialize a provider.")}</small>
     </div>;
@@ -1382,6 +1394,9 @@ function App() {
     selectedSession={selectedSession} configurationState={configurationState}
     preferences={{ theme, setTheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); } }}
     onOpenAbout={openAbout} />;
+  const newPromptDisabled = creatingBusy || creationLocked || !owned || !mutation?.capability.canMutate() || !snapshot
+    || !!selectedProject?.archived || projectId !== null && !selectedProject || (!localDraft.text.trim() && !localImages.images.length)
+    || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim());
   return <ShellLanguageContext.Provider value={language}><div className="app-shell ide-shell">
     <header className="topbar">
       <div className="brand"><span className="brand-mark">A</span><span>CodeAlta</span><small>{demoMode ? "interactive preview" : "desktop"}</small>
@@ -1566,6 +1581,7 @@ function App() {
               lifetime: creationGeneration.current, capturePopup: captureReferenceLifetime,
               observe: value => mutation?.capability.observe(value) } : null}><main className="content">
           <SessionTabStrip state={sessionTabPresentation(tabs, snapshot, projectId, sessionId)} snapshot={snapshot}
+            newSessionLabel={t("New session — {project}", { project: selectedProject?.name ?? t("Global") })}
             renderSession={tab => {
               const row = snapshot && resolveSessionTab(snapshot, tab);
               if (!row || !snapshot) return null;
@@ -1609,19 +1625,22 @@ function App() {
                <textarea aria-label={t("Original creation draft {number}", { number: index + 1 })} readOnly value={record.text} /></section>)}
           </details>}
           {!selectedSession
-            ? <section className="session-workspace blank-project" data-active="true"><div className="blank-project-logo" aria-label="CodeAlta"><span>Code</span><span className="logo-alta">Alta</span></div>
+            ? <NewSessionWorkspace key={draftScope} project={selectedProject}
+                preferredHeight={composerHeights.get(composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope))}
+                onHeight={height => setComposerHeights(sizes => rememberComposerHeight(sizes, composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope), height))}>
                 <ReadOnlyComposer key={draftScope} sessionId={draftScope} provider={null} draftIndicators={draftIndicators}
                   localImages={owned && snapshot?.configured && currentProjectWritable() ? localImages : undefined}
                   onOpenHelp={openHelp} onOpenPalette={openPalette}
                   reason={t("Local to this project/global scope. Create and transfer first, then review and Send in the session. Original text is retained; reload restores it only when local storage permits.")}
-                  localDraft={{ text: localDraft.text, edit: editLocalDraft, action: <>
-                    {creationProviderChoice()}
-                    <button type="button" disabled={creatingBusy || creationLocked || !owned || !mutation?.capability.canMutate() || !snapshot || !!selectedProject?.archived || projectId !== null && !selectedProject || (!localDraft.text.trim() && !localImages.images.length)
-                      || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim())}
-                      onClick={() => void createSelectedSession(true)}>{t("Create and transfer draft")}</button>
-                    {creatingBusy && <button type="button" onClick={() => { invalidateCreation(); setDraftHandoffNotice("Transfer canceled locally. Creation may still complete; original text retained. Inspect sessions; nothing sent."); }}>{t("Cancel transfer")}</button>}
+                   localDraft={{ text: localDraft.text, edit: editLocalDraft, options: creationProviderChoice(true),
+                     disabled: newPromptDisabled, busy: creatingBusy, submit: () => void createSelectedSession(true), action: <>
+                     <Button intent="primary" icon={<AppIcon name="send" size={16} />} disabled={newPromptDisabled}
+                       aria-label={t("Start session")} title={t("Create a session and review this prompt before sending.")}
+                       onClick={() => void createSelectedSession(true)} />
+                     {creatingBusy && <Button variant="minimal" icon={<AppIcon name="stop" size={16} />} aria-label={t("Cancel transfer")}
+                       onClick={() => { invalidateCreation(); setDraftHandoffNotice("Transfer canceled locally. Creation may still complete; original text retained. Inspect sessions; nothing sent."); }} />}
                   </> }} />
-              </section>
+               </NewSessionWorkspace>
             : null}
           </div></SessionTabStrip></main></ProjectReferenceContext.Provider>} />
       </div>
@@ -1886,49 +1905,8 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
       () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
   }
   const timeline = useTimelinePosition(session.id, scrollMemory);
-  const workspaceElement = useRef<HTMLDivElement>(null);
-  const resizeBar = useRef<HTMLDivElement>(null);
-  const composerRegion = useRef<HTMLDivElement>(null);
-  const [layout, setLayout] = useState({ available: 0, rendered: 0 });
+  const composer = useComposerLayout(preferredComposerHeight, onComposerHeight);
   const [messageNotice, setMessageNotice] = useState<TimelineNotice>(null);
-  useLayoutEffect(() => {
-    const workspace = workspaceElement.current;
-    const scroller = timeline.elementRef.current;
-    const bar = resizeBar.current;
-    const region = composerRegion.current;
-    if (!workspace || !scroller || !bar || !region) return;
-    const measure = () => {
-      const style = getComputedStyle(workspace);
-      let chromeHeight = 0;
-      for (const child of Array.from(workspace.children)) {
-        if (!(child instanceof HTMLElement) || child === scroller || child === region) continue;
-        const childStyle = getComputedStyle(child);
-        if (childStyle.display === "none" || childStyle.position === "fixed" || childStyle.position === "absolute") continue;
-        chromeHeight += child.offsetHeight + parseFloat(childStyle.marginTop) + parseFloat(childStyle.marginBottom);
-      }
-      const available = composerAvailableHeight(workspace.clientHeight,
-        parseFloat(style.paddingTop) + parseFloat(style.paddingBottom), chromeHeight);
-      const rendered = Math.round(region.getBoundingClientRect().height);
-      setLayout(old => old.available === available && old.rendered === rendered ? old : { available, rendered });
-    };
-    const observer = new ResizeObserver(measure);
-    for (const element of [workspace, ...Array.from(workspace.children)]) observer.observe(element);
-    measure();
-    return () => observer.disconnect();
-  }, [timeline.elementRef, infoOpen, timeline.following, messageNotice]);
-  const bounds = composerBounds(layout.available);
-  const visibleComposerHeight = preferredComposerHeight === undefined ? undefined : resizeComposerHeight(preferredComposerHeight, 0, bounds);
-  const pendingComposerHeight = useRef<number | null>(null);
-  useLayoutEffect(() => { pendingComposerHeight.current = null; }, [preferredComposerHeight]);
-  const resizeComposer = (delta: number) => {
-    // Hidden/unplaced FlexLayout panes have no viewport yet. Never save a zero-height preference.
-    if (layout.available <= 0) return;
-    const base = pendingComposerHeight.current ?? (preferredComposerHeight === undefined
-      ? composerRegion.current?.getBoundingClientRect().height ?? layout.rendered : visibleComposerHeight!);
-    const next = resizeComposerHeight(base, delta, bounds);
-    pendingComposerHeight.current = next;
-    onComposerHeight(next);
-  };
   const [newerOmitted, setNewerOmitted] = useState(false);
   const newest = useExplicitNewestHistory(session.id, selectedProjectId, status?.hostEpoch ?? null, timeline, setMessageNotice);
   // Stable across History's auto-pages; do not cancel an admitted request on a parent render.
@@ -1967,7 +1945,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
     onClick={openInfo}><AppIcon name="info" size={16} /></button>;
   return <SessionNotesDock sessionId={session.id} epoch={ownedSession ? status?.hostEpoch : undefined} capability={mutation?.capability}
     fallbackMarkdown={historyNotes} toggle={active ? notesToggle : undefined} reader={notesReader} onActivate={onActivate}>
-    <div className="session-workspace" data-active={active} ref={workspaceElement}>
+    <div className="session-workspace" data-active={active} ref={composer.workspaceRef}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       lifetime={infoLifetime} canRead={() => !!mutation?.capability.canMutate()}
       target={ownedSession && !demoMode && mutation?.capability.canMutate() ? runtimeTarget(snapshot, { sessionId: session.id, projectId: selectedProjectId, path: session.workspacePath }, status?.hostEpoch ?? undefined) : null} />}
@@ -2000,12 +1978,11 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
         </div>
         {!timeline.following && <button type="button" className="timeline-bottom-button" onClick={() => { newest.cancel(); timeline.jump(); }}><AppIcon name="arrowDown" size={14} />{t(newerOmitted ? "Bottom of retained window (not newest)" : "Jump to latest visible")}</button>}
         {messageNotice && <p role="status" className="detail timeline-navigation-notice">{timelineNotice(languageLocale, messageNotice)}</p>}
-        <div className="composer-resize-bar" ref={resizeBar}>
-          <ComposerSplitter value={layout.rendered} min={bounds.min} max={bounds.max} automatic={preferredComposerHeight === undefined}
-            onResize={resizeComposer} onReset={() => onComposerHeight(undefined)} />
+        <div className="composer-resize-bar" ref={composer.barRef}>
+          <ComposerSplitter {...composer.splitter} />
         </div>
-        <div ref={composerRegion} className={`composer-region${preferredComposerHeight === undefined ? "" : " resized"}`}
-          style={visibleComposerHeight === undefined ? undefined : { height: visibleComposerHeight }}>
+        <div ref={composer.regionRef} className={`composer-region${composer.height === undefined ? "" : " resized"}`}
+          style={composer.height === undefined ? undefined : { height: composer.height }}>
         <SessionComposerGate snapshot={snapshot} projectId={selectedProjectId} session={session}
           epoch={ownedHost ? status!.hostEpoch! : null}
           owned={status?.hostEpoch && mutation ? <OwnedSessionPanel active={active} sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
@@ -2129,52 +2106,6 @@ function SessionTime({ value, now }: { value: string; now: number }) {
   const { locale } = useShellLanguage();
   const { label, title, dateTime } = sessionTime(value, locale, now);
   return <time dateTime={dateTime} title={title}>{label}</time>;
-}
-
-function ComposerSplitter({ value, min, max, automatic, onResize, onReset }: {
-  value: number; min: number; max: number; automatic: boolean; onResize: (delta: number) => void; onReset: () => void;
-}) {
-  const handle = useRef<HTMLDivElement>(null);
-  const pointer = useRef<{ id: number; y: number } | null>(null);
-  useEffect(() => {
-    const blur = () => {
-      const id = pointer.current?.id;
-      pointer.current = null;
-      if (id !== undefined && handle.current?.hasPointerCapture(id)) handle.current.releasePointerCapture(id);
-    };
-    window.addEventListener("blur", blur);
-    return () => { window.removeEventListener("blur", blur); blur(); };
-  }, []);
-  function end(event: PointerEvent<HTMLDivElement>) {
-    if (pointer.current?.id !== event.pointerId) return;
-    pointer.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-  }
-  return <div ref={handle} className="composer-splitter" role="separator" aria-label="Resize timeline and composer" aria-orientation="horizontal"
-    aria-valuemin={Math.min(min, value)} aria-valuemax={Math.max(max, value)} aria-valuenow={value}
-    aria-valuetext={automatic ? `Automatic, ${value} pixels` : `${value} pixels`}
-    title="Arrow Up enlarges composer; Arrow Down shrinks; Home resets to automatic" tabIndex={0}
-    onKeyDown={event => {
-      if (event.key !== "ArrowUp" && event.key !== "ArrowDown" && event.key !== "Home") return;
-      event.stopPropagation();
-      if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
-        || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
-      event.preventDefault();
-      if (event.key === "Home") onReset(); else onResize(event.key === "ArrowUp" ? 16 : -16);
-    }}
-    onDoubleClick={onReset}
-    onPointerDown={event => {
-      if (!event.isPrimary || event.button !== 0 || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
-      pointer.current = { id: event.pointerId, y: event.clientY };
-      event.currentTarget.focus(); event.currentTarget.setPointerCapture(event.pointerId); event.preventDefault();
-    }}
-    onPointerMove={event => {
-      if (pointer.current?.id !== event.pointerId || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
-      const delta = pointer.current.y - event.clientY;
-      pointer.current.y = event.clientY;
-      onResize(delta);
-    }} onPointerUp={end} onPointerCancel={end}
-    onLostPointerCapture={() => { pointer.current = null; }}><span /></div>;
 }
 
 function PaneSplitter({ className, hidden, label, value, onResize, onReset }: {

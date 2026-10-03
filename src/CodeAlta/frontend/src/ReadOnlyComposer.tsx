@@ -1,7 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type ClipboardEvent } from "react";
+import { Button, Spinner } from "@blueprintjs/core";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { PromptEditor, type PromptInput } from "./PromptEditor";
-import { dispatchTransientComposerKey } from "./composerKeyboard";
+import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
+import { AppIcon } from "./AppIcon";
+import { ComposerSurface, ComposerToolbar } from "./ComposerSurface";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
 import { useShellLanguage } from "./shellLanguage";
@@ -12,7 +15,8 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
   draftIndicators: ReturnType<typeof createDraftIndicators>; reason?: string;
   infoControl?: ReactNode;
   onOpenHelp?: () => void; onOpenPalette?: () => void;
-  localDraft?: { text: string; edit: (text: string) => void; action: ReactNode };
+  localDraft?: { text: string; edit: (text: string) => void; action: ReactNode; options?: ReactNode;
+    submit: () => void; disabled: boolean; busy: boolean };
   localImages?: { paste: (event: ClipboardEvent<HTMLElement>) => void; attachments: ReactNode; invalidate: () => void };
 }) {
   const { t } = useShellLanguage();
@@ -34,32 +38,36 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
   }, [sessionId, draft, draftIndicators]);
   return <>
     {!expanded && localDraft && localImages && localImages.attachments}
-    <section className="composer catalog-composer" aria-label={t("Message composer")}>
-    {localDraft && <details className="composer-reference-help"><summary>@</summary><p className="catalog-diagnostics">{t("@ search requires an owned, verified project. References resolve only on normal Send after creation and transfer; file contents are not uploaded.")}</p></details>}
+    <ComposerSurface className={localDraft ? undefined : "catalog-composer"} busy={localDraft?.busy} status={<>
+      {localDraft?.busy ? <Spinner size={16} intent="primary" aria-hidden="true" /> : <AppIcon name="prompt" size={14} />}
+      {t(localDraft?.busy ? "Creating session…" : localDraft ? "Prompt ready" : "Draft only")}
+    </>}>
     {expanded && <ExpandedPromptEditor text={text} onChange={edit} onPaste={refuseImagePaste} onCompositionStart={localImages?.invalidate} attachments={localDraft && localImages ? localImages.attachments : imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>} onClose={() => { localImages?.invalidate(); setExpanded(false); }} />}
     {!expanded && imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>}
-    <label className="sr-only" htmlFor={active ? "catalog-prompt" : `catalog-prompt-${sessionId}`}>{t("Message draft")}</label>
-    <PromptEditor id={active ? "catalog-prompt" : `catalog-prompt-${sessionId}`} ref={promptInput} onPaste={refuseImagePaste} label={t("Message draft")} disabled={expanded}
+    <label className="sr-only" htmlFor={active ? "catalog-prompt" : `catalog-prompt-${sessionId}`}>{t("Message")}</label>
+    <PromptEditor id={active ? "catalog-prompt" : `catalog-prompt-${sessionId}`} ref={promptInput} onPaste={refuseImagePaste} label={t("Message")} disabled={expanded}
       onCompositionStart={() => localImages?.invalidate()}
       value={text} onChange={edit} onKeyDown={event => {
         if (dispatchTransientComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
           altKey: event.altKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing,
           keyCode: event.nativeEvent.keyCode, repeat: event.repeat, defaultPrevented: event.defaultPrevented },
-        promptInput.current!, onOpenHelp, onOpenPalette)) { event.preventDefault(); event.stopPropagation(); }
+        promptInput.current!, onOpenHelp, onOpenPalette)) { event.preventDefault(); event.stopPropagation(); return; }
+        if (localDraft && dispatchComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
+          altKey: event.altKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing,
+          keyCode: event.nativeEvent.keyCode, repeat: event.repeat, defaultPrevented: event.defaultPrevented },
+        () => { if (!localDraft.disabled) localDraft.submit(); }, () => {})) { event.preventDefault(); event.stopPropagation(); return; }
         if (event.key === "F6" && !event.defaultPrevented && !event.repeat && !event.nativeEvent.isComposing
           && event.nativeEvent.keyCode !== 229 && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
           event.preventDefault(); setExpanded(true);
         }
-      }} placeholder={t(localDraft ? "Draft a prompt — no session created yet…" : "Draft a prompt for this session…")} />
-    {localDraft && !expanded && <ProjectReferencePicker text={text} edit={edit} input={promptInput} />}
-    <div className="composer-toolbar">
-      <details><summary>{t("Draft only")}</summary><p id={`catalog-draft-status-${sessionId}`} role="status">{reason ?? t("No owned desktop host; sending is unavailable. Drafts stay local when storage permits.")}</p></details>
-      <div className="history-controls">
+      }} placeholder={t("Ask CodeAlta to work on this project…")} />
+    <ComposerToolbar options={localDraft?.options}>
+        {localDraft && !expanded && <ProjectReferencePicker text={text} edit={edit} input={promptInput} />}
+        <details className="composer-draft-info"><summary aria-label={t("Draft information")} title={t("Draft information")}><AppIcon name="info" size={16} /></summary><p id={`catalog-draft-status-${sessionId}`} role="status">{reason ?? t("No owned desktop host; sending is unavailable. Drafts stay local when storage permits.")}</p></details>
         {infoControl}
-        <button id={active ? "expand-session-prompt" : `expand-session-prompt-${sessionId}`} type="button" aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => setExpanded(true)}>{t("Expand")}</button>
-        {localDraft?.action ?? <button type="button" className="primary-button send-button" disabled aria-describedby={`catalog-draft-status-${sessionId}`}>{t("Send unavailable")}</button>}
-      </div>
-    </div>
+        <Button id={active ? "expand-session-prompt" : `expand-session-prompt-${sessionId}`} variant="minimal" icon={<AppIcon name="expand" size={16} />} aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => setExpanded(true)} />
+        {localDraft?.action ?? <Button className="send-button" intent="primary" icon={<AppIcon name="send" size={16} />} disabled aria-label={t("Send unavailable")} aria-describedby={`catalog-draft-status-${sessionId}`} />}
+    </ComposerToolbar>
     {!localDraft && <p className="catalog-diagnostics">{t("Provider {provider}; model, prompt and reasoning not available without an owned runtime.", { provider: provider ?? t("Not recorded") })}</p>}
-  </section></>;
+  </ComposerSurface></>;
 }

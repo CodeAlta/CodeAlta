@@ -4,6 +4,23 @@ function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
   return Object.freeze(Object.fromEntries(Object.entries(rows).map(([key, row]) => [key, Object.freeze(row)]))) as Readonly<T>;
 }
 export const messages = dictionary({
+  "New session": ["Nueva sesión", "Nouvelle session", "Neue Sitzung", "新しいセッション", "新会话"],
+  "New session — {project}": ["Nueva sesión — {project}", "Nouvelle session — {project}", "Neue Sitzung — {project}", "新しいセッション — {project}", "新会话 — {project}"],
+  "Start session": ["Iniciar sesión", "Démarrer la session", "Sitzung starten", "セッションを開始", "开始会话"],
+  "Create a session and review this prompt before sending.": ["Crea una sesión y revisa este mensaje antes de enviarlo.", "Créez une session et vérifiez ce prompt avant de l’envoyer.", "Sitzung erstellen und diesen Prompt vor dem Senden prüfen.", "セッションを作成し、送信前にこのプロンプトを確認します。", "创建会话并在发送前检查此提示词。"],
+  "Host default": ["Predeterminado del host", "Par défaut de l’hôte", "Host-Standard", "ホストの既定", "主机默认值"],
+  "Session choices become available after creation.": ["Las opciones de sesión estarán disponibles tras crearla.", "Les choix de session seront disponibles après sa création.", "Sitzungsoptionen sind nach dem Erstellen verfügbar.", "セッションの選択肢は作成後に利用できます。", "创建后可选择会话选项。"],
+  "Draft information": ["Información del borrador", "Informations du brouillon", "Entwurfsinformationen", "下書きの情報", "草稿信息"],
+  "Next session will start in {project} from folder {folder}.": ["La próxima sesión comenzará en {project} desde la carpeta {folder}.", "La prochaine session démarrera dans {project} depuis le dossier {folder}.", "Die nächste Sitzung startet in {project} im Ordner {folder}.", "次のセッションは {project} のフォルダー {folder} で開始します。", "下一会话将在 {project} 的文件夹 {folder} 中开始。"],
+  "Global workspace ready for a new session.": ["Espacio global listo para una nueva sesión.", "Espace global prêt pour une nouvelle session.", "Globaler Arbeitsbereich bereit für eine neue Sitzung.", "グローバルワークスペースで新しいセッションを開始できます。", "全局工作区已准备好开始新会话。"],
+  "Use the prompt below to start a new session for {project}.": ["Usa el mensaje de abajo para iniciar una nueva sesión en {project}.", "Utilisez le prompt ci-dessous pour démarrer une nouvelle session pour {project}.", "Mit dem Prompt unten eine neue Sitzung für {project} starten.", "下のプロンプトで {project} の新しいセッションを開始します。", "使用下方提示词为 {project} 开始新会话。"],
+  "Use the prompt below to start a new global session.": ["Usa el mensaje de abajo para iniciar una nueva sesión global.", "Utilisez le prompt ci-dessous pour démarrer une nouvelle session globale.", "Mit dem Prompt unten eine neue globale Sitzung starten.", "下のプロンプトで新しいグローバルセッションを開始します。", "使用下方提示词开始新的全局会话。"],
+  "Switch projects in the sidebar before sending if you want a different scope.": ["Cambia de proyecto en la barra lateral antes de enviar si deseas otro ámbito.", "Changez de projet dans la barre latérale avant l’envoi pour un autre contexte.", "Vor dem Senden das Projekt in der Seitenleiste wechseln, um den Bereich zu ändern.", "別のスコープを使う場合は、送信前にサイドバーでプロジェクトを切り替えてください。", "如需不同范围，请在发送前于侧边栏切换项目。"],
+  "Reopen any session tab to continue previous work.": ["Reabre una pestaña de sesión para continuar el trabajo anterior.", "Rouvrez un onglet de session pour reprendre le travail précédent.", "Einen Sitzungstab öffnen, um frühere Arbeit fortzusetzen.", "セッションタブを開き直して以前の作業を続けます。", "重新打开任一会话标签以继续之前的工作。"],
+  "Resize timeline and composer": ["Redimensionar historial y editor", "Redimensionner l’historique et l’éditeur", "Verlauf und Eingabefeld skalieren", "タイムラインと入力欄のサイズを変更", "调整时间线和编辑器大小"],
+  "Automatic, {height} pixels": ["Automático, {height} píxeles", "Automatique, {height} pixels", "Automatisch, {height} Pixel", "自動、{height} ピクセル", "自动，{height} 像素"],
+  "{height} pixels": ["{height} píxeles", "{height} pixels", "{height} Pixel", "{height} ピクセル", "{height} 像素"],
+  "Arrow Up enlarges composer; Arrow Down shrinks; Home resets to automatic": ["Flecha arriba amplía el editor; abajo lo reduce; Inicio restablece el tamaño automático", "Flèche haut agrandit l’éditeur ; bas le réduit ; Début rétablit la taille automatique", "Pfeil hoch vergrößert die Eingabe; Pfeil runter verkleinert; Pos1 setzt auf automatisch zurück", "上矢印で入力欄を拡大、下矢印で縮小、Homeで自動に戻します", "向上箭头扩大编辑器，向下箭头缩小，Home 恢复自动大小"],
   "Detecting providers…": ["Detectando proveedores…", "Détection des fournisseurs…", "Anbieter werden erkannt…", "プロバイダーを検出中…", "正在检测提供商…"],
   "{count} active provider": ["{count} proveedor activo", "{count} fournisseur actif", "{count} aktiver Anbieter", "{count} 個の有効なプロバイダー", "{count} 个活动提供商"],
   "{count} active providers": ["{count} proveedores activos", "{count} fournisseurs actifs", "{count} aktive Anbieter", "{count} 個の有効なプロバイダー", "{count} 个活动提供商"],

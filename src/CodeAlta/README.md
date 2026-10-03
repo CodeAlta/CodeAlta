@@ -105,10 +105,19 @@ reload, capability reset or mutation retry is performed. Inspect receipts before
 Reminders is a guarded selected-session native-modal popup, not a Settings section or replacement
 workspace. Closing it does not cancel an admitted action or retry an uncertain Save; original
 request evidence remains owned by the application. The underlying workspace stays mounted.
-Clicking a project opens a blank timeline with a bottom prompt and animated CodeAlta wordmark
-(stationary with reduced motion) in the focused pane without hiding the open tab strips or discarding
-other split panes. Click a session tab to return to it; there is no draft tab. The prompt's divider
-reserves space within its own pane, independently of tab and notes dividers. Real FlexLayout session tabs project
+Clicking a project opens one temporary **New session** tab, reused when selecting another project
+before creation. Selecting an existing session tab or sidebar session removes it. Real session
+panes, drafts and split geometry are retained, rather than replaced with a project placeholder.
+The welcome view renders the same 3-D FIGlet/ASCII logo asset as the TUI, with the project name,
+folder and launch guidance below it. Its composer uses the same surface, status line, editor,
+toolbar, expansion and keyboard handling as existing sessions. **Start session** (or Enter) retains
+the guarded create-and-transfer flow: review the transferred prompt in the created session before
+normal Send. Model/agent/reasoning choices remain unavailable until the session is created; the
+provider can be chosen before creation. The prompt's divider
+reserves space within its own pane, independently of tab and notes dividers. Sizing observes the
+actual portal DOM mount, including late-mounted panes. Nested notes drag events bubble to the
+outer session layout; FlexLayout's controller ownership keeps notes/session drops separate.
+Real FlexLayout session tabs project
 existing bounded identities, with compact status/close chrome and secondary Reopen/Refresh menus.
 Open sessions retain independent display/runtime/review/notes owners and drafts; the focused pane
 owns global composer shortcuts. Running indicators in the project/session sidebar refresh in bounded

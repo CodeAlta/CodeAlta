@@ -16,6 +16,6 @@ export default defineConfig(({ mode }) => ({
   },
   base: "./",
   plugins: [react()],
-  server: { fs: { allow: [".."] }, host: "127.0.0.1", strictPort: true, port: 5173 },
+  server: { fs: { allow: ["..", fileURLToPath(new URL("../../CodeAlta.Tui/Assets/3d.flf", import.meta.url))] }, host: "127.0.0.1", strictPort: true, port: 5173 },
   build: { sourcemap: false, assetsInlineLimit: 0 },
 }));

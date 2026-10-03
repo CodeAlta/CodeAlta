@@ -1,4 +1,27 @@
-# Workspace docking and live-history recovery (2026-10-03)
+# Temporary new-session tabs and drag integration (2026-10-03)
+
+Supersedes the project-placeholder behavior below. A project selection opens one temporary
+new-session node, reused across projects and removed by existing-session selection. Real session
+factories and split geometry are never replaced. Welcome rendering imports the actual TUI 3-D
+FIGlet asset and shows its project-folder subtitle/guidance. Owned, new-session and catalog
+composers share their surface and toolbar; new-session Enter/Start retains guarded creation and
+draft transfer for review before normal Send, without changing provider/request ownership.
+
+Composer sizing now follows callback-ref DOM lifetimes: nested FlexLayout factory portals can
+mount after the owner component's sizing effect, which previously left its resize bounds at zero.
+Both new and existing panes use the same sizing hook and separator. Nested notes layouts no longer
+stop all drag events; FlexLayout already checks the drag's owning controller, and the outer session
+layout must receive drag-enter/over/drop events to activate its split overlay. Overflow-menu
+selection also synchronizes focus after applying its accepted action.
+
+Regression coverage includes temporary-node reuse/removal, retained geometry, the shared logo/
+composer contracts, late-mounted sizing and an isolated browser drag/resize/lifecycle fixture.
+Verification remains build-only at the user's request; tests and browser/native/provider acceptance
+are not executed. Frontend TypeScript/production build, integrated Release desktop build,
+desktop test-project compilation and Lunet website build pass. Vite's existing large-chunk
+advisory remains. Generated bridge source and unrelated local configuration are excluded.
+
+# Workspace docking and live-history recovery (2026-10-03, earlier)
 
 Fixes regressions in the split-session presentation below. Session tabs are workspace-global:
 project selection keeps the dock/model, open factories and split geometry, showing the project
