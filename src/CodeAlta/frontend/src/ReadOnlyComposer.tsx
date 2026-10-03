@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type ClipboardEvent } from "react";
-import { Button, Spinner } from "@blueprintjs/core";
+import { Button } from "@blueprintjs/core";
+import { ActivitySpinner } from "./ActivitySpinner";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import type { PromptInput } from "./PromptEditor";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
@@ -39,7 +40,7 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
   return <>
     {!expanded && localDraft && localImages && localImages.attachments}
     <ComposerSurface className={localDraft ? undefined : "catalog-composer"} busy={localDraft?.busy} status={<>
-      {localDraft?.busy ? <Spinner size={16} intent="primary" aria-hidden="true" /> : <AppIcon name="prompt" size={14} />}
+      {localDraft?.busy ? <ActivitySpinner size={14} /> : <AppIcon name="prompt" size={14} />}
       {t(localDraft?.busy ? "Creating session…" : localDraft ? "Prompt ready" : "Draft only")}
     </>}
     expandedEditor={expanded && <ExpandedPromptEditor text={text} onChange={edit} onPaste={refuseImagePaste} onCompositionStart={localImages?.invalidate} attachments={localDraft && localImages ? localImages.attachments : imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>} onClose={() => { localImages?.invalidate(); setExpanded(false); }} />}

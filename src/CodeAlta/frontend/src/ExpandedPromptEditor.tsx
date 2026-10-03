@@ -1,4 +1,5 @@
-import { useEffect, useRef, type ClipboardEventHandler, type ReactNode } from "react";
+import { useRef, type ClipboardEventHandler, type ReactNode } from "react";
+import { AppWindow } from "./AppWindow";
 import { dispatchExpandedComposerKey } from "./composerKeyboard";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
 import { useShellLanguage } from "./shellLanguage";
@@ -10,16 +11,11 @@ export function ExpandedPromptEditor({ text, onChange, onClose, onPaste, attachm
   onCompositionStart?: () => void;
 }) {
   const { t } = useShellLanguage();
-  const dialog = useRef<HTMLDialogElement>(null);
   const editor = useRef<PromptInput>(null);
-  useEffect(() => {
-    const element = dialog.current!;
-    element.showModal();
-    editor.current?.focus();
-    return () => element.close();
-  }, []);
 
-  return <dialog ref={dialog} className="expanded-prompt-dialog" aria-labelledby="expanded-prompt-title"
+  return <AppWindow storageKey="codealta.desktop.window.prompt-editor.v1" className="expanded-prompt-dialog" titleId="expanded-prompt-title" title={t("Edit prompt")}
+    preferredSize={viewport => ({ width: Math.min(1000, viewport.width - 40), height: Math.min(760, viewport.height - 40) })}
+    minimumSize={{ width: 420, height: 280 }} onClose={onClose} closeLabel={t("Close")} onOpened={() => editor.current?.focus()}
     onCancel={event => { event.preventDefault(); onClose(); }} onKeyDown={event => {
       // Modal editing must never fall through to shell shortcuts or the regular composer's Send/Steer.
       event.stopPropagation();
@@ -32,8 +28,6 @@ export function ExpandedPromptEditor({ text, onChange, onClose, onPaste, attachm
         defaultPrevented: event.defaultPrevented }, onClose)) event.preventDefault();
       else if (event.key === "Escape") event.preventDefault();
     }}>
-    <header><h2 id="expanded-prompt-title">{t("Edit prompt")}</h2><div className="expanded-prompt-actions">
-      <button type="button" onClick={onClose}>{t("Close")}</button></div></header>
     {attachments}
     <div className="expanded-prompt-panes">
       <PromptEditor ref={editor} expanded label={t("Expanded prompt")}
@@ -45,5 +39,5 @@ export function ExpandedPromptEditor({ text, onChange, onClose, onPaste, attachm
     </div>
     <ProjectReferencePicker text={text} edit={onChange} input={editor} />
     <p id="expanded-prompt-hint">{t("Escape / Ctrl+Enter close · Enter new line · Draft preserved; nothing is sent.")}</p>
-  </dialog>;
+  </AppWindow>;
 }

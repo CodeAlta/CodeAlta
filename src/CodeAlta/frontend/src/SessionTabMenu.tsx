@@ -1,7 +1,8 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Menu, MenuItem, Overlay2 } from "@blueprintjs/core";
+import { AppIcon, type IconName } from "./AppIcon";
 
-export type SessionMenuEntry = { key: string; label: string; disabled?: boolean; onSelect: () => void };
+export type SessionMenuEntry = { key: string; label: string; disabled?: boolean; icon?: IconName; danger?: boolean; onSelect: () => void };
 
 // The portal stays inside the themed shell, not FlexLayout's unthemed popup container.
 export function SessionTabMenu({ anchor, items, title, container, current, onClose }: {
@@ -42,6 +43,7 @@ export function SessionTabMenu({ anchor, items, title, container, current, onClo
     }}>
       <Menu role="menu" aria-label={title}>
         {items.map(item => <MenuItem key={item.key} role="menuitem" text={item.label} disabled={item.disabled} tabIndex={-1}
+          icon={item.icon ? <AppIcon name={item.icon} size={15} /> : undefined} intent={item.danger ? "danger" : undefined}
           onClick={() => { if (!item.disabled && current()) { close(true); item.onSelect(); } }} />)}
       </Menu>
     </div>

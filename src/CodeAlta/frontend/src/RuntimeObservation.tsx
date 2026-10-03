@@ -1,16 +1,28 @@
 import { useSyncExternalStore } from "react";
+import { ActivitySpinner } from "./ActivitySpinner";
 import { tabKey, type SessionTab } from "./sessionTabs";
 import type { createRuntimeObservations } from "./runtimeObservations";
 import { useShellLanguage } from "./shellLanguage";
 
 export type RuntimeObservationControls = { store: ReturnType<typeof createRuntimeObservations>; enabled: boolean; canObserve: (tab: SessionTab) => boolean; refresh: (tabs: readonly SessionTab[]) => void };
 
+/** Sidebar activity: a spinner while an observed session (or any observed session of a project) is running. */
 export function RunningSessionBadge({ controls, tab, projectId }: { controls: RuntimeObservationControls; tab?: SessionTab; projectId?: string | null }) {
   const { t } = useShellLanguage();
   const state = useSyncExternalStore(controls.store.subscribe, controls.store.getSnapshot);
   const rows = tab ? [state.rows.get(tabKey(tab))] : [...state.rows.values()].filter(row => row.projectId === projectId);
   if (!controls.enabled || tab && !controls.canObserve(tab) || !rows.some(row => row?.running && !row.stale)) return null;
-  return <span className="session-running" role="img" aria-label={t("Running")} title={t("Running")}>●</span>;
+  return <span className="session-running"><ActivitySpinner size={12} label={t("Running")} /></span>;
+}
+
+/** Tab-title activity: a spinner while the session runs, otherwise the compact observation dot. */
+export function SessionTabActivity({ controls, tab }: { controls: RuntimeObservationControls; tab: SessionTab }) {
+  const { t } = useShellLanguage();
+  const state = useSyncExternalStore(controls.store.subscribe, controls.store.getSnapshot);
+  const row = state.rows.get(tabKey(tab));
+  if (controls.enabled && controls.canObserve(tab) && row?.running && !row.stale)
+    return <span className="runtime-observation runtime-observation-compact" title={`${row.label}\n${row.details}`}><ActivitySpinner size={12} label={t("Running")} /></span>;
+  return <RuntimeObservationBadge controls={controls} tab={tab} compact />;
 }
 
 export function RuntimeObservationBadge({ controls, tab, compact = false }: { controls: RuntimeObservationControls; tab: SessionTab; compact?: boolean }) {

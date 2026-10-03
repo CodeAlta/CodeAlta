@@ -1,9 +1,10 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { WorkspaceProject } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { ProjectDetailsDialog } from "./ProjectDetailsEntry";
 import { projectRowAccess, projectRowCurrent, type ProjectRowContext } from "./projectRowActionAccess";
-import { isSessionContextKey, menuFocusIndex } from "./sessionRowActions";
+import { isSessionContextKey } from "./sessionRowActions";
+import { SessionTabMenu } from "./SessionTabMenu";
 import { useShellLanguage } from "./shellLanguage";
 
 export type ProjectRowAuthority = {
@@ -19,10 +20,8 @@ export function ProjectRowActions({ project, authority, children }: {
   project: WorkspaceProject; authority?: ProjectRowAuthority; children: ReactNode;
 }) {
   const { t } = useShellLanguage();
-  const id = useId();
   const row = useRef<HTMLLIElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
-  const menu = useRef<HTMLDivElement>(null);
   const latest = useRef(authority); latest.current = authority;
   const review = useRef<Review | null>(null);
   const [shown, setShown] = useState<Review | null>(null);
@@ -51,7 +50,6 @@ export function ProjectRowActions({ project, authority, children }: {
     review.current = value; setShown(value);
   }
   const visible = shown && current(shown) ? shown : null;
-  useLayoutEffect(() => { if (visible && !visible.details) menu.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus(); }, [visible]);
   useEffect(() => { if (shown && !visible) dismiss(); }, [shown, visible]);
   useEffect(() => {
     const modal = (event: Event) => {
@@ -66,7 +64,11 @@ export function ProjectRowActions({ project, authority, children }: {
       }
       dismiss();
     };
-    const pointer = (event: PointerEvent) => { if (review.current && !review.current.row.contains(event.target as Node)) dismiss(); };
+    // The floating menu renders in a portal outside the row; its own overlay handles outside clicks.
+    const pointer = (event: PointerEvent) => {
+      if (review.current && !review.current.row.contains(event.target as Node)
+        && !(event.target instanceof Element && event.target.closest(".session-tab-popup"))) dismiss();
+    };
     document.addEventListener("beforetoggle", modal, true);
     document.addEventListener("pointerdown", pointer);
     return () => { review.current = null; document.removeEventListener("beforetoggle", modal, true); document.removeEventListener("pointerdown", pointer); };
@@ -74,7 +76,7 @@ export function ProjectRowActions({ project, authority, children }: {
   function action(kind: "open" | "details" | "rename" | "archive", original: Review) {
     const value = review.current;
     const owner = latest.current;
-    if (!value || value !== original || value.details || !owner || !current(value) || !menu.current?.isConnected
+    if (!value || value !== original || value.details || !owner || !current(value)
       || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')
       || !projectRowAccess(value.project, value.context)[kind] || !projectRowAccess(value.project, owner.current())[kind]) return;
     if (kind === "details") {
@@ -96,24 +98,18 @@ export function ProjectRowActions({ project, authority, children }: {
     event.preventDefault(); event.stopPropagation(); open();
   }}>{children}{authority && <button ref={trigger} type="button" className="icon-button project-actions-trigger"
     aria-label={t("Actions for {title} (ID: {id})", { title: project.name, id: project.id })}
-    aria-haspopup="menu" aria-expanded={!!visible && !visible.details} aria-controls={visible && !visible.details ? id : undefined}
+    aria-haspopup="menu" aria-expanded={!!visible && !visible.details}
     onClick={open}><AppIcon name="ellipsis" size={16} /></button>}
-    {visible && !visible.details && <div ref={menu} id={id} role="menu" className="project-actions-menu" aria-label={t("Project actions")}
-      onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null) && !review.current?.details) dismiss(); }}
-      onKeyDown={event => {
-        if (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
-          if (["Enter", " ", "Escape"].includes(event.key)) { event.preventDefault(); event.stopPropagation(); } return;
-        }
-        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); dismiss(true); return; }
-        const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)'));
-        const next = menuFocusIndex(event.key, items.indexOf(document.activeElement as HTMLButtonElement), items.length);
-        if (next !== null) { event.preventDefault(); event.stopPropagation(); items[next].focus(); }
-      }}>
-      <button type="button" role="menuitem" onClick={() => action("open", visible)}>{t("Open")}</button>
-      <button type="button" role="menuitem" onClick={() => action("details", visible)}>{t("Details")}</button>
-      <button type="button" role="menuitem" disabled={!access?.rename} onClick={() => action("rename", visible)}>{t("Rename project…")}</button>
-      <button type="button" role="menuitem" disabled={!access?.archive} onClick={() => action("archive", visible)}>{t(project.archived ? "Unarchive project…" : "Archive project…")}</button>
-    </div>}
+    {visible && !visible.details && <SessionTabMenu anchor={visible.origin} title={t("Project actions")} container={document.body}
+      current={() => review.current === visible && current(visible)}
+      // The menu closes before it runs the chosen entry; dismiss afterwards so the entry still sees its review.
+      onClose={() => queueMicrotask(() => { if (review.current === visible) dismiss(); })}
+      items={[
+        { key: "open", label: t("Open"), icon: "open", onSelect: () => action("open", visible) },
+        { key: "details", label: t("Details"), icon: "info", onSelect: () => action("details", visible) },
+        { key: "rename", label: t("Rename project…"), icon: "edit", disabled: !access?.rename, onSelect: () => action("rename", visible) },
+        { key: "archive", label: t(project.archived ? "Unarchive project…" : "Archive project…"), icon: "archive", disabled: !access?.archive, onSelect: () => action("archive", visible) },
+      ]} />}
     {visible?.details && visible.context.snapshot && <ProjectDetailsDialog project={visible.project} snapshot={visible.context.snapshot}
       isCurrent={() => current(visible)} onClose={() => dismiss(true)} />}
   </li>;

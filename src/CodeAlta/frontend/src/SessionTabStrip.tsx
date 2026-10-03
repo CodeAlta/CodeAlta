@@ -6,7 +6,7 @@ import { SessionTabMenu, type SessionMenuEntry } from "./SessionTabMenu";
 import { useShellLanguage } from "./shellLanguage";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { resolveSessionTab, type SessionTab, type SessionTabs as Tabs } from "./sessionTabs";
-import { RuntimeObservationBadge, type RuntimeObservationControls } from "./RuntimeObservation";
+import { SessionTabActivity, type RuntimeObservationControls } from "./RuntimeObservation";
 import { createSessionTabModel, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction } from "./sessionTabLayout";
 import { useSessionTabDrag } from "./useSessionTabDrag";
 
@@ -121,7 +121,7 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
         const tab = state.open.find(value => sessionNodeId(value) === node.getId());
         values.content = <span data-session-node={node.getId()}><SessionTabLabel label={label(tab ?? null)} path={tab?.path ?? null} dirty={!!tab && dirty(tab.sessionId)} /></span>;
         if (tab) values.leading = <>
-          {observations && <RuntimeObservationBadge controls={observations} tab={tab} compact />}
+          {observations && <SessionTabActivity controls={observations} tab={tab} />}
         </>;
       }}
       onRenderTabSet={(node, values) => values.buttons.push(<Button key="more" variant="minimal" size="small" className="session-tab-more"

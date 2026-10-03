@@ -1,4 +1,4 @@
-import { Button, Classes, HTMLSelect } from "@blueprintjs/core";
+import { Button, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, Popover } from "@blueprintjs/core";
 import { connect, onDiagnostic } from "@neoastra/client";
 import { rpcFailureCode } from "./rpcDiagnostics";
 import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
@@ -74,6 +74,7 @@ import { useNewSessionChoices } from "./newSessionChoices";
 import { ComposerSelectionFields, ReasoningSlider } from "./ComposerSurface";
 import { validSelection } from "./sessionSelection";
 import { AppIcon } from "./AppIcon";
+import { AppWindow } from "./AppWindow";
 import { sessionTime } from "./sessionTime";
 import { createProjectOpening } from "./projectOpening";
 import { OpenProjectDialog } from "./OpenProjectDialog";
@@ -86,7 +87,7 @@ import type { BatchDeleteControls } from "./SessionBatchDeletePanel";
 import { createProjectRename, projectNameVisible, projectRenameMessage, projectRenameSelectionCurrent, type ProjectNameTarget } from "./projectRename";
 import { sessionHierarchy } from "./sessionHierarchy";
 import { limitSessionHierarchy } from "./recentSessions";
-import { SessionActionMenu } from "./SessionActionMenu";
+import { SessionTabMenu } from "./SessionTabMenu";
 import { isSessionContextKey, restoreSessionMenuFocus, sessionActionAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
 import { projectRailProjection, type ProjectSort } from "./projectRail";
 import { ProjectRailRows } from "./ProjectRailRows";
@@ -328,10 +329,10 @@ function App() {
   const [menuTarget, setMenuTarget] = useState<SessionMenuTarget | null>(null);
   const menuSnapshot = useRef<WorkspaceSnapshot | undefined>(undefined);
   const menuSelection = useRef<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const menuOrigin = useRef<HTMLButtonElement>(null);
   const focusAction = useRef<"rename" | "delete" | null>(null);
   const [creatingVisible, writeCreatingVisible] = useState(false);
+  const [sessionOptionsOpen, setSessionOptionsOpen] = useState(false);
   const [creatingTitle, writeCreatingTitle] = useState("");
   const [creatingProvider, writeCreatingProvider] = useState("");
   function setCreatingProvider(value: string) { invalidateCreation(); writeCreatingProvider(value); }
@@ -656,25 +657,11 @@ function App() {
     && visibleSessions.some(session => session.id === menuTarget.id)
     && snapshot?.sessions.filter(session => session.id === menuTarget.id).length === 1 ? menuTarget : null;
   useLayoutEffect(() => {
-    if (activeMenu) {
-      menuRef.current?.querySelector<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)')?.focus();
-      menuRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
-    }
-  }, [activeMenu]);
-  useLayoutEffect(() => {
     if (menuTarget || !focusAction.current || narrow && railVisible) return;
     const field = sessionRail.current?.querySelector<HTMLInputElement>(focusAction.current === "rename" ? ".session-rename input" : ".session-delete input");
     if (field) { field.focus(); focusAction.current = null; }
   }, [menuTarget, renamingId, deletingId, narrow, railVisible]);
   useEffect(() => { if (menuTarget && !activeMenu) setMenuTarget(null); }, [menuTarget, activeMenu]);
-  useEffect(() => {
-    if (!activeMenu) return;
-    const dismiss = (event: globalThis.PointerEvent) => {
-      if (!menuRef.current?.contains(event.target as Node) && !menuOrigin.current?.contains(event.target as Node)) setMenuTarget(null);
-    };
-    document.addEventListener("pointerdown", dismiss);
-    return () => document.removeEventListener("pointerdown", dismiss);
-  }, [activeMenu]);
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const connected = !!status?.hostAvailable;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
@@ -721,7 +708,7 @@ function App() {
         sessionInfoTrigger.current.getAttribute("aria-expanded") === "false",
       promptReady: !!document.querySelector("#session-prompt, #catalog-prompt"),
       localDraftScope: sessionId === null ? draftScope : undefined,
-      searchReady: !!searchInput.current?.isConnected, browserScope: snapshot ? JSON.stringify([browserRevision.current, projectId, status?.hostEpoch, status?.hostAvailable, mutation?.capability.canMutate()]) : undefined,
+      searchReady: !!sessionRail.current?.isConnected, browserScope: snapshot ? JSON.stringify([browserRevision.current, projectId, status?.hostEpoch, status?.hostAvailable, mutation?.capability.canMutate()]) : undefined,
       tabSelection: tabs.active ? tabKey(tabs.active) : null,
       runtimeScope: owned && mutation?.capability.canMutate() && tabs.open.length ? JSON.stringify([browserRevision.current, currentHostEpoch.current, tabs.open.map(tabKey)]) : undefined,
       tabsReady: !!snapshot && tabs.open.length > 0, reopenReady: !!snapshot && tabs.closed.length > 0 };
@@ -779,7 +766,7 @@ function App() {
     else if (action === "nextTab" || action === "previousTab" || action === "closeTab" || action === "reopenTab") tabCommand(action);
     else if (action === "reminders") invokeComposerControl(remindersTrigger.current);
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
-    else if (action === "focusSearch") { const options = searchInput.current?.closest("details"); if (options) options.open = true; searchInput.current?.focus(); }
+    else if (action === "focusSearch") setSessionOptionsOpen(true); // The popover focuses its search field when it opens.
     else { navigate(action === "settings" ? "appearance" : action); settingsOrigin.current = paletteOrigin.current; }
   });
 
@@ -878,7 +865,7 @@ function App() {
     else if (action === "settings" || action === "plugins") navigate(action === "plugins" ? "mcp" : "appearance");
     else if (action === "toggleNotes") setNotesVisible(value => !value);
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
-    else if (action === "focusSearch") { const options = searchInput.current?.closest("details"); if (options) options.open = true; searchInput.current?.focus(); }
+    else if (action === "focusSearch") setSessionOptionsOpen(true); // The popover focuses its search field when it opens.
     else if (action === "focusProjects") {
       if (!railVisible) toggleProjects();
       else focusVisibleProject(projectRail.current, projectFilterInput.current);
@@ -1469,22 +1456,28 @@ function App() {
         </nav>
         <SessionContentLayout sessionWidth={ideWidth.width} narrow={narrow} sessionsHidden={!railVisible}
           projects={sessions => <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}>
-          <div className="panel-title"><span title={projectListing?.evidenceNotice ?? undefined}>{t("Projects")}</span><span><button type="button" className="rail-action" aria-label={`${t("Open project")} (Ctrl+O)`} title={`${t("Open project")} (Ctrl+O)`} onClick={() => setDialog("project")}>＋</button><span className="count">{snapshot?.projects.length ?? 0}</span></span></div>
+          <div className="panel-title"><span title={projectListing?.evidenceNotice ?? undefined}>{t("Projects")}<span className="count">{snapshot?.projects.length ?? 0}</span></span><span>
+            {snapshot && <Popover placement="bottom-end" content={<Menu aria-label={t("Project actions")}>
+              <MenuDivider title={t("Sort projects")} />
+              <MenuItem roleStructure="listoption" selected={projectSort === "name"} text={t("Name")} onClick={() => setProjectSort("name")} />
+              <MenuItem roleStructure="listoption" selected={projectSort === "recent"} text={t("Recent visible updates")} onClick={() => setProjectSort("recent")} />
+              <MenuDivider />
+              <MenuItem icon={<AppIcon name="open" size={15} />} text={`${t("Open project")}…`} label="Ctrl+O" onClick={() => setDialog("project")} />
+              <MenuItem icon={<AppIcon name="archive" size={15} />} text={t(selectedProject?.archived ? "Unarchive project…" : "Archive project…")}
+                disabled={!selectedProject || !owned || !mutation?.capability.canMutate()} onClick={() => setDialog("archive")} />
+            </Menu>}>
+              <Button variant="minimal" size="small" className="rail-action" icon={<AppIcon name="ellipsis" size={18} />} aria-label={t("Project actions")} title={t("Project actions")} />
+            </Popover>}
+            <Button variant="minimal" size="small" className="rail-action" icon={<AppIcon name="plus" size={18} />} aria-label={`${t("Open project")} (Ctrl+O)`} title={`${t("Open project")} (Ctrl+O)`} onClick={() => setDialog("project")} />
+          </span></div>
           {workspaceState.kind === "loading" && <LoadingRows />}
           {workspaceState.kind === "unconfigured" && <div className="sidebar-empty">{t("No catalog configured. See the launch instructions below.")}</div>}
           {workspaceState.kind === "error" && <div role="alert" className="sidebar-empty error-text">{workspaceState.message}</div>}
-          {snapshot && <details className="navigator-options"><summary title={t("Project actions")} aria-label={t("Project actions")}><AppIcon name="ellipsis" size={16} /></summary><div className="project-controls">
-            <input id="project-filter" ref={projectFilterInput} type="search" value={projectFilter} onChange={event => setProjectFilter(event.target.value)}
-              placeholder={t("Name or path")} aria-label={t("Filter projects by name or path")} aria-controls="project-list" />
-            <div className="project-options-fields">
-              <HTMLSelect id="project-sort" aria-label={t("Sort projects")} value={projectSort} onChange={event => setProjectSort(event.target.value as ProjectSort)}>
-                <option value="name">{t("Name")}</option><option value="recent">{t("Recent visible updates")}</option>
-              </HTMLSelect>
-              <button type="button" className="quiet-button" disabled={!projectFilter} onClick={() => { setProjectFilter(""); projectFilterInput.current?.focus(); }}>{t("Clear filter")}</button>
-              <button type="button" className="quiet-button" disabled={!selectedProject || !owned || !mutation?.capability.canMutate()}
-                onClick={() => setDialog("archive")}>{t(selectedProject?.archived ? "Unarchive project…" : "Archive project…")}</button>
-            </div>
-          </div></details>}
+          {snapshot && <InputGroup id="project-filter" inputRef={projectFilterInput} className="project-filter" size="small" type="search" value={projectFilter}
+            leftIcon={<AppIcon name="search" size={14} className={Classes.ICON} />} onChange={event => setProjectFilter(event.target.value)}
+            placeholder={t("Name or path")} aria-label={t("Filter projects by name or path")} aria-controls="project-list"
+            rightElement={projectFilter ? <Button variant="minimal" size="small" icon={<AppIcon name="close" size={14} />} aria-label={t("Clear filter")} title={t("Clear filter")}
+              onClick={() => { setProjectFilter(""); projectFilterInput.current?.focus(); }} /> : undefined} />}
           {snapshot && projectListing?.projects.length === 0 && <p className="sidebar-empty" role="status">
             {t(projectFilter.trim() ? "No matching projects. Clear the filter to show them again." : "No projects in this snapshot.")}
             {projectId !== null && ` ${t("The selected project and session remain open.")}`}
@@ -1518,16 +1511,20 @@ function App() {
           splitter={<PaneSplitter className="session-splitter" label={t("Resize Explorer")} value={ideWidth.width} hidden={narrow || !railVisible}
             onResize={delta => setIdeWidth(value => resizeIdeWidth(value, delta))} onReset={() => setIdeWidth({ width: 272, full: false })} />}
           sessions={<aside className="session-rail" aria-label={t("Sessions")} ref={sessionRail} hidden={!railVisible}>
-          <details className="session-navigation-options"><summary aria-label={t("Sessions")} title={notice || t("Sessions")}><AppIcon name="ellipsis" size={14} /></summary><div className="session-rail-header">
-            <div><h2>{selectedProject?.name ?? t("Other sessions")}</h2></div>
-            <div className="session-rail-actions"><ProjectDetailsEntry context={projectDetailsContext} getCurrent={currentProjectDetailsContext} />
-              <button type="button" className="icon-button" aria-label={t("Create session")} title={t("Create session in selected scope")}
-                disabled={!owned || !snapshot || !!selectedProject?.archived || projectId !== null && !selectedProject || creatingBusy}
-                onClick={() => { setCreatingVisible(value => !value); setCreatingMessage(""); }}>＋</button></div>
-          </div>
-          <button type="button" className="quiet-button" disabled={!snapshot} onClick={openSessionBrowser}>{t("Browse saved sessions")}</button>
-          <label className="search"><AppIcon name="search" size={14} /><input ref={searchInput} value={search} onChange={event => setSearch(event.target.value)} placeholder={t("Search sessions")} aria-label={t("Search sessions")} /></label>
-          </details>
+          <Popover placement="bottom-end" isOpen={sessionOptionsOpen} onInteraction={setSessionOptionsOpen} popoverClassName="session-options-popover"
+            content={<div className="session-options">
+              <InputGroup inputRef={searchInput} size="small" type="search" leftIcon={<AppIcon name="search" size={14} className={Classes.ICON} />} value={search}
+                onChange={event => setSearch(event.target.value)} placeholder={t("Search sessions")} aria-label={t("Search sessions")} />
+              <Menu aria-label={t("Sessions")}>
+                <MenuItem icon={<AppIcon name="newSession" size={15} />} text={t("Create session")} title={t("Create session in selected scope")}
+                  disabled={!owned || !snapshot || !!selectedProject?.archived || projectId !== null && !selectedProject || creatingBusy}
+                  onClick={() => { setCreatingVisible(value => !value); setCreatingMessage(""); }} />
+                <MenuItem icon={<AppIcon name="browse" size={15} />} text={t("Browse saved sessions")} disabled={!snapshot} onClick={openSessionBrowser} />
+              </Menu>
+            </div>}>
+            <Button variant="minimal" size="small" className="session-navigation-options" icon={<AppIcon name="ellipsis" size={16} />}
+              aria-label={t("Sessions")} title={notice || t("Sessions")} />
+          </Popover>
           {creatingVisible && <div className="session-create">
             <label>{selectedProject ? t("New session in {name}", { name: selectedProject.name }) : t("New global session")}
               <input value={creatingTitle} maxLength={256} disabled={creatingBusy} placeholder={t("Title (optional)")} onChange={event => setCreatingTitle(event.target.value)} /></label>
@@ -1584,11 +1581,17 @@ function App() {
               <span id={`session-tooltip-${index}`} role="tooltip" className="session-tooltip"
                 tabIndex={tooltip.length > 256 ? 0 : undefined}>{tooltip}</span>
               <button type="button" className="icon-button session-actions-trigger" aria-label={t("Actions for {title} (ID: {id})", { title: session.title, id: session.id })}
-                aria-haspopup="menu" aria-expanded={!!menu} aria-controls={menu ? `session-actions-${index}` : undefined}
+                aria-haspopup="menu" aria-expanded={!!menu}
                 onClick={event => openSessionMenu(session.id, event.currentTarget)}><AppIcon name="ellipsis" size={16} /></button>
-              {menu && access.open && <SessionActionMenu id={`session-actions-${index}`} label={session.title}
-                rename={access.rename} deleteAllowed={access.delete} menuRef={menuRef}
-                onAction={action => runSessionMenuAction(action, session, menu)} onDismiss={dismissSessionMenu} />}
+              {menu && access.open && menuOrigin.current && <SessionTabMenu anchor={menuOrigin.current} container={document.body}
+                title={t("Session actions for {title}", { title: session.title })} current={() => true}
+                // The menu closes before it runs the chosen entry; clear the target afterwards so the entry still sees it.
+                onClose={() => queueMicrotask(() => setMenuTarget(value => value === menu ? null : value))}
+                items={[
+                  { key: "open", label: t("Open session"), icon: "open", onSelect: () => runSessionMenuAction("open", session, menu) },
+                  { key: "rename", label: t("Rename…"), icon: "edit", disabled: !access.rename, onSelect: () => runSessionMenuAction("rename", session, menu) },
+                  { key: "delete", label: t("Delete… (confirmation required)"), icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
+                ]} />}
               {renamingId === session.id && <div className="session-rename"><label>{t("New title for {title}", { title: session.title })}
                 <input value={renamingTitle} maxLength={256} disabled={!owned || renamingBusy || renameLocked} onChange={event => setRenamingTitle(event.target.value)}
                   onKeyDown={event => { if (event.key === "Enter") void renameSelectedSession(); if (event.key === "Escape") setRenamingId(null); }} /></label>
@@ -1836,20 +1839,16 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
   onClose: () => void; children: ReactNode;
 }) {
   const { t } = useShellLanguage();
-  const modal = useRef<HTMLDialogElement>(null);
   const composingEscape = useRef(false);
-  useLayoutEffect(() => {
-    const element = modal.current;
-    element?.showModal();
-    return () => { if (element?.open) element.close(); };
-  }, []);
   const destinations: readonly [MessageKey, readonly [SettingsSection, MessageKey][]][] = [
     ["Personalization", [["appearance", "Appearance"]]],
     ["Agent & models", [["providers", "Providers"], ["models", "Models"], ["prompts", "Agent prompts"], ["skills", "Skills"]]],
     ["Extensions", [["plugins", "Plugins & MCP"], ["mcp", "MCP Servers"]]],
     ["Diagnostics", [["logs", "Application Logs"], ["about", "About"]]],
   ];
-  return <dialog ref={modal} className="settings-dialog" aria-modal="true" aria-labelledby="settings-title"
+  return <AppWindow storageKey="codealta.desktop.window.settings.v1" className="settings-dialog" titleId="settings-title" title={t("Settings")}
+    preferredSize={viewport => ({ width: viewport.width * 0.8, height: viewport.height * 0.8 })} minimumSize={{ width: 560, height: 360 }}
+    onClose={onClose} closeLabel={t("Close settings")}
     onKeyDown={event => {
       event.stopPropagation();
       if (event.key !== "Escape") return;
@@ -1858,8 +1857,6 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
       else onClose();
     }} onKeyUp={() => { composingEscape.current = false; }} onCompositionEnd={() => { composingEscape.current = false; }}
     onCancel={event => { event.preventDefault(); if (!composingEscape.current) onClose(); }}>
-    <header className="settings-dialog-header"><h2 id="settings-title">{t("Settings")}</h2>
-      <button type="button" className="icon-button" aria-label={t("Close settings")} onClick={onClose}><AppIcon name="close" size={16} /></button></header>
     <div className="settings-dialog-body">
       <nav className="settings-dialog-navigation" aria-label={t("Settings pages")}>
         {destinations.map(([group, pages]) => <div className="settings-dialog-group" key={group}>
@@ -1870,7 +1867,7 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
       </nav>
       <div className="settings-dialog-content" key={section}>{children}</div>
     </div>
-  </dialog>;
+  </AppWindow>;
 }
 
 function createSessionPaneOwners() {

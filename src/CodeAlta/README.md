@@ -59,10 +59,12 @@ unavailable; this tolerance does not promise cross-version RPC contract compatib
 Opening the dialog adds no metadata reads, and Copy remains session ID only. Existing
 snapshot identity/scope checks, catalog freshness and epoch/clipboard limits remain.
 
-Settings opens a modal overlay approximately 80% of the desktop viewport; the selected session,
+Settings opens a modal window, initially about 80% of the viewport; the selected session,
 composer draft and timeline remain mounted underneath but cannot be interacted with while it is
-open. Use the overlay's sections and Back to settings control, Escape or Close settings to return;
-at narrow widths it uses viewport margins and scrolls internally. Configuration, Providers,
+open. Drag its title bar to move it and its edges or corners to resize it; the geometry is saved in
+this WebView's local storage and the title bar's restore button (or a double-click on the title bar)
+returns to the default. The expanded prompt editor (F6) is the same kind of window with its own saved
+geometry. Use the window's sections, Escape or Close settings to return. Configuration, Providers,
 Models, Agent prompts, MCP Servers and Logs are **not** workspace tabs. Session tabs belong to the
 global workspace, not the selected project: sessions from different projects can stay open together.
 Drag a tab along the tab strip to reorder it, to a pane edge to create a split view, or to its center to merge
@@ -72,8 +74,14 @@ saved (220–720 pixels, never more than 60% of the window); the full-content bu
 Settings and the command palette are on the activity rail. The compact composer keeps secondary
 actions under **More composer actions**, with retained-request recovery separate. Alta notes belong
 to each session, start collapsed when empty, and open when meaningful content arrives. A small disclosure
-at the top right of the timeline expands/collapses their overlay without resizing the timeline or composer.
-There is no nested notes dock or notes divider. Existing session-keyed transitions and
+at the top right of the timeline expands/collapses their floating panel without resizing the timeline or
+composer. The panel (or its collapsed disclosure) can be dragged anywhere over the timeline and the open
+panel resized; its size and position are kept across collapse/expand and saved locally, relative to the
+pane's top-right corner, and its header restores the default. There is no nested notes dock or notes divider.
+Project and session rows open floating action menus from their **…** button, context menu or Shift+F10; the
+Projects header has a filter box, a sort/actions menu and an Open project button. A dot-matrix spinner on a
+session tab, its sidebar row and its project marks an observed running session, including sessions whose
+tab is closed. Existing session-keyed transitions and
 draft/uncertain-action guards remain in place.
 
 Queued text and steering use compact rows outside and above the prompt card. The Send button is a

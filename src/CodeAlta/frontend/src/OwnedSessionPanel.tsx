@@ -1,4 +1,5 @@
-import { Button, HTMLSelect, Spinner } from "@blueprintjs/core";
+import { Button, HTMLSelect } from "@blueprintjs/core";
+import { ActivitySpinner } from "./ActivitySpinner";
 import { createPortal } from "react-dom";
 import { PromptImageAttachments } from "./PromptImageAttachments";
 import { formatThinkingElapsed, useThinkingElapsed } from "./thinkingElapsed";
@@ -643,7 +644,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
         <Button icon={<AppIcon name="refresh" size={14} />} aria-label={t("Retry exact request")} disabled={invalidEpoch || pendingQueue.inFlight} onClick={() => queueTextInHost(false)} /></div>}
     {!expanded && attachmentStrip}
     <ComposerSurface busy={composerBusy} status={<>
-      {composerBusy ? <Spinner size={16} intent="primary" aria-hidden="true" /> : <AppIcon name={invalidEpoch ? "error" : "prompt"} size={14} />}
+      {composerBusy ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch ? "error" : "prompt"} size={14} />}
       {composerBusy ? thinkingSeconds > 0 ? t("Thinking for {elapsed}...", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
         : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : "Prompt ready")}</>}
     expandedEditor={expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}

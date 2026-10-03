@@ -39,6 +39,7 @@ export const messages = dictionary({
   "Browse agent prompts": ["Explorar instrucciones del agente", "Parcourir les instructions de l’agent", "Agenten-Prompts durchsuchen", "エージェントプロンプトを参照", "浏览智能体提示词"],
   "Agent, model and reasoning for the next Send": ["Agente, modelo y razonamiento para el próximo envío", "Agent, modèle et raisonnement pour le prochain envoi", "Agent, Modell und Denkaufwand für das nächste Senden", "次の送信のエージェント、モデル、推論", "下次发送的智能体、模型和推理"],
   "Default": ["Predeterminado", "Par défaut", "Standard", "既定", "默认"],
+  "Restore default size and position": ["Restaurar tamaño y posición predeterminados", "Rétablir la taille et la position par défaut", "Standardgröße und -position wiederherstellen", "既定のサイズと位置に戻す", "恢复默认大小和位置"],
   "Send options": ["Opciones de envío", "Options d’envoi", "Sendeoptionen", "送信オプション", "发送选项"],
   "Send now": ["Enviar ahora", "Envoyer maintenant", "Jetzt senden", "今すぐ送信", "立即发送"],
   "Enqueue until idle": ["Encolar hasta que esté inactiva", "Mettre en file jusqu’à l’inactivité", "Einreihen bis zum Leerlauf", "アイドルになるまでキューに追加", "排队直到空闲"],

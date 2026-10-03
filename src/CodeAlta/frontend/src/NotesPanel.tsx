@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { MarkdownContent } from "./MarkdownContent";
 import { canClearNotes, copyNotesMarkdown, notesMessage, type createNotesReader, type NotesClearState, type NotesState } from "./sessionNotes";
 import type { createMutationCapability } from "./sessionOperations";
@@ -6,8 +6,10 @@ import { notesResizeKey, visibleNotesHeight } from "./notesHeight";
 import { AppIcon } from "./AppIcon";
 import { useShellLanguage } from "./shellLanguage";
 
-export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkdown, preferredHeight, onResize, onReset, onCleared, onClose, embedded = false, panelId, onContent, observing = true }: {
+export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkdown, preferredHeight, onResize, onReset, onCleared, onClose, embedded = false, panelId, onContent, observing = true, headerActions }: {
   embedded?: boolean; panelId?: string; onContent?: (markdown: string) => void;
+  /** Extra header controls supplied by a hosting floating window. */
+  headerActions?: ReactNode;
   observing?: boolean;
   epoch?: string;
   sessionId: string | null;
@@ -103,7 +105,8 @@ export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkd
         const delta = event.clientY - lastY.current; lastY.current = event.clientY; onResize(delta);
       }} onPointerUp={pointerEnd} onPointerCancel={pointerEnd}><span /></div>}
     <section ref={pane} id={panelId} className="notes-pane" aria-label={t("Alta notes")} tabIndex={-1} style={{ height: embedded ? "100%" : height }}>
-      <header><span><strong>{t("Alta notes")}</strong><small>Markdown · session scoped</small></span><span>
+      <header className="window-drag-handle"><span><strong>{t("Alta notes")}</strong><small>Markdown · session scoped</small></span><span>
+        {headerActions}
         {current && <button type="button" title="Refresh notes" aria-label="Refresh notes" disabled={result?.kind === "clearing"}
           onClick={() => void current.reconcile().then(() => {
             if (selection.current?.actions === current && !current.uncertainClear())
