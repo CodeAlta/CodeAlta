@@ -98,3 +98,10 @@ export const sessionOperations = Object.freeze({
 export const sessionAsks = Object.freeze({ answer: unavailable, cancel: unavailable, list: emptyPage, observe: unavailable });
 export const sessionNotes = Object.freeze({ current: unavailable });
 export const sessionUserInput = Object.freeze({ cancel: unavailable, list: emptyPage, resolve: unavailable });
+
+// The demo has no host configuration file: the editor reports itself unavailable.
+export const globalConfig = Object.freeze({
+  read: async () => ({ status: "unavailable", content: null, revision: null }),
+  validate: async () => ({ valid: true, message: null, line: null, column: null }),
+  save: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
+});

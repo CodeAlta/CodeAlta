@@ -277,8 +277,20 @@ launch. The result is a completed initialization/probe, not proof of authenticat
 connection, and arbitrary provider error messages/URLs/categories are not shown. An abandoned
 probe is still joined by the host before disposal; do not assume its outcome from a timed-out
 browser request. Catalog-only mode lists saved descriptors read-only without runtime tests.
-Provider enablement, defaults, authentication and configuration writes are not available here;
-they require a separately verified safe persisted-source mutation contract.
+Provider enablement, defaults and other provider settings are edited as text in **Settings →
+Configuration file** (below); this section has no form editor and no sign-in flows yet.
+
+**Settings → Configuration file** edits the global `config.toml` (providers and their credentials,
+the default provider, plugin and skill policy) in an owned launch. The text is validated shortly
+after typing stops, with the first diagnostic marked on its line; Save is offered only for changed,
+valid text of at most 256 Ki UTF-16 units. A save is refused as a conflict when the file on disk no
+longer has the revision the editor read (for example after an edit in the TUI or a text editor):
+reload, then reapply the edit. **Save** only writes the file. **Save and apply providers** also
+re-registers the enabled provider definitions in the running host and unregisters providers that
+are no longer configured or enabled, like the TUI's Save and Apply; replacing a provider discards
+its cached runtime. The file is written as typed, without reformatting, and not atomically. The
+editor shows the file's content, including any credentials stored in it. Catalog-only launches and
+the browser demo report the editor as unavailable.
 
 ChatGPT subscription providers use the same token-sharing implementation and global credential
 store as the TUI. Sign in using **Continue with ChatGPT** in `altatui`, then use that configured

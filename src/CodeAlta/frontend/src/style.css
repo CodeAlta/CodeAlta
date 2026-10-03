@@ -1116,3 +1116,12 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .app-window-body { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .notes-pane > header.window-drag-handle { cursor: move; user-select: none; }
 .session-notes-overlay .notes-pane > header .bp6-button { min-width: 24px; min-height: 24px; }
+/* Settings: configuration file editor. */
+.settings-dialog-content > .config-editor.configuration-page { display: flex; flex-direction: column; gap: 10px; height: 100%; padding: 20px 24px 18px; overflow: hidden; }
+.config-editor-heading { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; margin: 0; }
+.config-editor-heading h1 { margin: 2px 0 4px; }
+.config-editor-heading p { margin: 0; color: var(--muted); }
+.config-editor-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.config-editor-diagnostic { margin-top: 4px; font: 12px/1.5 "Cascadia Code", Consolas, monospace; overflow-wrap: anywhere; white-space: pre-wrap; }
+.config-editor-surface { flex: 1 1 auto; min-height: 160px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
+.code-editor { width: 100%; height: 100%; }

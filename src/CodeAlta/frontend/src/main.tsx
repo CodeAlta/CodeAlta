@@ -75,6 +75,7 @@ import { ComposerSelectionFields, ReasoningSlider } from "./ComposerSurface";
 import { validSelection } from "./sessionSelection";
 import { AppIcon } from "./AppIcon";
 import { AppWindow } from "./AppWindow";
+import { ConfigEditorPanel } from "./ConfigEditorPanel";
 import { sessionTime } from "./sessionTime";
 import { createProjectOpening } from "./projectOpening";
 import { OpenProjectDialog } from "./OpenProjectDialog";
@@ -116,7 +117,7 @@ type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; e
   latestReady: () => boolean; latest: () => void; cancelLatest: () => void }>;
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
-type View = "workspace" | "appearance" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about";
+type View = "workspace" | "appearance" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config";
 type SettingsSection = Exclude<View, "workspace">;
 type SettingsCardPage = Exclude<SettingsSection, "models" | "mcp">;
 const paneLayoutStorageKey = "codealta.desktop.panes.v1";
@@ -479,6 +480,12 @@ function App() {
       .catch(() => { if (!abort.signal.aborted) setConfigurationState({ error: "Configuration inventory is unavailable." }); });
     return () => abort.abort();
   }, []);
+  // After a configuration save re-registered providers, re-read the inventory that pickers and settings show.
+  function refreshConfiguration() {
+    return configuration.snapshot({}, { timeoutMilliseconds: 8_000 })
+      .then(value => { if (creationAlive.current) setConfigurationState({ snapshot: value }); })
+      .catch(() => { /* The previous inventory stays visible. */ });
+  }
 
   const snapshot = workspaceState.kind === "ready" ? workspaceState.snapshot : undefined;
   const projectListing = snapshot ? projectRailProjection(snapshot, projectFilter, projectSort) : null;
@@ -1709,6 +1716,7 @@ function App() {
           && selectedSessionId.current === target.request.sessionId && selectedScope.current === projectId
           && currentHostEpoch.current === target.request.expectedHostEpoch && capability.canMutate() };
       }} />
+      : settingsSection === "config" ? <ConfigEditorPanel epoch={owned ? status!.hostEpoch : null} onApplied={() => void refreshConfiguration()} />
       : settingsSection === "logs" ? <>{settingsCard("logs")}
         <ApplicationLogsPanel clearActions={logClearActions} read={demoMode
           ? async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }) : applicationLogs.read} /></>
@@ -1844,6 +1852,7 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
     ["Personalization", [["appearance", "Appearance"]]],
     ["Agent & models", [["providers", "Providers"], ["models", "Models"], ["prompts", "Agent prompts"], ["skills", "Skills"]]],
     ["Extensions", [["plugins", "Plugins & MCP"], ["mcp", "MCP Servers"]]],
+    ["Advanced", [["config", "Configuration file"]]],
     ["Diagnostics", [["logs", "Application Logs"], ["about", "About"]]],
   ];
   return <AppWindow storageKey="codealta.desktop.window.settings.v1" className="settings-dialog" titleId="settings-title" title={t("Settings")}

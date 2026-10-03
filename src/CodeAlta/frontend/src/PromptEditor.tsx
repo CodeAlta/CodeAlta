@@ -1,18 +1,8 @@
 import { useImperativeHandle, useLayoutEffect, useRef, type ClipboardEventHandler, type KeyboardEventHandler, type Ref } from "react";
 import { Classes } from "@blueprintjs/core";
-import * as monaco from "monaco-editor/editor/editor.api.js";
-import "monaco-editor/editor/browser/coreCommands.js";
-import "monaco-editor/features/clipboard/register.js";
-import "monaco-editor/features/wordOperations/register.js";
-import "monaco-editor/features/linesOperations/register.js";
-import "monaco-editor/features/find/register.js";
-import "monaco-editor/features/contextmenu/register.js";
-import "monaco-editor/features/tokenization/register.js";
 import "monaco-editor/languages/definitions/markdown/register.js";
-import EditorWorker from "monaco-editor/editor/editor.worker.js?worker";
+import { followShellTheme, monaco } from "./monacoEnvironment";
 
-// Vite emits a same-origin worker: no CDN, inline script, eval or blob CSP exception.
-globalThis.MonacoEnvironment = Object.freeze({ getWorker: () => new EditorWorker() });
 
 export type PromptInput = Pick<HTMLTextAreaElement, "value" | "disabled" | "selectionStart" | "selectionEnd"
   | "isConnected" | "focus" | "contains" | "closest" | "setSelectionRange" | "addEventListener" | "removeEventListener">;
@@ -37,10 +27,8 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
       padding: { top: 8, bottom: 8 }, scrollbar: { alwaysConsumeMouseWheel: false },
       quickSuggestions: false, suggestOnTriggerCharacters: false, tabFocusMode: true, links: false });
     editor.current = instance;
-    const theme = () => monaco.editor.setTheme(document.documentElement.dataset.theme === "light" ? "vs" : "vs-dark");
-    theme();
-    const observer = new MutationObserver(theme);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    const unfollowTheme = followShellTheme();
+
     const size = () => { if (!expanded) node.style.height = `${Math.max(56, Math.min(240, instance.getContentHeight()))}px`; };
     const resized = instance.onDidContentSizeChange(size); size();
     let updating = false;
@@ -54,7 +42,7 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
       node.dispatchEvent(new Event("input", { bubbles: true }));
     });
     const selection = instance.onDidChangeCursorSelection(() => node.dispatchEvent(new Event("select")));
-    return () => { observer.disconnect(); changed.dispose(); selection.dispose(); resized.dispose(); instance.dispose(); model.dispose(); editor.current = null; };
+    return () => { unfollowTheme(); changed.dispose(); selection.dispose(); resized.dispose(); instance.dispose(); model.dispose(); editor.current = null; };
   }, [expanded]);
   useImperativeHandle(ref, () => ({
     get value() { return editor.current?.getValue() ?? latest.current.value; },
