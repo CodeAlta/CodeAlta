@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, ReactNode, SyntheticEvent } from "react";
 import { Button, ButtonGroup, FormGroup, Menu, MenuItem, Popover, Slider } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import { PromptEditor } from "./PromptEditor";
@@ -44,8 +44,8 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
     </div>
   </div>;
   return <Popover content={form} placement="top-start" popoverClassName="composer-selection-popover"
-    canEscapeKeyClose={!locked} onInteraction={(next, event) => { if (!next && locked) event?.preventDefault(); }}
-    {...(locked ? { isOpen: true } : {})}>
+    canEscapeKeyClose={!locked}
+    {...(locked ? { isOpen: true, onInteraction: (next: boolean, event?: SyntheticEvent<HTMLElement>) => { if (!next) event?.preventDefault(); } } : {})}>
     <Button variant="minimal" className="composer-selection" aria-label={t("Session configuration")}
       title={t("Agent, model and reasoning for the next Send")} endIcon={<AppIcon name="chevronDown" size={14} />}>
       <span className="composer-selection-part"><AppIcon name="assistant" size={14} /><span>{summary.agent}</span></span>
