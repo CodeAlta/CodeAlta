@@ -81,8 +81,12 @@ internal sealed class SessionOperationsService
     {
         ArgumentNullException.ThrowIfNull(request);
         // Match the browser's opaque key without recording prompts, paths or provider data.
-        var diagnosticId = Guid.TryParseExact(request.ClientRequestId, "D", out var id) ? id.ToString("D") : "non-uuid";
-        LogManager.GetLogger("CodeAlta.Desktop.Rpc").Info($"Send reached backend ({diagnosticId})");
+        // Diagnostic only: an uninitialized process logger must never turn admission into a failure.
+        if (LogManager.IsInitialized)
+        {
+            var diagnosticId = Guid.TryParseExact(request.ClientRequestId, "D", out var id) ? id.ToString("D") : "non-uuid";
+            LogManager.GetLogger("CodeAlta.Desktop.Rpc").Info($"Send reached backend ({diagnosticId})");
+        }
         lock (_gate)
         {
             var denied = CheckEpoch(request.ExpectedEpoch);
