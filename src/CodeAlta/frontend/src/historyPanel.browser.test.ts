@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { timelineGeometryProbe } from "./timelineGeometryProbe";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -92,7 +91,6 @@ test("mounted reverse history retains latest, anchors older pages and fences swi
         await evaluate(`fixture.language('${locale}')`);
         await wait(`document.querySelector('#history-heading').textContent===${JSON.stringify(translate(locale, "Session timeline"))}`);
         await paint();
-        if (process.env.CODEALTA_TIMELINE_GEOMETRY) console.log("HISTORY GEOMETRY", locale, JSON.stringify(await evaluate(timelineGeometryProbe)));
         await evaluate(`languageHistory.metrics.push({locale:'${locale}',top:languageHistory.row?.getBoundingClientRect().top,viewport:languageHistory.scroller.getBoundingClientRect().top,outer:document.querySelector('.outer-scroll').scrollTop,scroll:languageHistory.scroller.scrollTop,header:document.querySelector('.section-heading').getBoundingClientRect().height,banners:[...document.querySelectorAll('.banner')].map(n=>n.getBoundingClientRect().height),button:document.querySelector('.load-more')?.getBoundingClientRect().height})`);
         // Inner anchoring must stay enabled; the independent outer access scroller
         // must not compensate a second time for the same locale reflow.

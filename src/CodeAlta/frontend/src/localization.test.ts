@@ -47,10 +47,9 @@ test("inventory labels translate in six languages while status codes and English
   for (const locale of locales) {
     for (const key of ["Provider management", "Model catalog", "Agent prompts", "MCP Servers", "Configured providers",
       "Search models", "Adapter type", "Cached availability",
-      "Search agent prompts", "Next Send agent prompt selection", "No agent prompts match this search.",
+      "Next Send agent prompt selection",
       "Inspect supplied tool record", "Supplied record provenance", "Copy supplied tool JSON", "Display excerpt; Copy retains the supplied JSON.",
-      "Observed prompt (choices snapshot, not live execution)", "Local next-Send prompt", "Retained original Send prompt",
-      "Use model for next Send", "Use prompt for next Send"] as const) {
+      "Retained original Send prompt", "Use model for next Send"] as const) {
       assert.ok(translate(locale, key));
       if (locale !== "en") assert.notEqual(translate(locale, key), key);
     }

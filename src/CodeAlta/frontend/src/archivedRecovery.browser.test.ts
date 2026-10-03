@@ -84,7 +84,7 @@ test("production archived composer/reminder gates retain exact owner evidence wi
         window.localeEvidence={requests:f.calls.map(x=>x.request),json:JSON.stringify(f.calls.map(x=>x.request)),
           reads:JSON.stringify([f.reads,f.runtimeReads,window.fixtureChoiceReads,window.fixtureReceiptReads]),
           input:document.querySelector('${archived ? "#catalog-prompt" : "#session-prompt"}'),
-          literals:[...document.querySelectorAll('.archived-action-recovery pre, .archived-action-recovery code, .retained-intent-strip pre, .retained-intent-strip code')].map(x=>x.textContent),
+          literals:[...document.querySelectorAll('.archived-action-recovery pre, .archived-action-recovery code')].map(x=>x.textContent),
           selections:[...document.querySelectorAll('.composer select')].map(x=>[x,x.value,x.disabled]),
           buttons:[...document.querySelectorAll('.composer button')].map(x=>[x,x.disabled])};
         const e=window.localeEvidence,input=e.input;
@@ -100,7 +100,7 @@ test("production archived composer/reminder gates retain exact owner evidence wi
             && JSON.stringify([f.reads,f.runtimeReads,window.fixtureChoiceReads,window.fixtureReceiptReads])===e.reads
             && document.activeElement===e.focus && e.input.isConnected && e.input.value===e.text
             && e.input.selectionStart===e.start && e.input.selectionEnd===e.end
-            && JSON.stringify([...document.querySelectorAll('.archived-action-recovery pre, .archived-action-recovery code, .retained-intent-strip pre, .retained-intent-strip code')].map(x=>x.textContent))===JSON.stringify(e.literals)
+            && JSON.stringify([...document.querySelectorAll('.archived-action-recovery pre, .archived-action-recovery code')].map(x=>x.textContent))===JSON.stringify(e.literals)
             && e.selections.every(([select,value,disabled])=>select.isConnected && select.value===value && select.disabled===disabled)
             && e.buttons.every(([button,disabled])=>button.isConnected && button.disabled===disabled);
         })()`), true, `${locale}: no request, read, remount, unlock, draft or selection change`);
@@ -134,9 +134,6 @@ test("production archived composer/reminder gates retain exact owner evidence wi
     assert.deepEqual(await evaluate("window.archivedRecoveryFixture.calls.map(x=>x.kind).join(',')"), "send,save,steer,queue,compact,cancel,abort,cancelQueue,save,steer");
     await evaluate("void window.archivedRecoveryFixture.ask('one','answer'); void window.archivedRecoveryFixture.ask('two','cancel'); window.archivedRecoveryFixture.input('one','resolve'); window.archivedRecoveryFixture.permission(); true");
     assert.equal(await wait("window.archivedRecoveryFixture.calls.length===14"), "ready");
-    assert.equal(await wait(`!!document.querySelector('.retained-intent-row[data-kind="Queue"]') &&
-      !!document.querySelector('.retained-intent-row[data-kind="Steer"]')`), "ready",
-      "the mounted owned composer projects the two exact retained intents");
     assert.equal(await evaluate("[...window.archivedRecoveryFixture.reads].sort().join(',')"), "input:one,permission:one");
     await evaluate("document.querySelector('.advanced-session-controls').open=true");
     await localeCycle("Advanced session controls and diagnostics", false);
@@ -158,8 +155,6 @@ test("production archived composer/reminder gates retain exact owner evidence wi
     await evaluate("window.archivedRecoveryFixture.language('en')");
     await evaluate("window.archivedRecoveryFixture.archive(true)");
     assert.equal(await wait("!!document.querySelector('.catalog-composer #catalog-prompt')"), "ready");
-    assert.equal(await evaluate("!!document.querySelector('.retained-intent-strip')"), false,
-      "archival replaces the owned strip with the existing read-only recovery gate");
     assert.equal(await evaluate("!!document.querySelector('[data-reminder-count]')"), false,
       "archived read-only composer never exposes an owned reminder observation");
     assert.equal(await evaluate("document.querySelector('.catalog-composer').innerText.includes('Archived project; this session is read-only.')"), true);

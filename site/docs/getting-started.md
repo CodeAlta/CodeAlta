@@ -98,15 +98,6 @@ selection changes for manual receipt refresh or deliberate retry. Reload loses l
 receipts can still be browsed manually, but text and keys are not reconstructed. Restart recovery is
 not provided. Existing terminal prompt queues are unchanged.
 
-Beside the owned composer, **Review retained intent** opens read-only details for local unresolved
-Queue and cancellation originals. It is not a live queue list. Cancellation-only evidence contains
-the original target/key, not recoverable Queue text. **Copy text** copies the literal retained Queue
-text without editing the current draft or images, sending, refreshing receipts or retrying. Scope,
-input, image, runtime-observation, owner-revision or modal changes retire a stale review; reopen it
-for current evidence. Definitive settlement removes originals rather than creating settled-text
-history. Existing retained-request disclosure and guarded refresh/cancellation/retry controls remain
-available separately.
-
 In owned-host mode, **Refresh runtime state** before using **Steer observed run**. Steering sends
 text only to that recorded runtime, attachment and run; no recorded run means unavailable, and
 stale or unsupported targets fail rather than becoming a send/queue or targeting later work.

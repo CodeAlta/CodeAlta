@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { GeneralSettings } from "./GeneralSettings";
-import { ProjectRailToggle } from "./ProjectRailToggle";
 import { projectRailProjection } from "./projectRail";
 import { projectRailVisible } from "./projectRailVisibility";
 import { useWindowPreferences } from "./windowPreferences";
@@ -29,7 +28,7 @@ function Window() {
   }, []);
   const visible = projectRailVisible(railState, narrow);
   return <><header><button type="button" onClick={() => setSettings(!settings)}>{settings ? "Workspace" : "Settings"}</button>
-    <ProjectRailToggle expanded={visible} onToggle={() => toggleRail(narrow)} buttonRef={null} /></header>
+    <button type="button" aria-controls="project-rail" aria-expanded={visible} onClick={() => toggleRail(narrow)}>Projects</button></header>
     {settings ? <main className="configuration-page"><div className="settings-grid"><GeneralSettings theme={theme} setTheme={setTheme}
       sort={projectSort} setSort={setProjectSort} desktopCollapsed={railState.desktopCollapsed}
       setDesktopCollapsed={setDesktopCollapsed} notices={notices} recentSessionCount={recentSessionCount} setRecentSessionCount={setRecentSessionCount} /></div></main>

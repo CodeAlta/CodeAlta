@@ -37,21 +37,8 @@ const submissions = createOwnedSubmissions(async request => { sent.push(request)
 const selections = createNextSendSelectionStore(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value));
 const root = createRoot(document.getElementById("app")!);
 const providerProbeHolds = new Set<string>();
-let lastChoices: SessionChoicesResponse = choices;
 const fixture = {
   inputRevision: 0,
-  invalidateInput() { fixture.inputRevision++; },
-  replaceSelection(modelId: string, providerKey = "beta") {
-    const sessionId = fixture.sessionId!;
-    const observed = { ...choices, sessionId, current: { ...choices.current!, providerKey } };
-    lastChoices = observed;
-    selections.set("epoch-1", sessionId, observed, { ...observed.current, modelId, reasoningEffort: null });
-  },
-  repeatSelection() {
-    const current = selections.current("epoch-1", fixture.sessionId!)!;
-    // Same object and same values still announce a newer selection revision.
-    selections.set("epoch-1", fixture.sessionId!, lastChoices, current);
-  },
   providerReads, modelReads, probeRequests, sent, choicesReads: 0, holdChoices: false,
   releaseChoices: null as (() => void) | null,
   epoch: "epoch-1" as string | null, sessionId: null as string | null, view: "models" as "models" | "providers" | "composer",
@@ -63,8 +50,7 @@ const fixture = {
   readChoices: async (epoch: string, sessionId: string): Promise<SessionChoicesResponse> => {
     fixture.choicesReads++;
     if (fixture.holdChoices) { fixture.releaseChoices = null; await new Promise<void>(resolve => { fixture.releaseChoices = resolve; }); }
-    lastChoices = { ...choices, epoch, sessionId };
-    return lastChoices;
+    return { ...choices, epoch, sessionId };
   },
 };
 Object.assign(window, { catalogFixture: fixture });

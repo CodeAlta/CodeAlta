@@ -345,56 +345,6 @@ test("mounted catalog selects providers, filters models and rejects errors, stal
     assert.equal(await wait("document.querySelector('[aria-label=\"Provider details\"] [role=alert]')"), "ready");
     assert.equal(await evaluate(`document.querySelector('[aria-label="Provider details"] button').disabled`), true,
       "a mismatched probe reply cannot authorize retry after unknown admitted work");
-    // Independent cached chooser scenario follows all existing catalog/owner assertions.
-    await evaluate("catalogFixture.show('epoch-1');catalogFixture.session('chooser');catalogFixture.leaveCatalog()");
-    assert.equal(await wait("document.querySelector('select[aria-label=Model]')?.value==='beta-text'"), "ready");
-    assert.equal(await evaluate("!!document.querySelector('#next-send-model-chooser:not(:disabled)')"), true,
-      "an owned cached selection has a deliberate chooser trigger");
-    await evaluate("window.chooserReads=catalogFixture.choicesReads;document.querySelector('#next-send-model-chooser').focus();document.querySelector('#next-send-model-chooser').click()");
-    assert.equal(await wait("document.querySelector('.model-chooser')?.open"), "ready");
-    assert.equal(await evaluate("document.activeElement===document.querySelector('.model-chooser input') && catalogFixture.choicesReads===chooserReads"), true);
-    assert.equal(await evaluate("document.querySelectorAll('.model-chooser-list button')[0].textContent.includes('Image input: No') && document.querySelectorAll('.model-chooser-list button')[2].textContent.includes('Image input: Unknown')"), true);
-    await evaluate("document.querySelectorAll('.model-chooser-list button')[2].click()");
-    assert.equal(await wait("document.querySelector('.model-chooser select').disabled"), "ready");
-    await evaluate(`(() => { const input=document.querySelector('.model-chooser input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'beta-image');input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
-    assert.equal(await wait("document.querySelectorAll('.model-chooser-list button').length===1"), "ready");
-    assert.equal(await evaluate("document.querySelector('.model-chooser-list').textContent.includes('beta-image') && document.querySelector('.model-chooser-list').textContent.includes('Yes')"), true);
-    await evaluate("document.querySelector('.model-chooser-list button').click()");
-    await evaluate("document.querySelector('.model-chooser select').value='Medium';document.querySelector('.model-chooser select').dispatchEvent(new Event('change',{bubbles:true}))");
-    assert.equal(await evaluate("document.querySelector('select[aria-label=Model]').value"), "beta-text", "tentative selection never writes the owner");
-    await evaluate("document.querySelector('.model-chooser header button').click()");
-    assert.equal(await wait("!document.querySelector('.model-chooser') && document.activeElement.id==='next-send-model-chooser'"), "ready");
-    assert.equal(await evaluate("document.querySelector('select[aria-label=Reasoning]').value"), "High");
-    for (const change of ["choices", "selection-revision", "newer-selection", "provider", "input", "modal", "own-modal"]) {
-      await evaluate("document.querySelector('#next-send-model-chooser').click()");
-      assert.equal(await wait("document.querySelector('.model-chooser')?.open"), "ready");
-      await evaluate("document.querySelectorAll('.model-chooser-list button')[1].click();void(window.staleApply=document.querySelector('.model-chooser-apply'))");
-      if (change === "choices") await evaluate("catalogFixture.replaceSelection('beta-text');catalogFixture.replaceSelection('beta-text')");
-      if (change === "selection-revision") await evaluate("catalogFixture.repeatSelection();catalogFixture.repeatSelection()");
-      if (change === "newer-selection") await evaluate("catalogFixture.replaceSelection('beta-unknown')");
-      if (change === "provider") await evaluate("catalogFixture.replaceSelection('beta-text','other');catalogFixture.replaceSelection('beta-text')");
-      if (change === "input") await evaluate("catalogFixture.invalidateInput()");
-      if (change === "modal") await evaluate("{const d=document.createElement('dialog');document.body.append(d);d.showModal();d.close();d.remove()}");
-      if (change === "own-modal") await evaluate("{const d=document.querySelector('.model-chooser');d.close();d.showModal();staleApply.click()}");
-      await evaluate("staleApply.click()");
-      if (change !== "own-modal") assert.equal(await wait("!!document.querySelector('.model-chooser [role=alert]')"), "ready");
-      assert.equal(await evaluate("document.querySelector('select[aria-label=Model]').value"), change === "newer-selection" ? "beta-unknown" : "beta-text", change);
-      await evaluate("document.querySelector('.model-chooser header button')?.click();catalogFixture.replaceSelection('beta-text');catalogFixture.leaveCatalog()");
-      assert.equal(await wait("!document.querySelector('.model-chooser')"), "ready");
-    }
-    await evaluate("document.querySelector('#next-send-model-chooser').click()");
-    assert.equal(await wait("document.querySelector('.model-chooser')?.open"), "ready");
-    await evaluate("document.querySelectorAll('.model-chooser-list button')[1].click()");
-    await evaluate("document.querySelector('.model-chooser select').value='Medium';document.querySelector('.model-chooser select').dispatchEvent(new Event('change',{bubbles:true}))");
-    await evaluate("document.querySelector('.model-chooser-apply').click()");
-    assert.equal(await wait("document.querySelector('select[aria-label=Model]')?.value==='beta-image' && !document.querySelector('.model-chooser')"), "ready");
-    assert.equal(await evaluate("document.querySelector('select[aria-label=Reasoning]').value"), "Medium");
-    await evaluate(`{ const input=document.querySelector('#session-prompt');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'Chooser literal Send');input.dispatchEvent(new Event('input',{bubbles:true})); }`);
-    await evaluate("document.querySelector('.send-button').click()");
-    assert.equal(await wait("catalogFixture.sent.length===2"), "ready");
-    assert.deepEqual(JSON.parse((await evaluate("JSON.stringify(catalogFixture.sent[1].selection)"))!),
-      { providerKey: "beta", agentPromptId: "plan", modelId: "beta-image", reasoningEffort: "Medium" });
-    assert.equal(await evaluate("catalogFixture.choicesReads===chooserReads && document.querySelector('#next-send-model-chooser').disabled"), true);
   } finally {
     socket?.close(); browser?.kill();
     await rm(root, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });

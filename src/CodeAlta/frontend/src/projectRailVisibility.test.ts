@@ -1,12 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { renderToStaticMarkup } from "react-dom/server";
-import { createElement } from "react";
-import { ProjectRailToggle } from "./ProjectRailToggle";
 import { collapsedSessionWidth, constrainPaneLayout } from "./paneLayout";
 import { projectRailProjection } from "./projectRail";
 import { focusVisibleProject, persistProjectRailCollapsed, projectRailVisible, resetNarrowRail, restoreProjectRailCollapsed, restoreProjectRailFocus, toggleProjectRail } from "./projectRailVisibility";
-import { resolveShortcut } from "./shortcuts";
 import type { WorkspaceSnapshot } from "#neoastra";
 
 test("desktop collapse/reopen and narrow reveal do not change selection, filter, sort or preferred widths", () => {
@@ -58,33 +54,6 @@ test("malformed or inaccessible local storage falls back to expanded, failed wri
   assert.equal(restoreProjectRailCollapsed(() => { throw Error("blocked storage"); }), false);
   assert.equal(persistProjectRailCollapsed(() => { throw Error("quota"); }, true), false);
   assert.equal(projectRailVisible({ desktopCollapsed: true, narrowOpen: false }, false), false);
-});
-
-test("labelled native button toggles through its pointer/keyboard activation callback; focus chord and Escape respect IME", () => {
-  let state = { desktopCollapsed: true, narrowOpen: false };
-  const toggle = () => { state = toggleProjectRail(state, false); };
-  let activate = () => assert.fail("toggle has not rendered");
-  // Inspect the returned native button inside a React render: the localized
-  // component now reads context and cannot be invoked outside a renderer.
-  function ToggleProbe() {
-    const button = ProjectRailToggle({ expanded: projectRailVisible(state, false), onToggle: toggle, buttonRef: null });
-    activate = button.props.onClick;
-    return button;
-  }
-  const closed = renderToStaticMarkup(createElement(ToggleProbe));
-  assert.match(closed, /<button[^>]*aria-label="Show projects"[^>]*aria-controls="project-rail"[^>]*aria-expanded="false"/);
-  assert.match(closed, /type="button"/);
-  activate(); // Native button activation (pointer, Enter or Space) uses this same callback.
-  assert.equal(projectRailVisible(state, false), true);
-  const open = renderToStaticMarkup(createElement(ToggleProbe));
-  assert.match(open, /aria-label="Hide projects"[^>]*aria-controls="project-rail"[^>]*aria-expanded="true"/);
-  activate();
-  assert.equal(projectRailVisible(state, false), false);
-  assert.equal(resolveShortcut({ key: "g", ctrlKey: true }, false, false).chordPending, true);
-  assert.equal(resolveShortcut({ key: "s" }, true, false).action, "focusProjects");
-  assert.equal(resolveShortcut({ key: "Escape" }, false, true).action, "escape");
-  assert.equal(resolveShortcut({ key: "Escape", isComposing: true }, false, true).handled, false);
-  assert.equal(resolveShortcut({ key: "Escape", keyCode: 229 }, false, true).handled, false);
 });
 
 test("opening focuses a visible selected row or the filter when hidden; closing restores the toggle only for rail focus", () => {

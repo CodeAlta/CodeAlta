@@ -1,12 +1,5 @@
 .project-action-row { position: relative; }
 .project-list .project-actions-trigger { width: 30px; min-height: 30px; margin-left: auto; padding: 4px; }
-.app-dialog.model-chooser { display: block; width: min(42rem, calc(100vw - 2rem)); max-height: 85dvh; overflow: auto; text-align: start; }
-.model-chooser input, .model-chooser select { max-width: 100%; }
-.model-chooser-list { display: grid; gap: .4rem; max-height: 40dvh; overflow: auto; margin-block: .75rem; }
-.model-chooser-list button { display: grid; text-align: start; white-space: normal; overflow-wrap: anywhere; }
-.model-chooser-list button[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: -2px; }
-.model-chooser code, .model-chooser p { overflow-wrap: anywhere; }
-.prompt-selection-observation { overflow-wrap: anywhere; }
 .app-dialog.tool-record-dialog { width: min(48rem, calc(100vw - 2rem)); max-height: 85dvh; overflow: auto; text-align: start; }
 .tool-record-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 35dvh; overflow: auto; }
 .tool-record-dialog code, .tool-record-dialog h2 { overflow-wrap: anywhere; }
@@ -105,9 +98,6 @@ code, pre { font-family: var(--bp-typography-family-mono); }
 .settings-dialog-content > .settings-card-page + .configuration-page { padding-top: 18px; }
 .settings-dialog-content > :not(.configuration-page) { padding: 24px; }
 .reminders-destination { min-height: 0; overflow-y: auto; }
-.project-rail-toggle { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--panel-2); font-size: 11px; cursor: pointer; }
-.project-rail-toggle:hover { background: var(--accent-soft); }
-.project-rail-toggle[aria-expanded="true"] { border-color: var(--accent); }
 .connection { justify-self: end; display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
 .connection-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 3px color-mix(in srgb, var(--muted) 15%, transparent); }
 .connection-live .connection-dot, .connection-readonly .connection-dot { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 15%, transparent); }
@@ -538,17 +528,6 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .context-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; border-top: 1px solid var(--line); }
 .context-actions > div { flex: 1 1 230px; min-width: 0; }
 .context-actions textarea { min-height: 50px; max-height: 120px; }
-.retained-intent-strip { min-width: 0; margin-top: 8px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); font-size: 11px; }
-.retained-intent-strip > .detail { margin: 0 0 4px; }
-.retained-intent-row { min-width: 0; border-top: 1px solid var(--line); }
-.retained-intent-heading { display: flex; align-items: start; gap: 8px; min-width: 0; }
-.retained-intent-heading details { flex: 1; min-width: 0; }
-.retained-intent-heading summary { padding: 6px 0; cursor: pointer; overflow-wrap: anywhere; }
-.retained-intent-heading button { flex: 0 0 auto; font-size: 11px; }
-.retained-intent-evidence { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 8px; margin: 6px 0; }
-.retained-intent-evidence dd { margin: 0; }
-.retained-intent-evidence code { overflow-wrap: anywhere; }
-.retained-intent-row pre { max-height: 170px; overflow: auto; padding: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ask-refresh { margin: 8px 18px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--panel); cursor: pointer; font-size: 11px; }
 .ask-draft-recovery { min-width: 0; margin: 8px 0; padding: 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel-2); overflow-wrap: anywhere; }
 .ask-draft-recovery pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -717,13 +696,6 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
   .shortcut-dialog dl { grid-template-columns: 1fr; }
 }
 
-.queue-intent-compact { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; min-width: 0; padding: .5rem; border: 1px solid var(--line); border-radius: .4rem; }
-.queue-intent-preview { min-width: 0; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.queue-intent-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 35vh; overflow: auto; }
-.queue-intent-dialog dd { margin-left: 0; overflow-wrap: anywhere; }
-.queue-intent-dialog footer { flex-wrap: wrap; }
-.queue-intent-dialog header { flex-wrap: wrap; }
-.queue-intent-dialog h2 { min-width: 0; overflow-wrap: anywhere; }
 
 @media (max-width: 875px) and (max-height: 600px) {
   .workspace-shell, .workspace-shell:not(.project-rail-open) { grid-template-rows: minmax(180px, 40vh) minmax(0, 1fr); }

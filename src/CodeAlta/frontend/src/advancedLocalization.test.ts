@@ -6,7 +6,7 @@ import { locales, messages, translate, type MessageKey } from "./localization";
 
 test("advanced/recovery static source keys have frozen five-language rows and English fallback", () => {
   const keys = new Set<string>();
-  for (const file of ["OwnedSessionPanel", "RetainedRequestStrip", "ArchivedActionRecovery", "ArchivedInteractionRecovery", "ReadOnlyComposer"]) {
+  for (const file of ["OwnedSessionPanel", "ArchivedActionRecovery", "ArchivedInteractionRecovery", "ReadOnlyComposer"]) {
     const source = ts.createSourceFile(file, readFileSync(new URL(`./${file}.tsx`, import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
     function literals(node: ts.Node): void {
       if (ts.isStringLiteral(node)) keys.add(node.text);
@@ -30,7 +30,7 @@ test("advanced/recovery static source keys have frozen five-language rows and En
   }
   for (const locale of locales) {
     for (const key of ["Advanced session controls and diagnostics", "Captured model", "Retry exact original Send Abort",
-      "Archived interaction recovery", "Copy retained Queue text", "Original waiter pending"] as const) {
+      "Archived interaction recovery", "Original waiter pending"] as const) {
       if (locale === "en") assert.equal(translate(locale, key), key);
       else assert.notEqual(translate(locale, key), key);
     }
