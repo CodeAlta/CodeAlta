@@ -11,7 +11,7 @@ internal static class AgentJournalNotesReader
     private const int ReadBytes = 128 * 1024;
     private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 
-    /// <summary>A journal prefix whose records were all read: <paramref name="Latest"/> is the last notes event in <c>[0, Offset)</c>.</summary>
+    /// <summary>A journal prefix whose records were all read and are valid: <paramref name="Latest"/> is the last notes event in <c>[0, Offset)</c>.</summary>
     /// <param name="Offset">Exclusive end of the prefix, immediately after a line terminator.</param>
     /// <param name="LastWriteUtcTicks">Journal last-write time when the prefix was read.</param>
     /// <param name="Guard">The bytes ending at <paramref name="Offset"/>, used to recognize the same prefix in a longer journal.</param>
@@ -22,15 +22,25 @@ internal static class AgentJournalNotesReader
     internal readonly record struct Result(bool Supported, AgentNotesEvent? Latest, Prefix? Prefix);
 
     /// <summary>Reads the latest notes event in <c>[0, length)</c>, continuing after <paramref name="previous"/> when the journal still starts with it.</summary>
+    /// <param name="stream">The opened journal.</param>
+    /// <param name="previous">A prefix remembered from an earlier scan of this journal, or null.</param>
+    /// <param name="length">The journal length to read up to.</param>
+    /// <param name="lastWriteUtcTicks">The journal last-write time belonging to <paramref name="length"/>.</param>
+    /// <param name="tolerateIncompleteTail">
+    /// True to ignore a malformed final record as the tolerant line reader does. False for the validation preceding an append,
+    /// where a malformed final record would become an interior one.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the scan.</param>
     /// <remarks>
-    /// Matches the tolerant line reader: every record is deserialized, blank lines are skipped and only a malformed final record is ignored.
-    /// A final record that is malformed or unterminated is never part of the returned prefix, so it is read again once the journal grows.
+    /// Matches the line reader: every record is deserialized and blank lines are skipped. A final record that is malformed
+    /// or unterminated is never part of the returned prefix, so it is read again once the journal grows; a prefix therefore
+    /// holds valid records only, whichever way it was scanned, and both kinds of scan continue after it.
     /// The guard recognizes appends; like the history stamps it cannot detect every in-place rewrite of older records.
     /// </remarks>
-    /// <exception cref="JsonException">A record before the final one is malformed.</exception>
+    /// <exception cref="JsonException">A record is malformed and is not a tolerated final one.</exception>
     /// <exception cref="InvalidDataException">A notes event has no Markdown, or a record exceeds the maximum array length.</exception>
     /// <exception cref="OperationCanceledException">The scan is canceled.</exception>
-    internal static async Task<Result> ScanAsync(Stream stream, Prefix? previous, long length, long lastWriteUtcTicks, CancellationToken cancellationToken)
+    internal static async Task<Result> ScanAsync(Stream stream, Prefix? previous, long length, long lastWriteUtcTicks, bool tolerateIncompleteTail, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         cancellationToken.ThrowIfCancellationRequested();
@@ -39,7 +49,7 @@ internal static class AgentJournalNotesReader
         AgentNotesEvent? latest = null;
         byte[]? guard = null;
         // Same length with another write time is a rewrite, not an append: read it from the start.
-        if (previous is { Offset: > 0 } && previous.Offset < end
+        if (previous is { Offset: > 0 } && (previous.Offset < end || (previous.Offset == end && previous.LastWriteUtcTicks == lastWriteUtcTicks))
             && (await ReadGuardAsync(stream, previous.Offset, cancellationToken).ConfigureAwait(false)).AsSpan().SequenceEqual(previous.Guard))
         {
             start = previous.Offset;
@@ -88,7 +98,7 @@ internal static class AgentJournalNotesReader
                 // The journal became shorter after its length was captured; what was read is all there is.
                 if (read == 0) end = position + filled;
                 filled += read;
-                var consumed = Consume(buffer.AsSpan(0, filled), position, end, ref latest, ref verified, ref verifiedLatest);
+                var consumed = Consume(buffer.AsSpan(0, filled), position, end, tolerateIncompleteTail, ref latest, ref verified, ref verifiedLatest);
                 buffer.AsSpan(consumed, filled - consumed).CopyTo(buffer);
                 position += consumed;
                 filled -= consumed;
@@ -109,7 +119,7 @@ internal static class AgentJournalNotesReader
     }
 
     // Consumes every complete line and, once the buffer reaches the scan end, the unterminated remainder.
-    private static int Consume(ReadOnlySpan<byte> buffer, long position, long end, ref AgentNotesEvent? latest, ref long verified, ref AgentNotesEvent? verifiedLatest)
+    private static int Consume(ReadOnlySpan<byte> buffer, long position, long end, bool tolerateIncompleteTail, ref AgentNotesEvent? latest, ref long verified, ref AgentNotesEvent? verifiedLatest)
     {
         var atEnd = position + buffer.Length == end;
         var consumed = 0;
@@ -145,7 +155,7 @@ internal static class AgentJournalNotesReader
             {
                 value = Parse(rest[..lineLength]);
             }
-            catch (JsonException) when (final)
+            catch (JsonException) when (final && tolerateIncompleteTail)
             {
                 // The tolerated incomplete tail. It stays outside the verified prefix.
                 break;

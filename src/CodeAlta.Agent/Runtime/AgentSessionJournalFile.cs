@@ -126,40 +126,84 @@ internal sealed class AgentSessionJournalFile
     // Notes use the existing journal gate, but never create a missing journal. Once the
     // stream is open and cancellation is checked, finish the single record and feedback
     // without caller cancellation: cancellation must not masquerade as a rollback.
+    //
+    // Every existing record must be valid before the append: a malformed tail must not become an
+    // interior record that hides an acknowledged notes write. Records in the remembered notes
+    // prefix were already deserialized and are not read again. The rest is read through `open`
+    // without the journal gate, as a notes read does, which leaves only what is written in the
+    // meantime to validate strictly on the append handle.
     public Task AppendNotesLineAsync(
-        string path, string line, Encoding encoding, Func<Stream, CancellationToken, Task> validate,
+        string path, string line, Encoding encoding, Func<string, CancellationToken, Task<Stream>> open,
         Func<Task> committed, CancellationToken cancellationToken)
-        => WithPathLockAsync(path, async () =>
-        {
-            // Retry only opening, never a partially written record.
-            await using (var stream = await RetryFileOperationAsync(
-                () => Task.FromResult(new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read, 4096, useAsync: true)),
-                cancellationToken).ConfigureAwait(false))
-            {
-                // Validate through the canonical parser on this same handle, before
-                // changing any bytes, with read-only file sharing requested.
-                await validate(stream, cancellationToken).ConfigureAwait(false);
-                var needsSeparator = false;
-                if (stream.Length != 0)
-                {
-                    stream.Seek(-1, SeekOrigin.End);
-                    var lastByte = new byte[1];
-                    await stream.ReadExactlyAsync(lastByte, cancellationToken).ConfigureAwait(false);
-                    needsSeparator = lastByte[0] is not ((byte)'\n' or (byte)'\r');
-                }
+        => AppendNotesLineAsync(
+            path, line, encoding, open,
+            static file => new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.Read, 4096, useAsync: true),
+            committed, cancellationToken);
 
-                stream.Seek(0, SeekOrigin.End);
-                cancellationToken.ThrowIfCancellationRequested();
-                await using var writer = new StreamWriter(stream, encoding);
-                if (needsSeparator)
+    // Opening the append handle is a parameter only for tests that record what is read through it.
+    internal async Task AppendNotesLineAsync(
+        string path, string line, Encoding encoding, Func<string, CancellationToken, Task<Stream>> open,
+        Func<string, Stream> openAppend, Func<Task> committed, CancellationToken cancellationToken)
+    {
+        // Only for the prefix it remembers; the journal can still change before the append is admitted.
+        await ReadLatestNotesAsync(path, open, cancellationToken).ConfigureAwait(false);
+        var fullPath = Path.GetFullPath(path);
+        var state = _notesScans.GetOrAdd(fullPath, static _ => new NotesScanState());
+        // The scan state is taken before the journal gate, in the order a notes read takes them.
+        await state.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await WithPathLockAsync(path, async () =>
+            {
+                // Retry only opening, never a partially written record.
+                await using (var stream = await RetryFileOperationAsync(
+                    () => Task.FromResult(openAppend(path)), cancellationToken).ConfigureAwait(false))
                 {
-                    await writer.WriteLineAsync(ReadOnlyMemory<char>.Empty, CancellationToken.None).ConfigureAwait(false);
+                    // Validate through the canonical parser on this same handle, before
+                    // changing any bytes, with read-only file sharing requested.
+                    var validated = await AgentJournalNotesReader.ScanAsync(
+                        stream, state.Prefix, stream.Length, new FileInfo(fullPath).LastWriteTimeUtc.Ticks,
+                        tolerateIncompleteTail: false, cancellationToken).ConfigureAwait(false);
+                    if (!validated.Supported)
+                    {
+                        // Canonical writes are UTF-8. Tolerant reads may detect legacy BOMs, but
+                        // appending UTF-8 to a different encoding would acknowledge unreadable notes.
+                        throw new InvalidDataException("Notes cannot append to a non-UTF-8 journal. No journal bytes were changed.");
+                    }
+
+                    // The appended record is left to the next scan, which reads it back from the journal.
+                    if (validated.Prefix is not null)
+                    {
+                        state.Prefix = validated.Prefix;
+                    }
+
+                    var needsSeparator = false;
+                    if (stream.Length != 0)
+                    {
+                        stream.Seek(-1, SeekOrigin.End);
+                        var lastByte = new byte[1];
+                        await stream.ReadExactlyAsync(lastByte, cancellationToken).ConfigureAwait(false);
+                        needsSeparator = lastByte[0] is not ((byte)'\n' or (byte)'\r');
+                    }
+
+                    stream.Seek(0, SeekOrigin.End);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await using var writer = new StreamWriter(stream, encoding);
+                    if (needsSeparator)
+                    {
+                        await writer.WriteLineAsync(ReadOnlyMemory<char>.Empty, CancellationToken.None).ConfigureAwait(false);
+                    }
+                    await writer.WriteLineAsync(line.AsMemory(), CancellationToken.None).ConfigureAwait(false);
+                    await writer.FlushAsync(CancellationToken.None).ConfigureAwait(false);
                 }
-                await writer.WriteLineAsync(line.AsMemory(), CancellationToken.None).ConfigureAwait(false);
-                await writer.FlushAsync(CancellationToken.None).ConfigureAwait(false);
-            }
-            await committed().ConfigureAwait(false);
-        }, cancellationToken);
+                await committed().ConfigureAwait(false);
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            state.Gate.Release();
+        }
+    }
 
     // Reads the latest notes event without rescanning what an earlier read of this journal already covered.
     // Every store sharing this instance shares the result: an unchanged journal (length and last-write time)
@@ -191,7 +235,7 @@ internal sealed class AgentSessionJournalFile
             }
 
             await using var stream = await open(path, cancellationToken).ConfigureAwait(false);
-            var result = await AgentJournalNotesReader.ScanAsync(stream, previous, length, lastWriteUtcTicks, cancellationToken).ConfigureAwait(false);
+            var result = await AgentJournalNotesReader.ScanAsync(stream, previous, length, lastWriteUtcTicks, tolerateIncompleteTail: true, cancellationToken).ConfigureAwait(false);
             if (result.Prefix is not null)
             {
                 state.Prefix = result.Prefix;

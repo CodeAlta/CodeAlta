@@ -586,6 +586,13 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
     /// <param name="committed">Feedback after the record and metadata cache are acknowledged. Must not reenter this journal's operations.</param>
     /// <param name="cancellationToken">Cancels lookup or admission; after write admission the record and feedback finish without caller cancellation.</param>
     /// <returns>A task completing after acknowledged persistence and feedback.</returns>
+    /// <remarks>
+    /// Every existing record is validated before the append, without tolerating a malformed final record. Records
+    /// already scanned by a notes read or append through the same journal owner are not read again, and the others
+    /// are read before write admission without the journal lock, as <see cref="ReadLatestNotesAsync"/> does. The lock
+    /// is held to validate what was written in the meantime and to append, not while scanning a whole journal.
+    /// Rewrites of already scanned records are detected only as far as notes reads detect them.
+    /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="InvalidOperationException">The session does not exist.</exception>
     /// <exception cref="IOException">The write failed; no rollback of partial filesystem I/O is promised.</exception>
@@ -600,7 +607,9 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
         ArgumentNullException.ThrowIfNull(committed);
         cancellationToken.ThrowIfCancellationRequested();
         var path = await GetExistingSessionFilePathAsync(notes.SessionId, cancellationToken).ConfigureAwait(false);
-        await _journalFile.AppendNotesLineAsync(path, notes.ToJson(), Utf8WithoutBom, ValidateNotesAppendAsync, async () =>
+        // Like opening the append handle, the scan waits for a journal another process holds until canceled.
+        await _journalFile.AppendNotesLineAsync(path, notes.ToJson(), Utf8WithoutBom,
+            static async (file, token) => await OpenReadStreamAsync(file, maxRetryTime: null, token).ConfigureAwait(false), async () =>
         {
             try
             {
@@ -1133,19 +1142,6 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
         }
     }
 
-    private static async Task ValidateNotesAppendAsync(Stream stream, CancellationToken cancellationToken)
-    {
-        // Full canonical validation is streaming/bounded-memory, not repair. A malformed
-        // tail must not become an interior record that hides an acknowledged notes write.
-        await foreach (var entry in ReadJournalEventsAsync(stream, tolerateIncompleteTail: false, cancellationToken).ConfigureAwait(false))
-        {
-            if (entry is AgentNotesEvent { Markdown: null })
-            {
-                throw new InvalidDataException("A notes journal event has no Markdown value.");
-            }
-        }
-    }
-
     private static async IAsyncEnumerable<AgentEvent> ReadJournalEventsAsync(
         Stream stream,
         bool tolerateIncompleteTail,
@@ -1285,6 +1281,9 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
     }
 
     private static Task<FileStream> OpenReadStreamAsync(string path, CancellationToken cancellationToken)
+        => OpenReadStreamAsync(path, ReadRetryTime, cancellationToken);
+
+    private static Task<FileStream> OpenReadStreamAsync(string path, TimeSpan? maxRetryTime, CancellationToken cancellationToken)
         => AgentSessionJournalFile.RetryFileOperationAsync(
             () => Task.FromResult(new FileStream(
                 path,
@@ -1293,7 +1292,7 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
                 FileShare.ReadWrite | FileShare.Delete,
                 bufferSize: 4096,
                 useAsync: true)),
-            ReadRetryTime,
+            maxRetryTime,
             cancellationToken);
 
     private static FileStamp? GetFileStamp(string path)
