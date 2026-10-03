@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, Menu, MenuItem, Popover, Section, SectionCard, Tag } from "@blueprintjs/core";
+import { Button, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, Menu, MenuItem, PopoverNext, Section, SectionCard, Tag } from "@blueprintjs/core";
 import { agentPrompts, type AgentPromptDocument, type AgentPromptEntry } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
@@ -97,10 +97,10 @@ export function AgentPromptSettings({ epoch, project, api = agentPrompts }: {
 
   return <SettingsPage className="prompt-settings" label={t("Agent prompts")} group="Agent & models" title="Agent prompts" description="Instructions that define how an agent behaves. Pick one per session from the prompt bar."
     notice={notice} loading={loading} busy={busy} onReload={reload}
-    actions={<Popover placement="bottom-end" content={<Menu>
+    actions={<PopoverNext placement="bottom-end" content={<Menu>
       <MenuItem icon={<AppIcon name="assistant" size={15} />} text={t("Agent prompt")} onClick={() => create("Agent")} />
       <MenuItem icon={<AppIcon name="prompt" size={15} />} text={t("System prompt")} onClick={() => create("System")} /></Menu>}>
-      <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!listing || busy} endIcon={<AppIcon name="chevronDown" size={14} />}>{t("New prompt")}</Button></Popover>}>
+      <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!listing || busy} endIcon={<AppIcon name="chevronDown" size={14} />}>{t("New prompt")}</Button></PopoverNext>}>
     {!listing ? <SettingsUnavailable loading={loading} icon="assistant" title="Agent prompts unavailable" />
       : <div className="settings-editor-layout">
         <CardList compact className="settings-editor-list" aria-label={t("Agent prompts")}>
@@ -137,10 +137,10 @@ export function AgentPromptSettings({ epoch, project, api = agentPrompts }: {
               <Button disabled={selected !== added && !dirty || busy} onClick={() => { if (selected === added) { setForm(null); setSelected(prompts[0] ? identity(prompts[0]) : null); } else if (baseline) setForm(baseline); }}>{t(selected === added ? "Cancel" : "Revert")}</Button>
             </>}
             <span className="settings-editor-spacer" />
-            {document && !readOnly && selected !== added && <Popover placement="top-end" content={<div className="provider-settings-confirm"><p>{t("Remove {name}?", { name: entry?.name || document.id })}</p>
+            {document && !readOnly && selected !== added && <PopoverNext placement="top-end" content={<div className="provider-settings-confirm"><p>{t("Remove {name}?", { name: entry?.name || document.id })}</p>
               <Button intent="danger" disabled={busy} onClick={() => void remove()}>{t("Remove")}</Button></div>}>
               <Button variant="minimal" intent="danger" icon={<AppIcon name="trash" size={15} />} disabled={busy} text={t("Remove")} />
-            </Popover>}
+            </PopoverNext>}
           </SectionCard>
         </Section> : reading && <SettingsUnavailable loading icon="assistant" title="Agent prompts unavailable" />}
       </div>}

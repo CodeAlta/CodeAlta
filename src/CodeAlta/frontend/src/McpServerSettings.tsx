@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Card, CardList, FormGroup, InputGroup, Popover, Section, SectionCard, SegmentedControl, Switch, Tag, TextArea } from "@blueprintjs/core";
+import { Button, Card, CardList, FormGroup, InputGroup, PopoverNext, Section, SectionCard, SegmentedControl, Switch, Tag, TextArea } from "@blueprintjs/core";
 import { mcpServers, type McpServerEntry } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
@@ -120,10 +120,10 @@ export function McpServerSettings({ epoch, project, api = mcpServers }: {
             <Button intent="primary" disabled={!dirty || !!problem || busy} onClick={() => void save()}>{t("Save")}</Button>
             <Button disabled={selected !== added && !dirty || busy} onClick={() => { if (selected !== added) { if (baseline) setForm(baseline); } else if (servers[0]) choose(servers[0]); else { setSelected(null); setForm(null); } }}>{t(selected === added ? "Cancel" : "Revert")}</Button>
             <span className="settings-editor-spacer" />
-            {original && <Popover placement="top-end" content={<div className="provider-settings-confirm"><p>{t("Remove {name}?", { name: original.key })}</p>
+            {original && <PopoverNext placement="top-end" content={<div className="provider-settings-confirm"><p>{t("Remove {name}?", { name: original.key })}</p>
               <Button intent="danger" disabled={busy} onClick={() => void remove()}>{t("Remove")}</Button></div>}>
               <Button variant="minimal" intent="danger" icon={<AppIcon name="trash" size={15} />} disabled={busy} text={t("Remove")} />
-            </Popover>}
+            </PopoverNext>}
           </SectionCard>
         </Section>}
       </div>}

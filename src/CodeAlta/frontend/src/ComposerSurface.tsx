@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode, SyntheticEvent } from "react";
-import { Button, ButtonGroup, FormGroup, Menu, MenuItem, Popover, Slider } from "@blueprintjs/core";
+import { Button, ButtonGroup, FormGroup, Menu, MenuItem, PopoverNext, Slider } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import { PromptEditor } from "./PromptEditor";
 import { useShellLanguage } from "./shellLanguage";
@@ -43,7 +43,7 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
       <Button variant="minimal" size="small" icon={<AppIcon name="model" size={14} />} onClick={() => onOpenCatalog?.("models")}>{t("Browse models")}</Button>
     </div>
   </div>;
-  return <Popover content={form} placement="top-start" popoverClassName="composer-selection-popover"
+  return <PopoverNext content={form} placement="top-start" popoverClassName="composer-selection-popover"
     canEscapeKeyClose={!locked}
     {...(locked ? { isOpen: true, onInteraction: (next: boolean, event?: SyntheticEvent<HTMLElement>) => { if (!next) event?.preventDefault(); } } : {})}>
     <Button variant="minimal" className="composer-selection" aria-label={t("Session configuration")}
@@ -53,7 +53,7 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
         <span className="composer-selection-separator" aria-hidden="true">/</span><span>{summary.model}</span></span>
       <span className="composer-selection-part"><AppIcon name="brain" size={14} /><span>{summary.reasoning}</span></span>
     </Button>
-  </Popover>;
+  </PopoverNext>;
 }
 
 /** Stepped reasoning-effort slider: the first stop is the model default, then the model's supported efforts. */
@@ -86,10 +86,10 @@ export function SendSplitButton({ enqueue, onEnqueueChange, enqueueDisabled = fa
   </Menu>;
   return <ButtonGroup className="composer-send-group">
     {children}
-    <Popover content={menu} placement="top-end" disabled={optionsDisabled}>
+    <PopoverNext content={menu} placement="top-end" disabled={optionsDisabled}>
       <Button intent="primary" className="composer-send-options" disabled={optionsDisabled} aria-label={t("Send options")}
         title={t("Send options")} icon={<AppIcon name="chevronDown" size={14} />} />
-    </Popover>
+    </PopoverNext>
   </ButtonGroup>;
 }
 

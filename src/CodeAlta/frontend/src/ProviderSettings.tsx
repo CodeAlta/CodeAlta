@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Callout, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, NonIdealState, Popover, Section, SectionCard, Switch, Tag, type Intent } from "@blueprintjs/core";
+import { Button, Callout, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, NonIdealState, PopoverNext, Section, SectionCard, Switch, Tag, type Intent } from "@blueprintjs/core";
 import { globalConfig, type GlobalConfigProvidersResponse, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse,
   type ModelCatalogProvidersRequest, type ModelCatalogProvidersResponse } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
@@ -187,10 +187,10 @@ export function ProviderSettings({ epoch, config = globalConfig, readRuntime, pr
               title={dirty ? t("Save before testing.") : undefined} onClick={() => void test()}>{t(probing ? "Testing selected provider…" : "Test selected provider")}</Button>}
             <Button icon={<AppIcon name="model" size={15} />} onClick={onOpenModels}>{t("Browse models")}</Button>
             <Button variant="minimal" icon={<AppIcon name="edit" size={15} />} onClick={onOpenConfiguration} title={t("Every other provider setting is in the configuration file.")}>{t("Configuration file")}</Button>
-            {original && <Popover placement="top-end" content={<div className="provider-settings-confirm"><p>{t("Remove {name} from the configuration? Sessions that use it keep their history.", { name: original.effectiveName })}</p>
+            {original && <PopoverNext placement="top-end" content={<div className="provider-settings-confirm"><p>{t("Remove {name} from the configuration? Sessions that use it keep their history.", { name: original.effectiveName })}</p>
               <Button intent="danger" disabled={busy} onClick={remove}>{t("Remove provider")}</Button></div>}>
               <Button variant="minimal" intent="danger" icon={<AppIcon name="trash" size={15} />} disabled={busy} aria-label={t("Remove provider")} title={t("Remove provider")} />
-            </Popover>}
+            </PopoverNext>}
           </SectionCard>
         </Section>}
       </div>}

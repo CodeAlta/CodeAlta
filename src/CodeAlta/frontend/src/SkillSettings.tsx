@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Card, CardList, FormGroup, InputGroup, Popover, Switch, Tag } from "@blueprintjs/core";
+import { Button, Card, CardList, FormGroup, InputGroup, PopoverNext, Switch, Tag } from "@blueprintjs/core";
 import { skills, type SkillsEntry } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
@@ -43,7 +43,7 @@ export function SkillSettings({ epoch, project, api = skills }: { epoch: string 
 
   return <SettingsPage className="skill-settings" label={t("Skills")} group="Agent & models" title="Skills" description="Reusable instructions an agent loads when a task matches."
     notice={notice} loading={loading} busy={busy} onReload={reload}
-    actions={<Popover placement="bottom-end" isOpen={!!draft} onInteraction={open => setDraft(open ? draft ?? { name: "", description: "" } : null)}
+    actions={<PopoverNext placement="bottom-end" isOpen={!!draft} onInteraction={open => setDraft(open ? draft ?? { name: "", description: "" } : null)}
       content={<div className="settings-editor-popover">
         <FormGroup label={t("Name")} labelFor="skill-name"><InputGroup id="skill-name" autoFocus value={draft?.name ?? ""} spellCheck={false} placeholder="release-notes"
           onChange={event => setDraft(current => current && { ...current, name: event.target.value })} /></FormGroup>
@@ -52,7 +52,7 @@ export function SkillSettings({ epoch, project, api = skills }: { epoch: string 
         {draftProblem && (draft?.name || draft?.description) && <span className="settings-editor-problem" role="alert">{t(draftProblem)}</span>}
         <Button intent="primary" disabled={!!draftProblem || busy} onClick={() => void create()}>{t(writeScope === "Project" ? "Create in project" : "Create")}</Button>
       </div>}>
-      <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!listing || busy}>{t("New skill")}</Button></Popover>}>
+      <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!listing || busy}>{t("New skill")}</Button></PopoverNext>}>
     {!listing ? <SettingsUnavailable loading={loading} icon="skill" title="Skills unavailable" /> : <>
       <div className="settings-editor-toolbar">
         <InputGroup className="settings-editor-filter" type="search" size="small" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} value={filter}
