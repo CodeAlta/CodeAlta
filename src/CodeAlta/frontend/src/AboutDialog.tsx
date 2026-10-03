@@ -2,16 +2,8 @@ import { AppWindowSurface } from "./AppWindow";
 import { useLayoutEffect, useRef } from "react";
 import type { BootStatus } from "#neoastra";
 import { AppIcon } from "./AppIcon";
-import type { PaletteAction } from "./paletteActions";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
-
-export function openAboutPaletteAction(action: PaletteAction, origin: HTMLElement | null,
-  open: (origin: HTMLElement | null) => void): action is "about" {
-  if (action !== "about") return false;
-  open(origin);
-  return true;
-}
 
 function recordedText(value: unknown, maxLength: number): string | null {
   return typeof value === "string" && value.length <= maxLength && value.trim().length > 0 &&

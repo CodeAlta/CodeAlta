@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceSnapshot } from "#neoastra";
-import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabLimit, tabKey } from "./sessionTabs";
-import { resolveShortcut } from "./shortcuts";
-import { paletteAvailable } from "./paletteActions";
+import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabLimit } from "./sessionTabs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SessionTabLabel } from "./SessionTabStrip";
@@ -81,22 +79,4 @@ test("versioned bounded persistence validates all fields, active membership, dup
   assert.equal(many.open.length, sessionTabLimit); assert.equal(many.active?.sessionId, "79");
   for (const item of [...many.open]) many = closeSessionTab(many, item);
   assert.equal(many.closed.length, sessionTabLimit);
-});
-
-test("tab keys reject editing/IME/repeat and palette close refuses changed captured identity", () => {
-  for (const [key, modifiers, action] of [
-    ["w", {}, "closeTab"], ["t", { shiftKey: true }, "reopenTab"],
-    ["ArrowRight", { altKey: true }, "nextTab"], ["PageUp", {}, "previousTab"],
-  ] as const) {
-    const event = { key, ctrlKey: true, ...modifiers };
-    assert.equal(resolveShortcut(event, false, false).action, action);
-    assert.equal(resolveShortcut(event, false, true).action, null);
-    assert.equal(resolveShortcut({ ...event, isComposing: true }, false, false).action, null);
-    assert.equal(resolveShortcut({ ...event, repeat: true }, false, false).action, null);
-  }
-  const context = { workspace: true, selection: null, epoch: null, infoReady: false, promptReady: false,
-    searchReady: true, tabSelection: tabKey(tab("one")), tabsReady: true, reopenReady: true };
-  assert.equal(paletteAvailable("closeTab", context, context), true);
-  assert.equal(paletteAvailable("closeTab", context, { ...context, tabSelection: tabKey(tab("two")) }), false);
-  assert.equal(paletteAvailable("reopenTab", context, { ...context, workspace: false }), false);
 });

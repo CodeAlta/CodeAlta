@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import type { HistoryRequest, HistoryResponse } from "#neoastra";
 import { History } from "./HistoryPanel";
 import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePosition, timelineNotice, type TimelineNotice } from "./timelineScroll";
-import { dispatchWorkspaceShortcut, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
+import { resolveCommandKey } from "./commandRegistry";
 import { ShellLanguageContext } from "./shellLanguage";
 import type { Locale } from "./localization";
 
@@ -41,7 +41,7 @@ async function read(request: HistoryRequest): Promise<HistoryResponse> {
 function Mounted({ sessionId, epoch }: { sessionId: string; epoch: string }) {
   const position = useTimelinePosition(sessionId, memory);
   const shell = useRef<HTMLDivElement>(null);
-  const shortcut = useRef<WorkspaceShortcutState>({ chordPending: false, sessionInfoPrefix: null, reminderPrefix: null });
+  const chord = useRef(false);
   const [notice, setNotice] = useState("");
   const presentNotice = useCallback((value: TimelineNotice) => setNotice(timelineNotice("en", value)), []);
   const newest = useExplicitNewestHistory(sessionId, null, epoch, position, presentNotice);
@@ -57,19 +57,20 @@ function Mounted({ sessionId, epoch }: { sessionId: string; epoch: string }) {
       if (event.target instanceof HTMLElement && shell.current?.contains(event.target) &&
         !event.target.closest("input, textarea, select, [contenteditable='true']") &&
         ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) newest.cancel();
-      dispatchWorkspaceShortcut(event, shortcut.current, {
-      workspaceActive: true, workspaceShell: shell.current, modalOpen: false, selectedProjectFocused: false,
-      infoTrigger: null, reminderTrigger: null, infoSelection: { sessionId, projectId: null }, selection: null,
-      messageAvailable: position.messageReady(), latestAvailable: newest.available(),
-      run: action => {
-        if (action === "messageLatest") { newest.latest(); return; }
-        if (action !== "messagePrevious" && action !== "messageNext" && action !== "messageFirst") return;
-        newest.cancel();
-        const result = position.navigateMessage(action);
-        setNotice(result.status === "boundary" ? action === "messageNext" ? "Last retained message; refresh newest history."
-          : "First retained message; older journal history may exist." : result.label ?? result.status);
-      },
-      });
+      // The production key map, scoped to this mounted workspace; a modal takes the keys, as in the app.
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (!target || !shell.current?.contains(target) || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) { chord.current = false; return; }
+      const resolved = resolveCommandKey(event, chord.current, target.closest("#session-prompt, #catalog-prompt") ? "prompt" : "none");
+      chord.current = resolved.chord;
+      if (!resolved.handled) return;
+      event.preventDefault();
+      const action = resolved.command;
+      if (action === "messageLatest") { if (newest.available()) newest.latest(); return; }
+      if (action !== "messagePrevious" && action !== "messageNext" && action !== "messageFirst" || !position.messageReady()) return;
+      newest.cancel();
+      const result = position.navigateMessage(action);
+      setNotice(result.status === "boundary" ? action === "messageNext" ? "Last retained message; refresh newest history."
+        : "First retained message; older journal history may exist." : result.label ?? result.status);
     };
     window.addEventListener("keydown", keyDown);
     return () => window.removeEventListener("keydown", keyDown);

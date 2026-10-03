@@ -14,8 +14,7 @@ import { createReminderActions } from "./reminderActions";
 import { createRuntimeStateReader } from "./runtimeState";
 import { createDraftIndicators } from "./promptDraft";
 import { createNextSendSelectionStore } from "./nextSendSelection";
-import { dispatchWorkspaceShortcut, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
-import { activateContextShortcut } from "./contextShortcut";
+import { resolveCommandKey } from "./commandRegistry";
 import { createAskActions, captureAskAction } from "./sessionAsks";
 import { createUserInputReviewer } from "./sessionUserInput";
 import { createPermissionReviewer, type PermissionReviewState } from "./sessionPermissions";
@@ -126,21 +125,21 @@ function App() {
   const [view, navigate] = useState<"workspace" | "reminders">("workspace");
   const trigger = useRef<HTMLButtonElement>(null);
   const shell = useRef<HTMLDivElement>(null);
-  const chord = useRef<WorkspaceShortcutState>({ chordPending: false, sessionInfoPrefix: null, reminderPrefix: null });
+  const chord = useRef(false);
   setArchived = archive; setSession = session; setHost = hostChange; setView = navigate;
   const snapshot = { ...catalog, projects: [{ ...catalog.projects[0], archived }] };
   const selected = snapshot.sessions.find(row => row.id === sessionId);
   const current = host === epoch && selected;
   useLayoutEffect(() => {
-    const listener = (event: KeyboardEvent) => dispatchWorkspaceShortcut(event, chord.current, {
-      workspaceActive: view === "workspace", workspaceShell: shell.current, modalOpen: false,
-      selectedProjectFocused: false, infoTrigger: null, reminderTrigger: null, compactTrigger: trigger.current,
-      infoSelection: selected ? { sessionId, projectId: "project" } : null,
-      selection: current && !archived ? { epoch, sessionId, projectId: "project" } : null,
-      run: action => { if (action === "context") activateContextShortcut(shell.current);
-        if (action === "compact" && !archived && current && trigger.current?.isConnected && !trigger.current.disabled)
-        trigger.current.click(); },
-    });
+    const listener = (event: KeyboardEvent) => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const resolved = resolveCommandKey(event, chord.current, target?.closest("#session-prompt, #catalog-prompt") ? "prompt" : "none");
+      chord.current = resolved.chord;
+      if (!resolved.handled) return;
+      event.preventDefault();
+      if (resolved.command === "compact" && view === "workspace" && !archived && current && trigger.current?.isConnected && !trigger.current.disabled)
+        trigger.current.click();
+    };
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
   }, [archived, view, current, selected, sessionId]);

@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import type { SessionRuntimeScopedResponse } from "#neoastra";
 import { createRuntimeObservations, projectRuntimeObservation, type RuntimeTarget } from "./runtimeObservations";
 import { tabKey } from "./sessionTabs";
-import { paletteAvailable } from "./paletteActions";
 
 const target = (id = "one"): RuntimeTarget => ({ tab: { sessionId: id, projectId: null, path: null },
   request: { expectedHostEpoch: "epoch", sessionId: id, createdAt: "2026-01-01T00:00:00Z", scope: "global", projectId: null, projectPath: null } });
@@ -71,11 +70,4 @@ test("wrong scope and older attachment facts are refused, with fences retained a
   await owner.refresh([target()]); assert.equal(row()?.label, "Stale attachment");
   value = { ...reply(), observation: { ...reply().observation!, runtimeInstanceId: "wrong" } };
   await owner.refresh([target()]); assert.equal(row()?.label, "Error · runtime identity changed");
-});
-
-test("refresh palette captures exact observed scope and rejects ABA", () => {
-  const context = { workspace: true, selection: null, epoch: "host", infoReady: false, promptReady: false, searchReady: false, runtimeScope: "capture-1" };
-  assert.equal(paletteAvailable("refreshStatuses", context, context), true);
-  assert.equal(paletteAvailable("refreshStatuses", context, { ...context, runtimeScope: "capture-3" }), false);
-  assert.equal(paletteAvailable("refreshStatuses", context, { ...context, runtimeScope: undefined }), false);
 });

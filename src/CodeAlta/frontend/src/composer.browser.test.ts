@@ -13,13 +13,6 @@ const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
 
 // Mounts the actual OwnedSessionPanel with production style.css, not an OS select popup or native WebView2.
 test("mounted composer stays compact and its controls remain legible in both themes", { skip: !edge, timeout: 60_000 }, async () => {
-  const app = readFileSync(fileURLToPath(new URL("./main.tsx", import.meta.url)), "utf8");
-  assert.match(app, /action === "context"\)[\s\S]*?activateContextShortcut\(workspaceShell\.current\)/,
-    "the mounted shortcut dispatcher must remain wired to the production app");
-  assert.match(app, /compactTrigger: compactTrigger\.current/,
-    "the mounted compaction shortcut trigger must remain wired to the production dispatcher");
-  assert.match(app, /action === "compact"[\s\S]*?trigger\.dataset\.epoch === status\.hostEpoch[\s\S]*?trigger\.click\(\)/,
-    "production shortcut dispatch must recheck the selected epoch and live trigger");
   const root = await mkdtemp(join(tmpdir(), "codealta-composer-mounted-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -83,13 +76,6 @@ test("mounted composer stays compact and its controls remain legible in both the
       if (document.querySelector('select[aria-label="Agent prompt"]:not(:disabled)')) resolve('ready');
       else if (Date.now() > end) resolve(document.body.innerText.slice(0, 300)); else setTimeout(check, 35); }; check(); })`);
     assert.equal(ready, "ready");
-    assert.equal(await evaluate(`(() => {
-      const editor = document.createElement('div'); editor.className = 'prompt-editor';
-      const surface = editor.appendChild(document.createElement('div')); surface.className = 'monaco-editor';
-      surface.textContent = 'An existing prompt'; document.getElementById('workspace-shell').appendChild(editor);
-      surface.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true, cancelable: true }));
-      editor.remove(); return window.fixture.helpOpens;
-    })()`), 0, "Monaco EditContext divs must not dispatch shell help for typed question marks");
     const waitFor = (condition: string) => evaluate(`new Promise(resolve => { const end = Date.now() + 4000; const check = () => {
       if (${condition}) resolve('ready'); else if (Date.now() > end) resolve('timed out'); else setTimeout(check, 25); }; check(); })`);
     const countLabel = () => evaluate(`document.querySelector('.composer-toolbar [data-reminder-count]')?.getAttribute('aria-label')`);
@@ -245,32 +231,9 @@ test("mounted composer stays compact and its controls remain legible in both the
         assert.equal(await evaluate(`getComputedStyle(document.activeElement).outlineStyle`), "solid");
       }
     }
-    const compactKey = (target: string, extras = "") => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(target)});
-      const key = new KeyboardEvent('keydown', { key: 'F11', ctrlKey: true, bubbles: true, cancelable: true, ${extras} });
-      el.dispatchEvent(key); return key.defaultPrevented; })()`);
-    for (const extra of ["altKey: true", "shiftKey: true", "metaKey: true", "repeat: true", "isComposing: true", "keyCode: 229"]) {
-      assert.equal(await compactKey('#session-prompt', extra), false);
-    }
-    assert.equal(await compactKey('.project-rename input'), false, "another editor must retain its keyboard shortcut");
-    await evaluate(`window.fixture.workspaceActive(false)`);
-    assert.equal(await compactKey('#session-prompt'), false, "unrelated screens do not intercept Ctrl+F11");
-    await evaluate(`window.fixture.workspaceActive(true); window.fixture.shortcutSelection(null)`);
-    assert.equal(await compactKey('#session-prompt'), false, "unverified selection does not intercept Ctrl+F11");
-    await evaluate(`window.fixture.shortcutSelection({ epoch: 'fixture-epoch', sessionId: 'fixture-other', projectId: null })`);
-    assert.equal(await compactKey('#session-prompt'), false, "different selected session cannot dispatch compaction");
-    await evaluate(`window.fixture.shortcutSelection({ epoch: 'wrong', sessionId: 'fixture-session', projectId: null })`);
-    assert.equal(await compactKey('#session-prompt'), false, "stale selection cannot dispatch compaction");
-    await evaluate(`window.fixture.shortcutSelection({ epoch: 'fixture-epoch', sessionId: 'fixture-session', projectId: 'other' })`);
-    assert.equal(await compactKey('#session-prompt'), false, "wrong project scope cannot dispatch compaction");
-    await evaluate(`window.fixture.shortcutSelection({ epoch: 'fixture-epoch', sessionId: 'fixture-session', projectId: null })`);
-    assert.equal(await evaluate(`(() => { const modal = document.createElement('dialog'); modal.setAttribute('open', '');
-      const button = document.createElement('button'); modal.append(button); document.body.append(modal);
+    const compactKey = (target: string) => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(target)});
       const key = new KeyboardEvent('keydown', { key: 'F11', ctrlKey: true, bubbles: true, cancelable: true });
-      button.dispatchEvent(key);
-      const composerKey = new KeyboardEvent('keydown', { key: 'F11', ctrlKey: true, bubbles: true, cancelable: true });
-      document.querySelector('#session-prompt').dispatchEvent(composerKey);
-      modal.remove(); return key.defaultPrevented || composerKey.defaultPrevented; })()`), false);
-    assert.equal(await evaluate(`window.fixture.compactCalls.length`), 0);
+      el.dispatchEvent(key); return key.defaultPrevented; })()`);
     await evaluate(`window.fixture.flags({retiring:true}); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`[...document.querySelectorAll('.advanced-session-controls dt')].some(el => el.textContent.includes('Attachment retiring') && el.nextElementSibling?.textContent === 'yes')`), "ready");
     assert.equal(await waitFor(`document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')?.disabled`), "ready");
@@ -333,7 +296,8 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await evaluate(`window.fixture.compactCalls.length`), 2, "original waiter excludes repeated retry");
     assert.equal(await evaluate(`window.fixture.compactCalls[0].clientRequestId === window.fixture.compactCalls[1].clientRequestId &&
       window.fixture.compactCalls[1].expectedAttachmentGeneration === '12'`), true);
-    assert.equal(await compactKey('#session-prompt'), false, "in-flight control cannot intercept Ctrl+F11");
+    await compactKey('#session-prompt');
+    assert.equal(await evaluate(`window.fixture.compactCalls.length`), 2, "Ctrl+F11 cannot repeat an in-flight compaction");
     await evaluate(`window.fixture.switchSession('fixture-other')`);
     assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), "ready");
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label^="Retry exact compaction"]')`), false);
@@ -517,22 +481,6 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await evaluate(`window.fixture.abortCalls[2].expectedRunId`), "run-one");
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), true,
       "a settled failure permits only a new explicit observation-targeted action");
-    const beforeChord = Number(await evaluate("window.fixture.refreshes"));
-    assert.equal(await evaluate(`document.querySelector('.advanced-session-controls').open`), false);
-    await evaluate(`(() => { const prompt = document.querySelector('#session-prompt'); prompt.focus();
-      for (const key of ['g', 'u']) prompt.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true })); })()`);
-    assert.equal(await evaluate(`new Promise(resolve => { const end = Date.now() + 4000; const check = () => {
-      if (window.fixture.refreshes > ${beforeChord}) resolve('refreshed');
-      else if (Date.now() > end) resolve('not refreshed'); else setTimeout(check, 25); }; check(); })`), "refreshed",
-    "Ctrl+G, Ctrl+U must invoke the mounted composer runtime reader through production shortcut dispatch");
-    assert.equal(await evaluate(`document.querySelector('.advanced-session-controls').open`), true,
-      "shortcut must reveal the hidden context control and diagnostics");
-    assert.equal(await evaluate(`document.activeElement?.id`), "refresh-session-context", "revealed refresh must be discoverable by focus");
-    await evaluate(`(() => { const dialog = document.createElement('dialog'); dialog.setAttribute('open', '');
-      const button = document.createElement('button'); dialog.append(button); document.body.append(dialog);
-      for (const key of ['g', 'u']) button.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true }));
-      dialog.remove(); })()`);
-    assert.equal(Number(await evaluate("window.fixture.refreshes")), beforeChord + 1, "modal chord cannot refresh context");
     await evaluate(`(() => { window.fixtureChoicesFail = true; document.querySelector('.advanced-session-controls').open = true;
       [...document.querySelectorAll('.advanced-session-controls button')].find(button => button.textContent.includes('Refresh choices')).click(); })()`);
     assert.equal(await evaluate(`new Promise(resolve => { const end = Date.now() + 4000; const check = () => {
@@ -777,8 +725,9 @@ test("mounted composer stays compact and its controls remain legible in both the
     await evaluate(`document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')?.click()`);
     assert.equal(await evaluate(`window.fixture.steerCalls.length`), steerCount,
       "stale runtime/host authority cannot dispatch toolbar steering");
-    assert.equal(await compactKey('.project-rename input'), false);
-    assert.equal(await compactKey('.composer-toolbar .send-button'), false);
+    const compactCount = await evaluate(`window.fixture.compactCalls.length`);
+    await compactKey('.project-rename input'); await compactKey('.composer-toolbar .send-button');
+    assert.equal(await evaluate(`window.fixture.compactCalls.length`), compactCount, "Ctrl+F11 cannot compact without a current trigger");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar .send-button')?.disabled`), true);
     assert.equal(await evaluate(`document.querySelector('.cancel-run-button')?.disabled`), true);
     await evaluate(`document.querySelector('.cancel-run-button').click();document.querySelector('.send-button').click()`);

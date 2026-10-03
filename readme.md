@@ -94,12 +94,8 @@ On the Reminders page, Ctrl+Enter invokes the existing Create button only when f
 
 In the Desktop regular composer (owned or catalog/archived draft-only), typing `?` into an **exactly empty** prompt opens keyboard help; typing `/` opens the existing implemented-actions palette. These are transient keyboard shortcuts, not slash-command execution. Pasted text, composition, selection replacement and nonempty drafts remain literal; the expanded editor and other search/input fields do not use these shortcuts. Draft-only scopes can navigate/help but cannot gain mutation permissions from the palette.
 
-The palette also exposes Skills Settings and last-observed usage, plus
-existing Open Project and Help. Outside text in the workspace, Ctrl+G then Ctrl+K
-opens Skills Settings; Ctrl+G then Ctrl+L opens Application
-Logs. Usage reuses its existing guarded modal; Ctrl+G then Ctrl+U remains Context state
-because of the TUI mapping conflict. See [bounded command access](doc/command-access.md)
-for scope, validation and remaining qualification gaps.
+The Desktop palette (`Ctrl+P`) and help (`F1`) list every command with its shortcut, following the TUI key map.
+See [commands, help and keyboard shortcuts](src/CodeAlta/README.md#commands-help-and-keyboard-shortcuts).
 
 The Desktop timeline/composer divider can be dragged to reserve more room for the regular composer. Focus the divider and use **Arrow Up** to enlarge the composer, **Arrow Down** to shrink it, or **Home** (or **Auto size**) to restore compact automatic sizing. A bounded in-memory preference is kept separately per host/project/session during this window's lifetime; it does not alter drafts, Send/Steer authority or profile settings. A shorter window temporarily clamps the visible size without changing the preference. The composer and timeline stay mounted during resizing, and long controls/recovery details remain scrollable.
 

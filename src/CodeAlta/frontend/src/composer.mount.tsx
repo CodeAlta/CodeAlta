@@ -9,8 +9,7 @@ import { createAbortRunSubmissions } from "./sessionAbortRun";
 import { createQueueSubmissions } from "./sessionQueue";
 import { createRuntimeStateReader } from "./runtimeState";
 import { createDraftIndicators } from "./promptDraft";
-import { dispatchWorkspaceShortcut, type ShortcutSession, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
-import { activateContextShortcut } from "./contextShortcut";
+import { resolveCommandKey } from "./commandRegistry";
 import { createNextSendSelectionStore } from "./nextSendSelection";
 import { createReminderActions } from "./reminderActions";
 import type { ReminderListRequest, ReminderListResponse, SessionSendRequest, SessionAbortRequest, SessionAbortRunRequest, SessionCompactRequest, SessionSteerRequest, SessionQueueRequest, SessionAdmission, SessionRuntimeStateResponse } from "#neoastra";
@@ -32,8 +31,6 @@ let retiring = false;
 let transitioning = false;
 let draining = false;
 let currentSession = sessionId;
-let shortcutSelection: ShortcutSession | null = { epoch, sessionId, projectId: null };
-let workspaceActive = true;
 const compactTrigger = createRef<HTMLButtonElement>();
 let abortMode: "hold" | "fail" | "uncertain" = "hold";
 let settleAbort: ((value: SessionAdmission) => void) | undefined;
@@ -54,7 +51,7 @@ const readReminderCount = (request: ReminderListRequest): Promise<ReminderListRe
   reminderReads.push(request);
   return new Promise(resolve => { reminderSettlers.push(resolve); });
 };
-const counts = { helpOpens: 0, refreshes: 0, catalogOpens: 0, abortCalls: [] as SessionAbortRunRequest[], compactCalls: [] as SessionCompactRequest[],
+const counts = { refreshes: 0, catalogOpens: 0, abortCalls: [] as SessionAbortRunRequest[], compactCalls: [] as SessionCompactRequest[],
   sendCalls: [] as SessionSendRequest[], submissionAbortCalls: [] as SessionAbortRequest[],
   holdSend() { sendGate = new Promise(resolve => { releaseSend = resolve; }); },
   settleSend() { releaseSend?.(); releaseSend = undefined; sendGate = undefined; },
@@ -126,10 +123,8 @@ const counts = { helpOpens: 0, refreshes: 0, catalogOpens: 0, abortCalls: [] as 
         runId: request.expectedRunId, queueInsertion: null } });
     settleAbort = undefined;
   },
-  switchSession(id: string) { currentSession = id; shortcutSelection = { epoch, sessionId: id, projectId: null }; root.render(panel(id)); },
+  switchSession(id: string) { currentSession = id; root.render(panel(id)); },
   switchEpoch(value: string) { props.epoch = value; props.capability = createMutationCapability(value); root.render(panel(currentSession)); },
-  shortcutSelection(value: ShortcutSession | null) { shortcutSelection = value; },
-  workspaceActive(value: boolean) { workspaceActive = value; },
   async retainSend(text: string) {
     const request = captureSubmission(epoch, sessionId, text, "fixture-send")!;
     await props.submissions.submit(request, new AbortController().signal, props.capability, () => {});
@@ -137,21 +132,16 @@ const counts = { helpOpens: 0, refreshes: 0, catalogOpens: 0, abortCalls: [] as 
   },
 };
 Object.assign(window, { fixture: counts });
-const shortcutState: WorkspaceShortcutState = { chordPending: false, sessionInfoPrefix: null, reminderPrefix: null };
+// The production key map; like the app, a key pressed inside a modal runs no command.
+let commandChord = false;
 window.addEventListener("keydown", event => {
-  const selected = shortcutSelection;
-  dispatchWorkspaceShortcut(event, shortcutState, {
-    workspaceActive, workspaceShell: document.getElementById("workspace-shell"),
-    modalOpen: !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'),
-    selectedProjectFocused: false, infoTrigger: null, reminderTrigger: null,
-    compactTrigger: compactTrigger.current,
-    infoSelection: selected && selected.sessionId === currentSession ? { sessionId: currentSession, projectId: null } : null,
-    selection: selected, run: action => {
-      if (action === "help") counts.helpOpens++;
-      if (action === "context") activateContextShortcut(document.getElementById("workspace-shell"));
-      if (action === "compact") compactTrigger.current?.click();
-    },
-  });
+  if (document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) { commandChord = false; return; }
+  const target = event.target instanceof HTMLElement ? event.target : null;
+  const resolved = resolveCommandKey(event, commandChord, target?.closest("#session-prompt, #catalog-prompt") ? "prompt" : "none");
+  commandChord = resolved.chord;
+  if (!resolved.handled) return;
+  event.preventDefault();
+  if (resolved.command === "compact") compactTrigger.current?.click();
 });
 const props = {
   epoch, sessionId, submissions: createOwnedSubmissions(async request => {

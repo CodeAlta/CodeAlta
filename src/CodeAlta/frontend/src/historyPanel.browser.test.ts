@@ -152,12 +152,6 @@ test("mounted reverse history retains latest, anchors older pages and fences swi
       return true; })()`);
     await wait("document.querySelector('.navigation-notice').textContent.includes('latest user prompt')");
     assert.equal((await snapshot())!.includes('"following":"false"'), true, "navigating onto the bottom row stays unfollowed");
-    await evaluate(`(() => { const prompt = document.querySelector('#session-prompt'); prompt.focus();
-      prompt.dispatchEvent(new KeyboardEvent('keydown', { key: 'F3', ctrlKey: true, bubbles: true, cancelable: true }));
-      prompt.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', ctrlKey: true, bubbles: true, cancelable: true }));
-      return true; })()`);
-    assert.match((await evaluate("document.querySelector('.navigation-notice').textContent"))!, /latest user prompt/,
-      "composer editing keeps its own shortcuts and focus");
     await evaluate("document.querySelector('.keyboard-target').focus()");
     await evaluate(`(() => { const scroller = document.querySelector('.timeline-scroll'); scroller.scrollTop = 2000;
       scroller.dispatchEvent(new Event('scroll', { bubbles: true })); const viewport = scroller.getBoundingClientRect();

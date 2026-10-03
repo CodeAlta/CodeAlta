@@ -8,9 +8,8 @@ See [new-session provider choice](new-session-provider.md) for cached descriptor
 selection, exact enabled-host admission, original uncertainty retention and fresh
 catalog confirmation. Existing-session provider switching remains separate.
 
-See [bounded Desktop command access](command-access.md) for registry-backed Skills,
-logs, usage, Open Project and Help access, exact-original guards, TUI chord conflicts
-and the retained final bounded-test failure. Independent acceptance remains pending.
+See [commands, help and keyboard shortcuts](../src/CodeAlta/README.md#commands-help-and-keyboard-shortcuts)
+for the Desktop command palette, help and key map, which follow the TUI's.
 
 Provider/timeline localization and its scroll correction are independently accepted;
 Settings inventory translation is also independently accepted. Static project/session

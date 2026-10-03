@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import type { HistoryRequest, HistoryResponse } from "#neoastra";
 import { History } from "./HistoryPanel";
 import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePosition, timelineNotice, type TimelineNotice } from "./timelineScroll";
-import { dispatchWorkspaceShortcut, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
+import { resolveCommandKey } from "./commandRegistry";
 import { MarkdownContent } from "./MarkdownContent";
 import { LiveTextMessage, LiveToolMessage } from "./LiveSessionPanel";
 import { ShellLanguageContext } from "./shellLanguage";
@@ -60,7 +60,7 @@ function createFixture() {
     const [, rerender] = useState(0);
     const position = useTimelinePosition(sessionId, memory);
     const shell = useRef<HTMLDivElement>(null);
-    const chord = useRef<WorkspaceShortcutState>({ chordPending: false, sessionInfoPrefix: null, reminderPrefix: null });
+    const chord = useRef(false);
     const [notice, setNotice] = useState("");
     const [deferredHeight, setDeferredHeight] = useState(0);
     const presentNotice = useCallback((value: TimelineNotice) => setNotice(timelineNotice("en", value)), []);
@@ -87,11 +87,13 @@ function createFixture() {
     }, []);
     useLayoutEffect(() => {
       const keyDown = (event: KeyboardEvent) => {
-        dispatchWorkspaceShortcut(event, chord.current, { workspaceActive: true, workspaceShell: shell.current,
-          modalOpen: false, selectedProjectFocused: false, infoTrigger: null, reminderTrigger: null,
-          infoSelection: { sessionId, projectId: null }, selection: null,
-          messageAvailable: position.messageReady(), latestAvailable: newest.available(),
-          run: action => { if (action === "messageLatest") newest.latest(); }, });
+        const target = event.target instanceof HTMLElement ? event.target : null;
+        if (!target || !shell.current?.contains(target)) { chord.current = false; return; }
+        const resolved = resolveCommandKey(event, chord.current, "none");
+        chord.current = resolved.chord;
+        if (!resolved.handled) return;
+        event.preventDefault();
+        if (resolved.command === "messageLatest" && newest.available()) newest.latest();
       };
       window.addEventListener("keydown", keyDown);
       return () => window.removeEventListener("keydown", keyDown);

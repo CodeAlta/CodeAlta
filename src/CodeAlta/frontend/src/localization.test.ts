@@ -13,7 +13,7 @@ import { AboutDialog } from "./AboutDialog";
 
 test("support labels translate while recorded host identity and confirmation bytes stay literal", () => {
   for (const locale of locales) {
-    for (const key of ["About CodeAlta", "Open About", "Refresh logs", "Clear captured messages…", "Check reference metadata", "Close references", "Path metadata observed; Send revalidates", "Raw prompt reference preview"] as const) {
+    for (const key of ["About CodeAlta", "Refresh logs", "Clear captured messages…", "Check reference metadata", "Close references", "Path metadata observed; Send revalidates", "Raw prompt reference preview"] as const) {
       if (locale !== "en") assert.notEqual(translate(locale, key), key);
     }
     assert.ok(translate(locale, "Type {confirmation} to confirm", { confirmation: "CLEAR CAPTURED LOGS" }).includes("CLEAR CAPTURED LOGS"));
@@ -47,7 +47,6 @@ test("inventory labels translate in six languages while status codes and English
   for (const locale of locales) {
     for (const key of ["Provider management", "Model catalog", "Agent prompts", "MCP Servers", "Configured providers",
       "Search models", "Adapter type", "Cached availability",
-      "Next Send agent prompt selection",
       "Inspect supplied tool record", "Supplied record provenance", "Copy supplied tool JSON", "Display excerpt; Copy retains the supplied JSON.",
       "Retained original Send prompt", "Use model for next Send"] as const) {
       assert.ok(translate(locale, key));
