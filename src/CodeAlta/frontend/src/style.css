@@ -1169,3 +1169,9 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 @media (max-width: 900px) { .settings-dialog-content .model-catalog-layout { grid-template-columns: minmax(0, 1fr); } }
 .settings-dialog-content .model-catalog-results > .model-catalog-grid { max-width: calc(100% - 28px); overflow: hidden; border: 1px solid var(--line); border-radius: 4px; }
 .model-catalog-grid .bp6-table-container { box-shadow: none; }
+/* Model catalog: one grid for every provider's models, with details below it. */
+.settings-dialog-content .model-catalog-all > .model-catalog-results { padding: 0; border: 0; }
+.settings-dialog-content .model-catalog-all > .model-catalog-results > * { margin: 0 0 12px; }
+.settings-dialog-content .model-catalog-all .model-catalog-grid { max-width: 100%; overflow: hidden; border: 1px solid var(--line); border-radius: 4px; }
+.settings-dialog-content .model-catalog-all .model-catalog-results input[type="search"] { width: 100%; padding: 6px 9px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--panel-2); color: var(--text); }
+.settings-dialog-content .model-catalog-all .model-catalog-detail { padding: 14px 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }

@@ -247,8 +247,9 @@ state to `.alta` and performs no storage migration. Help/version and rejected ar
 native services or create storage. Explicit catalog and scoped-owned options retain stricter validation.
 
 The **Models** Settings section (or `Ctrl+G`, then `Ctrl+O`) opens a model catalog in owned
-mode. Select a registered provider to request its actual host-reported models, shown as a grid with
-resizable columns (name, ID, token limits, capabilities, default effort); search their names,
+mode. It requests the actual host-reported models of every enabled provider and shows them in one grid
+with resizable columns (provider, name, ID, token limits, capabilities, default effort), like the TUI's
+Models window; a provider whose read fails is named above the grid. Search provider and model names,
 IDs and descriptions and open a model for supported efforts, capabilities and token limits. Provider
 reads are capped at 32 and model reads at 128 and 96 KiB serialized, with omitted results identified; availability and
 missing metadata, including pricing not reported by this inventory, remain explicit. Loading a

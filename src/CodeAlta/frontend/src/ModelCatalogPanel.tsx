@@ -21,8 +21,9 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
   const [providers, setProviders] = useState<ModelCatalogProvidersResponse>();
   const [providersError, setProvidersError] = useState<InventoryNotice>("");
   const [providerId, setProviderId] = useState<string | null>(null);
-  const [page, setPage] = useState<ModelCatalogModelsResponse>();
-  const [modelsError, setModelsError] = useState<InventoryNotice>("");
+  const [pages, setPages] = useState<ReadonlyMap<string, ModelCatalogModelsResponse>>(new Map());
+  const [modelErrors, setModelErrors] = useState<ReadonlyMap<string, InventoryNotice>>(new Map());
+  const [loadingModels, setLoadingModels] = useState(false);
   const [query, setQuery] = useState("");
   const [modelId, setModelId] = useState<string | null>(null);
   const [choices, setChoices] = useState<SessionChoicesResponse>();
@@ -34,7 +35,7 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
   const applyingRef = useRef(false);
   const applyController = useRef<AbortController | null>(null);
   useEffect(() => {
-    setProviders(undefined); setProvidersError(""); setProviderId(null); setPage(undefined); setModelsError(""); setModelId(null);
+    setProviders(undefined); setProvidersError(""); setProviderId(null); setPages(new Map()); setModelErrors(new Map()); setModelId(null);
     if (!epoch) return;
     const controller = new AbortController();
     void readProviders({ expectedEpoch: epoch }, { signal: controller.signal, timeoutMilliseconds: 15000 }).then(value => {
@@ -51,30 +52,36 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
     return () => controller.abort();
   }, [epoch, readProviders]);
   useEffect(() => {
-    setPage(undefined); setModelsError(""); setModelId(null);
-    if (!epoch || !providerId || providers?.epoch !== epoch || !providers.providers.some(provider => provider.id === providerId)) return;
+    setPages(new Map()); setModelErrors(new Map()); setProviderId(null); setModelId(null);
+    if (!epoch || providers?.epoch !== epoch) return;
+    const enabled = providers.providers.filter(provider => provider.enabled);
+    if (!enabled.length) return;
     const controller = new AbortController();
-    void readModels({ expectedEpoch: epoch, providerId }, { signal: controller.signal, timeoutMilliseconds: 15000 }).then(value => {
+    setLoadingModels(true);
+    // One bounded read per enabled provider, in parallel; each result or failure is shown as it arrives.
+    void Promise.all(enabled.map(provider => readModels({ expectedEpoch: epoch, providerId: provider.id }, { signal: controller.signal, timeoutMilliseconds: 15000 }).then(value => {
       if (controller.signal.aborted) return;
-      if (value.epoch !== epoch || value.status === "stale_epoch") {
-        setModelsError("Host identity changed. Reload required."); return;
-      }
-      if (value.status !== "ok") {
-        setModelsError({ key: "Model inventory unavailable ({status}).", status: value.availability === "Unknown" ? value.status : value.availability }); return;
-      }
-      if (value.providerId?.toLowerCase() !== providerId.toLowerCase() || !Array.isArray(value.models) || value.models.length > 128
+      const fail = (notice: InventoryNotice) => setModelErrors(current => new Map(current).set(provider.id, notice));
+      if (value.epoch !== epoch || value.status === "stale_epoch") { fail("Host identity changed. Reload required."); return; }
+      if (value.status !== "ok") { fail({ key: "Model inventory unavailable ({status}).", status: value.availability === "Unknown" ? value.status : value.availability }); return; }
+      if (value.providerId?.toLowerCase() !== provider.id.toLowerCase() || !Array.isArray(value.models) || value.models.length > 128
         || value.models.some(model => typeof model.id !== "string" || !model.id || model.id.length > 256 || typeof model.name !== "string")) {
-        setModelsError("Invalid model inventory. Reload required."); return;
+        fail("Invalid model inventory. Reload required."); return;
       }
-      setPage(value);
-    }).catch(() => { if (!controller.signal.aborted) setModelsError("Model inventory could not be read."); });
+      setPages(current => new Map(current).set(provider.id, value));
+    }).catch(() => { if (!controller.signal.aborted) setModelErrors(current => new Map(current).set(provider.id, "Model inventory could not be read.")); })))
+      .finally(() => { if (!controller.signal.aborted) setLoadingModels(false); });
     return () => controller.abort();
-  }, [epoch, providerId, providers, readModels]);
+  }, [epoch, providers, readModels]);
   const activeProviders = providers?.epoch === epoch ? providers : undefined;
-  const activePage = page?.epoch === epoch && page.providerId?.toLowerCase() === providerId?.toLowerCase() ? page : undefined;
   const terms = query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
-  const visible = (activePage?.models ?? []).filter(model => terms.every(term => `${model.id} ${model.name} ${model.description ?? ""}`.toLocaleLowerCase().includes(term)));
-  const selected = visible.find(model => model.id === modelId);
+  // Every provider's models in one list, provider order first, each provider's reported order kept.
+  const rows = (activeProviders?.providers ?? []).flatMap(provider => (pages.get(provider.id)?.models ?? []).map(model => ({ provider, model })));
+  const visible = rows.filter(({ provider, model }) => terms.every(term => `${provider.id} ${provider.name} ${model.id} ${model.name} ${model.description ?? ""}`.toLocaleLowerCase().includes(term)));
+  const selectedRow = visible.findIndex(row => row.provider.id === providerId && row.model.id === modelId);
+  const selected = selectedRow >= 0 ? visible[selectedRow].model : undefined;
+  const truncated = [...pages.values()].some(value => value.truncated);
+
   useEffect(() => {
     actionRef.current++; applyController.current?.abort(); applyingRef.current = false; setApplying(false);
     return () => applyController.current?.abort();
@@ -126,49 +133,41 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
   const flag = (value: boolean | null) => t(value == null ? "Unknown" : value ? "Yes" : "No");
   const count = (value: number | string | null) => value == null ? "" : typeof value === "number" ? value.toLocaleString(locale) : String(value);
   const mark = (value: boolean | null) => value == null ? "" : value ? "✓" : "–";
-  const selectedRow = selected ? visible.findIndex(model => model.id === selected.id) : -1;
   return <main className="configuration-page model-catalog-page" aria-label={t("Model catalog")}>
     <header className="page-heading"><span className="eyebrow">{t("Desktop / Models")}</span><h1>{t("Model catalog")}</h1>
       <p>{t("Host-reported models. Only the selected session's next Send model can change here; authentication and global defaults cannot.")}</p></header>
     {!epoch ? <p role="status">{t("Catalog-only mode has no owned model inventory. Configured default model names are not a model list.")}</p>
-      : <div className="model-catalog-layout">
-        <section className="model-catalog-providers" aria-label={t("Model providers")}><h2>{t("Providers")}</h2>
+      : <div className="model-catalog-all">
+        <section className="model-catalog-results" aria-label={t("Provider models")}>
           {!activeProviders && !providersError && <p role="status">{t("Loading providers…")}</p>}
           {providersError && <p role="alert" className="error-text">{inventoryNotice(locale, providersError)}</p>}
           {activeProviders?.providers.length === 0 && <p role="status">{t("No providers are registered with this host.")}</p>}
-          {activeProviders?.providers.map(provider => <button type="button" key={provider.id} aria-pressed={providerId === provider.id}
-            onClick={() => { if (providerId === provider.id) return; setProviderId(provider.id); setPage(undefined); setModelId(null); setModelsError(""); }}>
-            <strong>{provider.name}</strong><small>{provider.id} · {provider.enabled ? provider.availability : t("Disabled")}</small></button>)}
-          {activeProviders?.truncated && <p role="status">{t("Showing {count} providers; others are omitted by the bounded inventory.", { count: activeProviders.providers.length })}</p>}
-        </section>
-        <section className="model-catalog-results" aria-label={t("Provider models")}><h2>{t("Models")}</h2>
-          {!providerId ? <p role="status">{t("Choose a provider to load its reported models.")}</p> : <>
+          {activeProviders && <>
             <label>{t("Search models")}<input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder={t("Name, ID or description")} /></label>
-            {!activePage && !modelsError && <p role="status">{t("Loading models for {id}…", { id: providerId })}</p>}
-            {modelsError && <p role="alert" className="error-text">{inventoryNotice(locale, modelsError)}</p>}
-            {activePage && <>
-              {activePage.models.length === 0 && <p role="status">{t("This provider reported no models. A configured default is not inventory.")}</p>}
-              {activePage.models.length > 0 && visible.length === 0 && <p role="status">{t("No models match this search.")}</p>}
-              {visible.length > 0 && <div className="model-catalog-grid" style={{ height: Math.min(346, 50 + visible.length * 28) }}>
-                <Table2 numRows={visible.length} enableRowHeader={false} enableMultipleSelection={false} defaultRowHeight={28}
-                  columnWidths={[180, 170, 112, 100, 108, 88, 64, 92, 104]} selectionModes={SelectionModes.ROWS_AND_CELLS}
-                  selectedRegionTransform={region => region.rows ? Regions.row(region.rows[0]) : region}
-                  selectedRegions={selectedRow >= 0 ? [Regions.row(selectedRow)] : []}
-                  onSelection={regions => { const row = regions[0]?.rows?.[0]; if (row !== undefined && visible[row]) setModelId(visible[row].id); }}>
-                  <Column name={t("Model")} cellRenderer={row => <Cell><strong>{visible[row].name}</strong></Cell>} />
-                  <Column name={t("ID")} cellRenderer={row => <Cell className="bp6-monospace-text">{visible[row].id}</Cell>} />
-                  <Column name={t("Context tokens")} cellRenderer={row => <Cell>{count(visible[row].contextTokens)}</Cell>} />
-                  <Column name={t("Input tokens")} cellRenderer={row => <Cell>{count(visible[row].inputTokens)}</Cell>} />
-                  <Column name={t("Output tokens")} cellRenderer={row => <Cell>{count(visible[row].outputTokens)}</Cell>} />
-                  <Column name={t("Reasoning")} cellRenderer={row => <Cell>{mark(visible[row].reasoning)}</Cell>} />
-                  <Column name={t("Tools")} cellRenderer={row => <Cell>{mark(visible[row].tools)}</Cell>} />
-                  <Column name={t("Image input")} cellRenderer={row => <Cell>{mark(visible[row].imageInput)}</Cell>} />
-                  <Column name={t("Default effort")} cellRenderer={row => <Cell>{visible[row].defaultEffort ?? ""}</Cell>} />
-                </Table2>
-              </div>}
-              {activePage.truncated && <p role="status">{t("Showing {count} reported models; others are omitted by the bounded inventory.", { count: activePage.models.length })}</p>}
-            </>}
-            {selected && <article className="model-catalog-detail" aria-label={t("Details for {name}", { name: selected.name })}><h3>{selected.name}</h3><p><code>{selected.id}</code></p>
+            {[...modelErrors].map(([id, notice]) => <p key={id} role="alert" className="error-text"><strong>{activeProviders.providers.find(provider => provider.id === id)?.name ?? id}</strong>: {inventoryNotice(locale, notice)}</p>)}
+            {loadingModels && rows.length === 0 && <p role="status">{t("Loading models…")}</p>}
+            {!loadingModels && rows.length === 0 && modelErrors.size === 0 && <p role="status">{t("This provider reported no models. A configured default is not inventory.")}</p>}
+            {rows.length > 0 && visible.length === 0 && <p role="status">{t("No models match this search.")}</p>}
+            {visible.length > 0 && <div className="model-catalog-grid" style={{ height: Math.min(402, 50 + visible.length * 28) }}>
+              <Table2 numRows={visible.length} enableRowHeader={false} enableMultipleSelection={false} defaultRowHeight={28}
+                columnWidths={[130, 230, 230, 112, 100, 108, 88, 64, 92, 104]} selectionModes={SelectionModes.ROWS_AND_CELLS}
+                selectedRegionTransform={region => region.rows ? Regions.row(region.rows[0]) : region}
+                selectedRegions={selectedRow >= 0 ? [Regions.row(selectedRow)] : []}
+                onSelection={regions => { const row = regions[0]?.rows?.[0]; if (row !== undefined && visible[row]) { setProviderId(visible[row].provider.id); setModelId(visible[row].model.id); } }}>
+                <Column name={t("Provider")} cellRenderer={row => <Cell>{visible[row].provider.name}</Cell>} />
+                <Column name={t("Model")} cellRenderer={row => <Cell><strong>{visible[row].model.name}</strong></Cell>} />
+                <Column name={t("ID")} cellRenderer={row => <Cell className="bp6-monospace-text">{visible[row].model.id}</Cell>} />
+                <Column name={t("Context tokens")} cellRenderer={row => <Cell>{count(visible[row].model.contextTokens)}</Cell>} />
+                <Column name={t("Input tokens")} cellRenderer={row => <Cell>{count(visible[row].model.inputTokens)}</Cell>} />
+                <Column name={t("Output tokens")} cellRenderer={row => <Cell>{count(visible[row].model.outputTokens)}</Cell>} />
+                <Column name={t("Reasoning")} cellRenderer={row => <Cell>{mark(visible[row].model.reasoning)}</Cell>} />
+                <Column name={t("Tools")} cellRenderer={row => <Cell>{mark(visible[row].model.tools)}</Cell>} />
+                <Column name={t("Image input")} cellRenderer={row => <Cell>{mark(visible[row].model.imageInput)}</Cell>} />
+                <Column name={t("Default effort")} cellRenderer={row => <Cell>{visible[row].model.defaultEffort ?? ""}</Cell>} />
+              </Table2>
+            </div>}
+            {rows.length > 0 && <p role="status" className="bp6-text-muted">{t("{count} models", { count: visible.length })}{truncated ? ` · ${t("Some provider inventories are bounded; more models may exist.")}` : ""}</p>}
+            {selected && <article className="model-catalog-detail" aria-label={t("Details for {name}", { name: selected.name })}><h3>{selected.name}</h3><p><code>{providerId} / {selected.id}</code></p>
               <p>{selected.description ?? t("No description reported.")}</p><dl>
                 <dt>{t("Context tokens")}</dt><dd>{present(selected.contextTokens)}</dd>
                 <dt>{t("Input tokens")}</dt><dd>{present(selected.inputTokens)}</dd>
