@@ -90,10 +90,13 @@ internal sealed class IndexedPromptReferences : IAsyncDisposable
                 return existing;
             }
         }
-        // Creating a session starts the first folder traversal in the background.
+        cancellationToken.ThrowIfCancellationRequested();
+        // Creating a session starts the first folder traversal in the background. The traversal belongs to the
+        // shared index: the request that happens to start it may be canceled (the picker does so whenever the
+        // query changes or its window closes) without stopping the read and leaving the index half built.
         var session = await _service.CreateSessionAsync(
             new ProjectFileSearchSessionOptions { ProjectRoot = projectRoot, MaximumResults = MaximumResults, RecentItemLimit = 5 },
-            cancellationToken).ConfigureAwait(false);
+            CancellationToken.None).ConfigureAwait(false);
         var created = new Entry(projectRoot, session) { Refreshed = _clock.GetUtcNow() };
         Entry? evicted = null;
         Entry result;

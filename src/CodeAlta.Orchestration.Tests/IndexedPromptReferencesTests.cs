@@ -58,6 +58,35 @@ public sealed class IndexedPromptReferencesTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
+    [TestMethod]
+    public async Task Search_CanceledWhileTheFirstTraversalRunsStillFinishesTheIndex()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-references-").FullName;
+        try
+        {
+            var traversal = new GatedTraversal();
+            await using var references = new IndexedPromptReferences(new ProjectFileSearchService(
+                new ProjectFileSnapshotCache(), new InMemoryProjectFileUsageStore(), traversal, new ProjectFileSearchScorer()));
+            using var canceled = new CancellationTokenSource();
+            var first = references.SearchAsync(root, "one", canceled.Token);
+            Assert.IsTrue(traversal.Entered.Wait(TimeSpan.FromSeconds(10)), "the first search starts reading the folder");
+            // The picker cancels its request when the query changes or the popup closes.
+            canceled.Cancel();
+            try { await first; } catch (OperationCanceledException) { }
+            traversal.Release.Set();
+
+            var result = await references.SearchAsync(root, "one", CancellationToken.None);
+            for (var attempt = 0; attempt < 20 && result.Status == "indexing"; attempt++)
+            {
+                await Task.Delay(25);
+                result = await references.SearchAsync(root, "one", CancellationToken.None);
+            }
+            Assert.AreEqual("ok", result.Status, "the index outlives the request that started it");
+            Assert.AreEqual("one.txt", result.Items[0].Path);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     // The first answers arrive while the folder is still being read; ask again until the index settles.
     private static async Task<OwnedReferenceSearchResult> Settled(IndexedPromptReferences references, string root, string query)
     {
@@ -69,5 +98,30 @@ public sealed class IndexedPromptReferencesTests
         }
         Assert.Fail("The index did not settle.");
         throw new InvalidOperationException();
+    }
+
+    // Reads one file, but only once released; like the real traversal it stops when its token is canceled.
+    private sealed class GatedTraversal : IProjectFileSearchTraversal
+    {
+        public ManualResetEventSlim Entered { get; } = new();
+        public ManualResetEventSlim Release { get; } = new();
+
+        public ProjectFileTraversalSnapshot Traverse(string projectRoot, IReadOnlyDictionary<string, ProjectFileUsageEntry> usageByRelativePath,
+            int batchSize, Action<IReadOnlyList<ProjectFileSearchItem>> onBatch, CancellationToken cancellationToken)
+        {
+            Entered.Set();
+            Release.Wait(cancellationToken);
+            ProjectFileSearchItem[] items =
+            [
+                new()
+                {
+                    Kind = ProjectFileSearchItemKind.File, ProjectRoot = projectRoot, RelativePath = "one.txt",
+                    FullPath = Path.Combine(projectRoot, "one.txt"), Basename = "one.txt", ParentPath = string.Empty, Extension = ".txt",
+                    SearchFields = ProjectFilePathUtilities.CreateSearchFields("one.txt", "one.txt", ".txt"),
+                },
+            ];
+            onBatch(items);
+            return new ProjectFileTraversalSnapshot(false, items);
+        }
     }
 }
