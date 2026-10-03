@@ -114,9 +114,15 @@ for the document lifetime. `request_id_capacity_exhausted` separately identifies
 active work/subscriptions; it is not a duplicate. No automatic
 reload, capability reset or mutation retry is performed. Inspect receipts before deliberate retry.
 
-Reminders is a guarded selected-session native-modal popup, not a Settings section or replacement
-workspace. Closing it does not cancel an admitted action or retry an uncertain Save; original
-request evidence remains owned by the application. The underlying workspace stays mounted.
+Session info, Reminders, context usage, timeline details, file changes, tool records, the raw history
+source, About, project details, the saved-session browser and the model/prompt choosers open as
+windows: drag the title bar to move them, drag an edge to resize them, and use the title bar's restore
+button (or double-click it) to return to the default size and position. Each kind of window remembers
+its own geometry. Closing Reminders does not cancel an admitted action or retry an uncertain Save.
+In the explorer, a project row has one **…** menu (also on right-click): **New session**, **Search
+sessions…** and **Browse saved sessions** for that project, then **Open**, **Details**, **Rename
+project…** and **Archive project…**. **Other sessions** has the same session actions. Session search
+is an inline field above the session list; Escape or its clear button hides it.
 Clicking a project opens one temporary **New session** tab, reused when selecting another project
 before creation. Selecting an existing session tab or sidebar session removes it. Real session
 panes, drafts and split geometry are retained, rather than replaced with a project placeholder.
@@ -176,19 +182,12 @@ complete last-active order: missing, unverified or truncated evidence cannot est
 recency, and undated projects follow name/ID order. Narrow-screen Show projects is a
 temporary reveal independent of the desktop collapse preference. These controls do not
 change the selected project/session, draft, requests, pane widths or timeline position.
-The TUI's recent-session count, language and command approval policy are **not** configurable
-from this desktop screen; this is not full General/Navigator parity.
+The command approval policy is edited in **Settings → Configuration file**.
 
-**Settings → About** and the implemented-actions palette open the same read-only About dialog
-within the Settings overlay. In the packaged desktop it reports the product and informational version
-from the running host's boot response, with a separate build field only for a recognized
-version `+metadata` suffix. Missing or invalid/overlong fields are marked unavailable,
-rather than replaced with an advertised version. The dialog distinguishes a browser demo,
-a pending/failed boot, an owned host and catalog-only browsing; it is not a runtime health check. Inspecting it
-does not fetch updates or read files, send data, or write configuration. TUI update checks,
-downloads and installation are **not supported** in this desktop view; no update status is known.
-Closing About or the palette returns focus to its connected opener only when no newer focus move, navigation
-or modal has taken precedence.
+**Settings → About** is an inline page with the product, version, build metadata (only for a recognized
+version `+metadata` suffix) and the mode of the running app (desktop app, catalog only, browser demo or
+unavailable host). The implemented-actions palette opens the same facts as a window. Nothing is fetched
+or written; update checks are not available in the desktop app.
 
 **Settings → Logs** (also in the implemented-actions palette) offers an
 explicit **Refresh logs** and a **Wrap lines** toggle. It displays at most 64 newest
@@ -311,39 +310,38 @@ store as the TUI. Sign in using **Continue with ChatGPT** in `altatui`, then use
 provider in the owned desktop. Existing legacy Codex credentials require a new sign-in; device
 login and credential import are no longer supported. No desktop-only OAuth flow or storage is added.
 
-The **Agent prompts** Settings section (or `Ctrl+G`, then `Ctrl+H`)
-shows effective prompts discovered by the shared host catalog for the exact selected owned
-session. It shows name, ID, description, effective source scope and a read-only excerpt of the
-effective agent prompt body (up to 2,048 characters per prompt). An appended prompt may include
-lower-precedence source content; source paths and system prompts are not exposed. The inventory
-is capped at 64 prompts and 96 KiB serialized, and identifies omitted or truncated content.
-Built-in prompts are read-only; no prompt editing or source storage is available here. Catalog-only
-mode and the browser demo have no owned prompt inventory. The recorded prompt and next-Send
-prompt are shown separately. Selecting a prompt validates fresh session choices and changes
-only that exact session's next Send, retaining its model/effort; pending exact Send, stale host,
-session changes and unavailable prompts cannot apply. Create/edit/delete remain TUI workflows.
+The **Agent prompts** Settings section (or `Ctrl+G`, then `Ctrl+H`) lists agent prompts and system
+prompts from the built-in, global and (when an unarchived project is selected) project scopes, and
+edits them: display name, description, system prompt, whether the text is added to the system prompt
+or replaces it, and the prompt text in a Markdown editor. **New prompt** creates an agent or system
+prompt in the global or project scope; **Customize a copy** on a built-in prompt creates a global
+prompt with the same name, which then overrides it; **Remove** deletes a global or project prompt
+file. Built-in prompts are read-only. A save is refused, without overwriting, when the file changed
+on disk since it was read. A session's prompt for the next Send is chosen from the prompt bar.
 
-The **MCP Servers** Settings section shows fixed-file global configuration and the selected owned session's
-catalog-resolved project overlay. It displays at most 64 safe server identifiers, transport,
-effective configured policy enabled state (merged MCP enabled AND server-local enabled) and
-project/global override evidence. Missing or
-unreadable config sources, policy read failure, and omitted definitions are disclosed without
-paths or raw diagnostics. Configuration is **not** a connection or tool-availability check:
-Desktop plugins remain off. This screen is read-only; connect, tools, add/edit/delete and
-runtime lifecycle are not implemented. No MCP inventory is available in catalog-only mode.
+The **MCP Servers** Settings section lists the servers defined in the global and selected project
+`mcp.json` and edits them: name, local command (command, arguments, working directory, environment
+variables) or HTTP (URL, headers), where it is stored, and whether it is enabled. The switch in the
+list enables or disables a server without opening it. Stored environment and header values are never
+sent to the page; leaving a value blank keeps the stored one. Connection tests, sign-in and per-tool
+switches remain TUI workflows. Enabling or disabling rewrites `config.toml` without its comments.
 
-The **Reminders** session tool is available only with a selected owned session. It lists that session's
-active and completed attempts, lets you create a delayed Markdown prompt (whole seconds 1–86400,
-1–20 attempts), refresh the list, and delete only after typing the exact reminder ID. At most 32
-retained reminders per session and 256 per host are accepted; deleting a completed entry frees a slot.
-The compact owned composer displays `?` for an unknown active count, or a number from a successful
-bounded list for the exact selected host and session. The accessible icon label says **active at last
-observation; may have changed**: completed schedules are excluded, and timer completion or changes
-after the read are not tracked live. The composer reads once when opened; **Refresh reminder count**
-under Advanced session controls requests a new observation (not a schedule mutation). Errors,
-incomplete/mismatched responses, changed host/session/scope, invalid catalog identity and pending
-or uncertain reminder admissions leave the count unknown until an eligible explicit refresh. No
-polling or automatic retry is performed. The timer icon and `Ctrl+G`, `Ctrl+D` open Reminders as before.
+The **Skills** Settings section lists discovered skills (project, user, plugin and built-in) with a
+switch per skill, a filter, **Enable all** / **Disable all** for the shown skills, and **New skill**,
+which creates `<name>/SKILL.md` under the global or project skills folder. The **Plugins** Settings
+section has a switch per plugin, including the built-in MCP, GitHub and Statistics plugins; a change
+applies the next time CodeAlta starts. With an unarchived project selected, both pages can store a
+change globally or for that project. Every Settings section has its own icon in the sidebar.
+
+The **Reminders** session tool is available only with a selected owned session. Its window lists that
+session's reminders on the left (state, attempts sent, interval) and shows either the **New reminder**
+form or the selected reminder on the right. A new reminder has a Markdown prompt, a delay (`5m`,
+`1h 30m`, `90s`, whole seconds or `HH:mm:ss`, at most 24 hours; quick buttons for 5m, 15m, 1h, 4h)
+and 1–20 attempts. **Delete reminder** asks for one confirmation. At most 32 reminders per session and
+256 per host are kept; they live in memory and are lost when CodeAlta stops. The composer's timer
+button shows the session's active count, and the explorer marks every session and project that has
+active reminders; both follow reminder changes made in the window and are re-read every 20 seconds.
+The timer icon and `Ctrl+G`, `Ctrl+D` open Reminders.
 Select a schedule to inspect its full stored message, beyond the list preview. **Use as new reminder**
 copies that message, delay and repeat count into the local Create form (with confirmation before
 discarding an edited draft); it does not change the selected schedule or create a new one until
@@ -364,7 +362,7 @@ list; discarding that draft requires confirmation and never clears an outstandin
 A refreshed detail does not silently rebase an old draft or retry it.
 Within the eligible panel, `Ctrl+R` refreshes from non-editor focus, `Ctrl+E` focuses the selected
 active message editor, and `Ctrl+S` saves a changed message from that editor or a non-editor panel
-control. `Delete` from non-editor focus only focuses the existing exact-ID confirmation field; it
+control. `Delete` from non-editor focus only focuses the **Delete reminder** button; it
 never submits deletion, and Delete in a text field remains text editing. Shortcuts do not run during
 inline discard confirmations, modal/IME input or without current host authority. Pending or uncertain
 Save blocks mutation/focus shortcuts; `Ctrl+R` remains read-only observation, never a retry. Create
@@ -483,25 +481,29 @@ Canceling an RPC waiter does not stop the shared catalog's background load. Exis
 teardown waits only a bounded time, so cache work can outlive bridge teardown; complete
 native lifecycle qualification remains open.
 
-### Read-only owned usage RPC and compact composer inspector
+### Context usage meter and window
 
-`sessionUsage.read` is an owned-only generated Desktop RPC for an existing actor and the actual host epoch.
-It requires explicit project ID/path or global scope, checks the exact persisted session header using a
-bounded first-line read, confirms complete unarchived project ownership when applicable, and rechecks
-the original attachment after asynchronous reads. Statuses distinguish unknown, unavailable,
-transitioning/closed/stale and read failures from a real zero. It returns only bounded last-observed
-typed numeric usage, source/timestamps, omission/invalid flags and decimal-string 64-bit counters; no
-history, provider probe, catalog limits, inferred totals or raw paths/details. External catalog and
-journal changes are checked point-in-time, not with a cross-process atomic guarantee. There is no
-full/native usage parity yet. A compact composer usage icon appears only for an exact, uniquely verified
-owned writable project/global session in the untruncated catalog. Opening its HTML read-only dialog
-or pressing **Refresh usage** performs one explicit `sessionUsage.read`; it never polls or probes providers.
-Values are labeled **last observed**, with nullable reported window/last-operation fields, source/scope/
-timestamps, attachment, invalid/omission evidence and safe unavailable states. Long counters display
-exact decimal strings; absent fields remain unknown, not zero, and cost has no inferred currency. Closing,
-changing scope or host, and replacing the attachment discard prior presentation rather than merging totals.
-The dialog does not establish current context, a complete history, atomic ownership against external
-writers or native/full TUI parity.
+The composer of an owned session shows a compact context meter: a small bar, the used percentage and
+the token counts (`46% 125k / 272k`), green below 75%, amber from 75% and red from 90%, as in the TUI.
+It reads `sessionUsage.read` when the session is shown and again, at most every four seconds, while a
+run produces events; until the host has observed usage (for example right after opening a saved
+session) it shows the last usage record of the loaded timeline. Clicking it opens the **Context usage**
+window with what the TUI popup shows: provider and model, the context window (percentage, used and
+limit, messages, active context against input headroom, indicative model limits), the last operation
+(input, output, cache read, cache write, cached input and reasoning tokens as a breakdown bar, with
+effort, initiator, duration and cost), rate limits (plan, primary and secondary windows with used
+percentage, window length and reset time) and the provider's session totals. **Copy as Markdown**
+copies the same content; **Refresh usage** reads again.
+
+`sessionUsage.read` is an owned-only generated Desktop RPC for an existing actor and the actual host
+epoch. It requires explicit project ID/path or global scope, checks the exact persisted session header,
+confirms unarchived project ownership when applicable, and rechecks the original attachment after
+asynchronous reads. It returns the last admitted usage event: numeric counters as decimal strings,
+bounded single-line text (model, effort, initiator, labels, plan; anything longer than 128 characters
+is dropped), rate-limit windows and the provider's cumulative session totals. Providers split usage
+across events, so the window keeps the newest value of each field seen on the same attachment and
+starts over when the attachment changes. Copilot quota snapshots, named Codex limits and compaction
+details are not shown yet.
 
 ### Persisted event history
 

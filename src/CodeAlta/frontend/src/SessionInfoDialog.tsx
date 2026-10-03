@@ -101,7 +101,9 @@ export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime
     const date = new Date(value);
     return <time dateTime={value} title={value}>{Number.isNaN(date.getTime()) ? value : date.toLocaleString()}</time>;
   };
-  const fields = (rows: readonly InfoField[]) => <dl className="session-info-fields" tabIndex={0}>{rows.map(([label, value]) => {
+  // Rows the host knows nothing about are left out of the window (the copied details keep every row).
+  const reported = (value: string) => !/^(?:Unknown|false)(?:\s*\/\s*(?:Unknown|false))*$/.test(value);
+  const fields = (rows: readonly InfoField[]) => <dl className="session-info-fields" tabIndex={0}>{rows.filter(([, value], index) => !!notice || index === 0 || reported(String(value))).map(([label, value]) => {
     const key = infoFieldLabel(label);
     return <div key={label}><dt>{key ? t(key) : label}</dt><dd>{notice ? t(notice) : value}</dd></div>;
   })}</dl>;

@@ -93,7 +93,6 @@ function QueueIntentDialog({ review, current, close }: { review: Review; current
     onCancel={event => { event.preventDefault(); if (!composing.current) close(true); }}>
     <AppWindowSurface storageKey="codealta.desktop.window.queue-intent.v1" title={t("Retained queue intent")} titleId="queue-intent-title" preferredSize={viewport => ({ width: Math.min(600, viewport.width - 40), height: Math.min(480, viewport.height - 40) })}
       onClose={() => close(true)} closeLabel={t("Close")}>
-    <p>{t("Local unresolved originals only; not live queue inventory or settled text. Reservation is not execution or durable storage. Existing controls retain all retry, cancellation and receipt-refresh authority.")}</p>
     {queue && <><h3>{t("Host-only Queue")}</h3><p>{t(queue.inFlight ? "Exact-request waiter pending" : "Outcome unknown · manual recovery")}</p>
       <dl className="session-info-fields">{Object.entries(queue.request).filter(([key]) => key !== "text").map(([key, value]) => <div key={key}><dt>{key}</dt><dd><code>{value}</code></dd></div>)}</dl>
       <pre className="queue-intent-text" tabIndex={0}>{queue.request.text}</pre></>}

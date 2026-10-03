@@ -1154,8 +1154,7 @@ function App() {
       && provider.id.length > 0 && provider.id.length <= 256 && provider.id === provider.id.trim()
       && !/[\u0000-\u001f\u007f-\u009f\ud800-\udfff]/u.test(provider.id)
       && inventory.providers.filter(other => other.id === provider.id).length === 1) : [];
-    const select = <HTMLSelect fill value={creatingProvider} aria-label={t("Provider for new session")} disabled={creatingBusy || creationLocked || !owned} onChange={event => setCreatingProvider(event.target.value)}
-      title={t("Cached enabled providers only; enabled does not mean ready or capable. Create may initialize a provider.")}>
+    const select = <HTMLSelect fill value={creatingProvider} aria-label={t("Provider for new session")} disabled={creatingBusy || creationLocked || !owned} onChange={event => setCreatingProvider(event.target.value)}>
       <option value="">{t("Default or first enabled provider")}</option>
       {creatingProvider && !providers.some(provider => provider.id === creatingProvider) && <option value={creatingProvider} disabled>{creatingProvider}</option>}
       {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.id}</option>)}
@@ -1190,7 +1189,6 @@ function App() {
       <label><span>{t("Provider for new session")}</span>
         {select}
       </label>
-      <small>{t("Cached enabled providers only; enabled does not mean ready or capable. Create may initialize a provider.")}</small>
     </div>;
   }
 
@@ -1704,7 +1702,7 @@ function App() {
                 <ReadOnlyComposer key={draftScope} sessionId={draftScope} provider={null} draftIndicators={draftIndicators}
                   localImages={owned && snapshot?.configured && currentProjectWritable() ? localImages : undefined}
                   onOpenHelp={openHelp} onOpenPalette={openPalette}
-                  reason={t("Local to this project/global scope. Create and transfer first, then review and Send in the session. Original text is retained; reload restores it only when local storage permits.")}
+                  reason={t("Draft kept locally. Start a session to send it.")}
                   localDraft={{ text: localDraft.text, edit: editLocalDraft, options: creationProviderChoice(true),
                     notice: draftChoices.failed && <p role="status" className="composer-notice">{t("Some draft choices are unavailable. Refresh choices to try again.")}</p>,
                     disabled: newPromptDisabled, busy: creatingBusy, submit: () => void createSelectedSession(true), action: <>

@@ -1382,3 +1382,6 @@ dialog:has(> .app-window) .tool-record-copy { align-self: flex-start; }
 .about-settings-facts > div:last-child { border-bottom: 0; }
 .about-settings-facts dt { color: var(--muted); }
 .about-settings-facts dd { margin: 0; overflow-wrap: anywhere; }
+
+/* The Other sessions row has the same hover-revealed actions trigger as a project row. */
+.ide-shell .project-root-list > li > button.project-actions-trigger { flex: 0 0 24px; width: 24px; min-height: 24px; height: 24px; padding: 0; justify-content: center; }

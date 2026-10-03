@@ -270,7 +270,7 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, getCurr
         {" "}{t(importEvidence.kind === "pending" ? "Wait for the original request. No saved selection or new folder request is available."
           : "Inspect the catalog; no navigation, new request or retry will run in this window. Reload the app only after resolving this exact outcome.")}
       </p>}
-      {!canImport && <p className="muted-text">{t("Adding a folder requires an owned host. Catalog-only browsing never changes the project list.")}</p>}
+      {!canImport && <p className="muted-text">{t("Adding a folder requires the desktop app.")}</p>}
       {canImport && <div className="project-import">
         <label htmlFor="project-folder-path">{t("Add a different existing folder (requires trust confirmation)")}</label>
         <input id="project-folder-path" aria-label={t("Absolute folder path to check")} value={query} disabled={busy || !!importEvidence}
@@ -284,7 +284,7 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, getCurr
         <button type="button" className="quiet-button" disabled={busy || suggestBusy || !!importEvidence || !query.trim()} onClick={() => void checkPath()}>{t("Check folder")}</button>
         <button type="button" className="quiet-button" disabled={busy || suggestBusy || !!importEvidence || !query || !canImport || !allowCompletion || getCurrentEpoch() !== epoch}
           onClick={() => void suggest()}>{t("Suggest folders")}</button>
-        {suggestBusy && <p role="status">{t("Reading a bounded folder subset… Canceling this wait does not stop a blocking host read.")}</p>}
+        {suggestBusy && <p role="status">{t("Reading folders…")}</p>}
         {suggestMessage && <p role="status" id="folder-suggestion-status">{workflowNotice(locale, suggestMessage)}</p>}
         {visibleSuggestions && visibleSuggestions.paths.length > 0 && <div id="folder-suggestions" className="dialog-list" role="listbox" aria-label={t("Observed folder suggestions")}>
           {visibleSuggestions.paths.map((path, i) => <button type="button" role="option" key={path} aria-selected={i === suggestActive}

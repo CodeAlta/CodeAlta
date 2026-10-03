@@ -218,8 +218,8 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     reminderObservation.operation === reminderOperation ? reminderObservation.count : null;
   // The host-wide marker read follows every reminder change; the per-session list read covers the time before it.
   const observedReminderCount = invalidEpoch ? null : activeReminderCount ?? listedReminderCount;
-  const reminderLabel = observedReminderCount === null ? t("Reminders for selected session: active count unknown")
-    : t("Reminders for selected session: {count} active at last observation; may have changed", { count: observedReminderCount });
+  const reminderLabel = observedReminderCount === null ? t("Reminders")
+    : t("Reminders: {count} active", { count: observedReminderCount });
   const scope = useRef<AbortController | null>(null);
   const receiptRevision = useRef(0);
   useEffect(() => {
@@ -713,42 +713,36 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       <Button id={active ? "expand-session-prompt" : `expand-session-prompt-${sessionId}`} variant="minimal" icon={<AppIcon name="expand" size={16} />} disabled={!!pending || invalidEpoch} aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => { inputRevision.current++; setExpanded(true); }} />
       {observedSteerRun && <Button variant="minimal" onClick={() => steer(true)}
         disabled={invalidEpoch || !!pending || !!pendingSteer || !availableComposerSteer || !capability.canSubmit(availableComposerSteer)}
-        aria-label={t("Steer current composer to observed run")} aria-describedby="observed-steering-help"
-        title={t("Steer current composer to observed run {run} (Ctrl+Enter; point-in-time observation, not run completion; retained steering requires separate manual review)", { run: observedSteerRun.expectedRunId })}>
+        aria-label={t("Steer current composer to observed run")}
+        title={t("Steer the running turn with this prompt (Ctrl+Enter)")}>
         <AppIcon name="steer" size={16} /></Button>}
       {observedQueueAttachment && <Button variant="minimal" onClick={() => queueTextInHost(true)}
         disabled={invalidEpoch || !!pending || !!pendingQueue || !availableComposerQueue || !capability.canSubmit(availableComposerQueue)}
-        aria-label={t("Queue current composer in this host")} aria-describedby="observed-queue-help"
-        title={t("Queue current composer for observed attachment {attachment} in this host only; no run target. Reservation does not confirm insertion or execution; composer draft stays editable.", { attachment: observedQueueAttachment.expectedAttachmentGeneration })}>
+        aria-label={t("Queue current composer in this host")}
+        title={t("Queue this prompt to run after the current turn")}>
         <AppIcon name="queue" size={16} /></Button>}
       <Button ref={compactTrigger} variant="minimal" onClick={compact}
         data-epoch={epoch} data-session-id={sessionId} data-project-id={projectId ?? ""}
         disabled={invalidEpoch || !!pendingCompact?.inFlight || (pendingCompact
           ? !capability.canSubmit(pendingCompact.request) : !availableCompact || !capability.canSubmit(availableCompact))}
         aria-label={pendingCompact ? t("Retry exact compaction request for attachment {attachment}", { attachment: pendingCompact.request.expectedAttachmentGeneration }) : t("Compact observed idle attachment")}
-        aria-describedby="observed-compaction-help"
         title={pendingCompact ? `${t("Manual retry of exact compaction:")} ${t("epoch")} ${pendingCompact.request.expectedEpoch}, ${t("session")} ${pendingCompact.request.sessionId}, ${t("runtime")} ${pendingCompact.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingCompact.request.expectedAttachmentGeneration}, ${t("request")} ${pendingCompact.request.clientRequestId}`
-          : t("Compact observed idle attachment (Ctrl+F11; point-in-time idle observation permits only an attempt; provider must prove idle)")}>
+          : t("Compact the conversation (Ctrl+F11)")}>
         <AppIcon name="compact" size={16} /></Button>
       <SendSplitButton enqueue={enqueue && images.length === 0} onEnqueueChange={setEnqueue} enqueueDisabled={images.length > 0} optionsDisabled={invalidEpoch || !!pending}>
       {(composerBusy || availableAbortRun || pendingAbortRun) ? <Button intent="danger" icon={<AppIcon name="stop" size={16} fill="currentColor" />} onClick={abortRun}
         disabled={invalidEpoch || !!pendingAbortRun?.inFlight || (pendingAbortRun
           ? !capability.canSubmit(pendingAbortRun.request) : !availableAbortRun || !capability.canSubmit(availableAbortRun))}
         aria-label={pendingAbortRun ? t("Retry exact cancellation request for observed run {run}", { run: pendingAbortRun.request.expectedRunId }) : t("Cancel observed run")}
-        aria-describedby="observed-run-cancellation-help"
         title={pendingAbortRun ? `${t("Manual retry of exact cancellation:")} ${t("epoch")} ${pendingAbortRun.request.expectedEpoch}, ${t("session")} ${pendingAbortRun.request.sessionId}, ${t("runtime")} ${pendingAbortRun.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingAbortRun.request.expectedAttachmentGeneration}, ${t("run")} ${pendingAbortRun.request.expectedRunId}, ${t("request")} ${pendingAbortRun.request.clientRequestId}`
-          : t("Cancel observed run {run} (point-in-time runtime observation, not original Send Abort; signalling does not confirm completion)", { run: availableAbortRun?.expectedRunId ?? "" })} />
+          : t("Stop the running turn")} />
       : <Button aria-label={t(pending ? "Retry exact request" : enqueue && images.length === 0 ? "Enqueue" : "Send")} title={t(pending ? "Retry exact request" : enqueue && images.length === 0 ? "Enqueue until idle" : "Send")} intent="primary" icon={<AppIcon name={pending ? "refresh" : enqueue && images.length === 0 ? "queue" : "send"} size={16} />} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || captureSubmission(epoch, sessionId, text, "availability", images.length ? selected : null, null, images) === null)} onClick={submit} />}
       </SendSplitButton>
     </ComposerSurface>
-    <span id="observed-run-cancellation-help" className="sr-only">{t("Targets a point-in-time observed run, not the original Send receipt. Cancellation signalled does not confirm run completion. Retained requests are only retried manually against their original target after the previous wait settles.")}</span>
-    <span id="observed-steering-help" className="sr-only">{t("Uses current composer text and the point-in-time observed run. Admission is not run completion. Retained steering is reviewed or retried separately, never from this button.")}</span>
-    <span id="observed-queue-help" className="sr-only">{t("Uses current editable composer text and the point-in-time observed attachment, including busy or draining attachments; never targets a run. Reservation does not prove host-only insertion, durability or execution. The composer draft is preserved. Retained queue requests are reviewed or retried separately, never from this button.")}</span>
-    <span id="observed-compaction-help" className="sr-only">{t("Point-in-time idle observation permits only an attempt; the provider must prove idle. Busy is a permanent outcome, not an automatic retry. Retained requests are retried manually against their original attachment after the previous wait settles.")}</span>
     {timelineNotices && createPortal(<>
     {choicesNotice && choicesNotice !== "Loading session choices…" && choicesNotice !== "Selections apply on Send; active runs and queued text are unchanged." && <p className="composer-notice" role={choicesNotice.includes("could not") || choicesNotice.includes("unavailable") ? "alert" : "status"}>{choicesNotice}</p>}
     {message !== "Ready to send to this owned session." && <p className="composer-notice" role="status">{message}</p>}
-    {invalidEpoch && <p role="alert">{t("Host/runtime identity changed. Reload required; mutations are disabled. The exact uncertain request is retained and will not be rebased or resent.")}</p>}
+    {invalidEpoch && <p role="alert">{t("CodeAlta restarted. Reload the window to continue.")}</p>}
     {mcpPlugin && /fail|error/i.test(mcpPlugin.state) && <p role="alert">{t("MCP plugin:")} {mcpPlugin.state}. {t("Check advanced diagnostics.")}</p>}
     {(compactMessage !== "Refresh runtime state explicitly before attempting idle compaction." || pendingAbortRun) && <p className="composer-notice" role="status">{compactMessage !== "Refresh runtime state explicitly before attempting idle compaction." && compactMessage} {pendingAbortRun && abortRunMessage}</p>}
     {pendingCompact && <p className="composer-notice">{t("Manual exact compaction retry only:")} {t("epoch")} {pendingCompact.request.expectedEpoch} · {t("session")} {pendingCompact.request.sessionId} · {t("runtime")} {pendingCompact.request.expectedRuntimeInstanceId} · {t("attachment")} {pendingCompact.request.expectedAttachmentGeneration} · {t("request")} {pendingCompact.request.clientRequestId}. {t("Refresh never retargets this intent.")}</p>}

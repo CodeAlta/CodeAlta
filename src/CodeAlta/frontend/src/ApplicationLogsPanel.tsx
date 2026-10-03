@@ -56,15 +56,14 @@ export function ApplicationLogsPanel({ read, clearActions }: {
 
   return <main className="configuration-page application-logs">
     <header className="page-heading"><span className="eyebrow">{t("Desktop")}</span><h1>{t("Application Logs")}</h1>
-      <p>{t("Bounded messages captured in memory from this desktop process only. Not persisted logs or a complete history. Logs can contain sensitive information; they stay in this window.")}</p></header>
+      <p>{t("Messages captured in memory by this app since it started.")}</p></header>
     <div className="logs-toolbar"><button autoFocus type="button" onClick={refresh}><AppIcon name="refresh" size={15} />{t("Refresh logs")}</button>
       <label><input type="checkbox" checked={wrap} onChange={event => setWrap(event.target.checked)} /> {t("Wrap lines")}</label>
       {clearAllowed && !confirming && <button ref={clearTrigger} type="button" onClick={() => setConfirming(true)}>{t("Clear captured messages…")}</button>}</div>
     {confirming && target && <form className="logs-confirm" aria-label={t("Confirm captured log clear")} onSubmit={event => {
       event.preventDefault();
       if (clearActions.submit(target, confirmation)) { setConfirming(false); setConfirmation(""); }
-    }}><p>{t("This clears only in-memory messages through observed boundary")} <strong>{target.boundary}</strong> {t("of capture")} <code>{target.captureId}</code>.
-      {` ${t("{rows} displayed row(s) and {readOmitted} additional response-omitted row(s) are covered; {captureOmitted} older capacity-omitted row(s) through this boundary are already absent and are logically covered. Concurrent newer messages remain. No log files are changed.", target)}`}</p>
+    }}><p>{t("Clear {rows} captured message(s) from memory? Log files are not changed.", target)}</p>
       <label>{t("Type {confirmation} to confirm", { confirmation: "CLEAR CAPTURED LOGS" })}<input autoFocus value={confirmation} onChange={event => setConfirmation(event.target.value)}
         onKeyDown={event => { if (event.key === "Escape" && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
           event.preventDefault(); event.stopPropagation(); cancelClear();

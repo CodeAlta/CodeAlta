@@ -36,8 +36,7 @@ export function FileChangeInspection({ changes, canInspect }: { changes: FileCha
     element.showModal(); element.querySelector<HTMLButtonElement>('button')?.focus();
     return () => { if (element.open) element.close(); };
   }, [selection]);
-  return <section className="file-change-inspection" aria-label={t("Supplied file records")}
-    title={t("Recorded data only, not disk state or write success. Counts cover supplied hunks, not complete file or run totals.")}>
+  return <section className="file-change-inspection" aria-label={t("Supplied file records")}>
     <ul>{changes.rows.map(row => {
       const open = selection?.index === row.index && (selection.current?.() ?? true) && allowed();
       return <li key={row.index}>

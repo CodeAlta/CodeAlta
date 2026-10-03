@@ -203,7 +203,7 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
     data-window-ready={current?.kind === "ready" && window?.generation === target.generation && historySettled(current, timeline)}>
     {!timeline && (!current || current.kind === "loading") && <p role="status">{t("Loading the latest persisted history.")}</p>}
     {current?.kind === "error" && <p role="alert" className="error-text">{t(historyMessage(current.code))}</p>}
-    {current?.kind === "error" && !!timeline?.entries.length && <p role="status">{t("Previously loaded history is retained; the window is partial and may be from an older revision. Refresh explicitly to replace it.")}</p>}
+    {current?.kind === "error" && !!timeline?.entries.length && <p role="status">{t("Showing previously loaded history. Refresh to update.")}</p>}
     {timeline?.tailOmitted && <div role="status" className="banner">{t("The malformed final journal record was omitted.")}</div>}
     {timeline?.next && <button type="button" className="load-more" disabled={current?.kind === "loading" || current?.kind === "error"}
       onClick={() => setTarget({ request: { sessionId, cursor: timeline.next }, explicitOlder: true,

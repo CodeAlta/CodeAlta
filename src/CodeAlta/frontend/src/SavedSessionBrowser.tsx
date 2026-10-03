@@ -76,14 +76,12 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
       <option value="saved">{t("Saved update")}</option><option value="name">{t("Name")}</option><option value="activity">{t("Observed activity (explicit refresh)")}</option>
     </HTMLSelect></label>
     <button type="button" onClick={() => { batch?.owner.invalidate(); setShowAll(value => !value); }}>{t(showAll ? "Use recent session limit" : "Show all loaded matches")}</button>
-    <p role="status">{t("{shown} shown / {matching} matching / {loaded} loaded in scope. Limit {limit}; active/highlighted rows retained.", { shown: rows.length, matching: page.matched, loaded: page.loaded, limit: recentCount })}{" "}{page.hidden > 0 && <>{t("{count} matches omitted by the 200-row display limit.", { count: page.hidden })}{" "}</>}
-      {t(page.incomplete ? "Snapshot or display text was truncated; more may exist." : "Loaded snapshot only; not a completeness or running-status report.")}</p>
+    <p role="status">{t("{shown} of {matching} sessions", { shown: rows.length, matching: page.matched })}{page.hidden > 0 && <>{" · "}{t("{count} matches omitted by the 200-row display limit.", { count: page.hidden })}</>}</p>
     {(stale || refused) && <p role="alert">{t("Catalog, host or selection changed, or identity is ambiguous. Close and reopen the browser; nothing was opened.")}</p>}
     {batch && <SessionBatchDeletePanel controls={{ ...batch, canReview: batch.canReview && !stale }}
       inputKey={JSON.stringify([scope, query, sort, showAll, recentCount, stale, rows.map(item => tabKey(item.tab))])}
       candidates={rows.flatMap(item => { const request = batchDeleteCandidate(snapshot, item.tab, batch.epoch); return request ? [request] : []; })} />}
     {observations && <RuntimeObservationRefresh controls={{ ...observations, refresh: tabs => { setSelected(selected); observations.refresh(tabs); } }} disabled={stale} tabs={page.rows.map(item => item.tab)} />}
-    {sort === "activity" && <p>{t("Last activity observed in this runtime/attachment: last admitted matching agent-event timestamp, not historical latest or maximum. Unknowns follow known observations in stable saved order. Refresh reads at most 32 loaded candidates, independently of the display limit; partial results are not globally recent. No tab reordering.")}</p>}
     <div id="session-browser-results" role="listbox" aria-label={t("Saved sessions")} className="session-browser-results">
       {rows.map(({ row, valid, tab }, index) => <button type="button" id={`session-browser-row-${index}`} key={valid ? tabKey(tab) : `${tabKey(tab)}:${index}`} role="option" aria-selected={index === selected}
         disabled={stale || !valid} onFocus={() => setSelected(index)} onClick={() => activate(index)}>
@@ -97,6 +95,5 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
       </button>)}
       {!rows.length && <p>{t("No matching saved sessions in the loaded scope.")}</p>}
     </div>
-    <p>{t("Up/Down then Enter from search to open; Escape closes. Filtering never selects a session. Archived projects open read-only.")}</p>
   </AppWindowSurface></dialog>;
 }

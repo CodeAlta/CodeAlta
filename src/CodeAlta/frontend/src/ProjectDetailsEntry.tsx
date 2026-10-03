@@ -63,7 +63,7 @@ export function ProjectDetailsDialog({ project, snapshot, isCurrent, onClose }: 
     copying.current = false;
     if (alive.current && isCurrent()) { setCopyBusy(false); setFeedback({ result, field }); }
   }
-  return <dialog ref={dialog} className="app-dialog session-info-dialog project-details-dialog" aria-modal="true" aria-labelledby="project-details-title" aria-describedby="project-details-description"
+  return <dialog ref={dialog} className="app-dialog session-info-dialog project-details-dialog" aria-modal="true" aria-labelledby="project-details-title"
     onKeyDown={event => {
       event.stopPropagation();
       if (event.key !== "Escape") return;
@@ -74,7 +74,6 @@ export function ProjectDetailsDialog({ project, snapshot, isCurrent, onClose }: 
     onCancel={event => { event.preventDefault(); if (!composingEscape.current) close(); }}>
     <AppWindowSurface storageKey="codealta.desktop.window.project-details.v1" title={t("Project details")} titleId="project-details-title" preferredSize={viewport => ({ width: Math.min(600, viewport.width - 40), height: Math.min(520, viewport.height - 40) })}
       onClose={close} closeLabel={t("Close project details")}>
-    <p id="project-details-description" className="muted-text">{t("Read-only saved catalog snapshot. Branch, tags, description and source metadata are not available here.")}</p>
     <dl className="session-info-fields project-details-fields" tabIndex={0} aria-label={t("Recorded project information")}>
       <div><dt>{t("Project ID")}</dt><dd><code>{project.id}</code></dd></div>
       <div><dt>{t("Display name")}</dt><dd>{project.name}</dd></div>
