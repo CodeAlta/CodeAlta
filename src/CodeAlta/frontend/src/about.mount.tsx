@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { BootStatus } from "#neoastra";
-import { AboutDialog, AboutSettingsEntry, openAboutPaletteAction } from "./AboutDialog";
+import { AboutDialog, openAboutPaletteAction } from "./AboutDialog";
 import { InventoryLanguageFixture } from "./inventoryLanguage.mount";
 import { CommandPalette } from "./CommandPalette";
 import { createPaletteFocusRestoration, paletteAvailable, paletteShortcut, type PaletteAction, type PaletteContext } from "./paletteActions";
@@ -69,7 +69,7 @@ function Window() {
     product: one, catalog: { ...one, hostAvailable: false, hostEpoch: null, state: "in-development" } } });
   return <div className="app-shell"><header className="topbar"><button id="commands" type="button" onClick={openPalette}>Commands</button>
     <button id="settings" type="button" onClick={() => setView("configuration")}>Settings</button></header>
-    {view === "configuration" && <main className="configuration-page"><div className="settings-grid"><AboutSettingsEntry onOpen={openAbout} /></div></main>}
+    {view === "configuration" && <main className="configuration-page"><div className="settings-grid"><button type="button" className="quiet-button" onClick={event => openAbout(event.currentTarget)}>Open About</button></div></main>}
     {palette && captured.current && <CommandPalette context={context} captured={captured.current} onChoose={choose} onClose={dismissPalette} />}
     {about && <AboutDialog status={status} bootError={error} demo={demo} onClose={closeAbout} />}
   </div>;

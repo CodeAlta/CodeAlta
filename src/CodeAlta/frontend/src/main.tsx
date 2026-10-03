@@ -5,7 +5,7 @@ import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, 
 import { createRoot } from "react-dom/client";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import {
-  boot, configuration, applicationLogs, modelCatalog, promptCatalog, mcpInventory, skillsInspection, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
+  boot, configuration, applicationLogs, modelCatalog, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionUserInput, type BootStatus,
   type ReminderListRequest,
   type ReminderListResponse,
@@ -31,13 +31,10 @@ import { useLocalDraftImages } from "./useLocalDraftImages";
 import { imageLimits } from "./promptImages";
 import { ModelCatalogPanel } from "./ModelCatalogPanel";
 import { ProvidersPanel } from "./ProvidersPanel";
-import { PromptCatalogPanel } from "./PromptCatalogPanel";
-import { promptCreation } from "#neoastra";
-import { createPromptCreation } from "./promptCreation";
-import { PromptCreationPanel } from "./PromptCreationPanel";
-import { McpServersPanel } from "./McpServersPanel";
-import { SkillsInspectionPanel } from "./SkillsInspectionPanel";
-import { createSkillsInspection } from "./skillsInspection";
+import { AgentPromptSettings } from "./AgentPromptSettings";
+import { McpServerSettings } from "./McpServerSettings";
+import { PluginSettings } from "./PluginSettings";
+import { SkillSettings } from "./SkillSettings";
 import { archivedProjectScope, ReminderScopeGate, SessionComposerGate } from "./ArchivedScopeGates";
 import { RemindersDialog } from "./RemindersDialog";
 import { ArchivedActionRecovery } from "./ArchivedActionRecovery";
@@ -45,7 +42,7 @@ import { createReminderActions } from "./reminderActions";
 import { activeReminderCounts, sameActiveReminders, scopeReminderCount, type ActiveReminders } from "./activeReminders";
 import { ReminderBadge } from "./ReminderBadge";
 import { verifiedReminderCountTarget } from "./reminderListObservation";
-import { applyCatalogNextSend, applyPromptNextSend, createNextSendSelectionStore } from "./nextSendSelection";
+import { applyCatalogNextSend, createNextSendSelectionStore } from "./nextSendSelection";
 import { createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
 import { createSessionDisplayStore } from "./sessionDisplay";
 import { createRuntimeStateReader } from "./runtimeState";
@@ -75,7 +72,7 @@ import { NewSessionWorkspace } from "./NewSessionWorkspace";
 import { useNewSessionChoices } from "./newSessionChoices";
 import { ComposerSelectionFields, ReasoningSlider } from "./ComposerSurface";
 import { validSelection } from "./sessionSelection";
-import { AppIcon } from "./AppIcon";
+import { AppIcon, type IconName } from "./AppIcon";
 import { AppWindow } from "./AppWindow";
 import { ConfigEditorPanel } from "./ConfigEditorPanel";
 import { ProviderSettings } from "./ProviderSettings";
@@ -103,7 +100,7 @@ import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from ".
 import { workflowNotice, type WorkflowNotice } from "./workflowNotice";
 import { translate, type MessageKey } from "./localization";
 import { ApplicationLogsPanel } from "./ApplicationLogsPanel";
-import { AboutDialog, AboutSettingsEntry } from "./AboutDialog";
+import { AboutDialog, AboutSettings } from "./AboutDialog";
 import { ProjectDetailsEntry, type ProjectDetailsContext } from "./ProjectDetailsEntry";
 import { createApplicationLogClearActions } from "./applicationLogClear";
 import { SessionInfoDialog, type SessionInfoLifetime } from "./SessionInfoDialog";
@@ -122,15 +119,11 @@ type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; e
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 type View = "workspace" | "appearance" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config";
 type SettingsSection = Exclude<View, "workspace">;
-type SettingsCardPage = Exclude<SettingsSection, "models" | "mcp">;
 const paneLayoutStorageKey = "codealta.desktop.panes.v1";
 
 function App() {
   const language = useLanguagePreference();
   const t = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate(language.locale, key, parameters);
-  const [skillsInspector] = useState(() => createSkillsInspection(skillsInspection.scan));
-  const [promptCreator] = useState(() => createPromptCreation(promptCreation.create));
-  useEffect(() => () => skillsInspector.invalidate(), [skillsInspector]);
   const [batchDeletion] = useState(() => createSessionBatchDeletion(workspace.deleteSession));
   const batchDeletionState = useSyncExternalStore(batchDeletion.subscribe, batchDeletion.getSnapshot);
   useEffect(() => () => batchDeletion.invalidate(), [batchDeletion]);
@@ -149,7 +142,7 @@ function App() {
   // Info read looking loading. Keep the existing synchronous capture revision visible.
   function advanceBrowserRevision() { batchDeletion.invalidate(); renderInfoRevision(++browserRevision.current); }
   const [browserCapture, setBrowserCapture] = useState<{ snapshot: WorkspaceSnapshot; projectId: string | null; revision: number; hostReady: boolean } | null>(null);
-  const invalidateCreation = (paletteTransition = false) => { creationGeneration.current++; if (!paletteTransition) commandGeneration.current++; runtimeObservations.invalidate(); skillsInspector.invalidate(); };
+  const invalidateCreation = (paletteTransition = false) => { creationGeneration.current++; if (!paletteTransition) commandGeneration.current++; runtimeObservations.invalidate(); };
   const [logClearActions] = useState(() => createApplicationLogClearActions(applicationLogs.clear));
   const [status, writeStatus] = useState<BootStatus>();
   function setStatus(value: BootStatus) { advanceBrowserRevision(); invalidateCreation(); writeStatus(value); }
@@ -1457,10 +1450,8 @@ function App() {
     setPaneLayout(current => ({ ...current, [pane]: defaultPaneLayout[pane] }));
   }
 
-  const settingsCard = (page: SettingsCardPage) => <ConfigurationPanel page={page} status={status}
-    selectedSession={selectedSession} configurationState={configurationState}
-    preferences={{ theme, setTheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); } }}
-    onOpenAbout={openAbout} />;
+  // Settings pages also edit the selected project's settings when it can be written.
+  const settingsProject = selectedProject && !selectedProject.archived ? { id: selectedProject.id, name: selectedProject.name } : null;
   const newPromptDisabled = creatingBusy || creationLocked || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !snapshot
     || !!selectedProject?.archived || projectId !== null && !selectedProject || (!localDraft.text.trim() && !localImages.images.length)
     || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim());
@@ -1730,24 +1721,12 @@ function App() {
           </div></SessionTabStrip></main></ProjectReferenceContext.Provider>} />
       </div>
     {settingsOpen && <SettingsOverlay section={settingsSection} onSection={navigate} onClose={closeSettings}>
-      {settingsSection === "appearance" || settingsSection === "plugins" || settingsSection === "about"
-        ? settingsCard(settingsSection)
-      : settingsSection === "skills" ? <SkillsInspectionPanel owner={skillsInspector} capture={() => {
-        if (!owned || !mutation?.capability.canMutate() || !snapshot?.configured || snapshot.projectsTruncated || snapshot.sessionsTruncated
-          || snapshot.displayTextTruncated || !selectedSession || !settingsVisible.current || currentSettingsSection.current !== "skills") return null;
-        const tab = selectedTab(snapshot, projectId, selectedSession.id);
-        const target = tab ? runtimeTarget(snapshot, tab, status?.hostEpoch ?? undefined) : null;
-        if (!target || snapshot.sessions.filter(row => row.id.toLowerCase() === selectedSession.id.toLowerCase()).length !== 1
-          || projectId !== null && (snapshot.projects.filter(row => row.id === projectId && row.path === tab!.path && !row.archived).length !== 1
-            || snapshot.projects.filter(row => row.id.toLowerCase() === projectId.toLowerCase() || row.path.toLowerCase() === tab!.path?.toLowerCase()).length !== 1)) return null;
-        const generation = creationGeneration.current;
-        const catalog = snapshot;
-        const capability = mutation.capability;
-        return { target: target.request, capability, current: () => generation === creationGeneration.current && currentSnapshot.current === catalog
-          && creationAlive.current && settingsVisible.current && currentSettingsSection.current === "skills"
-          && selectedSessionId.current === target.request.sessionId && selectedScope.current === projectId
-          && currentHostEpoch.current === target.request.expectedHostEpoch && capability.canMutate() };
-      }} />
+      {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); } }} />
+      : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} />
+      : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
+      : settingsSection === "skills" ? <SkillSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
+      : settingsSection === "mcp" ? <McpServerSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
+      : settingsSection === "prompts" ? <AgentPromptSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
       : settingsSection === "config" ? <ConfigEditorPanel epoch={owned ? status!.hostEpoch : null} onApplied={() => void refreshConfiguration()} />
       : settingsSection === "logs" ? <>
         <ApplicationLogsPanel clearActions={logClearActions} read={demoMode
@@ -1757,44 +1736,6 @@ function App() {
           onOpenModels={() => navigate("models")} onOpenConfiguration={() => navigate("config")} onApplied={() => void refreshConfiguration()} />
         : <ProvidersPanel epoch={null} read={modelCatalog.providers} probe={modelCatalog.probe} catalogProviders={configurationState.snapshot?.providers}
           holds={providerProbeHolds} onOpenModels={() => navigate("models")} />
-      : settingsSection === "mcp" ? <McpServersPanel target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
-        ? { sessionId: selectedSession.id, epoch: status!.hostEpoch!, projectId: selectedSession.projectId ?? null } : null}
-        read={mcpInventory.list} />
-      : settingsSection === "prompts" ? <>
-        <PromptCreationPanel owner={promptCreator} capture={() => {
-          if (!owned || !mutation?.capability.canMutate() || !snapshot?.configured || snapshot.projectsTruncated || snapshot.sessionsTruncated
-            || snapshot.displayTextTruncated || !selectedSession || !settingsVisible.current || currentSettingsSection.current !== "prompts") return null;
-          const tab = selectedTab(snapshot, projectId, selectedSession.id);
-          const target = tab ? runtimeTarget(snapshot, tab, status?.hostEpoch ?? undefined) : null;
-          if (!target || snapshot.sessions.filter(row => row.id.toLowerCase() === selectedSession.id.toLowerCase()).length !== 1
-            || projectId !== null && (snapshot.projects.filter(row => row.id === projectId && row.path === tab!.path && !row.archived).length !== 1
-              || snapshot.projects.filter(row => row.id.toLowerCase() === projectId.toLowerCase() || row.path.toLowerCase() === tab!.path?.toLowerCase()).length !== 1)) return null;
-          const generation = creationGeneration.current;
-          const catalog = snapshot;
-          const capability = mutation.capability;
-          return { target: target.request, capability, current: () => generation === creationGeneration.current && currentSnapshot.current === catalog
-            && creationAlive.current && settingsVisible.current && currentSettingsSection.current === "prompts"
-            && selectedSessionId.current === target.request.sessionId && selectedScope.current === projectId
-            && currentHostEpoch.current === target.request.expectedHostEpoch && capability.canMutate() };
-        }} />
-        <PromptCatalogPanel epoch={owned ? status!.hostEpoch : null} readPrompts={promptCatalog.list}
-        readChoices={sessionOperations.choices} target={owned && currentProjectWritable() && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
-          ? { sessionId: selectedSession.id, epoch: status!.hostEpoch! } : null}
-        selections={nextSendSelections} pendingSend={!!(selectedSession && submissions.pending(selectedSession.id))}
-        pendingSelection={selectedSession ? submissions.pending(selectedSession.id)?.request.selection ?? null : null}
-        onApply={async (target, signal) => {
-          const result = await applyPromptNextSend(target, () => ({ epoch: currentHostEpoch.current ?? null,
-            active: settingsVisible.current && currentSettingsSection.current === "prompts" && !signal.aborted,
-            sessionId: selectedScope.current === projectId ? selectedSessionId.current : null,
-            canMutate: !!mutation?.capability.canMutate() && currentProjectWritable(), pending: !!submissions.pending(target.sessionId) }),
-          async (epoch, sessionId) => {
-            const value = await sessionOperations.choices({ expectedEpoch: epoch, sessionId }, { signal, timeoutMilliseconds: 15000 });
-            mutation?.capability.observe(value);
-            return value;
-          }, nextSendSelections);
-          if (result === "applied" && !signal.aborted) closeSettings();
-          return result;
-        }} /></>
       : <ModelCatalogPanel epoch={owned ? status!.hostEpoch : null}
         readProviders={modelCatalog.providers} readModels={modelCatalog.models} readChoices={sessionOperations.choices}
         target={owned && currentProjectWritable() && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
@@ -1881,12 +1822,12 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
 }) {
   const { t } = useShellLanguage();
   const composingEscape = useRef(false);
-  const destinations: readonly [MessageKey, readonly [SettingsSection, MessageKey][]][] = [
-    ["Personalization", [["appearance", "Appearance"]]],
-    ["Agent & models", [["providers", "Providers"], ["models", "Models"], ["prompts", "Agent prompts"], ["skills", "Skills"]]],
-    ["Extensions", [["plugins", "Plugins & MCP"], ["mcp", "MCP Servers"]]],
-    ["Advanced", [["config", "Configuration file"]]],
-    ["Diagnostics", [["logs", "Application Logs"], ["about", "About"]]],
+  const destinations: readonly [MessageKey, readonly [SettingsSection, MessageKey, IconName][]][] = [
+    ["Personalization", [["appearance", "Appearance", "palette"]]],
+    ["Agent & models", [["providers", "Providers", "provider"], ["models", "Models", "model"], ["prompts", "Agent prompts", "assistant"], ["skills", "Skills", "skill"]]],
+    ["Extensions", [["plugins", "Plugins", "plugin"], ["mcp", "MCP Servers", "server"]]],
+    ["Advanced", [["config", "Configuration file", "config"]]],
+    ["Diagnostics", [["logs", "Application Logs", "logs"], ["about", "About", "info"]]],
   ];
   return <AppWindow storageKey="codealta.desktop.window.settings.v1" className="settings-dialog" titleId="settings-title" title={t("Settings")}
     preferredSize={viewport => ({ width: viewport.width * 0.8, height: viewport.height * 0.8 })} minimumSize={{ width: 560, height: 360 }}
@@ -1903,8 +1844,8 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
       <nav className="settings-dialog-navigation" aria-label={t("Settings pages")}>
         {destinations.map(([group, pages]) => <div className="settings-dialog-group" key={group}>
           <h3>{t(group)}</h3>
-          {pages.map(([value, label]) => <button key={value} type="button" aria-current={section === value ? "page" : undefined}
-            data-settings-section={value} onClick={() => onSection(value)}>{t(label)}</button>)}
+          {pages.map(([value, label, icon]) => <button key={value} type="button" aria-current={section === value ? "page" : undefined}
+            data-settings-section={value} onClick={() => onSection(value)}><AppIcon name={icon} size={16} /><span>{t(label)}</span></button>)}
         </div>)}
       </nav>
       <div className="settings-dialog-content" key={section}>{children}</div>
@@ -2117,29 +2058,11 @@ function DemoConversation({ session }: { session: WorkspaceSession }) {
   </section>;
 }
 
-function ConfigurationPanel({ page, status, selectedSession, configurationState, preferences, onOpenAbout }: {
-  page: SettingsCardPage;
-  status: BootStatus | undefined;
-  selectedSession: WorkspaceSession | undefined;
-  configurationState: { snapshot?: ConfigurationSnapshot; error?: string };
-  preferences: Parameters<typeof GeneralSettings>[0];
-  onOpenAbout: (origin: HTMLElement | null) => void;
-}) {
+function ConfigurationPanel({ preferences }: { preferences: Parameters<typeof GeneralSettings>[0] }) {
   const { t } = useShellLanguage();
-  const inventory = configurationState.snapshot;
-  const mcp = inventory?.plugins.find(plugin => `${plugin.id} ${plugin.name}`.toLowerCase().includes("mcp"));
   return <div className="configuration-page settings-card-page">
-    {page === "appearance" && <header className="page-heading"><span className="eyebrow">{t("Desktop")}</span><h1>{t("Appearance")}</h1><p>{t("Personalize this window and project navigator.")}</p></header>}
-    <div className="settings-grid">
-      {page === "appearance" && <GeneralSettings {...preferences} />}
-      {page === "plugins" && <section className="settings-card"><div className="settings-icon">⬡</div><div><h2>Plugins &amp; MCP</h2><p>Configured plugin policy is visible in catalog mode. Active state is shown only when the owned runtime has started that plugin.</p>
-        <div className="inventory-row"><span><strong>MCP servers</strong><small>Model Context Protocol runtime state</small></span><StatusPill label={mcp ? mcp.state : inventory?.pluginRuntimeAvailable ? "Not configured" : "Runtime not started"} /></div>
-        {inventory?.plugins.map(plugin => <div className="inventory-row" key={plugin.id}><span><strong>{plugin.name}</strong><small>{plugin.version ?? "No version"} · {plugin.contributionCount} contributions</small></span><StatusPill label={plugin.state} /></div>)}
-        {inventory && inventory.plugins.length === 0 && <StatusPill label={inventory.pluginRuntimeAvailable ? "No active plugins" : "Requires packaged host"} />}
-        {inventory?.pluginsTruncated && <p className="muted-text">Showing the first 32 active plugins.</p>}
-      </div></section>}
-      {page === "about" && <AboutSettingsEntry onOpen={onOpenAbout} />}
-    </div>
+    <header className="page-heading"><span className="eyebrow">{t("Personalization")}</span><h1>{t("Appearance")}</h1></header>
+    <div className="settings-grid"><GeneralSettings {...preferences} /></div>
   </div>;
 }
 

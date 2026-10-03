@@ -1330,3 +1330,55 @@ dialog.tool-record-dialog:has(> .app-window) .app-window-body > p:first-child co
 dialog:has(> .app-window) .tool-record-copy { align-self: flex-start; }
 
 .app-window-titlebar h2 > svg { vertical-align: -2px; margin-inline-end: 4px; color: var(--muted); }
+
+/* Settings navigation: one icon per page. */
+.settings-dialog-navigation button { display: flex; align-items: center; gap: 9px; }
+.settings-dialog-navigation button > svg { flex: 0 0 auto; color: var(--muted); }
+.settings-dialog-navigation button[aria-current="page"] > svg { color: var(--accent); }
+.settings-dialog-navigation button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Editable settings pages (MCP servers, agent prompts, skills, plugins): heading with actions, then
+   either a master list with an edit form, or one list of rows with switches. */
+.settings-dialog-content > .settings-editor.configuration-page { display: flex; flex-direction: column; gap: 12px; min-height: 100%; padding: 20px 24px 22px; }
+.settings-editor-heading { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; margin: 0; }
+.settings-dialog-content .settings-editor-heading { margin-bottom: 0; }
+.settings-editor-actions { display: flex; align-items: center; gap: 8px; }
+.settings-editor-layout { flex: 1 1 auto; display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; min-height: 0; }
+.settings-editor-list.bp6-card-list > .bp6-card, .settings-editor-rows.bp6-card-list > .bp6-card { justify-content: space-between; gap: 12px; }
+.settings-editor-name { display: grid; gap: 2px; min-width: 0; }
+.settings-editor-name strong, .settings-editor-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-editor-rows .settings-editor-name small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
+.settings-editor-name small { color: var(--muted); }
+.settings-editor-tags { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+.settings-editor-tags .bp6-switch { margin: 0; }
+.settings-editor-list .settings-editor-group { margin: 0; padding: 8px 12px 4px; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--panel-2); border-bottom: 1px solid var(--line); }
+.settings-editor-fields.bp6-section-card { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 4px 20px; }
+.settings-editor-fields .bp6-form-group { margin: 0 0 10px; }
+.settings-editor-wide { grid-column: 1 / -1; }
+.settings-editor-footer.bp6-section-card { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.settings-editor-spacer { flex: 1 1 auto; }
+.settings-editor-problem { flex: 1 0 100%; color: var(--red); font-size: 12px; }
+.settings-editor-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; font-size: 12px; }
+.settings-editor-filter.bp6-input-group { flex: 0 1 260px; }
+.settings-editor-popover { display: grid; gap: 8px; width: 320px; padding: 14px; }
+.settings-editor-popover .bp6-form-group { margin: 0; }
+.settings-name-values { display: grid; gap: 6px; justify-items: start; }
+.settings-name-value { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(140px, 2fr) auto; gap: 6px; width: 100%; }
+.prompt-settings .settings-editor-layout { align-items: stretch; }
+.prompt-settings-form.bp6-section { display: flex; flex-direction: column; min-height: 420px; }
+.prompt-settings-form > .bp6-section-header { flex: 0 0 auto; }
+.prompt-settings-editor.bp6-section-card { flex: 1 1 260px; min-height: 260px; padding: 0; overflow: hidden; }
+.prompt-settings .settings-editor-list { align-self: start; max-height: 100%; overflow: auto; }
+@media (max-width: 900px) { .settings-editor-layout { grid-template-columns: minmax(0, 1fr); } }
+
+/* Settings: About page. */
+.about-settings-card { display: flex; align-items: center; gap: 16px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, var(--panel)), var(--panel)); }
+.about-settings-mark { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 12px; color: #fff; background: var(--accent); font-size: 24px; font-weight: 700; }
+.about-settings-card > div { display: grid; gap: 2px; }
+.about-settings-card strong { font-size: 20px; letter-spacing: -.01em; }
+.about-settings-card span:not(.about-settings-mark) { color: var(--muted); font-variant-numeric: tabular-nums; }
+.about-settings-facts { margin: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.about-settings-facts > div { display: grid; grid-template-columns: minmax(120px, 28%) minmax(0, 1fr); gap: 12px; padding: 9px 14px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.about-settings-facts > div:last-child { border-bottom: 0; }
+.about-settings-facts dt { color: var(--muted); }
+.about-settings-facts dd { margin: 0; overflow-wrap: anywhere; }

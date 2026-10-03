@@ -4,6 +4,7 @@ import type { BootStatus } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import type { PaletteAction } from "./paletteActions";
 import { useShellLanguage } from "./shellLanguage";
+import type { MessageKey } from "./localization";
 
 export function openAboutPaletteAction(action: PaletteAction, origin: HTMLElement | null,
   open: (origin: HTMLElement | null) => void): action is "about" {
@@ -17,12 +18,36 @@ function recordedText(value: unknown, maxLength: number): string | null {
     !/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(value) ? value : null;
 }
 
-export function AboutSettingsEntry({ onOpen }: { onOpen: (origin: HTMLButtonElement) => void }) {
+type About = { product: string | null; version: string | null; build: string | null; mode: MessageKey };
+
+/** What the running host reported about itself; nothing is inferred when it reported nothing. */
+function aboutFacts(status: BootStatus | undefined, bootError: boolean, demo: boolean): About {
+  const browserDemo = demo || status?.state === "demo";
+  const verified = !browserDemo && !bootError && !!status;
+  const version = verified ? recordedText(status.version, 256) : null;
+  const versionKnown = version && version !== "development" ? version : null;
+  const buildSuffix = versionKnown?.match(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\+([0-9A-Za-z.-]+)$/u)?.[1];
+  return { product: verified ? recordedText(status.productName, 128) : null, version: versionKnown, build: recordedText(buildSuffix, 128),
+    mode: browserDemo ? "Browser demo" : bootError ? "Desktop host unavailable" : !status ? "Starting…"
+      : status.hostAvailable && recordedText(status.hostEpoch, 256) ? "Desktop app" : "Catalog only" };
+}
+
+/** The About page of Settings: product, version and build of the running app. */
+export function AboutSettings({ status, bootError, demo }: { status: BootStatus | undefined; bootError: boolean; demo: boolean }) {
   const { t } = useShellLanguage();
-  return <section className="settings-card"><div className="settings-icon">i</div><div><h2>{t("About")}</h2>
-    <p>{t("Inspect the running desktop host identity and its available build information.")}</p>
-    <button type="button" className="quiet-button" onClick={event => onOpen(event.currentTarget)}>{t("Open About")}</button>
-  </div></section>;
+  const about = aboutFacts(status, bootError, demo);
+  return <main className="configuration-page settings-editor about-settings" aria-label={t("About")}>
+    <header className="page-heading"><span className="eyebrow">{t("Diagnostics")}</span><h1>{t("About")}</h1></header>
+    <section className="about-settings-card">
+      <span className="about-settings-mark" aria-hidden="true">A</span>
+      <div><strong>{about.product ?? "CodeAlta"}</strong><span>{about.version ?? t("Development build")}</span></div>
+    </section>
+    <dl className="about-settings-facts" aria-label={t("Running host build information")}>
+      <div><dt>{t("Version")}</dt><dd>{about.version ?? t("Development build")}</dd></div>
+      {about.build && <div><dt>{t("Build metadata")}</dt><dd>{about.build}</dd></div>}
+      <div><dt>{t("Mode")}</dt><dd>{t(about.mode)}</dd></div>
+    </dl>
+  </main>;
 }
 
 export function AboutDialog({ status, bootError, demo, onClose }: {
@@ -39,21 +64,9 @@ export function AboutDialog({ status, bootError, demo, onClose }: {
   }, []);
   function close() { if (!closing.current) { closing.current = true; onClose(); } }
 
-  const browserDemo = demo || status?.state === "demo";
-  const verified = !browserDemo && !bootError && !!status;
-  const product = verified ? recordedText(status.productName, 128) : null;
-  const version = verified ? recordedText(status.version, 256) : null;
-  const versionKnown = version && version !== "development" ? version : null;
-  const buildSuffix = versionKnown?.match(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\+([0-9A-Za-z.-]+)$/u)?.[1];
-  const build = recordedText(buildSuffix, 128);
-  const mode = browserDemo ? "Browser demo; no running desktop host identity is available."
-    : bootError ? "Desktop boot unavailable; host identity could not be verified."
-      : !status ? "Waiting for the desktop boot response; host identity is not yet available."
-        : status.hostAvailable && recordedText(status.hostEpoch, 256) ? "Owned desktop host (runtime availability is not assessed here)."
-          : status.hostAvailable ? "Host mode unverified (no owned host identity was reported)."
-            : "Catalog-only desktop host; no owned runtime is available.";
+  const about = aboutFacts(status, bootError, demo);
   return <dialog ref={dialog} className="app-dialog session-info-dialog about-dialog" aria-modal="true"
-    aria-labelledby="about-title" aria-describedby="about-description"
+    aria-labelledby="about-title"
     onKeyDown={event => {
       event.stopPropagation();
       if (event.key !== "Escape") return;
@@ -64,13 +77,11 @@ export function AboutDialog({ status, bootError, demo, onClose }: {
     onCancel={event => { event.preventDefault(); if (!composingEscape.current) close(); }}>
     <AppWindowSurface storageKey="codealta.desktop.window.about.v1" title={t("About CodeAlta")} titleId="about-title" preferredSize={viewport => ({ width: Math.min(560, viewport.width - 40), height: Math.min(480, viewport.height - 40) })}
       onClose={close} closeLabel={t("Close About")}>
-    <p id="about-description" className="muted-text">{t(mode)}</p>
     <dl className="session-info-fields" tabIndex={0} aria-label={t("Running host build information")}>
-      <div><dt>{t("Product")}</dt><dd>{product ?? t("Not available from the running host")}</dd></div>
-      <div><dt>{t("Version")}</dt><dd>{versionKnown ?? t("Not available from the running host")}</dd></div>
-      {build && <div><dt>{t("Build metadata")}</dt><dd>{build}</dd></div>}
+      <div><dt>{t("Product")}</dt><dd>{about.product ?? "CodeAlta"}</dd></div>
+      <div><dt>{t("Version")}</dt><dd>{about.version ?? t("Development build")}</dd></div>
+      {about.build && <div><dt>{t("Build metadata")}</dt><dd>{about.build}</dd></div>}
+      <div><dt>{t("Mode")}</dt><dd>{t(about.mode)}</dd></div>
     </dl>
-    <p className="muted-text">{t("Update checks, downloads and installation are not supported in this desktop view. No update status is known.")}</p>
-    <footer><button type="button" className="quiet-button" onClick={close}>{t("Close")}</button></footer>
   </AppWindowSurface></dialog>;
 }

@@ -7,9 +7,11 @@ import { followShellTheme, monaco } from "./monacoEnvironment";
 export type CodeEditorMarker = Readonly<{ line: number; column: number; message: string }>;
 
 /** A full-size Monaco source editor for configuration text, with line numbers and one optional error marker. */
-export function CodeEditor({ value, onChange, language, label, readOnly = false, marker = null }: {
+export function CodeEditor({ value, onChange, language, label, readOnly = false, marker = null, wrap = false }: {
   value: string; onChange: (text: string) => void; language: "ini" | "markdown" | "plaintext"; label: string;
   readOnly?: boolean; marker?: CodeEditorMarker | null;
+  /** Wrap long lines (prose) instead of scrolling horizontally (configuration). */
+  wrap?: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor>(null);
@@ -19,7 +21,7 @@ export function CodeEditor({ value, onChange, language, label, readOnly = false,
     const model = monaco.editor.createModel(latest.current.value, language);
     const instance = monaco.editor.create(node, { model, automaticLayout: true, ariaLabel: label, readOnly,
       fontFamily: getComputedStyle(node).fontFamily, fontSize: 13, lineHeight: 20, minimap: { enabled: false },
-      scrollBeyondLastLine: false, wordWrap: "off", renderLineHighlight: "line", stickyScroll: { enabled: false },
+      scrollBeyondLastLine: false, wordWrap: wrap ? "on" : "off", renderLineHighlight: "line", stickyScroll: { enabled: false },
       padding: { top: 8, bottom: 8 }, quickSuggestions: false, suggestOnTriggerCharacters: false, links: false, tabSize: 2 });
     editor.current = instance;
     const unfollowTheme = followShellTheme();
