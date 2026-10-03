@@ -633,8 +633,9 @@ is available, keeping **Send** as a separate secondary button. This is not a liv
 A retained original Send keeps **Retry exact request** primary; retained run cancellation instead
 reads **Retry exact cancellation**, preserving its original target and manual recovery. Neither
 presentation changes nor cancellation clear the draft or initiate runtime reads. The two controls
-keep separate identities and handlers: editor Enter still sends, Ctrl+Enter steers, and expanded
-editor Enter closes without sending. Cancellation signalling does not establish run completion.
+keep separate identities and handlers: editor Enter still sends, Ctrl+Enter steers, and in the expanded
+editor Enter inserts a new line while Escape or Ctrl+Enter closes without sending. Cancellation
+signalling does not establish run completion.
 On narrow screens the labelled controls wrap rather than clip; exact-target evidence and the
 separate **Abort original Send operation** remain available.
 

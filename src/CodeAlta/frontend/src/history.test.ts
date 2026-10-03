@@ -20,27 +20,42 @@ test("transient history read failure remains eligible for bounded live-refresh r
     assert.equal(historyCanRetry({ kind: "error", request, code }), false);
 });
 
-test("reverse pages retain the latest user prompt across the 1,000-event window and preserve an older cursor", () => {
-  const entries = Array.from({ length: 1205 }, (_, index) => ({
+test("reverse pages stop at the latest user prompt, or at the 1,000-event cap, and preserve an older cursor", () => {
+  const journal = (user: number) => Array.from({ length: 1205 }, (_, index) => ({
     offset: `${index * 200}`, eventType: "contentCompleted", providerId: "p", sessionId: "runtime", runId: null,
-    timestamp: "2026-01-01T00:00:00Z", kind: index === 1204 ? "User" : "Assistant", phase: null,
+    timestamp: "2026-01-01T00:00:00Z", kind: index === user ? "User" : "Assistant", phase: null,
     contentId: `${index}`, activityId: null, parentActivityId: null, interactionId: null, name: null,
-    text: index === 1204 ? "latest user prompt" : `${index}`, details: null, textTruncated: false,
+    text: index === user ? "latest user prompt" : `${index}`, details: null, textTruncated: false,
     tool: null, files: null, detailsTruncated: false, bodyOmitted: false,
   } satisfies HistoryResponse["entries"][number]));
-  let timeline;
-  for (let end = 1205; end > 0 && (timeline?.entries.length ?? 0) < 1000; end -= 100) {
-    const start = Math.max(0, end - 100);
-    const older = start ? { version: 2, sessionId: "s", length: "300000", lastWriteUtcTicks: "7", offset: entries[start].offset } : null;
-    timeline = mergeHistoryPage(timeline, { sessionId: "s", cursor: timeline?.next ?? null },
-      { ...page, entries: entries.slice(start, end), next: older });
-  }
-  assert.equal(timeline?.entries.length, 1000);
-  assert.equal(timeline?.entries.at(-1)?.text, "latest user prompt");
-  assert.equal(timeline?.entries[0].contentId, "205");
-  assert.equal(timeline?.next?.version, 2);
-  assert.equal(timeline?.next?.offset, entries[205].offset);
-  assert.equal(historySettled({ kind: "ready", request, page }, timeline), true, "stop automatic reads at the cap, not at journal start");
+  const load = (entries: ReturnType<typeof journal>) => {
+    let timeline: HistoryTimeline | undefined;
+    for (let end = 1205; end > 0 && !historySettled({ kind: "ready", request, page }, timeline); end -= 100) {
+      const start = Math.max(0, end - 100);
+      const older = start ? { version: 2, sessionId: "s", length: "300000", lastWriteUtcTicks: "7", offset: entries[start].offset } : null;
+      timeline = mergeHistoryPage(timeline, { sessionId: "s", cursor: timeline?.next ?? null },
+        { ...page, entries: entries.slice(start, end), next: older });
+    }
+    return timeline!;
+  };
+  // The latest turn spans several pages: the window starts at its user prompt and keeps the tail.
+  let entries = journal(850);
+  let timeline = load(entries);
+  assert.equal(timeline.turnReached, true);
+  assert.equal(timeline.entries.length, 355);
+  assert.equal(timeline.entries[0].text, "latest user prompt");
+  assert.equal(timeline.entries.at(-1)?.contentId, "1204");
+  assert.equal(timeline.next?.version, 2);
+  assert.equal(timeline.next?.offset, entries[850].offset, "older paging continues right before the prompt");
+  // A turn longer than the window stops at the cap, not at journal start, and keeps the newest events.
+  entries = journal(100);
+  timeline = load(entries);
+  assert.equal(timeline.turnReached, false);
+  assert.equal(timeline.entries.length, 1000);
+  assert.equal(timeline.entries[0].contentId, "205");
+  assert.equal(timeline.entries.at(-1)?.contentId, "1204");
+  assert.equal(timeline.next?.offset, entries[205].offset);
+  assert.equal(timeline.limitReached, true);
 });
 
 test("an uneven initial page keeps the newest 1,000 and rewinds the older cursor to the retained boundary", () => {

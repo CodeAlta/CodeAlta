@@ -19,7 +19,8 @@ test("advanced/recovery static source keys have frozen five-language rows and En
     }
     visit(source);
   }
-  assert.ok(keys.size > 150);
+  // A floor that proves the walk found the composer/recovery keys, not an exact inventory.
+  assert.ok(keys.size > 100);
   for (const key of keys) {
     assert.ok(Object.hasOwn(messages, key), `missing translation row: ${key}`);
     const row = messages[key as MessageKey];

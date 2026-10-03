@@ -104,7 +104,7 @@ test("metadata-only pages stop after a finite acquisition and later errors do no
   assert.equal(states.at(-1)?.kind, "error"); assert.equal(timeline, original);
   const source = readFileSync(new URL("./HistoryPanel.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(source, /setWindow\(undefined\)/);
-  assert.match(source, /accumulated\.limitReached \|\| target\.explicitOlder/);
+  assert.match(source, /accumulated\.limitReached \|\| accumulated\.turnReached \|\| target\.explicitOlder/);
   assert.match(source, /Previously loaded history is retained/);
   const inspector = readFileSync(new URL("./HistorySource.tsx", import.meta.url), "utf8");
   assert.match(inspector, /<pre /); assert.doesNotMatch(inspector, /MarkdownContent|dangerouslySetInnerHTML/);

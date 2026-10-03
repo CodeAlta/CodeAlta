@@ -54,7 +54,8 @@ test("no run identity never erases persisted content, and absent live state does
   assert.deepEqual(reconcileTimeline([entry({ runId: null })], session({ text: [{ ...session().text[0], runId: null }] }))
     .map(row => row.source), ["history", "liveText"]);
   assert.deepEqual(reconcileTimeline([entry()], session({ configuration: null })).map(row => row.source), ["history", "liveText"]);
-  assert.deepEqual(reconcileTimeline([entry({ eventType: "contentDelta" })], session({ text: [{ ...session().text[0], startedWithDelta: true }] }))
+  // The host reports startedWithDelta only while no final content has established a complete baseline.
+  assert.deepEqual(reconcileTimeline([entry({ eventType: "contentDelta" })], session({ text: [{ ...session().text[0], isComplete: false, startedWithDelta: true }] }))
     .map(row => row.source), ["history", "liveText"]);
   assert.deepEqual(reconcileTimeline([entry({ eventType: "contentDelta" })], session({ text: [{ ...session().text[0], isTruncated: true }] }))
     .map(row => row.source), ["history", "liveText"]);

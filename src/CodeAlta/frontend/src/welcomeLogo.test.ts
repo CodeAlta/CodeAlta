@@ -28,10 +28,13 @@ test("web welcome renders the actual TUI 3-D font with the same words, spacing a
 test("owned and new-session composers share the surface, toolbar, editor and keyboard contracts", () => {
   const owned = readFileSync(new URL("./OwnedSessionPanel.tsx", import.meta.url), "utf8");
   const draft = readFileSync(new URL("./ReadOnlyComposer.tsx", import.meta.url), "utf8");
+  // The shared surface owns the editor and toolbar; neither composer mounts its own.
+  const surface = readFileSync(new URL("./ComposerSurface.tsx", import.meta.url), "utf8");
+  assert.match(surface, /<PromptEditor/);
+  assert.match(surface, /<ComposerToolbar/);
   for (const component of [owned, draft]) {
     assert.match(component, /<ComposerSurface/);
-    assert.match(component, /<ComposerToolbar/);
-    assert.match(component, /<PromptEditor/);
+    assert.doesNotMatch(component, /<(ComposerToolbar|PromptEditor)\b/);
     assert.match(component, /<ExpandedPromptEditor/);
     assert.match(component, /dispatchComposerKey/);
     assert.match(component, /isComposing/);

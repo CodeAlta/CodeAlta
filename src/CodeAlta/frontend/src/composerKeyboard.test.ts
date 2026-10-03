@@ -22,12 +22,13 @@ test("IME confirmation, modified newlines, held keys and handled input never dis
   ]) assert.equal(dispatchComposerKey(event, unexpected, unexpected), false);
 });
 
-test("expanded editor Enter, Escape and Ctrl+Enter only close; editing gestures remain input", () => {
+test("expanded editor Escape and Ctrl+Enter only close; Enter and editing gestures remain input", () => {
   let closed = 0;
-  for (const event of [{ key: "Enter" }, { key: "Escape" }, { key: "Enter", ctrlKey: true }])
+  for (const event of [{ key: "Escape" }, { key: "Enter", ctrlKey: true }])
     assert.equal(dispatchExpandedComposerKey(event, () => closed++), true);
-  assert.equal(closed, 3);
-  for (const event of [{ key: "Enter", shiftKey: true }, { key: "Enter", isComposing: true },
+  assert.equal(closed, 2);
+  for (const event of [{ key: "Enter" }, { key: "Escape", ctrlKey: true },
+    { key: "Enter", shiftKey: true }, { key: "Enter", isComposing: true },
     { key: "Escape", isComposing: true }, { key: "Enter", keyCode: 229 }, { key: "Enter", repeat: true },
     { key: "Enter", altKey: true }, { key: "Enter", metaKey: true }, { key: "a" }])
     assert.equal(dispatchExpandedComposerKey(event, () => assert.fail("Must remain editing")), false);
