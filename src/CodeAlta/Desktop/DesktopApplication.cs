@@ -103,6 +103,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         SessionOperationsService? operations = null;
         SessionAsksService? asks = null;
         ReminderService? reminders = null;
+        GithubIssuesService? githubIssues = null;
         PromptCreationService? promptCreation = null;
         ModelCatalogService? providers = null;
         WorkspaceService? workspace = null;
@@ -214,6 +215,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddPromptCreationService(promptCreation);
                     builder.AddMcpInventoryService(new McpInventoryService(host.Commands, epoch, roots.Home));
                     builder.AddReminderService(reminders);
+                    githubIssues = new GithubIssuesService(host.ProjectCatalog, epoch);
+                    builder.AddGithubIssuesService(githubIssues);
                     builder.AddSessionOperationsService(operations);
                     builder.AddSessionAsksService(asks);
                     builder.AddSessionNotesService(new SessionNotesService(host.WorkspaceReads, host.RuntimeService, epoch));
@@ -307,6 +310,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             GC.KeepAlive(window);
             return;
         }
+        githubIssues?.Dispose(); // Its RPC host is gone: no lookup can still use the HTTP client.
         if (window is not null)
         {
             allowClose = true;
