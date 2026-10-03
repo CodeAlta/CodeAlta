@@ -1,6 +1,6 @@
 # CodeAlta — Codex Agent Instructions
 
-An agentic AI coding CLI assistant developed in .NET.
+An agentic AI coding assistant developed in .NET.
 
 Pre-release project. Remove this line at stable release.
 
@@ -8,7 +8,9 @@ Paths/commands below are relative to this directory.
 
 ## Orientation
 
-- Terminal frontend: `src/CodeAlta.Tui/` (`CodeAlta.Tui` package, `altatui` command)
+- Frontends: 
+    - Webview2-based UI: `src/CodeAlta` (`alta` command)
+    - TUI: `src/CodeAlta.Tui/` (`altatui` command)
 - Tests: `src/CodeAlta.Tests/` (MSTest)
 - The in-process agent tool remains `alta`; do not rename neutral `CodeAlta.*` libraries or shared `.alta` state when changing frontend identities.
 - Website: `site/` (Lunet end-user documentation)
@@ -72,3 +74,4 @@ All tests and the Lunet website build must pass, and docs must be updated before
   - `XenoAtom` libraries (`XenoAtom.Glob`, `XenoAtom.Terminal.UI`...etc.) at `../XenoAtom/` (e.g. `../XenoAtom/XenoAtom.Glob/`).
   - `SharpYaml` at `../SharpYaml/`
   - `Tomlyn` at `../Tomlyn/`
+  - `NeoAstra` at `../NeoAstra/` providing the Webview2-based framework
