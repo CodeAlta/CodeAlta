@@ -81,7 +81,9 @@ disabled = ["ilspy-decompile"]
 - `skills`: skill enablement settings, currently normalized disabled skill names;
 - `plugins`: plugin enablement keyed by built-in id or source package id, plus plugin-owned policy such as `[plugins.mcp]`.
 
-Legacy `[acp]` and `[acp.*]` blocks are no longer active configuration. `CodeAltaConfigStore` ignores them while preserving their TOML text when saving normalized config so existing user data is not deleted.
+Legacy `[acp]` and `[acp.*]` blocks are no longer active configuration. `CodeAltaConfigStore` ignores them and keeps them when saving, like every other setting it does not model.
+
+**Typed saves keep what the document does not model.** `CodeAltaConfigDocument` models only part of the file: for a plugin it knows `enabled`, not the plugin-owned policy beside it. The typed save methods (`SaveGlobalProviderDefinitions`, `SaveGlobalProviderPreference`, `SaveGlobalDefaultProvider`, `SaveGlobalPluginEnabled`, `SaveProjectPluginEnabled`) therefore apply their changes to the table model of the existing file instead of replacing the file: a modeled key takes its new value or is removed when normalization drops it, and every other key or table stays, including `[plugins.mcp]` policy, `[plugins.mcp.servers.*]`, unknown top-level settings and unknown keys inside a provider that is kept. A provider that the save removes goes with its whole table. The file keeps its key order, its line endings and end-of-line comments; full-line comments and blank lines are not kept by these saves (the raw editor and skill enablement edits keep the text as it is).
 
 Global config is loaded from `~/.alta/config.toml`. Project config is loaded from `<project>/.alta/config.toml` when a project scope is active. The provider-management UI edits the same global file and validates TOML before saving. During startup, `CodeAltaConfigStore` creates the bundled default template only when the global config file is missing; existing user config files are not reconciled with newly bundled defaults.
 

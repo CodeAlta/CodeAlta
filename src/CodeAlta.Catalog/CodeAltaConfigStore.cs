@@ -5,8 +5,7 @@ using CodeAlta.Agent.Runtime.Compaction;
 using CodeAlta.Catalog.Skills;
 using Tomlyn;
 using Tomlyn.Model;
-using Tomlyn.Parsing;
-using Tomlyn.Syntax;
+using Tomlyn.Serialization;
 using Tomlyn.Text;
 
 namespace CodeAlta.Catalog;
@@ -66,11 +65,6 @@ public sealed class CodeAltaConfigStore
 
     private readonly CatalogOptions _options;
     private readonly TextFileCodec _textFiles;
-
-    private sealed record ConfigSection(
-        string Path,
-        int StartOffset,
-        int EndOffset);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CodeAltaConfigStore"/> class.
@@ -730,199 +724,137 @@ public sealed class CodeAltaConfigStore
 
     private static void SaveDocument(string path, CodeAltaConfigDocument document)
     {
-        var preservedAcpConfig = LoadPreservedAcpConfig(path);
         NormalizeDocument(document);
+        var existing = File.Exists(path) ? File.ReadAllText(path) : string.Empty;
+        var content = string.IsNullOrWhiteSpace(existing)
+            ? TomlSerializer.Serialize(document)
+            : MergeIntoExistingContent(existing, document, path);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var content = TomlSerializer.Serialize(document);
-        if (preservedAcpConfig is not null)
-        {
-            content = AppendPreservedAcpConfig(content, preservedAcpConfig.Value.Block, preservedAcpConfig.Value.Newline);
-        }
-
         File.WriteAllText(path, content);
     }
 
-    private static (string Block, string Newline)? LoadPreservedAcpConfig(string path)
+    // The typed document models only part of the file. Everything else (settings a plugin reads itself, such as
+    // the MCP policy under [plugins.mcp], ignored legacy tables, settings of another version) must survive a save,
+    // so the typed changes are applied to the file's own table model instead of replacing the file.
+    private static string MergeIntoExistingContent(string existing, CodeAltaConfigDocument document, string path)
     {
-        if (!File.Exists(path))
+        var options = TomlSerializerOptions.Default with
         {
-            return null;
+            SourceName = path,
+            // Carries the comments of the settings that stay in place.
+            MetadataStore = new TomlMetadataStore(),
+            NewLine = existing.Contains("\r\n", StringComparison.Ordinal) ? TomlNewLineKind.CrLf : TomlNewLineKind.Lf,
+        };
+        TomlTable root;
+        TomlTable modeled;
+        try
+        {
+            root = TomlSerializer.Deserialize<TomlTable>(existing, options) ?? new TomlTable();
+            // The file as the typed document reads it, before any normalization: its keys are the modeled ones.
+            modeled = ToTable(TomlSerializer.Deserialize<CodeAltaConfigDocument>(
+                existing, TomlSerializerOptions.Default with { SourceName = path }) ?? new CodeAltaConfigDocument());
+        }
+        catch (Exception ex) when (IsConfigLoadException(ex))
+        {
+            throw new InvalidDataException($"Failed to parse CodeAlta config '{path}'.", ex);
         }
 
-        var content = File.ReadAllText(path);
-        var block = ExtractPreservedAcpConfig(content, path);
-        return string.IsNullOrWhiteSpace(block)
-            ? null
-            : (block, DetectNewline(content));
+        var updated = ToTable(document);
+        ApplyModeledSettings(root, modeled, updated);
+        RemoveDroppedProviders(root, updated);
+        return TomlSerializer.Serialize(root, options);
     }
 
-    private static string? ExtractPreservedAcpConfig(string content, string sourcePath)
+    private static TomlTable ToTable(CodeAltaConfigDocument document)
     {
-        if (string.IsNullOrWhiteSpace(content))
-        {
-            return null;
-        }
-
-        var sections = GetConfigSections(content, ParseSyntaxDocument(content, sourcePath))
-            .Values
-            .Where(static section =>
-                string.Equals(section.Path, "acp", StringComparison.OrdinalIgnoreCase) ||
-                section.Path.StartsWith("acp.", StringComparison.OrdinalIgnoreCase))
-            .OrderBy(static section => section.StartOffset)
-            .ToArray();
-        if (sections.Length == 0)
-        {
-            return null;
-        }
-
-        return string.Join(
-            DetectNewline(content),
-            sections.Select(section => content[section.StartOffset..section.EndOffset].TrimEnd('\r', '\n')));
+        var content = TomlSerializer.Serialize(document);
+        return string.IsNullOrWhiteSpace(content)
+            ? new TomlTable()
+            : TomlSerializer.Deserialize<TomlTable>(content) ?? new TomlTable();
     }
 
-    private static string AppendPreservedAcpConfig(string content, string preservedAcpConfig, string newline)
+    // Gives every modeled key its updated value, or removes it when the typed document dropped it,
+    // and leaves every key the typed document does not model as it is.
+    private static void ApplyModeledSettings(TomlTable target, TomlTable modeled, TomlTable updated)
     {
-        var block = preservedAcpConfig.Trim('\r', '\n');
-        if (string.IsNullOrWhiteSpace(block))
+        foreach (var (key, value) in modeled)
         {
-            return content;
-        }
-
-        return content + CreateAppendedBlock(content, block, newline);
-    }
-
-    private static DocumentSyntax ParseSyntaxDocument(string content, string sourcePath)
-    {
-        if (!string.IsNullOrWhiteSpace(content))
-        {
-            ThrowIfLegacyConfigShapeDetected(content, sourcePath);
-        }
-
-        return SyntaxParser.ParseStrict(content, sourcePath);
-    }
-
-    private static Dictionary<string, ConfigSection> GetConfigSections(string content, DocumentSyntax document)
-    {
-        var result = new Dictionary<string, ConfigSection>(StringComparer.OrdinalIgnoreCase);
-        var tables = document.Tables.ToArray();
-        for (var i = 0; i < tables.Length; i++)
-        {
-            var table = tables[i];
-            if (table is not TableSyntax || GetKeyPath(table.Name) is not { } path)
+            if (FindKey(updated, key) is not null || !target.TryGetValue(key, out var existing))
             {
                 continue;
             }
 
-            var startOffset = GetNodeStartOffset(table.OpenBracket is null ? table : table.OpenBracket);
-            var nextTable = i + 1 < tables.Length ? tables[i + 1] : null;
-            var endOffset = nextTable is null
-                ? content.Length
-                : GetNodeStartOffset(nextTable.OpenBracket is null ? nextTable : nextTable.OpenBracket);
-            result.TryAdd(path, new ConfigSection(path, startOffset, endOffset));
-        }
-
-        return result;
-    }
-
-    private static string? GetKeyPath(KeySyntax? key)
-    {
-        if (key?.Key is null)
-        {
-            return null;
-        }
-
-        var parts = new List<string>();
-        AddKeyPart(parts, key.Key);
-        foreach (var dotKey in key.DotKeys)
-        {
-            if (dotKey.Key is null)
+            if (value is TomlTable modeledTable && existing is TomlTable existingTable)
             {
-                return null;
+                ApplyModeledSettings(existingTable, modeledTable, new TomlTable());
+                if (existingTable.Count > 0)
+                {
+                    continue; // Unmodeled settings remain in the table.
+                }
             }
 
-            AddKeyPart(parts, dotKey.Key);
+            target.Remove(key);
         }
 
-        return parts.Count == 0 || parts.Any(static part => string.IsNullOrWhiteSpace(part))
-            ? null
-            : string.Join('.', parts);
-    }
-
-    private static void AddKeyPart(List<string> parts, BareKeyOrStringValueSyntax key)
-    {
-        switch (key)
+        foreach (var (key, value) in updated)
         {
-            case BareKeySyntax bareKey:
-                parts.Add(bareKey.Key?.Text ?? string.Empty);
-                break;
-
-            case StringValueSyntax stringValue:
-                parts.Add(stringValue.Value ?? string.Empty);
-                break;
-        }
-    }
-
-    private static string DetectNewline(string content)
-        => content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
-
-    private static string CreateAppendedBlock(string existingContent, string block, string newline)
-    {
-        var builder = new StringBuilder();
-        if (existingContent.Length > 0)
-        {
-            if (!EndsWithNewline(existingContent))
+            // Normalization may change the case of a provider or plugin key; the file keeps its spelling.
+            var targetKey = FindKey(modeled, key) ?? key;
+            if (value is TomlTable updatedTable &&
+                target.TryGetValue(targetKey, out var existing) && existing is TomlTable existingTable)
             {
-                builder.Append(newline);
+                var modeledTable = modeled.TryGetValue(targetKey, out var modeledValue) ? modeledValue as TomlTable : null;
+                ApplyModeledSettings(existingTable, modeledTable ?? new TomlTable(), updatedTable);
             }
-
-            if (!EndsWithBlankLine(existingContent))
+            else
             {
-                builder.Append(newline);
+                target[targetKey] = value;
+            }
+        }
+    }
+
+    // A provider the typed document no longer has goes with its whole table: settings left behind
+    // would bring it back as an incomplete definition on the next load.
+    private static void RemoveDroppedProviders(TomlTable root, TomlTable updated)
+    {
+        const string ProvidersKey = "providers";
+        if (!root.TryGetValue(ProvidersKey, out var value) || value is not TomlTable providers)
+        {
+            return;
+        }
+
+        var kept = updated.TryGetValue(ProvidersKey, out var updatedValue) ? updatedValue as TomlTable : null;
+        foreach (var providerKey in providers.Keys)
+        {
+            if (kept is null || FindKey(kept, providerKey) is null)
+            {
+                providers.Remove(providerKey);
             }
         }
 
-        builder.Append(NormalizeNewlines(block, newline));
-        builder.Append(newline);
-        return builder.ToString();
+        if (kept is null && providers.Count == 0)
+        {
+            root.Remove(ProvidersKey);
+        }
     }
 
-    private static bool EndsWithNewline(string text)
-        => text.Length > 0 && IsNewline(text[^1]);
-
-    private static bool EndsWithBlankLine(string text)
+    private static string? FindKey(TomlTable table, string key)
     {
-        if (!EndsWithNewline(text))
+        if (table.ContainsKey(key))
         {
-            return false;
+            return key;
         }
 
-        var index = text.Length - 2;
-        if (index >= 0 && text[index] == '\r' && text[^1] == '\n')
+        foreach (var pair in table)
         {
-            index--;
+            if (string.Equals(pair.Key, key, StringComparison.OrdinalIgnoreCase))
+            {
+                return pair.Key;
+            }
         }
 
-        while (index >= 0 && !IsNewline(text[index]))
-        {
-            index--;
-        }
-
-        return index >= 0 && IsNewline(text[index]);
+        return null;
     }
-
-    private static bool IsNewline(char character)
-        => character is '\r' or '\n';
-
-    private static string NormalizeNewlines(string text, string newline)
-    {
-        var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\r", "\n", StringComparison.Ordinal);
-        return newline == "\n"
-            ? normalized
-            : normalized.Replace("\n", newline, StringComparison.Ordinal);
-    }
-
-    private static int GetNodeStartOffset(SyntaxNodeBase node)
-        => Math.Clamp(node.Span.Start.Offset, 0, int.MaxValue);
 
     private static void SavePluginEnabled(string path, CodeAltaConfigDocument document, string pluginId, bool enabled)
     {
