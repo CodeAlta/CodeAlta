@@ -237,7 +237,8 @@ public sealed class RuntimeDisplayProjectionTests
         while (pending.TryDequeue(out var type))
         {
             if (!visited.Add(type)) continue;
-            if (type == typeof(string) || type == typeof(Guid) || type.IsPrimitive || type.IsEnum) continue;
+            // DateTimeOffset is the only BCL value besides string/Guid/primitives: an immutable source-event timestamp.
+            if (type == typeof(string) || type == typeof(Guid) || type == typeof(DateTimeOffset) || type.IsPrimitive || type.IsEnum) continue;
             if (Nullable.GetUnderlyingType(type) is { } underlying) { pending.Enqueue(underlying); continue; }
             if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(System.Collections.Immutable.ImmutableArray<>))
             { pending.Enqueue(type.GenericTypeArguments[0]); continue; }

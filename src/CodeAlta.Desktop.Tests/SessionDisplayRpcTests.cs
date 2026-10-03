@@ -190,8 +190,11 @@ public sealed class SessionDisplayRpcTests
         Assert.AreEqual("SELECTED", item.SessionId);
         Assert.AreEqual("selected", item.Session!.SessionId);
         Assert.AreEqual(2, item.Session.ToolActivities.Length);
-        Assert.AreEqual(new SessionDisplayToolActivity("Provider", null, "same", "Completed", null, false), item.Session.ToolActivities[0]);
-        Assert.AreEqual(new SessionDisplayToolActivity("provider", "run", "same", "Started", new string('x', 128), true), item.Session.ToolActivities[1]);
+        // Each activity keeps the timestamp and per-session publication order of its first retained source event.
+        Assert.AreEqual(new SessionDisplayToolActivity("Provider", null, "same", "Completed", null, false)
+            { Timestamp = DateTimeOffset.UnixEpoch, Sequence = "1" }, item.Session.ToolActivities[0]);
+        Assert.AreEqual(new SessionDisplayToolActivity("provider", "run", "same", "Started", new string('x', 128), true)
+            { Timestamp = DateTimeOffset.UnixEpoch, Sequence = "2" }, item.Session.ToolActivities[1]);
         Assert.AreEqual("0", item.Session.EvictedToolActivities);
         Assert.IsTrue(item.IsPartial);
         var absent = SessionDisplayService.Project(HostEpoch, "SELECTED", new(snapshot with { Sessions = [], IsClosed = true }, false, 0, true));

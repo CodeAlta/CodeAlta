@@ -52,7 +52,9 @@ public sealed class WorkspaceDraftPromptsTests
             var globalResult = await service.DraftPromptsAsync(new(Epoch, null, null), CancellationToken.None);
             Assert.AreEqual("ok", globalResult.Status);
             Assert.IsFalse(globalResult.Prompts.Any(prompt => prompt.Id == "draft-fixture"));
-            Assert.AreEqual("stale_epoch", (await service.DraftPromptsAsync(request with { ExpectedHostEpoch = "other" }, CancellationToken.None)).Status);
+            // A well-formed epoch from another host is stale; a malformed one is refused before the epoch comparison.
+            Assert.AreEqual("stale_epoch", (await service.DraftPromptsAsync(request with { ExpectedHostEpoch = Guid.NewGuid().ToString("D") }, CancellationToken.None)).Status);
+            Assert.AreEqual("invalid_scope", (await service.DraftPromptsAsync(request with { ExpectedHostEpoch = "other" }, CancellationToken.None)).Status);
             Assert.AreEqual("invalid_scope", (await service.DraftPromptsAsync(request with { ProjectPath = null }, CancellationToken.None)).Status);
             Assert.AreEqual("unavailable", (await service.DraftPromptsAsync(request with { ProjectPath = global }, CancellationToken.None)).Status);
             Assert.AreEqual("unavailable", (await service.DraftPromptsAsync(request with { ProjectId = "missing" }, CancellationToken.None)).Status);
