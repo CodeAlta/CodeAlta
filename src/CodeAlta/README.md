@@ -413,6 +413,20 @@ prompt editor has focus; the ones marked "outside text" stay ordinary caret keys
 open window keeps the keyboard, except that the Settings window follows the commands that move to
 another Settings page.
 
+### When the host stops responding
+
+The title bar shows the connection to the host. The window pings the host every 10 seconds; when
+three pings in a row get no answer it shows **CodeAlta is not responding.** with a **Reload**
+button instead of the connection state. Reloading the window opens a new RPC session with the same
+host; sessions keep running and prompt drafts are restored, but image drafts and requests that were
+still waiting for an answer are lost. The message goes away by itself if the host answers again.
+
+The host side of an RPC session can be closed without the page being told, after which every request
+is dropped and only times out. NeoAstra 0.2.1 does this when the page closes a channel (the live view
+of a session, closed whenever its pane goes away) at the moment one of the channel's items is being
+posted: the canceled post is treated as a transport failure and cancels the whole session. That is a
+defect in `NeoRpcSession.SendRawAsync`; until the package is fixed, reloading is the way back.
+
 ## Browse a task-owned catalog copy
 
 To display persisted projects and sessions, supply an existing **trusted, task-owned catalog

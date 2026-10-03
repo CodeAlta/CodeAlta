@@ -41,6 +41,7 @@ export const messages = dictionary({
   "Global config.toml: providers and their credentials, the default provider, plugins and skills.": ["config.toml global: proveedores y sus credenciales, el proveedor predeterminado, complementos y habilidades.", "config.toml global : fournisseurs et leurs identifiants, fournisseur par défaut, extensions et compétences.", "Globale config.toml: Anbieter und ihre Zugangsdaten, der Standardanbieter, Plugins und Skills.", "グローバル config.toml: プロバイダーとその資格情報、既定のプロバイダー、プラグイン、スキル。", "全局 config.toml：提供商及其凭据、默认提供商、插件和技能。"],
   "Unsaved changes": ["Cambios sin guardar", "Modifications non enregistrées", "Ungespeicherte Änderungen", "未保存の変更", "未保存的更改"],
   "Reload": ["Recargar", "Recharger", "Neu laden", "再読み込み", "重新加载"],
+  "CodeAlta is not responding.": ["CodeAlta no responde.", "CodeAlta ne répond pas.", "CodeAlta reagiert nicht.", "CodeAlta が応答していません。", "CodeAlta 无响应。"],
   "Save": ["Guardar", "Enregistrer", "Speichern", "保存", "保存"],
   "Discard edits and read the file again": ["Descartar los cambios y volver a leer el archivo", "Abandonner les modifications et relire le fichier", "Änderungen verwerfen und die Datei erneut lesen", "編集を破棄してファイルを読み直す", "放弃编辑并重新读取文件"],
   "Save and apply providers": ["Guardar y aplicar proveedores", "Enregistrer et appliquer les fournisseurs", "Speichern und Anbieter anwenden", "保存してプロバイダーを適用", "保存并应用提供商"],

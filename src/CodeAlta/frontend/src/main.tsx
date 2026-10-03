@@ -94,6 +94,7 @@ import { maximumIdeWidth, minimumIdeWidth, parseIdeWidth, persistIdeWidth, resiz
 import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./projectRailVisibility";
 import { useWindowPreferences } from "./windowPreferences";
 import { GeneralSettings } from "./GeneralSettings";
+import { createHostLiveness, hostPingInterval, hostPingTimeout } from "./hostLiveness";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
 import { workflowNotice, type WorkflowNotice } from "./workflowNotice";
 import { translate, type MessageKey } from "./localization";
@@ -146,6 +147,8 @@ function App() {
   const [status, writeStatus] = useState<BootStatus>();
   function setStatus(value: BootStatus) { advanceBrowserRevision(); invalidateCreation(); writeStatus(value); }
   const [error, setError] = useState<string>();
+  const [hostLiveness] = useState(() => createHostLiveness(() => boot.status({}, { timeoutMilliseconds: hostPingTimeout })));
+  const hostSilent = useSyncExternalStore(hostLiveness.subscribe, hostLiveness.getSnapshot);
   const [workspaceState, setWorkspaceState] = useState<WorkspaceState>({ kind: "loading" });
   const currentSnapshot = useRef<WorkspaceSnapshot | undefined>(undefined);
   const projectInspection = useRef({ version: 0, ready: false });
@@ -463,6 +466,13 @@ function App() {
       .catch(() => { if (!abort.signal.aborted) setConfigurationState({ error: "Configuration inventory is unavailable." }); });
     return () => abort.abort();
   }, []);
+  const hostAnswered = !!status;
+  useEffect(() => {
+    // Watch only a host that answered once; a window that never connected already says so.
+    if (demoMode || !hostAnswered) return;
+    const timer = setInterval(() => void hostLiveness.check(), hostPingInterval);
+    return () => clearInterval(timer);
+  }, [hostAnswered, hostLiveness]);
   // After a configuration save re-registered providers, re-read the inventory that pickers and settings show.
   function refreshConfiguration() {
     return configuration.snapshot({}, { timeoutMilliseconds: 8_000 })
@@ -1403,10 +1413,15 @@ function App() {
       <div className="brand"><span className="brand-mark">A</span><span>CodeAlta</span><small>{demoMode ? "interactive preview" : "desktop"}</small>
       </div>
       {!widthSaved && <span role="status">{t("Width preference could not be saved; current layout stays available.")}</span>}
-      <div className={`connection ${error ? "connection-error" : connected ? "connection-live" : "connection-readonly"}`}>
+      {hostSilent ? <div className="connection connection-error connection-silent" role="alert">
+        <span className="connection-dot" />
+        {t("CodeAlta is not responding.")}
+        <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button>
+      </div>
+      : <div className={`connection ${error ? "connection-error" : connected ? "connection-live" : "connection-readonly"}`}>
         <span className="connection-dot" />
         {error ? "Bridge unavailable" : demoMode ? "Local demo" : connected ? "Runtime connected" : "Catalog only"}
-      </div>
+      </div>}
     </header>
 
     {dialog === "reminders" && remindersCurrent && <RemindersDialog onClose={closeReminders}><ReminderScopeGate snapshot={snapshot} projectId={projectId}

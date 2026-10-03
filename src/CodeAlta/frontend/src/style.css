@@ -101,6 +101,7 @@ code, pre { font-family: var(--bp-typography-family-mono); }
 .connection-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 3px color-mix(in srgb, var(--muted) 15%, transparent); }
 .connection-live .connection-dot, .connection-readonly .connection-dot { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 15%, transparent); }
 .connection-error .connection-dot { background: var(--red); }
+.connection-silent { color: var(--text); font-weight: 600; }
 
 .workspace-shell { min-width: 0; min-height: 0; display: grid; grid-template-columns: var(--project-pane-width, 240px) 8px minmax(calc(var(--session-pane-width, 310px) + 488px), 1fr); grid-template-areas: "projects project-resize session-content"; overflow: hidden; }
 .workspace-shell:not(.project-rail-open) { grid-template-columns: 0 0 minmax(calc(var(--session-pane-width, 310px) + 488px), 1fr); }
