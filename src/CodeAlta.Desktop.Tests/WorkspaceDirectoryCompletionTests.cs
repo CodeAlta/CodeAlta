@@ -195,7 +195,11 @@ public sealed class WorkspaceDirectoryCompletionTests
         {
             var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = Path.Combine(root, "catalog") });
             await using var reads = new OwnedSessionWorkspace(catalog, new SessionViewJournalStore(catalog.Options));
-            var paths = Enumerable.Range(0, 16).Select(i => Path.Combine(root, i.ToString("D2") + new string('\u00e9', 900))).ToArray();
+            // Each child stays within the per-path limit whatever the checkout depth, while sixteen
+            // escaped names still exceed the envelope budget.
+            var filler = Math.Min(900, DirectoryCompletionReader.MaximumDirectoryLength - root.Length - 3);
+            Assert.IsTrue(filler >= 700, "Fixture root is too deep to exceed the envelope budget with valid paths.");
+            var paths = Enumerable.Range(0, 16).Select(i => Path.Combine(root, i.ToString("D2") + new string('\u00e9', filler))).ToArray();
             var result = new DirectoryCompletionResult(DirectoryCompletionStatus.Complete, paths, 16, false);
             var service = new WorkspaceService(reads, catalog, Epoch, (_, _) => Task.FromResult(result));
             var response = await service.CompleteDirectoryAsync(new(Epoch, root, ""), CancellationToken.None);
