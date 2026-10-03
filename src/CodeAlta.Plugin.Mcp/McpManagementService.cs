@@ -100,6 +100,14 @@ public sealed record McpManagementRequest
 
     /// <summary>Gets the user home directory override, primarily for tests.</summary>
     public string? UserHomeDirectory { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether a refresh probes each configuration source for writability, which
+    /// can create and delete a temporary file next to a missing source. Hosts that only need the server
+    /// definitions set this to <see langword="false" />; sources then report as not writable and are read
+    /// with the bounded configuration reader.
+    /// </summary>
+    public bool ProbeWritability { get; init; } = true;
 }
 
 /// <summary>
@@ -560,6 +568,7 @@ public sealed class McpManagementService
         {
             ProjectDirectory = projectDirectory,
             UserHomeDirectory = request.UserHomeDirectory,
+            ProbeWritability = request.ProbeWritability,
         });
         var globalPolicyPath = McpPolicyWriter.GetGlobalPolicyPath(request.UserHomeDirectory);
         var projectPolicyPath = projectDirectory is null ? null : McpPolicyWriter.GetProjectPolicyPath(projectDirectory);
@@ -624,7 +633,7 @@ public sealed class McpManagementService
             await _configWriter.RemoveServerAsync(sourcePath, MapScope(sourceScope), originalKey.Trim(), cancellationToken).ConfigureAwait(false);
         }
 
-        RefreshSnapshot(new McpManagementRequest { ProjectDirectory = projectDirectory, UserHomeDirectory = request.UserHomeDirectory });
+        RefreshSnapshot(request with { ProjectDirectory = projectDirectory });
         return new McpManagementConfigMutationResult
         {
             Path = result.Path,
@@ -659,7 +668,7 @@ public sealed class McpManagementService
         var targetScope = ResolveWriteScope(scope, projectDirectory, nameof(scope));
         var targetPath = GetJsonConfigPath(targetScope, projectDirectory, request.UserHomeDirectory);
         var result = await _configWriter.RemoveServerAsync(targetPath, MapScope(targetScope), serverKey.Trim(), cancellationToken).ConfigureAwait(false);
-        RefreshSnapshot(new McpManagementRequest { ProjectDirectory = projectDirectory, UserHomeDirectory = request.UserHomeDirectory });
+        RefreshSnapshot(request with { ProjectDirectory = projectDirectory });
         return new McpManagementConfigMutationResult
         {
             Path = result.Path,
@@ -706,7 +715,7 @@ public sealed class McpManagementService
             ? McpPolicyWriter.GetProjectPolicyPath(projectDirectory!)
             : McpPolicyWriter.GetGlobalPolicyPath(request.UserHomeDirectory);
         var result = await _policyWriter.SetServerEnabledAsync(path, MapScope(targetScope), serverKey.Trim(), enabled, cancellationToken).ConfigureAwait(false);
-        RefreshSnapshot(new McpManagementRequest { ProjectDirectory = projectDirectory, UserHomeDirectory = request.UserHomeDirectory });
+        RefreshSnapshot(request with { ProjectDirectory = projectDirectory });
         return new McpManagementMutationResult
         {
             Path = result.Path,
@@ -759,7 +768,7 @@ public sealed class McpManagementService
         var previousStatus = GetCachedTestStatus(serverKey.Trim());
         var previousTestedAt = GetCachedTestedAt(serverKey.Trim());
         var result = await _policyWriter.SetToolEnabledAsync(path, MapScope(targetScope), serverKey.Trim(), toolName.Trim(), enabled, cancellationToken).ConfigureAwait(false);
-        var snapshot = RefreshSnapshot(new McpManagementRequest { ProjectDirectory = projectDirectory, UserHomeDirectory = request.UserHomeDirectory });
+        var snapshot = RefreshSnapshot(request with { ProjectDirectory = projectDirectory });
         if (previousTools.Count > 0)
         {
             UpdateCachedSnapshotWithTools(serverKey.Trim(), previousTools, previousStatus, previousTestedAt);
