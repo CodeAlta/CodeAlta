@@ -1,5 +1,4 @@
 export type PaneLayout = Readonly<{ projects: number; sessions: number }>;
-export type PaneName = keyof PaneLayout;
 
 export const defaultPaneLayout: PaneLayout = { projects: 240, sessions: 310 };
 const minimum = { projects: 160, sessions: 220 } as const;
@@ -26,23 +25,10 @@ export function constrainPaneLayout(layout: PaneLayout, availableWidth: number):
   return { projects, sessions };
 }
 
-export function resizePane(layout: PaneLayout, pane: PaneName, delta: number, availableWidth: number): PaneLayout {
-  const other = pane === "projects" ? layout.sessions : layout.projects;
-  const paneMaximum = Math.min(maximum[pane],
-    Math.max(minimum[pane], Math.floor(availableWidth) - minimumContentWidth - splitterWidth - other));
-  return { ...layout, [pane]: clamp(Math.round(layout[pane] + delta), minimum[pane], paneMaximum) };
-}
-
-// The hidden project rail contributes no width; only an explicit resize changes either preference.
+// The hidden project rail contributes no width.
 export function collapsedSessionWidth(layout: PaneLayout, availableWidth: number): number {
   const budget = Math.max(minimum.sessions, Math.floor(availableWidth) - minimumContentWidth - splitterWidth / 2);
   return clamp(Math.round(layout.sessions), minimum.sessions, Math.min(maximum.sessions, budget));
-}
-
-export function resizeCollapsedSessionPane(layout: PaneLayout, delta: number, availableWidth: number): PaneLayout {
-  const visible = collapsedSessionWidth(layout, availableWidth);
-  const budget = Math.max(minimum.sessions, Math.floor(availableWidth) - minimumContentWidth - splitterWidth / 2);
-  return { ...layout, sessions: clamp(Math.round(visible + delta), minimum.sessions, Math.min(maximum.sessions, budget)) };
 }
 
 // Keep preferred widths independent of viewport constraints so expanding the window restores them.

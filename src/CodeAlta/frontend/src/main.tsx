@@ -63,7 +63,7 @@ import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePositi
 import { workspaceEditingSelector, type ShortcutAction } from "./shortcuts";
 import { createDraftIndicators, draftStorageKey, persistDraft, restoreDraft, transferPromptDraft } from "./promptDraft";
 import { SessionDraftBadge } from "./SessionDraftBadge";
-import { collapsedSessionWidth, constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizeCollapsedSessionPane, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
+import { collapsedSessionWidth, constrainPaneLayout, persistPaneLayout, restorePaneLayout } from "./paneLayout";
 import { composerSizeKey, rememberComposerHeight } from "./composerHeight";
 import { ComposerSplitter, useComposerLayout } from "./ComposerLayout";
 import { NewSessionWorkspace } from "./NewSessionWorkspace";
@@ -88,7 +88,7 @@ import { sessionHierarchy } from "./sessionHierarchy";
 import { limitSessionHierarchy } from "./recentSessions";
 import { SessionTabMenu } from "./SessionTabMenu";
 import { isSessionContextKey, restoreSessionMenuFocus, sessionActionAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
-import { projectRailProjection, type ProjectSort } from "./projectRail";
+import { projectRailProjection } from "./projectRail";
 import { ProjectRailRows } from "./ProjectRailRows";
 import { maximumIdeWidth, minimumIdeWidth, parseIdeWidth, persistIdeWidth, resizeIdeWidth } from "./ideWidth";
 import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./projectRailVisibility";
@@ -385,7 +385,7 @@ function App() {
   const compactTrigger = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const timelineCommand = useRef<TimelineCommand | null>(null);
-  const [paneLayout, setPaneLayout] = useState(() => restorePaneLayout(() => localStorage.getItem(paneLayoutStorageKey), window.innerWidth));
+  const [paneLayout] = useState(() => restorePaneLayout(() => localStorage.getItem(paneLayoutStorageKey), window.innerWidth));
   const [workspaceWidth, setWorkspaceWidth] = useState(window.innerWidth);
   const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 875px)").matches);
   const [ideWidth, setIdeWidth] = useState(() => {
@@ -627,9 +627,6 @@ function App() {
   const selectedSession = snapshot && tabs.active?.sessionId === sessionId && !resolveSessionTab(snapshot, tabs.active)
     ? undefined : snapshot?.sessions.find(value => value.id === sessionId);
   const selectedProject = snapshot?.projects.find(value => value.id === projectId);
-  const projectDetailsContext: ProjectDetailsContext = { snapshot, projectId, sessionId, hostEpoch: status?.hostEpoch ?? null,
-    hostAvailable: !!status?.hostAvailable, refreshVersion: projectInspection.current.version,
-    refreshReady: projectInspection.current.ready, active: view === "workspace" && detailsPaneVisible };
   function currentProjectDetailsContext(): ProjectDetailsContext {
     return { snapshot: currentSnapshot.current, projectId: selectedScope.current, sessionId: selectedSessionId.current,
       hostEpoch: currentHostEpoch.current ?? null, hostAvailable: currentHostAvailable.current,
@@ -1396,23 +1393,6 @@ function App() {
       setDeletingMessage("Absence is not confirmed in the refreshed catalog. No retry will be sent; inspect the session or reload.");
   }
 
-  function changePane(pane: PaneName, delta: number) {
-    setPaneLayout(current => {
-      const width = workspaceShell.current?.clientWidth ?? workspaceWidth;
-      if (pane === "sessions" && !narrow && railState.desktopCollapsed) {
-        const next = resizeCollapsedSessionPane(current, delta, width);
-        return next.sessions === current.sessions ? current : next;
-      }
-      const visible = constrainPaneLayout(current, width);
-      const next = resizePane(visible, pane, delta, width);
-      return next[pane] === visible[pane] ? current : next;
-    });
-  }
-
-  function resetPane(pane: PaneName) {
-    setPaneLayout(current => ({ ...current, [pane]: defaultPaneLayout[pane] }));
-  }
-
   // Settings pages also edit the selected project's settings when it can be written.
   const settingsProject = selectedProject && !selectedProject.archived ? { id: selectedProject.id, name: selectedProject.name } : null;
   const newPromptDisabled = creatingBusy || creationLocked || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !snapshot
@@ -2026,12 +2006,7 @@ function ConfigurationPanel({ preferences }: { preferences: Parameters<typeof Ge
   </div>;
 }
 
-function StatusPill({ label }: { label: string }) { return <span className="status-pill">{label}</span>; }
-
 function LoadingRows() { return <div className="loading-rows"><span /><span /><span /></div>; }
-function EmptyWorkspace({ workspaceState }: { workspaceState: WorkspaceState }) {
-  return <div className="empty-workspace"><div className="empty-logo">A</div><h1>{workspaceState.kind === "loading" ? "Loading your sessions…" : "Select a session"}</h1><p>Choose a project and session from the sidebar to inspect its transcript and runtime.</p></div>;
-}
 function SessionTime({ value, now }: { value: string; now: number }) {
   const { locale } = useShellLanguage();
   const { label, title, dateTime } = sessionTime(value, locale, now);

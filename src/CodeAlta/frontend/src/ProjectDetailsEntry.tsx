@@ -1,19 +1,12 @@
 import { AppWindowSurface } from "./AppWindow";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { WorkspaceProject, WorkspaceSnapshot } from "#neoastra";
 import { savedProjectSelection } from "./savedProjectSelection";
-import { AppIcon } from "./AppIcon";
 import { useShellLanguage } from "./shellLanguage";
 
 export type ProjectDetailsContext = Readonly<{ snapshot: WorkspaceSnapshot | undefined; projectId: string | null;
   sessionId: string | null; hostEpoch: string | null; hostAvailable: boolean;
   refreshVersion: number; refreshReady: boolean; active: boolean }>;
-
-function sameContext(a: ProjectDetailsContext, b: ProjectDetailsContext): boolean {
-  return a.active && b.active && a.refreshReady && b.refreshReady && a.snapshot === b.snapshot
-    && a.projectId === b.projectId && a.sessionId === b.sessionId && a.hostEpoch === b.hostEpoch
-    && a.hostAvailable === b.hostAvailable && a.refreshVersion === b.refreshVersion;
-}
 
 export function selectedProjectDetails(context: ProjectDetailsContext): WorkspaceProject | null {
   if (!context.active || !context.refreshReady || !context.snapshot || context.projectId === null) return null;
@@ -90,33 +83,4 @@ export function ProjectDetailsDialog({ project, snapshot, isCurrent, onClose }: 
       <button type="button" className="quiet-button" disabled={copyBusy} onClick={() => void copy("path")}>{t("Copy project path")}</button>{" "}
       <button type="button" className="quiet-button" onClick={close}>{t("Close")}</button></span></footer>
   </AppWindowSurface></dialog>;
-}
-
-export function ProjectDetailsEntry({ context, getCurrent }: { context: ProjectDetailsContext; getCurrent: () => ProjectDetailsContext }) {
-  const { t } = useShellLanguage();
-  const [opened, setOpened] = useState<{ context: ProjectDetailsContext; project: WorkspaceProject } | null>(null);
-  const origin = useRef<HTMLButtonElement | null>(null);
-  const project = selectedProjectDetails(context);
-  function isCurrent() {
-    return !!opened && sameContext(opened.context, context) && sameContext(opened.context, getCurrent())
-      && !!savedProjectSelection(opened.project, getCurrent().snapshot);
-  }
-  const visible = !!opened && isCurrent();
-  useEffect(() => { if (opened && !visible) setOpened(null); }, [opened, visible]);
-  function close() {
-    const restore = isCurrent();
-    setOpened(null);
-    if (restore) requestAnimationFrame(() => {
-      if (origin.current?.isConnected && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) origin.current.focus();
-    });
-  }
-  return <><button type="button" className="quiet-button project-details-trigger" disabled={!project || !sameContext(context, getCurrent())}
-    aria-haspopup="dialog" aria-expanded={visible} onClick={event => {
-      if (document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') || !sameContext(context, getCurrent())) return;
-      const selected = selectedProjectDetails(getCurrent());
-      if (!selected || !project || !savedProjectSelection(project, getCurrent().snapshot)) return;
-      origin.current = event.currentTarget;
-      setOpened({ context, project: { ...selected } });
-    }} aria-label={t("Details")} title={t("Details")}><AppIcon name="info" size={14} /></button>
-    {visible && opened?.context.snapshot && <ProjectDetailsDialog project={opened.project} snapshot={opened.context.snapshot} isCurrent={isCurrent} onClose={close} />}</>;
 }
