@@ -508,6 +508,12 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
     /// <param name="sessionId">An existing identifier in this store's configured root, not a path.</param>
     /// <param name="cancellationToken">Cancels lookup, gate admission, or reading.</param>
     /// <returns>The latest event in journal order, or null if there are no notes events.</returns>
+    /// <remarks>
+    /// The first read of a journal scans it completely. Later reads through stores sharing the same journal owner
+    /// reuse that scan: an unchanged length and last-write time is answered without opening the journal, and a
+    /// longer journal is read only past the already scanned records. The journal lock is held to order the read
+    /// after admitted writes, not while scanning. Same-stamp rewrites are not detected.
+    /// </remarks>
     /// <exception cref="ArgumentException">The identifier is empty.</exception>
     /// <exception cref="InvalidOperationException">The session does not exist.</exception>
     /// <exception cref="IOException">The journal cannot be read.</exception>
@@ -526,7 +532,8 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
     /// <param name="cancellationToken">Cancels lookup, gate admission or reading.</param>
     /// <returns>The last canonical notes event in journal order, or null. Existing trailing-record tolerance applies.</returns>
     /// <remarks>Shares the legacy parser and journal lock. The complete scan is not bounded by a renderer limit.
-    /// Containment does not cover prior cache metadata/existence probes, reparse points or external races.</remarks>
+    /// Containment does not cover prior cache metadata/existence probes, reparse points or external races.
+    /// Scan reuse is as described for <see cref="ReadLatestNotesAsync"/>.</remarks>
     /// <exception cref="ArgumentException">The identifier is blank.</exception>
     /// <exception cref="InvalidOperationException">No session exists.</exception>
     /// <exception cref="AgentSessionHistoryException">The resolved notes path is outside the sessions root.</exception>
@@ -542,7 +549,19 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
         return await AgentJournalHistoryReader.OpenContainedAsync(_layout.SessionsRootPath, path, ReadLatestNotesAtPathAsync, cancellationToken).ConfigureAwait(false);
     }
 
-    private Task<AgentNotesEvent?> ReadLatestNotesAtPathAsync(string path, CancellationToken cancellationToken)
+    private async Task<AgentNotesEvent?> ReadLatestNotesAtPathAsync(string path, CancellationToken cancellationToken)
+    {
+        var scan = await _journalFile.ReadLatestNotesAsync(
+            path,
+            static async (file, token) => await OpenReadStreamAsync(file, token).ConfigureAwait(false),
+            cancellationToken).ConfigureAwait(false);
+        return scan.Supported
+            ? scan.Latest
+            : await ReadLatestNotesWithDetectedEncodingAsync(path, cancellationToken).ConfigureAwait(false);
+    }
+
+    // BOM-detected legacy encodings keep the complete tolerant scan under the journal gate.
+    private Task<AgentNotesEvent?> ReadLatestNotesWithDetectedEncodingAsync(string path, CancellationToken cancellationToken)
         => _journalFile.WithPathLockAsync(path, async () =>
         {
             AgentNotesEvent? latest = null;
@@ -655,6 +674,7 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
                     File.Delete(sessionFile);
                     _sessionFiles.TryRemove(sessionId, out _);
                     InvalidateMetadataProjectionCache(sessionFile);
+                    _journalFile.ForgetLatestNotes(sessionFile);
                     DeleteEmptySessionDirectories(Path.GetDirectoryName(sessionFile));
                     deleted = true;
                     return Task.CompletedTask;
@@ -696,6 +716,7 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
                     File.Delete(sessionFile);
                     _sessionFiles.TryRemove(sessionId, out _);
                     InvalidateMetadataProjectionCache(sessionFile);
+                    _journalFile.ForgetLatestNotes(sessionFile);
                     DeleteEmptySessionDirectories(Path.GetDirectoryName(sessionFile));
                     deleted = true;
                     return Task.CompletedTask;

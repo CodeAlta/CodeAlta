@@ -761,7 +761,11 @@ Selection/remount changes detach presentation but retain the original read. Whil
 another local refresh is refused; after failure, the next refresh is a new read, not a recovered write
 outcome. Host identity change requires reload before further operations. Notes shares the host's
 eight actual workspace/history reads, and a cancelled/timed-out wait does not release a still-running
-backend read. The display limit does not bound journal scanning or latency. Reload can perform a
+backend read. The display limit does not bound journal scanning or latency: the first notes read of a
+session after host start scans its whole journal. Later reads reuse that scan, so the ten-second refresh
+of an unchanged journal does not open it and a grown journal is read only past the records already
+scanned. A notes scan does not hold the journal gate, so it does not delay timeline pages or event
+appends for the same session. Reload can perform a
 fresh durable read without restoring run/queue/interaction authority.
 
 With a provider supporting run-bound review, cancellation of the actual owning run also invalidates

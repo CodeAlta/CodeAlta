@@ -9,6 +9,7 @@ internal sealed class AgentSessionJournalFile
     private const int LockViolation = 33;
     private static readonly TimeSpan FileRetryDelay = TimeSpan.FromMilliseconds(10);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _pathLocks = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, NotesScanState> _notesScans = new(StringComparer.Ordinal);
 
     public async Task AppendLinesAsync(
         string path,
@@ -160,6 +161,54 @@ internal sealed class AgentSessionJournalFile
             await committed().ConfigureAwait(false);
         }, cancellationToken);
 
+    // Reads the latest notes event without rescanning what an earlier read of this journal already covered.
+    // Every store sharing this instance shares the result: an unchanged journal (length and last-write time)
+    // is answered without opening it, and a longer one is scanned only past the remembered prefix.
+    public async Task<AgentJournalNotesReader.Result> ReadLatestNotesAsync(
+        string path, Func<string, CancellationToken, Task<Stream>> open, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(open);
+        var fullPath = Path.GetFullPath(path);
+        var state = _notesScans.GetOrAdd(fullPath, static _ => new NotesScanState());
+        // One scan per journal at a time, so a reader that waited reuses the finished scan instead of repeating it.
+        await state.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // The journal gate only orders this read after admitted writes. The scan runs outside it and stops at
+            // the length captured here, so a long first scan delays neither history pages nor appends.
+            var (length, lastWriteUtcTicks) = await WithPathLockAsync(path, () =>
+            {
+                var info = new FileInfo(fullPath);
+                return info.Exists
+                    ? Task.FromResult((info.Length, info.LastWriteTimeUtc.Ticks))
+                    : throw new FileNotFoundException("The session journal does not exist.", fullPath);
+            }, cancellationToken).ConfigureAwait(false);
+            var previous = state.Prefix;
+            if (previous is not null && previous.Offset == length && previous.LastWriteUtcTicks == lastWriteUtcTicks)
+            {
+                return new(true, previous.Latest, previous);
+            }
+
+            await using var stream = await open(path, cancellationToken).ConfigureAwait(false);
+            var result = await AgentJournalNotesReader.ScanAsync(stream, previous, length, lastWriteUtcTicks, cancellationToken).ConfigureAwait(false);
+            if (result.Prefix is not null)
+            {
+                state.Prefix = result.Prefix;
+            }
+
+            return result;
+        }
+        finally
+        {
+            state.Gate.Release();
+        }
+    }
+
+    // Drops the remembered notes prefix of a journal that was deleted or rewritten in place.
+    public void ForgetLatestNotes(string path)
+        => _notesScans.TryRemove(Path.GetFullPath(path), out _);
+
     // A same-directory rename is the commit point. No canonical bytes are changed before it.
     // Used for idle provider selection only, not normal streaming event writes.
     internal Task ReplaceWithSnapshotsAsync(string path, AgentHistoryRevision expected, string? header,
@@ -167,6 +216,7 @@ internal sealed class AgentSessionJournalFile
         => WithPathLockAsync(path, async () =>
         {
             var temporary = path + ".selection-" + Guid.NewGuid().ToString("N");
+            var notesKey = Path.GetFullPath(path);
             try
             {
                 await using var original = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
@@ -200,6 +250,8 @@ internal sealed class AgentSessionJournalFile
                     throw new InvalidOperationException("The session changed before journal replacement.");
                 File.Move(temporary, path, overwrite: true);
                 // Nothing fallible follows the durable decision; caches reproject from the changed stamp.
+                // A replaced header moves every later record, so the notes prefix is dropped rather than left to its guard.
+                _notesScans.TryRemove(notesKey, out _);
             }
             finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }, token);
@@ -431,5 +483,13 @@ internal sealed class AgentSessionJournalFile
         return errorCode is SharingViolation or LockViolation ||
             ex.Message.Contains("being used by another process", StringComparison.OrdinalIgnoreCase) ||
             ex.Message.Contains("locked", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class NotesScanState
+    {
+        internal readonly SemaphoreSlim Gate = new(1, 1);
+
+        // Read and replaced only while Gate is held.
+        internal AgentJournalNotesReader.Prefix? Prefix;
     }
 }
