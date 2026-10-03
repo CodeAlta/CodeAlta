@@ -1,6 +1,7 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Hosting;
+using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
 
 namespace CodeAlta.Desktop.Rpc;
@@ -9,6 +10,7 @@ internal sealed partial class WorkspaceService
 {
     private readonly ModelProviderRegistry? _sessionProviders;
     private readonly Func<ProjectDescriptor?, ModelProviderDescriptor, string?, Task<SessionViewDescriptor>>? _createSession;
+    private readonly Func<OwnedProjectReferenceScope?, CancellationToken, Task<IReadOnlyList<OwnedPromptChoice>?>>? _draftPrompts;
     private readonly Func<string, string?, string, string, Task<bool>>? _renameSession;
     private readonly Func<string, string?, string, string, Task<string>>? _deleteSession;
     // One instance monitor makes catalog-affecting admission atomic. Workers keep
@@ -23,8 +25,31 @@ internal sealed partial class WorkspaceService
     {
         _sessionProviders = host.ModelProviderRegistry;
         _createSession = host.Commands.CreateDraftSessionAsync;
+        _draftPrompts = host.Commands.GetDraftPromptChoicesAsync;
         _renameSession = host.Commands.RenameSessionAsync;
         _deleteSession = host.Commands.DeleteCatalogSessionAsync;
+    }
+
+    // Only catalogs: this read does not initialize a provider, create a session or confer send authority.
+    [NeoRpcMethod("draftPrompts")]
+    public async Task<WorkspaceDraftPromptsResponse> DraftPromptsAsync(WorkspaceDraftPromptsRequest request, CancellationToken cancellationToken)
+    {
+        WorkspaceDraftPromptsResponse Reply(string status, IReadOnlyList<OwnedPromptChoice>? prompts = null)
+            => new(status, _importEpoch, request?.ProjectId, request?.ProjectPath,
+                prompts?.Select(p => new SessionPromptChoice(p.Id, p.Name)).ToArray() ?? []);
+        if (_draftPrompts is null || _importEpoch is null) return Reply("unconfigured");
+        if (request is null || !ValidEpoch(request.ExpectedHostEpoch)
+            || (request.ProjectId is null) != (request.ProjectPath is null)
+            || request.ProjectId is not null && (!ValidScopeValue(request.ProjectId, 256) || !ValidScopeValue(request.ProjectPath, 4096)))
+            return Reply("invalid_scope");
+        if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
+        try
+        {
+            var prompts = await _draftPrompts(request.ProjectId is null ? null : new(request.ProjectId, request.ProjectPath!), cancellationToken).ConfigureAwait(false);
+            return Reply(prompts is null ? "unavailable" : "ok", prompts);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception) { return Reply("read_failed"); }
     }
 
     internal WorkspaceService(CodeAlta.Orchestration.Runtime.OwnedSessionWorkspace reads, ProjectCatalog catalog, string epoch,
@@ -159,3 +184,6 @@ internal sealed record WorkspaceCreateSessionRequest(string ExpectedHostEpoch, s
     string? ProviderId = null);
 internal sealed record WorkspaceCreateSessionResponse(string Status, string? HostEpoch, string? Scope, string? ProjectId, string? ProjectPath,
     string? SessionId, string? WorkspacePath, string? ProviderId = null);
+internal sealed record WorkspaceDraftPromptsRequest(string ExpectedHostEpoch, string? ProjectId, string? ProjectPath);
+internal sealed record WorkspaceDraftPromptsResponse(string Status, string? HostEpoch, string? ProjectId, string? ProjectPath,
+    IReadOnlyList<SessionPromptChoice> Prompts);

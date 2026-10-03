@@ -1,4 +1,4 @@
-import { Button, Checkbox, FormGroup, HTMLSelect, Spinner } from "@blueprintjs/core";
+import { Button, Checkbox, HTMLSelect, Spinner } from "@blueprintjs/core";
 import { createPortal } from "react-dom";
 import { PromptImageAttachments } from "./PromptImageAttachments";
 import { formatThinkingElapsed, useThinkingElapsed } from "./thinkingElapsed";
@@ -18,11 +18,11 @@ import { CommandPermissionPanel } from "./CommandPermissionPanel";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { AppIcon } from "./AppIcon";
 import { showContextAction } from "./workspacePresentation";
-import { PromptEditor, type PromptInput } from "./PromptEditor";
+import type { PromptInput } from "./PromptEditor";
 import { changeSelection, validSelection } from "./sessionSelection";
 import { ProviderChooser } from "./ProviderChooser";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
-import { ComposerSurface, ComposerToolbar } from "./ComposerSurface";
+import { ComposerSurface, ComposerSelectionFields } from "./ComposerSurface";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import type { createReminderActions } from "./reminderActions";
@@ -38,8 +38,9 @@ import { useShellLanguage } from "./shellLanguage";
 import type { ClipboardEvent } from "react";
 import type { SessionSteerRequest } from "#neoastra";
 
-export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true }: {
+export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true }: {
   active?: boolean;
+  observing?: boolean;
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
   projectId?: string | null;
   inputLifetime?: { current: () => boolean };
@@ -117,6 +118,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     setChoicesNotice("Selections apply on Send; active runs and queued text are unchanged.");
   }), [epoch, sessionId, capability, selections]);
   useEffect(() => {
+    if (!observing) { setLoadingChoices(false); return; }
     const controller = new AbortController();
     const revision = selectionRevision.current;
     setChoicesNotice("Loading session choices…");
@@ -139,12 +141,16 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
           setChoicesNotice(`Session choices unavailable (${value.status}).`); return;
         }
         setChoices(value);
-        setSelection(selections.get(epoch, sessionId, value));
+        const verified = selections.get(epoch, sessionId, value);
+        const retained = selections.current(epoch, sessionId);
+        // A temporarily empty catalog must not silently replace an unsent preference.
+        // Keep it visibly unverified; normal Send still requires validSelection.
+        setSelection(verified ?? (retained?.providerKey === value.current.providerKey ? retained : null));
         setChoicesNotice("Selections apply on Send; active runs and queued text are unchanged.");
       }).catch(() => { if (!controller.signal.aborted && revision === selectionRevision.current) setChoicesNotice("Session choices could not be loaded. Reopen the Model selector to try again."); })
       .finally(() => { if (!controller.signal.aborted) setLoadingChoices(false); });
     return () => controller.abort();
-  }, [epoch, sessionId, capability, selections, choicesRevision]);
+  }, [epoch, sessionId, capability, selections, choicesRevision, observing]);
   const [steerText, setSteerText] = useState("");
   const [steerMessage, setSteerMessage] = useState("Refresh runtime state explicitly before targeting a run.");
   const [compactMessage, setCompactMessage] = useState("Refresh runtime state explicitly before attempting idle compaction.");
@@ -190,7 +196,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   useEffect(() => {
     const revision = ++reminderRevision.current;
     setReminderObservation(undefined);
-    if (!onOpenReminders || !readReminderCount || !reminderActions || invalidEpoch) return;
+    if (!observing || !onOpenReminders || !readReminderCount || !reminderActions || invalidEpoch) return;
     const controller = new AbortController();
     const operation = reminderActions.get({ epoch, sessionId });
     void readReminderCount({ expectedEpoch: epoch, sessionId }, { signal: controller.signal, timeoutMilliseconds: 15000 })
@@ -200,7 +206,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
           setReminderObservation({ epoch, sessionId, reload: reminderReload, count: value.activeCount, operation });
       }).catch(() => { /* An error is unknown, never an observed zero or an automatic retry. */ });
     return () => { controller.abort(); reminderRevision.current++; };
-  }, [epoch, sessionId, !!onOpenReminders, readReminderCount, reminderActions, reminderReload, invalidEpoch]);
+  }, [epoch, sessionId, !!onOpenReminders, readReminderCount, reminderActions, reminderReload, invalidEpoch, observing]);
   const observedReminderCount = !invalidEpoch && readReminderCount && reminderActions &&
     !reminderOperation?.pending && !reminderOperation?.hold && reminderObservation?.epoch === epoch &&
     reminderObservation.sessionId === sessionId && reminderObservation.reload === reminderReload &&
@@ -231,10 +237,19 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     setAbortRunMessage(abortRuns.pending(sessionId)
       ? "A retained exact cancellation request exists. Refresh submissions or explicitly retry its original key and run after the previous wait settles."
       : "Refresh runtime state explicitly before targeting cancellation.");
-    setRuntimeState(undefined);
     setSubmittedThinking(null);
-    runtimeScope.current = runtimeReader.forSelection({ expectedHostEpoch: epoch, sessionId }, controller.signal, setRuntimeState, capability.observe);
-    const runtime = runtimeScope.current;
+    setMessage(submissions.pending(sessionId) || submissions.aborts(sessionId).length
+      ? "Retained Send/Abort intent exists. Refresh receipts manually or retry the exact request after its original waiter settles."
+      : "Ready to send to this owned session.");
+    return () => { controller.abort(); scope.current = null; };
+  }, [sessionId, epoch, submissions, steering, compaction, abortRuns, queue, runtimeReader, capability]);
+
+  useEffect(() => {
+    setRuntimeState(undefined);
+    if (!observing) return;
+    const controller = new AbortController();
+    const runtime = runtimeReader.forSelection({ expectedHostEpoch: epoch, sessionId }, controller.signal, setRuntimeState, capability.observe);
+    runtimeScope.current = runtime;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const observe = async () => {
       if (controller.signal.aborted || !capability.canMutate()) return;
@@ -242,13 +257,11 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
       if (!controller.signal.aborted) timer = setTimeout(observe, 1000);
     };
     void observe();
-    setMessage(submissions.pending(sessionId) || submissions.aborts(sessionId).length
-      ? "Retained Send/Abort intent exists. Refresh receipts manually or retry the exact request after its original waiter settles."
-      : "Ready to send to this owned session.");
-    return () => { clearTimeout(timer); controller.abort(); scope.current = null; runtimeScope.current = null; };
-  }, [sessionId, epoch, submissions, steering, compaction, abortRuns, queue, runtimeReader, capability]);
+    return () => { clearTimeout(timer); controller.abort(); if (runtimeScope.current === runtime) runtimeScope.current = null; };
+  }, [epoch, sessionId, capability, runtimeReader, observing]);
 
   useEffect(() => {
+    if (!observing) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const read = async () => {
@@ -258,7 +271,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     };
     void read();
     return () => { stopped = true; clearTimeout(timer); };
-  }, [epoch, sessionId, capability]);
+  }, [epoch, sessionId, capability, observing]);
 
   useEffect(() => {
     if (!submissions.pending(sessionId)) draftIndicators.persisted(sessionId, draft.editGeneration,
@@ -631,11 +644,10 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     <ComposerSurface busy={composerBusy} status={<>
       {composerBusy ? <Spinner size={16} intent="primary" aria-hidden="true" /> : <AppIcon name={invalidEpoch ? "error" : "prompt"} size={14} />}
       {composerBusy ? thinkingSeconds > 0 ? t("Thinking for {elapsed}...", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
-        : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : "Prompt ready")}</>}>
-    {expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
-    <label className="sr-only" htmlFor={active ? "session-prompt" : `session-prompt-${sessionId}`}>{t("Message")}</label>
-    <PromptEditor id={active ? "session-prompt" : `session-prompt-${sessionId}`} ref={promptInput} onPaste={pasteImages} label={t("Message")} value={pending?.request.text ?? text} disabled={!!pending || invalidEpoch || expanded}
-      onChange={editText} onCompositionStart={() => { inputRevision.current++; }} placeholder={t("Ask CodeAlta to work on this project…")} onKeyDown={event => {
+        : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : "Prompt ready")}</>}
+    expandedEditor={expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
+    editor={{ id: active ? "session-prompt" : `session-prompt-${sessionId}`, ref: promptInput, onPaste: pasteImages, label: t("Message"), value: pending?.request.text ?? text, disabled: !!pending || invalidEpoch || expanded,
+      onChange: editText, onCompositionStart: () => { inputRevision.current++; }, placeholder: t("Ask CodeAlta to work on this project…"), onKeyDown: event => {
         if (dispatchTransientComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
           altKey: event.altKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing,
           keyCode: event.nativeEvent.keyCode, repeat: event.repeat, defaultPrevented: event.defaultPrevented },
@@ -644,14 +656,13 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
           shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey,
           isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode,
            repeat: event.repeat, defaultPrevented: event.defaultPrevented }, submit, () => steer(true))) { event.preventDefault(); event.stopPropagation(); }
-      }} />
-    <ComposerToolbar options={<>
-      <FormGroup className="composer-field" label={<Button variant="minimal" onClick={() => onOpenCatalog?.("prompts")}>{t("Agent→")}</Button>} labelFor={`composer-agent-${sessionId}`}><HTMLSelect fill id={`composer-agent-${sessionId}`} aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
+      } }}
+    options={<ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog}
+      agent={<HTMLSelect fill id={`composer-agent-${sessionId}`} aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
         {!activeChoices?.prompts.some(p => p.id === selected?.agentPromptId) && <option value={selected?.agentPromptId ?? ""}>{selected?.agentPromptId ?? t("Loading…")}</option>}
         {activeChoices?.prompts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-      </HTMLSelect></FormGroup>
-      <FormGroup className="composer-field composer-model-field" label={<Button variant="minimal" onClick={() => onOpenCatalog?.("models")}>{t("Model→")}</Button>} labelFor={`composer-model-${sessionId}`}><div className="composer-model-options">
-      <ProviderChooser epoch={epoch} sessionId={sessionId} providerKey={selected?.providerKey ?? t("session provider")}
+      </HTMLSelect>}
+      provider={<ProviderChooser epoch={epoch} sessionId={sessionId} providerKey={selected?.providerKey ?? t("session provider")}
         disabled={selectionDisabled || !capability.canMutate() || runtimeState?.kind !== "ready"
           || runtimeState.snapshot.coordinatorTransitionInProgress || !!runtimeState.snapshot.entry?.activeRunId
           || !!runtimeState.snapshot.entry?.queueDrainInProgress || !!runtimeState.snapshot.entry?.isRetiring}
@@ -665,27 +676,22 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
           setChoices(value); setChoicesNotice("");
           loadModelChoices();
           void runtimeScope.current?.refresh();
-        }} />
-      <HTMLSelect fill id={`composer-model-${sessionId}`} data-model-selector aria-label={t("Model")} value={selected?.modelId ?? ""} disabled={invalidEpoch || !!pending || loadingChoices}
-        onPointerDown={event => { if (!activeChoices?.models.length && !loadingChoices) { event.preventDefault(); loadModelChoices(); } }}
-        onKeyDown={event => {
-          if (!activeChoices?.models.length && !loadingChoices && !event.nativeEvent.isComposing && !event.repeat
-            && ["Enter", " ", "ArrowDown", "ArrowUp"].includes(event.key)) { event.preventDefault(); loadModelChoices(); }
-        }}
+        }} />}
+      model={<HTMLSelect fill id={`composer-model-${sessionId}`} data-model-selector aria-label={t("Model")} value={selected?.modelId ?? ""} disabled={invalidEpoch || !!pending || loadingChoices}
         onChange={event => select("modelId", event.target.value)} title={selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) ? t("Saved selection; not verified by this host's observed model catalog.") : t("Model for the next Send · {provider}", { provider: selected?.providerKey ?? t("session provider") })}>
         <option value="">{t(loadingChoices ? "Loading…" : "Provider default")}</option>
         {selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) && <option value={selected.modelId}>{loadingChoices ? t("Loading…") : `${selected.modelId} · ${t("Unverified")}`}</option>}
         {activeChoices?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-      </HTMLSelect></div></FormGroup>
-      <FormGroup className="composer-field" labelFor={`composer-reasoning-${sessionId}`}><HTMLSelect fill id={`composer-reasoning-${sessionId}`} aria-label={t("Reasoning")} value={selected?.reasoningEffort ?? ""} disabled={selectionDisabled || efforts.length === 0} onChange={event => select("reasoningEffort", event.target.value)} title={t("Supported reasoning effort for the selected model")}>
+      </HTMLSelect>}
+      reasoning={<HTMLSelect fill id={`composer-reasoning-${sessionId}`} aria-label={t("Reasoning")} value={selected?.reasoningEffort ?? ""} disabled={selectionDisabled || efforts.length === 0} onChange={event => select("reasoningEffort", event.target.value)} title={t("Supported reasoning effort for the selected model")}>
         <option value="">{t("Model default")}</option>
         {selected?.reasoningEffort && !efforts.includes(selected.reasoningEffort) && <option value={selected.reasoningEffort}>{selected.reasoningEffort} · {t("Unverified")}</option>}
         {efforts.map(e => <option key={e} value={e}>{e}</option>)}
-      </HTMLSelect></FormGroup>
-    </>}>
+      </HTMLSelect>} />}>
       {!pending && !expanded && !invalidEpoch && <ProjectReferencePicker text={text} edit={editText} input={promptInput} />}
-      <Checkbox checked={enqueue} disabled={invalidEpoch || !!pending || images.length > 0} label={t("Enqueue")} onChange={event => setEnqueue(event.currentTarget.checked)} />
       <ActiveProviderStatus epoch={epoch} onOpen={() => onOpenCatalog?.("providers")} />
+      {(!activeChoices?.models.length || choicesNotice.includes("could not")) && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />}
+        disabled={invalidEpoch || !!pending || loadingChoices} aria-label={t("Refresh composer choices")} title={t("Refresh composer choices")} onClick={loadModelChoices} />}
       <ObservationStatus unavailable={!invalidEpoch && (receiptUnavailable || runtimeState?.kind === "error")} />
       <span className="sr-only">{t("Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer")}</span>
       {infoControl}
@@ -713,6 +719,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
         title={pendingCompact ? `${t("Manual retry of exact compaction:")} ${t("epoch")} ${pendingCompact.request.expectedEpoch}, ${t("session")} ${pendingCompact.request.sessionId}, ${t("runtime")} ${pendingCompact.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingCompact.request.expectedAttachmentGeneration}, ${t("request")} ${pendingCompact.request.clientRequestId}`
           : t("Compact observed idle attachment (Ctrl+F11; point-in-time idle observation permits only an attempt; provider must prove idle)")}>
         <AppIcon name="compact" size={16} /></Button>
+      <Checkbox className="composer-enqueue" checked={enqueue} disabled={invalidEpoch || !!pending || images.length > 0} label={t("Enqueue")} onChange={event => setEnqueue(event.currentTarget.checked)} />
       {(composerBusy || availableAbortRun || pendingAbortRun) ? <Button intent="danger" icon={<AppIcon name="stop" size={16} fill="currentColor" />} onClick={abortRun}
         disabled={invalidEpoch || !!pendingAbortRun?.inFlight || (pendingAbortRun
           ? !capability.canSubmit(pendingAbortRun.request) : !availableAbortRun || !capability.canSubmit(availableAbortRun))}
@@ -721,7 +728,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
         title={pendingAbortRun ? `${t("Manual retry of exact cancellation:")} ${t("epoch")} ${pendingAbortRun.request.expectedEpoch}, ${t("session")} ${pendingAbortRun.request.sessionId}, ${t("runtime")} ${pendingAbortRun.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingAbortRun.request.expectedAttachmentGeneration}, ${t("run")} ${pendingAbortRun.request.expectedRunId}, ${t("request")} ${pendingAbortRun.request.clientRequestId}`
           : t("Cancel observed run {run} (point-in-time runtime observation, not original Send Abort; signalling does not confirm completion)", { run: availableAbortRun?.expectedRunId ?? "" })} />
       : <Button aria-label={t(pending ? "Retry exact request" : "Send")} title={t(pending ? "Retry exact request" : "Send")} intent="primary" icon={<AppIcon name={pending ? "refresh" : "send"} size={16} />} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || captureSubmission(epoch, sessionId, text, "availability", images.length ? selected : null, null, images) === null)} onClick={submit} />}
-    </ComposerToolbar>
+    </ComposerSurface>
     <span id="observed-run-cancellation-help" className="sr-only">{t("Targets a point-in-time observed run, not the original Send receipt. Cancellation signalled does not confirm run completion. Retained requests are only retried manually against their original target after the previous wait settles.")}</span>
     <span id="observed-steering-help" className="sr-only">{t("Uses current composer text and the point-in-time observed run. Admission is not run completion. Retained steering is reviewed or retried separately, never from this button.")}</span>
     <span id="observed-queue-help" className="sr-only">{t("Uses current editable composer text and the point-in-time observed attachment, including busy or draining attachments; never targets a run. Reservation does not prove host-only insertion, durability or execution. The composer draft is preserved. Retained queue requests are reviewed or retried separately, never from this button.")}</span>
@@ -759,5 +766,5 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     </div>)}
     </div>}
     </>, timelineNotices)}
-  </ComposerSurface></>;
+  </>;
 }

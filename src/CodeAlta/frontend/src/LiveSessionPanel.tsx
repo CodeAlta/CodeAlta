@@ -6,19 +6,21 @@ import { TimelineMessage } from "./TimelineMessage";
 import { liveTextItem, liveToolItem } from "./liveTimeline";
 import { useShellLanguage } from "./shellLanguage";
 
-export function LiveSessionPanel({ store, hostEpoch, sessionId, capability }: {
+export function LiveSessionPanel({ store, hostEpoch, sessionId, capability, observing = true }: {
   store: ReturnType<typeof createSessionDisplayStore>; hostEpoch: string; sessionId: string;
   capability: ReturnType<typeof createMutationCapability>;
+  observing?: boolean;
 }) {
   const { t } = useShellLanguage();
   const observed = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const canMutate = useSyncExternalStore(capability.subscribe, capability.canMutate);
   const scope = useRef<{ hostEpoch: string; sessionId: string; selection: ReturnType<typeof store.select> } | null>(null);
   useEffect(() => {
+    if (!observing) return;
     const owned = { hostEpoch, sessionId, selection: store.select(hostEpoch, sessionId, capability.observe) };
     scope.current = owned;
     return () => { owned.selection.detach(); if (scope.current === owned) scope.current = null; };
-  }, [store, hostEpoch, sessionId, capability]);
+  }, [store, hostEpoch, sessionId, capability, observing]);
   // Never flash the previous selection during the render preceding effect cleanup/admission.
   const state = observed.hostEpoch === hostEpoch && observed.sessionId === sessionId ? observed : null;
   const snapshot = state?.snapshot;

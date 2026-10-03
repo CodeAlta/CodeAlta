@@ -10,7 +10,14 @@ delete waiting messages. These drafts live only in the app, not across reloads. 
 use immediate Send. **Agent→** and **Model→** open their selection windows, and provider
 readiness is shown as a compact active-provider count in the bottom bar (green when ready,
 orange on provider errors). Send becomes Stop during a run and returns to Send afterward.
-The compaction icon stays visible and is enabled when the session can safely be compacted.
+The compaction action uses an archive icon, distinct from expanding the editor. Enqueue sits
+beside Send/Stop. The session-tab menu uses themed Blueprint controls and supports keyboard
+navigation. New and existing sessions share the same composer surface; new-session Agent
+choices load for the project/global scope, and model choices load for the selected provider.
+Choices are revalidated after creation before transferring the draft for review and normal Send.
+If a provider's model catalog is unavailable, available Agent choices remain usable; use
+**Refresh composer choices** to retry. Hidden tabs pause automatic observations without losing
+drafts or canceling admitted commands; visible split panes continue observing.
 
 ## Install
 

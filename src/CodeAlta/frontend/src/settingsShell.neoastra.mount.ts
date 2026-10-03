@@ -231,6 +231,10 @@ export const workspace = { snapshot: async () => {
   return localStorage.getItem("settingsFixtureFreshSnapshot") === "true"
     ? { ...catalog, sessions: catalog.sessions.map(row => ({ ...row, updatedAt: "2026-09-26T00:00:00Z" })) } : catalog;
 },
+  draftPrompts: async (request: { expectedHostEpoch: string; projectId: string | null; projectPath: string | null }) => ({
+    status: "ok", hostEpoch: request.expectedHostEpoch, projectId: request.projectId, projectPath: request.projectPath,
+    prompts: [{ id: "default", name: "Default" }, { id: "plan", name: "Plan" }],
+  }),
   historyTail: (request: HistoryRequest) => {
     if (localStorage.getItem("bodyFixtureEnabled") === "true") { historyCalls.push(request); return Promise.resolve(bodyHistory(request)); }
     if (localStorage.getItem("toolFixtureEnabled") === "true") { historyCalls.push(request); return Promise.resolve(toolHistory(request)); }

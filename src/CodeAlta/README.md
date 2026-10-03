@@ -113,8 +113,12 @@ The welcome view renders the same 3-D FIGlet/ASCII logo asset as the TUI, with t
 folder and launch guidance below it. Its composer uses the same surface, status line, editor,
 toolbar, expansion and keyboard handling as existing sessions. **Start session** (or Enter) retains
 the guarded create-and-transfer flow: review the transferred prompt in the created session before
-normal Send. Model/agent/reasoning choices remain unavailable until the session is created; the
-provider can be chosen before creation. The prompt's divider
+normal Send. Agent/model/reasoning choices are available before creation in the same shared
+selector rows as an existing session. Agent choices use the exact project/global prompt catalog;
+model choices load for the selected enabled provider. These are local preferences, revalidated
+against the created session before transfer, not authority to send or switch a running provider.
+Unavailable model catalogs do not remove independently available Agent choices; use the labelled
+Refresh composer choices button to retry. The prompt's divider
 reserves space within its own pane, independently of session dividers. Sizing observes the
 actual portal DOM mount, including late-mounted panes. Session tab dragging uses pointer capture
 and public FlexLayout move actions, avoiding native HTML5 drag/drop handling. A highlighted target
@@ -122,7 +126,10 @@ previews the split/merge/insertion, and Escape or loss of capture cancels. The t
 right/below** actions provide a keyboard alternative when a pane contains multiple session tabs.
 Real FlexLayout session tabs project
 existing bounded identities, with compact status/close chrome and secondary Reopen/Refresh menus.
-Open sessions retain independent display/runtime/review/notes owners and drafts; the focused pane
+The tab menu uses themed Blueprint controls with an opaque popup and keyboard navigation.
+Open sessions retain independent display/runtime/review/notes owners and drafts. Hidden panes
+pause automatic history, live, runtime, receipt, Ask, notes and choice reads until visible again;
+visible split panes continue observing. Hiding a pane does not cancel admitted commands. The focused pane
 owns global composer shortcuts. Running indicators in the project/session sidebar refresh in bounded
 batches, prioritizing visible and open sessions (at most 32 verified sessions per batch). Missing or
 stale observations never imply idle or authorize mutations. Provider switching remains blocked

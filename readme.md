@@ -42,7 +42,11 @@ buttons. Tool rows open details with independently scrollable content and no dia
 The desktop composer immediately echoes submitted text in the timeline. Live and saved
 activity share message rendering, source timestamps and role colors; journal refreshes
 fill in retained live previews automatically. Model choices load when the composer opens,
-and selector labels stay inline on desktop widths. Sending/uncertain/failed echoes are
+and selector labels stay inline on desktop widths. New-session drafts use the same composer
+and selector surface, with scoped Agent and provider-model choices available before creation.
+Hidden session panes pause background observations while retaining drafts and exact-request
+recovery; visible split panes continue observing. The session-tab menu uses themed Blueprint
+controls, and Enqueue sits beside the primary prompt action. Sending/uncertain/failed echoes are
 presentation only, not proof of provider execution.
 
 > On this development branch, the terminal package is renamed to `CodeAlta.Tui` / `altatui`. Installation commands below describe that package once released. Existing releases used `CodeAlta` / `alta`; the replacement desktop head is still in development. Shared `~/.alta` state and the in-session `alta` tool keep their identities.

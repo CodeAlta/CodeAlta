@@ -31,6 +31,23 @@ public sealed record OwnedMcpScope(string? ProjectDirectory, string? ProjectId);
 
 public sealed partial class OwnedSessionCommandService
 {
+    /// <summary>Reads effective prompt choices for a draft's exact catalog scope without creating a session or provider.</summary>
+    /// <param name="scope">Exact project identity/path, or null for a global draft.</param>
+    /// <param name="cancellationToken">Cancels the catalog read.</param>
+    /// <returns>Bounded choices, or null when the scope or host is unavailable.</returns>
+    /// <exception cref="OperationCanceledException">The caller cancels the read.</exception>
+    public async Task<IReadOnlyList<OwnedPromptChoice>?> GetDraftPromptChoicesAsync(OwnedProjectReferenceScope? scope,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate) { if (_closed || _retained) return null; }
+        var project = scope is null ? null : await ResolveReferenceProjectAsync(scope, cancellationToken).ConfigureAwait(false);
+        if (scope is not null && !ReferenceScopeMatches(scope, project)) return null;
+        lock (_gate) { if (_closed || _retained) return null; }
+        cancellationToken.ThrowIfCancellationRequested();
+        return _runtime.ListOwnedPrompts(project?.ProjectPath).Where(p => p.PromptName.Length <= 256).Take(64)
+            .Select(p => new OwnedPromptChoice(p.PromptName, Bound(p.DisplayName))).ToArray();
+    }
+
     /// <summary>Resolves an owned session's exact catalog project; null result means unavailable, not global.</summary>
     /// <exception cref="ArgumentException">The session identity is blank.</exception>
     /// <exception cref="OperationCanceledException">The caller cancels the read.</exception>

@@ -13,8 +13,13 @@ identities are not offered. Oversized owned-registry IDs are omitted rather than
 truncated into a different identity. Catalog-only configuration is not creation
 authority. The list can be stale or incomplete.
 
-Opening, editing, choosing, closing or translating this control performs no new
-inventory read, initialization, model read, authentication, probe or session creation.
+The provider descriptor control itself uses the cached inventory. In the new-session
+composer, opening the draft or changing its provider also loads the selected provider's
+model catalog; this can initialize that provider. Agent choices load independently from
+the exact project/global prompt catalog, without provider or session creation. Failed
+model reads leave available Agent choices accessible and offer an explicit refresh.
+Choosing Agent/model/reasoning values changes only local next-send preferences. Merely
+translating the controls does not issue new reads or create a session.
 The labels/help support en/es/fr/de/ja/zh-CN; canonical IDs are never translated.
 Enabled does not mean ready, capable, authenticated or successfully created.
 
@@ -46,6 +51,10 @@ refusal or successful fresh matching publication releases it. Manual list refres
 does not unlock it. This is in-memory uncertainty retention, not durable receipts,
 reload-safe reconciliation or a guarantee that reloading permits a safe retry.
 Local text and image drafts are not discarded: existing text-transfer fences remain.
+Draft creation captures the effective provider and Agent/model/reasoning preference.
+After the created session is confirmed by a fresh catalog read, its authoritative choices
+must validate those preferences before copying the draft into an empty destination and
+installing its next-send selection. Failed validation preserves the source; nothing is sent.
 The explicit owned new-session draft now permits [bounded PNG handoff](prompt-images.md)
 only with current immutable input and an empty eligible destination/capacity preflight.
 Storage failure retains the source and reports uncertainty; there is no cross-storage

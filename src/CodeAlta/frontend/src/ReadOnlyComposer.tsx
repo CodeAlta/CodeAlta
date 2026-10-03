@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type ClipboardEvent } from "react";
 import { Button, Spinner } from "@blueprintjs/core";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
-import { PromptEditor, type PromptInput } from "./PromptEditor";
+import type { PromptInput } from "./PromptEditor";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
 import { AppIcon } from "./AppIcon";
-import { ComposerSurface, ComposerToolbar } from "./ComposerSurface";
+import { ComposerSurface } from "./ComposerSurface";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
 import { useShellLanguage } from "./shellLanguage";
@@ -15,7 +15,7 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
   draftIndicators: ReturnType<typeof createDraftIndicators>; reason?: string;
   infoControl?: ReactNode;
   onOpenHelp?: () => void; onOpenPalette?: () => void;
-  localDraft?: { text: string; edit: (text: string) => void; action: ReactNode; options?: ReactNode;
+  localDraft?: { text: string; edit: (text: string) => void; action: ReactNode; options?: ReactNode; notice?: ReactNode;
     submit: () => void; disabled: boolean; busy: boolean };
   localImages?: { paste: (event: ClipboardEvent<HTMLElement>) => void; attachments: ReactNode; invalidate: () => void };
 }) {
@@ -41,13 +41,13 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
     <ComposerSurface className={localDraft ? undefined : "catalog-composer"} busy={localDraft?.busy} status={<>
       {localDraft?.busy ? <Spinner size={16} intent="primary" aria-hidden="true" /> : <AppIcon name="prompt" size={14} />}
       {t(localDraft?.busy ? "Creating session…" : localDraft ? "Prompt ready" : "Draft only")}
-    </>}>
-    {expanded && <ExpandedPromptEditor text={text} onChange={edit} onPaste={refuseImagePaste} onCompositionStart={localImages?.invalidate} attachments={localDraft && localImages ? localImages.attachments : imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>} onClose={() => { localImages?.invalidate(); setExpanded(false); }} />}
-    {!expanded && imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>}
-    <label className="sr-only" htmlFor={active ? "catalog-prompt" : `catalog-prompt-${sessionId}`}>{t("Message")}</label>
-    <PromptEditor id={active ? "catalog-prompt" : `catalog-prompt-${sessionId}`} ref={promptInput} onPaste={refuseImagePaste} label={t("Message")} disabled={expanded}
-      onCompositionStart={() => localImages?.invalidate()}
-      value={text} onChange={edit} onKeyDown={event => {
+    </>}
+    expandedEditor={expanded && <ExpandedPromptEditor text={text} onChange={edit} onPaste={refuseImagePaste} onCompositionStart={localImages?.invalidate} attachments={localDraft && localImages ? localImages.attachments : imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>} onClose={() => { localImages?.invalidate(); setExpanded(false); }} />}
+    notice={<>{localDraft?.notice}{!expanded && imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>}
+      {!localDraft && <p className="catalog-diagnostics">{t("Provider {provider}; model, prompt and reasoning not available without an owned runtime.", { provider: provider ?? t("Not recorded") })}</p>}</>}
+    options={localDraft?.options}
+    editor={{ id: active ? "catalog-prompt" : `catalog-prompt-${sessionId}`, ref: promptInput, onPaste: refuseImagePaste, label: t("Message"), disabled: expanded,
+      onCompositionStart: () => localImages?.invalidate(), value: text, onChange: edit, onKeyDown: event => {
         if (dispatchTransientComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
           altKey: event.altKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing,
           keyCode: event.nativeEvent.keyCode, repeat: event.repeat, defaultPrevented: event.defaultPrevented },
@@ -60,14 +60,11 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
           && event.nativeEvent.keyCode !== 229 && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
           event.preventDefault(); setExpanded(true);
         }
-      }} placeholder={t("Ask CodeAlta to work on this project…")} />
-    <ComposerToolbar options={localDraft?.options}>
+      }, placeholder: t("Ask CodeAlta to work on this project…") }}>
         {localDraft && !expanded && <ProjectReferencePicker text={text} edit={edit} input={promptInput} />}
         <details className="composer-draft-info"><summary aria-label={t("Draft information")} title={t("Draft information")}><AppIcon name="info" size={16} /></summary><p id={`catalog-draft-status-${sessionId}`} role="status">{reason ?? t("No owned desktop host; sending is unavailable. Drafts stay local when storage permits.")}</p></details>
         {infoControl}
         <Button id={active ? "expand-session-prompt" : `expand-session-prompt-${sessionId}`} variant="minimal" icon={<AppIcon name="expand" size={16} />} aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => setExpanded(true)} />
         {localDraft?.action ?? <Button className="send-button" intent="primary" icon={<AppIcon name="send" size={16} />} disabled aria-label={t("Send unavailable")} aria-describedby={`catalog-draft-status-${sessionId}`} />}
-    </ComposerToolbar>
-    {!localDraft && <p className="catalog-diagnostics">{t("Provider {provider}; model, prompt and reasoning not available without an owned runtime.", { provider: provider ?? t("Not recorded") })}</p>}
   </ComposerSurface></>;
 }

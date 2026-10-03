@@ -74,11 +74,19 @@ test("temporary project tab, composer resizing, pointer splits and session-local
     const session = (name: string) => evaluate(`[...document.querySelectorAll('.session-row button')].find(b=>b.querySelector('.session-title')?.textContent===${JSON.stringify(name)}).click()`);
     await project("Project");
     assert.equal(await wait("document.querySelector('.welcome-subtitle')?.textContent.includes('/fixture/project')"), true);
-    assert.equal(await evaluate("!!document.querySelector('.blank-project-logo pre') && !!document.querySelector('.blank-project .owned-session')"), true);
+    assert.equal(await evaluate("document.querySelectorAll('.blank-project-logo .welcome-logo-word').length===2 && !!document.querySelector('.blank-project .owned-session')"), true);
+    assert.equal(await wait("document.querySelector('#composer-agent-new')?.options.length===2 && !document.querySelector('#composer-agent-new')?.disabled && document.querySelector('#composer-model-new')?.options.length>=3"), true);
     await session("one");
     assert.equal(await wait("!!document.querySelector('#session-prompt') && !document.querySelector('.blank-project')"), true);
     await session("two");
     assert.equal(await wait("document.querySelectorAll('.session-dock > .flexlayout__layout [data-session-node]').length===2"), true);
+    assert.equal(await wait("settingsShellFixture.displayEvidence().some(a=>a.sessionId==='two'&&!a.aborted) && settingsShellFixture.displayEvidence().filter(a=>a.sessionId==='one').every(a=>a.aborted)"), true);
+    await evaluate("document.querySelector('.session-tab-more').click()");
+    assert.equal(await wait("!!document.querySelector('.session-tab-popup .bp6-menu')"), true);
+    assert.equal(await evaluate("document.querySelector('.session-tab-more').classList.contains('bp6-button') && getComputedStyle(document.querySelector('.session-tab-popup')).backgroundColor!=='rgba(0, 0, 0, 0)'"), true);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    assert.equal(await wait("!document.querySelector('.session-tab-popup') && document.activeElement?.classList.contains('session-tab-more')"), true);
     await evaluate("window.dockKept={one:document.querySelector('#session-prompt-one'),two:document.querySelector('#session-prompt')}");
     const resize = async () => {
       assert.equal(await wait("Number(document.querySelector('.session-workspace[data-active=true] .composer-splitter')?.getAttribute('aria-valuenow'))>0"), true);
@@ -122,6 +130,7 @@ test("temporary project tab, composer resizing, pointer splits and session-local
     assert.equal(await evaluate("[...document.querySelectorAll('.session-workspace')].filter(n=>n.getBoundingClientRect().height>0).length"), 1);
     await drop("right");
     assert.equal(await wait("[...document.querySelectorAll('.session-workspace')].filter(n=>n.getBoundingClientRect().height>0).length===2"), true);
+    assert.equal(await wait("['one','two'].every(id=>settingsShellFixture.displayEvidence().some(a=>a.sessionId===id&&!a.aborted))"), true);
     assert.equal(await evaluate("window.nativeTabDrags"), 0);
     // Notes overlay the timeline, never create a nested dock or steal editor space.
     const composerBefore = await evaluate("document.querySelector('.session-workspace[data-active=true] .composer-region').getBoundingClientRect().height");

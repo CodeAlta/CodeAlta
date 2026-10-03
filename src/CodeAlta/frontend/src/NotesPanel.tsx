@@ -6,8 +6,9 @@ import { notesResizeKey, visibleNotesHeight } from "./notesHeight";
 import { AppIcon } from "./AppIcon";
 import { useShellLanguage } from "./shellLanguage";
 
-export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkdown, preferredHeight, onResize, onReset, onCleared, onClose, embedded = false, panelId, onContent }: {
+export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkdown, preferredHeight, onResize, onReset, onCleared, onClose, embedded = false, panelId, onContent, observing = true }: {
   embedded?: boolean; panelId?: string; onContent?: (markdown: string) => void;
+  observing?: boolean;
   epoch?: string;
   sessionId: string | null;
   reader?: ReturnType<typeof createNotesReader>;
@@ -29,7 +30,7 @@ export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkd
   const selection = useRef<{ epoch: string; sessionId: string; actions: ReturnType<ReturnType<typeof createNotesReader>["forSelection"]> } | undefined>(undefined);
   const lastY = useRef<number | undefined>(undefined);
   useEffect(() => {
-    if (!epoch || !sessionId || !reader || !capability) { selection.current = undefined; return; }
+    if (!observing || !epoch || !sessionId || !reader || !capability) { selection.current = undefined; return; }
     setAction(undefined);
     setCopyStatus(undefined);
     setObserved({ epoch, sessionId, state: { kind: "loading" } });
@@ -53,7 +54,7 @@ export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkd
     };
     queueMicrotask(refresh);
     return () => { clearTimeout(timer); controller.abort(); selection.current = undefined; };
-  }, [epoch, sessionId, reader, capability, embedded]);
+  }, [epoch, sessionId, reader, capability, embedded, observing]);
   useEffect(() => {
     const rail = pane.current?.parentElement;
     if (!rail) return;

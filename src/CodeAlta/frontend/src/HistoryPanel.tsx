@@ -24,9 +24,10 @@ function revisionOf(cursor: HistoryRequest["cursor"]): string | null {
   return cursor?.version === 2 ? JSON.stringify([cursor.length, cursor.lastWriteUtcTicks]) : null;
 }
 
-export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, onAfterOlder, onNewerOmitted, onNavigationReset,
+export function History({ sessionId, observing = true, onNotesChange, onSettled, onBeforeOlder, onAfterOlder, onNewerOmitted, onNavigationReset,
   newestRequest, onNewestResult, live, read, canInspect, outgoing = [], onAcknowledgeOutgoing, messageCount }: {
   sessionId: string; onNotesChange: (markdown: string) => void; onSettled: () => void;
+  observing?: boolean;
   onBeforeOlder: () => void; onAfterOlder: () => void; live: SessionDisplayView | null;
   onNewerOmitted?: (value: boolean) => void;
   onNavigationReset?: (generation: number, explicitNewest: boolean) => void;
@@ -76,6 +77,7 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
   });
   useLayoutEffect(() => { onNavigationReset?.(target.generation, target.explicitNewest); }, [target, onNavigationReset]);
   useEffect(() => {
+    if (!observing) return;
     const abort = new AbortController();
     void loadHistory(read, request, abort.signal, value => {
       if (value.kind === "ready") {
@@ -99,7 +101,7 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
       }
     });
     return () => abort.abort();
-  }, [read, target]);
+  }, [read, target, observing]);
   useEffect(() => {
     // Earlier pages can contain older notes, not the current note. Never promote them to latest.
     if (!timeline?.newerOmitted) onNotesChange(latestNotes(timeline?.entries ?? []));
@@ -109,7 +111,7 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
   liveRefresh.current = { revision: live?.revision,
     ready: (current?.kind === "ready" && window?.generation === target.generation && historySettled(current, window?.timeline)
       || historyCanRetry(current))
-      && !target.explicitOlder && !timeline?.newerOmitted && !sourceTarget && (canInspect?.() ?? true),
+      && observing && !target.explicitOlder && !timeline?.newerOmitted && !sourceTarget && (canInspect?.() ?? true),
     retry: historyCanRetry(current),
     refresh: () => { refreshNewest(false); } };
   useEffect(() => {
@@ -134,12 +136,12 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
   }, [accumulation]);
   useEffect(() => {
     const accumulated = accumulation?.timeline;
-    if (current?.kind !== "ready" || accumulation?.generation !== target.generation || !accumulated?.next ||
+    if (!observing || current?.kind !== "ready" || accumulation?.generation !== target.generation || !accumulated?.next ||
         accumulated.sessionId !== sessionId || accumulated.limitReached || accumulated.turnReached || target.explicitOlder) return;
     const timer = globalThis.window.setTimeout(() => setTarget({ request: { sessionId, cursor: accumulated.next },
       explicitOlder: false, explicitNewest: target.explicitNewest, generation: target.generation }), 0);
     return () => globalThis.window.clearTimeout(timer);
-  }, [current, accumulation, sessionId, target]);
+  }, [current, accumulation, sessionId, target, observing]);
   useLayoutEffect(() => {
     if (target.explicitNewest && current?.kind === "ready" && candidate?.generation === target.generation &&
       historySettled(current, candidate.timeline) && window !== candidate) setWindow(candidate);

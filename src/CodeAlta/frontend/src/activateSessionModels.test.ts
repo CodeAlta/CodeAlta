@@ -28,7 +28,21 @@ test("provider changes and failed catalog loading never apply old model choices"
   await assert.rejects(activateSessionModels("epoch", "session", async () => ++reads === 1 ? choices
     : { ...choices, current: { ...choices.current!, providerKey: "other" } }, async () => catalog, () => true), /provider changed/);
   reads = 0;
-  await assert.rejects(activateSessionModels("epoch", "session", async () => { reads++; return choices; },
-    async () => ({ ...catalog, status: "unavailable" }), () => true), /catalog unavailable/);
+  assert.equal(await activateSessionModels("epoch", "session", async () => { reads++; return choices; },
+    async () => ({ ...catalog, status: "unavailable" }), () => true), choices);
   assert.equal(reads, 1);
+});
+
+test("a failed model probe preserves independently valid Agent choices without inventing models", async () => {
+  const withPrompts = { ...choices, prompts: [{ id: "default", name: "Default" }] };
+  const result = await activateSessionModels("epoch", "session", async () => withPrompts,
+    async () => { throw new Error("provider unavailable"); }, () => true);
+  assert.equal(result, withPrompts);
+  assert.deepEqual(result.models, []);
+});
+
+test("a canceled model probe cannot publish the old session choices", async () => {
+  let current = true;
+  await assert.rejects(activateSessionModels("epoch", "session", async () => choices,
+    async () => { current = false; throw new Error("late failure"); }, () => current), { name: "AbortError" });
 });

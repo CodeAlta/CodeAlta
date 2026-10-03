@@ -12,10 +12,18 @@ export async function activateSessionModels(epoch: string, sessionId: string,
     throw new Error("Session choices unavailable");
   if (before.models.length > 0) return before;
   const provider = before.current.providerKey;
-  const catalog = await load(provider);
+  let catalog: ModelCatalogModelsResponse;
+  try { catalog = await load(provider); }
+  catch {
+    if (!current()) throw new DOMException("Selection changed", "AbortError");
+    // A provider timeout is not failure of the independently resolved prompt catalog.
+    // Keep real observed choices; never synthesize models or image capability.
+    return before;
+  }
   if (!current()) throw new DOMException("Selection changed", "AbortError");
-  if (catalog.status !== "ok" || catalog.epoch !== epoch || catalog.providerId !== provider || catalog.availability !== "Ready")
+  if (catalog.epoch !== epoch || catalog.providerId !== provider)
     throw new Error("Provider catalog unavailable");
+  if (catalog.status !== "ok" || catalog.availability !== "Ready") return before;
   const after = await read();
   if (!current()) throw new DOMException("Selection changed", "AbortError");
   if (after.status !== "ok" || after.epoch !== epoch || after.sessionId !== sessionId || after.current?.providerKey !== provider)

@@ -17,7 +17,7 @@ const notices = Object.freeze({
   invalid: "The answer is invalid or exceeds the 8,192-character aggregate limit.",
 } satisfies Record<Notice, MessageKey>);
 
-type Props = { epoch: string; sessionId: string; actions: ReturnType<typeof createAskActions>; capability: ReturnType<typeof createMutationCapability>; refreshTrigger?: RefObject<(() => void) | null> };
+type Props = { epoch: string; sessionId: string; actions: ReturnType<typeof createAskActions>; capability: ReturnType<typeof createMutationCapability>; refreshTrigger?: RefObject<(() => void) | null>; observing?: boolean };
 type Draft = { id: number; epoch: string; sessionId: string; source: string; handle: AskHandle;
   questions: readonly AskQuestion[]; text: Record<number, string>; choices: Record<number, number[]>; detached: boolean };
 type RetainedAction = ReturnType<ReturnType<typeof createAskActions>["forSession"]>[number];
@@ -29,7 +29,7 @@ function draftSource(epoch: string, sessionId: string, head: NonNullable<AskPage
   return JSON.stringify([epoch, sessionId, askWireHandle(head.handle), head.request.questions]);
 }
 
-export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger }: Props) {
+export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger, observing = true }: Props) {
   const { t } = useShellLanguage();
   const [pageState, setPage] = useState<{ epoch: string; sessionId: string; version: number; page: AskPage }>();
   const [readPending, setReadPending] = useState<{ epoch: string; sessionId: string; version: number } | null>(null);
@@ -58,7 +58,7 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
   const canMutate = useSyncExternalStore(capability.subscribe, capability.canMutate);
   useEffect(() => actions.subscribe(() => repaint(value => value + 1)), [actions]);
   useEffect(() => {
-    if (!canMutate) return;
+    if (!canMutate || !observing) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const version = readVersion.current;
@@ -89,7 +89,7 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
       if (!controller.signal.aborted) timer = setTimeout(() => setRevision(value => value + 1), 1000);
     });
     return () => { clearTimeout(timer); controller.abort(); void observer; };
-  }, [epoch, sessionId, revision, actions, capability, scope, canMutate]);
+  }, [epoch, sessionId, revision, actions, capability, scope, canMutate, observing]);
   const page = pageState?.epoch === epoch && pageState.sessionId === sessionId ? pageState.page : undefined;
   const head = page?.head;
   const source = head?.state === "pending" ? draftSource(epoch, sessionId, head) : null;

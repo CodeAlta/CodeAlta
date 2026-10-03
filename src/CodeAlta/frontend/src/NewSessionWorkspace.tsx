@@ -15,7 +15,7 @@ export function NewSessionWorkspace({ project, preferredHeight, onHeight, childr
     <div className="timeline-scroll new-session-welcome">
       <div className="welcome-content">
         <div className="blank-project-logo" role="img" aria-label="CodeAlta">
-          <pre aria-hidden="true">{logo.code}</pre><pre className="logo-alta" aria-hidden="true">{logo.alta}</pre>
+          <LogoWord text={logo.code} /><LogoWord text={logo.alta} className="logo-alta" />
         </div>
         <p className="welcome-subtitle">{project ? t("Next session will start in {project} from folder {folder}.", { project: project.name, folder: project.path })
           : t("Global workspace ready for a new session.")}</p>
@@ -28,5 +28,16 @@ export function NewSessionWorkspace({ project, preferredHeight, onHeight, childr
     <div className="composer-resize-bar" ref={composer.barRef}><ComposerSplitter {...composer.splitter} /></div>
     <div ref={composer.regionRef} className={`composer-region${composer.height === undefined ? "" : " resized"}`}
       style={composer.height === undefined ? undefined : { height: composer.height }}>{children}</div>
+  </div>;
+}
+
+function LogoWord({ text, className }: { text: string; className?: string }) {
+  // Box-drawing glyphs may come from a proportional fallback font on the WebView.
+  // Allocate FIGlet cells explicitly so both words share the same columns/baseline.
+  const rows = text.split("\n"), columns = Math.max(...rows.map(row => Array.from(row).length));
+  return <div className={`welcome-logo-word${className ? ` ${className}` : ""}`} aria-hidden="true">
+    {rows.map((row, index) => <div className="welcome-logo-row" key={index} style={{ width: `${columns}ch` }}>
+      {Array.from(row, (character, column) => <span key={column}>{character}</span>)}
+    </div>)}
   </div>;
 }

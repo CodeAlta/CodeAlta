@@ -875,3 +875,32 @@ browser/native/provider acceptance were not run, per the rapid-iteration constra
 Older browser fixtures still assume textarea DOM and removed controls and need migration
 before that suite is used as an acceptance gate. Monaco increases the frontend bundle;
 the existing chunk-size warning remains.
+
+## Composer, session menu and retained-read correction
+
+Session-tab overflow/split actions now use an opaque themed Blueprint menu and minimal
+Blueprint button, with arrow/Home/End navigation and Escape focus return. The shared
+3-D welcome logo allocates explicit character cells to avoid fallback-font column drift.
+New and existing composers render the same status/editor/toolbar surface and selector
+wrappers. Enqueue sits beside Send/Stop; compaction uses Archive instead of Minimize.
+
+New-session Agent choices resolve the exact unarchived catalog project/global scope
+without creating a session or provider. Model choices load the selected enabled provider's
+catalog independently. Captured preferences are revalidated against the fresh created
+session before guarded text/image transfer and next-send selection; no automatic Send is
+introduced. A provider catalog failure no longer fails independently valid Agent choices.
+
+Retained hidden FlexLayout panes used to continue background reads and display channels,
+putting pressure on bounded workspace/RPC admission. Content now observes actual node
+visibility events and pauses history/live/runtime/receipt/Ask/notes/selection reads until
+visible again. Visible split panes still observe independently. Composers, Ask answers,
+notes evidence and exact-command owners remain mounted; admitted mutations are not canceled.
+This addresses source-confirmed pressure paths, not a runtime reproduction of every reported
+history/choices/live failure. Genuine read/identity/cleanup failures remain explicit.
+
+Verification is build-only: Release desktop and desktop-test-project builds, frontend
+TypeScript/production build, isolated actual-App dock fixture compilation, and Lunet site
+build. Regression fixtures cover provider failure isolation, draft prompt scope and DTOs,
+populated draft choices, hidden/split channel cancellation, menu theme/focus and logo cells.
+No tests, browser/native acceptance, live hosts or providers were run. The existing Vite
+chunk-size warning remains.

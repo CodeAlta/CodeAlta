@@ -247,6 +247,9 @@ h1, h2, h3, p { margin-top: 0; }
 .welcome-content .welcome-subtitle { margin: 18px 0 12px; color: var(--text); }
 .blank-project-logo { display: flex; justify-content: center; align-items: start; gap: 2ch; font: clamp(3px, 1.8cqw, 12px)/1 "Cascadia Code", Consolas, monospace; color: var(--text); user-select: none; }
 .blank-project-logo pre { margin: 0; font: inherit; white-space: pre; }
+.welcome-logo-word { font: inherit; white-space: pre; font-variant-ligatures: none; }
+.welcome-logo-row { display: flex; height: 1em; line-height: 1; }
+.welcome-logo-row > span { display: block; flex: 0 0 1ch; width: 1ch; text-align: center; }
 .logo-alta { background: linear-gradient(110deg, #37b4ed, #c46af3, #ffb34c, #37b4ed); background-size: 300% 100%; background-clip: text; color: transparent; text-shadow: none; animation: alta-logo-colors 9s linear infinite; }
 @keyframes alta-logo-colors { to { background-position: 300% 0; } }
 @media (prefers-reduced-motion: reduce) { .logo-alta { animation: none; } }
@@ -266,6 +269,13 @@ h1, h2, h3, p { margin-top: 0; }
 .session-tabs .session-tab-label { display: block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-tabs .runtime-observation-compact { padding: 0 3px; border: 0; font-size: 11px; }
 .session-tab-more { padding: 2px 8px; }
+.session-tab-popup { position: fixed; z-index: 1000; max-width: calc(100vw - 8px); max-height: calc(100dvh - 8px); overflow: auto;
+  padding: 4px; border: 1px solid var(--line); border-radius: var(--bp-surface-border-radius); background: var(--panel); color: var(--text); box-shadow: var(--shadow); }
+.session-tab-popup .bp6-menu { background: var(--panel); color: var(--text); min-width: 210px; }
+.session-tab-popup .bp6-menu-item { color: var(--text); }
+.session-tab-popup .bp6-menu-item.bp6-disabled { color: var(--muted); }
+.session-tab-popup .bp6-menu-item:not(.bp6-disabled):hover, .session-tab-popup .bp6-menu-item:focus { background: var(--accent-soft); }
+.session-tab-popup .bp6-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .reference-palette { width: min(620px, calc(100vw - 32px)); max-height: min(620px, calc(100dvh - 32px)); overflow: auto; }
 .reference-palette header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .reference-palette h2 { margin: 0; font-size: 16px; }
@@ -901,6 +911,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .prompt-options > * { flex: initial; }
 .ide-shell .current-provider { display: flex; align-items: center; gap: 4px; }
 .ide-shell .composer-toolbar .history-controls { margin-left: auto; flex-wrap: wrap; gap: var(--bp-surface-spacing); }
+.ide-shell .composer-toolbar .composer-enqueue { display: inline-flex; align-items: center; margin: 0; min-height: 30px; white-space: nowrap; }
 .ide-shell .composer-icon-button, .ide-shell .history-controls > button:not(.bp6-button) { width: 30px; height: 30px; padding: 4px; border-radius: var(--bp-surface-border-radius); }
 .ide-shell .composer-status-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; color: var(--muted); font-size: 11px; }
 .ide-shell .composer-status-line > span { display: flex; align-items: center; gap: 5px; min-width: 0; }

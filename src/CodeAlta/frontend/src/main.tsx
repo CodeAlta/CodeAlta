@@ -1,4 +1,4 @@
-import { Button, Classes, FormGroup, HTMLSelect } from "@blueprintjs/core";
+import { Button, Classes, HTMLSelect } from "@blueprintjs/core";
 import { connect, onDiagnostic } from "@neoastra/client";
 import { rpcFailureCode } from "./rpcDiagnostics";
 import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
@@ -70,6 +70,9 @@ import { collapsedSessionWidth, constrainPaneLayout, defaultPaneLayout, persistP
 import { composerSizeKey, rememberComposerHeight } from "./composerHeight";
 import { ComposerSplitter, useComposerLayout } from "./ComposerLayout";
 import { NewSessionWorkspace } from "./NewSessionWorkspace";
+import { useNewSessionChoices } from "./newSessionChoices";
+import { ComposerSelectionFields } from "./ComposerSurface";
+import { validSelection } from "./sessionSelection";
 import { AppIcon } from "./AppIcon";
 import { sessionTime } from "./sessionTime";
 import { createProjectOpening } from "./projectOpening";
@@ -675,6 +678,9 @@ function App() {
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const connected = !!status?.hostAvailable;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
+  const draftChoices = useNewSessionChoices(status?.hostEpoch, projectId, selectedProject?.path ?? null,
+    creatingProvider, configurationState.snapshot, owned && sessionId === null && view === "workspace" && !settingsOpen
+      && !!snapshot?.configured && (projectId === null || !!selectedProject && !selectedProject.archived), mutation?.capability);
   const currentHostEpoch = useRef(status?.hostEpoch);
   currentHostEpoch.current = status?.hostEpoch;
   const currentHostAvailable = useRef(!!status?.hostAvailable);
@@ -1134,15 +1140,30 @@ function App() {
       {creatingProvider && !providers.some(provider => provider.id === creatingProvider) && <option value={creatingProvider} disabled>{creatingProvider}</option>}
       {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.id}</option>)}
     </HTMLSelect>;
-    if (compact) return <>
-      <FormGroup className="composer-field" label={<Button variant="minimal" onClick={() => navigate("prompts")}>{t("Agent→")}</Button>}>
-        <HTMLSelect fill aria-label={t("Agent prompt")} disabled title={t("Session choices become available after creation.")}><option>{t("Host default")}</option></HTMLSelect>
-      </FormGroup>
-      <FormGroup className="composer-field composer-model-field" label={<Button variant="minimal" onClick={() => navigate("models")}>{t("Model→")}</Button>}>
-        <div className="composer-model-options">{select}<HTMLSelect fill aria-label={t("Model")} disabled title={t("Session choices become available after creation.")}><option>{t("Provider default")}</option></HTMLSelect></div>
-      </FormGroup>
-      <FormGroup className="composer-field"><HTMLSelect fill aria-label={t("Reasoning")} disabled title={t("Session choices become available after creation.")}><option>{t("Model default")}</option></HTMLSelect></FormGroup>
-    </>;
+    if (compact) {
+      const locked = creatingBusy || creationLocked || !owned;
+      const value = draftChoices.value;
+      const efforts = draftChoices.models.find(model => model.id === value.modelId)?.efforts ?? [];
+      const change = (field: "agentPromptId" | "modelId" | "reasoningEffort", next: string) => {
+        invalidateCreation(); draftChoices.change(field, next);
+      };
+      return <ComposerSelectionFields sessionId="new" onOpenCatalog={navigate}
+        agent={<HTMLSelect fill id="composer-agent-new" aria-label={t("Agent prompt")} value={value.agentPromptId}
+          disabled={locked || draftChoices.loadingPrompts || !draftChoices.prompts.length} onChange={event => change("agentPromptId", event.target.value)}>
+          {!draftChoices.prompts.some(prompt => prompt.id === value.agentPromptId) && <option value={value.agentPromptId}>{t(draftChoices.loadingPrompts ? "Loading…" : "Host default")}</option>}
+          {draftChoices.prompts.map(prompt => <option key={prompt.id} value={prompt.id}>{prompt.name}</option>)}
+        </HTMLSelect>} provider={select}
+        model={<HTMLSelect fill id="composer-model-new" data-model-selector aria-label={t("Model")} value={value.modelId ?? ""}
+          disabled={locked || draftChoices.loadingModels} onChange={event => change("modelId", event.target.value)}>
+          <option value="">{t(draftChoices.loadingModels ? "Loading…" : "Provider default")}</option>
+          {value.modelId && !draftChoices.models.some(model => model.id === value.modelId) && <option value={value.modelId}>{value.modelId} · {t("Unverified")}</option>}
+          {draftChoices.models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
+        </HTMLSelect>}
+        reasoning={<HTMLSelect fill id="composer-reasoning-new" aria-label={t("Reasoning")} value={value.reasoningEffort ?? ""}
+          disabled={locked || !efforts.length} onChange={event => change("reasoningEffort", event.target.value)}>
+          <option value="">{t("Model default")}</option>{efforts.map(effort => <option key={effort} value={effort}>{effort}</option>)}
+        </HTMLSelect>} />;
+    }
     return <div className="creation-provider">
       <label><span>{t("Provider for new session")}</span>
         {select}
@@ -1155,11 +1176,11 @@ function App() {
     if (creationPending.current || creationHeld.current || !owned || !snapshot || !mutation?.capability.canMutate() || selectedProject?.archived
       || projectId !== null && !selectedProject || settingsVisible.current || dialog || paletteOpen
       || currentView.current !== "workspace" || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
-    if (fromDraft && (sessionId !== null || (!localDraft.text.trim() && !localImages.images.length)
+    if (fromDraft && (!draftChoices.ready || sessionId !== null || (!localDraft.text.trim() && !localImages.images.length)
       || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim()))) return;
     invalidateCreation(); // Deliberate capture fences any outstanding local paste.
     const handoff = fromDraft ? { scope: draftScope, ...localDraft, imageKey: localImageKey, images: localImages.images,
-      imageGeneration: localImageGeneration.current } : null;
+      imageGeneration: localImageGeneration.current, selection: { ...draftChoices.value } } : null;
     const evidenceIndex = draftHandoffEvidence.length;
     const recordHandoff = (outcome: string) => {
       if (!handoff) return;
@@ -1169,7 +1190,7 @@ function App() {
     creationPending.current = true;
     creationHeld.current = true;
     setCreationLocked(true);
-    const providerId = creatingProvider || null;
+    const providerId = handoff?.selection.providerKey || creatingProvider || null;
     const target: SessionTarget = selectedProject
       ? { scope: "project", projectId: selectedProject.id, projectPath: selectedProject.path } : { scope: "global" };
     const generation = creationGeneration.current;
@@ -1211,6 +1232,19 @@ function App() {
         const selection = candidate && fresh && selectedTab(fresh, candidate.projectId, candidate.sessionId) ? candidate : undefined;
         if (fresh && selection && isCurrent()) {
           if (handoff) {
+            // Revalidate preferences against this newly verified session's choices, never
+            // manufacture session authority from the pre-creation catalog DTOs.
+            let choices: Awaited<ReturnType<typeof sessionOperations.choices>> | undefined;
+            try {
+              choices = await sessionOperations.choices({ expectedEpoch: epoch!, sessionId: selection.sessionId },
+                { signal: creationRefresh.current.signal, timeoutMilliseconds: 15000 });
+              capability.observe(choices);
+            } catch { /* Original draft and choices stay available for manual review. */ }
+            if (!isCurrent() || !choices || choices.status !== "ok" || choices.epoch !== epoch
+              || choices.sessionId !== selection.sessionId || !choices.current || !validSelection(choices, handoff.selection)) {
+              recordHandoff("Session created, but draft choices could not be verified. Original draft retained; nothing sent.");
+              return;
+            }
             // Never overwrite a pre-existing session editor. Storage failure cannot
             // certify delivery into the ordinary composer, so leave navigation alone.
             if (snapshot.sessions.some(row => row.id === selection.sessionId) || submissions.pending(selection.sessionId)
@@ -1222,6 +1256,10 @@ function App() {
                     && isCurrent() && !submissions.pending(selection.sessionId);
                 }) : transferPromptDraft(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value), selection.sessionId, handoff.text))) {
               recordHandoff("Session created, but draft transfer could not be confirmed. Original text and images retained. Destination text storage may be uncertain; inspect sessions. Nothing sent.");
+              return;
+            }
+            if (!isCurrent() || !nextSendSelections.set(epoch!, selection.sessionId, choices, handoff.selection)) {
+              recordHandoff("Session created, but draft choices could not be verified. Original draft retained; nothing sent.");
               return;
             }
             recordHandoff("Draft copied to the verified session. Review it and use normal Send. Original local draft retained.");
@@ -1394,7 +1432,7 @@ function App() {
     selectedSession={selectedSession} configurationState={configurationState}
     preferences={{ theme, setTheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); } }}
     onOpenAbout={openAbout} />;
-  const newPromptDisabled = creatingBusy || creationLocked || !owned || !mutation?.capability.canMutate() || !snapshot
+  const newPromptDisabled = creatingBusy || creationLocked || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !snapshot
     || !!selectedProject?.archived || projectId !== null && !selectedProject || (!localDraft.text.trim() && !localImages.images.length)
     || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim());
   return <ShellLanguageContext.Provider value={language}><div className="app-shell ide-shell">
@@ -1582,7 +1620,7 @@ function App() {
               observe: value => mutation?.capability.observe(value) } : null}><main className="content">
           <SessionTabStrip state={sessionTabPresentation(tabs, snapshot, projectId, sessionId)} snapshot={snapshot}
             newSessionLabel={t("New session — {project}", { project: selectedProject?.name ?? t("Global") })}
-            renderSession={tab => {
+            renderSession={(tab, visible) => {
               const row = snapshot && resolveSessionTab(snapshot, tab);
               if (!row || !snapshot) return null;
               const ownerKey = JSON.stringify([status?.hostEpoch, tabKey(tab), row.createdAt]);
@@ -1593,7 +1631,7 @@ function App() {
                 ? { expectedEpoch: status.hostEpoch, projectId: tab.projectId, projectPath: tab.path!, sessionId: row.id,
                   lifetime: creationGeneration.current, capturePopup: captureReferenceLifetime,
                   observe: value => mutation?.capability.observe(value) } : null}>
-              <SessionWorkspace session={row} snapshot={snapshot} selectedProjectId={tab.projectId} notesReader={owners.notesReader}
+              <SessionWorkspace session={row} snapshot={snapshot} selectedProjectId={tab.projectId} notesReader={owners.notesReader} observing={visible && view === "workspace" && !settingsOpen}
                 active={tab.sessionId === sessionId} notesToggle={notesVisible} onActivate={() => { if (sessionId !== tab.sessionId) selectSessionTab(tab); }}
                 infoTrigger={sessionInfoTrigger} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger}
                 infoLifetime={{ revision: 0, current: () => !!currentSnapshot.current && !!resolveSessionTab(currentSnapshot.current, tab)
@@ -1632,8 +1670,11 @@ function App() {
                   localImages={owned && snapshot?.configured && currentProjectWritable() ? localImages : undefined}
                   onOpenHelp={openHelp} onOpenPalette={openPalette}
                   reason={t("Local to this project/global scope. Create and transfer first, then review and Send in the session. Original text is retained; reload restores it only when local storage permits.")}
-                   localDraft={{ text: localDraft.text, edit: editLocalDraft, options: creationProviderChoice(true),
-                     disabled: newPromptDisabled, busy: creatingBusy, submit: () => void createSelectedSession(true), action: <>
+                  localDraft={{ text: localDraft.text, edit: editLocalDraft, options: creationProviderChoice(true),
+                    notice: draftChoices.failed && <p role="status" className="composer-notice">{t("Some draft choices are unavailable. Refresh choices to try again.")}</p>,
+                    disabled: newPromptDisabled, busy: creatingBusy, submit: () => void createSelectedSession(true), action: <>
+                      {draftChoices.failed && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />} disabled={creatingBusy || creationLocked}
+                        aria-label={t("Refresh composer choices")} title={t("Refresh composer choices")} onClick={draftChoices.refresh} />}
                      <Button intent="primary" icon={<AppIcon name="send" size={16} />} disabled={newPromptDisabled}
                        aria-label={t("Start session")} title={t("Create a session and review this prompt before sending.")}
                        onClick={() => void createSelectedSession(true)} />
@@ -1843,8 +1884,9 @@ function createSessionPaneOwners() {
   };
 }
 
-function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, notesToggle, onActivate, notesReader }: {
+function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader }: {
   notesReader: ReturnType<typeof createNotesReader>;
+  observing?: boolean;
   active?: boolean; notesToggle?: boolean; onActivate?: () => void;
   session: WorkspaceSession;
   snapshot: WorkspaceSnapshot;
@@ -1956,7 +1998,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
           onWheel={event => { newest.cancel(); timeline.wheel(event); }} onKeyDown={timeline.keyDown}
           onPointerDown={event => { newest.cancel(); timeline.pointerDown(event); }}
           onPointerMove={timeline.pointerMove} onPointerUp={timeline.pointerEnd} onPointerCancel={timeline.pointerEnd}>
-        <History sessionId={session.id} messageCount={session.messageCount} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onSettled={() => {
+        <History observing={observing} sessionId={session.id} messageCount={session.messageCount} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onSettled={() => {
           timeline.settled(); if (!newest.pending()) timeline.pauseIfUnfollowed();
         }}
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}
@@ -1967,15 +2009,15 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
           live={ownedSession ? live?.snapshot?.session ?? null : null} />
         {ownedSession && status?.hostEpoch
         ? <>
-          <LiveSessionPanel store={display} hostEpoch={status.hostEpoch} sessionId={session.id} capability={mutation!.capability} />
+          <LiveSessionPanel observing={observing} store={display} hostEpoch={status.hostEpoch} sessionId={session.id} capability={mutation!.capability} />
           <div className="timeline-notices" ref={setTimelineNotices} />
-          {status.ownedAsksEnabled && <AskPanel epoch={status.hostEpoch} sessionId={session.id} actions={askActions} capability={mutation!.capability} refreshTrigger={askRefresh} />}
+          {status.ownedAsksEnabled && <AskPanel observing={observing} epoch={status.hostEpoch} sessionId={session.id} actions={askActions} capability={mutation!.capability} refreshTrigger={askRefresh} />}
           {status.ownedUserInputEnabled && <UserInputPanel epoch={status.hostEpoch} sessionId={session.id} reviewer={inputReviewer} capability={mutation!.capability}
             canReview={() => infoLifetime.current()} />}
         </>
         : null}
         </div>
-        <SessionNotesOverlay sessionId={session.id} epoch={ownedSession ? status?.hostEpoch : undefined} capability={mutation?.capability}
+        <SessionNotesOverlay observing={observing} sessionId={session.id} epoch={ownedSession ? status?.hostEpoch : undefined} capability={mutation?.capability}
           fallbackMarkdown={historyNotes} toggle={active ? notesToggle : undefined} reader={notesReader} />
         </div>
         {!timeline.following && <button type="button" className="timeline-bottom-button" onClick={() => { newest.cancel(); timeline.jump(); }}><AppIcon name="arrowDown" size={14} />{t(newerOmitted ? "Bottom of retained window (not newest)" : "Jump to latest visible")}</button>}
@@ -1987,7 +2029,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
           style={composer.height === undefined ? undefined : { height: composer.height }}>
         <SessionComposerGate snapshot={snapshot} projectId={selectedProjectId} session={session}
           epoch={ownedHost ? status!.hostEpoch! : null}
-          owned={status?.hostEpoch && mutation ? <OwnedSessionPanel active={active} sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
+          owned={status?.hostEpoch && mutation ? <OwnedSessionPanel observing={observing} active={active} sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
               usageTarget={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? {
                 epoch: status.hostEpoch, sessionId: session.id, scope: selectedProjectId === null ? "global" : "project",
                 projectId: selectedProjectId, expectedProjectPath: selectedProjectId === null ? null : session.workspacePath } : null}

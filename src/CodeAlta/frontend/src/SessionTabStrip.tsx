@@ -1,5 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Actions, DockLocation, Layout, PopupMenu, TabNode, TabSetNode, type Action, type PopupMenuEntry } from "flexlayout-react";
+import { Actions, DockLocation, Layout, TabNode, TabSetNode, type Action } from "flexlayout-react";
+import { Button } from "@blueprintjs/core";
+import { AppIcon } from "./AppIcon";
+import { SessionTabMenu, type SessionMenuEntry } from "./SessionTabMenu";
 import { useShellLanguage } from "./shellLanguage";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { resolveSessionTab, type SessionTab, type SessionTabs as Tabs } from "./sessionTabs";
@@ -19,14 +22,14 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
   select: (tab: SessionTab) => void; close: (tab: SessionTab) => void; reopen: () => void;
   observations?: RuntimeObservationControls;
   capture: () => () => boolean; children: ReactNode;
-  renderSession?: (tab: SessionTab) => ReactNode;
+  renderSession?: (tab: SessionTab, visible: boolean) => ReactNode;
   newSessionLabel?: string;
 }) {
   const { t } = useShellLanguage();
   const [model] = useState(createSessionTabModel);
   const root = useRef<HTMLDivElement>(null);
   const alive = useRef(true);
-  const [menu, setMenu] = useState<{ anchor: HTMLElement; items: PopupMenuEntry[]; current: () => boolean } | null>(null);
+  const [menu, setMenu] = useState<{ anchor: HTMLElement; items: SessionMenuEntry[]; current: () => boolean } | null>(null);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const label = (tab: SessionTab | null) => tab ? `${snapshot && resolveSessionTab(snapshot, tab)?.title || t("Unavailable session")} - ${
     tab.projectId === null ? t("Global") : snapshot?.projects.find(project => project.id === tab.projectId)?.name ?? t("Unavailable project")}` : newSessionLabel ?? t("New session");
@@ -121,15 +124,17 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
           {observations && <RuntimeObservationBadge controls={observations} tab={tab} compact />}
         </>;
       }}
-      onRenderTabSet={(node, values) => values.buttons.push(<button key="more" type="button" className="session-tab-more"
-        aria-label={t("Open sessions")} aria-haspopup="menu" onClick={event => more(event.currentTarget, node)}>⋯</button>)}
+      onRenderTabSet={(node, values) => values.buttons.push(<Button key="more" variant="minimal" size="small" className="session-tab-more"
+        icon={<AppIcon name="ellipsis" size={16} />} aria-label={t("Open sessions")} aria-haspopup="menu"
+        aria-expanded={!!menu && menu.anchor.dataset.tabset === node.getId()} data-tabset={node.getId()}
+        onClick={event => more(event.currentTarget, node)} />)}
       onShowOverflowMenu={(_node, event, items) => {
         const current = guard();
         if (!current()) return;
         setMenu({ anchor: event.currentTarget as HTMLElement, current, items: items.map(item => ({
           key: item.node.getId(), label: item.node.getName(),
           onSelect: () => {
-            // PopupMenu is outside Layout's onAction pipeline; apply the accepted action here.
+            // External menus are outside Layout's onAction pipeline; apply the accepted action here.
             apply(Actions.selectTab(item.node.getId()), current);
           },
         })) });
@@ -137,11 +142,23 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
       factory={node => {
         if (node.getId() === sessionDraftNodeId) return <div className="session-tab-content">{children}</div>;
         const tab = state.open.find(tab => sessionNodeId(tab) === node.getId());
-        return tab && renderSession ? <div className="session-tab-content">{renderSession(tab)}</div> : null;
+        return tab && renderSession ? <SessionTabContent node={node}>{visible => renderSession(tab, visible)}</SessionTabContent> : null;
       }} /></div>
     {drag.preview && <div className="session-drop-preview" aria-hidden="true" style={{ left: drag.preview.rect.x, top: drag.preview.rect.y,
       width: drag.preview.rect.width, height: drag.preview.rect.height }} />}
-    {menu && <PopupMenu anchor={menu.anchor} items={menu.items} title={t("Open sessions")}
-      container={root.current ?? undefined} onClose={() => setMenu(null)} />}
+    {menu && root.current && <SessionTabMenu anchor={menu.anchor} items={menu.items} title={t("Open sessions")}
+      container={root.current} current={menu.current} onClose={() => setMenu(null)} />}
   </div>;
+}
+
+function SessionTabContent({ node, children }: { node: TabNode; children: (visible: boolean) => ReactNode }) {
+  const [visible, setVisible] = useState(node.isVisible());
+  useLayoutEffect(() => {
+    // FlexLayout memoizes hidden content, so factory props alone cannot stop its readers.
+    const update = () => setVisible(node.isVisible());
+    node.setEventListener("visibility", update);
+    update();
+    return () => node.removeEventListener("visibility");
+  }, [node]);
+  return <div className="session-tab-content">{children(visible)}</div>;
 }

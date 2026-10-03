@@ -5,10 +5,11 @@ import type { createNotesReader } from "./sessionNotes";
 import type { createMutationCapability } from "./sessionOperations";
 import { useShellLanguage } from "./shellLanguage";
 
-export function SessionNotesOverlay({ sessionId, epoch, capability, fallbackMarkdown, toggle, reader }: {
+export function SessionNotesOverlay({ sessionId, epoch, capability, fallbackMarkdown, toggle, reader, observing = true }: {
   reader: ReturnType<typeof createNotesReader>;
   sessionId: string; epoch?: string; capability?: ReturnType<typeof createMutationCapability>;
   fallbackMarkdown: string; toggle?: boolean;
+  observing?: boolean;
 }) {
   const { t } = useShellLanguage();
   const panelId = useId();
@@ -45,7 +46,7 @@ export function SessionNotesOverlay({ sessionId, epoch, capability, fallbackMark
       title={t("Expand Alta notes")} aria-label={t("Expand Alta notes")} aria-expanded={!collapsed} aria-controls={panelId}
       onClick={() => setCollapsed(false)}><AppIcon name="notes" size={14} />{t("Alta notes")}<AppIcon name="chevronDown" size={14} /></button>
     <div className="session-notes-content" hidden={collapsed}>
-      <NotesPanel epoch={epoch} sessionId={sessionId} reader={reader} capability={capability}
+      <NotesPanel observing={observing} epoch={epoch} sessionId={sessionId} reader={reader} capability={capability}
         fallbackMarkdown={fallbackMarkdown} embedded panelId={panelId} onContent={showContent} preferredHeight={320}
         onResize={() => {}} onReset={() => {}} onCleared={() => { showContent(""); collapse(); }} onClose={collapse} />
     </div>
