@@ -6,17 +6,19 @@ title: Troubleshooting
 
 ## Open logs
 
-Use `Ctrl+G Ctrl+L`, `/logs`, or the **Show Logs** button in the navigator footer. CodeAlta also writes rolling diagnostic logs under:
+Use `Ctrl+G Ctrl+L` or `/logs`. CodeAlta also writes rolling diagnostic logs. The TUI writes them under:
 
 ```text
 ~/.alta/logs/
 ```
 
+The desktop app writes them under `CodeAlta/desktop/logs` in the local application data folder, for example `%LOCALAPPDATA%\CodeAlta\desktop\logs` on Windows.
+
 Logs are the first place to check for provider startup, credential, plugin build, and runtime errors.
 
 ## Glyphs or tree icons look wrong
 
-CodeAlta's terminal UI uses Nerd Fonts icons for tree expanders, status indicators, and other compact symbols. If these appear as empty boxes, question marks, unrelated icons, or misaligned glyphs, the terminal is usually not using a current Nerd Font-compatible font.
+This applies to the TUI only. CodeAlta's terminal UI uses Nerd Fonts icons for tree expanders, status indicators, and other compact symbols. If these appear as empty boxes, question marks, unrelated icons, or misaligned glyphs, the terminal is usually not using a current Nerd Font-compatible font.
 
 Check the font setup in this order:
 
@@ -63,13 +65,13 @@ Common fixes:
 
 ## No providers are enabled
 
-If no provider is enabled, CodeAlta opens the Model Providers dialog automatically. Configure credentials, click **Test Provider**, then **Save**. A successful test enables the provider automatically; Codex/Copilot browser or device login also enables its provider automatically.
+If no provider is enabled, CodeAlta opens the provider setup automatically: the Model Providers dialog in the TUI, or **Settings > Providers** in the desktop app. Configure credentials, test the provider, then save. A successful test enables the provider automatically; Codex/Copilot browser or device login also enables its provider automatically.
 
-For API-key providers, verify that the environment variable exists in the shell that launches `altatui`.
+For API-key providers, verify that the environment variable exists in the shell that launches CodeAlta. When the desktop app is started from the Start Menu or the applications menu, it sees the environment variables of your user session, not those of a terminal.
 
 ## Codex or Copilot login is pending
 
-The Model Providers dialog keeps browser sign-in and supported device-login instructions visible while authorization is pending. ChatGPT uses **Continue with ChatGPT** (browser only); Copilot and xAI also support device login. The current operation can be canceled from the dialog or with `Ctrl+G Ctrl+C`. Use `Ctrl+G Ctrl+U` / `Ctrl+G Ctrl+D` to copy the current login URL or device code.
+In the TUI, the Model Providers dialog keeps browser sign-in and supported device-login instructions visible while authorization is pending. ChatGPT uses **Continue with ChatGPT** (browser only); Copilot and xAI also support device login. The current operation can be canceled from the dialog or with `Ctrl+G Ctrl+C`. Use `Ctrl+G Ctrl+U` / `Ctrl+G Ctrl+D` to copy the current login URL or device code. In the desktop app, use **Sign in with the browser** or **Sign in with a device code** on the provider in **Settings > Providers**.
 
 For ChatGPT, legacy Codex credentials cannot be reused or imported. Sign in again, remove old credential-import `auth_source` settings, and use the public `https://api.openai.com/v1` endpoint. The callback must reach `127.0.0.1` on the machine running CodeAlta; remote/headless setups need browser access to that loopback listener. If sign-in succeeds without plan permission, choose **Continue with ChatGPT** to enable plan access or configure an API-key provider. Temporary refresh/network failures retain credentials; an unusable refresh token requires another sign-in with the saved registration. If sign-out reports unconfirmed revocation, disconnect CodeAlta in ChatGPT Settings.
 
@@ -80,7 +82,7 @@ If the first authorization-code exchange reports `invalid_grant`, choose **Conti
 > [!WARNING]
 > Broken plugins can fail during discovery, build, load, activation, or callbacks. Use safe mode or `--no-plugins` first if CodeAlta cannot start normally.
 
-Start CodeAlta without dynamic plugins:
+Start the TUI without dynamic plugins:
 
 ```sh
 altatui --no-plugins
@@ -92,13 +94,13 @@ Or with plugin safe mode:
 altatui --plugin-safe-mode
 ```
 
-You can also set:
+For both apps, you can also set this environment variable before starting CodeAlta. The desktop app does not have the two options above, so this is the way to start it without plugins:
 
 ```sh
 CODEALTA_DISABLE_PLUGINS=1
 ```
 
-Then open plugin management, disable the failing plugin, or inspect `~/.alta/logs/codealta.log` for build/load diagnostics.
+Then open plugin management, disable the failing plugin, or inspect the [logs](#open-logs) for build/load diagnostics.
 
 ## Plugin build says `plugin.cs` was treated as a project file
 
@@ -106,7 +108,7 @@ Source plugins require a .NET SDK that supports native file-based C# builds. Res
 
 ## Another CodeAlta instance is already running
 
-Only one `altatui` application instance can run on a machine at a time. The shared CodeAlta lock identity is unchanged by the terminal rename:
+Only one CodeAlta instance can run on a profile at a time, desktop or TUI. CodeAlta uses:
 
 > [!CAUTION]
 > Do not delete the lock file for a running process. Multiple active instances would share user state, sessions, and provider/runtime files unsafely.
@@ -115,7 +117,9 @@ Only one `altatui` application instance can run on a machine at a time. The shar
 ~/.alta/alta.lock
 ```
 
-A second launch exits with the PID of the already-running instance because multiple instances would share session state unsafely. The one exception is the developer instance (`altatui --dev` or `alta --dev`), which keeps its sessions and its own lock under `~/.alta/dev/` and can run beside the normal one.
+A second `altatui` exits with the PID of the already-running instance because multiple instances would share session state unsafely. A second `alta` shows the window of the running desktop app instead. `alta --exit` asks the running desktop app to exit.
+
+The desktop app can keep running in the notification area after its window is closed. If the TUI reports a running instance and you see no window, look for the CodeAlta icon in the notification area, or run `alta --exit`.
 
 ## A prompt did not send
 
@@ -131,4 +135,4 @@ If the session is busy, the prompt may be in the waiting list rather than sent i
 
 ## Context is too large
 
-Open the context usage popup with `Ctrl+G Ctrl+U`. For idle started sessions, press `F11` to run manual compaction. If compaction repeatedly misses its target, review attached file sizes and provider context metadata in the provider configuration.
+Open the context usage popup with `Ctrl+G Ctrl+U`. For idle started sessions, press `Ctrl+F11` to run manual compaction. If compaction repeatedly misses its target, review attached file sizes and provider context metadata in the provider configuration.

@@ -1,6 +1,7 @@
 doc:
   - {path: readme.md, title: "<i class='bi bi-book' aria-hidden='true'></i> User Guide"}
   - {path: getting-started.md, title: "<i class='bi bi-rocket-takeoff' aria-hidden='true'></i> Getting Started"}
+  - {path: desktop-and-tui.md, title: "<i class='bi bi-window-split' aria-hidden='true'></i> Desktop and TUI"}
   - {path: principles.md, title: "<i class='bi bi-compass' aria-hidden='true'></i> Principles"}
   - {path: model-providers.md, title: "<i class='bi bi-cpu' aria-hidden='true'></i> Model Providers"}
   - {path: prompts.md, title: "<i class='bi bi-chat-square-text' aria-hidden='true'></i> Agent Prompts"}

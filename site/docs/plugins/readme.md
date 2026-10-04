@@ -47,19 +47,18 @@ for source plugins:
 | Plugin | What it adds |
 |---|---|
 | [GitHub](github.md) | `#` issue lookup in GitHub repositories and an optional `gh` agent tool when the GitHub CLI is installed. |
-| [MCP](mcp.md) | Model Context Protocol server configuration, `alta mcp` commands, session-activated MCP agent tools, and the MCP Servers dialog. |
+| [MCP](mcp.md) | Model Context Protocol server configuration, `alta mcp` commands, session-activated MCP agent tools, and MCP server management. |
 | [Statistics](statistics.md) | Transient per-turn/session statistics timeline cards and a `statistics estimate` live-tool command. |
 
 ## Manage plugins
 
 Open plugin management with `Ctrl+G Ctrl+N`, `/plugins`, or `/plugin`.
 
-<figure class="my-4">
-  <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-plugins.png" alt="CodeAlta plugin management dialog with plugin list, diagnostics, and selected plugin contributions" loading="lazy">
-  <figcaption class="small text-secondary mt-2">Plugin management keeps discovered plugins, diagnostics, source actions, and contribution summaries visible in one dialog.</figcaption>
-</figure>
+{{ alta_shot "alta-desktop-plugins.webp" "alta-plugins.png" "Plugin management with the list of plugins" "Plugin management lists the plugins of the global and project scopes and lets you enable or disable them." }}
 
-The dialog shows:
+The desktop **Plugins** page of Settings lists the plugins with a switch to enable or disable each one. A change applies at the next start.
+
+The TUI dialog shows:
 
 - plugin scope and state;
 - diagnostics from discovery, config, build, load, activation, contributions,
@@ -74,69 +73,18 @@ You can also use a headless status summary:
 altatui --plugins-status
 ```
 
-## Shutdown
+## Plugins in the desktop app
 
-When `altatui` exits normally, it attempts runtime, provider and model-metadata
-cleanup before shutting down plugins started for the application. Runtime
-cleanup is best-effort and may report multiple failures together. This is not
-a guarantee that a failed or unresponsive plugin has stopped all of its work.
+The desktop app loads the same built-in and source plugins as the TUI. Agent tools, agent instructions, `alta` live-tool commands, prompt input processing, session status items and the Statistics timeline cards work in both apps.
 
-If a terminal frontend cleanup step fails, CodeAlta attempts the remaining
-frontend cleanup steps before runtime cleanup and can report their failures
-together. A step that does not finish can still delay the rest of shutdown.
+A plugin can also contribute user interface to the TUI. These contributions are not shown in the desktop app yet:
 
-For a successfully created terminal frontend, shutdown first stops new reminder
-creation, edits and deletions, requests cancellation, and waits for its retained
-reminder workers, including workers whose reminders were deleted. A terminal
-reminder cleanup failure still allows the remaining cleanup to be attempted;
-an unfinished worker can delay it indefinitely. This does not retract captured
-sends, remove queued prompts, stop agent runs or drain queued interface actions.
-It does not cover reminders created outside the frontend's owned service or
-resources hidden by failed frontend construction.
+- dialogs and other custom visuals;
+- commands and keyboard shortcuts;
+- prompt editor attachments;
+- timeline cards from source plugins.
 
-Editor cleanup also attempts the remaining open editors if closing the file picker
-or an earlier editor fails. This does not wait for every pending file load, save,
-or search, and it does not roll back file changes already made.
-
-If waiting to save a prompt draft fails, its work chain still waits for the
-previous draft operation before finishing that failed attempt. This can delay
-error reporting and shutdown while an earlier save is pending. It does not
-guarantee that every draft is saved: failures while preparing a flush remain a
-separate limitation, and file changes already made are not rolled back.
-
-Runtime event-delivery cleanup also attempts its remaining stages after failures,
-waiting for its worker before releasing cancellation resources. This does not
-drain pending interface updates or stop plugins, and fatal runtime errors can
-still terminate the process.
-
-Shell initialization cleanup similarly attempts its remaining stages after errors.
-It waits for the initialization task owned by the shell, not every provider
-refresh, startup history load, or queued interface action. This is not a
-complete-startup shutdown guarantee.
-
-If shared runtime startup fails, CodeAlta also attempts to clean up resources
-already acquired during that startup. This cleanup does not remove folders or
-files already created, and it does not guarantee that all background work has
-stopped.
-
-If you exit the terminal while its shared services are still starting, `altatui`
-requests startup cancellation and waits for that startup operation before
-finishing cleanup. Services returned after exit are still cleaned up. Shutdown
-can therefore take longer when startup or a plugin does not respond to
-cancellation; there is no forced-termination timeout.
-
-Normal terminal cleanup also requests cancellation of the background version
-check and waits for its operation before releasing its resources. This happens
-after application/startup cleanup; an unresponsive earlier cleanup stage can
-delay that request. It does not add a forced shutdown deadline or install updates.
-
-Model-metadata cleanup stops new background refresh starts and waits for the
-retained refresh before releasing its owned resources. It still attempts eligible
-resource cleanup after cancellation or refresh failures; repeated cleanup calls
-share the same result rather than retrying. A refresh that does not finish can
-delay shutdown indefinitely. This does not guarantee cache persistence or roll
-back resources hidden by failed construction, and caller-supplied HTTP clients
-remain the caller's responsibility.
+Plugin build problems at startup are reported in **Settings > Application Logs**.
 
 ## Source plugins
 
@@ -173,14 +121,14 @@ enabled = false
 enabled = false
 ```
 
-When a plugin is broken, start CodeAlta with a bypass:
+When a plugin is broken, start the TUI with a bypass:
 
 ```sh
 altatui --no-plugins
 altatui --plugin-safe-mode
 ```
 
-Or set:
+Or set this environment variable, which is also the way to start the desktop app without plugins:
 
 ```sh
 CODEALTA_DISABLE_PLUGINS=1

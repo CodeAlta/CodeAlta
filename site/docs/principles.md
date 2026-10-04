@@ -4,7 +4,7 @@ title: CodeAlta Principles
 
 # CodeAlta Principles
 
-CodeAlta is designed around a small set of product and engineering principles. They are meant to keep the terminal workspace efficient, inspectable, and practical for real development work as the feature set grows.
+CodeAlta is designed around a small set of product and engineering principles. They are meant to keep the workspace efficient, inspectable, and practical for real development work as the feature set grows. They were written for the terminal UI and they guide the desktop app in the same way.
 
 **Efficient. Transparent. Keyboard-first. Session-oriented. Provider-agnostic. Native .NET. Error-aware. Extensible.**
 

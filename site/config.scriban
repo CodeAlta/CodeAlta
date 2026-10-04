@@ -7,6 +7,7 @@
 extend "lunet-io/templates"
 
 template_theme_default_mode = "dark"
+template_theme_override_styles = ["/css/codealta.scss"]
 
 # -----------------------------------------------------------------------------
 # SITE SECTION (project-specific values only)
@@ -15,15 +16,45 @@ template_theme_default_mode = "dark"
 # Canonical base URL used for `lunet build` (links, og:meta, sitemap...).
 site_project_baseurl = "https://codealta.github.io"
 site_project_name = "CodeAlta"
-site_project_description = "An agentic AI coding CLI assistant for local projects, model providers, plugins, and multi-session workflows."
+site_project_description = "An agentic AI coding assistant for your desktop and your terminal: local projects, model providers, plugins, and multi-session workflows."
 site_project_logo_path = "/img/CodeAlta.svg"
 site_project_social_banner_path = "/img/alta-banner.png"
 site_project_banner_background_path = "/img/alta-banner.png"
-site_project_package_id = "CodeAlta.Tui"
+site_project_package_id = "CodeAlta"
 site_project_github_user = "CodeAlta"
 site_project_github_repo = "CodeAlta"
 site_project_owner_name = "Alexandre Mutel"
 site_project_owner_alias = "xoofx"
 site_project_owner_url = "https://xoofx.github.io"
 
+with bundle
+    js "/js/codealta.js"
+end
+
 site_project_init
+
+# Screenshots come in two versions, Desktop and TUI. The visitor's choice is kept in
+# localStorage and applied before the first paint so pages do not flash the other version.
+html.head.metas.add '<script>(function(){var ui="desktop";try{if(localStorage.getItem("codealta-ui")==="tui"){ui="tui";}}catch(_){}document.documentElement.setAttribute("data-alta-ui",ui);}());</script>'
+
+with builtins
+    # Renders one screenshot in its Desktop and TUI versions with a switch between them.
+    # `desktop` and `tui` are file names under /img, `alt` describes the screen and
+    # `caption` is HTML shown below the image.
+    func alta_shot(desktop, tui, alt, caption)
+        $img = site.basepath + "/img/"
+        $html = '<figure class="alta-shots my-4">'
+        $html = $html + '<div class="alta-shots-bar" role="group" aria-label="Screenshot version">'
+        $html = $html + '<button type="button" class="alta-shots-tab" data-alta-ui-set="desktop"><i class="bi bi-window" aria-hidden="true"></i> Desktop</button>'
+        $html = $html + '<button type="button" class="alta-shots-tab" data-alta-ui-set="tui"><i class="bi bi-terminal" aria-hidden="true"></i> TUI</button>'
+        $html = $html + '</div>'
+        $html = $html + '<div class="alta-shots-frame">'
+        $html = $html + '<img class="alta-shot alta-only-desktop" src="' + $img + desktop + '" alt="' + alt + ' in CodeAlta Desktop" loading="lazy">'
+        $html = $html + '<img class="alta-shot alta-only-tui" src="' + $img + tui + '" alt="' + alt + ' in CodeAlta TUI" loading="lazy">'
+        $html = $html + '</div>'
+        if caption
+            $html = $html + '<figcaption class="small text-secondary mt-2">' + caption + '</figcaption>'
+        end
+        ret $html + '</figure>'
+    end
+end

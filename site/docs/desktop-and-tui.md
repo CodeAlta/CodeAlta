@@ -1,0 +1,125 @@
+---
+title: Desktop and TUI
+---
+
+# Desktop and TUI
+
+CodeAlta has two apps:
+
+- **CodeAlta Desktop** (`alta`) is a desktop application with session tabs you can arrange, a file editor and a single Settings window. It is the most complete way to use CodeAlta.
+- **CodeAlta TUI** (`altatui`) is a keyboard-first terminal UI.
+
+Both apps share the same harness: the same agent runtime, providers, tools, agent prompts, skills, MCP servers and plugins, on the same `~/.alta` profile. This documentation applies to both. Where the two apps differ, the page says so, and screenshots have a **Desktop / TUI** switch.
+
+{{ alta_shot "alta-desktop-home.webp" "alta-home.png" "CodeAlta main workspace" "The same workspace in both apps: projects and sessions on the left, the session timeline, and the prompt at the bottom." }}
+
+## Install
+
+```sh
+dotnet tool install -g CodeAlta        # Desktop: alta
+dotnet tool install -g CodeAlta.Tui    # TUI: altatui
+```
+
+You can install both. See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements and first launch.
+
+## What is shared
+
+Everything under `~/.alta/` is common to both apps:
+
+- `config.toml`, model providers and their credentials;
+- the project catalog and all sessions, with their timelines, notes and pasted images;
+- agent prompts, system prompts and skills;
+- MCP server configuration and plugins.
+
+A session started in one app can be opened and continued in the other. Only one CodeAlta runs on a profile at a time, so close one app before starting the other.
+
+Appearance is not shared. The desktop app keeps its theme, color scheme, open tabs and window layout in its own application data, and the TUI keeps its theme and navigator settings in `~/.alta/ui-state.yaml`.
+
+## What the desktop app adds
+
+### Arrange sessions in the window
+
+Session tabs can be dragged along the tab strip to reorder them, to the edge of a pane to split the window, or to the center of another pane to merge. The tab menu also has **Split right** and **Split below**. Tabs from different projects stay open together, and each pane has its own prompt.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-split-three.webp" alt="CodeAlta Desktop with a parent session and its two child sessions in three panes" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A parent session and its two child sessions share the window.</figcaption>
+</figure>
+
+<div class="row g-3 my-4">
+  <div class="col-md-6">
+    <figure class="alta-figure mb-0">
+      <img src="{{site.basepath}}/img/alta-desktop-split-side.webp" alt="CodeAlta Desktop with two sessions side by side" loading="lazy">
+      <figcaption class="small text-secondary mt-2">Two sessions side by side.</figcaption>
+    </figure>
+  </div>
+  <div class="col-md-6">
+    <figure class="alta-figure mb-0">
+      <img src="{{site.basepath}}/img/alta-desktop-split-stacked.webp" alt="CodeAlta Desktop with two sessions stacked" loading="lazy">
+      <figcaption class="small text-secondary mt-2">Two sessions from different projects, stacked.</figcaption>
+    </figure>
+  </div>
+</div>
+
+### Files beside sessions
+
+`Ctrl+E` opens a project file in an editor tab. An editor tab can be split like a session tab, so the file stays visible beside the session that works on it.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-code-editor.webp" alt="CodeAlta Desktop with a session on the left and a C# file in an editor tab on the right" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A session and a file of the project, side by side.</figcaption>
+</figure>
+
+### One Settings window
+
+The TUI opens a dialog for each area. The desktop app groups them as pages of one window: **Appearance**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-settings.webp" alt="CodeAlta Desktop Settings window showing the Appearance page with the list of pages on the left" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Settings pages on the left, the selected page on the right.</figcaption>
+</figure>
+
+### Windows over the session
+
+Tool details, file diffs, context usage, session info, the session browser and the Notes of a session open as windows that you can move and resize over the workspace.
+
+### Runs in the background
+
+Closing the window keeps CodeAlta running in the notification area, with its sessions. Use the tray icon to open the window again or to exit. Turn this off with **Settings > Appearance > Keep running when the window is closed**. Exiting while sessions are running asks for confirmation first.
+
+### Updates from the app
+
+When a new version is available, the desktop app shows a notice with **Update and restart**. The TUI shows the `dotnet tool update` command to run.
+
+## Differences at a glance
+
+| | Desktop | TUI |
+| --- | --- | --- |
+| Command | `alta` | `altatui` |
+| Session tabs | Drag to reorder, split and merge panes | One visible tab at a time |
+| File editor | Editor tabs that can sit beside a session | Editor tab |
+| Settings | One window with a page per area | One dialog per area |
+| Appearance | Light, dark or system theme, 13 color schemes | Terminal themes |
+| Session notes | Movable Notes window over the timeline | Notes panel in the sidebar |
+| Pasted images | Thumbnails above the prompt | Preview dialog, in terminals with image support |
+| Queue a prompt | **Enqueue until idle** in the Send options | **AlwaysQueue** checkbox |
+| Tool permissions | Always approved automatically | Approved automatically by default; can be reviewed |
+| Plugins | Tools, instructions, commands for agents, status items | Also plugin dialogs, shortcuts and custom timeline cards |
+| Updates | **Update and restart** | Shows the command to run |
+| Font | No requirement | Nerd Font required |
+| Copy the UI as an image | Not available | `Ctrl+F12` |
+
+## Current desktop limitations
+
+The desktop app runs the same plugins as the TUI: the built-in MCP, GitHub and Statistics plugins, and your source plugins. Plugin tools, instructions for agents, `alta` commands and session status items work. The following parts of the plugin model are not available on the desktop yet:
+
+- dialogs, commands and keyboard shortcuts contributed by a plugin;
+- custom timeline cards from source plugins (the Statistics cards are shown);
+- prompt editor attachments contributed by a plugin (the `@` file picker and the `#` GitHub issue picker are built in);
+- the `--no-plugins` and `--plugin-safe-mode` options. Set `CODEALTA_DISABLE_PLUGINS=1` to start without plugins.
+
+Tool permission requests are always approved automatically on the desktop. To review each request, use the TUI and turn off **Auto approve commands** in Workspace Settings.
+
+## Which one to use
+
+Use the desktop app for daily work: it shows more at once and every feature is one click away. Use the TUI when you prefer to stay in a terminal, or when you want to review tool permission requests.

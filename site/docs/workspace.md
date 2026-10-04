@@ -4,21 +4,20 @@ title: Workspace and Dialogs
 
 # Workspace and Dialogs
 
-CodeAlta is designed for keyboard-first work in a terminal UI. Most popups close back to the prompt editor so you can keep typing without rebuilding context.
+CodeAlta is designed for keyboard-first work, in the desktop app and in the terminal UI. Most popups close back to the prompt editor so you can keep typing without rebuilding context.
+
+The workspace is the same in both apps. Use the **Desktop / TUI** switch on a screenshot to see each version; [Desktop and TUI]({{site.basepath}}/docs/desktop-and-tui/) lists the differences.
 
 ## Main workspace
 
-<figure class="my-4">
-  <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-home.png" alt="CodeAlta main workspace with projects sidebar, session tab, timeline, prompt editor, and provider footer" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The default workspace keeps navigation, the active session, prompt drafting, provider selection, and context status visible together.</figcaption>
-</figure>
+{{ alta_shot "alta-desktop-home.webp" "alta-home.png" "CodeAlta main workspace with projects sidebar, session tab, timeline and prompt editor" "The default workspace keeps navigation, the active session, prompt drafting, provider selection, and context status visible together." }}
 
 The main screen has four important areas:
 
-- **Navigator/sidebar**: projects, open sessions, running work, and navigator actions.
+- **Navigator/sidebar**: projects, their sessions and child sessions, running work, and navigator actions.
 - **Workspace tabs**: session tabs and editor tabs share the same tab strip.
-- **Timeline**: user messages, assistant messages, reasoning/status updates, tool-call chips, results, statistics cards, compaction notices, and modified-file summaries.
-- **Prompt/footer**: prompt editor, queue strip, **Agent:** profile selector, provider/model/reasoning selectors, context usage, compact button, and status text.
+- **Timeline**: user messages, assistant messages, reasoning/status updates, tool calls, results, statistics cards, compaction notices, and modified-file summaries.
+- **Prompt bar**: prompt editor, queue strip, agent prompt selector, provider/model/reasoning selectors, context usage, compact button, and status text.
 
 > [!TIP]
 > Press `F1`, type `/help`, or type `?` when you are unsure where an action lives. Help and command discovery are designed to return you to the prompt quickly.
@@ -28,104 +27,101 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. Use `Ctrl+T` (or 
 > [!TIP]
 > If these shortcuts do not work in Windows Terminal, see [Troubleshooting: Windows Terminal shortcuts do not reach CodeAlta]({{site.basepath}}/docs/troubleshooting/#windows-terminal-shortcuts-do-not-reach-codealta).
 
-## Session notes
+### Command palette
 
-The sidebar **Notes** panel shows the selected session's sticky Markdown checklist, status, or next actions. Agents use `alta notes get`, `alta notes set --stdin`, and `alta notes clear`; `note` remains an alias. The panel wraps Markdown, scrolls vertically, copies the exact Markdown, and clears without blocking the UI.
+Press `Ctrl+P`, or type `/` in an empty prompt, to search and run any command. Each entry shows its slash command and its shortcut.
 
-Notes belong to the session, not its tab. A known caller session can read or update its notes while its tab is closed, and reopening restores the latest notes or clear event from the session journal. Switching tabs cannot redirect an operation that has already captured its session. An unknown explicit session is an error rather than permission to change another session's notes. Writes preserve exact Markdown, including empty text, and acknowledge journal persistence before reporting success. If an error explicitly says the notes were committed but feedback failed, read them again before retrying; do not assume the write was rolled back. This does not add restart persistence for asks or reminders.
+{{ alta_shot "alta-desktop-command-palette.webp" "alta-command-palette.png" "Command palette listing commands with their shortcuts" "The command palette lists every command with its slash name and shortcut." }}
 
-If the session journal contains malformed or truncated data, notes updates are refused without discarding that data. Notes commands do not automatically repair journals.
+### Split panes (desktop)
 
-## Saved workspace preferences
+In the desktop app, session and editor tabs can be arranged in panes:
 
-Open-session selection, project preferences, theme and navigator settings are saved in `~/.alta/ui-state.yaml`. Session-specific execution state stays in session journals. UI-state saves retain unrecognized nested settings, frontend-specific layout data and logical tab descriptors for unavailable contributions; retaining a descriptor does not mean the current frontend can display it.
+- drag a tab along the tab strip to reorder it;
+- drag a tab to an edge of a pane to split the window side by side or stacked;
+- drag a tab to the center of another pane to move it there;
+- or use **Split right** and **Split below** in the tab menu (`…`) of a pane.
 
-Saves check the last successfully loaded/saved file content, not just its timestamp. If another editor changes, deletes or creates the file, stale UI state is not silently written over it. Malformed or unsupported YAML also remains untouched. During normal use, the workspace status line reports conflicts as warnings and other save failures as errors; a successful retry reports that pending changes were saved. The settings dialog still closes back to the workspace, and later UI activity may replace the status message. Pending settings can remain effective in memory without being saved. There is not yet a UI-state conflict-resolution dialog or restart recovery for those pending changes; preserve your intended changes before exiting after a save error. Shutdown save failures are logged without skipping later cleanup. YAML comments and formatting are not retained when a save succeeds.
-
-## Timeline cards
+Each pane has its own timeline and prompt. Tabs are workspace-wide: sessions from different projects stay open together, and the layout is restored at the next start. `Ctrl+W` closes the current tab and `Ctrl+Shift+T` reopens the last closed one.
 
 <div class="row g-3 my-4">
-  <div class="col-lg-4">
-    <figure class="h-100">
-      <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-modified-files.png" alt="CodeAlta modified-files timeline card summarizing file changes" loading="lazy">
-      <figcaption class="small text-secondary mt-2">Modified-file cards summarize changed files and diff totals.</figcaption>
+  <div class="col-md-6">
+    <figure class="alta-figure mb-0">
+      <img src="{{site.basepath}}/img/alta-desktop-split-side.webp" alt="CodeAlta Desktop with a parent session and a child session side by side" loading="lazy">
+      <figcaption class="small text-secondary mt-2">A parent session and one of its child sessions, side by side.</figcaption>
     </figure>
   </div>
-  <div class="col-lg-4">
-    <figure class="h-100">
-      <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-tool-input-output-dialog.png" alt="CodeAlta tool input and output dialog opened from a timeline tool call" loading="lazy">
-      <figcaption class="small text-secondary mt-2">Tool inputs and outputs stay inspectable in expandable dialogs.</figcaption>
-    </figure>
-  </div>
-  <div class="col-lg-4">
-    <figure class="h-100">
-      <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-plugin-statistics.png" alt="CodeAlta plugin statistics card in the timeline" loading="lazy">
-      <figcaption class="small text-secondary mt-2">Timeline projections can include plugin-provided statistics.</figcaption>
+  <div class="col-md-6">
+    <figure class="alta-figure mb-0">
+      <img src="{{site.basepath}}/img/alta-desktop-split-stacked.webp" alt="CodeAlta Desktop with two sessions from different projects stacked" loading="lazy">
+      <figcaption class="small text-secondary mt-2">Sessions from two projects, stacked.</figcaption>
     </figure>
   </div>
 </div>
+
+## Timeline cards
+
+{{ alta_shot "alta-desktop-tool-details.webp" "alta-tool-input-output-dialog.png" "Tool call details opened from the timeline" "Tool inputs and outputs stay inspectable: open a tool call to read its arguments and its output." }}
+
+{{ alta_shot "alta-desktop-modified-files.webp" "alta-modified-files.png" "Diff of a modified file opened from the timeline" "Modified-file cards summarize changed files and diff totals. Open a file to read its diff." }}
 
 Timeline entries are grouped so the important parts stay visible:
 
 - assistant messages render as Markdown;
 - reasoning and status messages explain what the agent is doing;
-- tool calls appear as compact chips with expandable details;
+- tool calls appear as compact tiles with expandable details;
 - tool results can be collapsed to avoid flooding the transcript;
 - the modified-files card summarizes per-file `+/-` diff totals and can show diff details;
 - statistics cards summarize timing, tools, usage, and other plugin-projected details.
 
-Built-in file-change inspection is bounded so large files or recursive directory operations do not
-overload session history. Text snapshots skip files larger than 1 MiB and share an 8,388,608-character
-capture budget per tracker. Tool and turn diffs retain complete per-file blocks up to 1,048,576
-characters, with explicit notices when file content or remaining diffs are omitted. These limits do
-not restrict the file operation itself. Omitted content is not retained in the journal; use Git or
-another external diff when you need complete inspection rather than treating displayed counts as
-complete totals.
-
 Use `F3` / `F4` to jump between previous and next user or assistant messages. Use `Ctrl+F3` to jump to the first message and `Ctrl+F4` to return to the bottom.
+
+The desktop timeline opens on the latest messages of a session. Use **Load previous messages** at the top to read earlier turns.
 
 ## Prompt editor and prompt queue
 
-<div class="row g-3 my-4">
-  <div class="col-lg-6">
-    <figure class="h-100">
-      <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-prompt.png" alt="CodeAlta inline prompt editor with model controls, context usage, and send actions" loading="lazy">
-      <figcaption class="small text-secondary mt-2">The inline prompt editor keeps model controls, context usage, queue state, and send actions close to your draft.</figcaption>
-    </figure>
-  </div>
-  <div class="col-lg-6">
-    <figure class="h-100">
-      <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-prompt-fullscreen.png" alt="CodeAlta full-screen prompt editor for longer multi-line prompts" loading="lazy">
-      <figcaption class="small text-secondary mt-2">Use the full-screen prompt editor for longer multi-line prompts without leaving the selected session.</figcaption>
-    </figure>
-  </div>
-</div>
+{{ alta_shot "alta-desktop-prompt.webp" "alta-prompt.png" "Inline prompt editor with model controls, context usage and send actions" "The inline prompt editor keeps model controls, context usage, queue state, and send actions close to your draft." }}
 
 Press `Enter` to send and `Shift+Enter` for a new line. If the selected session is busy, `Enter` adds the prompt to the waiting list instead of dropping it. Queued prompts can be edited, repeated, steered immediately when supported, deleted, or cleared with `F10`.
 
-The footer **Agent:** selector chooses the agent prompt profile for the current draft/session. Built-in prompts appear first, followed by global `~/.alta/prompts/agents` prompts and project `.alta/prompts/agents` prompts. Global/project prompts with the same file id override lower-precedence prompts; see [Agent Prompts]({{site.basepath}}/docs/prompts/).
+The agent prompt selector chooses the agent prompt profile for the current draft/session. Built-in prompts appear first, followed by global `~/.alta/prompts/agents` prompts and project `.alta/prompts/agents` prompts. Global/project prompts with the same file id override lower-precedence prompts; see [Agent Prompts]({{site.basepath}}/docs/prompts/).
 
-`Ctrl+Enter` steers a running provider session. If the provider cannot steer live, CodeAlta re-queues the prompt for the next normal turn.
+In the desktop app, the agent prompt, provider, model and reasoning effort are in one picker at the left of the prompt bar. The prompt bar also shows the project folder, the git branch and the number of changed files.
 
-Use `F6` or the **Full Prompt** action to open a larger prompt editor. `Enter`, `Esc`, or `Ctrl+Enter` closes it and keeps your draft.
+<figure class="alta-figure my-4" style="max-width: 38rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-session-config.webp" alt="CodeAlta Desktop picker for agent prompt, provider, model and reasoning effort" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Agent prompt, provider, model and reasoning effort for the next send.</figcaption>
+</figure>
+
+`Ctrl+Enter` steers a running provider session. If the provider cannot steer live, CodeAlta re-queues the prompt for the next normal turn. `F8` aborts the running turn.
+
+Use `F6` or the **Full Prompt** action to open a larger prompt editor. `Esc` or `Ctrl+Enter` closes it and keeps your draft.
 
 <figure class="my-4">
   <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-system-prompt-and-user-prompt.png" alt="CodeAlta timeline showing system prompt details and an agent prompt" loading="lazy">
   <figcaption class="small text-secondary mt-2">Prompt and system-prompt details are visible in the timeline, including the selected agent prompt and source path, so you can review what context was sent.</figcaption>
 </figure>
 
+## Session notes
+
+Each session has sticky Markdown notes that agents keep up to date with a checklist, a status or next actions. The TUI shows them in the **Notes** panel of the sidebar. The desktop app shows them in a **Notes** window over the timeline, which you can move, resize, collapse, copy and clear; `Ctrl+Shift+N` shows or hides it.
+
+{{ alta_shot "alta-desktop-notes.webp" "alta-notes.png" "Session notes with a Markdown checklist" "Notes belong to the session and stay visible while the agent works." }}
+
 ## Open Project dialog
 
-Open it with `Ctrl+O`, `/open`, or the `+` action on the Projects sidebar row.
+Open it with `Ctrl+O`, `/open`, or the `+` action of the Projects sidebar.
 
-The dialog supports project-name and directory completion. Rooted paths such as `/`, `C:`, `D:`, and `~` open folders. The **Include hidden** toggle includes archived/hidden projects in completion.
+The dialog supports project-name and directory completion. Rooted paths such as `/`, `C:`, `D:`, and `~` open folders. In the TUI, the **Include hidden** toggle includes archived/hidden projects in completion.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-open-project.webp" alt="CodeAlta Desktop Open project dialog filtering projects by name" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Type a name to filter known projects, or a path to open a folder.</figcaption>
+</figure>
 
 ## File/folder picker and prompt attachments
 
-<figure class="my-4">
-  <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-file-selection.gif" alt="CodeAlta animated file selection dialog for attaching project files to a prompt" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The <code>@</code> picker searches project files and folders, then inserts accepted entries as structured prompt attachments.</figcaption>
-</figure>
+{{ alta_shot "alta-desktop-file-selection.webp" "alta-file-selection.gif" "File picker for attaching project files to a prompt" "The <code>@</code> picker searches project files and folders, then inserts accepted entries as structured prompt attachments." }}
 
 Type `@` in the prompt to search project files and folders. Accepted entries become Markdown links and are sent as structured attachments. You can also type raw references such as:
 
@@ -141,161 +137,201 @@ Use `Ctrl+E` or `/edit` to open the same picker in editor mode.
 
 ## Editor tabs
 
-<figure class="my-4">
-  <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-code-editor.png" alt="CodeAlta editor tab with syntax-highlighted source code" loading="lazy">
-  <figcaption class="small text-secondary mt-2">Editor tabs sit beside session tabs for quick inspection and focused edits without leaving the terminal UI.</figcaption>
-</figure>
+{{ alta_shot "alta-desktop-code-editor.webp" "alta-code-editor.png" "Editor tab with syntax-highlighted source code" "Editor tabs sit beside session tabs for quick inspection and focused edits without leaving CodeAlta." }}
 
-Editor tabs support TextMate syntax highlighting, line/column status, dirty markers, `Ctrl+S` save, reload prompts for on-disk changes, and close confirmation for unsaved edits. Editor tabs sit beside session tabs so you can inspect files without leaving CodeAlta.
+Editor tabs support syntax highlighting, line/column status, dirty markers, `Ctrl+S` save, reload prompts for on-disk changes, and close confirmation for unsaved edits. In the desktop app an editor tab can be placed in its own pane, beside the session that works on the file.
 
-## Model Providers dialog
+## Model Providers
 
-<figure class="my-4">
-  <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-model-providers.png" alt="CodeAlta Model Providers dialog with provider configuration and validation controls" loading="lazy">
-  <figcaption class="small text-secondary mt-2">Provider setup, endpoint details, credential options, and tests live in one dialog.</figcaption>
-</figure>
+{{ alta_shot "alta-desktop-model-providers.webp" "alta-model-providers.png" "Model provider configuration with validation controls" "Provider setup, endpoint details, credential options, and tests live in one place." }}
 
-Open it with `Ctrl+G Ctrl+R`, `/model_providers`, or the provider summary. Use it to enable providers, enter credentials, test endpoints, handle Codex/Copilot login flows, refresh saved provider availability, and edit advanced TOML safely.
+Open it with `Ctrl+G Ctrl+R`, `/model_providers`, or the provider summary. Use it to enable providers, enter credentials, test endpoints, sign in to Codex or Copilot, and edit advanced TOML safely. In the desktop app this is the **Providers** page of Settings.
 
 ## Prompt manager
 
-Open it with `Ctrl+G Ctrl+H` or `/prompt`. The dialog opens on **Agent Prompts**, which lists built-in modes such as Default and Plan plus global/project custom prompts, shows which prompts are shadowed by overrides, and edits the selected prompt on the right. Agent prompt properties are `name`, `description`, `system`, and the Markdown body. The **System Prompt** tab lists system prompt files with the same override rules and lets you edit only global/project override bodies. Built-in prompts are displayed for inspection but are read-only; create a global or project prompt/system prompt with the same id to override one. Advanced prompt workflows can combine prompts with sessions, notes, reminders, asks, MCP, and skills; see [Advanced Agent Workflows]({{site.basepath}}/docs/advanced-agent-workflows/).
+Open it with `Ctrl+G Ctrl+H` or `/prompt`. It lists built-in modes such as Default and Plan plus global/project custom prompts, shows which prompts are shadowed by overrides, and edits the selected prompt on the right. Agent prompt properties are `name`, `description`, `system`, and the Markdown body. System prompt files are listed with the same override rules, and only global/project override bodies can be edited. Built-in prompts are displayed for inspection but are read-only; create a global or project prompt/system prompt with the same id to override one. Advanced prompt workflows can combine prompts with sessions, notes, reminders, asks, MCP, and skills; see [Advanced Agent Workflows]({{site.basepath}}/docs/advanced-agent-workflows/).
 
-The prompt manager edits structured fields and may normalize frontmatter. Agent-driven raw prompt edits instead replace complete supplied file text, preserving comments/unknown fields, line endings and existing Unicode encoding/BOM. Both reject detected file conflicts and use the same host storage owner. Raw command checks start when the command runs, so they do not detect that replacement text was already stale beforehand; external edits can still race the final check/write. See [Advanced Agent Workflows]({{site.basepath}}/docs/advanced-agent-workflows/) before coordinating multiple editors.
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-prompts.webp" alt="CodeAlta Desktop Agent prompts page listing built-in prompts with the selected prompt on the right" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The <strong>Agent prompts</strong> page of the desktop Settings. <strong>Customize a copy</strong> creates your own version of a built-in prompt.</figcaption>
+</figure>
 
 ## Model browser
 
-<figure class="my-4">
-  <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-models.png" alt="CodeAlta model browser showing provider models, model references, and capability metadata" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The model browser lists available provider models, copyable model refs, reasoning settings, and capability metadata.</figcaption>
-</figure>
+{{ alta_shot "alta-desktop-models.webp" "alta-models.png" "Model browser showing provider models and capability metadata" "The model browser lists the models of every provider with their context size and capabilities." }}
 
-Open it with `Ctrl+G Ctrl+O` or `/models`. It shows provider/model metadata and copyable model refs such as `codex:gpt-5.5@high`. Use it to select the current model and verify whether reasoning/tool-call/image capabilities are available.
+Open it with `Ctrl+G Ctrl+O` or `/models`. It shows provider/model metadata and model refs such as `codex:gpt-5.5@high`. Use it to verify whether reasoning/tool-call/image capabilities are available.
 
 ## Context usage popup
 
-<figure class="my-4">
-  <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-context-usage.png" alt="CodeAlta context usage popup with token sections and provider usage details" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The usage popup explains active context, recent usage, compaction pressure, and provider-reported limits.</figcaption>
-</figure>
+{{ alta_shot "alta-desktop-context-usage.webp" "alta-context-usage.png" "Context usage with token sections and provider usage details" "The usage popup explains active context, recent usage, compaction pressure, and provider-reported limits." }}
 
-Open it with `Ctrl+G Ctrl+U` or the footer context indicator. The popup explains the current context denominator, active usage, compaction pressure, recent operation usage, and provider-specific usage details when available.
+Open it with `Ctrl+G Ctrl+U` or the context indicator of the prompt bar. The popup explains the current context denominator, active usage, compaction pressure, recent operation usage, and provider-specific usage details when available.
 
 ## Session report
 
 Open it with `Ctrl+G Ctrl+T` or the session info icon. The report summarizes selected-session scope, provider/model state, run status, queue state, and history/session details useful for troubleshooting or handoff.
 
+In the desktop app, `Ctrl+Alt+B` opens the session browser: a searchable table of the sessions of a project or of the global scope, with their provider, last update and message count.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-session-browser.webp" alt="CodeAlta Desktop session browser listing saved sessions of a project" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The session browser finds and opens any saved session.</figcaption>
+</figure>
+
 ## Workspace settings
+
+Open settings with `Ctrl+G Ctrl+W` or `/settings`.
+
+### Desktop
+
+The desktop app has one Settings window with a page per area: **Appearance**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. `Ctrl+,` and the gear button of the title bar open it too.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-settings.webp" alt="CodeAlta Desktop Settings window showing the Appearance page" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Appearance page: language, theme, color scheme, project sorting and window behavior.</figcaption>
+</figure>
+
+The **Appearance** page sets:
+
+- the UI language: **Auto**, English, Spanish, French, German, Japanese, or Simplified Chinese;
+- the theme: **Dark**, **Light**, or **System**;
+- one of 13 color schemes, each with a dark and a light variant;
+- how projects are sorted and how many recent sessions are listed per project;
+- whether CodeAlta keeps running in the notification area when the window is closed.
+
+<div class="row g-3 my-4">
+  <div class="col-md-6">
+    <figure class="alta-figure mb-0">
+      <img src="{{site.basepath}}/img/alta-desktop-theme-dark.webp" alt="CodeAlta Desktop in the dark theme" loading="lazy">
+      <figcaption class="small text-secondary mt-2">Dark</figcaption>
+    </figure>
+  </div>
+  <div class="col-md-6">
+    <figure class="alta-figure mb-0">
+      <img src="{{site.basepath}}/img/alta-desktop-theme-light.webp" alt="CodeAlta Desktop in the light theme" loading="lazy">
+      <figcaption class="small text-secondary mt-2">Light</figcaption>
+    </figure>
+  </div>
+</div>
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-themes.webp" alt="CodeAlta Desktop in six color schemes, dark and light" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Blueprint, Cherry, Kiwi, Plum and Orange in dark mode, and Blueberry in light mode.</figcaption>
+</figure>
+
+### TUI
 
 <div class="row g-3 my-4">
   <div class="col-md-6 col-xl-4">
     <figure>
-      <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-theme-default.png" alt="CodeAlta default dark theme" loading="lazy">
+      <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-theme-default.png" alt="CodeAlta TUI default dark theme" loading="lazy">
       <figcaption class="small text-secondary mt-2">Default</figcaption>
     </figure>
   </div>
   <div class="col-md-6 col-xl-4">
     <figure>
-      <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-theme-blue.png" alt="CodeAlta blue theme" loading="lazy">
+      <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-theme-blue.png" alt="CodeAlta TUI blue theme" loading="lazy">
       <figcaption class="small text-secondary mt-2">Blue</figcaption>
     </figure>
   </div>
   <div class="col-md-6 col-xl-4">
     <figure>
-      <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-theme-green.png" alt="CodeAlta green theme" loading="lazy">
+      <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-theme-green.png" alt="CodeAlta TUI green theme" loading="lazy">
       <figcaption class="small text-secondary mt-2">Green</figcaption>
     </figure>
   </div>
   <div class="col-md-6 col-xl-4">
     <figure>
-      <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-theme-cherry.png" alt="CodeAlta cherry theme" loading="lazy">
+      <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-theme-cherry.png" alt="CodeAlta TUI cherry theme" loading="lazy">
       <figcaption class="small text-secondary mt-2">Cherry</figcaption>
     </figure>
   </div>
   <div class="col-md-6 col-xl-4">
     <figure>
-      <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-theme-light.png" alt="CodeAlta light theme" loading="lazy">
+      <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-theme-light.png" alt="CodeAlta TUI light theme" loading="lazy">
       <figcaption class="small text-secondary mt-2">Light</figcaption>
     </figure>
   </div>
   <div class="col-md-6 col-xl-4">
     <figure>
-      <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-theme-multi.png" alt="CodeAlta theme selector showing multiple available themes" loading="lazy">
+      <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-theme-multi.png" alt="CodeAlta TUI theme selector showing multiple available themes" loading="lazy">
       <figcaption class="small text-secondary mt-2">Theme selector</figcaption>
     </figure>
   </div>
 </div>
 
-Open it with `Ctrl+G Ctrl+W` or `/settings`. Workspace settings cover the selected workspace/project behavior and are separate from the model-provider editor. You can also choose the UI language from **Auto**, English, Spanish, French, German, Japanese, and Simplified Chinese; language changes are saved with the workspace settings and fully apply after restarting CodeAlta.
-
-### Tool permissions
-
-**Auto-approve** is enabled by default. When enabled, permission requests are approved once automatically. Disable it to review requests using **Allow Once**, **Allow for Session**, or **Deny**; press `Escape` to cancel. Provider/runtime policy still governs what each approval permits.
-
-When a waiting request is canceled, its permission dialog closes; a canceled request queued for display does not appear afterward. An old dialog response cannot approve a later request that reuses the same provider interaction ID. Permission completion does not depend on an open session tab, and dismissing presentation alone is not an approval.
+The Workspace Settings dialog covers the navigator and the UI theme, and is separate from the model-provider editor. You can also choose the UI language from **Auto**, English, Spanish, French, German, Japanese, and Simplified Chinese; language changes are saved with the workspace settings and fully apply after restarting CodeAlta.
 
 <figure class="my-4">
   <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-workspace-settings-with-language.png" alt="CodeAlta Workspace Settings dialog showing theme, recent sessions, language, and auto-approve options" loading="lazy">
   <figcaption class="small text-secondary mt-2">The Workspace Settings dialog includes the language selector and a restart notice for fully applying language changes.</figcaption>
 </figure>
 
+### Tool permissions
+
+Agents ask for permission before running commands or changing files. **Auto approve commands** is enabled by default in the TUI Workspace Settings: requests are approved automatically. Turn it off to review each request with **Allow Once**, **Allow for Session**, or **Deny**.
+
+The desktop app always approves requests automatically.
+
+> [!CAUTION]
+> With automatic approval, commands and file changes run with your user privileges. They are not limited to the project folder.
+
 ## About and updates
 
-Open it with `Ctrl+G Ctrl+A` or `/about`. The dialog shows the animated CodeAlta logo, current version, copyright, and whether the startup update check found a newer .NET tool package.
+Open it with `Ctrl+G Ctrl+A` or `/about`. It shows the current version and whether the startup update check found a newer .NET tool package.
 
-### New version toast
+### New version notice
 
-When the startup update check finds a newer `CodeAlta.Tui` package on NuGet, CodeAlta shows a non-blocking toast during the session. The toast includes the latest version and the matching `dotnet tool update -g CodeAlta.Tui` command (with `--prerelease` for preview versions), with a copy action for the command. CodeAlta does not update itself automatically; after you exit `altatui`, it also prints the same command so you can run it in your shell.
+When the startup update check finds a newer package on NuGet, CodeAlta shows a notice with the new version and a link to the release notes.
+
+- **Desktop**: the notice has an **Update and restart** button. CodeAlta exits, runs `dotnet tool update -g CodeAlta`, and starts again.
+- **TUI**: the notice shows the `dotnet tool update -g CodeAlta.Tui` command with a copy action. After you exit, the same command is printed so you can run it in your shell.
 
 <figure class="my-4">
-  <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-release-toast.png" alt="CodeAlta update-available toast showing a newer package version and a dotnet tool update command" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The update toast appears once per session when a newer CodeAlta package is available.</figcaption>
+  <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-release-toast.png" alt="CodeAlta TUI update-available toast showing a newer package version and a dotnet tool update command" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The update notice appears once per session when a newer CodeAlta package is available.</figcaption>
 </figure>
+
+### Notification area (desktop)
+
+Closing the desktop window keeps CodeAlta and its sessions running, with an icon in the notification area. Click the icon to show the window, or use its menu to exit. `Ctrl+Q` exits directly. If sessions are still running, CodeAlta asks before exiting because exiting stops them.
+
+Turn off **Keep running when the window is closed** in **Settings > Appearance** to exit when the window is closed.
 
 ## Plugin management
 
-<figure class="my-4">
-  <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-plugins.png" alt="CodeAlta plugin management dialog with diagnostics and contributions" loading="lazy">
-  <figcaption class="small text-secondary mt-2">Plugin management exposes state, diagnostics, contributions, and source/README actions for trusted local plugins.</figcaption>
-</figure>
+{{ alta_shot "alta-desktop-plugins.webp" "alta-plugins.png" "Plugin management" "Plugin management lists built-in and source plugins and lets you enable or disable them." }}
 
-Open it with `Ctrl+G Ctrl+N`, `/plugins`, or `/plugin`. The dialog shows discovered global and project plugins, state, diagnostics, contributions, and actions for source or README files.
+Open it with `Ctrl+G Ctrl+N`, `/plugins`, or `/plugin`. The TUI dialog shows discovered global and project plugins, state, diagnostics, contributions, and actions for source or README files. The desktop **Plugins** page lists the plugins of the global and project scopes with a switch to enable or disable each one. See [Plugins]({{site.basepath}}/docs/plugins/).
 
 ## Skills management
 
-<figure class="my-4">
-  <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-skills.png" alt="CodeAlta skills management dialog showing discovered skills and activation details" loading="lazy">
-  <figcaption class="small text-secondary mt-2">Skills management shows discovered skill packages, descriptions, and activation state for providers that support injected skill context.</figcaption>
-</figure>
+{{ alta_shot "alta-desktop-skills.webp" "alta-skills.png" "Skills management showing discovered skills" "Skills management shows discovered skill packages, their descriptions, and whether they are enabled." }}
 
-CodeAlta discovers Agent Skills-compatible `SKILL.md` packages from user and project locations. The skills dialog lets you inspect skills, open related files, activate enabled skills when the selected provider supports injected skill context, and manage enablement. Compact `G` and `P` checkboxes disable or enable a skill in global `~/.alta/config.toml` or the selected project's `.alta/config.toml`; bulk actions can enable, disable, or invert the currently shown skills for Global, Project, or Both scopes. Disabled skills remain inspectable in the dialog but are not advertised to models and cannot be activated.
+Open it with `Ctrl+G Ctrl+K` or `/skills`. CodeAlta discovers Agent Skills-compatible `SKILL.md` packages from user and project locations. Skills management lets you inspect skills and their files, create a new skill, and enable or disable skills for the global `~/.alta/config.toml` or for the selected project's `.alta/config.toml`. Disabled skills remain inspectable but are not advertised to models and cannot be activated.
 
-**New skill** creates `SKILL.md` plus `scripts/`, `references/`, and `assets/` folders under `<project>/.alta/skills/<name>` (Current Project, or Combined with a selected project) or `~/.alta/skills/<name>` (User, or Combined without a project). Names use lowercase Unicode letters/digits and single hyphens, up to 64 characters; portable reserved device names are rejected. Supply a description of up to 1024 characters. Creation requires an available root and rejects linked/reparse paths and existing files or directories rather than overwriting them. A canceled or failed creation before publication does not leave a partially created final skill.
+In the TUI, compact `G` and `P` checkboxes set the global and project state of a skill, and bulk actions can enable, disable, or invert the currently shown skills. Enabled skills can also be activated for the session when the selected provider supports injected skill context.
 
-Enablement edits preserve TOML comments and unknown settings. Project and Both require a selected project before any config changes are written. Both is not a transaction: a later project-file I/O failure can leave the global change applied.
+## MCP servers
 
-**Open SKILL.md** and **Open related** open built-in skills as read-only in the normal file editor. You can inspect, select, copy, and find text, but typing, replacement, Save, and Ctrl+S cannot change bundled files. Create your own project or user skill to customize one. User/project and plugin-contributed skills remain editable, with the usual external-change/overwrite confirmation.
+Open it with `/mcp`, or `Ctrl+G Ctrl+Y` in the desktop app. See the [MCP plugin]({{site.basepath}}/docs/plugins/mcp/) page.
 
-If the same file is already open, a built-in skill open makes that tab read-only without discarding unsaved text or conflict state; copy pending edits elsewhere, or explicitly discard them when closing. Ordinary file opens do not make a protected tab writable again. If a save is already running, the read-only open is refused with a retry message until it finishes. Protection applies to this open-document workflow, not to external editors or arbitrary trusted file tools.
+{{ alta_shot "alta-desktop-mcp.webp" "alta-plugin-mcp.png" "MCP server configuration" "MCP servers are defined globally or per project, with a local command or an HTTP endpoint." }}
 
 ## Logs viewer
 
-<figure class="my-4">
-  <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-logs.png" alt="CodeAlta logs viewer with diagnostic output and search controls" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The logs viewer keeps startup, provider, credential, and plugin diagnostics available inside the terminal UI.</figcaption>
-</figure>
+{{ alta_shot "alta-desktop-logs.webp" "alta-logs.png" "Logs viewer with diagnostic output and search controls" "The logs viewer keeps startup, provider, credential, and plugin diagnostics available inside CodeAlta." }}
 
-Open logs with `Ctrl+G Ctrl+L`, `/logs`, or the navigator footer. The log viewer replays diagnostic output from startup, supports search, wraps by default, and can clear the retained session log buffer.
+Open logs with `Ctrl+G Ctrl+L` or `/logs`. The log viewer shows diagnostic output from startup, supports search and level filters, and can clear the retained log buffer.
 
 ## Config recovery editor
 
 <figure class="my-4">
-  <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-config-recovery.png" alt="CodeAlta configuration recovery editor with TOML validation feedback" loading="lazy">
+  <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-config-recovery.png" alt="CodeAlta TUI configuration recovery editor with TOML validation feedback" loading="lazy">
   <figcaption class="small text-secondary mt-2">The recovery editor opens before normal startup continues, highlights TOML issues, and lets you save once the configuration is valid.</figcaption>
 </figure>
 
-If `~/.alta/config.toml` is invalid at startup, CodeAlta opens a recovery editor with TOML highlighting, an error marker, live parse feedback, `Ctrl+S` Save and Continue when valid, and `Ctrl+Q` Exit.
+If `~/.alta/config.toml` cannot be loaded at startup, CodeAlta opens a recovery editor with TOML highlighting, an error marker, and live parse feedback. Fix the file, then save to continue. Both apps have this editor.
 
-Read, decoding and first-run creation failures also open recovery. Recovery saves keep your complete TOML text, comments, unknown settings, line endings and supported Unicode encoding/BOM. A valid TOML indicator is not a successful save: if the file changed or disappeared on disk, or saving fails, startup stays paused and your edits remain in the editor. Save can be retried after fixing an access problem; it never silently overwrites a newer file.
-
-Use **Reload** to read the current file, then reapply your edits. Reload asks before discarding unsaved text, so copy anything you want to keep first. There is no forced overwrite option. If the file could not be read or decoded, fix that problem externally and successfully reload before saving; an unreadable file is never treated as an empty baseline. A failed reload keeps your editor text but disables saving until a successful reload. Reload alone does not continue startup: choose **Save and Continue** after reviewing the result. **Exit** never saves; unsaved recovery edits are not retained after exit.
+The desktop Settings also has a **Configuration file** page to edit `~/.alta/config.toml` at any time.

@@ -1,0 +1,622 @@
+// CodeAlta site styles, bundled after the shared Lunet template styles.
+
+:root {
+  --alta-cyan: #00d1ff;
+  --alta-indigo: #4f46e5;
+  --alta-purple: #a855f7;
+  --alta-teal: #2dd4bf;
+  --alta-gradient: linear-gradient(115deg, var(--alta-cyan), var(--alta-indigo) 55%, var(--alta-purple));
+  --alta-card-bg: color-mix(in srgb, var(--lunet-color-surface-1) 82%, transparent);
+  --alta-card-border: var(--lunet-color-border);
+  --alta-shadow: 0 1.4rem 3.2rem rgba(0, 0, 0, .22);
+}
+
+// -----------------------------------------------------------------------------
+// Desktop / TUI switch
+// -----------------------------------------------------------------------------
+
+:root[data-alta-ui="tui"] .alta-only-desktop,
+:root:not([data-alta-ui="tui"]) .alta-only-tui {
+  display: none !important;
+}
+
+.alta-shots {
+  margin-inline: 0;
+}
+
+.alta-shots-bar {
+  display: inline-flex;
+  gap: .2rem;
+  padding: .2rem;
+  margin-bottom: .6rem;
+  border: 1px solid var(--alta-card-border);
+  border-radius: 999px;
+  background: var(--alta-card-bg);
+}
+
+.alta-shots-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .22rem .85rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--bs-secondary-color);
+  font-size: .82rem;
+  font-weight: 600;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: color .15s ease, background-color .15s ease;
+
+  &:hover {
+    color: var(--bs-body-color);
+  }
+
+  &.active {
+    color: #fff;
+    background: var(--alta-gradient);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--alta-cyan);
+    outline-offset: 2px;
+  }
+}
+
+.alta-shots-frame {
+  border: 1px solid var(--lunet-color-border-strong);
+  border-radius: .85rem;
+  background: #0b1220;
+  box-shadow: var(--alta-shadow);
+  overflow: hidden;
+}
+
+.alta-shot {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+// Single-version screenshots used in the documentation.
+.alta-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--lunet-color-border-strong);
+  border-radius: .85rem;
+  box-shadow: var(--alta-shadow);
+}
+
+.alta-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .08rem .6rem;
+  border: 1px solid var(--alta-card-border);
+  border-radius: 999px;
+  background: var(--alta-card-bg);
+  font-size: .78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.alta-badge--desktop { color: var(--lunet-color-bright-blue); }
+.alta-badge--tui { color: var(--lunet-color-bright-green); }
+
+// -----------------------------------------------------------------------------
+// Home page
+// -----------------------------------------------------------------------------
+
+.alta-home {
+  overflow-x: clip;
+
+  section {
+    position: relative;
+  }
+
+  h2 {
+    font-weight: 700;
+    letter-spacing: -.01em;
+  }
+}
+
+.alta-kicker {
+  display: inline-block;
+  margin-bottom: .6rem;
+  color: var(--lunet-color-cyan);
+  font-size: .76rem;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.alta-section-head {
+  max-width: 46rem;
+  margin: 0 auto 2.5rem;
+  text-align: center;
+
+  p {
+    margin-bottom: 0;
+    color: var(--bs-secondary-color);
+    font-size: 1.1rem;
+  }
+}
+
+.alta-gradient-text {
+  color: transparent;
+  background-image: var(--alta-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+// Hero ------------------------------------------------------------------------
+
+.alta-hero {
+  padding: 3.5rem 0 1rem;
+  text-align: center;
+}
+
+.codealta-ascii-logo {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 1rem 1.25rem;
+  margin: 0 auto;
+  border: 1px solid rgba(255, 255, 255, .10);
+  border-radius: 1rem;
+  background: radial-gradient(circle at 20% 10%, rgba(0, 209, 255, .14), transparent 28%), linear-gradient(135deg, #0b1220, #111b30);
+  box-shadow: 0 1.25rem 3rem rgba(0, 0, 0, .28);
+  color: rgba(234, 242, 255, .92);
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: clamp(.42rem, 1.23vw, 1rem);
+  line-height: 1.05;
+  text-align: left;
+  white-space: pre;
+}
+
+.logo-code {
+  color: rgba(234, 242, 255, .86);
+}
+
+.logo-alta {
+  color: transparent;
+  background-image: linear-gradient(115deg, rgba(0, 209, 255, .82), #7ae8ff, #4f46e5, #a855f7, #ffffff, #00d1ff);
+  background-size: 240% 240%;
+  background-position: var(--alta-logo-shift, 0%) 50%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  filter: drop-shadow(0 0 .4rem rgba(0, 209, 255, .26));
+}
+
+.alta-hero-title {
+  max-width: 50rem;
+  margin: 2.25rem auto .9rem;
+  font-size: clamp(1.9rem, 4.2vw, 3.1rem);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -.02em;
+}
+
+.alta-hero-lead {
+  max-width: 44rem;
+  margin: 0 auto;
+  color: var(--bs-secondary-color);
+  font-size: clamp(1.05rem, 1.6vw, 1.25rem);
+}
+
+.alta-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: .85rem;
+  margin-top: 1.9rem;
+
+  .btn {
+    border-radius: 999px;
+    padding-inline: 1.5rem;
+  }
+}
+
+.alta-install {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  max-width: 54rem;
+  margin: 2.25rem auto 0;
+  text-align: left;
+}
+
+.alta-install-card {
+  padding: .9rem 1rem .35rem;
+  border: 1px solid var(--alta-card-border);
+  border-radius: 1rem;
+  background: var(--alta-card-bg);
+
+  pre {
+    margin-bottom: 0;
+    overflow-x: auto;
+  }
+
+  // Keep the copy button, hide the language label that would cover the short commands.
+  .code-toolbar .toolbar-item > span {
+    display: none;
+  }
+}
+
+.alta-install-label {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-bottom: .55rem;
+  font-weight: 700;
+
+  small {
+    margin-left: auto;
+    color: var(--bs-secondary-color);
+    font-weight: 500;
+  }
+}
+
+.alta-install-note {
+  margin: 1rem auto 0;
+  color: var(--bs-secondary-color);
+  font-size: .9rem;
+  text-align: center;
+
+  a {
+    color: inherit;
+  }
+}
+
+// Showcase windows ------------------------------------------------------------
+
+.alta-showcase {
+  position: relative;
+  isolation: isolate;
+  max-width: 76rem;
+  margin-inline: auto;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: -5rem -3rem -6rem;
+    z-index: -1;
+    border-radius: 999px;
+    background:
+      radial-gradient(circle at 18% 35%, rgba(0, 209, 255, .40), transparent 30%),
+      radial-gradient(circle at 52% 14%, rgba(99, 102, 241, .32), transparent 32%),
+      radial-gradient(circle at 84% 58%, rgba(168, 85, 247, .34), transparent 32%),
+      radial-gradient(circle at 44% 96%, rgba(45, 212, 191, .20), transparent 34%);
+    filter: blur(4.5rem);
+    opacity: .7;
+    pointer-events: none;
+  }
+}
+
+.alta-window {
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 1.1rem;
+  background: #07111f;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, .035),
+    0 1.7rem 4rem rgba(0, 0, 0, .34),
+    0 0 4rem rgba(0, 209, 255, .10),
+    0 0 5rem rgba(168, 85, 247, .08);
+  overflow: hidden;
+
+  img,
+  video {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+}
+
+.alta-window-bar {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .7rem .95rem;
+  border-bottom: 1px solid rgba(255, 255, 255, .09);
+  background: linear-gradient(90deg, rgba(255, 255, 255, .105), rgba(255, 255, 255, .04));
+  color: rgba(234, 242, 255, .72);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: .86rem;
+
+  span {
+    display: inline-block;
+    width: .7rem;
+    height: .7rem;
+    border-radius: 50%;
+  }
+
+  span:nth-child(1) { background: #ff5f56; }
+  span:nth-child(2) { background: #ffbd2e; }
+  span:nth-child(3) { background: #27c93f; margin-right: .45rem; }
+
+  strong {
+    font-weight: 700;
+    letter-spacing: .04em;
+  }
+}
+
+.alta-points {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.25rem;
+  max-width: 68rem;
+  margin: 2.5rem auto 0;
+}
+
+.alta-point {
+  display: flex;
+  gap: .85rem;
+
+  h3 {
+    margin: 0 0 .25rem;
+    font-size: 1.05rem;
+    font-weight: 700;
+  }
+
+  p {
+    margin: 0;
+    color: var(--bs-secondary-color);
+    font-size: .95rem;
+  }
+}
+
+.alta-icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: .8rem;
+  background: linear-gradient(135deg, var(--accent, var(--alta-cyan)), var(--accent-2, var(--alta-indigo)));
+  box-shadow: 0 .6rem 1.35rem color-mix(in srgb, var(--accent, var(--alta-cyan)) 25%, transparent);
+  color: #fff;
+  font-size: 1.1rem;
+}
+
+// Shared harness --------------------------------------------------------------
+
+.alta-harness {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 1.25rem;
+}
+
+.alta-card {
+  position: relative;
+  padding: 1.5rem;
+  border: 1px solid var(--alta-card-border);
+  border-radius: 1.25rem;
+  background: var(--alta-card-bg);
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+
+  h3 {
+    display: flex;
+    align-items: center;
+    gap: .7rem;
+    margin: 0 0 .75rem;
+    font-size: 1.2rem;
+    font-weight: 700;
+  }
+
+  p {
+    color: var(--bs-secondary-color);
+  }
+
+  ul {
+    margin: 0;
+    padding-left: 1.1rem;
+    color: var(--bs-secondary-color);
+
+    li + li {
+      margin-top: .3rem;
+    }
+  }
+
+  code {
+    white-space: nowrap;
+  }
+}
+
+a.alta-card,
+.alta-card:has(.stretched-link) {
+  &:hover {
+    transform: translateY(-3px);
+    border-color: color-mix(in srgb, var(--alta-cyan) 55%, var(--alta-card-border));
+    box-shadow: var(--alta-shadow);
+  }
+}
+
+.alta-harness-core {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: .5rem;
+  min-width: 15rem;
+  padding: 1.5rem 1.25rem;
+  border-radius: 1.25rem;
+  background: var(--alta-gradient);
+  color: #fff;
+  text-align: center;
+
+  strong {
+    font-size: 1.1rem;
+  }
+
+  ul {
+    display: grid;
+    gap: .35rem;
+    margin: .5rem 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: .95rem;
+  }
+
+  li {
+    padding: .3rem .6rem;
+    border-radius: .6rem;
+    background: rgba(255, 255, 255, .14);
+  }
+}
+
+// Feature tour ----------------------------------------------------------------
+
+.alta-tour {
+  display: grid;
+  gap: clamp(3rem, 6vw, 5.5rem);
+}
+
+.alta-tour-row {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 8fr);
+  align-items: center;
+  gap: clamp(1.5rem, 4vw, 3.5rem);
+
+  &:nth-child(even) {
+    grid-template-columns: minmax(0, 8fr) minmax(0, 5fr);
+
+    .alta-tour-copy {
+      order: 2;
+    }
+  }
+
+  .alta-shots {
+    margin: 0 !important;
+  }
+}
+
+.alta-tour-copy {
+  h3 {
+    margin: 0 0 .75rem;
+    font-size: clamp(1.35rem, 2.2vw, 1.8rem);
+    font-weight: 700;
+    letter-spacing: -.01em;
+  }
+
+  p {
+    color: var(--bs-secondary-color);
+    font-size: 1.05rem;
+  }
+
+  a {
+    font-weight: 600;
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
+// Link cards and principles ---------------------------------------------------
+
+.alta-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.25rem;
+
+  .alta-card p {
+    margin-bottom: 0;
+  }
+}
+
+.alta-principles {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: .7rem;
+  max-width: 60rem;
+  margin: 0 auto;
+}
+
+.alta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .5rem 1rem;
+  border: 1px solid var(--alta-card-border);
+  border-radius: 999px;
+  background: var(--alta-card-bg);
+  color: var(--bs-body-color);
+  font-weight: 600;
+  text-decoration: none;
+  transition: border-color .18s ease, transform .18s ease;
+
+  i {
+    color: var(--lunet-color-cyan);
+  }
+
+  &:hover {
+    transform: translateY(-2px);
+    border-color: var(--alta-cyan);
+    color: var(--bs-body-color);
+  }
+}
+
+.alta-cta {
+  padding: clamp(2rem, 5vw, 3.5rem);
+  border-radius: 1.75rem;
+  background: var(--alta-gradient);
+  color: #fff;
+  text-align: center;
+
+  h2 {
+    margin-bottom: .6rem;
+  }
+
+  p {
+    max-width: 38rem;
+    margin: 0 auto 1.5rem;
+    opacity: .92;
+  }
+
+  .btn {
+    border-radius: 999px;
+    padding-inline: 1.5rem;
+  }
+}
+
+@media (max-width: 991.98px) {
+  .alta-points,
+  .alta-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .alta-harness {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .alta-tour-row,
+  .alta-tour-row:nth-child(even) {
+    grid-template-columns: minmax(0, 1fr);
+
+    .alta-tour-copy {
+      order: 0;
+    }
+  }
+}
+
+@media (max-width: 767.98px) {
+  .alta-install {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .logo-alta {
+    background-position: 50% 50%;
+  }
+
+  .alta-card,
+  .alta-chip {
+    transition: none;
+  }
+}

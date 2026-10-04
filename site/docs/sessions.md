@@ -13,10 +13,6 @@ A CodeAlta session is a durable work unit with provider/model state, prompt hist
 
 The sidebar keeps running sessions visible even when their tab is closed. Closing a tab does not stop active work, and unsent session drafts are saved under `~/.alta/saved_prompts/`.
 
-Draft text for new global and project sessions is saved there too. Text saves and clears are checked against the last saved version: an external edit or storage failure is not silently overwritten or treated as saved. If a pre-send clear fails, your composer text and images remain available, and the prompt is not sent or queued; retrying that storage failure does not duplicate an accepted queue entry. If a draft flush fails, preserve your pending text before exiting; failed changes are retained in memory, not in a separate recovery file. Unsent image attachments are not restored after restart.
-
-When a prompt is dispatched, its image bytes are saved as separate copies beside the session journal, in `<session-id>.attachments/`. Existing copies are never overwritten. Clearing the composer does not delete images retained by queued prompts or successfully saved submissions. A later dispatch failure or retry can leave additional saved copies; this is not restart persistence for unsent images.
-
 > [!NOTE]
 > Closing a tab only closes that view. Check the sidebar for running sessions before assuming work has stopped.
 
@@ -52,7 +48,7 @@ If no provider run is active, CodeAlta falls back to a normal send. If the provi
 
 ## Compaction
 
-Press `F11` or click the compact button beside the provider/model/reasoning selectors to compact an idle started session. Manual compaction uses the session's current provider/model/reasoning configuration and emits visible start/completion notices in the timeline.
+Press `Ctrl+F11`, use `/compact`, or click the compact button beside the provider/model/reasoning selectors to compact an idle started session. Manual compaction uses the session's current provider/model/reasoning configuration and emits visible start/completion notices in the timeline.
 
 Local compaction targets a smaller post-compaction context by default so long sessions can continue without immediately hitting the context limit.
 
@@ -75,7 +71,7 @@ Think of it as CodeAlta giving the agent a safe, scoped way to ask the host ques
 
 ## Prompting for delegated work
 
-Use the UI delegation shortcut (`F7`) for an explicit delegation flow, or ask the current agent to create and coordinate child sessions for you.
+Ask the current agent to create and coordinate child sessions for you.
 
 Examples:
 
@@ -103,7 +99,7 @@ For parent/child delegated work, CodeAlta uses a notification-based pattern: the
 
 Agents can also ask the live tool to schedule in-process reminder prompts with `alta reminder create --duration <seconds> --content ...`. Reminders default to the calling session, can target another session with `--session <session-id>`, can repeat with `--repeat <count>`, and can be inspected or removed with `alta reminder list` and `alta reminder delete <reminder-id>`. In the TUI, use the compact clock button in the prompt bar or `/reminder` (`Ctrl+G Ctrl+D`) to create, delete, and edit reminder messages for the selected session.
 
-Agents can update the left-sidebar Notes panel for the current session with `alta notes set --stdin`, read it back with `alta notes get`, and clear it with `alta notes clear`. Notes are session-scoped sticky Markdown for plans, checklists, and progress summaries; switching tabs shows the selected session's notes, and reopening a session restores the latest notes set/clear event from that session's journal.
+Agents can update the Notes of the current session (the sidebar Notes panel in the TUI, the Notes window in the desktop app) with `alta notes set --stdin`, read it back with `alta notes get`, and clear it with `alta notes clear`. Notes are session-scoped sticky Markdown for plans, checklists, and progress summaries; switching tabs shows the selected session's notes, and reopening a session restores the latest notes set/clear event from that session's journal.
 
 ## Prompting for CodeAlta self-inspection
 

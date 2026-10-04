@@ -6,7 +6,7 @@ title: Model Providers
 
 A model provider is the user-facing execution target in CodeAlta: it owns credentials, endpoint settings, model discovery, the selected model, reasoning effort, and optional context/compaction metadata.
 
-The preferred workflow is the **Model Providers** dialog (`Ctrl+G Ctrl+R`). Advanced users can edit the same TOML file directly at `~/.alta/config.toml`.
+The preferred workflow is the provider editor (`Ctrl+G Ctrl+R`): the **Providers** page of Settings in the desktop app, or the **Model Providers** dialog in the TUI. Advanced users can edit the same TOML file directly at `~/.alta/config.toml`.
 
 > [!IMPORTANT]
 > Use **Test** before saving provider changes. It catches missing credentials, unsupported models, endpoint mistakes, and login-flow issues before the provider becomes the active execution target.
@@ -44,14 +44,11 @@ Project-local overrides can live in `<project>/.alta/config.toml`. Project files
 
 ## Provider dialog
 
-Open the dialog with `Ctrl+G Ctrl+R`, `/model_providers`, or the provider summary in the footer. Use **Refresh** (or `/model_providers_refresh`) to reload the saved configuration from disk and retest provider availability, for example after starting a local LLM server that was offline earlier.
+Open it with `Ctrl+G Ctrl+R`, `/model_providers`, or the provider summary below the prompt. Use **Refresh** (or `/model_providers_refresh`) to reload the saved configuration from disk and retest provider availability, for example after starting a local LLM server that was offline earlier.
 
-<figure class="my-4">
-  <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-model-providers.png" alt="CodeAlta Model Providers dialog with provider list and editable provider settings" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The provider dialog edits the same TOML-backed configuration while keeping credentials, model selection, login flows, and validation visible.</figcaption>
-</figure>
+{{ alta_shot "alta-desktop-model-providers.webp" "alta-model-providers.png" "Provider list with the editable settings of the selected provider" "The provider editor edits the same TOML-backed configuration while keeping credentials, model selection, sign-in, and validation visible." }}
 
-The dialog can:
+Both apps edit the same providers and share the same credentials, so a provider configured or signed in from one app is ready in the other. The provider editor can:
 
 - add, delete, enable, and disable provider entries;
 - validate provider keys, endpoint URLs, required credentials, and conflicting settings;
@@ -61,7 +58,7 @@ The dialog can:
 - start and monitor ChatGPT browser sign-in or Copilot browser/device login; successful authorization automatically enables that provider;
 - refresh saved providers from disk and retest runtime availability without reopening the app;
 - preserve advanced TOML settings such as `profile`, `compaction`, `extra_body`, `model_overrides`, and `protocol_trace`;
-- open an Advanced TOML editor with live validation.
+- open an Advanced TOML editor with live validation (the **Configuration file** page in the desktop app).
 
 Each **Default** checkbox indicates that the field inherits its provider default rather than a custom override. Omitted settings stay marked as Default when you reopen or refresh the dialog; for example, a Codex entry containing only `type = "codex"` leaves its optional settings at their defaults. Uncheck Default to supply an override, or check it to remove the override when saving.
 
@@ -111,9 +108,7 @@ For a recognized reasoning model through `openai-responses` against the official
 
 ### ChatGPT sign-in and migration
 
-The `codex` provider uses OpenAI's [Sign in with ChatGPT token-sharing flow](https://developers.openai.com/siwc/token-sharing-open-source). In Model Providers, choose **Continue with ChatGPT** and authorize CodeAlta to use your plan in the system browser. No developer registration, pre-issued client ID, client secret, or partner API key is needed. CodeAlta starts with `dynamic_agent_client`, then saves and reuses the issued client ID for that account/workspace, together with a stable host ID. The loopback callback uses `127.0.0.1` and an available port; browser sign-in must reach the machine running CodeAlta.
-
-The TUI (`altatui`) and owned desktop share the same provider runtime and global credential store. Complete sign-in in the TUI's Model Providers dialog before using the configured provider in the desktop. Desktop provider Settings remain read-only; the desktop does not have a separate sign-in flow.
+The `codex` provider uses OpenAI's [Sign in with ChatGPT token-sharing flow](https://developers.openai.com/siwc/token-sharing-open-source). In the provider editor, choose **Continue with ChatGPT** (TUI) or **Sign in with the browser** (desktop app) and authorize CodeAlta to use your plan in the system browser. No developer registration, pre-issued client ID, client secret, or partner API key is needed. CodeAlta starts with `dynamic_agent_client`, then saves and reuses the issued client ID for that account/workspace, together with a stable host ID. The loopback callback uses `127.0.0.1` and an available port; browser sign-in must reach the machine running CodeAlta.
 
 Add a separate `type = "codex"` provider with a recognizable `display_name` for another account or workspace, even if it has the same email address. Selecting that provider selects its separate registration and credentials; **Account Info** shows the validated account and issued registration ID. Reauthorization validates the selected identity before replacing its credentials. If plan access is declined, the validated sign-in is retained but inference remains disabled; choose **Continue with ChatGPT** to grant access, or configure a separate API-key provider.
 

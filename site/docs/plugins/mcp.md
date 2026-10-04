@@ -6,10 +6,7 @@ title: MCP plugin
 
 The built-in MCP plugin connects CodeAlta to configured Model Context Protocol servers. It supports stdio servers and remote HTTP/SSE servers, exposes MCP **tools**, adds the `alta mcp` live-tool command root, provides compact prompt guidance for active/inactive servers, and includes the MCP Servers dialog.
 
-<figure class="my-4">
-  <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-plugin-mcp.png" alt="CodeAlta MCP Servers dialog showing configured MCP servers and tools" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The MCP Servers dialog keeps server configuration, policy, diagnostics, and discovered tools visible without blocking the workspace.</figcaption>
-</figure>
+{{ alta_shot "alta-desktop-mcp.webp" "alta-plugin-mcp.png" "MCP server configuration" "MCP server management keeps server configuration and connection details in one place." }}
 
 ## Typical flow
 
@@ -179,12 +176,12 @@ its token for the CodeAlta process:
 
 ```powershell
 $env:GITHUB_PERSONAL_ACCESS_TOKEN = gh auth token
-alta
+alta      # or altatui
 ```
 
 ```sh
 export GITHUB_PERSONAL_ACCESS_TOKEN="$(gh auth token)"
-alta
+alta      # or altatui
 ```
 
 > [!NOTE]
@@ -337,7 +334,7 @@ If a server cannot start, connect, authenticate, or list tools, it contributes d
 
 ## MCP Servers dialog
 
-Open the dialog from `/mcp`, the command palette entry **MCP Servers**, the MCP status indicator, or plugin management. The dialog can:
+Open it from `/mcp`, the command palette entry **MCP Servers**, or the MCP status indicator of the prompt bar. In the desktop app it is the **MCP Servers** page of Settings (`Ctrl+G Ctrl+Y`), where you add, edit, enable and remove servers of the global or project scope. The TUI dialog can:
 
 - show global and project MCP definitions, including project definitions that shadow global ones;
 - add, edit, save, and remove server JSON definitions;

@@ -4,9 +4,10 @@ layout: simple
 og_type: website
 ---
 
-<section class="text-center py-5 codealta-hero">
-  <div class="container">
-    <pre class="codealta-ascii-logo mx-auto" aria-label="CodeAlta"><span class="logo-code">   ██████                  ██           </span><span class="logo-alta">     ██       ██    ██</span>
+<div class="alta-home">
+
+<section class="alta-hero">
+  <pre class="codealta-ascii-logo" aria-label="CodeAlta"><span class="logo-code">   ██████                  ██           </span><span class="logo-alta">     ██       ██    ██</span>
 <span class="logo-code">  ██░░░░██                ░██           </span><span class="logo-alta">    ████     ░██   ░██</span>
 <span class="logo-code"> ██    ░░    ██████       ░██   █████   </span><span class="logo-alta">   ██░░██    ░██  ██████   ██████</span>
 <span class="logo-code">░██         ██░░░░██   ██████  ██░░░██  </span><span class="logo-alta">  ██  ░░██   ░██ ░░░██░   ░░░░░░██</span>
@@ -14,435 +15,250 @@ og_type: website
 <span class="logo-code">░░██    ██ ░██   ░██ ░██  ░██ ░██░░░░   </span><span class="logo-alta">░██░░░░░░██  ░██   ░██    ██░░░░██</span>
 <span class="logo-code"> ░░██████  ░░██████  ░░██████ ░░██████  </span><span class="logo-alta">░██     ░██  ███   ░░██  ░░████████</span>
 <span class="logo-code">  ░░░░░░    ░░░░░░    ░░░░░░   ░░░░░░   </span><span class="logo-alta">░░      ░░  ░░░     ░░    ░░░░░░░░</span></pre>
-    <p class="lead mt-4 mb-4">
-      A keyboard-first, terminal AI coding workspace for managing projects, model providers, durable sessions, agent prompts, MCP-backed tools, plugins, and delegated agents.
-    </p>
-    <div class="d-flex justify-content-center gap-3 mt-4 flex-wrap">
-      <a href="{{site.basepath}}/docs/getting-started/" class="btn btn-primary btn-lg"><i class="bi bi-rocket-takeoff"></i> Get started</a>
-      <a href="{{site.basepath}}/docs/model-providers/" class="btn btn-outline-secondary btn-lg"><i class="bi bi-cpu"></i> Configure providers</a>
-      <a href="https://github.com/CodeAlta/CodeAlta" class="btn btn-info btn-lg"><i class="bi bi-github"></i> GitHub</a>
+  <h1 class="alta-hero-title">AI coding agents on your <span class="alta-gradient-text">desktop</span> and in your <span class="alta-gradient-text">terminal</span></h1>
+  <p class="alta-hero-lead">
+    CodeAlta is a workspace for agentic coding on your local projects: model providers, durable sessions, agent prompts, MCP tools, plugins, and delegated agents, in a desktop app or a terminal UI.
+  </p>
+  <div class="alta-hero-actions">
+    <a href="{{site.basepath}}/docs/getting-started/" class="btn btn-primary btn-lg"><i class="bi bi-rocket-takeoff"></i> Get started</a>
+    <a href="{{site.basepath}}/docs/desktop-and-tui/" class="btn btn-outline-secondary btn-lg"><i class="bi bi-window-split"></i> Desktop and TUI</a>
+    <a href="https://github.com/CodeAlta/CodeAlta" class="btn btn-info btn-lg"><i class="bi bi-github"></i> GitHub</a>
+  </div>
+  <div class="alta-install">
+    <div class="alta-install-card">
+      <div class="alta-install-label"><i class="bi bi-window"></i> CodeAlta Desktop <small>recommended</small></div>
+      <pre class="language-shell-session"><code>dotnet tool install -g CodeAlta
+alta</code></pre>
     </div>
-    <div class="mt-4 text-start mx-auto" style="max-width: 48rem;">
+    <div class="alta-install-card">
+      <div class="alta-install-label"><i class="bi bi-terminal"></i> CodeAlta TUI</div>
       <pre class="language-shell-session"><code>dotnet tool install -g CodeAlta.Tui
 altatui</code></pre>
-      <p class="text-center text-secondary mt-2" style="font-size: 0.85rem;">The terminal NuGet package is <a href="https://www.nuget.org/packages/CodeAlta.Tui/" class="text-secondary">CodeAlta.Tui</a>; the installed command is <code>altatui</code>. Requires <a href="https://dotnet.microsoft.com/en-us/download/dotnet/10.0" class="text-secondary">.NET 10</a>. Alternatively, use <code>dnx --yes CodeAlta.Tui</code> to install, update, and run in a single command.</p>
-      <p class="text-center text-secondary">Development branch: these commands describe the renamed terminal package once released. Earlier releases used <code>CodeAlta</code> / <code>alta</code>; the desktop head is still in development. The in-session <code>alta</code> tool and shared <code>~/.alta</code> state are unchanged.</p>
+    </div>
+  </div>
+  <p class="alta-install-note">Requires <a href="https://dotnet.microsoft.com/en-us/download/dotnet/10.0">.NET 10</a>. Both apps use the same <code>~/.alta</code> profile, so you can install both.</p>
+</section>
+
+<section class="my-5 py-4">
+  <div class="alta-section-head">
+    <span class="alta-kicker">CodeAlta Desktop</span>
+    <h2 class="display-6">The complete CodeAlta experience</h2>
+    <p>A desktop app with session tabs you can drag and split, a file editor, and every setting in one window.</p>
+  </div>
+  <div class="alta-showcase">
+    <div class="alta-window">
+      <img src="{{site.basepath}}/img/alta-desktop-split-three.webp" alt="CodeAlta Desktop with three sessions arranged in split panes: a parent session and two delegated child sessions" width="2400" height="1500">
+    </div>
+  </div>
+  <div class="alta-points">
+    <div class="alta-point">
+      <span class="alta-icon" style="--accent: #38bdf8; --accent-2: #6366f1;"><i class="bi bi-layout-split"></i></span>
+      <div>
+        <h3>Arrange your workspace</h3>
+        <p>Drag a session tab to an edge to split the window side by side or stacked. Tabs from different projects stay open together.</p>
+      </div>
+    </div>
+    <div class="alta-point">
+      <span class="alta-icon" style="--accent: #34d399; --accent-2: #06b6d4;"><i class="bi bi-eye"></i></span>
+      <div>
+        <h3>Inspect everything</h3>
+        <p>Tool calls, file diffs, images, context usage and turn statistics open in windows over the session.</p>
+      </div>
+    </div>
+    <div class="alta-point">
+      <span class="alta-icon" style="--accent: #f472b6; --accent-2: #a855f7;"><i class="bi bi-sliders"></i></span>
+      <div>
+        <h3>One Settings window</h3>
+        <p>Providers, models, agent prompts, skills, plugins, MCP servers, logs and appearance are pages of the same window.</p>
+      </div>
     </div>
   </div>
 </section>
 
-<section class="container my-5 codealta-workflow-preview">
-  <div class="workflow-preview-panel">
-    <div class="workflow-terminal-frame">
-      <div class="workflow-terminal-titlebar" aria-hidden="true">
+<section class="my-5 py-4">
+  <div class="alta-section-head">
+    <span class="alta-kicker">CodeAlta TUI</span>
+    <h2 class="display-6">The same workspace in your terminal</h2>
+    <p>A keyboard-first terminal UI with tabs, a full-width timeline, a prompt editor and dialogs for everything else.</p>
+  </div>
+  <div class="alta-showcase">
+    <div class="alta-window">
+      <div class="alta-window-bar" aria-hidden="true">
         <span></span><span></span><span></span><strong>altatui</strong>
       </div>
-      <div class="workflow-demo-video">
-        <video controls autoplay loop muted playsinline preload="metadata" poster="{{site.basepath}}/img/alta-home.png" aria-label="CodeAlta terminal workflow video">
-          <source src="{{site.basepath}}/img/alta-multi-agents.mp4" type="video/mp4">
-          <a href="{{site.basepath}}/img/alta-multi-agents.mp4">Download the CodeAlta terminal workflow video.</a>
-        </video>
-      </div>
+      <video controls autoplay loop muted playsinline preload="metadata" poster="{{site.basepath}}/img/alta-home.png" aria-label="CodeAlta TUI workflow video">
+        <source src="{{site.basepath}}/img/alta-multi-agents.mp4" type="video/mp4">
+        <a href="{{site.basepath}}/img/alta-multi-agents.mp4">Download the CodeAlta TUI workflow video.</a>
+      </video>
     </div>
   </div>
 </section>
 
-<section class="container my-5 codealta-capabilities">
-  <div class="text-center mx-auto" style="max-width: 58rem;">
-    <p class="text-uppercase text-secondary fw-semibold mb-2">Recent workflow capabilities</p>
-    <h2 class="display-6 mb-3">Compose higher-level coding workflows instead of only sending one prompt at a time.</h2>
-    <p class="lead text-secondary mb-4">Use built-in modes, custom agent prompts, MCP servers, skills, delegated sessions, notes, reminders, and trusted plugins together. You ask for the outcome; CodeAlta-managed agents coordinate the available host capabilities.</p>
+<section class="container my-5 py-4">
+  <div class="alta-section-head">
+    <span class="alta-kicker">One harness</span>
+    <h2 class="display-6">Two apps, the same agents</h2>
+    <p>Desktop and TUI run the same agent runtime on the same profile. A session started in one can be continued in the other, and this documentation applies to both.</p>
   </div>
-  <div class="row g-4 mt-2">
-    <div class="col-md-6 col-xl-4">
-      <div class="card h-100 shadow-sm">
-        <div class="card-body">
-          <h3 class="h5"><i class="bi bi-signpost-split text-primary"></i> Plan mode and agent prompts</h3>
-          <p>Create selectable workflow profiles such as planning-only, implementation, review, triage, or project-specific release assistance.</p>
-          <a href="{{site.basepath}}/docs/prompts/" class="stretched-link">Learn about agent prompts</a>
-        </div>
-      </div>
+  <div class="alta-harness">
+    <div class="alta-card">
+      <h3><span class="alta-icon" style="--accent: #38bdf8; --accent-2: #6366f1;"><i class="bi bi-window"></i></span> Desktop</h3>
+      <ul>
+        <li>Session tabs you can drag, split and merge</li>
+        <li>File editor tabs beside sessions</li>
+        <li>All settings in one window</li>
+        <li>Light and dark themes with 13 color schemes</li>
+        <li>Keeps running in the notification area</li>
+        <li>Updates and restarts from the app</li>
+      </ul>
     </div>
-    <div class="col-md-6 col-xl-4">
-      <div class="card h-100 shadow-sm">
-        <div class="card-body">
-          <h3 class="h5"><i class="bi bi-hdd-network text-info"></i> MCP server support</h3>
-          <p>Configure stdio or HTTP/SSE Model Context Protocol servers, inspect tools, and activate server tools for future agent turns.</p>
-          <a href="{{site.basepath}}/docs/plugins/mcp/" class="stretched-link">Configure MCP servers</a>
-        </div>
-      </div>
+    <div class="alta-harness-core">
+      <strong>Shared by both</strong>
+      <ul>
+        <li>Projects and sessions</li>
+        <li>Providers and models</li>
+        <li>Agent prompts and skills</li>
+        <li>MCP servers and plugins</li>
+        <li>Notes, reminders and asks</li>
+        <li><code class="text-white">~/.alta</code> configuration</li>
+      </ul>
     </div>
-    <div class="col-md-6 col-xl-4">
-      <div class="card h-100 shadow-sm">
-        <div class="card-body">
-          <h3 class="h5"><i class="bi bi-stars text-warning"></i> Advanced agent workflows</h3>
-          <p>Prompts can direct agents to inspect CodeAlta state, ask for structured approval, update notes, set reminders, and coordinate sessions.</p>
-          <a href="{{site.basepath}}/docs/advanced-agent-workflows/" class="stretched-link">Build advanced workflows</a>
-        </div>
-      </div>
+    <div class="alta-card">
+      <h3><span class="alta-icon" style="--accent: #34d399; --accent-2: #06b6d4;"><i class="bi bi-terminal"></i></span> TUI</h3>
+      <ul>
+        <li>Runs in your terminal, keyboard-first</li>
+        <li>Tabs, timeline, prompt and dialogs in one screen</li>
+        <li>Terminal color themes</li>
+        <li>Plugin dialogs, commands and shortcuts</li>
+        <li>Permission prompts when auto-approve is off</li>
+        <li>Screenshot of the UI with <code>Ctrl+F12</code></li>
+      </ul>
     </div>
-    <div class="col-md-6 col-xl-4">
-      <div class="card h-100 shadow-sm">
-        <div class="card-body">
-          <h3 class="h5"><i class="bi bi-diagram-3 text-success"></i> Sessions and delegation</h3>
-          <p>Keep work durable, compare providers or reasoning levels, and let parent sessions synthesize bounded child-session results.</p>
-          <a href="{{site.basepath}}/docs/sessions/" class="stretched-link">Coordinate sessions</a>
-        </div>
+  </div>
+  <p class="text-center mt-4 mb-0"><a href="{{site.basepath}}/docs/desktop-and-tui/">Compare Desktop and TUI <i class="bi bi-arrow-right"></i></a></p>
+</section>
+
+<section class="container my-5 py-4">
+  <div class="alta-section-head">
+    <span class="alta-kicker">A closer look</span>
+    <h2 class="display-6">Built for real work on real repositories</h2>
+    <p>Use the switch on a screenshot to see the same screen in the Desktop app or in the TUI.</p>
+  </div>
+  <div class="alta-tour">
+    <div class="alta-tour-row">
+      <div class="alta-tour-copy">
+        <h3>Run several agents at once</h3>
+        <p>A session can start child sessions for bounded tasks, wait for their reports, review the diffs and commit. Parent and children stay visible in the sidebar while they run.</p>
+        <a href="{{site.basepath}}/docs/sessions/">Sessions and delegation <i class="bi bi-arrow-right"></i></a>
       </div>
+      {{ alta_shot "alta-desktop-split-side.webp" "alta-home.png" "A parent session with its delegated child sessions" "" }}
     </div>
-    <div class="col-md-6 col-xl-4">
-      <div class="card h-100 shadow-sm">
-        <div class="card-body">
-          <h3 class="h5"><i class="bi bi-journal-check text-secondary"></i> Notes, reminders, and approvals</h3>
-          <p>Ask agents to keep visible Markdown checklists, return later to check delegated work, or request structured user decisions before proceeding.</p>
-          <a href="{{site.basepath}}/docs/advanced-agent-workflows/#workflow-recipes" class="stretched-link">See workflow recipes</a>
-        </div>
+    <div class="alta-tour-row">
+      <div class="alta-tour-copy">
+        <h3>See what the agent did</h3>
+        <p>Tool calls are grouped in the timeline with their status, size and duration. Open any of them to read the exact arguments and the output.</p>
+        <a href="{{site.basepath}}/docs/workspace/#timeline-cards">The timeline <i class="bi bi-arrow-right"></i></a>
       </div>
+      {{ alta_shot "alta-desktop-tool-details.webp" "alta-tool-input-output-dialog.png" "Tool call details with arguments and output" "" }}
     </div>
-    <div class="col-md-6 col-xl-4">
-      <div class="card h-100 shadow-sm">
-        <div class="card-body">
-          <h3 class="h5"><i class="bi bi-puzzle text-danger"></i> Skills and trusted plugins</h3>
-          <p>Add reusable skill context or extend the host with trusted local .NET plugins when prompts and configuration are not enough.</p>
-          <a href="{{site.basepath}}/docs/plugins/" class="stretched-link">Explore extensibility</a>
-        </div>
+    <div class="alta-tour-row">
+      <div class="alta-tour-copy">
+        <h3>Review every change</h3>
+        <p>Each turn ends with the list of modified files and their added and removed lines. Open a file to read its diff before you accept the work.</p>
+        <a href="{{site.basepath}}/docs/workspace/#timeline-cards">Modified files <i class="bi bi-arrow-right"></i></a>
       </div>
+      {{ alta_shot "alta-desktop-modified-files.webp" "alta-modified-files.png" "Diff of a file modified by the agent" "" }}
+    </div>
+    <div class="alta-tour-row">
+      <div class="alta-tour-copy">
+        <h3>Use the models you already have</h3>
+        <p>Sign in with a ChatGPT or GitHub Copilot subscription, or add API keys for OpenAI, Anthropic, Google, Mistral, xAI, Azure OpenAI and OpenAI-compatible servers. Choose the provider, model and reasoning effort per session.</p>
+        <a href="{{site.basepath}}/docs/model-providers/">Model providers <i class="bi bi-arrow-right"></i></a>
+      </div>
+      {{ alta_shot "alta-desktop-models.webp" "alta-models.png" "Model catalog listing the models of every provider" "" }}
+    </div>
+    <div class="alta-tour-row">
+      <div class="alta-tour-copy">
+        <h3>Edit files next to the session</h3>
+        <p>Open a project file with <code>Ctrl+E</code> in an editor tab with syntax highlighting. On the desktop, put the editor beside the session that is working on it.</p>
+        <a href="{{site.basepath}}/docs/workspace/#editor-tabs">File editor <i class="bi bi-arrow-right"></i></a>
+      </div>
+      {{ alta_shot "alta-desktop-code-editor.webp" "alta-code-editor.png" "File editor showing C# code" "" }}
+    </div>
+    <div class="alta-tour-row">
+      <div class="alta-tour-copy">
+        <h3>Pick your colors</h3>
+        <p>The desktop has light and dark themes with 13 color schemes. The TUI has its own set of terminal themes.</p>
+        <a href="{{site.basepath}}/docs/workspace/#workspace-settings">Appearance settings <i class="bi bi-arrow-right"></i></a>
+      </div>
+      {{ alta_shot "alta-desktop-themes.webp" "alta-theme-multi.png" "CodeAlta in several color themes" "" }}
     </div>
   </div>
 </section>
 
-<section class="container my-5 codealta-principles">
-  <div class="principles-intro mx-auto text-center">
-    <p class="text-uppercase text-secondary fw-semibold mb-2">CodeAlta principles</p>
-    <h2 class="display-6 mb-3">Efficient. Transparent. Keyboard-first. Session-oriented. Provider-agnostic. Native .NET. Error-aware. Extensible.</h2>
-    <p class="lead mb-0">A compact set of design principles for a terminal workspace that stays practical while it grows.</p>
+<section class="container my-5 py-4">
+  <div class="alta-section-head">
+    <span class="alta-kicker">Workflows</span>
+    <h2 class="display-6">More than one prompt at a time</h2>
+    <p>Combine agent prompts, MCP servers, skills, delegated sessions, notes, reminders and plugins. You ask for the outcome and the agents use what the host provides.</p>
   </div>
-  <div class="principle-flow mt-5">
-    <article class="principle-feature" style="--accent: #f472ff; --accent-2: #38bdf8;">
-      <div class="principle-copy">
-        <span class="principle-kicker">Efficient interface</span>
-        <h3><i class="bi bi-arrows-collapse"></i> Using terminal space efficiently</h3>
-      </div>
-      <div class="principle-shot principle-shot--image">
-        <img src="{{site.basepath}}/img/alta-home.png" alt="CodeAlta main workspace with projects, session timeline, prompt editor, and provider footer" loading="lazy">
-      </div>
-    </article>
-    <article class="principle-feature" style="--accent: #60a5fa; --accent-2: #c084fc;">
-      <div class="principle-copy">
-        <span class="principle-kicker">Transparent execution</span>
-        <h3><i class="bi bi-eye"></i> Keeping execution inspectable</h3>
-      </div>
-      <div class="principle-shot principle-shot--image principle-shot--wide">
-        <img src="{{site.basepath}}/img/alta-tool-input-output-dialog.png" alt="CodeAlta tool input and output dialog showing inspectable execution details" loading="lazy">
-      </div>
-    </article>
-    <article class="principle-feature" style="--accent: #34d399; --accent-2: #facc15;">
-      <div class="principle-copy">
-        <span class="principle-kicker">Keyboard-first workflow</span>
-        <h3><i class="bi bi-keyboard"></i> Working keyboard-first</h3>
-      </div>
-      <div class="principle-shot principle-shot--image principle-shot--wide">
-        <img src="{{site.basepath}}/img/alta-command-palette.png" alt="CodeAlta command palette with keyboard-first commands" loading="lazy">
-      </div>
-    </article>
-    <article class="principle-feature" style="--accent: #22d3ee; --accent-2: #a78bfa;">
-      <div class="principle-copy">
-        <span class="principle-kicker">Session-oriented workspace</span>
-        <h3><i class="bi bi-diagram-3"></i> Coordinating multiple agents in durable sessions</h3>
-      </div>
-      <div class="principle-shot principle-shot--image">
-        <img src="{{site.basepath}}/img/alta-help.png" alt="CodeAlta help dialog listing session, queue, steering, and delegation shortcuts" loading="lazy">
-      </div>
-    </article>
-    <article class="principle-feature" style="--accent: #fb923c; --accent-2: #38bdf8;">
-      <div class="principle-copy">
-        <span class="principle-kicker">Provider-agnostic runtime</span>
-        <h3><i class="bi bi-cpu"></i> Switching between multiple providers and models, local and remote</h3>
-      </div>
-      <div class="principle-shot principle-shot--image">
-        <img src="{{site.basepath}}/img/alta-model-providers.png" alt="CodeAlta Model Providers dialog for configuring providers and models" loading="lazy">
-      </div>
-    </article>
-    <article class="principle-feature" style="--accent: #818cf8; --accent-2: #2dd4bf;">
-      <div class="principle-copy">
-        <span class="principle-kicker">Native .NET foundation</span>
-        <h3><i class="bi bi-braces-asterisk"></i> Staying native to C# and .NET</h3>
-      </div>
-      <div class="principle-shot principle-shot--image">
-        <img src="{{site.basepath}}/img/alta-code-editor.png" alt="CodeAlta native terminal editor with syntax-highlighted C# code" loading="lazy">
-      </div>
-    </article>
-    <article class="principle-feature" style="--accent: #f43f5e; --accent-2: #fbbf24;">
-      <div class="principle-copy">
-        <span class="principle-kicker">Actionable errors</span>
-        <h3><i class="bi bi-life-preserver"></i> Turning failures into repair paths</h3>
-      </div>
-      <div class="principle-shot principle-shot--image">
-        <img src="{{site.basepath}}/img/alta-config-recovery.png" alt="CodeAlta configuration recovery editor with TOML validation feedback" loading="lazy">
-      </div>
-    </article>
-    <article class="principle-feature" style="--accent: #a3e635; --accent-2: #06b6d4;">
-      <div class="principle-copy">
-        <span class="principle-kicker">Extensible workflows</span>
-        <h3><i class="bi bi-puzzle"></i> Composing prompts, tools, MCP, skills, and trusted plugins</h3>
-      </div>
-      <div class="principle-shot principle-shot--image">
-        <img src="{{site.basepath}}/img/alta-system-prompt-and-user-prompt.png" alt="CodeAlta timeline showing selected agent prompt and system prompt details" loading="lazy">
-      </div>
-    </article>
-  </div>
-  <div class="principles-cta text-center mt-5">
-    <a href="{{site.basepath}}/docs/principles/" class="btn btn-outline-primary btn-lg">Read the full principles</a>
+  <div class="alta-grid">
+    <div class="alta-card">
+      <h3><span class="alta-icon" style="--accent: #60a5fa; --accent-2: #c084fc;"><i class="bi bi-signpost-split"></i></span> Agent prompts</h3>
+      <p>Switch between Default and Plan modes, or write your own prompts for review, triage or release work.</p>
+      <a href="{{site.basepath}}/docs/prompts/" class="stretched-link" aria-label="Agent prompts"></a>
+    </div>
+    <div class="alta-card">
+      <h3><span class="alta-icon" style="--accent: #22d3ee; --accent-2: #a78bfa;"><i class="bi bi-hdd-network"></i></span> MCP servers</h3>
+      <p>Add stdio or HTTP Model Context Protocol servers, inspect their tools and activate them for a session.</p>
+      <a href="{{site.basepath}}/docs/plugins/mcp/" class="stretched-link" aria-label="MCP servers"></a>
+    </div>
+    <div class="alta-card">
+      <h3><span class="alta-icon" style="--accent: #fb923c; --accent-2: #f43f5e;"><i class="bi bi-stars"></i></span> Advanced workflows</h3>
+      <p>Agents can ask for structured approval, keep notes, set reminders and coordinate other sessions.</p>
+      <a href="{{site.basepath}}/docs/advanced-agent-workflows/" class="stretched-link" aria-label="Advanced agent workflows"></a>
+    </div>
+    <div class="alta-card">
+      <h3><span class="alta-icon" style="--accent: #34d399; --accent-2: #facc15;"><i class="bi bi-diagram-3"></i></span> Sessions</h3>
+      <p>Sessions are saved on disk. Queue prompts, steer a running turn, compact the context and come back later.</p>
+      <a href="{{site.basepath}}/docs/sessions/" class="stretched-link" aria-label="Sessions and delegation"></a>
+    </div>
+    <div class="alta-card">
+      <h3><span class="alta-icon" style="--accent: #818cf8; --accent-2: #2dd4bf;"><i class="bi bi-mortarboard"></i></span> Skills</h3>
+      <p>Agent Skills-compatible <code>SKILL.md</code> packages add reusable instructions for a project or for all of them.</p>
+      <a href="{{site.basepath}}/docs/workspace/#skills-management" class="stretched-link" aria-label="Skills"></a>
+    </div>
+    <div class="alta-card">
+      <h3><span class="alta-icon" style="--accent: #a3e635; --accent-2: #06b6d4;"><i class="bi bi-puzzle"></i></span> Plugins</h3>
+      <p>Extend the host with trusted local .NET plugins when prompts and configuration are not enough.</p>
+      <a href="{{site.basepath}}/docs/plugins/" class="stretched-link" aria-label="Plugins"></a>
+    </div>
   </div>
 </section>
-<style>
-.codealta-ascii-logo {
-  display: block;
-  width: max-content;
-  max-width: 100%;
-  overflow-x: auto;
-  padding: 1rem 1.25rem;
-  margin-bottom: 0;
-  border-radius: 1rem;
-  background: radial-gradient(circle at 20% 10%, rgba(0, 209, 255, 0.14), transparent 28%), linear-gradient(135deg, rgba(11, 18, 32, 0.52), rgba(17, 27, 48, 0.32));
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  box-shadow: 0 1.25rem 3rem rgba(0, 0, 0, 0.28);
-  color: rgba(234, 242, 255, 0.92);
-  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: clamp(0.42rem, 1.23vw, 1rem);
-  line-height: 1.05;
-  text-align: left;
-  white-space: pre;
-}
-.logo-code { color: rgba(234, 242, 255, 0.86); }
-.logo-alta {
-  color: transparent;
-  background-image: linear-gradient(115deg, rgba(0, 209, 255, 0.82), #7ae8ff, #4f46e5, #a855f7, #ffffff, #00d1ff);
-  background-size: 240% 240%;
-  background-position: var(--alta-logo-shift, 0%) 50%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  filter: drop-shadow(0 0 0.4rem rgba(0, 209, 255, 0.26));
-}
-.codealta-workflow-preview {
-  position: relative;
-  isolation: isolate;
-}
-.workflow-preview-panel {
-  position: relative;
-  max-width: 72rem;
-  margin-inline: auto;
-}
-.workflow-preview-panel::before,
-.workflow-preview-panel::after {
-  content: "";
-  position: absolute;
-  pointer-events: none;
-  z-index: -1;
-  border-radius: 999px;
-}
-.workflow-preview-panel::before {
-  inset: -6rem -4rem -8rem -4rem;
-  background:
-    radial-gradient(circle at 18% 35%, rgba(0, 209, 255, .44), transparent 28%),
-    radial-gradient(circle at 52% 18%, rgba(99, 102, 241, .34), transparent 30%),
-    radial-gradient(circle at 82% 55%, rgba(244, 114, 255, .36), transparent 31%),
-    radial-gradient(circle at 46% 92%, rgba(45, 212, 191, .22), transparent 34%);
-  filter: blur(4.8rem);
-  opacity: .72;
-}
-.workflow-preview-panel::after {
-  inset: 12% 8% -18% 8%;
-  background: linear-gradient(90deg, rgba(0, 209, 255, .12), rgba(168, 85, 247, .16), rgba(45, 212, 191, .10));
-  filter: blur(3rem);
-  opacity: .78;
-}
-.workflow-terminal-frame {
-  position: relative;
-  border: 1px solid rgba(255,255,255,.16);
-  border-radius: 1.35rem;
-  background: linear-gradient(180deg, rgba(12, 23, 40, .98), rgba(3, 10, 19, .98));
-  box-shadow:
-    inset 0 0 0 1px rgba(255,255,255,.035),
-    0 1.7rem 4rem rgba(0,0,0,.34),
-    0 0 4rem rgba(0, 209, 255, .10),
-    0 0 5rem rgba(168, 85, 247, .08);
-  overflow: hidden;
-}
-.workflow-terminal-titlebar {
-  display: flex;
-  align-items: center;
-  gap: .5rem;
-  padding: .72rem .95rem;
-  color: rgba(234, 242, 255, .72);
-  background: linear-gradient(90deg, rgba(255,255,255,.105), rgba(255,255,255,.04));
-  border-bottom: 1px solid rgba(255,255,255,.09);
-  font-family: "Cascadia Mono", Consolas, monospace;
-  font-size: .86rem;
-}
-.workflow-terminal-titlebar span {
-  display: inline-block;
-  width: .7rem;
-  height: .7rem;
-  border-radius: 50%;
-}
-.workflow-terminal-titlebar span:nth-child(1) { background: #ff5f56; }
-.workflow-terminal-titlebar span:nth-child(2) { background: #ffbd2e; }
-.workflow-terminal-titlebar span:nth-child(3) { background: #27c93f; margin-right: .45rem; }
-.workflow-terminal-titlebar strong {
-  font-weight: 700;
-  letter-spacing: .04em;
-}
-.workflow-demo-video {
-  background: #07111f;
-}
-.workflow-demo-video video {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-.codealta-principles {
-  position: relative;
-}
-.principles-intro {
-  max-width: 68rem;
-  position: relative;
-}
-.principles-intro::after {
-  content: "";
-  display: block;
-  width: min(36rem, 82%);
-  height: 1px;
-  margin: 1.75rem auto 0;
-  background: linear-gradient(90deg, transparent, rgba(0, 209, 255, .55), rgba(168, 85, 247, .55), transparent);
-}
-.principle-flow {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: stretch;
-  gap: clamp(1.1rem, 2.1vw, 1.75rem);
-}
-.principle-feature {
-  isolation: isolate;
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, .82fr) minmax(12rem, 1.18fr);
-  align-items: center;
-  gap: clamp(.9rem, 1.8vw, 1.4rem);
-  min-height: 14.5rem;
-  padding: clamp(1rem, 2vw, 1.5rem);
-  border: 1px solid rgba(255, 255, 255, .10);
-  border-radius: 1.65rem;
-  background:
-    linear-gradient(135deg, rgba(255,255,255,.075), rgba(255,255,255,.025) 38%, rgba(255,255,255,.055)),
-    rgba(7, 17, 31, .70);
-  box-shadow: 0 1.35rem 3rem rgba(0, 0, 0, .20);
-  overflow: hidden;
-}
-.principle-feature::before,
-.principle-feature::after {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  border-radius: 999px;
-  filter: blur(8px);
-  opacity: .20;
-}
-.principle-feature::before {
-  width: 15rem;
-  height: 15rem;
-  inset: -7rem auto auto -5rem;
-  background: radial-gradient(circle, var(--accent), transparent 68%);
-}
-.principle-feature::after {
-  width: 12rem;
-  height: 12rem;
-  right: -5rem;
-  bottom: -6rem;
-  background: radial-gradient(circle, var(--accent-2), transparent 68%);
-}
-.principle-copy {
-  position: relative;
-  z-index: 1;
-}
-.principle-kicker {
-  display: inline-flex;
-  align-items: center;
-  gap: .4rem;
-  margin-bottom: .55rem;
-  color: rgba(234, 242, 255, .66);
-  font-size: .72rem;
-  font-weight: 700;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-}
-.principle-copy h3 {
-  margin: 0;
-  color: rgba(248, 252, 255, .96);
-  font-size: clamp(1.08rem, 1.25vw, 1.42rem);
-  line-height: 1.14;
-}
-.principle-copy h3 i {
-  display: inline-grid;
-  place-items: center;
-  width: 2.05rem;
-  height: 2.05rem;
-  margin-right: .48rem;
-  border-radius: .78rem;
-  color: white;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  box-shadow: 0 .6rem 1.35rem color-mix(in srgb, var(--accent) 25%, transparent);
-  font-size: 1rem;
-  vertical-align: .08em;
-}
-.principle-shot {
-  border: 1px solid rgba(255, 255, 255, .13);
-  border-radius: 1.1rem;
-  background: linear-gradient(180deg, rgba(11, 18, 32, .96), rgba(3, 10, 19, .96));
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.035), 0 .85rem 2rem rgba(0,0,0,.22);
-  overflow: hidden;
-}
-.principle-shot--image {
-  display: block;
-}
-.principle-shot--image img {
-  display: block;
-  width: 100%;
-  height: clamp(9.4rem, 13vw, 12.5rem);
-  object-fit: cover;
-  object-position: center top;
-}
-.principle-shot--wide img { height: clamp(8rem, 11vw, 10rem); }
-.principles-cta .btn {
-  border-radius: 999px;
-}
-@media (max-width: 1199.98px) {
-  .principle-flow {
-    grid-template-columns: 1fr;
-  }
-}
-@media (max-width: 991.98px) {
-  .principle-feature {
-    grid-template-columns: 1fr;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .logo-alta { background-position: 50% 50%; }
-}
-</style>
 
-<script>
-(function () {
-  "use strict";
-  var alta = document.querySelector(".logo-alta");
-  if (!alta || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  var start;
-  function tick(timestamp) {
-    if (start === undefined) start = timestamp;
-    var phase = ((timestamp - start) / 5200) % 1;
-    document.documentElement.style.setProperty("--alta-logo-shift", (phase * 100).toFixed(2) + "%");
-    window.requestAnimationFrame(tick);
-  }
-  window.requestAnimationFrame(tick);
-})();
-</script>
+<section class="container my-5 py-4">
+  <div class="alta-section-head">
+    <span class="alta-kicker">Principles</span>
+    <h2 class="display-6">What CodeAlta is built on</h2>
+  </div>
+  <div class="alta-principles">
+    <a class="alta-chip" href="{{site.basepath}}/docs/principles/"><i class="bi bi-arrows-collapse"></i> Efficient</a>
+    <a class="alta-chip" href="{{site.basepath}}/docs/principles/"><i class="bi bi-eye"></i> Transparent</a>
+    <a class="alta-chip" href="{{site.basepath}}/docs/principles/"><i class="bi bi-keyboard"></i> Keyboard-first</a>
+    <a class="alta-chip" href="{{site.basepath}}/docs/principles/"><i class="bi bi-diagram-3"></i> Session-oriented</a>
+    <a class="alta-chip" href="{{site.basepath}}/docs/principles/"><i class="bi bi-cpu"></i> Provider-agnostic</a>
+    <a class="alta-chip" href="{{site.basepath}}/docs/principles/"><i class="bi bi-braces-asterisk"></i> Native .NET</a>
+    <a class="alta-chip" href="{{site.basepath}}/docs/principles/"><i class="bi bi-life-preserver"></i> Error-aware</a>
+    <a class="alta-chip" href="{{site.basepath}}/docs/principles/"><i class="bi bi-puzzle"></i> Extensible</a>
+  </div>
+</section>
+
+<section class="container my-5 pb-4">
+  <div class="alta-cta">
+    <h2>Start your first session</h2>
+    <p>Install CodeAlta, enable one provider and send a prompt on one of your projects.</p>
+    <a href="{{site.basepath}}/docs/getting-started/" class="btn btn-light btn-lg"><i class="bi bi-rocket-takeoff"></i> Get started</a>
+  </div>
+</section>
+
+</div>

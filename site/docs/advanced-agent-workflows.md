@@ -117,14 +117,6 @@ Before editing, ask me whether to update only website docs or both website and i
 
 After queuing an ask, the agent should stop and wait. CodeAlta presents the questions in the session UI and sends your answers back as the next prompt.
 
-Pending asks retain their queued questions and choices in per-session order, independently of whether that session has an open tab. Only one response attempt can own the current ask. While it is submitting, another response or local cancellation is blocked; callbacks from an older attempt cannot submit or cancel a new attempt.
-
-CodeAlta consumes the ask only after positive evidence that the runtime admitted its response. This acknowledgement may arrive after the provider finishes; it is not an early receipt or a guarantee of provider success. If a plugin intercepts the response or preparation fails before runtime submission, the ask stays pending with a fresh attempt. Plugin actions are not undone or automatically replayed.
-
-If submission fails or is canceled after entering the runtime without positive evidence, the status reports **unresolved admission**. Resubmission and local cancellation are blocked to avoid sending the answer twice. The unresolved head also blocks later asks in that session. **There is no recovery or dismiss action for this state in this version.** Do not assume the response was unsent or automatically retry it in the normal composer.
-
-These queues and response states last only for the current application process; they are not restored after restart. Closing presentation does not cancel an accepted response. Notification failures warn without undoing committed queue changes or changing the agent's instruction to wait. Execution lifetime and reconnect recovery remain separate limitations.
-
 ### Delegate read-only research
 
 Delegation works best when each child has a narrow task and a bounded output.
@@ -148,12 +140,6 @@ Start a read-only child session to inspect the build logs. Set a reminder for th
 
 Reminders are delivered through normal session queue semantics while the current CodeAlta host is still running.
 
-Each firing captures its message and target before sending, without requiring an open session tab. Edits made after that capture affect only later firings. Deleting a reminder prevents future firings, but an already captured send may still proceed; deletion does not remove queued prompts or stop a run. Repeats wait the configured delay after the previous delivery call returns, and failed delivery results also count toward the repeat limit. Completed reminders remain in `reminder list --all` until deleted. A successful delivery result is not proof that the agent finished the work, and reminder schedules do not survive restarting CodeAlta.
-
-If a reminder change succeeds but notifying the interface fails, CodeAlta reports a warning rather than pretending the change failed. Observer errors do not replace delivery results or cancel repeats. `reminder list` and opening/refreshing the TUI reminder dialog can show the latest retained notification failure, including one for a completed or deleted reminder. This single process-only snapshot is overwritten by the next failed notification pass; it is historical feedback, not a current delivery failure or complete history. Successful notifications do not clear it, and warnings may be shortened or omitted by output limits. Feedback is queried rather than guaranteed to appear immediately.
-
-When a successfully created TUI frontend shuts down, its reminder service stops accepting changes and waits for retained reminder workers before frontend/runtime cleanup. It requests cancellation, but an already captured send may still proceed; queued prompts and agent runs are not withdrawn or joined by this worker cleanup. Listing remains available during shutdown, and an `Active` entry can be historical rather than still scheduled. An unfinished worker can delay shutdown without a forced timeout. This applies to the frontend's own reminder service, not every independently created host service or failed frontend construction.
-
 ### Switch or create modes through prompts
 
 You can ask an agent to inspect available prompts, recommend one, create a project prompt, or switch the current session.
@@ -171,10 +157,6 @@ Switch this session to the triage prompt for the next turn.
 ```
 
 Use [Agent Prompts](prompts.md) for file layout, frontmatter, override rules, and authoring guidance.
-
-When an agent creates a prompt, CodeAlta validates and writes the metadata and body without replacing an existing same-scope file. Raw prompt edits replace the complete file: supplied comments, unknown metadata and line endings are retained, as is an existing Unicode encoding/BOM. An edit can also create a missing file or repair malformed prompt metadata; asking only for its path does not write anything. Built-in prompts and linked paths are not writable through these commands.
-
-Changes detected after an edit command captures its file baseline cause a failure rather than an automatic overwrite/retry. This check begins when the command runs, not when the agent originally composed the replacement; ask it to reread and reconcile old content before editing. External editors can still race the final check and write. Review prompt-file diffs, especially when several tools are editing the same file.
 
 ### Activate MCP tools for a future turn
 

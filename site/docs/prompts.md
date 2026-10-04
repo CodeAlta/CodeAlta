@@ -162,7 +162,7 @@ Use a custom prompt when you repeat the same workflow often enough that it deser
 3. Create a **Global** prompt for all projects or a **Project** prompt for the current project.
 4. Pick a short lowercase id such as `reviewer`, `triage`, or `release`.
 5. Fill in a concise name, description, optional system prompt id, optional composition overrides, and Markdown body.
-6. Select the agent prompt from the footer **Agent:** selector or cycle prompts with `Ctrl+T` / `/next_prompt`.
+6. Select the agent prompt from the agent selector below the prompt, or cycle prompts with `Ctrl+T` / `/next_prompt`.
 
 Creating a system prompt does not activate it by itself. In normal use, a system prompt becomes active only when the selected agent prompt references its id in the **System Prompt** field (the `system` frontmatter property).
 
@@ -263,8 +263,6 @@ For advanced workflows, the body can mention CodeAlta live-tool capabilities the
 Use the **Agent:** selector below the prompt editor to choose the prompt for the current draft/session. Built-in prompts appear first, followed by global prompts and project prompts.
 
 The prompt manager lists built-in, global, and project prompts, shows shadowed replacements, and lets you create, edit, save, or delete global/project prompt files. Built-in prompt and system prompt files are visible for inspection but read-only; create a global or project file with the same id to replace or append to one.
-
-Creating a prompt never replaces an existing file in the same scope. If a file changes or disappears while you are editing it, Save/Delete reports a conflict and retains your edits. You can cancel, or explicitly continue against the version observed by the conflict check; another intervening change will conflict again. Refresh asks before discarding unsaved edits. The manager edits file-local metadata rather than filling in inherited append values, and retains the file's Unicode encoding/BOM when saving. It rewrites managed frontmatter and trims the body, so use a file editor when you need to preserve comments or additional frontmatter fields. Linked prompt files/directories are not editable through this dialog.
 
 Agents can also use the `prompt` and `session` live-tool command groups internally when you ask for prompt automation. For example, you can ask:
 
