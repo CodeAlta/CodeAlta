@@ -110,6 +110,29 @@ public sealed class AgentRuntimeTests
     }
 
     [TestMethod]
+    public async Task AgentRuntime_CreateSession_RecordsTheCreationTimeItIsGiven()
+    {
+        using var temp = TestTempDirectory.Create();
+        var agentRuntime = CreateAgentRuntime(temp.Path, out _);
+        var recorded = new DateTimeOffset(2026, 3, 4, 5, 6, 7, 891, TimeSpan.Zero);
+
+        await using var session = await agentRuntime.CreateSessionAsync(
+                new AgentSessionCreateOptions
+                {
+                    SessionId = "recorded-session",
+                    CreatedAt = recorded,
+                    ProviderKey = "openai",
+                    Model = "gpt-5.4",
+                    WorkingDirectory = "C:\\repo\\recorded",
+                    OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+                }).ConfigureAwait(false);
+
+        // A host that wrote the journal header first lists the session under that same instant.
+        var sessions = await CreateSessionStore(temp.Path).ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+        Assert.AreEqual(recorded, sessions.Single().CreatedAt);
+    }
+
+    [TestMethod]
     public async Task AgentRuntime_ResumeSession_LoadsLegacyProviderIdOnlyJournalAndSwitchesProvider()
     {
         using var temp = TestTempDirectory.Create();

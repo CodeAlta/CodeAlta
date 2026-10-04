@@ -1,4 +1,5 @@
 import type { HistoryResponse } from "#neoastra";
+import { parseDelegatedMessage } from "./delegatedMessage";
 import type { IconName } from "./AppIcon";
 import { compactionDetailsMarkdown, splitCheckpointSummary } from "./compactionDetails";
 import { projectFileChanges, type FileChanges } from "./fileChanges";
@@ -31,6 +32,8 @@ export type TimelineItem = Readonly<{
   toolOutputLines?: number;
   toolOutputBytes?: number | null;
   toolFields?: NonNullable<HistoryEntry["tool"]>["fields"];
+  /** True for a prompt another agent session delivered, shown without its routing envelope. */
+  delegated?: boolean;
 }>;
 
 type JsonObject = Record<string, unknown>;
@@ -126,16 +129,21 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
   let detailMarkdown: string | null = null;
   let details = formatDetails(entry.details);
   let detailsLabel = "Details";
+  const delegated = !streaming && normalizedKind === "user" && entry.eventType === "contentCompleted" ? parseDelegatedMessage(entry.text) : null;
 
   if (entry.eventType === "contentCompleted" || entry.eventType === "contentDelta") {
-    if (normalizedKind === "user") { category = "user"; icon = "user"; title = "You"; }
+    if (normalizedKind === "user") {
+      category = "user"; icon = delegated ? "branch" : "user"; title = delegated ? "Agent message" : "You";
+      if (delegated) markdown = delegated.body;
+    }
     else if (normalizedKind === "assistant") { category = "assistant"; icon = "assistant"; title = "Assistant"; }
     else if (normalizedKind.startsWith("reasoning")) { category = "reasoning"; icon = "brain"; title = normalizedKind === "reasoningsummary" ? "Reasoning summary" : "Reasoning"; }
     else if (normalizedKind === "plan") { category = "plan"; icon = "plan"; title = "Plan"; }
     else if (normalizedKind === "filechangeoutput") { category = "file"; icon = "file"; title = "File changes"; }
     else if (normalizedKind.endsWith("output")) { category = "tool"; icon = "tool"; title = friendly(kind); }
     else { title = friendly(kind || entry.eventType); }
-    subtitle = streaming ? "Streaming" : null;
+    subtitle = streaming ? "Streaming" : delegated
+      ? [friendly(delegated.kind), delegated.sourceSessionId?.slice(0, 8)].filter(Boolean).join(" · ") : null;
   } else if (entry.eventType === "activity") {
     category = normalizedKind === "filechange" ? "file" : "tool";
     icon = category === "file" ? "file" : "tool";
@@ -198,6 +206,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
   }
 
   const metadata = [
+    delegated?.sourceSessionId ? `From session: ${delegated.sourceSessionId}` : null,
     entry.providerId ? `Provider: ${entry.providerId}` : null,
     entry.runId ? `Run: ${entry.runId}` : null,
     entry.activityId ? `Activity: ${entry.activityId}` : null,
@@ -233,6 +242,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     toolOutputLines: entry.tool?.outputLines,
     toolOutputBytes: entry.tool?.outputBytes,
     toolFields: entry.tool?.fields,
+    delegated: delegated ? true : undefined,
   };
 }
 

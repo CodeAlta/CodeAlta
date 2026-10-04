@@ -1123,6 +1123,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             SessionId = requestedSessionId,
             ParentSessionId = NormalizeOptionalText(session.ParentSessionId),
             CreatedBySessionId = NormalizeOptionalText(session.CreatedBy?.SourceSessionId),
+            // The journal header records this instant; the provider's own record must not name a later one.
+            CreatedAt = session.CreatedAt == default ? null : session.CreatedAt,
             Title = NormalizeOptionalText(session.Title),
             ProviderKey = options.ProviderKey ?? session.ResolvedProviderKey,
             Model = options.Model,

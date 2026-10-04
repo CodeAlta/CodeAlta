@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceSnapshot } from "#neoastra";
-import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
+import { loadWorkspace, sessionListSignature, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 
 const empty: WorkspaceSnapshot = {
   configured: true, projects: [], sessions: [], projectsTruncated: false,
@@ -81,4 +81,15 @@ test("workspace shows truncation without implying paging", () => {
   assert.match(workspaceNotice({ ...empty, projectsTruncated: true })!, /not paging/i);
   assert.match(workspaceNotice({ ...empty, sessionsTruncated: true })!, /whole catalog/i);
   assert.match(workspaceNotice({ ...empty, displayTextTruncated: true })!, /shortened/i);
+});
+
+test("session list signature changes with the sessions shown, not with their activity", () => {
+  const session = { id: "a", title: "A", parentSessionId: null, scopeKind: "project", projectId: "p", workspacePath: "/p", updatedAt: "2026-01-01T00:00:00Z" };
+  const snapshot = (...sessions: object[]) => ({ ...empty, sessions }) as unknown as WorkspaceSnapshot;
+  const shown = sessionListSignature(snapshot(session));
+
+  assert.equal(sessionListSignature(snapshot({ ...session, updatedAt: "2026-01-02T00:00:00Z" })), shown);
+  assert.notEqual(sessionListSignature(snapshot(session, { ...session, id: "b", parentSessionId: "a" })), shown, "a sub-session appeared");
+  assert.notEqual(sessionListSignature(snapshot({ ...session, title: "Renamed" })), shown);
+  assert.equal(sessionListSignature(snapshot({ ...session, id: "b" }, session)), sessionListSignature(snapshot(session, { ...session, id: "b" })));
 });

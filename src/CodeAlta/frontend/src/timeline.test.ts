@@ -22,6 +22,21 @@ test("typed completed output retains authoritative totals with its exact activit
   assert.equal(buildTimelineItems([activity, { ...output, tool: null }])[0].toolOutputBytes, undefined);
 });
 
+test("a prompt delivered by another session is shown as an agent message without its envelope", () => {
+  const text = "[CodeAlta delegated-agent message]\r\nSource session: 01a105f5-60d1\r\nKind: answer\r\n\r\n[CodeAlta child-session answer update]\r\nRun: r\r\n\r\nPONG";
+  const [item] = buildTimelineItems([entry({ eventType: "contentCompleted", kind: "User", text })]);
+
+  assert.equal(item.category, "user");
+  assert.equal(item.delegated, true);
+  assert.equal(item.title, "Agent message");
+  assert.equal(item.subtitle, "Answer · 01a105f5");
+  assert.equal(item.markdown, "PONG");
+  assert.ok(item.metadata.includes("From session: 01a105f5-60d1"));
+  const [own] = buildTimelineItems([entry({ eventType: "contentCompleted", kind: "User", text: "PONG" })]);
+  assert.equal(own.delegated, undefined);
+  assert.equal(own.title, "You");
+});
+
 test("TUI status-only updates do not become timeline cards", () => {
   assert.deepEqual(buildTimelineItems(["Idle", "UsageUpdated", "Shutdown"].map(kind => entry({ eventType: "sessionUpdate", kind }))), []);
 });

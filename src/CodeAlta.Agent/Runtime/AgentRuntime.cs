@@ -190,7 +190,7 @@ public sealed class AgentRuntime : IAsyncDisposable
             ParentSessionId = NormalizeOptionalText(options.ParentSessionId),
             CreatedBySessionId = NormalizeOptionalText(options.CreatedBySessionId ?? options.ParentSessionId),
             CreatedByRunId = options.CreatedByRunId,
-            CreatedAt = now,
+            CreatedAt = options.CreatedAt ?? now,
             UpdatedAt = now,
         };
         var state = new AgentSessionState

@@ -26,6 +26,13 @@ public class AgentSessionCreateOptions
     public AgentRunId? CreatedByRunId { get; init; }
 
     /// <summary>
+    /// Gets or initializes the creation time recorded for a new session. A host that has already recorded
+    /// one, such as the header of the session's journal, passes it so both name the same instant; otherwise
+    /// the session is stamped when it starts.
+    /// </summary>
+    public DateTimeOffset? CreatedAt { get; init; }
+
+    /// <summary>
     /// Gets or initializes the user-facing session title when known at creation time.
     /// </summary>
     public string? Title { get; init; }

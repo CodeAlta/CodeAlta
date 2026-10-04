@@ -109,7 +109,7 @@ export function TimelineMessage({ item, canInspect, historySource, onOpenSource,
   const outcome = ({ completed: "Completed", failed: "Failed", canceled: "Canceled", requested: "Pending",
     started: "Running", progressed: "Running", selected: "Running", deselected: "Completed" } as Record<string, "Completed" | "Failed" | "Canceled" | "Pending" | "Running">)[item.toolPhase ?? ""];
   // Categories below have fixed UI titles in toTimelineItem; tool/provider names do not.
-  const title = item.category === "file" ? t("Modified files") : item.category === "user" ? t("You") : item.category === "plan" ? t("Plan")
+  const title = item.category === "file" ? t("Modified files") : item.category === "user" ? t(item.delegated ? "Agent message" : "You") : item.category === "plan" ? t("Plan")
     : item.category === "assistant" ? t("Assistant") : item.category === "notes" ? t("Notes") : item.category === "error" ? t("Error")
     : item.category === "reasoning" ? t(item.title === "Reasoning summary" ? "Reasoning summary" : "Reasoning") : item.title;
   const copyLabel = copyState === "copied" ? t("Copied") : copyState === "failed" ? t("Copy failed") : t("Copy {title} as Markdown", { title });

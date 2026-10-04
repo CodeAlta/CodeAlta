@@ -486,6 +486,26 @@ Nothing is written above the prompt. Message navigation (`F3`/`F4`) is announced
 technology only, and a Send that was not accepted is reported in a toast at the top right of the
 window.
 
+### The alta tool, sub-sessions and agent messages
+
+Sessions of the desktop host have the same `alta` tool as in the terminal: notes, sessions and
+sub-sessions, reminders, skills, projects, providers, models and prompts. The plugin commands
+(`alta mcp`, `alta statistics`) are absent because the desktop host does not start the plugin runtime.
+
+- `alta notes set` writes the session's notes; the **Notes** window at the top right of the session
+  opens with them.
+- `alta ask` shows its questions as a card above the prompt (see the ask card below).
+- `alta reminder create` creates reminders the **Reminders** view lists and delivers.
+- `alta session create` creates a sub-session. It appears in the Explorer under its parent within ten
+  seconds while a run is live, and at the latest when the run ends. A sub-session is an ordinary
+  session: it opens in a tab and takes prompts from the window. Sub-sessions created before their
+  journal and their provider record agreed on the creation time stay at the root of their project.
+
+What a sub-session reports to its parent, and what one session writes to another, is recorded as a
+prompt with a routing envelope. The timeline shows it as an **Agent message** card with the kind of
+message and the start of the sending session's id, and only the text that was sent; **Details** names
+the sending session.
+
 ### Turn statistics
 
 When a turn ends, the built-in Statistics plugin adds a **Turn statistics** row after it, as in the
@@ -982,52 +1002,21 @@ Aborting the owning submission or closing the application invalidates still-pend
 but cannot revoke a decision already accepted by the backend. Native/provider qualification and
 the broader permission, file-review and ask workflows remain incomplete.
 
-Owned submissions also enable restricted caller-session **`alta ask --stdin`** questions; ordinary
-host composition still defaults to no owned asks. This does not expose the general LiveTool command
-dispatcher or activate provider user-input requests. In **Pending asks**, use **Refresh asks** to
-read the original retained head, then **Answer original ask** or **Cancel original ask**. An answer
-starts a new normal text submission to the original session with the original AskId. Cancel removes
-only an unclaimed pending ask; it does not stop the producer run or an admitted answer. A committed
-ask can outlive its producer. Requests and answers each have an aggregate 8,192 UTF-16-unit text limit.
-For a validated multi-question head, **Previous question** and **Next question** show the current
-position/title and move between questions without wrapping. The panel retains every question's
-local choices and text when switching and on same-head refresh; only an explicit **Answer original
-ask** submits all question indexes, including unvisited/empty answers under existing validation.
-With focus in the current question's input or the question-navigation buttons, Ctrl+N/P moves
-through available questions using those same guarded controls; at boundaries, for single-question
-asks, and everywhere else (including Answer/Cancel, Refresh, dialogs and the composer), browser
-shortcuts retain their defaults. Navigation never submits, reads or acknowledges an action, and
-does not implement the TUI's SubmitOrAdvance command. A changed head resets the visible question
-rather than rebinding an old draft; single-question asks keep the original simple editor.
-Unsubmitted text and selected-choice drafts survive explicit refreshes of the same validated
-pending head, including edits made while its read is in flight. The editor compares the full
-handle and all validated question, choice and freeform fields, not just AskId; answer/cancel
-remain disabled while a refresh is pending. A missing, failed, malformed or replaced head leaves
-its former unsent draft visible only as local read-only recovery, never as an answer for another
-head (even if an earlier shape returns). A two-step **Discard local draft** removes only that
-local copy, not a captured backend action. At most eight drafts are kept by the mounted panel;
-discard recovery to free capacity. These drafts are **component-lifetime only**: navigating
-away, archival or closing the window unmounts the panel and loses unsubmitted drafts. A different
-host epoch/session cannot see another scope's local recovery. This adds no reads beyond the
-existing mount/selection read and explicit Refresh; it adds no persistence, retry, rebind or
-submission route.
-After an answer is captured, the panel exposes its **original immutable action** separately
-from those discardable local drafts: full captured freeform text, question/choice indexes and
-original host epoch, session, complete handle and action ID remain inspectable during pending
-and uncertain transport, including failed or changed list reads and same-host panel remount.
-Question/choice wording is not stored in that action and is never invented from a later head.
-Discarding a local draft cannot remove or acknowledge a submitted answer. An actual failed
-list read is reported as failed, not as a still-pending refresh; neither state permits stale
-submission. Archived scopes continue using their existing read-only recovery gate.
+An agent asks the user a question with **`alta ask --stdin`**. The question appears as a card at the
+end of the timeline, above the prompt: its title, the question, its choices as checkboxes and, when the
+ask allows one, a text answer. **Answer** sends the answers of every question as a new prompt to the
+session that asked; **Cancel** withdraws the ask without stopping anything. An ask with several
+questions shows its position (`1 / 3`) with previous and next buttons, and `Ctrl+N` / `Ctrl+P` move
+between questions while the focus is in the card. Choices and text are kept while moving between
+questions and across refreshes of the same ask. The card leaves the timeline once the ask is answered
+or cancelled; the answer is then an ordinary **You** card.
 
-Original actions survive selection changes and panel remounts. An eight-second timeout permanently
-marks the original transport result uncertain and prevents competing actions; it is not proof of
-failure to submit. **Observe original action** reads separate backend evidence without resending or
-rewriting that uncertain result. Reload can read same-host retained heads/dispositions but cannot
-reconstruct lost action intent; absence is not acknowledgment. Host restart restores no authority.
-The host retains at most 256 asks and 256 action records without evicting uncertain evidence. No
-attachments, file review, target override, polling or automatic retry is provided. Qualification
-uses isolated inert providers, not native UI or configured-provider workflows.
+An answer and an ask each hold at most 8,192 UTF-16 units of text. A run can ask once, and only a run
+started from the window can ask; asks do not survive closing the application. When the ask an answer
+was written for changes or disappears before it is sent, the text stays in the card as an **Unsent
+answer** that can be copied or discarded, never sent to another ask. When the host does not confirm an
+answer or a cancel within eight seconds, the card says so with a **Check** button that reads what the
+host recorded, without sending again.
 
 Add **`--enable-owned-user-input`** to the complete owned-mode command for **Nonsecret provider input**.
 It is off by default, requires owned mode, and is independent of command review and restricted asks.

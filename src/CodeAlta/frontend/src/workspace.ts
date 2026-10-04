@@ -37,6 +37,16 @@ export function sessionsForProject(snapshot: WorkspaceSnapshot, projectId: strin
         && project.path === value.workspacePath) : !value.workspacePath || !knownPaths.has(value.workspacePath)));
 }
 
+/**
+ * What the Explorer shows of a snapshot's sessions, without their activity times: two snapshots with the
+ * same signature list the same sessions under the same parents and titles.
+ */
+export function sessionListSignature(snapshot: WorkspaceSnapshot): string {
+  return JSON.stringify([snapshot.projects.map(project => [project.id, project.name, project.path, project.archived]),
+    snapshot.sessions.map(session => [session.id, session.title, session.parentSessionId, session.scopeKind, session.projectId, session.workspacePath])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])))]);
+}
+
 export function workspaceNotice(snapshot: WorkspaceSnapshot): string | null {
   if (!snapshot.projectsTruncated && !snapshot.sessionsTruncated && !snapshot.displayTextTruncated) return null;
   return "Display limits applied (up to 200 projects / 500 sessions, with a wire-size limit); some labels may be shortened. This is not paging: the shared loader still reads the whole catalog. Sessions whose projects are omitted appear under Global / unmatched.";

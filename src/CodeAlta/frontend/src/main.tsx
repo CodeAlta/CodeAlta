@@ -15,7 +15,7 @@ import {
   type ReminderDetailRequest,
   type ConfigurationSnapshot, type WorkspaceSession, type WorkspaceSnapshot,
 } from "#neoastra";
-import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
+import { loadWorkspace, sessionListSignature, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
 import { readTimeline } from "./readTimeline";
 import { SessionContentLayout } from "./SessionContentLayout";
@@ -181,6 +181,31 @@ function App() {
     markProjectInspection(value.kind === "ready");
     setWorkspaceState(value);
   }
+  // Sessions also appear without the window asking: an agent creates sub-sessions through the alta tool.
+  // While a run is live, and when it ends, the session list is read again and shown only if it differs.
+  const liveRuns = useRef(new Set<string>());
+  const sessionListRead = useRef(false);
+  const readSessionList = useRef(() => {});
+  readSessionList.current = () => {
+    if (sessionListRead.current || !currentSnapshot.current || document.visibilityState !== "visible") return;
+    sessionListRead.current = true;
+    const revision = browserRevision.current;
+    void workspace.snapshot({}, { timeoutMilliseconds: 30_000 }).then(fresh => {
+      const shown = currentSnapshot.current;
+      if (!creationAlive.current || !shown || !fresh.configured || revision !== browserRevision.current
+        || sessionListSignature(shown) === sessionListSignature(fresh)) return;
+      publishWorkspaceState({ kind: "ready", snapshot: fresh });
+    }).catch(() => {}).finally(() => { sessionListRead.current = false; });
+  };
+  const noteRunActivity = (id: string, running: boolean | null) => {
+    const was = liveRuns.current.has(id);
+    if (running) liveRuns.current.add(id); else liveRuns.current.delete(id);
+    if (was && !running) readSessionList.current();
+  };
+  useEffect(() => {
+    const timer = setInterval(() => { if (liveRuns.current.size > 0) readSessionList.current(); }, 10_000);
+    return () => clearInterval(timer);
+  }, []);
   const [projectId, writeProjectId] = useState<string | null>(null);
   const [sessionId, writeSessionId] = useState<string | null>(null);
   const [restoredTabs] = useState(() => restoreSessionTabs(() => localStorage.getItem(sessionTabsKey)));
@@ -1749,7 +1774,7 @@ function App() {
                 ? { expectedEpoch: status.hostEpoch, projectId: tab.projectId, projectPath: tab.path!, sessionId: row.id,
                   lifetime: creationGeneration.current, capturePopup: captureReferenceLifetime,
                   observe: value => mutation?.capability.observe(value) } : null}>
-              <SessionWorkspace session={row} snapshot={snapshot} selectedProjectId={tab.projectId} onRunActivity={running => runtimeObservations.setLive(tab, running)} notesReader={owners.notesReader} observing={visible && view === "workspace" && !settingsOpen}
+              <SessionWorkspace session={row} snapshot={snapshot} selectedProjectId={tab.projectId} onRunActivity={running => { runtimeObservations.setLive(tab, running); noteRunActivity(tab.sessionId, running); }} notesReader={owners.notesReader} observing={visible && view === "workspace" && !settingsOpen}
                 active={tab.sessionId === sessionId} notesToggle={notesVisible} onActivate={() => { if (sessionId !== tab.sessionId || fileTabs.active) selectSessionTab(tab); }}
                 infoTrigger={sessionInfoTrigger} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger}
                 infoLifetime={{ revision: 0, current: () => !!currentSnapshot.current && !!resolveSessionTab(currentSnapshot.current, tab)
@@ -2193,7 +2218,8 @@ function ConfigurationPanel({ preferences }: { preferences: Parameters<typeof Ge
 function LoadingRows() { return <div className="loading-rows"><span /><span /><span /></div>; }
 function SessionTime({ value, now }: { value: string; now: number }) {
   const { locale } = useShellLanguage();
-  const { label, title, dateTime } = sessionTime(value, locale, now);
+  // The list's clock ticks slowly: activity recorded since its last tick is "now", not in the future.
+  const { label, title, dateTime } = sessionTime(value, locale, Math.max(now, Date.parse(value) || 0));
   return <time dateTime={dateTime} title={title}>{label}</time>;
 }
 
