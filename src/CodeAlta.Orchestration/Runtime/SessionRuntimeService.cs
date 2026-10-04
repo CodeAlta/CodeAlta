@@ -1030,7 +1030,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 await GetActorForWork(session.SessionId).QueryAsync(_ =>
                 {
                     if (_transitions.TryGetValue(session.SessionId, out var current) && ReferenceEquals(current, ticket))
+                    {
                         _transitions.TryRemove(session.SessionId, out var completedTransition);
+                        // Callbacks that arrive from now on count as activity of the published attachment.
+                        if (_entries.TryGetValue(session.SessionId, out var published)) published.OpenActivity();
+                    }
                     return ValueTask.FromResult(true);
                 }, CancellationToken.None).ConfigureAwait(false);
                 }
@@ -1227,7 +1231,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         projector.Entry = entry;
         var subscription = await _agentHub.SubscribeSessionEventsAsync(
                 sessionHandleId,
-                @event => _ = PostAgentEventToActorAsync(actor, session.SessionId, projector, @event),
+                // Whether a callback counts as activity is decided when it arrives, not when the actor reaches it:
+                // one delivered while the attachment is still being set up (a provider may call back from inside
+                // the subscription itself) must not count or be skipped depending on how fast it is forwarded.
+                @event => _ = PostAgentEventToActorAsync(actor, session.SessionId, projector, @event, entry.ActivityOpen),
                 cancellationToken)
             .ConfigureAwait(false);
         attachment.InstallSubscription(subscription);
@@ -2502,12 +2509,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         SessionActor actor,
         string sessionId,
         EventProjector projector,
-        AgentEvent @event)
+        AgentEvent @event,
+        bool arrivedOnOpenActivity)
         => _forwarding.Forward(projector.Entry!.Attachment,
-            use => PostAgentEventToActorCoreAsync(actor, sessionId, projector, @event, use));
+            use => PostAgentEventToActorCoreAsync(actor, sessionId, projector, @event, arrivedOnOpenActivity, use));
 
     private async Task PostAgentEventToActorCoreAsync(
-        SessionActor actor, string sessionId, EventProjector projector, AgentEvent @event,
+        SessionActor actor, string sessionId, EventProjector projector, AgentEvent @event, bool arrivedOnOpenActivity,
         OwnedProviderEventForwarding.Use projectionUse)
     {
         var projectId = projector.Entry!.ProjectId;
@@ -2520,7 +2528,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         {
             await publication.CompleteAsync(mark => actor.QueryAsync(_ =>
                 {
-                    ObserveAdmittedActivity(sessionId, projector.Entry!, @event);
+                    if (arrivedOnOpenActivity) ObserveAdmittedActivity(sessionId, projector.Entry!, @event);
                     var sanitized = projector.Project(@event);
                     ObserveAdmittedUsage(sessionId, projector.Entry!, sanitized);
                     published = sanitized;
@@ -3649,6 +3657,16 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         public SessionRuntimeUsageObservation? LastObservedUsage { get; set; }
         public long UsageSequence { get; set; }
         public long OmittedUsageEvents { get; set; }
+        private volatile bool _activityOpen;
+
+        /// <summary>
+        /// Whether provider callbacks arriving now count as activity: true once the transition that created
+        /// this attachment has completed. Read on the provider's callback thread.
+        /// </summary>
+        public bool ActivityOpen => _activityOpen;
+
+        public void OpenActivity() => _activityOpen = true;
+
         public DateTimeOffset? ActivityTimestamp { get; set; }
         public long ActivityEvents { get; set; }
         public long OmittedActivityEvents { get; set; }

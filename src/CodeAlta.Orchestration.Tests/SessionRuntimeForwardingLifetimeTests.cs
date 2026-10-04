@@ -767,9 +767,13 @@ public sealed class SessionRuntimeForwardingLifetimeTests
     {
         await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
         var old = f.Provider.Latest;
-        var first = await f.Wait(f.Runtime.QueuePromptAsync(f.Session, "queued", "send", null));
+        // The fixture session reports Idle from inside its subscription, and that callback is forwarded
+        // asynchronously: it may drain the queue at any time from here on. The pending prompt and the held
+        // preparation are therefore in place before the queue has an item, so whichever Idle drains it
+        // (that one or the one emitted below) starts the same held replacement.
         await f.Wait(f.Runtime.SetActiveSessionAgentPromptIdAsync(f.Session.SessionId, "plan"));
         f.Provider.HoldPreparation = true;
+        var first = await f.Wait(f.Runtime.QueuePromptAsync(f.Session, "queued", "send", null));
         old.EmitIdle();
         await f.Ready(f.Provider.ReplacementPreparationStarted.Task);
         // Replacement owns a transition, but no actor: an admitted queue mutation must finish
