@@ -307,6 +307,47 @@ edits; **Exit** closes the application without changing the file. A file that ch
 meantime is not overwritten. Recovery reads, checks and writes that one file only: no provider,
 plugin or session is started before it is valid.
 
+### The application beyond its window
+
+CodeAlta keeps an icon in the notification area (the menu bar on macOS, the system tray on Linux)
+with **Open CodeAlta** and **Exit**; selecting the icon opens the window too. By default, closing
+the window hides it and leaves the application running there, so sessions keep running. Settings →
+Appearance → **Keep running when the window is closed** turns this off, and closing the window then
+exits. The choice is kept in `preferences.json` in the application data directory. Where the desktop
+has no status area (some Linux sessions), closing the window exits whatever the setting says; on
+macOS the Dock icon also brings the window back.
+
+Starting `alta` while CodeAlta already runs with the same profile does not start a second one: the
+running one shows its window and comes to the front. `alta --exit` asks the running one to exit, as
+**Exit** in the tray does (`alta --dev --exit` for the developer instance); with none running it does
+nothing. Use it before `dotnet tool update -g CodeAlta`, which cannot replace the files of a running
+application.
+
+**Exit** (the tray's, Ctrl+Q, or a closed window that cannot stay in the tray) first asks about files
+with unsaved edits, then, while sessions are running, says how many and that exiting stops them:
+**Exit CodeAlta** or **Cancel**. The end of the user's session at sign-out or shutdown exits without
+a question.
+
+### Desktop entry of the installed tool
+
+The first start of a tool installed with `dotnet tool install -g CodeAlta` adds CodeAlta to the
+desktop, in the user's own folders and without elevation, and refreshes the entry when the version
+or the launcher's path changes. The first time, a notice in the window says where it was added:
+
+- **Windows:** a **CodeAlta** shortcut in the Start Menu, with the application's icon. The process
+  has its own application identity, so the taskbar groups the window with that shortcut and a pin
+  keeps the name and icon.
+- **macOS:** `~/Applications/CodeAlta.app`, a bundle whose executable is a shell script that becomes
+  the installed tool (`exec`). It starts the tool through the user's login shell so that it gets the
+  PATH of a terminal (git, node, the .NET runtime), which an application started from the Finder
+  does not have. Nothing is signed or downloaded: the bundle is created locally, so it is not
+  quarantined. If the tool is uninstalled, the bundle says so when opened.
+- **Linux:** `codealta.desktop` in `~/.local/share/applications` (or `$XDG_DATA_HOME`).
+
+Each entry starts the tool's launcher (`alta` in the .NET tools folder), so a tool update needs no
+change. The developer instance, an instance on explicit roots, a build output and a local tool add
+nothing. Uninstalling the tool leaves the entry behind; delete it by hand.
+
 The view is an application shell rather than a browser page: the browser's own find, print, reload
 and zoom shortcuts, its context menu and its status bubble are turned off, so those keys reach
 CodeAlta's commands. Text-editing keys work as usual.

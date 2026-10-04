@@ -99,6 +99,13 @@ export const sessionOperations = Object.freeze({
 export const sessionAsks = Object.freeze({ answer: unavailable, cancel: unavailable, list: emptyPage, observe: unavailable });
 export const sessionNotes = Object.freeze({ current: unavailable });
 export const sessionPluginEvents = Object.freeze({ read: unavailable });
+// The demo has no host process: nothing to repair, nothing to keep running.
+export const startupConfig = Object.freeze({ read: unavailable, reload: unavailable, validate: unavailable, save: unavailable, leave: unavailable });
+export const desktopShell = Object.freeze({
+  preferences: async () => ({ status: "unavailable", closeToTray: false, canKeepRunning: false, platform: "windows", entryAdded: false }),
+  setCloseToTray: async () => ({ status: "unavailable", closeToTray: false, canKeepRunning: false, platform: "windows", entryAdded: false }),
+  exit: async () => ({ status: "unavailable" }), watch: unavailable,
+});
 export const providerLogin = Object.freeze({ status: unavailable, login: unavailable, logout: unavailable });
 export const projectFiles = Object.freeze({ read: unavailable, write: unavailable });
 export const projectGit = Object.freeze({ status: unavailable });

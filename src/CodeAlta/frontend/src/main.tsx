@@ -9,6 +9,9 @@ import { settingsNavigation } from "./settingsNavigation";
 import { colorSchemeAttribute } from "./colorSchemes";
 import { dismissStartupScreen, rememberAppearance } from "./startupScreen";
 import { ConfigRecoveryScreen } from "./ConfigRecoveryScreen";
+import { RunningExitDialog } from "./RunningExitDialog";
+import { entryAddedNotice } from "./desktopShell";
+import { showToast } from "./appToaster";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionPluginEvents, projectGit, promptImages, composerStatus, sessionUserInput, type BootStatus,
@@ -16,6 +19,7 @@ import {
   type ReminderListResponse,
   type ReminderDetailRequest,
   type ConfigurationSnapshot, type WorkspaceSession, type WorkspaceSnapshot,
+  desktopShell, type DesktopShellPreferences,
 } from "#neoastra";
 import { loadWorkspace, sessionListSignature, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
@@ -638,7 +642,7 @@ function App() {
   const [exiting, setExiting] = useState<{ tabs: FileTab[]; busy: boolean } | null>(null);
   function exitApplication() {
     const unsaved = fileTabs.open.filter(tab => fileEditors.dirty(fileTabKey(tab)));
-    if (unsaved.length === 0) { closeApplicationWindow(); return; }
+    if (unsaved.length === 0) { quitApplication(); return; }
     setExiting(current => current?.busy ? current : { tabs: unsaved, busy: false });
   }
   const requestExit = useRef(exitApplication);
@@ -650,7 +654,53 @@ function App() {
       if (creationAlive.current) { setExiting(null); activateFile(tab); }
       return;
     }
-    closeApplicationWindow();
+    setExiting(null);
+    quitApplication();
+  }
+  // The host exits the application; while sessions run it first has this page ask (see the shell's notices).
+  function quitApplication(confirmed = false) {
+    void desktopShell.exit({ confirmed }, { timeoutMilliseconds: 15_000 })
+      .then(reply => { if (reply.status !== "ok") closeApplicationWindow(); }, closeApplicationWindow);
+  }
+  // How the application lives beyond its window: whether closing it leaves CodeAlta running, and the host's
+  // requests to exit (Exit in the tray) or to ask before an exit that stops running sessions.
+  const [shellPreferences, setShellPreferences] = useState<DesktopShellPreferences | null>(null);
+  const [exitQuestionFor, setExitQuestionFor] = useState<number | null>(null);
+  // Said once, the first time the installed tool is added to the desktop's applications.
+  const entryAnnounced = useRef(false);
+  const shownLocale = useRef(language.locale); shownLocale.current = language.locale;
+  const currentPlatform = useRef("windows");
+  function announceEntry(platform: string) {
+    if (entryAnnounced.current) return;
+    entryAnnounced.current = true;
+    showToast({ message: translate(shownLocale.current, entryAddedNotice(platform)), intent: "success", icon: "tick", timeout: 12_000 });
+  }
+  useEffect(() => {
+    if (!status?.hostEpoch) return;
+    const abort = new AbortController();
+    void desktopShell.preferences({}, { signal: abort.signal, timeoutMilliseconds: 8_000 })
+      .then(value => {
+        if (abort.signal.aborted || value.status !== "ok") return;
+        setShellPreferences(value);
+        currentPlatform.current = value.platform;
+        if (value.entryAdded) announceEntry(value.platform);
+      }, () => { /* No shell: the window is the application. */ });
+    void (async () => {
+      try {
+        for await (const notice of await desktopShell.watch({}, { signal: abort.signal })) {
+          if (abort.signal.aborted) return;
+          if (notice.kind === "entry-added") announceEntry(currentPlatform.current);
+          else if (notice.kind === "exit-requested") requestExit.current();
+          else if (notice.kind === "confirm-exit") setExitQuestionFor(notice.runningSessions);
+        }
+      } catch { /* The bridge is gone; the window's own close still works. */ }
+    })();
+    return () => abort.abort();
+  }, [status?.hostEpoch]);
+  function setCloseToTray(enabled: boolean) {
+    setShellPreferences(current => current && { ...current, closeToTray: enabled });
+    void desktopShell.setCloseToTray({ enabled }, { timeoutMilliseconds: 8_000 })
+      .then(value => { if (value.status === "ok") setShellPreferences(value); }, () => { /* The switch shows what was asked. */ });
   }
   async function saveAndCloseFile(tab: FileTab) {
     setFileClosing({ tab, busy: true });
@@ -1866,7 +1916,8 @@ function App() {
           </div></SessionTabStrip></main></ProjectReferenceContext.Provider>} />
       </div>
     {settingsOpen && <SettingsOverlay section={settingsSection} onSection={navigate} onClose={closeSettings}>
-      {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, shownTheme, colorScheme, setColorScheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); } }} />
+      {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, shownTheme, colorScheme, setColorScheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); },
+        keepRunning: shellPreferences?.canKeepRunning ? { enabled: shellPreferences.closeToTray, platform: shellPreferences.platform, set: setCloseToTray } : null }} />
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl} />
       : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
       : settingsSection === "skills" ? <SkillSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
@@ -1937,8 +1988,10 @@ function App() {
       observe={value => mutation?.capability.observe(value)} onClose={() => setDialog(null)}
       onOpen={path => { setDialog(null); openFile({ projectId: filePickerProject.id, projectPath: filePickerProject.path, path }); }} />}
     {exiting && <UnsavedExitDialog names={exiting.tabs.map(fileTabName)} busy={exiting.busy}
-      onSave={() => void saveAllAndExit(exiting.tabs)} onDiscard={closeApplicationWindow}
+      onSave={() => void saveAllAndExit(exiting.tabs)} onDiscard={() => { setExiting(null); quitApplication(); }}
       onCancel={() => { if (!exiting.busy) setExiting(null); }} />}
+    {exitQuestionFor !== null && <RunningExitDialog runningSessions={exitQuestionFor} onCancel={() => setExitQuestionFor(null)}
+      onExit={() => { setExitQuestionFor(null); quitApplication(true); }} />}
     {fileClosing && <UnsavedFileDialog name={fileTabName(fileClosing.tab)} mode="close" busy={fileClosing.busy}
       onSave={() => void saveAndCloseFile(fileClosing.tab)} onDiscard={() => closeFile(fileClosing.tab, true)}
       onCancel={() => { if (!fileClosing.busy) setFileClosing(null); }} />}

@@ -22,7 +22,27 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
     internal int ExitCode { get; private set; } = 1;
 
     internal static int Run(DesktopLaunchOptions options)
-        => RunWithCapture(options, RunCore);
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        // A profile in use is a running CodeAlta, possibly with its window closed. This start asks it to show
+        // its window and ends there, before touching anything the running one holds (its log file, say).
+        if (options.Owned is not null && ProfileInUse(options)) return ActivateRunningInstance(options);
+        if (options.ExitRunning) return 0; // None is running: there is nothing to exit.
+        return RunWithCapture(options, RunCore);
+    }
+
+    private static string LockPath(DesktopLaunchOptions options) => Path.Combine(options.StateRoot ?? options.CatalogRoot!, "alta.lock");
+
+    private static bool ProfileInUse(DesktopLaunchOptions options)
+    {
+        try
+        {
+            using var probe = CodeAltaSingleInstanceGuard.Acquire(LockPath(options));
+            return false;
+        }
+        catch (CodeAltaAlreadyRunningException) { return true; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { return false; } // The start itself reports it.
+    }
 
     // Initialize before any host/provider acquisition. A failed/unconfirmed lifetime can still
     // own callbacks, so leave its logger available until process exit rather than breaking them.
@@ -61,12 +81,72 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         uri.IsAbsoluteUri && uri.Scheme == "app" && uri.Host == "codealta" && uri.Port == -1 &&
         string.IsNullOrEmpty(uri.UserInfo) && uri.AbsolutePath is "/index.html" or "/splash.html" && string.IsNullOrEmpty(uri.Query);
 
+    /// <summary>
+    /// The identity under which running instances are found: one per profile, so the developer instance and
+    /// an instance on explicit roots are never mistaken for the normal one.
+    /// </summary>
+    internal static string InstanceId(DesktopLaunchOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var root = Path.GetFullPath(options.StateRoot ?? options.CatalogRoot ?? options.DataRoot);
+        if (OperatingSystem.IsWindows()) root = root.ToUpperInvariant();
+        return "org.codealta.desktop." + Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(root)))[..24];
+    }
+
+    // The running instance listens for the next ones. Without this endpoint the application still runs; a
+    // second start then only finds the profile in use.
+    private static async ValueTask<IAsyncDisposable?> AcquireInstanceAsync(NeoApplication application, DesktopLaunchOptions options)
+    {
+        try
+        {
+            return await NeoSingleInstance.AcquireAsync(application, new NeoSingleInstanceOptions { ApplicationId = InstanceId(options) },
+                new NeoLaunchEvent(NeoLaunchReason.SecondInstance));
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or TimeoutException or IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            LogManager.GetLogger("CodeAlta.Desktop").Warn($"Second starts cannot reach this instance: {exception.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The profile is in use by a running CodeAlta, possibly with its window closed: this start asks that one
+    /// to show its window, then ends.
+    /// </summary>
+    private static int ActivateRunningInstance(DesktopLaunchOptions options)
+    {
+        var routed = false;
+        var result = NeoApplication.Run(new NeoApplicationOptions { ApplicationName = "CodeAlta", ShutdownMode = NeoApplicationShutdownMode.Explicit }, async application =>
+        {
+            try
+            {
+                // Routing happens inside the acquisition: this process is not the first one.
+                await using var instance = await NeoSingleInstance.AcquireAsync(application, new NeoSingleInstanceOptions { ApplicationId = InstanceId(options) },
+                    new NeoLaunchEvent(NeoLaunchReason.SecondInstance, options.ExitRunning ? [DesktopCommandLine.ExitOption] : null));
+                routed = !instance.IsPrimary;
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or TimeoutException or IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+            {
+                Console.Error.WriteLine($"The running CodeAlta could not be reached: {exception.Message}");
+            }
+            finally { application.ForceShutdown(); }
+        });
+        if (!routed) Console.Error.WriteLine("CodeAlta is already running with this profile.");
+        return result == 0 && routed ? 0 : 1;
+    }
+
     private static int RunOwned(DesktopLaunchOptions options, DesktopLogCapture? capture)
     {
         var desktop = new DesktopApplication(options, capture);
         try
         {
-            desktop._lease = CodeAltaSingleInstanceGuard.Acquire(Path.Combine(options.StateRoot ?? options.CatalogRoot!, "alta.lock"));
+            // Only the normal instance is the installed application; the developer instance and one on explicit
+            // roots stay apart from it in the taskbar and leave the desktop's entry alone.
+            var installed = !options.Developer && options.Owned!.Home is null;
+            DesktopIntegration.IdentifyProcess(developer: !installed);
+            try { desktop._lease = CodeAltaSingleInstanceGuard.Acquire(LockPath(options)); }
+            catch (CodeAltaAlreadyRunningException) { return ActivateRunningInstance(options); } // Another start won the profile meanwhile.
+
             Directory.CreateDirectory(options.DataRoot);
             var result = NeoApplication.Run(new NeoApplicationOptions
             {
@@ -129,7 +209,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         ProviderLoginService? providerLogin = null;
         WorkspaceService? workspace = null;
         NeoWindow? window = null;
-        IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null, chromeLifetime = null;
+        IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null, chromeLifetime = null, instanceLifetime = null;
         var bodyFailed = false;
         try
         {
@@ -138,19 +218,34 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             window = application.CreateWindow(DesktopWindowChrome.WindowOptions(options.Developer, appearance));
             application.MainWindow = window;
             window.Closed += (_, _) => closed.TrySetResult();
+            var shutdownWindow = window;
+            // The application's shutdown starts once, from the window being closed without a tray to stay in,
+            // from Exit in the tray or in the page, or from the end of the user's session.
+            var shell = new DesktopShell(window, application.Dispatcher, options.DataRoot, () =>
+            {
+                operations?.CloseAdmission();
+                asks?.CloseAdmission();
+                reminders?.CloseAdmission();
+                providers?.CloseAdmission();
+                closeRequested.TrySetResult();
+                application.Dispatcher.Post(() => { if (!shutdownUnconfirmed && !shutdownWindow.IsClosed) shutdownWindow.Title = "CodeAlta — shutdown pending; lease retained"; });
+            });
             window.CloseRequested += request =>
             {
-                if (!allowClose)
-                {
-                    request.Cancel();
-                    operations?.CloseAdmission();
-                    asks?.CloseAdmission();
-                    reminders?.CloseAdmission();
-                    providers?.CloseAdmission();
-                    closeRequested.TrySetResult();
-                    if (!shutdownUnconfirmed) window.Title = "CodeAlta — shutdown pending; lease retained";
-                }
+                // Closing the window hides it while the application stays in the tray; otherwise it exits,
+                // after a question when sessions are running.
+                if (!allowClose) shell.Close(request);
                 return ValueTask.CompletedTask; // Never await host cleanup inside the native deadline.
+            };
+            // The installed tool becomes an application of this desktop; the page says so the first time.
+            if (!options.Developer && roots.Home is null)
+                _ = Task.Run(() => { if (DesktopIntegration.Ensure(options.DataRoot, DesktopCommandLine.Version)) shell.NotifyEntryAdded(); });
+            // Starting CodeAlta again, or selecting it in the Dock, brings back the window of the running one.
+            application.LaunchReceived += launch =>
+            {
+                if (launch.Reason == NeoLaunchReason.SecondInstance && launch.Arguments.Contains(DesktopCommandLine.ExitOption)) shell.RequestUserExit();
+                else if (launch.Reason is NeoLaunchReason.Activated or NeoLaunchReason.SecondInstance) shell.Show();
+                return ValueTask.CompletedTask;
             };
             // The window is shown once its view has the start-up screen (see below): a window without a view
             // is a white rectangle, whatever the theme.
@@ -215,6 +310,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var chrome = await DesktopWindowChrome.StartAsync(application, options.DataRoot);
             chromeLifetime = chrome;
             await chrome.ApplyWindowIconAsync(window);
+            await shell.StartTrayAsync(chrome.Services, options.Developer);
+            instanceLifetime = await AcquireInstanceAsync(application, options);
             var creatingView = environment.CreateWebViewAsync(NeoAstraHost.FillWindow(window), DesktopWindowChrome.ViewOptions());
             var view = await creatingView;
             Mark("view created");
@@ -238,6 +335,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 DesktopWindowReveal.Reveal(window);
             }
             Mark("window shown with the start-up screen");
+            // This method runs for the whole life of the application: say now that it is ready, or the launches
+            // routed to it (a second start, the Dock) would wait for it to return.
+            application.NotifyReady();
             // The page's theme: kept for the next start, and the window controls follow it now.
             void RememberAppearance(DesktopAppearance remembered)
             {
@@ -255,8 +355,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 recoveryBuilder.AddBootService(new BootService { ConfigRecovery = true, Developer = options.Developer, RememberAppearance = RememberAppearance });
                 recoveryBuilder.AddStartupConfigService(new StartupConfigService(configRecovery)
                 {
-                    Continue = () => repaired.TrySetResult(), Exit = () => closeRequested.TrySetResult(),
+                    Continue = () => repaired.TrySetResult(), Exit = () => shell.RequestExit(confirmed: true),
                 });
+                recoveryBuilder.AddDesktopShellService(new DesktopShellService(shell));
                 await using (var recoveryRpc = recoveryBuilder.Build())
                 {
                     await using (NeoRpcViewBinding.Bind(recoveryRpc, view))
@@ -280,6 +381,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var host = await _hostCreation;
             Mark("host created");
             DesktopPlugins.LogStartupDiagnostics(host.PluginRuntime);
+            shell.RunningSessions = host.RuntimeService.CountActiveRuns;
+            shell.HasWorkspace = true;
             if (!closeRequested.Task.IsCompleted)
             {
                 var epoch = Guid.NewGuid().ToString("D");
@@ -310,6 +413,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     {
                         RememberAppearance = RememberAppearance, ProviderSetup = NeedsProviderSetup(configStore),
                     });
+                    builder.AddDesktopShellService(new DesktopShellService(shell));
                     builder.AddWorkspaceService(workspace);
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime));
                     var globalConfig = new GlobalConfigService(configStore, host.ModelProviderRegistry, options.CatalogRoot!, epoch);
@@ -395,7 +499,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             return; // No native-resource disposal, lease release or ForceShutdown on this path.
         }
         var nativeFailed = false;
-        foreach (var resource in new[] { bindingLifetime, viewLifetime, rpcLifetime, chromeLifetime, environmentLifetime })
+        foreach (var resource in new[] { bindingLifetime, viewLifetime, rpcLifetime, instanceLifetime, chromeLifetime, environmentLifetime })
         {
             if (resource is null) continue;
             try

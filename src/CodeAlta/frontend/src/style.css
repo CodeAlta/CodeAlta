@@ -1610,3 +1610,6 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .guided-tour-dots { display: flex; gap: 5px; margin-right: auto; }
 .guided-tour-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong, var(--line)); transition: background .2s ease, width .2s ease; }
 .guided-tour-dots i[data-current] { width: 16px; border-radius: 3px; background: var(--accent); }
+.settings-field-help { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; }
+.running-exit-dialog { width: min(440px, calc(100vw - 32px)); }
+.running-exit-dialog .bp6-dialog-header > svg { flex: none; margin-right: 8px; color: var(--red); }

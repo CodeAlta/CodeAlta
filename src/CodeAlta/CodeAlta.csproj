@@ -26,6 +26,11 @@
     <None Update="README.md" Pack="true" PackagePath="/" />
     <!-- The window's own icon (Alt+Tab, task switcher): the executable's icon resource does not reach the native window. -->
     <Content Include="../../img/alta.ico" Link="alta.ico" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The same icon for the other desktops: the window, tray and launcher on Linux, the menu bar item and
+         the application bundle on macOS. img/make-icons.py derives them from CodeAlta.png. -->
+    <Content Include="../../img/alta.png" Link="alta.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../img/alta-tray.png" Link="alta-tray.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../img/alta.icns" Link="alta.icns" CopyToOutputDirectory="PreserveNewest" />
     <!-- The page imports the logo from outside its folder: without this, changing it does not rebuild the page. -->
     <NeoAstraFrontendInput Include="../../img/CodeAlta.svg" />
     <PackageReference Include="NeoAstra" />

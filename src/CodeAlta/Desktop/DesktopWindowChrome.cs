@@ -123,11 +123,14 @@ internal sealed class DesktopWindowChrome : IAsyncDisposable
     internal async ValueTask ApplyWindowIconAsync(NeoWindow window)
     {
         ArgumentNullException.ThrowIfNull(window);
-        var icon = Path.Combine(AppContext.BaseDirectory, "alta.ico");
+        var icon = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "alta.ico" : "alta.png");
         if (!File.Exists(icon)) return;
         try { await _services.WindowPolish.SetIconAsync(window, icon).ConfigureAwait(true); }
         catch (Exception exception) when (exception is not OperationCanceledException) { /* The default icon stays. */ }
     }
+
+    /// <summary>The desktop services behind the handlers: the host itself uses their tray and menu commands.</summary>
+    internal NeoDesktopServices Services => _services;
 
     /// <summary>Lets the main view call the desktop handlers, which are denied without an authorization service.</summary>
     internal NeoRpcOptions Authorize(NeoRpcOptions options)

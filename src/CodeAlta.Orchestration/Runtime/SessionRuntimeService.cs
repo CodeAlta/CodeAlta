@@ -1889,6 +1889,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Counts the sessions that have a run in flight right now. It is a reading for the user (a question
+    /// before the application exits), taken without waiting for any session: a run that starts or ends at
+    /// this instant may or may not be counted.
+    /// </summary>
+    public int CountActiveRuns() => _entries.Values.Count(static entry => !entry.IsTerminated && entry.HasActiveRun);
+
+    /// <summary>
     /// Returns whether the session's active coordinator session has an in-flight run.
     /// </summary>
     public async Task<bool> HasActiveRunAsync(SessionViewDescriptor session, CancellationToken cancellationToken = default)

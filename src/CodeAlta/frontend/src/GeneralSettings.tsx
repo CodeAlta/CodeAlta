@@ -6,6 +6,7 @@ import { colorSchemes } from "./colorSchemes";
 import { themeLabel, themes, type EffectiveTheme, type Theme, type PreferenceNotices } from "./windowPreferences";
 import { useShellLanguage } from "./shellLanguage";
 import { locales, languageNames, preferenceNotice } from "./localization";
+import { keepRunningPlace } from "./desktopShell";
 
 /** The icon of each theme choice, shared with the title-bar switch. */
 export const themeIcons: Readonly<Record<Theme, IconName>> = { dark: "themeDark", light: "themeLight", system: "themeSystem" };
@@ -19,7 +20,7 @@ function Field({ label, htmlFor, notice, children }: { label: string; htmlFor?: 
   </div>;
 }
 
-export function GeneralSettings({ theme, setTheme, shownTheme, colorScheme, setColorScheme, sort, setSort, desktopCollapsed, setDesktopCollapsed, notices, recentSessionCount, setRecentSessionCount }: {
+export function GeneralSettings({ theme, setTheme, shownTheme, colorScheme, setColorScheme, sort, setSort, desktopCollapsed, setDesktopCollapsed, notices, recentSessionCount, setRecentSessionCount, keepRunning }: {
   theme: Theme;
   setTheme: (value: Theme) => void;
   /** The theme on screen, which decides the variant of each scheme that is previewed. */
@@ -32,6 +33,8 @@ export function GeneralSettings({ theme, setTheme, shownTheme, colorScheme, setC
   setDesktopCollapsed: (value: boolean) => void;
   recentSessionCount: number;
   setRecentSessionCount: (value: number) => void;
+  /** Whether closing the window leaves the application running; absent where it cannot stay anywhere. */
+  keepRunning?: { enabled: boolean; platform: string; set: (value: boolean) => void } | null;
   notices: PreferenceNotices;
 }) {
   const { t, locale, choice, issue, setLanguage } = useShellLanguage();
@@ -78,5 +81,9 @@ export function GeneralSettings({ theme, setTheme, shownTheme, colorScheme, setC
       notice={notices.rail && <p role="status" className="notice" data-diagnostic={notices.rail}>{preferenceNotice(locale, "Desktop projects", locale === "en" ? "expanded" : t("Show projects"), notices.rail)}</p>}>
       <Switch id="settings-rail-collapsed" className="settings-checkbox" checked={desktopCollapsed} onChange={event => setDesktopCollapsed(event.currentTarget.checked)} />
     </Field>
+    {keepRunning && <Field label={t("Keep running when the window is closed")} htmlFor="settings-keep-running"
+      notice={<p className="settings-field-help">{t(keepRunningPlace(keepRunning.platform))}</p>}>
+      <Switch id="settings-keep-running" className="settings-checkbox" checked={keepRunning.enabled} onChange={event => keepRunning.set(event.currentTarget.checked)} />
+    </Field>}
   </Card>;
 }
