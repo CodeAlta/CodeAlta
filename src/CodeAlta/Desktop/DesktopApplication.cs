@@ -182,6 +182,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     // Owned-only host-wide inbound UTF-8 framing cap, not a per-image/response limit.
                     var chrome = await DesktopWindowChrome.StartAsync(application, options.DataRoot);
                     chromeLifetime = chrome;
+                    await chrome.ApplyWindowIconAsync(window);
                     var builder = new NeoRpcBuilder(chrome.Authorize(new NeoRpcOptions
                     {
                         ContractHash = NeoRpcGeneratedContract.Hash, Release = true, MaximumFrameBytes = 128 * 1024 * 1024,
@@ -348,6 +349,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 CustomSchemes = [NeoCustomScheme.Application("app", new NeoManifestResourceProvider(assets, manifest))],
             });
             await using var chrome = await DesktopWindowChrome.StartAsync(application, options.DataRoot);
+            await chrome.ApplyWindowIconAsync(window);
             var builder = new NeoRpcBuilder(chrome.Authorize(new NeoRpcOptions { ContractHash = NeoRpcGeneratedContract.Hash, Release = true }));
             chrome.AddHandlers(builder);
             builder.AddBootService(new BootService());

@@ -1,5 +1,6 @@
 import type { HistoryResponse } from "#neoastra";
 import type { IconName } from "./AppIcon";
+import { compactionDetailsMarkdown, splitCheckpointSummary } from "./compactionDetails";
 import { projectFileChanges, type FileChanges } from "./fileChanges";
 import { projectToolRecord, type ToolRecord } from "./toolRecords";
 
@@ -187,6 +188,10 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
       detailsLabel = "Model details";
     } else {
       title = sessionUpdateTitle(kind);
+      // A local compaction is detailed like in the terminal, in place of its raw record.
+      const checkpoint = normalizedKind === "compactioncompleted" ? splitCheckpointSummary(entry.text) : null;
+      const compaction = checkpoint ? compactionDetailsMarkdown(parsedDetails, checkpoint.summary) : null;
+      if (compaction) { markdown = checkpoint!.message; detailMarkdown = compaction; details = null; detailsLabel = "Compaction details"; }
     }
   } else if (entry.eventType === "interaction") {
     category = "status"; icon = "check"; title = friendly(kind || "Interaction");

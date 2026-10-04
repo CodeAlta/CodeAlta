@@ -35,12 +35,12 @@ export function ProjectRailRows({ projects, selectedId, onSelect, actions, child
         <AppIcon name="folder" size={15} /><strong>{project.name}</strong>{activity?.(project.id)}{project.archived && <small>{t("Archived")}</small>}
       </button></ProjectRowActions>{selectedId === project.id && <li className="project-session-branch" hidden={!expanded}>{children}</li>}</Fragment>)}
     </ul>
-    <ul className="nav-list project-root-list" aria-label={t("Other sessions")}>
+    <ul className="nav-list project-root-list" aria-label={t("Global sessions")}>
       <li className="project-action-row" onContextMenu={event => { if (sessions) { event.preventDefault(); setOtherMenu(true); } }}>
         <button type="button" aria-pressed={selectedId === null} aria-expanded={selectedId === null && expanded} onClick={() => select(null)}>
-          <AppIcon name="chevronDown" size={12} className={selectedId === null && expanded ? "tree-chevron expanded" : "tree-chevron"} /><AppIcon name="folder" size={15} /><strong>{t("Other sessions")}</strong>{activity?.(null)}
+          <AppIcon name="chevronDown" size={12} className={selectedId === null && expanded ? "tree-chevron expanded" : "tree-chevron"} /><AppIcon name="home" size={15} /><strong>{t("Global sessions")}</strong>{activity?.(null)}
         </button>
-        {sessions && <button ref={otherTrigger} type="button" className="icon-button project-actions-trigger" aria-label={t("Actions for {title}", { title: t("Other sessions") })}
+        {sessions && <button ref={otherTrigger} type="button" className="icon-button project-actions-trigger" aria-label={t("Actions for {title}", { title: t("Global sessions") })}
           aria-haspopup="menu" aria-expanded={otherMenu} onClick={() => setOtherMenu(value => !value)}><AppIcon name="ellipsis" size={16} /></button>}
         {sessions && otherMenu && otherTrigger.current && <SessionTabMenu anchor={otherTrigger.current} title={t("Sessions")} container={document.body}
           current={() => true} onClose={() => queueMicrotask(() => setOtherMenu(false))}

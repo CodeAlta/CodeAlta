@@ -24,6 +24,8 @@
   </PropertyGroup>
   <ItemGroup>
     <None Update="README.md" Pack="true" PackagePath="/" />
+    <!-- The window's own icon (Alt+Tab, task switcher): the executable's icon resource does not reach the native window. -->
+    <Content Include="../../img/alta.ico" Link="alta.ico" CopyToOutputDirectory="PreserveNewest" />
     <PackageReference Include="NeoAstra" />
     <PackageReference Include="MinVer" PrivateAssets="all" />
     <InternalsVisibleTo Include="CodeAlta.Desktop.Tests" />

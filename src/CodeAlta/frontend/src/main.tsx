@@ -705,11 +705,21 @@ function App() {
       else applyTabState({ ...valid, active: null });
     }
   }
+  // After a tab was created, switched to or closed, typing goes to the prompt of the session now shown. The
+  // frames let the newly active pane render its prompt; a file tab focuses its own editor.
+  function focusPromptSoon() {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (currentView.current !== "workspace" || settingsVisible.current
+        || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') || document.querySelector(".file-editor[data-active='true']")) return;
+      const prompt = document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt");
+      if (prompt) prompt.focus();
+      else document.querySelector<HTMLButtonElement>('.session-tabs [role="tab"][aria-selected="true"], .session-tabs > button')?.focus();
+    }));
+  }
   useLayoutEffect(() => {
     if (!tabFocusPending.current) return;
     tabFocusPending.current = false;
-    if (view === "workspace" && !settingsVisible.current)
-      document.querySelector<HTMLButtonElement>('.session-tabs [role="tab"][aria-selected="true"], .session-tabs > button')?.focus();
+    if (view === "workspace" && !settingsVisible.current && !fileTabs.active) focusPromptSoon();
   }, [tabs, fileTabs, view]);
 
   const sessions = snapshot ? sessionsForProject(snapshot, projectId) : [];
@@ -1325,7 +1335,7 @@ function App() {
     const completedElsewhere = "Creation may have completed, but its original view or input lifetime changed or the catalog did not confirm it. Inspect sessions; no retry was sent.";
     setCreatingBusy(true);
     setCreatingMessage("");
-    if (handoff) setDraftHandoffNotice("Creation pending. Original draft retained; nothing has been sent.");
+    if (handoff) setDraftHandoffNotice("");
     try {
       const result = await createSession(epoch, target, handoff ? null : creatingTitle.trim() || null, capability, providerId);
       if (!creationAlive.current) return;
@@ -1756,6 +1766,7 @@ function App() {
                 selections={nextSendSelections} timelineCommand={timelineCommand} /></ProjectReferenceContext.Provider>;
             }}
             capture={captureTabLifetime} dirty={id => draftIndicators.visible(id, sessionId)} observations={runtimeObservationControls()}
+            onSessionTabClick={focusPromptSoon}
             select={selectSessionTab} close={tab => {
               if (!snapshot || snapshot !== currentSnapshot.current || !resolveSessionTab(snapshot, tab)) return;
               const next = closeSessionTab(tabs, tab);
@@ -1782,7 +1793,6 @@ function App() {
                   onOpenHelp={openHelp} onOpenPalette={openPalette}
                   reason={t("Draft kept locally. Start a session to send it.")}
                   localDraft={{ text: localDraft.text, edit: editLocalDraft, options: creationProviderChoice(true),
-                    notice: draftChoices.failed && <p role="status" className="composer-notice">{t("Some draft choices are unavailable. Refresh choices to try again.")}</p>,
                     disabled: newPromptDisabled, busy: creatingBusy, submit: () => void createSelectedSession(true),
                     surface: owned && status?.hostEpoch ? { epoch: status.hostEpoch, onOpenProviders: () => navigate("providers"),
                       contextTokens: draftChoices.models.find(model => model.id === draftChoices.value.modelId)?.contextTokens ?? null } : undefined,
@@ -2119,7 +2129,8 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
           fallbackMarkdown={historyNotes} toggle={active ? notesToggle : undefined} reader={notesReader} />
         </div>
         {!timeline.following && <button type="button" className="timeline-bottom-button" onClick={() => { newest.cancel(); timeline.jump(); }}><AppIcon name="arrowDown" size={14} />{t(newerOmitted ? "Bottom of retained window (not newest)" : "Jump to latest visible")}</button>}
-        {messageNotice && <p role="status" className="detail timeline-navigation-notice">{timelineNotice(languageLocale, messageNotice)}</p>}
+        {/* Message navigation is announced to assistive technology only: nothing is written above the prompt. */}
+        {messageNotice && <p role="status" className="sr-only">{timelineNotice(languageLocale, messageNotice)}</p>}
         <div className="composer-resize-bar" ref={composer.barRef}>
           <ComposerSplitter {...composer.splitter} />
         </div>

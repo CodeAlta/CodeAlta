@@ -267,7 +267,6 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .composer-region.resized { flex: 0 0 auto; display: flex; flex-direction: column; }
 .composer-region.resized .catalog-composer { flex: 1 0 auto; max-height: none; display: flex; flex-direction: column; overflow: visible; }
 .timeline-bottom-button { z-index: 3; align-self: center; margin: -45px 0 8px; padding: 7px 12px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--text); background: var(--panel-3); box-shadow: var(--shadow); cursor: pointer; }
-.timeline-navigation-notice { margin: 4px 8px 0; }
 .demo-banner, .banner { display: flex; align-items: center; gap: 12px; margin: 16px 0; padding: 10px 13px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line)); border-radius: 10px; background: var(--accent-soft); color: color-mix(in srgb, var(--accent) 75%, var(--text)); font-size: 12px; }
 .demo-banner span { color: var(--muted); }
 .banner-error { border-color: color-mix(in srgb, var(--red) 40%, var(--line)); color: var(--red); }
@@ -427,10 +426,6 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .owned-session .composer-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 5px; margin-top: 6px; }
 .owned-session .history-controls { flex: 0 1 auto; flex-wrap: wrap; gap: 3px; margin: 0; min-width: 0; }
 .owned-session .history-controls button:not(.bp6-button) { min-height: 30px; margin: 0; padding: 5px 8px; }
-.composer-draft-info { position: relative; }
-.composer-draft-info > summary { display: grid; place-items: center; padding: 5px; cursor: pointer; list-style: none; }
-.composer-draft-info > summary::-webkit-details-marker { display: none; }
-.composer-draft-info > p { width: min(320px, 60vw); margin: 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 .owned-session .history-controls [data-reminder-count] { display: inline-flex; align-items: center; gap: 2px; width: auto; }
 .owned-session .reminder-count { font-size: 10px; line-height: 1; font-weight: 700; }
 .owned-session .composer-notice { margin: 4px 0; color: var(--muted); font-size: 12px; }
@@ -668,7 +663,10 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .messages { gap: 8px; padding-bottom: 0; }
 .ide-shell .conversation { margin-top: 0; }
 .ide-shell .session-workspace { padding-top: 4px; padding-bottom: 0; }
-.ide-shell .timeline-message { position: relative; display: flex; gap: 8px; padding: 12px; border: 1px solid var(--line); border-left: 2px solid var(--card-color, var(--muted)); border-radius: var(--bp-surface-border-radius); background: color-mix(in srgb, var(--card-color, var(--muted)) 8%, var(--panel)); margin-bottom: 8px; }
+.ide-shell .timeline-message { position: relative; display: flex; gap: 8px; padding: 6px 12px; border: 1px solid var(--line); border-left: 2px solid var(--card-color, var(--muted)); border-radius: var(--bp-surface-border-radius); background: color-mix(in srgb, var(--card-color, var(--muted)) 8%, var(--panel)); margin-bottom: 6px; }
+/* The timeline is compact: its rows are spaced by the list alone, the same for every kind of card. */
+.ide-shell .messages { gap: 6px; }
+.ide-shell .messages .timeline-message { margin-bottom: 0; }
 .ide-shell .timeline-message .avatar { width: 18px; height: 22px; flex: 0 0 18px; border: 0; background: none; color: var(--card-color, var(--muted)); border-radius: 0; }
 .ide-shell .message-assistant { --card-color: var(--accent); }
 .ide-shell .message-user { --card-color: var(--user-accent); }
@@ -678,15 +676,15 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .message-error { --card-color: var(--red); }
 .ide-shell .message-status { --card-color: var(--green); }
 .ide-shell .message-plugin { --card-color: var(--bp-palette-gold-4); }
-.ide-shell .message-heading { min-height: 22px; gap: 8px; margin-bottom: 4px; font-size: 12px; }
+.ide-shell .message-heading { min-height: 20px; gap: 8px; margin-bottom: 2px; font-size: 12px; }
 .ide-shell .message-heading strong { color: var(--card-color, var(--text)); }
 .ide-shell .message-heading > span:first-child { display: inline-flex; flex-shrink: 0; gap: 6px; max-width: 45%; overflow: hidden; white-space: nowrap; }
 .ide-shell .message-heading small { font-size: var(--bp-typography-size-body-small); }
 .ide-shell .message-actions { margin-left: auto; flex-shrink: 0; }
 .ide-shell .message-actions time { font-size: var(--bp-typography-size-body-small); color: var(--muted); }
-.ide-shell .message-actions > button { opacity: 0; pointer-events: none; padding: 3px; width: 24px; height: 24px; border-radius: 4px; border: 0; background: var(--panel-2); color: var(--muted); }
+.ide-shell .message-actions > button { opacity: 0; pointer-events: none; padding: 2px; width: 20px; height: 20px; border-radius: 4px; border: 0; background: var(--panel-2); color: var(--muted); }
 .ide-shell .timeline-message:hover .message-actions > button, .ide-shell .timeline-message:focus-within .message-actions > button { opacity: 1; pointer-events: auto; }
-.ide-shell .timeline-compact { padding-block: 4px; }
+.ide-shell .timeline-compact { padding-block: 3px; }
 .timeline-single-row { display: contents; }
 .ide-shell .timeline-tool-group { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 6px; min-width: 0; padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: color-mix(in srgb, var(--panel-2) 60%, transparent); }
 .ide-shell .timeline-tool-group-heading { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
@@ -1430,3 +1428,6 @@ dialog.session-browser .session-batch-delete summary { cursor: pointer; color: v
 
 /* Blueprint dialogs dim the window like the app's own windows do. */
 .bp6-overlay-backdrop { background-color: var(--scrim); }
+
+/* Toasts appear below the title bar, clear of the window controls. */
+.app-toaster.bp6-toast-container { padding-top: 46px; }

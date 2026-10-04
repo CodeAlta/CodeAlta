@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { HistoryEntry } from "./timeline";
 import { reconcileTimeline } from "./reconcileTimeline";
-import { groupTimelineTools } from "./toolGroups";
+import { groupTimelineTools, toolGroupLimit } from "./toolGroups";
 
 const entry = (offset: string, changes: Partial<HistoryEntry> = {}): HistoryEntry => ({ offset,
   eventType: "activity", kind: "ToolCall", providerId: "provider", runId: "run", sessionId: "session",
@@ -11,10 +11,10 @@ const entry = (offset: string, changes: Partial<HistoryEntry> = {}): HistoryEntr
   tool: null, files: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, ...changes });
 
 test("adjacent known journal tools form bounded sub-card groups without changing records", () => {
-  const entries = Array.from({ length: 14 }, (_, index) => entry(String(index)));
+  const entries = Array.from({ length: toolGroupLimit + 2 }, (_, index) => entry(String(index)));
   const rows = reconcileTimeline(entries, null);
   const groups = groupTimelineTools(rows, entries);
-  assert.deepEqual(groups.map(group => group.rows.length), [12, 2]);
+  assert.deepEqual(groups.map(group => group.rows.length), [toolGroupLimit, 2]);
   assert.ok(groups.every(group => group.tools));
   assert.deepEqual(groups.flatMap(group => group.rows), rows);
 });
@@ -38,6 +38,24 @@ test("journal plumbing between tool calls does not split their visual group", ()
   assert.deepEqual(groupTimelineTools(reconcileTimeline(entries, null), entries).map(group => group.rows.length), [2]);
   entries[2] = entry("3", { eventType: "contentCompleted", kind: "Assistant", text: "Explanation" });
   assert.deepEqual(groupTimelineTools(reconcileTimeline(entries, null), entries).map(group => group.rows.length), [1, 1, 1]);
+});
+
+test("records that show nothing between tool calls keep them in one group", () => {
+  // What a provider writes around each call: its usage, its output, and reasoning without any text.
+  const call = (id: string): HistoryEntry[] => [
+    entry(`${id}0`, { activityId: id, phase: "Requested" }),
+    entry(`${id}1`, { eventType: "sessionUpdate", kind: "UsageUpdated", activityId: null }),
+    entry(`${id}2`, { activityId: id, phase: "Started" }),
+    entry(`${id}3`, { activityId: id }),
+    entry(`${id}4`, { eventType: "contentCompleted", kind: "ToolOutput", activityId: null, parentActivityId: id, text: "output" }),
+    entry(`${id}5`, { eventType: "contentCompleted", kind: "Reasoning", activityId: null, text: "" }),
+  ];
+  const entries = [...call("1"), ...call("2"), ...call("3")];
+  const rows = reconcileTimeline(entries, null);
+  assert.deepEqual(groupTimelineTools(rows, entries).filter(group => group.tools).map(group => group.rows.length), [3]);
+  // Reasoning that has something to show still separates the calls around it.
+  const spoken = [...call("1"), entry("19", { eventType: "contentCompleted", kind: "Reasoning", activityId: null, text: "Thinking about it." }), ...call("2")];
+  assert.deepEqual(groupTimelineTools(reconcileTimeline(spoken, null), spoken).filter(group => group.tools).map(group => group.rows.length), [1, 1]);
 });
 
 test("retained live tool groups stay separate from journal groups and other runs", () => {

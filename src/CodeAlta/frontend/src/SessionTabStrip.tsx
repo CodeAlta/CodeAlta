@@ -31,7 +31,7 @@ const noFiles = emptyFileTabs();
 // Each pane retains its own live factory payload. App owns session authority and drafts.
 // File editors are tabs of the same dock; App owns which files are open and which one is active.
 export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen, observations, capture, children, renderSession, newSessionLabel,
-  files = noFiles, renderFile, selectFile, closeFile, fileDirty }: {
+  files = noFiles, renderFile, selectFile, closeFile, fileDirty, onSessionTabClick }: {
   state: Tabs; snapshot?: WorkspaceSnapshot; dirty: (id: string) => boolean;
   select: (tab: SessionTab) => void; close: (tab: SessionTab) => void; reopen: () => void;
   observations?: RuntimeObservationControls;
@@ -42,6 +42,8 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
   /** Activates a file tab, or with null returns to the session selection. */
   selectFile?: (tab: FileTab | null) => void;
   closeFile?: (tab: FileTab) => void; fileDirty?: (tab: FileTab) => boolean;
+  /** A session tab or the New session tab was clicked (not its close button): the shell moves the focus to its prompt. */
+  onSessionTabClick?: () => void;
 }) {
   const { t } = useShellLanguage();
   const [model] = useState(createSessionTabModel);
@@ -146,7 +148,11 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
     ] });
   }
   return <div className="session-tabs workspace-layout" ref={root} data-dragging={!!drag.preview}
-    onPointerDownCapture={drag.down} onPointerMoveCapture={drag.move} onPointerUpCapture={drag.up}
+    onPointerDownCapture={drag.down} onPointerMoveCapture={drag.move} onPointerUpCapture={event => {
+      // A click on a session tab (or the New session tab) hands the keyboard to that session's prompt.
+      const clicked = drag.up(event);
+      if (clicked && !clicked.startsWith("file:")) onSessionTabClick?.();
+    }}
     onPointerCancelCapture={drag.end} onLostPointerCapture={drag.end}
     onDragStartCapture={event => {
       if ((event.target as HTMLElement).closest('.flexlayout__tab_button')) { event.preventDefault(); event.stopPropagation(); }

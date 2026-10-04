@@ -1,5 +1,6 @@
 import { Button, HTMLSelect } from "@blueprintjs/core";
 import { ActivitySpinner } from "./ActivitySpinner";
+import { showToast } from "./appToaster";
 import { createPortal } from "react-dom";
 import { PromptImageAttachments } from "./PromptImageAttachments";
 import { formatThinkingElapsed, useThinkingElapsed } from "./thinkingElapsed";
@@ -461,7 +462,10 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
     void submissions.submit(request, signal, capability, result => {
       observeEpoch(result);
       if (!["accepted", "replay"].includes(result.status) || result.receipt?.state === "terminal") setSubmittedThinking(null);
-      setMessage(result.status === "accepted" || result.status === "replay" ? "Ready to send to this owned session." : sendFailureMessage(result.status, "reason" in result ? result.reason : undefined));
+      const failure = result.status === "accepted" || result.status === "replay" ? null : sendFailureMessage(result.status, "reason" in result ? result.reason : undefined);
+      setMessage(failure ?? "Ready to send to this owned session.");
+      // A send that was not accepted is told in a toast: nothing is written above the prompt.
+      if (failure) showToast({ message: failure, intent: "danger", icon: "error", timeout: 8000 });
       if (result.status === "accepted" || result.status === "replay") void runtimeScope.current?.refresh(true);
       if ((!retained || !request.images?.length) && (result.status === "accepted" || result.status === "replay") && !signal.aborted
         // The composer still holds exactly what was sent (a choices refresh alone also bumps the revision).
@@ -816,13 +820,6 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
       </SendSplitButton>
     </ComposerSurface>
     {timelineNotices && createPortal(<>
-    {choicesNotice && choicesNotice !== "Loading session choices…" && choicesNotice !== "Selections apply on Send; active runs and queued text are unchanged." && <p className="composer-notice" role={choicesNotice.includes("could not") || choicesNotice.includes("unavailable") ? "alert" : "status"}>{choicesNotice}</p>}
-    {message !== "Ready to send to this owned session." && <p className="composer-notice" role="status">{message}</p>}
-    {invalidEpoch && <p role="alert">{t("CodeAlta restarted. Reload the window to continue.")}</p>}
-    {mcpPlugin && /fail|error/i.test(mcpPlugin.state) && <p role="alert">{t("MCP plugin:")} {mcpPlugin.state}. {t("Check advanced diagnostics.")}</p>}
-    {(compactMessage !== "Refresh runtime state explicitly before attempting idle compaction." || pendingAbortRun) && <p className="composer-notice" role="status">{compactMessage !== "Refresh runtime state explicitly before attempting idle compaction." && compactMessage} {pendingAbortRun && abortRunMessage}</p>}
-    {pendingCompact && <p className="composer-notice">{t("Manual exact compaction retry only:")} {t("epoch")} {pendingCompact.request.expectedEpoch} · {t("session")} {pendingCompact.request.sessionId} · {t("runtime")} {pendingCompact.request.expectedRuntimeInstanceId} · {t("attachment")} {pendingCompact.request.expectedAttachmentGeneration} · {t("request")} {pendingCompact.request.clientRequestId}. {t("Refresh never retargets this intent.")}</p>}
-    {pendingAbortRun && <p className="composer-notice">{t("Manual exact cancellation retry only:")} {t("epoch")} {pendingAbortRun.request.expectedEpoch} · {t("session")} {pendingAbortRun.request.sessionId} · {t("runtime")} {pendingAbortRun.request.expectedRuntimeInstanceId} · {t("attachment")} {pendingAbortRun.request.expectedAttachmentGeneration} · {t("run")} {pendingAbortRun.request.expectedRunId} · {t("request")} {pendingAbortRun.request.clientRequestId}. {t("Refresh never retargets this intent.")}</p>}
     {pendingQueueCancellations.map(value => <Button key={value.intent.request.clientRequestId} icon={<AppIcon name="refresh" size={14} />}
       disabled={invalidEpoch || value.inFlight || !capability.canSubmit(value.intent.request)} onClick={() => cancelQueued(undefined, value.intent.request.targetOperationId)}>
       {t("Retry exact queued-operation cancellation")}</Button>)}

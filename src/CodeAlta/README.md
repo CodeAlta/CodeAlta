@@ -121,7 +121,7 @@ button (or double-click it) to return to the default size and position. Each kin
 its own geometry. Closing Reminders does not cancel an admitted action or retry an uncertain Save.
 In the explorer, a project row has one **…** menu (also on right-click): **New session**, **Search
 sessions…** and **Browse saved sessions** for that project, then **Open**, **Details**, **Rename
-project…** and **Archive project…**. **Other sessions** has the same session actions. Session search
+project…** and **Archive project…**. **Global sessions** has the same session actions. Session search
 is an inline field above the session list; Escape or its clear button hides it.
 Clicking a project opens one temporary **New session** tab, reused when selecting another project
 before creation. Selecting an existing session tab or sidebar session removes it. Real session
@@ -468,6 +468,24 @@ row and on its project's row in the Explorer, and in the status line above the p
 open in a visible pane the three follow the run itself and start and stop together. Sessions that are
 not open are checked every five seconds, so their Explorer spinner can lag by that much.
 
+### Timeline cards
+
+The timeline is compact: every card has the same small padding and the rows are spaced by the list
+alone. Consecutive tool calls of one run share a single **Tool calls** card, their tiles side by side
+(up to 60 per card); only something the timeline shows between two calls (an assistant message, a file
+change, a status row) starts a new card. Records that show nothing, such as usage updates or reasoning
+without text, do not.
+
+A **Compaction completed** row's **Details** shows what the terminal shows for a local compaction:
+context before and after with the ratio and the target, the messages summarized and kept, the
+summarizer's calls and budgets, what fed it (messages, tool calls and outputs, reasoning, files) and
+the checkpoint summary. The host sends those figures as a small record and the summary as text, because
+the stored details are larger than a history row may carry.
+
+Nothing is written above the prompt. Message navigation (`F3`/`F4`) is announced to assistive
+technology only, and a Send that was not accepted is reported in a toast at the top right of the
+window.
+
 ### Turn statistics
 
 When a turn ends, the built-in Statistics plugin adds a **Turn statistics** row after it, as in the
@@ -608,6 +626,10 @@ shortcuts**, a filterable window listing the same commands by category.
 | `Ctrl+G` then `Ctrl+W` / `Ctrl+R` / `Ctrl+O` / `Ctrl+H` | Settings, providers, models, agent prompts |
 | `Ctrl+G` then `Ctrl+K` / `Ctrl+N` / `Ctrl+Y` / `Ctrl+L` / `Ctrl+A` | Skills, plugins, MCP servers, logs, about |
 
+Switching to a session tab, by clicking it or with the tab keys, and creating, closing or reopening one
+puts the keyboard focus in that session's prompt, so typing can start at once. A file tab focuses its
+editor. The window's own icon (Alt+Tab, task switcher) is `alta.ico`, shipped next to the executable.
+
 The second stroke of a `Ctrl+G` chord works with or without `Ctrl` held. Shortcuts work while the
 prompt editor has focus; the ones marked "outside text" stay ordinary caret keys in text fields. An
 open window keeps the keyboard, except that the Settings window follows the commands that move to
@@ -669,7 +691,7 @@ snapshot. It selects existing sessions without importing, creating a runtime, or
 drafts. Archived projects are labeled and their sessions open read-only; a catalog-only launch
 can also navigate saved projects read-only. **Details** in a project's **…** menu
 opens a read-only window with the display name, full recorded path, ID and archive flag, each value
-with a copy button at the end of its row. The global Other sessions root has no project details;
+with a copy button at the end of its row. The Global sessions root has no project details;
 missing, duplicated or changed ID/path rows cannot open it. A failed/pending catalog refresh
 disables inspection until a successful fresh snapshot, and project, session or host changes
 dismiss stale details. It has no total session count, tags, description or source metadata. A copy
@@ -858,7 +880,7 @@ In the focused session workspace, `F3`/`F4` move among **persisted user and assi
 messages in the currently retained window** (not live projection, tool, reasoning,
 unknown-kind or status cards); a live-only window does not enable these keys. `Ctrl+F3` moves
 to its first retained message, which may not be the journal's first message. These
-keys unfollow the timeline and report retained-window boundaries. They do not fetch
+keys unfollow the timeline. They do not fetch
 older pages or infer that a running session has finished persisting events. Use
 **Load older history** to browse older pages. **Refresh newest history** and `Ctrl+F4`
 explicitly read the newest persisted window (up to 1,000 events), including when
@@ -1147,8 +1169,7 @@ shutdown retains and joins accepted steering and cancellation work.
 The compact prompt toolbar offers **Compact observed idle attachment** (or `Ctrl+F11` from the
 selected owned workspace/prompt) only for an eligible point-in-time runtime observation or a
 retained exact compaction intent. Send, exact Send recovery and observed-run cancellation remain
-separate. An uncertain intent shows its original epoch, session, runtime, attachment and request
-key next to the composer; deliberate **Retry exact compaction request** never retargets after
+separate. For an uncertain intent, deliberate **Retry exact compaction request** never retargets after
 refresh or session switch and waits for the original waiter to settle. No polling or automatic
 retry occurs. The action requires no recorded run or queue drain. That is only eligibility: the
 host and supported provider must admit compaction without waiting for active work. Unsupported

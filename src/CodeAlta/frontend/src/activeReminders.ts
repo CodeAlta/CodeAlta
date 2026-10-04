@@ -22,7 +22,7 @@ export function sameActiveReminders(left: ActiveReminders, right: ActiveReminder
   return true;
 }
 
-/** Active reminders of every session shown under one explorer scope (a project, or "Other sessions" for null). */
+/** Active reminders of every session shown under one explorer scope (a project, or "Global sessions" for null). */
 export function scopeReminderCount(reminders: ActiveReminders, snapshot: WorkspaceSnapshot | undefined, projectId: string | null): number {
   if (!snapshot || reminders.size === 0) return 0;
   return sessionsForProject(snapshot, projectId).reduce((sum, session) => sum + (reminders.get(session.id) ?? 0), 0);

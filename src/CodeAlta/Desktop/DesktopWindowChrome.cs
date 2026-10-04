@@ -86,6 +86,20 @@ internal sealed class DesktopWindowChrome : IAsyncDisposable
             Release = true, Profile = NeoSecurityProfile.ProductionLocalApp,
         });
 
+    /// <summary>
+    /// Gives the window the application's icon, which the task switcher (Alt+Tab) shows. A native window
+    /// does not take the icon of its executable by itself. A missing icon file or an unsupported platform
+    /// leaves the default icon.
+    /// </summary>
+    internal async ValueTask ApplyWindowIconAsync(NeoWindow window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        var icon = Path.Combine(AppContext.BaseDirectory, "alta.ico");
+        if (!File.Exists(icon)) return;
+        try { await _services.WindowPolish.SetIconAsync(window, icon).ConfigureAwait(true); }
+        catch (Exception exception) when (exception is not OperationCanceledException) { /* The default icon stays. */ }
+    }
+
     /// <summary>Lets the main view call the desktop handlers, which are denied without an authorization service.</summary>
     internal NeoRpcOptions Authorize(NeoRpcOptions options)
     {

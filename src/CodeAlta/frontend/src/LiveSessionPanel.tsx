@@ -29,15 +29,11 @@ export function LiveSessionPanel({ store, hostEpoch, sessionId, capability, obse
   if (!state || (state.kind !== "error" && !state.code && !state.cleanupBlocked
     && state.kind !== "closed" && !snapshot?.isClosed)) return null;
   return <section className="live-indicator" aria-label={t("Selected session live status")}>
-    {state?.code === "stale_epoch" && <p role="alert">{t("The host has changed. Reload the Desktop UI before continuing; reconnecting with this old host identity will not work.")}</p>}
-    {state.kind === "error" && state.code !== "stale_epoch" && !state.cleanupBlocked && <p role="alert">{t("Live observation unavailable. No idle or completion state is inferred.")}</p>}
-    {state?.cleanupBlocked && <p role="alert">{t("Previous observation cleanup failed. Its owner is retained; no successor can open here. Reconnect cannot prove cleanup or recover effects.")}</p>}
     {(state.kind === "error" || state.kind === "closed" || snapshot?.isClosed || state.code || state.cleanupBlocked) && <button type="button" disabled={!canMutate || state.code === "stale_epoch" || state.cleanupBlocked} onClick={() => {
       const owned = scope.current;
       if (!owned || owned.hostEpoch !== hostEpoch || owned.sessionId !== sessionId || !capability.canMutate() || store.getSnapshot().cleanupBlocked) return;
       owned.selection = store.select(hostEpoch, sessionId, capability.observe);
     }}>{t("Reconnect live activity")}</button>}
-    {(state.kind === "closed" || snapshot?.isClosed) && <p role="status">{t("Runtime display closed. No further updates will arrive on this observation.")}</p>}
   </section>;
 }
 

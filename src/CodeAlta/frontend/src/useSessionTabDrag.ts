@@ -92,16 +92,17 @@ export function useSessionTabDrag(root: RefObject<HTMLDivElement | null>, model:
     pending.dragging = true;
     setPreview(dropAt(event.clientX, event.clientY));
   }
-  function up(event: PointerEvent<HTMLDivElement>) {
+  /** Ends a press on a tab; returns the id of the tab when the press was a plain click that selected it. */
+  function up(event: PointerEvent<HTMLDivElement>): string | undefined {
     const pending = gesture.current;
     if (!pending) {
       if (cancelledPointer.current === event.pointerId) {
         cancelledPointer.current = null; suppressClick.current = true;
         event.preventDefault(); event.stopPropagation();
       }
-      return;
+      return undefined;
     }
-    if (pending.pointerId !== event.pointerId) return;
+    if (pending.pointerId !== event.pointerId) return undefined;
     const valid = current(), drop = valid && pending.dragging ? dropAt(event.clientX, event.clientY) : null;
     suppressClick.current = true;
     cancel(); cancelledPointer.current = null; event.preventDefault(); event.stopPropagation();
@@ -117,6 +118,7 @@ export function useSessionTabDrag(root: RefObject<HTMLDivElement | null>, model:
       Array.from(container.querySelectorAll<HTMLElement>("[data-session-node]")).find(node => node.dataset.sessionNode === pending.node.getId())
         ?.closest<HTMLElement>('[role="tab"]')?.focus({ preventScroll: true });
     });
+    return !drop && valid && !pending.dragging ? pending.node.getId() : undefined;
   }
   function end(event: PointerEvent<HTMLDivElement>) {
     if (gesture.current?.pointerId === event.pointerId) cancel();

@@ -7,7 +7,7 @@ import { isSessionContextKey } from "./sessionRowActions";
 import { SessionTabMenu } from "./SessionTabMenu";
 import { useShellLanguage } from "./shellLanguage";
 
-/** Session actions of one scope (a project, or the global "Other sessions" scope when the id is null). */
+/** Session actions of one scope (a project, or the global "Global sessions" scope when the id is null). */
 export type ScopeSessionActions = {
   /** Whether a session can be created in this scope right now. */
   canCreate: (projectId: string | null) => boolean;

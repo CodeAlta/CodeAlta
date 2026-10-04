@@ -67,7 +67,7 @@ test("filtering and rename refresh never change selection, and a renamed project
   assert.equal(renamed.sessions[0].id, selected.sessionId);
 });
 
-test("filtered rail renders a fixed accessible Other sessions root, archived label, tooltip and hidden selection", () => {
+test("filtered rail renders a fixed accessible Global sessions root, archived label, tooltip and hidden selection", () => {
   const value = snapshot([project("arch", "Archived", "/full/private/path", true), project("selected", "Hidden")]);
   const render = (filter: string, selectedId: string | null) => renderToStaticMarkup(createElement(ProjectRailRows, {
     projects: projectRailProjection(value, filter, "name").projects, selectedId, onSelect: () => {}, canRename: true,
@@ -79,8 +79,8 @@ test("filtered rail renders a fixed accessible Other sessions root, archived lab
   assert.doesNotMatch(archived, /Rename project/);
   const hidden = render("no-match", "selected");
   assert.match(hidden, /aria-label="Projects"/);
-  assert.match(hidden, /aria-label="Other sessions"/);
-  assert.match(hidden, /Other sessions/);
+  assert.match(hidden, /aria-label="Global sessions"/);
+  assert.match(hidden, /Global sessions/);
   assert.doesNotMatch(hidden, /Hidden/);
   assert.match(hidden, /aria-pressed="false"/);
   assert.doesNotMatch(hidden, /aria-pressed="true"/); // hidden project is still selected in state, not retargeted to root

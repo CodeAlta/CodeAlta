@@ -127,6 +127,15 @@ internal sealed partial class WorkspaceService
                 case AgentSessionUpdateEvent update:
                     type = "sessionUpdate"; kind = update.Kind.ToString(); text = FormatSessionUpdate(update);
                     details = Json(update.Details);
+                    // A local compaction's details would be cut mid-JSON by the row budget: send its figures and,
+                    // as text, its checkpoint summary.
+                    if (update.Kind == AgentSessionUpdateKind.CompactionCompleted
+                        && HistoryCompactionProjection.TryProject(update.Details, out var figures, out var checkpoint))
+                    {
+                        details = figures;
+                        if (checkpoint is not null)
+                            text = $"{text}\n\n{HistoryCompactionProjection.SummaryHeading}\n\n{checkpoint}";
+                    }
                     break;
                 case AgentPlanSnapshotEvent plan:
                     type = "planSnapshot"; kind = plan.Snapshot.ChangeKind?.ToString(); text = FormatPlan(plan.Snapshot);

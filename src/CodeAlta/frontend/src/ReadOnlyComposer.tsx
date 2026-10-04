@@ -81,8 +81,10 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
         {localDraft && !expanded && <ProjectReferencePicker text={text} edit={edit} input={promptInput} />}
         {localDraft && !expanded && <GitHubIssuePicker edit={edit} input={promptInput} />}
         {localDraft?.surface && <ActiveProviderStatus epoch={localDraft.surface.epoch} onOpen={localDraft.surface.onOpenProviders} />}
-        <details className="composer-draft-info"><summary aria-label={t("Draft information")} title={t("Draft information")}><AppIcon name="info" size={16} /></summary><p id={`catalog-draft-status-${sessionId}`} role="status">{reason ?? t("Sending requires the desktop app.")}</p></details>
-        {infoControl}
+        {/* A session that does not exist yet has no information to show: the control is there, disabled. */}
+        {infoControl ?? <Button variant="minimal" className="session-info-trigger" icon={<AppIcon name="info" size={16} />} disabled
+          aria-label={t("Session info")} title={t("Session info")} />}
+        <p id={`catalog-draft-status-${sessionId}`} className="sr-only">{reason ?? t("Sending requires the desktop app.")}</p>
         {localDraft?.surface && <DraftUsage contextTokens={localDraft.surface.contextTokens} />}
         {localDraft?.surface && <Button variant="minimal" icon={<AppIcon name="reminder" size={16} />} data-reminder-count="" disabled
           aria-label={t("Reminders: {count} active", { count: 0 })} title={t("Reminders: {count} active", { count: 0 })}><span className="reminder-count" aria-hidden="true">0</span></Button>}

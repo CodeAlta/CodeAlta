@@ -1,5 +1,6 @@
 import type { ComponentProps } from "react";
 import {
+  House,
   ArrowDown,
   ArrowDownUp,
   Bot,
@@ -93,6 +94,7 @@ const icons = {
   expand: Maximize2,
   file: FileDiff,
   folder: Folder,
+  home: House,
   history: History,
   issueOpen: CircleDot,
   issueClosed: CircleCheck,
