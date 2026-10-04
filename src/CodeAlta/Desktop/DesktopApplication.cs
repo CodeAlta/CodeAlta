@@ -105,6 +105,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         ReminderService? reminders = null;
         GithubIssuesService? githubIssues = null;
         ModelCatalogService? providers = null;
+        ProviderLoginService? providerLogin = null;
         WorkspaceService? workspace = null;
         NeoWindow? window = null;
         IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null, chromeLifetime = null;
@@ -154,6 +155,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 if (workspace is not null) await Task.WhenAll(workspace.CloseImportsAsync(), workspace.CloseSessionsAsync());
                 if (reminders is not null) await reminders.DisposeAsync();
                 if (providers is not null) await providers.DrainAsync();
+                if (providerLogin is not null) await providerLogin.CloseAsync(); // A running sign-in is canceled and joined.
             });
             await AwaitOwnedAsync(_hostCreation, window);
             var host = await _hostCreation;
@@ -196,7 +198,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddBootService(new BootService(epoch, options.ReviewOwnedCommandPermissions, options.EnableOwnedUserInput));
                     builder.AddWorkspaceService(workspace);
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime));
-                    builder.AddGlobalConfigService(new GlobalConfigService(new CodeAltaConfigStore(catalog), host.ModelProviderRegistry, options.CatalogRoot!, epoch));
+                    var configStore = new CodeAltaConfigStore(catalog);
+                    var globalConfig = new GlobalConfigService(configStore, host.ModelProviderRegistry, options.CatalogRoot!, epoch);
+                    builder.AddGlobalConfigService(globalConfig);
+                    providerLogin = new ProviderLoginService(configStore, globalConfig, options.CatalogRoot!, epoch);
+                    builder.AddProviderLoginService(providerLogin);
                     builder.AddMcpServersService(new McpServersService(host.ProjectCatalog, epoch, roots.Home));
                     builder.AddAgentPromptsService(new AgentPromptsService(host.ProjectCatalog, epoch));
                     // The standard launch has no explicit discovery home: common skills come from the profile, like the TUI.
@@ -347,6 +353,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddWorkspaceService(new WorkspaceService(options.CatalogRoot));
             builder.AddConfigurationService(new ConfigurationService(options.CatalogRoot!));
             builder.AddGlobalConfigService(new GlobalConfigService());
+            builder.AddProviderLoginService(new ProviderLoginService());
             builder.AddMcpServersService(new McpServersService());
             builder.AddAgentPromptsService(new AgentPromptsService());
             builder.AddSkillsService(new SkillsService());

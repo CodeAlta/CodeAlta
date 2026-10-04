@@ -24,6 +24,7 @@ internal sealed class GlobalConfigService
     private readonly string? _stateRoot;
     private readonly string? _epoch;
     private readonly Lock _gate = new();
+    private ProviderDefaults? _defaults; // Parsed on the first listing, under the gate.
 
     /// <summary>Creates an unavailable service for launches without an owned host.</summary>
     internal GlobalConfigService()
@@ -125,8 +126,8 @@ internal sealed class GlobalConfigService
     public GlobalConfigProvidersResponse Providers(GlobalConfigProvidersRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (_store is null) return new("unavailable", null, null, [], ProviderTypes, ReasoningEfforts);
-        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null, null, [], ProviderTypes, ReasoningEfforts);
+        if (_store is null) return new("unavailable", null, null, [], ProviderTypes, ReasoningEfforts, []);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null, null, [], ProviderTypes, ReasoningEfforts, []);
         try
         {
             lock (_gate)
@@ -134,6 +135,7 @@ internal sealed class GlobalConfigService
                 var revision = Revision(_store.LoadGlobalConfigContent());
                 var document = _store.LoadGlobal();
                 var raw = RawDefinitions(document).ToDictionary(static value => value.ProviderKey, StringComparer.OrdinalIgnoreCase);
+                var defaults = _defaults ??= ProviderDefaults.Load();
                 var providers = _store.LoadGlobalProviderDefinitions(includeDisabled: true).Take(MaximumProviders)
                     .Select(effective =>
                     {
@@ -143,15 +145,35 @@ internal sealed class GlobalConfigService
                             Bound(definition?.DisplayName), Bound(effective.DisplayName) ?? effective.ProviderKey,
                             Bound(definition?.Model), Bound(definition?.ReasoningEffort),
                             Bound(definition?.ApiUrl), Bound(effective.ApiUrl), Bound(definition?.ApiKeyEnv),
-                            !string.IsNullOrEmpty(definition?.ApiKey));
+                            !string.IsNullOrEmpty(definition?.ApiKey), defaults.For(effective));
                     }).ToArray();
-                return new("ok", revision, Bound(document.Chat?.DefaultProvider?.Trim().ToLowerInvariant()), providers, ProviderTypes, ReasoningEfforts);
+                return new("ok", revision, Bound(document.Chat?.DefaultProvider?.Trim().ToLowerInvariant()), providers, ProviderTypes, ReasoningEfforts, defaults.Types);
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
         {
-            return new("read_failed", null, null, [], ProviderTypes, ReasoningEfforts);
+            return new("read_failed", null, null, [], ProviderTypes, ReasoningEfforts, []);
         }
+    }
+
+    /// <summary>
+    /// Enables one configured provider and re-registers the providers, as a structured save with "apply" does.
+    /// An already enabled provider is not rewritten. Used after an account sign-in, which has no editor revision.
+    /// </summary>
+    /// <param name="key">The provider key.</param>
+    /// <returns>The save result: <c>ok</c>, <c>invalid</c> (unknown provider), <c>write_failed</c>, <c>apply_failed</c> or <c>unavailable</c>.</returns>
+    internal GlobalConfigSaveResponse EnableProvider(string? key)
+    {
+        if (_store is null || _registry is null) return Failure("unavailable");
+        return Mutate(_store, _registry, null, checkRevision: false, applyProviders: true, (store, definitions) =>
+        {
+            var definition = definitions.FirstOrDefault(value => string.Equals(value.ProviderKey, key?.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (definition is null) return "The provider no longer exists in the configuration.";
+            if (definition.Enabled != false) return null;
+            definition.Enabled = true;
+            store.SaveGlobalProviderDefinitions(definitions);
+            return null;
+        });
     }
 
     /// <summary>
@@ -214,12 +236,18 @@ internal sealed class GlobalConfigService
     {
         if (_store is null || _registry is null) return Failure("unavailable");
         if (!string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal)) return Failure("stale_epoch");
+        return Mutate(_store, _registry, expectedRevision, checkRevision: true, applyProviders, edit);
+    }
+
+    private GlobalConfigSaveResponse Mutate(CodeAltaConfigStore store, ModelProviderRegistry registry, string? expectedRevision,
+        bool checkRevision, bool applyProviders, Func<CodeAltaConfigStore, List<CodeAltaProviderDocument>, string?> edit)
+    {
         lock (_gate)
         {
             try
             {
-                if (!string.Equals(Revision(_store.LoadGlobalConfigContent()), expectedRevision, StringComparison.Ordinal)) return Failure("conflict");
-                var refusal = edit(_store, RawDefinitions(_store.LoadGlobal()).ToList());
+                if (checkRevision && !string.Equals(Revision(store.LoadGlobalConfigContent()), expectedRevision, StringComparison.Ordinal)) return Failure("conflict");
+                var refusal = edit(store, RawDefinitions(store.LoadGlobal()).ToList());
                 if (refusal is not null) return new("invalid", null, refusal, null, null, 0);
             }
             catch (Exception exception) when (exception is InvalidDataException or InvalidOperationException or ArgumentException)
@@ -233,12 +261,12 @@ internal sealed class GlobalConfigService
             }
 
             string revision;
-            try { revision = Revision(_store.LoadGlobalConfigContent()); }
+            try { revision = Revision(store.LoadGlobalConfigContent()); }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException) { return Failure("write_failed"); }
             if (!applyProviders) return new("ok", revision, null, null, null, 0);
             try
             {
-                return new("ok", revision, null, null, null, ApplyProviders(_store, _registry, _stateRoot!));
+                return new("ok", revision, null, null, null, ApplyProviders(store, registry, _stateRoot!));
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException)
             {
@@ -292,6 +320,51 @@ internal sealed class GlobalConfigService
 
     private static string? Bound(string? value)
         => value is null || value.Length <= MaximumMessageLength ? value : value[..MaximumMessageLength];
+
+    // What blank provider fields fall back to. Built once from the bundled template and the type completion, then only read.
+    private sealed class ProviderDefaults
+    {
+        private readonly Dictionary<string, CodeAltaProviderDocument> _template;
+        private readonly Dictionary<string, GlobalConfigProviderDefaults> _types;
+
+        private ProviderDefaults(Dictionary<string, CodeAltaProviderDocument> template, Dictionary<string, GlobalConfigProviderDefaults> types)
+        {
+            _template = template;
+            _types = types;
+            Types = [.. ProviderTypes.Select(type => new GlobalConfigProviderTypeDefaults(type, types[type]))];
+        }
+
+        /// <summary>The defaults of a new provider of each offered type, in the order of the offered types.</summary>
+        public IReadOnlyList<GlobalConfigProviderTypeDefaults> Types { get; }
+
+        /// <exception cref="InvalidOperationException">The bundled template or an offered type cannot be completed.</exception>
+        public static ProviderDefaults Load()
+        {
+            var template = new Dictionary<string, CodeAltaProviderDocument>(StringComparer.OrdinalIgnoreCase);
+            foreach (var definition in CodeAltaConfigStore.LoadDefaultProviderDefinitions().Take(MaximumProviders))
+                template[definition.ProviderKey] = definition;
+            return new(template, ProviderTypes.ToDictionary(static type => type,
+                static type => Project(CodeAltaConfigStore.CreateProviderTypeDefaults(type), null), StringComparer.Ordinal));
+        }
+
+        /// <summary>
+        /// The defaults of one configured provider: the built-in template entry with its key (when it has the same
+        /// adapter type), then the type's own defaults; a blank display name finally shows the provider key.
+        /// </summary>
+        public GlobalConfigProviderDefaults For(CodeAltaProviderDocument effective)
+        {
+            var type = _types.GetValueOrDefault(effective.ProviderType ?? string.Empty);
+            var template = _template.TryGetValue(effective.ProviderKey, out var entry) &&
+                string.Equals(entry.ProviderType, effective.ProviderType, StringComparison.OrdinalIgnoreCase) ? entry : null;
+            var defaults = template is null ? type ?? new(null, null, null, null, null) : Project(template, type);
+            return defaults with { DisplayName = defaults.DisplayName ?? Bound(effective.ProviderKey) };
+        }
+
+        private static GlobalConfigProviderDefaults Project(CodeAltaProviderDocument definition, GlobalConfigProviderDefaults? fallback)
+            => new(Bound(definition.DisplayName) ?? fallback?.DisplayName, Bound(definition.Model) ?? fallback?.Model,
+                Bound(definition.ReasoningEffort) ?? fallback?.ReasoningEffort, Bound(definition.ApiUrl) ?? fallback?.ApiUrl,
+                Bound(definition.ApiKeyEnv) ?? fallback?.ApiKeyEnv);
+    }
 }
 
 internal sealed record GlobalConfigReadRequest(string? ExpectedEpoch);
@@ -302,11 +375,19 @@ internal sealed record GlobalConfigSaveRequest(string? ExpectedEpoch, string? Co
 internal sealed record GlobalConfigSaveResponse(string Status, string? Revision, string? Message, int? Line, int? Column, int ProvidersApplied);
 internal sealed record GlobalConfigProvidersRequest(string? ExpectedEpoch);
 internal sealed record GlobalConfigProvidersResponse(string Status, string? Revision, string? DefaultProvider,
-    IReadOnlyList<GlobalConfigProvider> Providers, IReadOnlyList<string> ProviderTypes, IReadOnlyList<string> ReasoningEfforts);
+    IReadOnlyList<GlobalConfigProvider> Providers, IReadOnlyList<string> ProviderTypes, IReadOnlyList<string> ReasoningEfforts,
+    IReadOnlyList<GlobalConfigProviderTypeDefaults> TypeDefaults);
 
 /// <summary>One configured provider: values as written (null when the file leaves them to defaults) plus effective display values.</summary>
 internal sealed record GlobalConfigProvider(string Key, string Type, bool Enabled, string? DisplayName, string EffectiveName,
-    string? Model, string? ReasoningEffort, string? ApiUrl, string? EffectiveApiUrl, string? ApiKeyEnv, bool HasApiKey);
+    string? Model, string? ReasoningEffort, string? ApiUrl, string? EffectiveApiUrl, string? ApiKeyEnv, bool HasApiKey,
+    GlobalConfigProviderDefaults Defaults);
+
+/// <summary>What each blank field of a provider falls back to; null when nothing is known for the field.</summary>
+internal sealed record GlobalConfigProviderDefaults(string? DisplayName, string? Model, string? ReasoningEffort, string? ApiUrl, string? ApiKeyEnv);
+
+/// <summary>The defaults of a provider of one adapter type that has no definition yet.</summary>
+internal sealed record GlobalConfigProviderTypeDefaults(string Type, GlobalConfigProviderDefaults Defaults);
 internal sealed record GlobalConfigProviderEdit(string? Key, string? Type, bool Enabled, string? DisplayName, string? Model,
     string? ReasoningEffort, string? ApiUrl, string? ApiKeyEnv, string? ApiKey, bool ClearApiKey);
 internal sealed record GlobalConfigSaveProviderRequest(string? ExpectedEpoch, string? ExpectedRevision, string? OriginalKey,

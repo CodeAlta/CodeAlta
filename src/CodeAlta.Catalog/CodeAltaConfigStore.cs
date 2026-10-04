@@ -195,6 +195,43 @@ public sealed class CodeAltaConfigStore
     }
 
     /// <summary>
+    /// Loads the provider definitions of the bundled first-run template, normalized like a loaded configuration.
+    /// </summary>
+    /// <returns>
+    /// New definitions identified by <see cref="CodeAltaProviderDocument.ProviderKey"/>. Type defaults are not filled
+    /// in, and a value the template writes that equals its type default is left unset.
+    /// </returns>
+    /// <exception cref="InvalidOperationException">The bundled template is unavailable or cannot be parsed.</exception>
+    public static IReadOnlyList<CodeAltaProviderDocument> LoadDefaultProviderDefinitions()
+    {
+        try
+        {
+            return [.. (ParseDocument(GetDefaultGlobalConfigContent(), null).Providers ?? []).Values.Select(CloneProviderDefinition)];
+        }
+        catch (Exception ex) when (ex is FormatException or TomlException)
+        {
+            throw new InvalidOperationException("The bundled first-run configuration template is invalid.", ex);
+        }
+    }
+
+    /// <summary>
+    /// Creates a blank, disabled definition of one provider type completed with the defaults that type fills in.
+    /// </summary>
+    /// <param name="providerType">A provider type or one of its aliases.</param>
+    /// <returns>A definition holding only the type's defaults; a type without defaults leaves the optional settings unset.</returns>
+    /// <exception cref="ArgumentException"><paramref name="providerType"/> is blank.</exception>
+    /// <exception cref="InvalidOperationException">The provider type is not supported.</exception>
+    public static CodeAltaProviderDocument CreateProviderTypeDefaults(string providerType)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerType);
+
+        // Disabled: completion does not then require the settings an enabled provider of the type needs.
+        var definition = new CodeAltaProviderDocument { ProviderKey = "type-defaults", ProviderType = providerType, Enabled = false };
+        CompleteAndValidateProviderDefinition(definition);
+        return definition;
+    }
+
+    /// <summary>
     /// Validates global CodeAlta TOML configuration content without starting providers or sessions.
     /// </summary>
     /// <param name="content">The TOML content to validate.</param>

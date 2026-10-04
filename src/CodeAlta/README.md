@@ -304,6 +304,37 @@ Account sign-in for Codex, Copilot and xAI is still done from `altatui`. The def
 here is `[chat] default_provider`; the host's own inventory marks every registered provider as
 default, so it is not used for that.
 
+**Provider defaults.** `globalConfig.providers` also reports what a blank field falls back to. Each provider carries
+`defaults` (`displayName`, `model`, `reasoningEffort`, `apiUrl`, `apiKeyEnv`; null when nothing is
+known): the built-in template entry with the same key and adapter type, then what the adapter type
+fills in (the Codex, Copilot and xAI display names, the Codex API URL), and finally the provider key
+as the display name. `typeDefaults` lists the same record per offered adapter type, in the order of
+`providerTypes`, for a provider that has no definition yet.
+
+**The `providerLogin` RPC.** The owned host's `providerLogin` service signs the Codex, Copilot and xAI providers in to their
+accounts with the flows and credential storage of the TUI. Requests name the host epoch and a
+provider key.
+
+- `status` reads the stored sign-in state without network access: `supported` (false for an adapter
+  type without account sign-in), the `modes` (`browser` for Codex, `device` for Copilot, both for
+  xAI), `signedIn`, an account label, a short detail and a token expiry when known. Status codes are
+  `ok`, `unavailable`, `stale_epoch`, `invalid`, `unknown_provider`, `config_invalid` and
+  `read_failed`. Copilot's state follows its short-lived cached token.
+- `login` takes an optional mode (the provider's first mode when blank) and returns a channel of
+  events. A `prompt` event carries the address to open, for a device flow the user code and its
+  expiry, and `browserOpened`: the host hands `https` addresses to the system browser. Exactly one
+  terminal event follows: `completed` with the signed-in state, or `failed` with a code
+  (`unavailable`, `stale_epoch`, `invalid`, `unknown_provider`, `unsupported`, `busy`, `timeout`,
+  `canceled`, `login_failed`) and at most an exception type name as detail. Only one sign-in runs at
+  a time in the host; a second one fails with `busy`. Closing the channel cancels the sign-in, and
+  closing the window cancels and joins it before the host is disposed. A completed sign-in enables a
+  disabled provider and re-registers the providers like **Save and apply**, so the configuration
+  revision changes; a ChatGPT sign-in that declined plan usage (detail `No plan usage permission`)
+  does not.
+- `logout` removes the stored credential and reports `removed` (false when the provider was not
+  signed in). It is refused with `busy` while a sign-in runs; other codes are those of `status` plus
+  `unsupported` and `logout_failed`.
+
 **Settings → Configuration file** edits the global `config.toml` (providers and their credentials,
 the default provider, plugin and skill policy) in an owned launch. The text is validated shortly
 after typing stops, with the first diagnostic marked on its line; Save is offered only for changed,

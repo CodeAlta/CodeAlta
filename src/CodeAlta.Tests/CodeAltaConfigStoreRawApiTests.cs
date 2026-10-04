@@ -6,6 +6,48 @@ namespace CodeAlta.Tests;
 public sealed class CodeAltaConfigStoreRawApiTests
 {
     [TestMethod]
+    public void LoadDefaultProviderDefinitions_ReturnsTheNormalizedTemplateEntries()
+    {
+        var definitions = CodeAltaConfigStore.LoadDefaultProviderDefinitions();
+
+        var codex = definitions.Single(static definition => definition.ProviderKey == "codex");
+        Assert.AreEqual("codex", codex.ProviderType);
+        Assert.IsNull(codex.DisplayName, "A written value equal to the type default is left unset, as in a loaded configuration.");
+        Assert.IsFalse(string.IsNullOrWhiteSpace(codex.Model));
+        Assert.IsNull(codex.ApiUrl, "Type defaults are not filled in.");
+        Assert.AreEqual(false, codex.Enabled);
+        var anthropic = definitions.Single(static definition => definition.ProviderKey == "anthropic");
+        Assert.AreEqual("Anthropic", anthropic.DisplayName);
+        Assert.AreEqual("CODEALTA_ANTHROPIC_API_KEY", anthropic.ApiKeyEnv);
+        Assert.AreNotSame(codex, CodeAltaConfigStore.LoadDefaultProviderDefinitions().Single(static definition => definition.ProviderKey == "codex"));
+    }
+
+    [TestMethod]
+    public void CreateProviderTypeDefaults_CompletesOnlyWhatTheTypeFillsIn()
+    {
+        var codex = CodeAltaConfigStore.CreateProviderTypeDefaults(" Codex ");
+        Assert.AreEqual("codex", codex.ProviderType);
+        Assert.AreEqual("Codex", codex.DisplayName);
+        Assert.AreEqual("https://api.openai.com/v1", codex.ApiUrl);
+        Assert.IsNull(codex.Model);
+        Assert.AreEqual(false, codex.Enabled);
+        Assert.AreEqual("Copilot", CodeAltaConfigStore.CreateProviderTypeDefaults("copilot").DisplayName);
+        Assert.AreEqual("xAI Grok", CodeAltaConfigStore.CreateProviderTypeDefaults("xai").DisplayName);
+
+        foreach (var type in new[] { "openai-chat", "openai-responses", "azure-openai", "anthropic", "google-genai", "vertex-ai", "mistral" })
+        {
+            var defaults = CodeAltaConfigStore.CreateProviderTypeDefaults(type);
+            Assert.AreEqual(type, defaults.ProviderType);
+            Assert.IsNull(defaults.DisplayName, type);
+            Assert.IsNull(defaults.ApiUrl, type);
+            Assert.IsNull(defaults.ApiKeyEnv, type);
+        }
+
+        Assert.ThrowsExactly<ArgumentException>(() => CodeAltaConfigStore.CreateProviderTypeDefaults(" "));
+        Assert.ThrowsExactly<InvalidOperationException>(() => CodeAltaConfigStore.CreateProviderTypeDefaults("unknown-type"));
+    }
+
+    [TestMethod]
     public void LoadGlobalProviderDefinitions_NormalizesProviderFirstProviders()
     {
         using var temp = TempDirectory.Create();

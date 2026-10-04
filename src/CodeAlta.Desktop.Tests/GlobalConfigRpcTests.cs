@@ -129,6 +129,52 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
+    public async Task Providers_ReportWhatBlankFieldsFallBackTo()
+    {
+        await using var fixture = new Fixture("""
+            [providers.anthropic]
+            enabled = false
+            type = "anthropic"
+
+            [providers.codex]
+            enabled = false
+            type = "codex"
+            model = "gpt-custom"
+
+            [providers.openai]
+            enabled = false
+            type = "anthropic"
+
+            [providers.local]
+            enabled = false
+            type = "openai-chat"
+            """);
+        var listed = fixture.Service.Providers(new(Epoch));
+        Assert.AreEqual("ok", listed.Status);
+        GlobalConfigProviderDefaults Defaults(string key) => listed.Providers.Single(provider => provider.Key == key).Defaults;
+
+        // The built-in template entry with the same key and adapter type.
+        Assert.AreEqual(new GlobalConfigProviderDefaults("Anthropic", "claude-sonnet-4-6", null, null, "CODEALTA_ANTHROPIC_API_KEY"), Defaults("anthropic"));
+        // The template, completed by what the type fills in; a written value does not change its default.
+        Assert.AreEqual(new GlobalConfigProviderDefaults("Codex", "gpt-5.5", "high", "https://api.openai.com/v1", null), Defaults("codex"));
+        Assert.AreEqual("gpt-custom", listed.Providers.Single(static provider => provider.Key == "codex").Model);
+        // A template entry of another adapter type describes a different provider: only the key remains as the name.
+        Assert.AreEqual(new GlobalConfigProviderDefaults("openai", null, null, null, null), Defaults("openai"));
+        Assert.AreEqual(new GlobalConfigProviderDefaults("local", null, null, null, null), Defaults("local"));
+
+        CollectionAssert.AreEqual(listed.ProviderTypes.ToArray(), listed.TypeDefaults.Select(static entry => entry.Type).ToArray());
+        GlobalConfigProviderDefaults Type(string type) => listed.TypeDefaults.Single(entry => entry.Type == type).Defaults;
+        Assert.AreEqual(new GlobalConfigProviderDefaults("Codex", null, null, "https://api.openai.com/v1", null), Type("codex"));
+        Assert.AreEqual(new GlobalConfigProviderDefaults("Copilot", null, null, null, null), Type("copilot"));
+        Assert.AreEqual(new GlobalConfigProviderDefaults("xAI Grok", null, null, null, null), Type("xai"));
+        foreach (var type in new[] { "openai-chat", "openai-responses", "azure-openai", "anthropic", "google-genai", "vertex-ai", "mistral" })
+            Assert.AreEqual(new GlobalConfigProviderDefaults(null, null, null, null, null), Type(type), type);
+
+        Assert.AreEqual(0, fixture.Service.Providers(new("another")).TypeDefaults.Count);
+        Assert.AreEqual(0, new GlobalConfigService().Providers(new(Epoch)).TypeDefaults.Count);
+    }
+
+    [TestMethod]
     public async Task SaveProvider_UpdatesOnlyTheEditedFieldsAndKeepsTheStoredSecret()
     {
         await using var fixture = new Fixture(ProvidersConfig);

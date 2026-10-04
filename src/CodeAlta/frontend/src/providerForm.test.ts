@@ -5,7 +5,8 @@ import { providerEdit, providerForm, providerFormDirty, usesAccountSignIn, valid
 
 const types = ["openai-chat", "anthropic", "codex"];
 const local: GlobalConfigProvider = { key: "local", type: "openai-chat", enabled: true, displayName: "Local", effectiveName: "Local", model: "model-a",
-  reasoningEffort: null, apiUrl: "http://127.0.0.1:9999/v1", effectiveApiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: null, hasApiKey: true };
+  reasoningEffort: null, apiUrl: "http://127.0.0.1:9999/v1", effectiveApiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: null, hasApiKey: true,
+  defaults: { displayName: "local", model: null, reasoningEffort: null, apiUrl: null, apiKeyEnv: null } };
 
 test("a form starts from the written values, never from the stored secret", () => {
   const form = providerForm(local, "local", types);
