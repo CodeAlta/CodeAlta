@@ -1,5 +1,6 @@
 import { matchesOutgoingText } from "./outgoingEcho";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { Button, ButtonGroup, Menu, MenuItem, PopoverNext } from "@blueprintjs/core";
 import { workspace, type HistoryRequest, type SessionDisplayView, type SessionPluginEvent } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
@@ -318,6 +319,7 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
     if (candidate?.generation === target.generation && window !== candidate) { beforeOlder.current(); setWindow(candidate); }
     setTarget({ ...target, all: false });
   }
+  const loadDisabled = current?.kind === "loading" || current?.kind === "error";
   const loadingAll = !!target.all && current?.kind !== "error"
     && !(window?.generation === target.generation && historySettled(current, timeline));
   // The rows of a long timeline are costly to build and to compare: they are rebuilt when the window or the
@@ -340,13 +342,19 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
     {timeline?.next && <div className="load-more-bar">{loadingAll ? <>
       <span className="load-more-progress" role="status"><ActivitySpinner size={14} />{t("Loading previous messages… {count} loaded",
         { count: (candidate?.generation === target.generation ? candidate.timeline : timeline).entries.length })}</span>
-      <button type="button" className="load-more" onClick={stopLoadingAll}>{t("Stop")}</button>
-    </> : <>
-      <button type="button" className="load-more" disabled={current?.kind === "loading" || current?.kind === "error"} onClick={() => loadOlder(false)}>
-        <AppIcon name="history" size={14} />{t("Load previous messages")}</button>
-      <button type="button" className="load-more" disabled={current?.kind === "loading" || current?.kind === "error"} onClick={() => loadOlder(true)}>
-        {t("Load all previous messages")}</button>
-    </>}</div>}
+      <Button size="small" icon={<AppIcon name="stop" size={14} />} text={t("Stop")} onClick={stopLoadingAll} />
+    </> : <ButtonGroup className="load-more-group">
+      {/* One slot, like Send: the button loads a chunk, the caret offers the whole history as well. */}
+      <Button intent="primary" className="load-more" icon={<AppIcon name="history" size={14} />} text={t("Load previous messages")}
+        disabled={loadDisabled} onClick={() => loadOlder(false)} />
+      <PopoverNext placement="bottom-end" disabled={loadDisabled} content={<Menu aria-label={t("Load options")}>
+        <MenuItem icon={<AppIcon name="history" size={16} />} text={t("Load previous messages")} onClick={() => loadOlder(false)} />
+        <MenuItem icon={<AppIcon name="browse" size={16} />} text={t("Load all previous messages")} onClick={() => loadOlder(true)} />
+      </Menu>}>
+        <Button intent="primary" className="load-more-options" disabled={loadDisabled} aria-label={t("Load options")} title={t("Load options")}
+          icon={<AppIcon name="chevronDown" size={14} />} />
+      </PopoverNext>
+    </ButtonGroup>}</div>}
     <TimelineRows sessionId={sessionId} rows={reconciled} entries={entries} outgoing={outgoing} onAcknowledgeOutgoing={onAcknowledgeOutgoing}
       pluginEvents={pluginCards?.sessionId === sessionId && timeline && !timeline.newerOmitted ? pluginCards.events : undefined}
       echoes={!timeline?.newerOmitted} empty={reconciled.length === 0 && current?.kind === "ready"} revision={timeline?.revision ?? null} sources={sources}

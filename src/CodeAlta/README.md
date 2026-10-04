@@ -887,10 +887,11 @@ details are not shown yet.
 ### Persisted event history
 
 Selecting a session shows its latest turn: bounded pages of its persisted canonical events, up to 1,000
-events. Two buttons above the first message bring in what came before:
+events. One button above the first message brings in what came before, with a caret for its second
+action, like Send:
 
-- **Load previous messages** reads one chunk: whole turns, at least 300 records.
-- **Load all previous messages** reads back to the start of the session, page after page. The timeline
+- **Load previous messages**, the button itself, reads one chunk: whole turns, at least 300 records.
+- **Load all previous messages**, in the caret's menu, reads back to the start of the session, page after page. The timeline
   takes what was read in small batches while a counter shows the records loaded; **Stop** keeps what
   was read and ends at a whole turn. A session of tens of thousands of records takes about a minute.
 

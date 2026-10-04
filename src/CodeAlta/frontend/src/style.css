@@ -339,7 +339,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .composer textarea { width: 100%; min-height: 84px; padding: 14px 15px 8px; resize: vertical; border: 0; outline: 0; color: var(--text); background: transparent; line-height: 1.5; }
 .composer textarea::placeholder { color: var(--muted); }
 .composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 9px 9px 14px; color: var(--muted); font-size: 11px; }
-.composer-footer button, .load-more { padding: 7px 12px; border: 0; border-radius: 8px; color: white; background: var(--accent-strong); cursor: pointer; }
+.composer-footer button { padding: 7px 12px; border: 0; border-radius: 8px; color: white; background: var(--accent-strong); cursor: pointer; }
 .composer-footer button:disabled { cursor: default; opacity: .45; }
 .composer-footer button { display: inline-flex; align-items: center; gap: 5px; }
 .catalog-composer .composer-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; padding: 4px 9px 5px 12px; }
@@ -350,8 +350,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .empty-history { padding: 60px 20px; color: var(--muted); text-align: center; }
 /* Reserve a two-line read-notice slot; longer notices still grow and wrap. */
 .history > .error-text { min-block-size: 2lh; }
-.load-more { display: flex; align-items: center; gap: 6px; margin: 0; }
-.load-more:disabled { cursor: default; opacity: .6; }
+.load-more-group .load-more-options.bp6-button { min-width: 22px; padding: 0 3px; }
 /* A long timeline lays out and paints only the rows near the view; a row keeps the height it last had. */
 .messages > .timeline-single-row, .messages > .timeline-tool-group { content-visibility: auto; contain-intrinsic-size: auto 72px; }
 .load-more-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin: 9px auto 2px; }

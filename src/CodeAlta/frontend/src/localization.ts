@@ -748,6 +748,7 @@ export const messages = dictionary({
   "Loading previous messages… {count} loaded": ["Cargando mensajes anteriores… {count} cargados", "Chargement des messages précédents… {count} chargés", "Frühere Nachrichten werden geladen… {count} geladen", "以前のメッセージを読み込み中… {count} 件読み込み済み", "正在加载之前的消息… 已加载 {count} 条"],
   "Stop": ["Detener", "Arrêter", "Anhalten", "停止", "停止"],
   "Load all previous messages": ["Cargar todos los mensajes anteriores", "Charger tous les messages précédents", "Alle früheren Nachrichten laden", "以前のメッセージをすべて読み込む", "加载全部之前的消息"],
+  "Load options": ["Opciones de carga", "Options de chargement", "Ladeoptionen", "読み込みオプション", "加载选项"],
   "Open settings": ["Abrir configuración", "Ouvrir les paramètres", "Einstellungen öffnen", "設定を開く", "打开设置"],
   "Copy project name": ["Copiar nombre del proyecto", "Copier le nom du projet", "Projektnamen kopieren", "プロジェクト名をコピー", "复制项目名称"],
   "Copy project ID": ["Copiar ID del proyecto", "Copier l'ID du projet", "Projekt-ID kopieren", "プロジェクト ID をコピー", "复制项目 ID"],
