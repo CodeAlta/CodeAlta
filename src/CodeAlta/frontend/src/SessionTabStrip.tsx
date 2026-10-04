@@ -135,9 +135,9 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
     const right = split(DockLocation.RIGHT), below = split(DockLocation.BOTTOM);
     const canSplit = node instanceof TabSetNode && node.isEnableDivide() && node.getTabNodes().length > 1 && selected?.isEnableDrag();
     setMenu({ anchor, current, items: [
-      { key: "split-right", label: t("Split session right"), disabled: !canSplit || !right || !sessionLayoutActionAllowed(model, right, state, snapshot, current, files),
+      { key: "split-right", label: t("Split right"), disabled: !canSplit || !right || !sessionLayoutActionAllowed(model, right, state, snapshot, current, files),
         onSelect: () => { if (right) apply(right, current); } },
-      { key: "split-below", label: t("Split session below"), disabled: !canSplit || !below || !sessionLayoutActionAllowed(model, below, state, snapshot, current, files),
+      { key: "split-below", label: t("Split below"), disabled: !canSplit || !below || !sessionLayoutActionAllowed(model, below, state, snapshot, current, files),
         onSelect: () => { if (below) apply(below, current); } },
       { key: "reopen", label: t("Reopen closed tab"), disabled: !snapshot || !state.closed.length && !files.closed.length,
         onSelect: () => { if (current()) reopen(); } },

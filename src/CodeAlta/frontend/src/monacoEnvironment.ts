@@ -12,9 +12,13 @@ import EditorWorker from "monaco-editor/editor/editor.worker.js?worker";
 globalThis.MonacoEnvironment = Object.freeze({ getWorker: () => new EditorWorker() });
 
 // Inline code in Markdown stands out in the same red as in the rendered messages (Blueprint red 4 / red 2).
-const themes = { dark: { base: "vs-dark", inline: "e76a6e" }, light: { base: "vs", inline: "ac2f33" } } as const;
-monaco.editor.defineTheme("codealta-dark", { base: themes.dark.base, inherit: true, colors: {}, rules: [{ token: "variable.md", foreground: themes.dark.inline }] });
-monaco.editor.defineTheme("codealta-light", { base: themes.light.base, inherit: true, colors: {}, rules: [{ token: "variable.md", foreground: themes.light.inline }] });
+const themes = { dark: { base: "vs-dark", inline: "e76a6e", inserted: "72ca9b", deleted: "fa999c" },
+  light: { base: "vs", inline: "ac2f33", inserted: "1c6e42", deleted: "ac2f33" } } as const;
+// Added and removed lines of a diff are green and red; the base themes have no rule for them.
+const rules = (mode: keyof typeof themes, inline: string) => [{ token: "variable.md", foreground: inline },
+  { token: "inserted", foreground: themes[mode].inserted }, { token: "deleted", foreground: themes[mode].deleted }];
+monaco.editor.defineTheme("codealta-dark", { base: themes.dark.base, inherit: true, colors: {}, rules: rules("dark", themes.dark.inline) });
+monaco.editor.defineTheme("codealta-light", { base: themes.light.base, inherit: true, colors: {}, rules: rules("light", themes.light.inline) });
 
 // The color a custom property resolves to on the root, as #rrggbb; undefined when it is not an opaque color.
 function shellColor(probe: HTMLElement, property: string): string | undefined {
@@ -50,7 +54,7 @@ function applyShellTheme() {
   set("scrollbarSlider.activeBackground", color("--text"), "59");
   const inline = color("--inline-code-text")?.slice(1) ?? themes[mode].inline;
   probe.remove();
-  monaco.editor.defineTheme("codealta-scheme", { base: themes[mode].base, inherit: true, colors, rules: [{ token: "variable.md", foreground: inline }] });
+  monaco.editor.defineTheme("codealta-scheme", { base: themes[mode].base, inherit: true, colors, rules: rules(mode, inline) });
   monaco.editor.setTheme("codealta-scheme");
 }
 

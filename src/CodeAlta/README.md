@@ -139,8 +139,8 @@ Refresh composer choices button to retry. The prompt's divider
 reserves space within its own pane, independently of session dividers. Sizing observes the
 actual portal DOM mount, including late-mounted panes. Session tab dragging uses pointer capture
 and public FlexLayout move actions, avoiding native HTML5 drag/drop handling. A highlighted target
-previews the split/merge/insertion, and Escape or loss of capture cancels. The tab menu's **Split session
-right/below** actions provide a keyboard alternative when a pane contains multiple session tabs.
+previews the split/merge/insertion, and Escape or loss of capture cancels. The tab menu's **Split right** and
+**Split below** actions provide a keyboard alternative when a pane contains multiple tabs.
 Real FlexLayout session tabs project
 existing bounded identities, with compact status/close chrome and secondary Reopen/Refresh menus.
 The tab menu uses themed Blueprint controls with an opaque popup and keyboard navigation.
@@ -503,10 +503,16 @@ selected, the commands that act on a session (send, abort, message navigation, n
 and the like) are unavailable; selecting a session tab, a session or project in the Explorer, or
 the New session tab returns to the session.
 
-The editor is Monaco. The file name or extension chooses the highlighting (C#, F#, TypeScript,
-JavaScript, JSON, XML and MSBuild files, Markdown, TOML/INI, YAML, HTML, CSS, Python, Rust, Go, Java,
-Kotlin, C/C++, shell, PowerShell, SQL, Dockerfile and others; anything else is plain text), and a
-language is loaded the first time a file needs it. The footer shows the state (**Saved**,
+The editor is Monaco. The file name or extension chooses the highlighting; anything unknown is plain
+text. Every grammar Monaco ships is available (about eighty: C#, F#, VB, TypeScript, JavaScript, XML
+and MSBuild files, Markdown, YAML, HTML, CSS/SCSS/Less, Python, Rust, Go, Java, Kotlin, Scala, Swift,
+C/C++, Objective-C, shell, PowerShell, batch, SQL dialects, Dockerfile, Ruby, PHP, Lua, Perl, R, Dart,
+Julia, Elixir, Clojure, Scheme, Pascal, Solidity, Razor, GraphQL, Protobuf, HCL, Bicep and others),
+and the app adds its own small grammars for what Monaco lacks: JSON, TOML, Makefile and diff/patch
+(`frontend/src/monacoGrammars.ts`). A language is one lazily loaded chunk, fetched the first time a
+file needs it; `frontend/src/fileLanguage.ts` maps file names and extensions to languages. To add a
+language, add its Monarch grammar to `monacoGrammars.ts` and its extensions to `fileLanguage.ts`.
+The footer shows the state (**Saved**,
 **Modified**, **Saving…**, **Read-only**, **Changed on disk**), the caret line and column, the
 path, a **Wrap lines** switch (on by default), **Reload** and **Save**.
 

@@ -26,8 +26,10 @@ export function CodeEditor({ value, onChange, language, label, readOnly = false,
   const latest = useRef({ value, onChange, onSave, onCursor }); latest.current = { value, onChange, onSave, onCursor };
   useLayoutEffect(() => {
     const node = host.current!;
-    // An unregistered language is plain text until its definition has loaded.
-    const model = monaco.editor.createModel(latest.current.value, language);
+    // A language that is not registered yet starts as plain text and is set once its definition has loaded. Naming it
+    // now would switch the model the moment the id is registered, before its tokenizer is, and leave it without colors.
+    const model = monaco.editor.createModel(latest.current.value,
+      monaco.languages.getLanguages().some(known => known.id === language) ? language : "plaintext");
     const instance = monaco.editor.create(node, { model, automaticLayout: true, ariaLabel: label, readOnly,
       fontFamily: getComputedStyle(node).fontFamily, fontSize: 13, lineHeight: 20, minimap: { enabled: false },
       scrollBeyondLastLine: false, wordWrap: wrap ? "on" : "off", renderLineHighlight: "line", stickyScroll: { enabled: false },

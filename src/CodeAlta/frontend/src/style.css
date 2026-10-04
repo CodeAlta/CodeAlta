@@ -1427,3 +1427,6 @@ dialog.session-browser .session-batch-delete summary { cursor: pointer; color: v
 .file-editor-footer .bp6-control.file-editor-wrap { flex: none; margin: 0; font-size: 12px; }
 .file-editor-footer .bp6-button { flex: none; min-height: 22px; font-size: 12px; }
 .unsaved-file-dialog.bp6-dialog { width: min(440px, calc(100vw - 32px)); }
+
+/* Blueprint dialogs dim the window like the app's own windows do. */
+.bp6-overlay-backdrop { background-color: var(--scrim); }
