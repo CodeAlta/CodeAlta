@@ -243,6 +243,10 @@ altatui
 
 CodeAlta stores user state under `~/.alta/`, including configuration, logs, cached provider state, session journals, agent prompts under `~/.alta/prompts/agents`, plugins, and skills.
 
+### Developer instance
+
+`altatui --dev` (and `alta --dev` for the desktop application) starts a second CodeAlta beside the normal one, on the same `~/.alta` profile. Configuration, providers, credentials, prompts, skills, plugins and the project catalog are shared; its sessions, session cache, view state, prompt drafts, logs and lock live under `~/.alta/dev/`. It exists to work on CodeAlta with CodeAlta: the normal instance keeps your sessions while the developer instance runs the build under test. One developer instance runs at a time.
+
 ### Help and startup admission
 
 Run `altatui --help` (or `altatui -h`) or `altatui --version` with no additional arguments to print built-in information without initializing application state, logging, the terminal workspace, or plugins. Early help lists built-in options only.

@@ -34,7 +34,7 @@ public sealed class PromptImageAttachmentStore
         ArgumentNullException.ThrowIfNull(catalogOptions);
         ArgumentException.ThrowIfNullOrWhiteSpace(catalogOptions.GlobalRoot);
         ArgumentNullException.ThrowIfNull(clock);
-        _sessionsRoot = Path.Combine(Path.GetFullPath(catalogOptions.GlobalRoot), "sessions");
+        _sessionsRoot = Path.GetFullPath(catalogOptions.SessionsRoot);
         _clock = clock;
         _writeAsync = writeAsync ?? (static (stream, bytes, token) => stream.WriteAsync(bytes, token).AsTask());
     }

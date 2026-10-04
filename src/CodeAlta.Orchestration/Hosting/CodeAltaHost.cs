@@ -192,7 +192,16 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta")
                 : Path.GetFullPath(options.GlobalRoot);
             Directory.CreateDirectory(globalRoot);
-            _ = CoordinatorAgentsBootstrapper.Ensure(globalRoot);
+            var catalogOptions = new CatalogOptions
+            {
+                GlobalRoot = globalRoot,
+                StateRoot = string.IsNullOrWhiteSpace(options.StateRoot) ? globalRoot : Path.GetFullPath(options.StateRoot),
+            };
+            Directory.CreateDirectory(catalogOptions.StateRoot);
+            // The owner of the global root keeps the coordinator instructions current; a second instance on a
+            // separate state root is usually another build, and only supplies them when they are missing.
+            if (!catalogOptions.HasSeparateStateRoot || !File.Exists(Path.Combine(globalRoot, "AGENTS.md")))
+                _ = CoordinatorAgentsBootstrapper.Ensure(globalRoot);
             if (options.OwnsLogging && !LogManager.IsInitialized)
             {
                 LogManager.InitializeForAsync(new LogManagerConfig());
@@ -202,10 +211,6 @@ public sealed class CodeAltaHost : IAsyncDisposable
             var currentProjectPath = string.IsNullOrWhiteSpace(options.CurrentProjectPath)
                 ? Environment.CurrentDirectory
                 : Path.GetFullPath(options.CurrentProjectPath);
-            var catalogOptions = new CatalogOptions
-            {
-                GlobalRoot = globalRoot,
-            };
             var projectCatalog = new ProjectCatalog(catalogOptions);
             var currentProject = await ResolveCurrentProjectAsync(projectCatalog, currentProjectPath, cancellationToken).ConfigureAwait(false);
 
@@ -250,7 +255,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             modelProviderRegistry = new ModelProviderRegistry();
             options.ConfigureModelProviders?.Invoke(modelProviderRegistry);
             var modelProviderInitializationService = new ModelProviderInitializationService(modelProviderRegistry);
-            agentHub = new AgentHub(modelProviderRegistry, globalRoot, sessionViewCatalog.JournalStore.ProjectionCache);
+            agentHub = new AgentHub(modelProviderRegistry, catalogOptions.StateRoot, sessionViewCatalog.JournalStore.ProjectionCache);
             var agentSessionCatalog = new AgentSessionCatalog(sessionViewCatalog.JournalStore.CreateSessionStore());
             var projectFileSnapshotCache = new ProjectFileSnapshotCache();
             var eventFailurePolicy = options.PluginAgentEventFailurePolicy ??

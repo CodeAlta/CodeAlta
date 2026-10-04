@@ -1525,3 +1525,6 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .rename-form .bp6-label { color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
 .rename-form .bp6-form-helper-text { overflow-wrap: anywhere; }
 .rename-actions { display: flex; justify-content: flex-end; gap: 6px; }
+
+/* The developer instance says so beside its name, so two CodeAlta windows are told apart. */
+.window-brand-tag { flex: none; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--yellow) 60%, transparent); border-radius: 999px; color: var(--yellow); font-size: 10px; font-weight: 600; letter-spacing: .06em; line-height: 16px; text-transform: uppercase; }

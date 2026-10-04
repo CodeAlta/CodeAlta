@@ -115,7 +115,7 @@ Only one `altatui` application instance can run on a machine at a time. The shar
 ~/.alta/alta.lock
 ```
 
-A second launch exits with the PID of the already-running instance because multiple instances would share session state unsafely.
+A second launch exits with the PID of the already-running instance because multiple instances would share session state unsafely. The one exception is the developer instance (`altatui --dev` or `alta --dev`), which keeps its sessions and its own lock under `~/.alta/dev/` and can run beside the normal one.
 
 ## A prompt did not send
 

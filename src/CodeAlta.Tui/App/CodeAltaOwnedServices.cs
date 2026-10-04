@@ -129,10 +129,12 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                 ".alta");
             Directory.CreateDirectory(homeRoot);
             var cacheRoot = Path.Combine(homeRoot, "cache");
-            ownsLogging = CodeAltaLogging.Initialize(homeRoot);
+            var rawArguments = Environment.GetCommandLineArgs();
+            // The developer instance (--dev) shares the profile and keeps its own sessions, view state and logs.
+            var instance = CodeAltaInstanceProfile.Create(homeRoot, CodeAltaInstanceProfile.IsDeveloperRequested(rawArguments));
+            ownsLogging = CodeAltaLogging.Initialize(instance.StateRoot);
 
             Directory.CreateDirectory(cacheRoot);
-            var rawArguments = Environment.GetCommandLineArgs();
             var pluginBootstrapOptions = CodeAltaCliOptions.GetPluginBootstrapOptions(rawArguments);
             var catalogOptions = new CatalogOptions { GlobalRoot = homeRoot };
             var configStore = new CodeAltaConfigStore(catalogOptions);
@@ -149,6 +151,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                     new CodeAltaHostOptions
                     {
                         GlobalRoot = homeRoot,
+                        StateRoot = instance.StateRoot,
                         CurrentProjectPath = Environment.CurrentDirectory,
                         IsHeadless = false,
                         PluginStartupFeedback = new CodeAlta.Tui.Plugins.TerminalPluginStartupFeedback(),

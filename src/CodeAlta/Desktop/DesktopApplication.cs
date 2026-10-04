@@ -59,7 +59,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         var desktop = new DesktopApplication(options, capture);
         try
         {
-            desktop._lease = CodeAltaSingleInstanceGuard.Acquire(Path.Combine(options.CatalogRoot!, "alta.lock"));
+            desktop._lease = CodeAltaSingleInstanceGuard.Acquire(Path.Combine(options.StateRoot ?? options.CatalogRoot!, "alta.lock"));
             Directory.CreateDirectory(options.DataRoot);
             var result = NeoApplication.Run(new NeoApplicationOptions
             {
@@ -112,7 +112,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         var bodyFailed = false;
         try
         {
-            window = application.CreateWindow(DesktopWindowChrome.WindowOptions());
+            window = application.CreateWindow(DesktopWindowChrome.WindowOptions(options.Developer));
             application.MainWindow = window;
             window.Closed += (_, _) => closed.TrySetResult();
             window.CloseRequested += request =>
@@ -130,10 +130,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 return ValueTask.CompletedTask; // Never await host cleanup inside the native deadline.
             };
             window.Show();
-            var catalog = new CatalogOptions { GlobalRoot = options.CatalogRoot! };
+            var catalog = new CatalogOptions { GlobalRoot = options.CatalogRoot!, StateRoot = options.StateRoot ?? options.CatalogRoot! };
             _hostCreation = CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
-                GlobalRoot = options.CatalogRoot, CurrentProjectPath = roots.Project,
+                GlobalRoot = options.CatalogRoot, StateRoot = options.StateRoot, CurrentProjectPath = roots.Project,
                 DiscoveryScope = roots.Home is null || roots.Instructions is null
                     ? null
                     : new SessionDiscoveryScope(roots.Home, roots.Instructions),
@@ -197,7 +197,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         DiagnosticSink = new DesktopRpcDiagnostics(),
                     }));
                     chrome.AddHandlers(builder);
-                    builder.AddBootService(new BootService(epoch, options.ReviewOwnedCommandPermissions, options.EnableOwnedUserInput));
+                    builder.AddBootService(new BootService(epoch, options.ReviewOwnedCommandPermissions, options.EnableOwnedUserInput, options.Developer));
                     builder.AddWorkspaceService(workspace);
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime));
                     var configStore = new CodeAltaConfigStore(catalog);

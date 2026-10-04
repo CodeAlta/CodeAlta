@@ -148,9 +148,14 @@ internal sealed class CodeAltaFrontendComposition
             .Add(altaRegistry)
             .Add(altaDispatcher)
             .Add(reminderService);
-        _ = CoordinatorAgentsBootstrapper.Ensure(
-            catalogOptions.GlobalRoot,
-            AltaHelpText.RenderRootHelp(altaRegistry, altaServices));
+        // The instance that owns the global root keeps the coordinator instructions current; the developer
+        // instance is another build and leaves them as they are.
+        if (!catalogOptions.HasSeparateStateRoot)
+        {
+            _ = CoordinatorAgentsBootstrapper.Ensure(
+                catalogOptions.GlobalRoot,
+                AltaHelpText.RenderRootHelp(altaRegistry, altaServices));
+        }
 
         var sessionPromptDraftService = new SessionPromptDraftService(frontend.LoadPromptDraft, frontend.DeletePromptDraft);
         var sessionModelProviderPreferenceService = new SessionModelProviderPreferenceService(frontend.ApplySessionPreference, frontend.RememberSessionPreference);

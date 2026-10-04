@@ -16,6 +16,17 @@ public sealed class CodeAltaHostOptions
     /// </summary>
     public string? GlobalRoot { get; init; }
 
+    /// <summary>
+    /// Gets the root of the state this host alone writes (sessions, session cache, view state, prompt
+    /// drafts). When unset, it is the global root.
+    /// </summary>
+    /// <remarks>
+    /// A host with a separate state root runs beside the host that owns the global root: it shares that
+    /// root's configuration, credentials, prompts, skills and project catalog, and does not rewrite the
+    /// coordinator <c>AGENTS.md</c> another build maintains there.
+    /// </remarks>
+    public string? StateRoot { get; init; }
+
     /// <summary>Gets optional explicit home and lexical instruction ancestry limits.</summary>
     /// <remarks>Requires explicit absolute global/project roots; does not isolate plugins, providers, authentication or filesystem links.</remarks>
     public SessionDiscoveryScope? DiscoveryScope { get; init; }

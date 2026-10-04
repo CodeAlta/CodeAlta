@@ -38,24 +38,43 @@ The desktop UI (`src/CodeAlta`, React frontend in `src/CodeAlta/frontend`) runs 
 
 **1. Build.** `dotnet build CodeAlta/CodeAlta.csproj` from `src` builds the host and the frontend (it restores npm packages and regenerates the typed RPC client `src/CodeAlta/obj/neoastra/neoastra.ts`). The frontend alone is checked from `src/CodeAlta/frontend` with `node node_modules/typescript/bin/tsc --noEmit` and its unit tests with `node node_modules/tsx/dist/cli.mjs --test src/<name>.test.ts`. The `src/*.browser.test.ts` files start their own Edge; do not use them to look at the app.
 
-**2. Launch with remote debugging.** WebView2 opens a DevTools port when this variable is set; the MCP configuration expects port 9222. From the repository root (PowerShell):
+**2. Launch the developer instance with remote debugging.** `--dev` starts a second CodeAlta beside the normal one (see "Developer instance" below), and WebView2 opens a DevTools port when this variable is set; the MCP configuration expects port 9222. From the repository root (PowerShell):
 
 ```powershell
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
-Start-Process src\CodeAlta\bin\Debug\net10.0\alta.exe -WorkingDirectory (Get-Location)
+Start-Process src\CodeAlta\bin\Debug\net10.0\alta.exe -ArgumentList "--dev" -WorkingDirectory (Get-Location)
 ```
 
-`http://127.0.0.1:9222/json/list` then lists one page, `app://codealta/index.html`. `alta.exe` is a windowed executable: it has no console, and a startup failure only shows as the process exiting. One instance runs per profile; a second launch on the same profile exits at once.
+`http://127.0.0.1:9222/json/list` then lists one page, `app://codealta/index.html`. The window is titled **CodeAlta (dev)** and shows a **DEV** tag beside its name. `alta.exe` is a windowed executable: it has no console, and a startup failure only shows as the process exiting (a second developer instance exits at once, because one is already running).
 
 **3. Connect.** Two checked-in files register the same `chrome-devtools` MCP server ([chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp)), attached to `http://127.0.0.1:9222`: `.mcp.json` for agents that read project MCP configuration (Claude Code and others), and `.alta/mcp.json` for CodeAlta itself. Both start it with `fnm exec --using=default cmd /c npx …` (Windows, Node managed by fnm); where `npx` is on the `PATH`, use `"command": "npx"` with the arguments after `npx`. Start the app before the first tool call.
 
 - `list_pages` gives the page id; pass it as `pageId` to the other tools. The id changes each time the app restarts.
 - `take_snapshot` (accessibility tree with element ids) and `take_screenshot` show the window; `click`, `fill`, `type_text` and `press_key` act on it; `evaluate_script` runs JavaScript in the page; `list_console_messages` reads its console.
 - The title bar's native caption buttons are not part of the page, so they are not in screenshots.
+- In a CodeAlta session the server starts inactive: activate it with the `alta mcp` command, then its tools (`mcp__chrome_devtools__…`) are available from the next turn.
 
-**4. Change, rebuild, look again.** The executable and its assets are locked while the window is open: close the window (for example `(Get-Process alta).CloseMainWindow()`), build, launch again, call `list_pages` again. Check both themes and a narrow window when a change is visual.
+**4. Change, rebuild, look again.** The executable and its assets are locked while the window is open. Close the developer window only, never every `alta` process (the normal instance may be the one you are running in):
 
-**5. Mind the profile.** Launched without arguments, the app uses the real profile in `~/.alta`: its projects, sessions, providers and credentials. Look and navigate freely, but do not send prompts, rename or delete sessions, or change settings there unless the task asks for it, and leave the window as you found it (theme, open tabs). To test anything that writes, use an isolated profile; the flags are described in `src/CodeAlta/README.md` (`--data-root`, `--catalog-root`, `--allow-owned-host`, …).
+```powershell
+Get-Process alta | Where-Object MainWindowTitle -eq 'CodeAlta (dev)' | ForEach-Object { $_.CloseMainWindow() }
+```
+
+Then build, launch again and call `list_pages` again. Check both themes and a narrow window when a change is visual.
+
+**5. Mind what is shared.** The developer instance has its own sessions, so sending prompts there is safe and its sessions are disposable. Everything else is the user's real profile: do not change settings, providers, prompts or skills, and do not rename, archive or add projects, unless the task asks for it. A window started without `--dev` is the normal instance, with the user's real sessions: look and navigate freely, but do not send prompts, rename or delete sessions there unless asked, and leave it as you found it.
+
+### Developer instance
+
+Only one CodeAlta runs on a profile, because two processes must not write the same session files. `--dev` (`alta --dev` for the desktop app, `altatui --dev` for the terminal UI) starts a second one on the same `~/.alta`:
+
+| Shared with the normal instance | Its own, under `~/.alta/dev/` |
+| --- | --- |
+| `config.toml`, providers and their credentials (`auth/`), `mcp.json`, prompts, skills, plugins, the project catalog (`projects/`) | `sessions/` (journals, pasted images), `cache/cache.sqlite3`, `ui-state.yaml`, `saved_prompts/`, `logs/`, `alta.lock` |
+
+The desktop developer instance also has its own WebView data (`%LOCALAPPDATA%\CodeAlta\desktop-dev`: open tabs, drafts, theme), which is what lets it take its own debugging port. One developer instance runs at a time, terminal or desktop. It leaves the coordinator `~/.alta/AGENTS.md` as the normal instance wrote it.
+
+This is how CodeAlta is developed with CodeAlta: you run in the normal instance (any released or built `alta`/`altatui`), build the repository, start `alta.exe --dev` with the debugging port, and drive that window through the `chrome-devtools` MCP server. The terminal UI is checked the same way with `altatui --dev` in a separate console.
 
 ## Contribution Rules (Do/Don't)
 

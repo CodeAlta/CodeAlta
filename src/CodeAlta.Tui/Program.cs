@@ -24,7 +24,9 @@ try
         () =>
         {
             startupOwner = Program.StartupOwner.CreateProduction();
-            return startupOwner.AcquireAdmission(() => CodeAltaSingleInstanceGuard.Acquire(startupOwner.GuardEvidence));
+            // The developer instance (--dev) takes its own lock, so it runs beside the normal instance.
+            var lockFilePath = CodeAltaInstanceProfile.FromArguments(args).LockFilePath;
+            return startupOwner.AcquireAdmission(() => CodeAltaSingleInstanceGuard.Acquire(lockFilePath, startupOwner.GuardEvidence));
         },
         () => Program.RunAdmittedStartup(args, mainThreadId, startupOwner!));
 }
@@ -344,9 +346,8 @@ internal partial class Program
     {
         try
         {
-            var homeRoot = Program.GetDefaultHomeRoot();
             owner.LoggingRequired = true;
-            CodeAltaLogging.Initialize(homeRoot);
+            CodeAltaLogging.Initialize(CodeAltaInstanceProfile.FromArguments(args).StateRoot);
 
             // Plugin runtime startup ordering: register MSBuild before any plugin build service, pipe-logger
             // event payload, or Microsoft.Build type can be touched. Safe-mode raw args/environment are
@@ -356,6 +357,8 @@ internal partial class Program
             var session = Terminal.Open();
             owner.Terminal = session;
             owner.ReleaseTerminal = session.Dispose;
+            // Two CodeAlta consoles are told apart by their title.
+            if (CodeAltaInstanceProfile.IsDeveloperRequested(args)) Terminal.Title = "CodeAlta (dev)";
 
             _ = PluginRuntimeConfigResolver.IsSafeModeEnabled(args);
             var commandLinePluginRuntime = Program.StartPluginRuntimeForCommandLine(args, CancellationToken.None, owner);
@@ -486,7 +489,7 @@ internal partial class Program
         ArgumentNullException.ThrowIfNull(args);
         var homeRoot = GetDefaultHomeRoot();
         Directory.CreateDirectory(homeRoot);
-        CodeAltaLogging.Initialize(homeRoot);
+        CodeAltaLogging.Initialize(CodeAltaInstanceProfile.FromArguments(args).StateRoot);
         var currentDirectory = Environment.CurrentDirectory;
         var pluginBootstrapOptions = CodeAltaCliOptions.GetPluginBootstrapOptions(args);
         if (!CanStartPluginRuntimeBeforeConfigRecovery(homeRoot))

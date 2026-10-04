@@ -47,6 +47,7 @@ const bootStatus: BootStatus = {
   hostEpoch: null,
   ownedAsksEnabled: false,
   ownedUserInputEnabled: false,
+  developerMode: false,
   productName: "CodeAlta Desktop Demo",
   state: "demo",
   version: "local preview",

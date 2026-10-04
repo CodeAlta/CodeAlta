@@ -29,6 +29,13 @@ a prompt immediately. It can start configured providers and acquires the shared 
 command permission review and provider input remain disabled by default. WebView-only data stays in
 the platform-local application-data directory, and existing `.alta` storage is not migrated.
 
+`alta --dev` starts the **developer instance**: a second window, titled **CodeAlta (dev)** with a
+**DEV** tag beside its name, that runs beside the normal one on the same `~/.alta` profile. It shares
+configuration, providers, credentials, prompts, skills and the project catalog, and keeps its own
+sessions, session cache and lock under `~/.alta/dev/` and its own WebView data (tabs, drafts, theme)
+under `CodeAlta/desktop-dev`. It is how CodeAlta is developed with CodeAlta; `AGENTS.md` at the
+repository root describes the workflow. `--dev` is used alone.
+
 ## Try the web workspace now
 
 The frontend includes an interactive, in-memory browser demo. It does not need a .NET host,

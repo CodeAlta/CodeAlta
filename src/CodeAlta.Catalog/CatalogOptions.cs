@@ -10,6 +10,31 @@ public sealed class CatalogOptions
     /// </summary>
     public string GlobalRoot { get; set; } = string.Empty;
 
+    private string? _stateRoot;
+
+    /// <summary>
+    /// Gets or sets the root of the state one running instance alone writes: sessions, the session cache,
+    /// view state, prompt drafts and internal session links. When unset, it is <see cref="GlobalRoot"/>.
+    /// </summary>
+    /// <remarks>
+    /// A second instance on the same <see cref="GlobalRoot"/> (the developer instance) sets a separate
+    /// state root: it shares configuration, providers, prompts, skills and the project catalog, and keeps
+    /// what two processes must not write together under this root.
+    /// </remarks>
+    public string StateRoot
+    {
+        get => string.IsNullOrWhiteSpace(_stateRoot) ? GlobalRoot : _stateRoot;
+        set => _stateRoot = value;
+    }
+
+    /// <summary>
+    /// Gets whether this instance keeps its state apart from <see cref="GlobalRoot"/>, and therefore leaves
+    /// the files it shares with the instance that owns that root as they are at startup.
+    /// </summary>
+    public bool HasSeparateStateRoot => !string.IsNullOrWhiteSpace(_stateRoot)
+        && !string.Equals(Path.GetFullPath(_stateRoot), Path.GetFullPath(GlobalRoot),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
     /// <summary>
     /// Gets the default checkout root path under the global catalog.
     /// </summary>
@@ -47,24 +72,24 @@ public sealed class CatalogOptions
     public string CacheRoot => Path.Combine(GlobalRoot, "cache");
 
     /// <summary>
-    /// Gets the shared machine-local SQLite cache database path.
+    /// Gets the SQLite cache database path of this instance's sessions, under <see cref="StateRoot"/>.
     /// </summary>
-    public string SessionCacheDatabasePath => Path.Combine(CacheRoot, "cache.sqlite3");
+    public string SessionCacheDatabasePath => Path.Combine(StateRoot, "cache", "cache.sqlite3");
 
     /// <summary>
-    /// Gets the session journals root path under the global catalog.
+    /// Gets the session journals root path, under <see cref="StateRoot"/>.
     /// </summary>
-    public string SessionsRoot => Path.Combine(GlobalRoot, "sessions");
+    public string SessionsRoot => Path.Combine(StateRoot, "sessions");
 
     /// <summary>
-    /// Gets the saved prompt drafts root path under the global catalog.
+    /// Gets the saved prompt drafts root path, under <see cref="StateRoot"/>.
     /// </summary>
-    public string PromptDraftsRoot => Path.Combine(GlobalRoot, "saved_prompts");
+    public string PromptDraftsRoot => Path.Combine(StateRoot, "saved_prompts");
 
     /// <summary>
-    /// Gets the session view state path.
+    /// Gets the session view state path, under <see cref="StateRoot"/>.
     /// </summary>
-    public string UiStatePath => Path.Combine(GlobalRoot, "ui-state.yaml");
+    public string UiStatePath => Path.Combine(StateRoot, "ui-state.yaml");
 
     /// <summary>
     /// Gets the legacy machine-agent runtime root path under the legacy catalog.
@@ -76,5 +101,5 @@ public sealed class CatalogOptions
     /// Gets the internal session linkage root path under the global catalog.
     /// </summary>
     // Compatibility: keep the persisted legacy threads/internal directory loadable.
-    public string InternalSessionsRoot => Path.Combine(GlobalRoot, "threads", "internal");
+    public string InternalSessionsRoot => Path.Combine(StateRoot, "threads", "internal");
 }

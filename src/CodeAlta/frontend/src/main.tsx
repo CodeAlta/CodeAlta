@@ -1585,7 +1585,7 @@ function App() {
           "--project-pane-width": `${visiblePaneLayout.projects}px`,
           "--session-pane-width": `${visibleSessionWidth}px`,
         } as CSSProperties}>
-        <WindowBrand>
+        <WindowBrand developer={status?.developerMode ?? false}>
           <nav className="activity-rail" aria-label={t("Workspace navigation")}>
             <Button ref={projectRailToggle} variant="minimal" size="small" active={railVisible} icon={<AppIcon name="folder" size={16} />} aria-label={t("Explorer")} title={t("Explorer")} aria-expanded={railVisible} aria-controls="project-rail" onClick={toggleProjects} />
             <Button variant="minimal" size="small" icon={<AppIcon name="search" size={16} />} aria-label={t("Open command palette")} aria-haspopup="dialog" title={`${t("Open command palette")} (Ctrl+P)`} onClick={openPalette} />

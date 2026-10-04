@@ -22,6 +22,14 @@ CodeAlta keeps user-owned durable state under a global root and project-local `.
 | `skills/` | Skill catalog | User-scoped CodeAlta skill roots. |
 | `sessions/internal/` | Work-session catalog | Internal session linkage descriptors still read by the catalog. |
 
+### Instance state and the developer instance
+
+`CatalogOptions.StateRoot` is the root of what one running instance alone writes: `sessions/` (journals and prompt-image copies), `cache/cache.sqlite3`, `ui-state.yaml`, `saved_prompts/` and the legacy `threads/internal/`. It defaults to the global root, so the layout above is unchanged for the normal instance, whose lock is `~/.alta/alta.lock`.
+
+The developer instance (`alta --dev`, `altatui --dev`; `CodeAltaInstanceProfile` in `CodeAlta.Hosting`) keeps the same global root and sets the state root to `~/.alta/dev/`. It therefore shares `config.toml`, `auth/`, `mcp.json`, `projects/`, `prompts/`, `skills/`, `plugins/` and the rest of `cache/`, and writes its sessions, session cache, view state, drafts, terminal logs (`dev/logs/`) and lock (`dev/alta.lock`) apart, which lets it run beside the normal instance. The desktop developer instance also uses its own WebView data root (`CodeAlta/desktop-dev` under the local application-data directory). A host with a separate state root does not refresh the coordinator `AGENTS.md` of the global root; it only creates it when missing.
+
+Shared files keep their existing guarantees between the two instances: Codex credentials are refreshed under a cross-process file lock; `config.toml`, the project descriptors and the Copilot/xAI token files are whole-file writes without one, so the last writer wins. Optional provider protocol traces stay under the global root's `sessions/traces/`, one file per session id.
+
 The runtime creates directories as needed. Provider auth managers also write under `~/.alta/auth/`, for example subscription credentials and direct-provider token caches. Protocol traces, session journals, auth files, and provider caches can contain prompts, tool arguments, model output, file paths, command output, or credentials; treat them as private user data.
 
 ### Bounded directory completion prerequisite

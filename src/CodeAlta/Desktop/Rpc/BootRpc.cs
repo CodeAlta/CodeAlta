@@ -11,14 +11,16 @@ internal sealed class BootService
     private readonly string? _epoch;
     private readonly bool _commandReview;
     private readonly bool _userInput;
+    private readonly bool _developer;
     internal BootService() { }
     internal BootService(string epoch) { _epoch = epoch; }
     internal BootService(string epoch, bool commandReview) { _epoch = epoch; _commandReview = commandReview; }
     internal BootService(string epoch, bool commandReview, bool userInput) : this(epoch, commandReview) { _userInput = userInput; }
+    internal BootService(string epoch, bool commandReview, bool userInput, bool developer) : this(epoch, commandReview, userInput) { _developer = developer; }
     [NeoRpcMethod("status")]
     public BootStatus Status(BootRequest request) => _epoch is null
         ? new("in-development", "CodeAlta", DesktopCommandLine.Version, false)
-        : new("owned-text-only", "CodeAlta", DesktopCommandLine.Version, true) { HostEpoch = _epoch, CommandReviewEnabled = _commandReview, OwnedAsksEnabled = true, OwnedUserInputEnabled = _userInput };
+        : new("owned-text-only", "CodeAlta", DesktopCommandLine.Version, true) { HostEpoch = _epoch, CommandReviewEnabled = _commandReview, OwnedAsksEnabled = true, OwnedUserInputEnabled = _userInput, DeveloperMode = _developer };
 }
 
 internal sealed record BootRequest;
@@ -28,6 +30,9 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
     public bool CommandReviewEnabled { get; init; }
     public bool OwnedAsksEnabled { get; init; }
     public bool OwnedUserInputEnabled { get; init; }
+
+    /// <summary>True for the developer instance, which runs beside the normal one with its own sessions.</summary>
+    public bool DeveloperMode { get; init; }
 }
 
 [JsonSerializable(typeof(BootRequest))]

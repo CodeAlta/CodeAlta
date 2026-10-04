@@ -16,6 +16,7 @@ public sealed class HostingCompositionBoundaryTests
             typeof(ConfiguredCodexAuthentication), typeof(CodexAccountMetadata),
             typeof(ConfiguredProviderLogin), typeof(ProviderLoginPrompt), typeof(ProviderLoginStatus),
             typeof(CodeAltaSingleInstanceGuard), typeof(CodeAltaAlreadyRunningException), typeof(CodeAltaStartupAdmission),
+            typeof(CodeAltaInstanceProfile),
         }, assembly.GetExportedTypes());
         Assert.IsFalse(assembly.GetReferencedAssemblies().Any(reference =>
             reference.Name is "alta" or "altatui" or "CodeAlta.Tui" or "CodeAlta" ||

@@ -1,10 +1,17 @@
 using System.Reflection;
+using CodeAlta.Hosting;
 
 namespace CodeAlta.Desktop;
 
 internal sealed record DesktopLaunchOptions(string DataRoot, string? CatalogRoot)
 {
     internal OwnedDesktopRoots? Owned { get; init; }
+
+    /// <summary>The root of the state this instance alone writes; null keeps it in the catalog root.</summary>
+    internal string? StateRoot { get; init; }
+
+    /// <summary>Whether this is the developer instance, running beside the normal one on the same profile.</summary>
+    internal bool Developer { get; init; }
     internal bool ReviewOwnedCommandPermissions { get; init; }
     internal bool EnableOwnedUserInput { get; init; }
 }
@@ -20,6 +27,7 @@ internal static class DesktopCommandLine
         if (args is ["--help"] or ["-h"])
         {
             output.WriteLine("alta\nalta --data-root <new absolute directory> [--catalog-root <existing absolute trusted task-owned COPY> --allow-catalog-cache]\nCodeAlta desktop is in development; use altatui for the complete terminal experience.\nWith no options, the desktop starts the normal interactive host for the current directory and ~/.alta catalog, matching the TUI default. It acquires the runtime lock and may update project catalog, journal, cache, provider state, and configured provider authentication/storage when a prompt is submitted. Plugins stay disabled in this desktop host. WebView data remains under the platform-local application-data directory.\nThe explicit-root form remains available for isolated catalog-only browsing. Browser and catalog roots must be separate and outside .alta.\n--help / --version must be used alone and do not initialize native services or storage.");
+            output.WriteLine("alta --dev\nStarts the developer instance for the current directory. It runs beside the normal instance on the same ~/.alta profile: configuration, providers, credentials, prompts, skills and the project catalog are shared, while sessions, the session cache and the runtime lock live under ~/.alta/dev and WebView data under its own application-data directory. Use it to work on CodeAlta with CodeAlta. --dev must be used alone.");
             output.WriteLine("Explicit scoped owned mode requires --allow-owned-host --project-root <existing absolute directory> --discovery-home <existing absolute directory> --instruction-root <existing absolute project ancestor> --builtin-skill-root <existing absolute directory>. This consents to lock/project-catalog/journal/cache/provider-state writes, configured-provider registration (including declared credential environment names and shipped defaults), and provider authentication/storage/network on submission. Plugins and automatic probes stay disabled; explicit Models reads and Providers tests may probe; tools auto-approved and user input cancelled by default. No default-profile/HOME substitution; discovery roots do not sandbox providers, copied-cache external journal paths or reparse points. Only task-owned roots are admitted; this is not production/shared-profile qualification.");
             output.WriteLine("Owned mode automatically approves tool permissions by default, like TUI AutoApprove. Commands and file writes run with the host's privileges; roots are not a sandbox. --review-owned-command-permissions instead enables manual review of supported plain command requests (Allow once / Deny / Cancel), denying unsupported permissions. User input remains separately controlled. Closing a review or losing an RPC response does not revoke an accepted decision.");
             output.WriteLine("Owned mode only: --enable-owned-user-input independently enables manual nonsecret provider forms. Not credential entry or command approval; answers may persist in provider tool results/history. Default remains cancelled. Refresh manually; lost decisions cannot be recovered or replayed safely.");
@@ -59,9 +67,9 @@ internal static class DesktopCommandLine
         ArgumentNullException.ThrowIfNull(fileExists);
         options = null;
         error = "Unknown or invalid options. Run alta with no arguments for the interactive current-project host, or use --help for isolated-root options.";
-        if (args.Length == 0)
+        if (args.Length == 0 || args is [CodeAltaInstanceProfile.DeveloperOption])
         {
-            options = CreateDefaultOptions();
+            options = CreateDefaultOptions(developer: args.Length == 1);
             error = null;
             return true;
         }
@@ -122,7 +130,9 @@ internal static class DesktopCommandLine
         return true;
     }
 
-    internal static DesktopLaunchOptions CreateDefaultOptions()
+    internal static DesktopLaunchOptions CreateDefaultOptions() => CreateDefaultOptions(developer: false);
+
+    internal static DesktopLaunchOptions CreateDefaultOptions(bool developer)
     {
         var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (string.IsNullOrWhiteSpace(userProfile))
@@ -130,13 +140,18 @@ internal static class DesktopCommandLine
         var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrWhiteSpace(localData))
             localData = Path.Combine(userProfile, ".local", "share");
+        var profile = CodeAltaInstanceProfile.Create(Path.Combine(userProfile, ".alta"), developer);
         return new DesktopLaunchOptions(
-            Path.Combine(localData, "CodeAlta", "desktop"),
-            Path.Combine(userProfile, ".alta"))
+            // The developer instance has its own WebView profile: its own tabs and drafts, and its own
+            // remote debugging port when one is requested.
+            Path.Combine(localData, "CodeAlta", developer ? "desktop-dev" : "desktop"),
+            profile.GlobalRoot)
         {
             // Match the TUI's normal startup: current project, standard profile, and the
             // built-in discovery defaults rather than the restricted explicit-root scope.
             Owned = new(Path.GetFullPath(Environment.CurrentDirectory), null, null, null),
+            StateRoot = developer ? profile.StateRoot : null,
+            Developer = developer,
         };
     }
 

@@ -125,6 +125,8 @@ internal sealed class CodeAltaCliOptions
             { "plugin-safe-mode", "Disable plugin discovery, build, and load for this process", value => state.PluginSafeMode = value is not null },
             { "plugins-status", "Print plugin discovery/config status and exit without starting the TUI", value => state.PluginsStatus = value is not null },
             { "plugins-wait-for-enter", "Wait for Enter after source plugin live progress finishes", value => state.WaitForEnterAfterPluginLiveOutput = value is not null },
+            // Read from the raw arguments before this parser runs (CodeAltaInstanceProfile); declared here so it is accepted and documented.
+            { "dev", "Run as the developer instance: beside the normal one on the same ~/.alta profile, with its own sessions, view state, logs and lock under ~/.alta/dev", _ => { } },
         };
 
         if (pluginCommandLineContributions is not null)
@@ -194,6 +196,8 @@ internal sealed class CodeAltaCliOptions
             { "plugin-safe-mode", "Disable plugin discovery, build, and load for this process", value => state.PluginSafeMode = value is not null },
             { "plugins-status", "Print plugin discovery/config status and exit without starting the TUI", value => state.PluginsStatus = value is not null },
             { "plugins-wait-for-enter", "Wait for Enter after source plugin live progress finishes", value => state.WaitForEnterAfterPluginLiveOutput = value is not null },
+            // Read from the raw arguments before this parser runs (CodeAltaInstanceProfile); declared here so it is accepted and documented.
+            { "dev", "Run as the developer instance: beside the normal one on the same ~/.alta profile, with its own sessions, view state, logs and lock under ~/.alta/dev", _ => { } },
             { "<>", "Arguments parsed by the full command app after plugin startup" },
             static _ => ValueTask.FromResult(0),
         };

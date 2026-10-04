@@ -19,7 +19,7 @@ test("support labels translate while recorded host identity and confirmation byt
     const markup = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: () => {} } },
       createElement(AboutSettings, { demo: false, bootError: false,
         status: { productName: "Settings", version: "1.2.3+Copy", state: "owned-text-only", hostAvailable: true, hostEpoch: "Close",
-          commandReviewEnabled: false, ownedAsksEnabled: false, ownedUserInputEnabled: false } })));
+          commandReviewEnabled: false, ownedAsksEnabled: false, ownedUserInputEnabled: false, developerMode: false } })));
     assert.ok(markup.includes("<strong>Settings</strong>") && markup.includes("<dd>1.2.3+Copy</dd>") && markup.includes("<dd>Copy</dd>"));
   }
 });

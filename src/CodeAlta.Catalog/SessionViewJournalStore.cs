@@ -46,7 +46,7 @@ public sealed partial class SessionViewJournalStore
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(journalFile);
-        _layout = new AgentRuntimePathLayout(options.GlobalRoot);
+        _layout = new AgentRuntimePathLayout(options.StateRoot);
         _journalFile = journalFile;
         _sessionCache = new SessionJournalSqliteCache(options);
     }

@@ -31,9 +31,12 @@ internal sealed class DesktopWindowChrome : IAsyncDisposable
     }
 
     /// <summary>Options of the main window: default placement and a title bar handed to the page.</summary>
-    internal static NeoWindowOptions WindowOptions() => DesktopWindowPlacement.Apply(new NeoWindowOptions
+    internal static NeoWindowOptions WindowOptions() => WindowOptions(developer: false);
+
+    /// <summary>Options of the main window; the developer instance says so in its title.</summary>
+    internal static NeoWindowOptions WindowOptions(bool developer) => DesktopWindowPlacement.Apply(new NeoWindowOptions
     {
-        Label = "main", Title = "CodeAlta", IsVisible = false,
+        Label = "main", Title = developer ? "CodeAlta (dev)" : "CodeAlta", IsVisible = false,
         TitleBar = new NeoWindowTitleBar(NeoWindowTitleBarStyle.Overlay) { Height = TitleBarHeight },
     });
 
