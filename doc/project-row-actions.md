@@ -12,7 +12,8 @@ not select a project, import a folder, refresh the catalog or send a request.
   snapshot does not establish branch, live activity, source revision or lifecycle.
 - **Rename project…** is available only for the already-selected, nonarchived
   project with an owned, currently permitted host. It enters the existing exact
-  source/revision preflight and editable name workflow; saving remains separate.
+  source/revision preflight, then shows the name in a popover beside the row;
+  saving remains separate.
 - **Archive project… / Unarchive project…** is available only for the
   already-selected project with current permission. It opens the existing
   revision-bound review; confirmation remains a separate action. Archiving changes

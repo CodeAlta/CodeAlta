@@ -5,7 +5,7 @@ import { useShellLanguage } from "./shellLanguage";
 import { ProjectRowActions, type ProjectRowAuthority } from "./ProjectRowActions";
 import { SessionTabMenu } from "./SessionTabMenu";
 
-export function ProjectRailRows({ projects, selectedId, onSelect, actions, children, activity }: {
+export function ProjectRailRows({ projects, selectedId, onSelect, actions, children, activity, renaming }: {
   activity?: (projectId: string | null) => ReactNode;
   projects: WorkspaceProject[];
   selectedId: string | null;
@@ -13,6 +13,8 @@ export function ProjectRailRows({ projects, selectedId, onSelect, actions, child
   canRename: boolean;
   renameBusy: boolean;
   onRename: () => void;
+  /** The rename form of the project being renamed, shown beside its row. */
+  renaming?: { id: string; form: ReactNode };
   actions?: ProjectRowAuthority;
   children?: ReactNode;
 }) {
@@ -33,7 +35,7 @@ export function ProjectRailRows({ projects, selectedId, onSelect, actions, child
         aria-expanded={selectedId === project.id && expanded} onClick={() => select(project.id)}>
         <AppIcon name="chevronDown" size={12} className={selectedId === project.id && expanded ? "tree-chevron expanded" : "tree-chevron"} />
         <AppIcon name="folder" size={15} /><strong>{project.name}</strong>{activity?.(project.id)}{project.archived && <small>{t("Archived")}</small>}
-      </button></ProjectRowActions>{selectedId === project.id && <li className="project-session-branch" hidden={!expanded}>{children}</li>}</Fragment>)}
+      </button>{renaming?.id === project.id && renaming.form}</ProjectRowActions>{selectedId === project.id && <li className="project-session-branch" hidden={!expanded}>{children}</li>}</Fragment>)}
     </ul>
     <ul className="nav-list project-root-list" aria-label={t("Global sessions")}>
       <li className="project-action-row" onContextMenu={event => { if (sessions) { event.preventDefault(); setOtherMenu(true); } }}>

@@ -123,6 +123,9 @@ In the explorer, a project row has one **…** menu (also on right-click): **New
 sessions…** and **Browse saved sessions** for that project, then **Open**, **Details**, **Rename
 project…** and **Archive project…**. **Global sessions** has the same session actions. Session search
 is an inline field above the session list; Escape or its clear button hides it.
+**Rename project…** and a session's **Rename…** open a small popover beside the row, with the current
+name selected: Enter or **Rename** saves it; Escape, **Cancel** or a click elsewhere leaves the name
+as it is. A rename that is refused says why under the field.
 Clicking a project opens one temporary **New session** tab, reused when selecting another project
 before creation. Selecting an existing session tab or sidebar session removes it. Real session
 panes, drafts and split geometry are retained, rather than replaced with a project placeholder.

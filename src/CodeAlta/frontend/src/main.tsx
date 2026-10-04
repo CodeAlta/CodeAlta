@@ -91,6 +91,7 @@ import { createSessionRename, renamedSessionVisible, renameSelectionCurrent, ses
 import { createSessionDeletion, deletedSessionRecovery, deleteSelectionCurrent, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
 import { batchDeleteCandidate, createSessionBatchDeletion } from "./sessionBatchDeletion";
 import type { BatchDeleteControls } from "./SessionBatchDeletePanel";
+import { RenamePopover } from "./RenamePopover";
 import { createProjectRename, projectNameVisible, projectRenameMessage, projectRenameSelectionCurrent, type ProjectNameTarget } from "./projectRename";
 import { sessionHierarchy } from "./sessionHierarchy";
 import { limitSessionHierarchy } from "./recentSessions";
@@ -799,7 +800,8 @@ function App() {
     && snapshot?.sessions.filter(session => session.id === menuTarget.id).length === 1 ? menuTarget : null;
   useLayoutEffect(() => {
     if (menuTarget || !focusAction.current || narrow && railVisible) return;
-    const field = sessionRail.current?.querySelector<HTMLInputElement>(focusAction.current === "rename" ? ".session-rename input" : ".session-delete input");
+    if (focusAction.current === "rename") { focusAction.current = null; return; } // The rename popover focuses its own field.
+    const field = sessionRail.current?.querySelector<HTMLInputElement>(".session-delete input");
     if (field) { field.focus(); focusAction.current = null; }
   }, [menuTarget, renamingId, deletingId, narrow, railVisible]);
   useEffect(() => { if (menuTarget && !activeMenu) setMenuTarget(null); }, [menuTarget, activeMenu]);
@@ -827,6 +829,7 @@ function App() {
       && !!snapshot?.configured && (projectId === null || !!selectedProject && !selectedProject.archived), mutation?.capability);
   const currentHostEpoch = useRef(status?.hostEpoch);
   currentHostEpoch.current = status?.hostEpoch;
+  const projectRenaming = !!projectRenameTarget && projectId === projectRenameTarget.id && currentHostEpoch.current === projectRenameTarget.epoch;
   const currentHostAvailable = useRef(!!status?.hostAvailable);
   currentHostAvailable.current = !!status?.hostAvailable;
   const localImageKey = JSON.stringify(["local-draft", status?.hostEpoch ?? null, projectId, selectedProject?.path ?? null]);
@@ -1626,6 +1629,10 @@ function App() {
             activity={id => <><RunningSessionBadge controls={runtimeObservationControls()} projectId={id} />
               <ReminderBadge count={activeReminders ? scopeReminderCount(activeReminders, snapshot, id) : 0} /></>}
             canRename={owned} renameBusy={projectRenameBusy || !mutation?.capability.canMutate()} onRename={() => void beginProjectRename()}
+            renaming={projectRenaming && projectRenameTarget ? { id: projectRenameTarget.id, form: <RenamePopover label={t("Project name")}
+              value={projectRenameName} onChange={setProjectRenameName} busy={projectRenameBusy} disabled={projectRenameLocked || projectRenameConflict}
+              error={projectRenameNotice ? workflowNotice(language.locale, projectRenameNotice) : null}
+              onSubmit={() => void saveProjectRename()} onCancel={() => { projectRenameGeneration.current++; setProjectRenameTarget(null); }} /> } : undefined}
             actions={{ current: () => ({ ...currentProjectDetailsContext(),
               active: creationAlive.current && currentView.current === "workspace" && !settingsVisible.current && !!projectRail.current && !projectRail.current.hidden,
               generation: browserRevision.current + projectRenameGeneration.current, modalGeneration: creationGeneration.current,
@@ -1636,19 +1643,7 @@ function App() {
               sessions: { canCreate: scopeCanCreateSession, create: id => scopeSessionAction(id, "create"),
                 search: id => scopeSessionAction(id, "search"), browse: id => scopeSessionAction(id, "browse") } }} />}
           {projectArchive.records.length > 0 && <button type="button" className="quiet-button" onClick={() => setDialog("archive")}>{t("Archive operation evidence")}</button>}
-          {projectRenameTarget && projectId === projectRenameTarget.id && currentHostEpoch.current === projectRenameTarget.epoch &&
-            <div className="project-rename" role="group" aria-label={t("Rename project {name}", { name: projectRenameTarget.name })}>
-              <label>{t("Project name")}
-                <input autoFocus={railVisible} value={projectRenameName} maxLength={256} disabled={projectRenameBusy || projectRenameLocked || projectRenameConflict}
-                  onChange={event => setProjectRenameName(event.target.value)}
-                  onKeyDown={event => { if (event.key === "Escape" && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
-                    event.preventDefault(); event.stopPropagation(); projectRenameGeneration.current++; setProjectRenameTarget(null);
-                  } }} /></label>
-              <button type="button" disabled={projectRenameBusy || projectRenameLocked || projectRenameConflict || !projectRenameName.trim()}
-                onClick={() => void saveProjectRename()}>{t("Save project name")}</button>
-              <button type="button" disabled={projectRenameBusy} onClick={() => { projectRenameGeneration.current++; setProjectRenameTarget(null); }}>{t("Cancel (Escape)")}</button>
-            </div>}
-          {projectRenameNotice && <p role="alert" className="notice error-text">{workflowNotice(language.locale, projectRenameNotice)}</p>}
+          {projectRenameNotice && !projectRenaming && <p role="alert" className="notice error-text">{workflowNotice(language.locale, projectRenameNotice)}</p>}
           {projectRenameLocked && <button type="button" className="quiet-button" onClick={() => void refreshProjectRename()}>{t("Refresh project name (no retry)")}</button>}
         </aside>}
           splitter={<PaneSplitter className="session-splitter" label={t("Resize Explorer")} value={ideWidth.width} hidden={narrow || !railVisible}
@@ -1730,13 +1725,9 @@ function App() {
                   { key: "rename", label: t("Rename…"), icon: "edit", disabled: !access.rename, onSelect: () => runSessionMenuAction("rename", session, menu) },
                   { key: "delete", label: t("Delete… (confirmation required)"), icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
                 ]} />}
-              {renamingId === session.id && <div className="session-rename"><label>{t("New title for {title}", { title: session.title })}
-                <input value={renamingTitle} maxLength={256} disabled={!owned || renamingBusy || renameLocked} onChange={event => setRenamingTitle(event.target.value)}
-                  onKeyDown={event => { if (event.key === "Enter") void renameSelectedSession(); if (event.key === "Escape") setRenamingId(null); }} /></label>
-                <button type="button" disabled={!owned || renamingBusy || renameLocked || !renamingTitle.trim()} onClick={() => void renameSelectedSession()}>{t("Save title")}</button>
-                <button type="button" disabled={renamingBusy} onClick={() => setRenamingId(null)}>{t("Cancel")}</button>
-                {renamingMessage && <p role="alert" className="notice error-text">{workflowNotice(language.locale, renamingMessage)}</p>}
-              </div>}
+              {renamingId === session.id && <RenamePopover label={t("Session title")} value={renamingTitle} onChange={setRenamingTitle}
+                busy={renamingBusy} disabled={!owned || renameLocked} error={renamingMessage ? workflowNotice(language.locale, renamingMessage) : null}
+                onSubmit={() => void renameSelectedSession()} onCancel={() => setRenamingId(null)} />}
               {deletingId === session.id && <div className="session-delete" role="group" aria-label={t("Confirm deletion of {title}", { title: session.title })}>
                 <p>{t("Delete only this session's journal and history (ID: {id}). Project files are not deleted. This cannot be undone.", { id: session.id })}</p>
                 <label>{t("Type the exact session title:")} <strong>{session.title}</strong>

@@ -1517,3 +1517,11 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .markdown-diagram { margin: 10px 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); overflow: auto; text-align: center; }
 .markdown-diagram > svg { max-width: 100%; height: auto; }
 .markdown-content pre[data-language]::before { content: attr(data-language); float: right; margin: -7px -5px 4px 12px; color: var(--muted); font: 10px/1.4 var(--bp-typography-family-default); letter-spacing: .04em; user-select: none; }
+
+/* Rename popover: the name of a project or a session, edited beside its row in the Explorer. */
+.rename-anchor { position: absolute; inset: 0; pointer-events: none; }
+.rename-form { display: grid; gap: 10px; width: min(320px, calc(100vw - 32px)); padding: 12px 14px 10px; }
+.rename-form .bp6-form-group { margin: 0; }
+.rename-form .bp6-label { color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+.rename-form .bp6-form-helper-text { overflow-wrap: anywhere; }
+.rename-actions { display: flex; justify-content: flex-end; gap: 6px; }

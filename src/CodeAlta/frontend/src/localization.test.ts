@@ -28,11 +28,11 @@ test("project/session workflow labels translate while literal titles, paths and 
   const literal = "Settings Unknown Archived C:/Settings/<literal>";
   for (const locale of locales) {
     for (const key of ["Project details", "Copy project path","Confirm archive", "Confirm unarchive",
-      "Project name or folder path", "Trust and open folder", "Create and open", "Save title", "Save project name"] as const) {
+      "Project name or folder path", "Trust and open folder", "Create and open", "Session title", "Rename"] as const) {
       if (locale !== "en") assert.notEqual(translate(locale, key), key);
     }
     assert.equal(workflowNotice(locale, literal), literal);
-    assert.ok(workflowNotice(locale, { key: "Rename project {name}", parameters: { name: literal } }).includes(literal));
+    assert.ok(workflowNotice(locale, { key: "Actions for {title}", parameters: { title: literal } }).includes(literal));
     const markup = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: () => {} } },
       createElement(ProjectRailRows, { projects: [{ id: "Settings", name: "Archived", path: "C:/Settings/Unknown", archived: true }],
         selectedId: "Settings", onSelect: () => assert.fail("render cannot navigate"), canRename: true, renameBusy: false, onRename: () => assert.fail("render cannot rename") })));
