@@ -43,6 +43,40 @@ public sealed class CatalogStateRootTests
     }
 
     [TestMethod]
+    public async Task SeparateStateRoot_StartsFromTheOwnersProjectPreferencesOnce()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-state-seed-" + Guid.NewGuid().ToString("N"));
+        var global = Path.Combine(root, "alta");
+        var state = Path.Combine(global, "dev");
+        Directory.CreateDirectory(state);
+        try
+        {
+            var owner = new SessionViewCatalog(new CatalogOptions { GlobalRoot = global });
+            var theirs = new SessionViewViewState { OpenSessionIds = ["their-session"] };
+            theirs.ProjectPreferences["project-1"] = new SessionViewPreference { ProviderKey = "codex", ModelId = "model-a", ReasoningEffort = AgentReasoningEffort.High };
+            theirs.Navigator.ThemeSchemeName = "Dark Soft";
+            await owner.SaveViewStateAsync(theirs);
+            var developer = new SessionViewCatalog(new CatalogOptions { GlobalRoot = global, StateRoot = state });
+
+            Assert.IsTrue(await developer.SeedViewStateFromAsync(owner));
+
+            var mine = await developer.LoadViewStateAsync();
+            Assert.AreEqual("model-a", mine.ProjectPreferences["project-1"].ModelId);
+            Assert.AreEqual("codex", mine.ProjectPreferences["project-1"].ProviderKey);
+            Assert.AreEqual("Dark Soft", mine.Navigator.ThemeSchemeName);
+            // Sessions of the owner are not this instance's sessions.
+            Assert.AreEqual(0, mine.OpenSessionIds.Count);
+
+            // Its own later choices are kept: seeding happens once.
+            mine.ProjectPreferences["project-1"].ModelId = "model-b";
+            await developer.SaveViewStateAsync(mine);
+            Assert.IsFalse(await developer.SeedViewStateFromAsync(owner));
+            Assert.AreEqual("model-b", (await developer.LoadViewStateAsync()).ProjectPreferences["project-1"].ModelId);
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch (IOException) { } }
+    }
+
+    [TestMethod]
     public async Task SessionJournalsAndTheirCache_AreWrittenUnderTheStateRoot()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-state-root-" + Guid.NewGuid().ToString("N"));

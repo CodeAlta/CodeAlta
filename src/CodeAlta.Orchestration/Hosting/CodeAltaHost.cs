@@ -145,6 +145,22 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// </summary>
     public ProjectDescriptor CurrentProject { get; }
 
+    // A first run on a separate state root starts from the per-project provider/model choices and the
+    // navigator settings of the instance that owns the global root. Best effort: that instance may be
+    // writing its view state right now, and a session can always choose its provider itself.
+    private static async Task SeedViewStateAsync(SessionViewCatalog catalog, string globalRoot, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await catalog.SeedViewStateFromAsync(new SessionViewCatalog(new CatalogOptions { GlobalRoot = globalRoot }), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException
+            or ArgumentException or System.Text.DecoderFallbackException or SharpYaml.YamlException)
+        {
+            LogManager.GetLogger("CodeAlta.Host").Warn($"The view state of the separate state root was not seeded: {exception.Message}");
+        }
+    }
+
     /// <summary>
     /// Creates a shared CodeAlta host.
     /// </summary>
@@ -242,6 +258,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
             var sessionJournalFile = new AgentSessionJournalFile();
             var sessionViewCatalog = new SessionViewCatalog(catalogOptions, sessionJournalFile);
+            if (catalogOptions.HasSeparateStateRoot)
+                await SeedViewStateAsync(sessionViewCatalog, globalRoot, cancellationToken).ConfigureAwait(false);
             var pluginOperationOptions = CreatePluginOperationOptions(options, catalogOptions, currentProject);
             var skillCatalog = new SkillCatalog([
                 new ProjectCodeAltaSkillRootProvider(),

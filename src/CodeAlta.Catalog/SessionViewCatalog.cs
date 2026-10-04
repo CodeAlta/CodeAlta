@@ -135,6 +135,35 @@ public sealed class SessionViewCatalog
     }
 
     /// <summary>
+    /// Gives a catalog that has no view state yet the preferences of another one: the provider, model,
+    /// agent prompt and reasoning chosen per project, and the navigator settings (sort order, theme, language).
+    /// </summary>
+    /// <remarks>
+    /// Used by an instance with a separate state root, so its first session in a project uses what the
+    /// user chose for that project. Open sessions, the selection and layouts are not copied: they name
+    /// sessions this catalog does not have.
+    /// </remarks>
+    /// <param name="source">The catalog to read the preferences from.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>True when the view state was created; false when this catalog already had one.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="source"/> is null.</exception>
+    /// <inheritdoc cref="LoadViewStateAsync"/>
+    public async Task<bool> SeedViewStateFromAsync(SessionViewCatalog source, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (File.Exists(GetViewStatePath())) return false;
+        var theirs = await source.LoadViewStateAsync(cancellationToken).ConfigureAwait(false);
+        var seed = new SessionViewViewState
+        {
+            ProjectPreferences = new(theirs.ProjectPreferences, StringComparer.OrdinalIgnoreCase),
+            Navigator = theirs.Navigator,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        var saved = await SaveViewStateAsync(seed, cancellationToken).ConfigureAwait(false);
+        return !saved.IsConflict;
+    }
+
+    /// <summary>
     /// Conditionally saves against the state's loaded revision (missing for a new state).
     /// Repeated saves must use the returned acknowledgment, not reuse the original baseline.
     /// </summary>
