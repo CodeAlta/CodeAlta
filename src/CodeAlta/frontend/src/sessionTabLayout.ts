@@ -1,6 +1,7 @@
 import { Actions, DockLocation, Model, RowNode, TabNode, TabSetNode, type Action } from "flexlayout-react";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { openSessionTab, reconcileSessionTabs, resolveSessionTab, selectedTab, sessionTabLimit, tabKey, type SessionTab, type SessionTabs } from "./sessionTabs";
+import { emptyFileTabs, fileNodeId, fileTabLimit, fileTabName, type FileTab, type FileTabs } from "./fileTabs";
 
 const panelId = "session-tabs-panel";
 // Presentation only: never persisted in the session list, recent history or draft owners.
@@ -34,10 +35,14 @@ export function createSessionTabModel() {
   ] } });
 }
 
+const noFiles = emptyFileTabs();
+
 // Only public actions; retained nodes (and their factory roots) are never rebuilt.
-export function reconcileSessionTabModel(model: Model, state: SessionTabs, label: (tab: SessionTab | null) => string) {
+// File tabs share the strip: an active file is the selected tab, over the session selection.
+export function reconcileSessionTabModel(model: Model, state: SessionTabs, label: (tab: SessionTab | null) => string, files: FileTabs = noFiles) {
   const open = state.open.slice(0, sessionTabLimit);
-  const ids = new Set(open.map(sessionNodeId));
+  const openFiles = files.open.slice(0, fileTabLimit);
+  const ids = new Set([...open.map(sessionNodeId), ...openFiles.map(fileNodeId)]);
   if (!state.active) ids.add(sessionDraftNodeId);
   const existing: TabNode[] = [];
   model.visitNodes(node => { if (node instanceof TabNode) existing.push(node); });
@@ -47,6 +52,11 @@ export function reconcileSessionTabModel(model: Model, state: SessionTabs, label
     const node = model.getNodeById(id);
     if (!node) model.doAction(Actions.addTab({ type: "tab", id, name, component: "session" }, model.getActiveTabset()?.getId() ?? panelId, DockLocation.CENTER, -1, false));
     else if (node instanceof TabNode && node.getName() !== name) model.doAction(Actions.renameTab(id, name));
+  }
+  for (const file of openFiles) {
+    const id = fileNodeId(file);
+    if (!model.getNodeById(id)) model.doAction(Actions.addTab({ type: "tab", id, name: fileTabName(file), component: "file" },
+      model.getActiveTabset()?.getId() ?? panelId, DockLocation.CENTER, -1, false));
   }
   if (!state.active) {
     const name = label(null);
@@ -63,7 +73,8 @@ export function reconcileSessionTabModel(model: Model, state: SessionTabs, label
   for (const node of existing) {
     if (!ids.has(node.getId())) model.doAction(Actions.deleteTab(node.getId()));
   }
-  const active = state.active ? sessionNodeId(state.active) : sessionDraftNodeId;
+  const activeFile = files.active && openFiles.find(file => fileNodeId(file) === fileNodeId(files.active!));
+  const active = activeFile ? fileNodeId(activeFile) : state.active ? sessionNodeId(state.active) : sessionDraftNodeId;
   const node = ids.has(active) ? model.getNodeById(active) : undefined;
   if (node instanceof TabNode && !node.isSelected()) model.doAction(Actions.selectTab(node.getId()));
   if (node instanceof TabNode && node.getParent() && model.getActiveTabset() !== node.getParent())
@@ -80,6 +91,14 @@ export function sessionTabAction(action: Action, state: SessionTabs, snapshot: W
   return { kind: action.type === Actions.SELECT_TAB ? "select" : "close", tab: matches[0] };
 }
 
+export type FileTabIntent = { kind: "select" | "close"; file: FileTab };
+export function fileTabAction(action: Action, files: FileTabs, current: () => boolean): FileTabIntent | null {
+  if (!current() || (action.type !== Actions.SELECT_TAB && action.type !== Actions.DELETE_TAB)) return null;
+  const id = action.type === Actions.SELECT_TAB ? action.data.tabNode : action.data.node;
+  const matches = files.open.slice(0, fileTabLimit).filter(file => fileNodeId(file) === id);
+  return matches.length === 1 ? { kind: action.type === Actions.SELECT_TAB ? "select" : "close", file: matches[0] } : null;
+}
+
 export function ownsSessionTabContent(id: string, state: SessionTabs) {
   return !!state.active && id === sessionNodeId(state.active);
 }
@@ -87,12 +106,13 @@ export function ownsSessionTabContent(id: string, state: SessionTabs) {
 // Layout owns geometry and must apply accepted GUI actions before App projects focus.
 // Unrecognized/mutation actions still cannot bypass catalog or captured-lifetime checks.
 export function sessionLayoutActionAllowed(model: Model, action: Action, state: SessionTabs,
-  snapshot: WorkspaceSnapshot | undefined, current: () => boolean): boolean {
+  snapshot: WorkspaceSnapshot | undefined, current: () => boolean, files: FileTabs = noFiles): boolean {
   if (!current() || !snapshot) return false;
   const valid = (node: TabNode) => node.getId() === sessionDraftNodeId && !state.active
+    || !!fileTabAction(Actions.selectTab(node.getId()), files, current)
     || !!sessionTabAction(Actions.selectTab(node.getId()), state, snapshot, current);
   if (action.type === Actions.SELECT_TAB) return action.data.tabNode === sessionDraftNodeId && !state.active
-    || !!sessionTabAction(action, state, snapshot, current);
+    || !!fileTabAction(action, files, current) || !!sessionTabAction(action, state, snapshot, current);
   if (action.type === Actions.ADJUST_WEIGHTS) return model.getNodeById(action.data.nodeId) instanceof RowNode;
   if (action.type === Actions.SET_ACTIVE_TABSET) {
     const node = model.getNodeById(action.data.tabsetNode);

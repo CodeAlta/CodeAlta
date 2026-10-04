@@ -66,8 +66,9 @@ Up/Down in search selects a result; Enter opens it. Result buttons also support
 native keyboard activation or a mouse click. Escape/Close dismisses the dialog.
 IME, repeats and modified editing keys do not activate results or close it, and
 shell shortcuts do not run through an open modal. Help documents the entry.
-**Ctrl+E is not reassigned**: TUI `BuiltinShellCommands.EditFile` uses it for the
-separately parked file editor; TUI session browsing is a sidebar row action.
+**Ctrl+E is not reassigned**: as in the TUI (`BuiltinShellCommands.EditFile`) it
+opens the file editor (see File editor tabs below); TUI session browsing is a
+sidebar row action.
 
 The dialog shows loaded/matching/displayed counts, explicit snapshot/text
 truncation and any matches omitted by the 200-row display limit. Queries are
@@ -204,6 +205,31 @@ Navigation never retries or reconciles a creation automatically.
 and no claim that an explicitly requested host creation is provider-free. Original
 local text is intentionally retained even after successful transfer. Unlike the
 TUI's replace-draft presentation, the local draft entry remains available.
+
+## File editor tabs
+
+Ctrl+E (`/edit`) opens the file picker of the selected project and a chosen file
+becomes a tab of the same FlexLayout strip. `fileTabs.ts` owns the pure state in
+parallel to `sessionTabs.ts`: a tab is `{ projectId, projectPath, path }`, its node
+id is `file:` followed by the JSON of `[projectId, path]` (one tab per file), and
+`codealta.desktop.fileTabs.v1` stores the open and active identities (32 at most).
+Restore drops tabs whose project is missing, archived or another folder.
+
+App keeps the session selection as it is while a file is active: the active file
+is the selected tab, session-scoped commands are unavailable, and any session,
+project or New session selection leaves the file. `sessionTabLayout.ts` admits
+select, move, split and active-tabset actions for file nodes with the same
+captured-lifetime guard as session nodes; closing is an App intent, so a tab with
+unsaved edits can ask Save / Discard / Cancel first. Close, reopen and
+next/previous tab commands cover both kinds of tab (ring order: New session,
+sessions, files; reopen follows the order of closing).
+
+`ProjectFileEditor` reads and writes through `projectFiles.read` / `projectFiles.write`
+with the read revision; its transitions (`fileEditorState.ts`) keep edits on every
+refusal and turn a `conflict` into a Reload / Overwrite choice. Editors stay mounted
+with their tab, so text and unsaved state survive tab changes; nothing unsaved is
+persisted. `fileEditors.ts` gives App the unsaved marks and a save-by-key for the
+close question.
 
 ## Focused verification
 

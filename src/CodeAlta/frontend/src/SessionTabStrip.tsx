@@ -7,7 +7,9 @@ import { useShellLanguage } from "./shellLanguage";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { resolveSessionTab, type SessionTab, type SessionTabs as Tabs } from "./sessionTabs";
 import { SessionTabActivity, type RuntimeObservationControls } from "./RuntimeObservation";
-import { createSessionTabModel, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction } from "./sessionTabLayout";
+import { createSessionTabModel, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction } from "./sessionTabLayout";
+import { emptyFileTabs, fileNodeId, fileTabName, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
+import { fileAppearance } from "./fileAppearance";
 import { useSessionTabDrag } from "./useSessionTabDrag";
 import { plainTitle } from "./sessionTitle";
 
@@ -17,14 +19,29 @@ export function SessionTabLabel({ label, path, dirty }: { label: string; path: s
     {dirty && <span className="session-tab-dirty" role="img" title={t("Draft edited in this window")} aria-label={t("Draft edited in this window")} />}</span>;
 }
 
+/** A file tab's header text: the file name (the project-relative path and its project as tooltip) and the unsaved mark. */
+export function FileTabLabel({ tab, project, dirty }: { tab: FileTab; project: string; dirty: boolean }) {
+  const { t } = useShellLanguage();
+  return <span className="session-tab-title"><span className="session-tab-label" title={`${tab.path}\n${project}`}>{fileTabName(tab)}</span>
+    {dirty && <span className="session-tab-dirty" role="img" title={t("Unsaved changes")} aria-label={t("Unsaved changes")} />}</span>;
+}
+
+const noFiles = emptyFileTabs();
+
 // Each pane retains its own live factory payload. App owns session authority and drafts.
-export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen, observations, capture, children, renderSession, newSessionLabel }: {
+// File editors are tabs of the same dock; App owns which files are open and which one is active.
+export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen, observations, capture, children, renderSession, newSessionLabel,
+  files = noFiles, renderFile, selectFile, closeFile, fileDirty }: {
   state: Tabs; snapshot?: WorkspaceSnapshot; dirty: (id: string) => boolean;
   select: (tab: SessionTab) => void; close: (tab: SessionTab) => void; reopen: () => void;
   observations?: RuntimeObservationControls;
   capture: () => () => boolean; children: ReactNode;
   renderSession?: (tab: SessionTab, visible: boolean) => ReactNode;
   newSessionLabel?: string;
+  files?: FileTabs; renderFile?: (tab: FileTab, visible: boolean) => ReactNode;
+  /** Activates a file tab, or with null returns to the session selection. */
+  selectFile?: (tab: FileTab | null) => void;
+  closeFile?: (tab: FileTab) => void; fileDirty?: (tab: FileTab) => boolean;
 }) {
   const { t } = useShellLanguage();
   const [model] = useState(createSessionTabModel);
@@ -58,7 +75,7 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
   }, []);
   const label = (tab: SessionTab | null) => tab ? `${plainTitle(snapshot && resolveSessionTab(snapshot, tab)?.title || t("Unavailable session"))} - ${
     tab.projectId === null ? t("Global") : snapshot?.projects.find(project => project.id === tab.projectId)?.name ?? t("Unavailable project")}` : newSessionLabel ?? t("New session");
-  useLayoutEffect(() => { reconcileSessionTabModel(model, state, label); });
+  useLayoutEffect(() => { reconcileSessionTabModel(model, state, label, files); });
   useLayoutEffect(() => { if (menu && !menu.current()) setMenu(null); });
   function guard() {
     const current = capture();
@@ -70,10 +87,12 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
       if (tab) select(tab);
       return undefined;
     }
-    if (sessionLayoutActionAllowed(model, action, state, snapshot, current)) return action;
+    if (sessionLayoutActionAllowed(model, action, state, snapshot, current, files)) return action;
+    const file = fileTabAction(action, files, current);
+    if (file?.kind === "close") { closeFile?.(file.file); return undefined; }
     const intent = sessionTabAction(action, state, snapshot, current);
     if (intent?.kind === "close") close(intent.tab);
-    // App must accept closing a session; unsupported actions never reach the model.
+    // App must accept closing a session or a file; unsupported actions never reach the model.
     return undefined;
   }
   function changed(action: Action) {
@@ -81,8 +100,12 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
     if (![Actions.SELECT_TAB, Actions.MOVE_NODE, Actions.SET_ACTIVE_TABSET].includes(action.type)) return;
     const selected = model.getActiveTabset()?.getSelectedNode();
     if (!selected) return;
-    const intent = sessionTabAction(Actions.selectTab(selected.getId()), state, snapshot, guard());
-    if (intent?.kind === "select" && (!state.active || sessionNodeId(state.active) !== selected.getId())) select(intent.tab);
+    const current = guard();
+    const file = fileTabAction(Actions.selectTab(selected.getId()), files, current);
+    if (file) { if (!sameFileTab(files.active, file.file)) selectFile?.(file.file); return; }
+    const intent = sessionTabAction(Actions.selectTab(selected.getId()), state, snapshot, current);
+    if (intent?.kind === "select" && (files.active || !state.active || sessionNodeId(state.active) !== selected.getId())) select(intent.tab);
+    else if (files.active && selected.getId() === sessionDraftNodeId && !state.active && current()) selectFile?.(null);
   }
   function apply(action: Action, current = guard()) {
     const accepted = dispatch(action, current);
@@ -90,13 +113,18 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
     if (accepted) model.doAction(accepted);
   }
   const drag = useSessionTabDrag(root, model, guard,
-    (action, current) => sessionLayoutActionAllowed(model, action, state, snapshot, current), apply);
+    (action, current) => sessionLayoutActionAllowed(model, action, state, snapshot, current, files), apply);
   function returnToSession(target: HTMLElement) {
-    if (state.active || target.closest(".flexlayout__tab_button_trailing")) return;
+    if (target.closest(".flexlayout__tab_button_trailing")) return false;
     const id = target.closest('[role="tab"]')?.querySelector<HTMLElement>('[data-session-node]')?.dataset.sessionNode;
-    if (!id) return;
-    const intent = sessionTabAction(Actions.selectTab(id), state, snapshot, guard());
+    if (!id) return false;
+    const current = guard();
+    const file = fileTabAction(Actions.selectTab(id), files, current);
+    if (file) { if (!sameFileTab(files.active, file.file)) selectFile?.(file.file); return true; }
+    if (state.active && !files.active) return false;
+    const intent = sessionTabAction(Actions.selectTab(id), state, snapshot, current);
     if (intent?.kind === "select") select(intent.tab);
+    return intent?.kind === "select";
   }
   function more(anchor: HTMLElement, node: unknown) {
     const current = guard();
@@ -107,11 +135,11 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
     const right = split(DockLocation.RIGHT), below = split(DockLocation.BOTTOM);
     const canSplit = node instanceof TabSetNode && node.isEnableDivide() && node.getTabNodes().length > 1 && selected?.isEnableDrag();
     setMenu({ anchor, current, items: [
-      { key: "split-right", label: t("Split session right"), disabled: !canSplit || !right || !sessionLayoutActionAllowed(model, right, state, snapshot, current),
+      { key: "split-right", label: t("Split session right"), disabled: !canSplit || !right || !sessionLayoutActionAllowed(model, right, state, snapshot, current, files),
         onSelect: () => { if (right) apply(right, current); } },
-      { key: "split-below", label: t("Split session below"), disabled: !canSplit || !below || !sessionLayoutActionAllowed(model, below, state, snapshot, current),
+      { key: "split-below", label: t("Split session below"), disabled: !canSplit || !below || !sessionLayoutActionAllowed(model, below, state, snapshot, current, files),
         onSelect: () => { if (below) apply(below, current); } },
-      { key: "reopen", label: t("Reopen closed tab"), disabled: !snapshot || !state.closed.length,
+      { key: "reopen", label: t("Reopen closed tab"), disabled: !snapshot || !state.closed.length && !files.closed.length,
         onSelect: () => { if (current()) reopen(); } },
       { key: "refresh", label: t("Refresh statuses"), disabled: !observations?.enabled || !state.open.length,
         onSelect: () => { if (current()) observations?.refresh(state.open); } },
@@ -132,9 +160,9 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
     if (!target.closest('[role="tablist"], [role="menu"], .session-tab-more')) return;
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.repeat) {
       event.preventDefault(); event.stopPropagation();
-    } else if (!state.active && event.key === "Enter" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
-      && target.closest('[role="tab"]')) {
-      returnToSession(target); event.preventDefault(); event.stopPropagation();
+    } else if (event.key === "Enter" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
+      && target.closest('[role="tab"]') && (returnToSession(target) || !state.active)) {
+      event.preventDefault(); event.stopPropagation();
     }
   }}>
     <div className="session-dock"><Layout model={model} supportsPopout={false} invalidateTabContentOnParentRender={true}
@@ -144,6 +172,14 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
       onContextMenu={(_node, event) => event.preventDefault()}
       onRenderTab={(node, values) => {
         if (node.getId() === sessionDraftNodeId) { values.content = <span data-session-node={node.getId()}>{label(null)}</span>; return; }
+        const file = files.open.find(value => fileNodeId(value) === node.getId());
+        if (file) {
+          const look = fileAppearance(file.path, false);
+          values.leading = <span className="file-tab-icon" data-file-tone={look.tone}><AppIcon name={look.icon} size={14} /></span>;
+          values.content = <span data-session-node={node.getId()}><FileTabLabel tab={file} dirty={!!fileDirty?.(file)}
+            project={snapshot?.projects.find(project => project.id === file.projectId)?.name ?? t("Unavailable project")} /></span>;
+          return;
+        }
         const tab = state.open.find(value => sessionNodeId(value) === node.getId());
         values.content = <span data-session-node={node.getId()}><SessionTabLabel label={label(tab ?? null)} path={tab?.path ?? null} dirty={!!tab && dirty(tab.sessionId)} /></span>;
         if (tab && observations) values.leading = <SessionTabActivity controls={observations} tab={tab} />;
@@ -165,6 +201,8 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
       }}
       factory={node => {
         if (node.getId() === sessionDraftNodeId) return <div className="session-tab-content">{children}</div>;
+        const file = files.open.find(value => fileNodeId(value) === node.getId());
+        if (file) return renderFile ? <SessionTabContent node={node}>{visible => renderFile(file, visible)}</SessionTabContent> : null;
         const tab = state.open.find(tab => sessionNodeId(tab) === node.getId());
         return tab && renderSession ? <SessionTabContent node={node}>{visible => renderSession(tab, visible)}</SessionTabContent> : null;
       }} /></div>

@@ -1408,3 +1408,22 @@ dialog.session-browser .session-batch-delete summary { cursor: pointer; color: v
 
 /* Blueprint outlines every focused element; only keyboard focus shows a ring, a mouse click does not. */
 :focus:not(:focus-visible) { outline: none; }
+
+/* File editor tabs (Ctrl+E): the file-type icon at the leading edge of a tab, the editor panel with its footer
+   (state, caret position, path, wrap switch, reload and save), and the unsaved-changes dialog. */
+.file-tab-icon { display: inline-flex; flex: none; }
+.file-editor { display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; background: var(--bg); }
+.file-editor-surface { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.file-editor-empty.bp6-non-ideal-state { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.file-editor-notice.bp6-callout { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; border-radius: 0; }
+.file-editor-notice-actions { display: inline-flex; gap: 6px; }
+.file-editor-footer { flex: none; display: flex; align-items: center; gap: 14px; min-height: 26px; padding: 0 6px 0 12px; border-top: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; }
+.file-editor-status { display: inline-flex; align-items: center; gap: 6px; }
+.file-editor-status[data-state="modified"] { color: var(--accent); }
+.file-editor-status[data-state="conflict"] { color: var(--yellow); }
+.file-editor-position { font-variant-numeric: tabular-nums; }
+.file-editor-path { display: inline-flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; }
+.file-editor-path > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.file-editor-footer .bp6-control.file-editor-wrap { flex: none; margin: 0; font-size: 12px; }
+.file-editor-footer .bp6-button { flex: none; min-height: 22px; font-size: 12px; }
+.unsaved-file-dialog.bp6-dialog { width: min(440px, calc(100vw - 32px)); }

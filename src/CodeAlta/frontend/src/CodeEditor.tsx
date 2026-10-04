@@ -1,43 +1,66 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, type RefObject } from "react";
 import { Classes } from "@blueprintjs/core";
-import "monaco-editor/languages/definitions/ini/register.js";
 import { followShellTheme, monaco } from "./monacoEnvironment";
+import { ensureMonacoLanguage } from "./monacoLanguages";
+import type { EditorLanguage } from "./fileLanguage";
 
 /** One diagnostic shown as an error marker; lines and columns are 1-based. */
 export type CodeEditorMarker = Readonly<{ line: number; column: number; message: string }>;
+/** What a host can ask of the mounted editor. */
+export type CodeEditorHandle = Readonly<{ focus: () => void }>;
 
-/** A full-size Monaco source editor for configuration text, with line numbers and one optional error marker. */
-export function CodeEditor({ value, onChange, language, label, readOnly = false, marker = null, wrap = false }: {
-  value: string; onChange: (text: string) => void; language: "ini" | "markdown" | "plaintext"; label: string;
+/** A full-size Monaco source editor for configuration and project text, with line numbers and one optional error marker. */
+export function CodeEditor({ value, onChange, language, label, readOnly = false, marker = null, wrap = false, onSave, onCursor, handle }: {
+  value: string; onChange: (text: string) => void; language: EditorLanguage; label: string;
   readOnly?: boolean; marker?: CodeEditorMarker | null;
   /** Wrap long lines (prose) instead of scrolling horizontally (configuration). */
   wrap?: boolean;
+  /** Ctrl+S while the editor has focus. */
+  onSave?: () => void;
+  /** The caret position, 1-based, whenever it moves. */
+  onCursor?: (line: number, column: number) => void;
+  handle?: RefObject<CodeEditorHandle | null>;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor>(null);
-  const latest = useRef({ value, onChange }); latest.current = { value, onChange };
+  const latest = useRef({ value, onChange, onSave, onCursor }); latest.current = { value, onChange, onSave, onCursor };
   useLayoutEffect(() => {
     const node = host.current!;
+    // An unregistered language is plain text until its definition has loaded.
     const model = monaco.editor.createModel(latest.current.value, language);
     const instance = monaco.editor.create(node, { model, automaticLayout: true, ariaLabel: label, readOnly,
       fontFamily: getComputedStyle(node).fontFamily, fontSize: 13, lineHeight: 20, minimap: { enabled: false },
       scrollBeyondLastLine: false, wordWrap: wrap ? "on" : "off", renderLineHighlight: "line", stickyScroll: { enabled: false },
       padding: { top: 8, bottom: 8 }, quickSuggestions: false, suggestOnTriggerCharacters: false, links: false, tabSize: 2 });
     editor.current = instance;
+    if (handle) handle.current = { focus: () => instance.focus() };
+    let disposed = false;
+    void ensureMonacoLanguage(language).then(registered => { if (registered && !disposed) monaco.editor.setModelLanguage(model, language); });
     const unfollowTheme = followShellTheme();
     const changed = model.onDidChangeContent(() => {
       const next = model.getValue();
       if (next !== latest.current.value) latest.current.onChange(next);
     });
-    return () => { unfollowTheme(); changed.dispose(); instance.dispose(); model.dispose(); editor.current = null; };
+    const moved = instance.onDidChangeCursorPosition(event => latest.current.onCursor?.(event.position.lineNumber, event.position.column));
+    // Handled on this instance: a command binding is shared by every editor on the page.
+    const keys = instance.onKeyDown(event => {
+      if (!latest.current.onSave || event.keyCode !== monaco.KeyCode.KeyS || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+      event.preventDefault(); event.stopPropagation();
+      latest.current.onSave();
+    });
+    return () => {
+      disposed = true;
+      if (handle) handle.current = null;
+      unfollowTheme(); changed.dispose(); moved.dispose(); keys.dispose(); instance.dispose(); model.dispose(); editor.current = null;
+    };
   }, [language]);
   useLayoutEffect(() => {
     const instance = editor.current;
     if (!instance) return;
-    instance.updateOptions({ readOnly, ariaLabel: label });
+    instance.updateOptions({ readOnly, ariaLabel: label, wordWrap: wrap ? "on" : "off" });
     // An external replacement (a reload) resets the text; ordinary typing already matches.
     if (instance.getValue() !== value) instance.getModel()!.setValue(value);
-  }, [value, readOnly, label]);
+  }, [value, readOnly, label, wrap]);
   useLayoutEffect(() => {
     const model = editor.current?.getModel();
     if (!model) return;

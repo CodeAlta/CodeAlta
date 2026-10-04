@@ -485,6 +485,44 @@ records; a turn that begins further back gets no row) and returns at most 32 row
 With the Statistics plugin turned off in **Settings > Plugins**, the next read (the next turn, or
 reopening the session) returns no rows.
 
+### File editor
+
+`Ctrl+E` (or `/edit` in the command palette) opens **Open file** for the selected project: the `@`
+search limited to files, recently used first, with the same colored icon per file type. Up/Down and
+PageUp/PageDown move the selection, Enter opens the file and Escape closes the window. The command
+needs a selected project that is not archived and an owned host.
+
+The file opens in a tab of the same strip as the sessions: the icon of its file type at the leading
+edge, the file name (the project-relative path and the project name as tooltip) and a dot while it
+has unsaved edits. There is one tab per file; opening a file that is already open selects its tab.
+File tabs close (`Ctrl+W`), reopen (`Ctrl+Shift+T`, in the order tabs were closed), cycle
+(`Ctrl+Alt+Left` / `Ctrl+Alt+Right`, after the session tabs), drag and split like session tabs. Up
+to 32 open files and the selected one are restored with the window (`codealta.desktop.fileTabs.v1`
+in local storage); a file whose project is gone or archived is not restored. While a file tab is
+selected, the commands that act on a session (send, abort, message navigation, notes, session info
+and the like) are unavailable; selecting a session tab, a session or project in the Explorer, or
+the New session tab returns to the session.
+
+The editor is Monaco. The file name or extension chooses the highlighting (C#, F#, TypeScript,
+JavaScript, JSON, XML and MSBuild files, Markdown, TOML/INI, YAML, HTML, CSS, Python, Rust, Go, Java,
+Kotlin, C/C++, shell, PowerShell, SQL, Dockerfile and others; anything else is plain text), and a
+language is loaded the first time a file needs it. The footer shows the state (**Saved**,
+**Modified**, **Saving…**, **Read-only**, **Changed on disk**), the caret line and column, the
+path, a **Wrap lines** switch (on by default), **Reload** and **Save**.
+
+- `Ctrl+S` saves through `projectFiles.write` with the revision that was read, from the editor or
+  from anywhere else in the tab. Text is written with the line endings the editor shows: a file
+  with mixed line endings gets its dominant one once it is edited and saved.
+- When the file changed on disk since it was read, nothing is written and the tab offers **Reload**
+  (replace the edits with the file on disk), **Overwrite** (write the edits anyway) or **Cancel**
+  (keep editing; the next save asks again).
+- Closing a tab with unsaved edits asks **Save**, **Discard** or **Cancel**; a save that is refused
+  keeps the tab open. **Reload** with unsaved edits asks before dropping them.
+- A file with the read-only attribute opens read-only. A binary file, a file over 1 MiB, a missing
+  file, a path outside the project folder and an archived or unavailable project show the reason in
+  place of the editor, with **Reload** to read again.
+- Unsaved edits live in the open tab only: they are not stored, and closing the window drops them.
+
 ### Project files and git status
 
 Two host RPC services give the page a project's files and repository state. Both take a project id,
@@ -546,6 +584,7 @@ shortcuts**, a filterable window listing the same commands by category.
 | `Ctrl+P`, `F1` | Command palette, help |
 | `Ctrl+Q` | Exit (`/exit`); works from any window |
 | `Ctrl+O` | Open project |
+| `Ctrl+E`, `Ctrl+S` in a file tab | Open a project file in an editor tab (`/edit`), save the file |
 | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+PageUp` / `Ctrl+PageDown`) | Previous / next tab |
 | `Ctrl+W`, `Ctrl+Shift+T` | Close tab, reopen the last closed tab |
 | `Enter`, `Ctrl+Enter`, `Shift+Enter` | Send, steer the running turn, new line |

@@ -28,6 +28,10 @@ import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./
 import { createProjectArchive } from "./projectArchive";
 import { browserActivation } from "./sessionBrowser";
 import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
+import { activateFileTab, closeFileTab, cycleTab, emptyFileTabs, fileTabKey, fileTabName, fileTabsKey, openFileTab, persistFileTabs, reconcileFileTabs, reopenTabKind, restoreFileTabs, sameFileTab, type FileTab, type TabKind, type TabPosition } from "./fileTabs";
+import { createFileEditors } from "./fileEditors";
+import { OpenFileDialog } from "./OpenFileDialog";
+import { ProjectFileEditor, UnsavedFileDialog } from "./ProjectFileEditor";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { ReadOnlyComposer } from "./ReadOnlyComposer";
 import { useLocalDraftImages } from "./useLocalDraftImages";
@@ -181,6 +185,15 @@ function App() {
   const [restoredTabs] = useState(() => restoreSessionTabs(() => localStorage.getItem(sessionTabsKey)));
   const [tabs, setTabs] = useState(restoredTabs ?? emptySessionTabs);
   const [tabsReady, setTabsReady] = useState(false);
+  // File editor tabs share the strip with the sessions. An active file is shown over the session selection,
+  // which stays as it is; selecting a session, a project or the new-session tab leaves the file.
+  const [restoredFileTabs] = useState(() => restoreFileTabs(() => localStorage.getItem(fileTabsKey)));
+  const [fileTabs, setFileTabs] = useState(emptyFileTabs);
+  const [fileEditors] = useState(createFileEditors);
+  useSyncExternalStore(fileEditors.subscribe, fileEditors.snapshot);
+  const [fileClosing, setFileClosing] = useState<{ tab: FileTab; busy: boolean } | null>(null);
+  // The kinds of tab closed, oldest first: Reopen restores the most recent one.
+  const closedTabKinds = useRef<TabKind[]>([]);
   // Scope-local text is App-owned even when storage is denied or workspace DOM is unmounted.
   const localDrafts = useRef(new Map<string, { text: string; revision: number }>());
   const localImageGeneration = useRef(0);
@@ -200,8 +213,8 @@ function App() {
     renderLocalDraft(value => value + 1);
   }
   const tabFocusPending = useRef(false);
-  function setProjectId(value: string | null) { advanceBrowserRevision(); invalidateCreation(); writeProjectId(value); }
-  function setSessionId(value: string | null) { advanceBrowserRevision(); invalidateCreation(); writeSessionId(value); }
+  function setProjectId(value: string | null) { advanceBrowserRevision(); invalidateCreation(); writeProjectId(value); activateFile(null); }
+  function setSessionId(value: string | null) { advanceBrowserRevision(); invalidateCreation(); writeSessionId(value); activateFile(null); }
   const [composerHeights, setComposerHeights] = useState<ReadonlyMap<string, number>>(() => new Map());
   const [view, setView] = useState<View>("workspace");
   const currentView = useRef<View>(view);
@@ -253,7 +266,7 @@ function App() {
   const { projectSort, setProjectSort, theme, shownTheme, setTheme, colorScheme, setColorScheme, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount } = useWindowPreferences();
   const [sessionExpansion, setSessionExpansion] = useState<{ projectId: string | null; search: string; extra: number } | null>(null);
   const [notesVisible, setNotesVisible] = useState(true);
-  const [dialog, writeDialog] = useState<"project" | "help" | "sessions" | "archive" | "reminders" | null>(null);
+  const [dialog, writeDialog] = useState<"project" | "help" | "sessions" | "archive" | "reminders" | "file" | null>(null);
   function setDialog(value: typeof dialog) { batchDeletion.invalidate(); invalidateCreation(); writeDialog(value); }
   const helpOrigin = useRef<{ element: HTMLElement | null; view: View; sessionId: string | null; scope: string | null } | null>(null);
   const [paletteOpen, writePaletteOpen] = useState(false);
@@ -505,17 +518,22 @@ function App() {
     if (!snapshot || initialSelectionMade.current) return;
     initialSelectionMade.current = true;
     setTabsReady(true);
-    if (restoredTabs) {
-      applyTabState(reconcileSessionTabs(restoredTabs, snapshot));
-      return;
+    try {
+      if (restoredTabs) {
+        applyTabState(reconcileSessionTabs(restoredTabs, snapshot));
+        return;
+      }
+      const firstSession = snapshot.sessions[0];
+      if (!firstSession) return;
+      const project = snapshot.projects.find(value => value.path === firstSession.workspacePath);
+      selectedScope.current = project?.id ?? null;
+      setProjectId(project?.id ?? null);
+      setSessionId(firstSession.id);
+      selectedSessionId.current = firstSession.id;
+    } finally {
+      // After the session selection above, which leaves any file: the restored file tab stays active.
+      if (restoredFileTabs) setFileTabs(reconcileFileTabs(restoredFileTabs, snapshot));
     }
-    const firstSession = snapshot.sessions[0];
-    if (!firstSession) return;
-    const project = snapshot.projects.find(value => value.path === firstSession.workspacePath);
-    selectedScope.current = project?.id ?? null;
-    setProjectId(project?.id ?? null);
-    setSessionId(firstSession.id);
-    selectedSessionId.current = firstSession.id;
   }, [snapshot]);
 
   useEffect(() => {
@@ -524,7 +542,10 @@ function App() {
     // A previously verified active identity disappearing must not silently bind
     // the same ID to a different project/path or a duplicate catalog row.
     if (tabs.active && !resolveSessionTab(snapshot, tabs.active) && tabs.active.sessionId === sessionId) {
-      applyTabState(valid); return;
+      const file = fileTabs.active;
+      applyTabState(valid);
+      if (file) activateFile(file);
+      return;
     }
     const selection = selectedTab(snapshot, projectId, sessionId);
     const next = selection ? openSessionTab(valid, selection) : valid.active ? { ...valid, active: null } : valid;
@@ -533,6 +554,9 @@ function App() {
   useEffect(() => {
     if (tabsReady && snapshot) persistSessionTabs(value => localStorage.setItem(sessionTabsKey, value), tabs);
   }, [tabs, tabsReady, snapshot]);
+  useEffect(() => {
+    if (tabsReady && snapshot) persistFileTabs(value => localStorage.setItem(fileTabsKey, value), fileTabs);
+  }, [fileTabs, tabsReady, snapshot]);
 
   function applyTabState(next: SessionTabsState) {
     setTabs(next);
@@ -544,6 +568,30 @@ function App() {
   function selectSessionTab(tab: SessionTab) {
     if (!snapshot || snapshot !== currentSnapshot.current || !resolveSessionTab(snapshot, tab)) return;
     applyTabState(openSessionTab(reconcileSessionTabs(tabs, snapshot), tab));
+  }
+  function activateFile(tab: FileTab | null) { setFileTabs(state => activateFileTab(state, tab)); }
+  function openFile(tab: FileTab) {
+    // At the tab limit a file with unsaved edits is never the one that makes room.
+    setFileTabs(state => openFileTab(state, tab, value => fileEditors.dirty(fileTabKey(value))));
+  }
+  function closeFile(tab: FileTab, discard = false) {
+    if (!discard && fileEditors.dirty(fileTabKey(tab))) { activateFile(tab); setFileClosing({ tab, busy: false }); return; }
+    setFileClosing(null);
+    closedTabKinds.current = [...closedTabKinds.current, "file" as const].slice(-64);
+    tabFocusPending.current = true;
+    setFileTabs(state => closeFileTab(state, tab));
+  }
+  async function saveAndCloseFile(tab: FileTab) {
+    setFileClosing({ tab, busy: true });
+    const saved = await fileEditors.save(fileTabKey(tab));
+    if (!creationAlive.current) return;
+    // A refused save keeps the tab: its editor shows why.
+    if (saved) closeFile(tab, true); else setFileClosing(null);
+  }
+  function openFilePicker() {
+    if (dialog || paletteOpen || !owned || !selectedProject || selectedProject.archived || currentView.current !== "workspace"
+      || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+    setDialog("file");
   }
   function captureTabLifetime() {
     const revision = browserRevision.current;
@@ -606,15 +654,27 @@ function App() {
     if (!snapshot || view !== "workspace" || settingsVisible.current) return;
     const valid = reconcileSessionTabs(tabs, snapshot);
     if (action === "closeTab") {
-      if (valid.active) { tabFocusPending.current = true; applyTabState(closeSessionTab(valid, valid.active)); }
+      if (fileTabs.active) closeFile(fileTabs.active);
+      else if (valid.active) {
+        closedTabKinds.current = [...closedTabKinds.current, "session" as const].slice(-64);
+        tabFocusPending.current = true; applyTabState(closeSessionTab(valid, valid.active));
+      }
     } else if (action === "reopenTab") {
-      const last = valid.closed.at(-1);
-      if (last) { tabFocusPending.current = true; selectSessionTab(last); }
-    } else if (valid.open.length) {
+      const kind = reopenTabKind(closedTabKinds.current, valid.closed.length, fileTabs.closed.length);
+      if (!kind) return;
+      const at = closedTabKinds.current.lastIndexOf(kind);
+      if (at >= 0) closedTabKinds.current = closedTabKinds.current.filter((_kind, index) => index !== at);
       tabFocusPending.current = true;
-      const index = valid.open.findIndex(tab => valid.active && tabKey(tab) === tabKey(valid.active));
-      const next = (index + 1 + (action === "nextTab" ? 1 : -1) + valid.open.length + 1) % (valid.open.length + 1);
-      if (next === 0) applyTabState({ ...valid, active: null }); else selectSessionTab(valid.open[next - 1]);
+      if (kind === "file") openFile(fileTabs.closed.at(-1)!); else selectSessionTab(valid.closed.at(-1)!);
+    } else if (valid.open.length + fileTabs.open.length) {
+      tabFocusPending.current = true;
+      const file = fileTabs.open.findIndex(tab => sameFileTab(tab, fileTabs.active));
+      const session = valid.open.findIndex(tab => valid.active && tabKey(tab) === tabKey(valid.active));
+      const current: TabPosition = file >= 0 ? { kind: "file", index: file } : session >= 0 ? { kind: "session", index: session } : { kind: "draft" };
+      const next = cycleTab(valid.open.length, fileTabs.open.length, current, action === "nextTab" ? 1 : -1);
+      if (next.kind === "file") activateFile(fileTabs.open[next.index]);
+      else if (next.kind === "session") selectSessionTab(valid.open[next.index]);
+      else applyTabState({ ...valid, active: null });
     }
   }
   useLayoutEffect(() => {
@@ -622,7 +682,7 @@ function App() {
     tabFocusPending.current = false;
     if (view === "workspace" && !settingsVisible.current)
       document.querySelector<HTMLButtonElement>('.session-tabs [role="tab"][aria-selected="true"], .session-tabs > button')?.focus();
-  }, [tabs, view]);
+  }, [tabs, fileTabs, view]);
 
   const sessions = snapshot ? sessionsForProject(snapshot, projectId) : [];
   const loadedSessionRows = snapshot ? sessionHierarchy(sessions, snapshot.sessions, search, projectId) : [];
@@ -765,16 +825,17 @@ function App() {
     runCommand(command);
   });
 
-  // Session-scoped commands need an open session; everything else is always offered.
+  // Session-scoped commands need an open session that is not behind a file tab; everything else is always offered.
   function commandAvailable(command: CommandId): boolean {
-    const session = view === "workspace" && !!selectedSession;
+    const session = view === "workspace" && !!selectedSession && !fileTabs.active;
     const ownedSession = session && owned;
     switch (command) {
       case "sessionInfo": case "messagePrevious": case "messageNext": case "messageFirst": case "messageLatest": case "toggleNotes": return session;
       case "usage": case "reminders": case "compact": case "abort": case "clearQueue": case "nextPrompt": case "modelSelector": case "send": case "steer": return ownedSession;
-      case "expandPrompt": case "focusPrompt": return view === "workspace";
-      case "closeTab": case "previousTab": case "nextTab": return tabs.open.length > 0;
-      case "reopenTab": return tabs.closed.length > 0;
+      case "expandPrompt": case "focusPrompt": return view === "workspace" && !fileTabs.active;
+      case "closeTab": case "previousTab": case "nextTab": return tabs.open.length + fileTabs.open.length > 0;
+      case "reopenTab": return tabs.closed.length + fileTabs.closed.length > 0;
+      case "editFile": return owned && view === "workspace" && !!selectedProject && !selectedProject.archived;
       case "refreshStatuses": return owned && tabs.open.length > 0;
       case "newSession": return owned && !!snapshot && !selectedProject?.archived;
       case "renameProject": return owned && !!selectedProject && !selectedProject.archived;
@@ -801,6 +862,7 @@ function App() {
       case "help": openHelp(); break;
       case "palette": openPalette(); break;
       case "openProject": setDialog("project"); break;
+      case "editFile": openFilePicker(); break;
       case "newSession": selectProject(projectId); requestAnimationFrame(() => document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt")?.focus()); break;
       case "focusSidebar": runShortcut("focusProjects"); break;
       case "toggleNavigator": toggleProjects(); break;
@@ -940,6 +1002,10 @@ function App() {
   useLayoutEffect(() => {
     if (dialog === "reminders" && !remindersCurrent) setDialog(null);
   }, [dialog, remindersCurrent]);
+  const filePickerProject = owned && selectedProject && !selectedProject.archived ? selectedProject : null;
+  useLayoutEffect(() => {
+    if (dialog === "file" && !filePickerProject) setDialog(null);
+  }, [dialog, filePickerProject]);
 
   // The inline session search field mounts focused; when it is already shown, focus it again.
   function showSessionSearch() { setSessionOptionsOpen(true); searchInput.current?.focus(); }
@@ -1646,7 +1712,7 @@ function App() {
                   lifetime: creationGeneration.current, capturePopup: captureReferenceLifetime,
                   observe: value => mutation?.capability.observe(value) } : null}>
               <SessionWorkspace session={row} snapshot={snapshot} selectedProjectId={tab.projectId} onRunActivity={running => runtimeObservations.setLive(tab, running)} notesReader={owners.notesReader} observing={visible && view === "workspace" && !settingsOpen}
-                active={tab.sessionId === sessionId} notesToggle={notesVisible} onActivate={() => { if (sessionId !== tab.sessionId) selectSessionTab(tab); }}
+                active={tab.sessionId === sessionId} notesToggle={notesVisible} onActivate={() => { if (sessionId !== tab.sessionId || fileTabs.active) selectSessionTab(tab); }}
                 infoTrigger={sessionInfoTrigger} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger}
                 infoLifetime={{ revision: 0, current: () => !!currentSnapshot.current && !!resolveSessionTab(currentSnapshot.current, tab)
                   && currentView.current === "workspace" && !settingsVisible.current && currentHostEpoch.current === status?.hostEpoch }}
@@ -1666,9 +1732,16 @@ function App() {
               if (!snapshot || snapshot !== currentSnapshot.current || !resolveSessionTab(snapshot, tab)) return;
               const next = closeSessionTab(tabs, tab);
               advanceBrowserRevision();
+              closedTabKinds.current = [...closedTabKinds.current, "session" as const].slice(-64);
               tabFocusPending.current = true;
-              if (tabs.active && tabKey(tabs.active) === tabKey(tab)) applyTabState(next); else setTabs(next);
-            }} reopen={() => tabCommand("reopenTab")}>
+              // Closing the session behind an active file tab does not leave the file.
+              const file = fileTabs.active;
+              if (tabs.active && tabKey(tabs.active) === tabKey(tab)) { applyTabState(next); if (file) activateFile(file); } else setTabs(next);
+            }} reopen={() => tabCommand("reopenTab")}
+            files={fileTabs} fileDirty={tab => fileEditors.dirty(fileTabKey(tab))} selectFile={activateFile} closeFile={tab => closeFile(tab)}
+            renderFile={(tab, visible) => <ProjectFileEditor key={fileTabKey(tab)} tab={tab} editors={fileEditors}
+              epoch={!status ? undefined : owned ? status.hostEpoch : null}
+              visible={visible} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)} />}>
           <div id="active-session-content" className="active-session-content">
           {error && <div className="banner banner-error" role="alert">{error}</div>}
           {draftHandoffNotice && <p role="status" className="notice">{draftHandoffNotice}</p>}
@@ -1767,6 +1840,12 @@ function App() {
         return true;
       }} onClose={() => setDialog(null)} />}
     {dialog === "help" && <CommandHelp onClose={closeHelp} />}
+    {dialog === "file" && filePickerProject && <OpenFileDialog epoch={status!.hostEpoch!} project={filePickerProject}
+      observe={value => mutation?.capability.observe(value)} onClose={() => setDialog(null)}
+      onOpen={path => { setDialog(null); openFile({ projectId: filePickerProject.id, projectPath: filePickerProject.path, path }); }} />}
+    {fileClosing && <UnsavedFileDialog name={fileTabName(fileClosing.tab)} mode="close" busy={fileClosing.busy}
+      onSave={() => void saveAndCloseFile(fileClosing.tab)} onDiscard={() => closeFile(fileClosing.tab, true)}
+      onCancel={() => { if (!fileClosing.busy) setFileClosing(null); }} />}
     {dialog === "sessions" && browserCapture && <SessionBrowser snapshot={browserCapture.snapshot} projectId={browserCapture.projectId} observations={runtimeObservationControls()} recentCount={recentSessionCount} activeSessionId={sessionId} batch={batchDeleteControls()}
       stale={browserCapture.revision !== browserRevision.current || browserCapture.hostReady !== (mutation?.capability.canMutate() ?? false) || view !== "workspace" || settingsOpen}
       close={() => setDialog(null)} open={tab => {

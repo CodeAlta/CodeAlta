@@ -24,6 +24,7 @@ test("single-stroke gestures follow the terminal key map and work inside the pro
     assert.equal(resolveCommandKey(ctrl("t"), false, focus).command, "nextPrompt");
     assert.equal(resolveCommandKey(ctrl("p"), false, focus).command, "palette");
     assert.equal(resolveCommandKey(ctrl("o"), false, focus).command, "openProject");
+    assert.equal(resolveCommandKey(ctrl("e"), false, focus).command, "editFile");
     assert.equal(resolveCommandKey(key("F8"), false, focus).command, "abort");
     assert.equal(resolveCommandKey(key("F10"), false, focus).command, "clearQueue");
     assert.equal(resolveCommandKey(ctrl("F11"), false, focus).command, "compact");
@@ -84,6 +85,9 @@ test("palette search ranks the slash name first, needs every word and hides inte
   assert.deepEqual(names("model").slice(0, 2), ["model", "model_providers"]);
   assert.equal(names("tab left")[0], "tab_left");
   assert.equal(names("stop")[0], "abort");
+  assert.equal(names("/edit")[0], "edit");
+  assert.equal(names("open file")[0], "edit");
+  assert.equal(names("open")[0], "open");
   assert.deepEqual(names("zzz-nothing"), []);
   assert.ok(names("session").includes("session_info") && names("session").includes("new_session"));
 });

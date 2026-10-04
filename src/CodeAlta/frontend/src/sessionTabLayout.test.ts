@@ -4,7 +4,8 @@ import { Actions, DockLocation, TabNode, TabSetNode } from "flexlayout-react";
 import { sessionTabDrop } from "./sessionTabDrag";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { closeSessionTab, emptySessionTabs, openSessionTab, sessionTabLimit, type SessionTab } from "./sessionTabs";
-import { createSessionTabModel, ownsSessionTabContent, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation } from "./sessionTabLayout";
+import { createSessionTabModel, fileTabAction, ownsSessionTabContent, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation } from "./sessionTabLayout";
+import { activateFileTab, closeFileTab, emptyFileTabs, fileNodeId, openFileTab, type FileTab } from "./fileTabs";
 
 const tab = (id: string) => ({ projectId: "p", sessionId: id, path: "/p" });
 const snapshot: WorkspaceSnapshot = { configured: true, projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false,
@@ -276,4 +277,98 @@ test("unchanged App identity makes repeated presentation reconciliation inert; s
   assert.equal(model.getNodeById(sessionNodeId(tab("one"))), undefined);
   assert.equal(ownsSessionTabContent(sessionNodeId(tab("one")), closed), false);
   model.removeChangeListener(listener);
+});
+
+const file = (path: string): FileTab => ({ projectId: "p", projectPath: "/p", path });
+
+test("file tabs join the session strip: one node per file, selected while active, removed when closed", () => {
+  const model = createSessionTabModel(), state = both();
+  let files = openFileTab(emptyFileTabs(), file("src/a.ts"));
+  reconcileSessionTabModel(model, state, label, files);
+  const two = model.getNodeById(sessionNodeId(tab("two"))) as TabNode;
+  const a = model.getNodeById(fileNodeId(file("src/a.ts"))) as TabNode;
+  assert.equal(a.getName(), "a.ts");
+  assert.equal(a.getComponent(), "file");
+  assert.equal(a.isEnableDrag(), true);
+  assert.equal(model.getActiveTabset()?.getSelectedNode(), a);
+  assert.equal(model.getNodeById(sessionDraftNodeId), undefined);
+  // Opening the same file again does not add a tab; another file does and keeps the first node.
+  files = openFileTab(openFileTab(files, file("src/a.ts")), file("b.md"));
+  reconcileSessionTabModel(model, state, label, files);
+  assert.equal(model.getNodeById(a.getId()), a);
+  const b = model.getNodeById(fileNodeId(file("b.md"))) as TabNode;
+  assert.equal(model.getActiveTabset()?.getSelectedNode(), b);
+  assert.equal((a.getParent() as TabSetNode).getTabNodes().length, 4);
+  // Leaving the file shows the session selection again; the file tabs stay open.
+  reconcileSessionTabModel(model, state, label, activateFileTab(files, null));
+  assert.equal(model.getActiveTabset()?.getSelectedNode(), two);
+  assert.equal(model.getNodeById(b.getId()), b);
+  files = closeFileTab(files, file("b.md"));
+  reconcileSessionTabModel(model, state, label, files);
+  assert.equal(model.getNodeById(b.getId()), undefined);
+  assert.equal(model.getNodeById(a.getId()), a);
+  assert.equal(model.getActiveTabset()?.getSelectedNode(), two);
+  // Without files the strip is what it was.
+  reconcileSessionTabModel(model, state, label);
+  assert.equal(model.getNodeById(a.getId()), undefined);
+  assert.equal(model.getNodeById(two.getId()), two);
+});
+
+test("a file tab stays beside the new-session tab when no session is selected", () => {
+  const model = createSessionTabModel();
+  const files = openFileTab(emptyFileTabs(), file("a.ts"));
+  reconcileSessionTabModel(model, emptySessionTabs(), label, files);
+  const draft = model.getNodeById(sessionDraftNodeId) as TabNode;
+  const a = model.getNodeById(fileNodeId(file("a.ts"))) as TabNode;
+  assert.ok(draft && a);
+  assert.equal(model.getActiveTabset()?.getSelectedNode(), a);
+  assert.equal(draft.isEnableClose(), false);
+  assert.equal(sessionLayoutActionAllowed(model, Actions.selectTab(sessionDraftNodeId), emptySessionTabs(), snapshot, () => true, files), true);
+  reconcileSessionTabModel(model, emptySessionTabs(), label, activateFileTab(files, null));
+  assert.equal(model.getActiveTabset()?.getSelectedNode(), draft);
+  assert.equal(model.getNodeById(a.getId()), a);
+});
+
+test("file tabs select, move and split like session tabs; closing is an App intent and lifetimes still guard", () => {
+  const model = createSessionTabModel(), state = both();
+  const files = openFileTab(openFileTab(emptyFileTabs(), file("a.ts")), file("b.ts"));
+  reconcileSessionTabModel(model, state, label, files);
+  const a = model.getNodeById(fileNodeId(file("a.ts"))) as TabNode;
+  const one = model.getNodeById(sessionNodeId(tab("one"))) as TabNode;
+  const select = Actions.selectTab(a.getId()), close = Actions.deleteTab(a.getId());
+  assert.deepEqual(fileTabAction(select, files, () => true), { kind: "select", file: file("a.ts") });
+  assert.deepEqual(fileTabAction(close, files, () => true), { kind: "close", file: file("a.ts") });
+  assert.equal(fileTabAction(select, files, () => false), null);
+  assert.equal(fileTabAction(Actions.selectTab(one.getId()), files, () => true), null);
+  assert.equal(fileTabAction(Actions.selectTab(fileNodeId(file("missing.ts"))), files, () => true), null);
+  assert.equal(sessionTabAction(select, state, snapshot, () => true), null);
+  assert.equal(sessionLayoutActionAllowed(model, select, state, snapshot, () => true, files), true);
+  assert.equal(sessionLayoutActionAllowed(model, select, state, snapshot, () => false, files), false);
+  assert.equal(sessionLayoutActionAllowed(model, select, state, undefined, () => true, files), false);
+  // A file node the App no longer owns, or an App that passes no files, admits nothing for it.
+  assert.equal(sessionLayoutActionAllowed(model, select, state, snapshot, () => true), false);
+  assert.equal(sessionLayoutActionAllowed(model, close, state, snapshot, () => true, files), false);
+  assert.equal(sessionLayoutActionAllowed(model, Actions.renameTab(a.getId(), "renamed"), state, snapshot, () => true, files), false);
+  const split = Actions.moveNode(a.getId(), a.getParent()!.getId(), DockLocation.RIGHT, -1, true);
+  assert.equal(sessionLayoutActionAllowed(model, split, state, snapshot, () => true, files), true);
+  assert.equal(sessionLayoutActionAllowed(model, split, state, snapshot, () => true), false);
+  const drop = sessionTabDrop(a, a.getParent() as TabSetNode, { x: 0, y: 0, width: 600, height: 400 }, { x: 590, y: 200 });
+  assert.equal(drop?.location, DockLocation.RIGHT);
+  model.doAction(split);
+  assert.notEqual(a.getParent(), one.getParent());
+  assert.equal(model.getActiveTabset()?.getSelectedNode(), a);
+  // Session and file panes are selected side by side; either tabset can become the active one.
+  const sessions = Actions.setActiveTabset(one.getParent()!.getId());
+  assert.equal(sessionLayoutActionAllowed(model, sessions, state, snapshot, () => true, files), true);
+  assert.equal(sessionLayoutActionAllowed(model, Actions.setActiveTabset(a.getParent()!.getId()), state, snapshot, () => true, files), true);
+  assert.equal(sessionLayoutActionAllowed(model, Actions.moveNode(a.getParent()!.getId(), one.getParent()!.getId(), DockLocation.BOTTOM, -1), state, snapshot, () => true, files), true);
+  // Reconciling keeps the split; the active file's pane is the active tabset.
+  model.doAction(sessions);
+  const parents = [a.getParent(), one.getParent()];
+  reconcileSessionTabModel(model, state, label, activateFileTab(files, file("a.ts")));
+  assert.deepEqual([a.getParent(), one.getParent()], parents);
+  assert.equal(model.getActiveTabset(), a.getParent());
+  reconcileSessionTabModel(model, state, label, activateFileTab(files, null));
+  assert.equal(model.getActiveTabset(), one.getParent());
+  assert.equal(a.isSelected(), true);
 });
