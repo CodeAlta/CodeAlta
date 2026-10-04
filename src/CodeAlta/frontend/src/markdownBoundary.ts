@@ -1,4 +1,6 @@
 import createDOMPurify from "dompurify";
+import { highlightCode } from "./codeHighlight";
+import { diagramAppearance, diagrams } from "./diagrams";
 import { createMarkdownParser } from "./markdown";
 
 /** Instance-owned browser boundary; parser output must never bypass this sanitizer. */
@@ -26,13 +28,42 @@ export function createMarkdownRenderer(view: Window & typeof globalThis) {
       || name === "value" && tag === "li" && /^-?\d{1,6}$/.test(value)
       || name === "reversed" && tag === "ol";
   });
-  return (source: string, timelineCodeBlocks: boolean) => {
+  // Fenced blocks are dressed after sanitization, from their text alone: the sanitizer keeps accepting no
+  // authored class, style or SVG. A `mermaid` block that has been drawn becomes its diagram; one that has
+  // not is reported in `undrawn` and stays a code block. Any other known language is highlighted.
+  function dressFences(fragment: DocumentFragment, undrawn: string[] | undefined) {
+    for (const code of Array.from(fragment.querySelectorAll<HTMLElement>("pre > code[class^='language-']"))) {
+      const pre = code.parentElement!;
+      if (pre.children.length !== 1) continue;
+      const language = code.className.slice("language-".length);
+      const text = code.textContent ?? "";
+      if (language === "mermaid") {
+        const svg = diagrams.get(text, diagramAppearance());
+        if (typeof svg === "string") {
+          const figure = view.document.createElement("div");
+          figure.className = "markdown-diagram";
+          figure.innerHTML = svg;
+          pre.replaceWith(figure);
+        } else {
+          if (svg === undefined) undrawn?.push(text);
+          pre.setAttribute("data-language", "mermaid");
+        }
+        continue;
+      }
+      const highlighted = highlightCode(text, language);
+      if (highlighted !== null) code.innerHTML = highlighted;
+      // The block names its language in a corner (drawn by the stylesheet, so never selected or copied).
+      pre.setAttribute("data-language", language.toLowerCase());
+    }
+  }
+  return (source: string, timelineCodeBlocks: boolean, undrawn?: string[]) => {
     try {
       const fragment = purifier.sanitize(parse(source), {
         ALLOWED_TAGS: tags,
         ALLOWED_ATTR: ["href", "title", "class", "open", "scope", "align", "colspan", "rowspan", "start", "value", "reversed"],
         ALLOW_ARIA_ATTR: false, ALLOW_DATA_ATTR: false, RETURN_DOM_FRAGMENT: true,
       });
+      dressFences(fragment, undrawn);
       // Only constant renderer-owned attributes may be added to sanitized nodes.
       // Authored pre/code and fenced code share a harmless region, never app controls.
       if (timelineCodeBlocks) for (const pre of Array.from(fragment.querySelectorAll("pre"))) {

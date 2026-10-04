@@ -52,9 +52,12 @@ function snapshot() {
   return { ...state, html: content?.innerHTML, text: content?.textContent, location: location.href, base: document.baseURI, frames: frames.length,
     prohibited: content ? Array.from(content.querySelectorAll("script,style,img,picture,source,video,audio,track,iframe,link,base,meta,object,embed,svg,math,form,input,button,textarea,select")).map(e => e.outerHTML) : [],
     attributes: content ? Array.from(content.querySelectorAll("*")).flatMap(e => Array.from(e.attributes).filter(a => /^on|^(style|id|name|data-.*|src|srcset|srcdoc|target|download|ping|action|formaction)$/i.test(a.name)
+        // The renderer names a fenced block's language on its pre and colors its tokens with highlight.js spans.
+        && !(e.tagName === "PRE" && a.name === "data-language" && /^[a-z0-9_-]{1,32}$/.test(a.value))
       || /^(role|tabindex|aria-.*)$/.test(a.name) && !(e.tagName === "PRE" && e.className === "timeline-code"
         && (a.name === "role" && a.value === "region" || a.name === "tabindex" && a.value === "0" || a.name === "aria-label" && a.value === "Code block"))
-      || a.name === "class" && !(e.tagName === "PRE" && a.value === "timeline-code" || e.tagName === "CODE" && /^language-[a-zA-Z0-9_-]{1,32}$/.test(a.value))).map(a => `${e.tagName}:${a.name}=${a.value}`)) : [] };
+      || a.name === "class" && !(e.tagName === "PRE" && a.value === "timeline-code" || e.tagName === "CODE" && /^language-[a-zA-Z0-9_-]{1,32}$/.test(a.value)
+        || e.tagName === "SPAN" && !!e.closest("pre > code") && /^(?:(?:hljs-[a-z_-]+|[a-z]+_)(?: |$))+$/.test(a.value))).map(a => `${e.tagName}:${a.name}=${a.value}`)) : [] };
 }
 Object.assign(window, { markdownFixture: { state, cases, render, snapshot,
   run(index: number) { render(cases[index].source); return (cases[index].selectors?.split(",") ?? []).every(s => document.querySelector(`.markdown-content ${s}`)); },

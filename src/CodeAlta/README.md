@@ -871,8 +871,8 @@ replacement; returning to an earlier source does not restore its previous expans
 Timeline, live text and Notes use markdown-it **15.0.2** with the CommonMark preset,
 raw HTML enabled, explicit pipe-table/strikethrough/linkify rules and hard line breaks.
 This is not full GFM or a CommonMark-conformance claim. Task markers remain literal;
-strike renders as `s` rather than `del`. Grid tables, footnotes, task-list plugins,
-Prism highlighting/autoload and Mermaid rendering are not implemented. Footnote-like
+strike renders as `s` rather than `del`. Grid tables, footnotes and task-list plugins
+are not implemented. Footnote-like
 syntax may parse as an ordinary reference link instead. Mixed inline HTML/Markdown
 renders; Markdown inside block HTML follows CommonMark blank-line boundaries, not
 arbitrary nested Markdown interpretation.
@@ -890,6 +890,25 @@ Table alignment uses `align`, never authored CSS. Authored IDs, app classes, han
 ARIA/data/role/tabindex authority, scripts, styles, forms, frames, objects, embeds,
 images/media and SVG/MathML are not accepted. Sanitized pre/code can receive only the
 renderer-owned harmless timeline region attributes; no markup can create app controls.
+
+**Fenced code blocks.** A fence that names a language is colored with highlight.js **11.12.0**: its
+common set (C#, C/C++, JavaScript, TypeScript, Python, Go, Rust, Java, Kotlin, Swift, JSON, YAML,
+XML/HTML, CSS, SQL, shell, diff, Markdown and more) plus CMake, Dart, Dockerfile, batch, Elixir, F#,
+Haskell, HTTP, nginx, PowerShell, properties, Protocol Buffers and Scala, under their usual short
+names (`cs`, `js`, `ts`, `sh`, `ps1`, `yml`, `jsonc`, `csproj`, ...). The block shows its language in
+its top right corner. A fence without a language, with an unknown one, or longer than 200,000
+characters stays plain. The colors follow the theme and the color scheme.
+
+A `mermaid` fence is drawn as a diagram by Mermaid **11.17.2**, in the colors of the theme and color
+scheme, and drawn again when either changes. Text that is not a valid diagram, or is longer than
+20,000 characters, stays a code block labelled `mermaid`. A diagram is drawn shortly after its text
+stops changing, so a message still being written shows the code first. Mermaid is loaded when the
+first diagram is drawn. Copying a message still copies its Markdown source, fences included.
+
+Both happen after sanitization, from the block's text alone: the sanitizer still refuses authored
+classes, styles and SVG, and highlighted code contains only `span` elements with highlight.js classes.
+Diagrams are drawn at Mermaid's `strict` security level, which encodes markup in labels, disables
+click handlers and sanitizes the SVG.
 
 Markdown images become **escaped alt text**; authored image/fetch nodes are removed.
 Only credential-free absolute HTTP(S) anchor href survives; relative, mailto, custom,

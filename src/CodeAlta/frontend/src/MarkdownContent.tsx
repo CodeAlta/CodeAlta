@@ -1,9 +1,28 @@
-import { useMemo, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore, type KeyboardEvent } from "react";
+import { diagramAppearance, diagrams } from "./diagrams";
 import { createMarkdownRenderer } from "./markdownBoundary";
+import { appearanceKey, subscribeAppearance } from "./shellColors";
 
 export function MarkdownContent({ source, timelineCodeBlocks = false }: { source: string; timelineCodeBlocks?: boolean }) {
   const render = useMemo(() => createMarkdownRenderer(window), []);
-  const html = useMemo(() => render(source, timelineCodeBlocks), [render, source, timelineCodeBlocks]);
+  // Diagrams are drawn on the side, for the window's theme and color scheme, then found by the next render.
+  const appearance = useSyncExternalStore(subscribeAppearance, appearanceKey);
+  const [drawn, setDrawn] = useState(0);
+  const rendered = useMemo(() => {
+    const undrawn: string[] = [];
+    return { html: render(source, timelineCodeBlocks, undrawn), undrawn };
+  }, [render, source, timelineCodeBlocks, appearance, drawn]);
+  const html = rendered.html;
+  useEffect(() => {
+    if (!rendered.undrawn.length) return;
+    let current = true;
+    // Text still being written changes before this fires, so only settled text is drawn.
+    const timer = setTimeout(() => {
+      const look = diagramAppearance();
+      void Promise.all(rendered.undrawn.map(text => diagrams.draw(text, look))).then(() => { if (current) setDrawn(value => value + 1); });
+    }, 200);
+    return () => { current = false; clearTimeout(timer); };
+  }, [rendered]);
   // React compares this prop by identity. Equivalent persisted refreshes must not
   // replace focused code DOM, its selection or its inner scroll position.
   const codeMarkup = useMemo(() => ({ __html: html }), [html]);

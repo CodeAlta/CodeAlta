@@ -7,6 +7,7 @@ import "monaco-editor/features/find/register.js";
 import "monaco-editor/features/contextmenu/register.js";
 import "monaco-editor/features/tokenization/register.js";
 import EditorWorker from "monaco-editor/editor/editor.worker.js?worker";
+import { shellColor } from "./shellColors";
 
 // Vite emits a same-origin worker: no CDN, inline script, eval or blob CSP exception.
 globalThis.MonacoEnvironment = Object.freeze({ getWorker: () => new EditorWorker() });
@@ -19,13 +20,6 @@ const rules = (mode: keyof typeof themes, inline: string) => [{ token: "variable
   { token: "inserted", foreground: themes[mode].inserted }, { token: "deleted", foreground: themes[mode].deleted }];
 monaco.editor.defineTheme("codealta-dark", { base: themes.dark.base, inherit: true, colors: {}, rules: rules("dark", themes.dark.inline) });
 monaco.editor.defineTheme("codealta-light", { base: themes.light.base, inherit: true, colors: {}, rules: rules("light", themes.light.inline) });
-
-// The color a custom property resolves to on the root, as #rrggbb; undefined when it is not an opaque color.
-function shellColor(probe: HTMLElement, property: string): string | undefined {
-  probe.style.color = `var(${property})`;
-  const channels = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(getComputedStyle(probe).color);
-  return channels ? `#${channels.slice(1).map(channel => Number(channel).toString(16).padStart(2, "0")).join("")}` : undefined;
-}
 
 // A color scheme tints the editor like the panels around it; Blueprint's own palette keeps Monaco's surfaces.
 function applyShellTheme() {
