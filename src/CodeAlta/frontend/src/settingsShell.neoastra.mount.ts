@@ -96,7 +96,7 @@ function fileHistory(request: HistoryRequest): HistoryResponse {
     { offset: "1", eventType: "activity", kind: "FileChange", providerId: "fixture", sessionId: request.sessionId,
       runId: "run", timestamp: "2026-09-24T00:00:00Z", phase: "Failed", contentId: null, activityId: "file",
       parentActivityId: null, interactionId: null, name: null, text: null, details: fileDetails,
-      tool: null, files: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false },
+      tool: null, files: null, images: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false },
   ] };
 }
 function toolHistory(request: HistoryRequest): HistoryResponse {
@@ -122,7 +122,7 @@ function navigationHistory(request: HistoryRequest): HistoryResponse {
       sessionId: request.sessionId, runId: null, timestamp: "2026-09-24T00:00:00Z", kind, phase: null,
       contentId: `${index}`, activityId: null, parentActivityId: null, interactionId: null, name: null,
       text: `persisted-${kind}-${request.sessionId}` + (mode === "tabs" ? "\n\n" + Array.from({ length: 30 }, (_, n) => `Retained paragraph ${n}`).join("\n\n") : ""),
-      tool: null, files: null, details: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false })) };
+      tool: null, files: null, images: null, details: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false })) };
 }
 Object.assign(window, { settingsShellFixture: { calls, rpcCalls, sends, choiceReads, usageReads, probes, clearRequests,
   renameRequests, projectRenames, deleteRequests, creates, snapshots, snapshotCalls, catalog, historyCalls,
@@ -350,6 +350,7 @@ export const sessionNotes = { current: (request: unknown) => { notesCalls.push(r
 export const sessionPluginEvents = { read: unavailable };
 export const projectFiles = { read: unavailable, write: unavailable };
 export const projectGit = { status: unavailable };
+export const promptImages = { read: unavailable };
 export const composerStatus = { read: unavailable };
 export const sessionUserInput = {
   list: (request: { expectedHostEpoch: string; sessionId: string }) => new Promise(resolve => inputReads.push({ request, resolve })),

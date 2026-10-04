@@ -24,7 +24,7 @@ type Entry = HistoryResponse["entries"][number];
 const entry = (overrides: Partial<Entry> = {}): Entry => ({ offset: "1", eventType: "contentCompleted", providerId: "provider",
   sessionId: "session", runId: "run", timestamp: "2026-09-23T00:00:00Z", kind: "Assistant", phase: null,
   contentId: "content", activityId: null, parentActivityId: null, interactionId: null, name: null,
-  tool: null, files: null, text: "persisted", details: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, ...overrides });
+  tool: null, files: null, images: null, text: "persisted", details: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, ...overrides });
 const session = (overrides: Partial<SessionDisplayView> = {}): SessionDisplayView => ({ sessionId: "session", revision: "1",
   lifecycle: null, queuedPromptCount: null, configuration: { providerId: "provider", providerKey: null, modelId: null,
     reasoningEffort: null, agentPromptId: null }, statusKind: null, statusMessage: null,

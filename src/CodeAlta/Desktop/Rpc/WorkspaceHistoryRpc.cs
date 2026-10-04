@@ -97,6 +97,8 @@ internal sealed partial class WorkspaceService
             string? kind = null, phase = null, contentId = null, activityId = null, parentId = null, interactionId = null;
             string? text = null, name = null, details = null;
             var omitted = false;
+            HistoryImage[]? images = null;
+            var imageCost = 0;
             switch (value)
             {
                 case AgentContentDeltaEvent delta:
@@ -107,6 +109,8 @@ internal sealed partial class WorkspaceService
                     type = "contentCompleted"; kind = completed.Kind.ToString(); contentId = completed.ContentId;
                     parentId = completed.ParentActivityId; text = completed.Content;
                     interactionId = completed.AskId; details = Json(completed.Details);
+                    // A user message lists its images; its text and details do not name their files.
+                    images = HistoryImageProjection.Project(completed, ref text, ref details, out imageCost);
                     break;
                 case AgentActivityEvent activity:
                     type = "activity"; kind = activity.Kind.ToString(); phase = activity.Phase.ToString();
@@ -176,7 +180,7 @@ internal sealed partial class WorkspaceService
             name = Preview(name, 256, ref shortened);
             var rowsRemaining = page.Entries.Count - rows.Count;
             var rowBudget = remaining / rowsRemaining;
-            var detailsBudget = Math.Max(0, rowBudget - 1024 - identityCost - 6 * (name?.Length ?? 0));
+            var detailsBudget = Math.Max(0, rowBudget - 1024 - identityCost - imageCost - 6 * (name?.Length ?? 0));
             var fileCost = 0;
             var toolCost = 0;
             var tool = value is AgentActivityEvent activityValue && activityValue.Kind != AgentActivityKind.FileChange
@@ -191,12 +195,12 @@ internal sealed partial class WorkspaceService
             details = Preview(details, Math.Min(8 * 1024, detailsBudget / 18), ref detailsShortened);
             var textBudget = Math.Max(0, detailsBudget - 6 * (details?.Length ?? 0));
             text = Preview(text, Math.Min(32 * 1024, textBudget / 6), ref shortened);
-            var cost = 1024 + identityCost + fileCost + toolCost + 6 * ((text?.Length ?? 0) + (name?.Length ?? 0) + (details?.Length ?? 0));
+            var cost = 1024 + identityCost + imageCost + fileCost + toolCost + 6 * ((text?.Length ?? 0) + (name?.Length ?? 0) + (details?.Length ?? 0));
             if (cost > remaining) return Failure("wire_limit");
             remaining -= cost;
             rows.Add(new(entry.Offset.ToString(CultureInfo.InvariantCulture), type, provider, value.SessionId, run,
                 value.Timestamp, kind, phase, contentId, activityId, parentId, interactionId, name, text, details,
-                shortened, detailsShortened, omitted, files, tool));
+                shortened, detailsShortened, omitted, files, tool, images));
         }
         HistoryCursor? next = null;
         if (page.Next is { } cursor)
@@ -343,4 +347,4 @@ internal sealed record HistoryResponse(string Status, HistoryEntry[] Entries, Hi
 internal sealed record HistoryEntry(string Offset, string EventType, string ProviderId, string SessionId, string? RunId,
     DateTimeOffset Timestamp, string? Kind, string? Phase, string? ContentId, string? ActivityId, string? ParentActivityId,
     string? InteractionId, string? Name, string? Text, string? Details, bool TextTruncated, bool DetailsTruncated, bool BodyOmitted,
-    HistoryFileSet? Files = null, HistoryToolSummary? Tool = null);
+    HistoryFileSet? Files = null, HistoryToolSummary? Tool = null, HistoryImage[]? Images = null);

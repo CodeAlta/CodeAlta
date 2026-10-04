@@ -8,7 +8,7 @@ const entry = (offset: string, changes: Partial<HistoryEntry> = {}): HistoryEntr
   eventType: "activity", kind: "ToolCall", providerId: "provider", runId: "run", sessionId: "session",
   activityId: `tool-${offset}`, parentActivityId: null, phase: "Completed", contentId: null, interactionId: null,
   timestamp: "2026-09-27T00:00:00Z", name: "Read", text: "Done", details: null,
-  tool: null, files: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, ...changes });
+  tool: null, files: null, images: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, ...changes });
 
 test("adjacent known journal tools form bounded sub-card groups without changing records", () => {
   const entries = Array.from({ length: toolGroupLimit + 2 }, (_, index) => entry(String(index)));

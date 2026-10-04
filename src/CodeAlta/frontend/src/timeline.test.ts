@@ -72,12 +72,25 @@ test("file changes inspect supplied paths and count only validated per-file hunk
   assert.equal(item.copyMarkdown, formatDetails(details));
 });
 
+test("a user message lists its images and no other record does", () => {
+  const images = [{ index: 0, title: "Screenshot", mediaType: "image/png" }, { index: 1, title: "Diagram", mediaType: null }];
+  const [user, assistant, onlyImages] = buildTimelineItems([entry({ kind: "User", text: "Look", images }),
+    entry({ offset: "2", contentId: "other", images }), entry({ offset: "3", contentId: "third", kind: "User", text: "", images: images.slice(0, 1) })]);
+  assert.deepEqual(user.images, images);
+  assert.equal(user.markdown, "Look");
+  assert.equal(assistant.images, undefined);
+  // A prompt of images only has no text, and its card still has its images.
+  assert.equal(onlyImages.markdown, "");
+  assert.deepEqual(onlyImages.images, images.slice(0, 1));
+  assert.equal(buildTimelineItems([entry({ kind: "User", images: [{ index: 3, title: "Misplaced", mediaType: null }] })])[0].images, undefined);
+});
+
 function entry(overrides: Partial<Entry>): Entry {
   return {
     offset: "1", eventType: "contentCompleted", providerId: "provider", sessionId: "session", runId: "run",
     timestamp: "2026-09-22T10:00:00Z", kind: "Assistant", phase: null, contentId: "content", activityId: null,
     parentActivityId: null, interactionId: null, name: null, text: "Hello", details: null,
-    tool: null, files: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, ...overrides,
+    tool: null, files: null, images: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, ...overrides,
   };
 }
 

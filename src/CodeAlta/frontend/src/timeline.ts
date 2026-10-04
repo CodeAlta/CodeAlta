@@ -3,6 +3,7 @@ import { parseDelegatedMessage } from "./delegatedMessage";
 import type { IconName } from "./AppIcon";
 import { compactionDetailsMarkdown, splitCheckpointSummary } from "./compactionDetails";
 import { projectFileChanges, type FileChanges } from "./fileChanges";
+import { projectTimelineImages, type TimelineImage } from "./timelineImages";
 import { projectToolRecord, type ToolRecord } from "./toolRecords";
 
 export type HistoryEntry = HistoryResponse["entries"][number];
@@ -26,6 +27,8 @@ export type TimelineItem = Readonly<{
   bodyOmitted: boolean;
   copyMarkdown: string | null;
   fileChanges?: FileChanges;
+  /** The images attached to a user message; their content is read by index. */
+  images?: ReadonlyArray<TimelineImage>;
   toolRecord?: ToolRecord;
   toolPhase?: string;
   toolOutput?: string | null;
@@ -236,6 +239,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     bodyOmitted: entry.bodyOmitted,
     copyMarkdown,
     fileChanges: projectFileChanges(entry),
+    images: category === "user" ? projectTimelineImages(entry.images) : undefined,
     toolRecord: projectToolRecord(entry),
     toolPhase: entry.eventType === "activity" ? entry.phase?.toLowerCase() : undefined,
     toolOutput: entry.tool?.output,

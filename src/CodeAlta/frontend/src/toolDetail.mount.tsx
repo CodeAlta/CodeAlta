@@ -38,7 +38,7 @@ function createFixture() {
       name: tool ? "fixture_tool" : null, text: omitted ? null : tool ? "**Failed** `literal code stays as Markdown`" :
         longUser || longAssistant ? `${longText} ${changedBody ? "changed " : ""}${session}-${index}` : `turn-${index}`,
       details: tool && !omitted ? JSON.stringify({ command: longLine, result: { output: `${longLine}\n${longLine}\n<img src=x onerror=alert(1)>` } }) : null,
-      tool: null, files: null, textTruncated: longUser, detailsTruncated: tool && !omitted, bodyOmitted: tool || longUser,
+      tool: null, files: null, images: null, textTruncated: longUser, detailsTruncated: tool && !omitted, bodyOmitted: tool || longUser,
       ...(longAssistant ? assistantOverride : {}),
       ...(session === "D" ? { phase: "Canceled", text: toolMessage, textTruncated: true } : {}),
       ...(session === "E" ? { kind: "FileChange", phase: "Started", text: "Supplied file record", details: fileDetails } : {}),

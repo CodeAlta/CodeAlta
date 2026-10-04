@@ -12,6 +12,7 @@ import { TimelineMessage } from "./TimelineMessage";
 import { useShellLanguage } from "./shellLanguage";
 import { HistorySource, type HistorySourceTarget } from "./HistorySource";
 import type { OutgoingMessage } from "./sessionOperations";
+import { inlineImageSource, type TimelineImageReader, type TimelineImageSource } from "./timelineImages";
 
 // The production caller supplies readTimeline (workspace.historyTimeline). The injection seam lets the mounted
 // browser fixture exercise this exact component with an isolated, revisioned test journal.
@@ -29,7 +30,7 @@ function revisionOf(cursor: HistoryRequest["cursor"]): string | null {
 }
 
 export function History({ sessionId, observing = true, onNotesChange, onUsageChange, onSettled, onBeforeOlder, onAfterOlder, onNewerOmitted, onNavigationReset,
-  newestRequest, onNewestResult, live, read, readPluginEvents, canInspect, outgoing = [], onAcknowledgeOutgoing, messageCount }: {
+  newestRequest, onNewestResult, live, read, readPluginEvents, readImages, canInspect, outgoing = [], onAcknowledgeOutgoing, messageCount }: {
   sessionId: string; onNotesChange: (markdown: string) => void; onSettled: () => void;
   /** Reports the newest persisted usage record text of the loaded window. */
   onUsageChange?: (text: string | null) => void;
@@ -42,6 +43,8 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
   read: typeof workspace.historyTail;
   /** Reads the cards plugins derive from the finished turns of the loaded window, such as turn statistics. */
   readPluginEvents?: PluginEventsRead;
+  /** Reads the images attached to the persisted user messages of this session. */
+  readImages?: TimelineImageReader;
   canInspect?: () => boolean;
   outgoing?: readonly OutgoingMessage[];
   onAcknowledgeOutgoing?: (keys: readonly string[]) => void;
@@ -217,13 +220,20 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
         && Date.parse(timestamp ?? "") >= Date.parse(echo.timestamp);
     });
     if (index < 0) return true;
-    availableUsers.splice(index, 1); acknowledged.push(echo.key); return false;
+    const [matched] = availableUsers.splice(index, 1);
+    // The live copy of a prompt has no images: the card that holds them stays until the persisted message arrives.
+    if (matched.source === "liveText" && echo.images?.length) { items.splice(items.indexOf(matched), 1); return true; }
+    acknowledged.push(echo.key); return false;
   });
   useEffect(() => { if (acknowledged.length) onAcknowledgeOutgoing?.(acknowledged); }, [JSON.stringify(acknowledged), onAcknowledgeOutgoing]);
+  const echoImages = new Map<string, TimelineImageSource>();
   for (const echo of timeline?.newerOmitted ? [] : echoes) {
-    const item = liveTextItem({ contentId: echo.key, runId: echo.runId, kind: "User", text: echo.text || (echo.imageCount ? t("{count} image attached", { count: echo.imageCount }) : ""),
+    const images = echo.images?.length ? echo.images : undefined;
+    const item = liveTextItem({ contentId: echo.key, runId: echo.runId, kind: "User", text: echo.text || (echo.imageCount && !images ? t("{count} image attached", { count: echo.imageCount }) : ""),
       timestamp: echo.timestamp, sequence: null, isComplete: true, isTruncated: false, startedWithDelta: false });
+    if (images) echoImages.set(`outgoing:${echo.key}`, inlineImageSource(`outgoing:${echo.key}`, images));
     items.push({ source: "history", key: `outgoing:${echo.key}`, item: { ...item,
+      images: images?.map((image, index) => ({ index, title: image.title, mediaType: image.mediaType })),
       subtitle: echo.state === "sending" ? "Sending…" : echo.state === "failed" ? "Failed" : echo.state === "uncertain" ? "Pending" : null } });
   }
   if (pluginCards?.sessionId === sessionId && timeline && !timeline.newerOmitted) {
@@ -253,6 +263,7 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
             return count > 0 ? <span key={phase} data-phase={phase}> · {t(phase === "completed" ? "{count} done" : phase === "failed" ? "{count} failed" : phase === "started" ? "{count} running" : "{count} canceled", { count })}</span> : null;
           })}</span></div>}
         {group.rows.map(item => item.source === "history" ? <TimelineMessage key={`${sessionId}:${item.key}`} item={item.item} canInspect={canInspect} toolTile={group.tools}
+        imageSource={!item.item.images ? undefined : echoImages.get(item.key) ?? (item.item.eventType !== "plugin" ? readImages?.(item.item.key) : undefined)}
         onOpenSource={value => {
           const captured = generation.current;
           setSourceTarget({ ...value, current: () => generation.current === captured && (canInspect?.() ?? true) });

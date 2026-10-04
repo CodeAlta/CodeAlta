@@ -424,6 +424,23 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
             AgentJournalHistoryReader.ReadSourceAsync(stream, revision, start, end, offset, stamp, token), cancellationToken);
     }
 
+    /// <summary>Reads the one persisted event that starts at a journal offset, as a page entry reported it.</summary>
+    /// <param name="sessionId">Selected catalog identity.</param>
+    /// <param name="offset">Starting byte offset of the physical record.</param>
+    /// <param name="cancellationToken">Cancels lookup, lock admission and reading.</param>
+    /// <returns>The event, or null when the record is blank.</returns>
+    /// <remarks>A record is read up to 8 MiB. No journal revision is checked: a journal only grows.</remarks>
+    /// <exception cref="ArgumentException">The session identity is blank.</exception>
+    /// <exception cref="AgentSessionHistoryException">
+    /// The session is missing, the offset is not a record boundary, or the record is too large or not readable.
+    /// </exception>
+    /// <exception cref="IOException">Journal access fails.</exception>
+    /// <exception cref="UnauthorizedAccessException">Journal access is denied.</exception>
+    /// <exception cref="OperationCanceledException">The read is canceled.</exception>
+    public Task<AgentEvent?> ReadHistoryRecordAsync(string sessionId, long offset, CancellationToken cancellationToken)
+        => ReadHistoryStreamAsync(sessionId, (stream, _, token) =>
+            AgentJournalHistoryReader.ReadRecordAsync(stream, offset, token), cancellationToken);
+
     private async Task<T> ReadHistoryStreamAsync<T>(string sessionId,
         Func<Stream, Func<AgentJournalHistoryReader.Stamp>, CancellationToken, Task<T>> read, CancellationToken cancellationToken)
     {

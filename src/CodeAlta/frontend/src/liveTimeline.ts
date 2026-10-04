@@ -6,7 +6,7 @@ function displayEntry(values: Partial<HistoryEntry>): HistoryEntry {
   return { offset: "", sessionId: "", providerId: "", runId: null, activityId: null,
     contentId: null, parentActivityId: null, interactionId: null, eventType: "contentCompleted",
     kind: null, name: null, phase: null, text: null, timestamp: "", details: null,
-    textTruncated: false, detailsTruncated: false, bodyOmitted: false, files: null, tool: null, ...values };
+    textTruncated: false, detailsTruncated: false, bodyOmitted: false, files: null, tool: null, images: null, ...values };
 }
 
 export function liveTextItem(row: SessionDisplayText) {

@@ -211,6 +211,24 @@ public sealed class RuntimeDisplayProjectionTests
     }
 
     [TestMethod]
+    public void UserMessage_IsShownWithoutTheLinesThatNameItsImageFiles()
+    {
+        var publisher = new SessionRuntimeEventPublisher(1);
+        var path = @"C:\catalog\sessions\2026\09\23\session.attachments\one.png";
+        using var details = System.Text.Json.JsonDocument.Parse(
+            """{"items":[{"$type":"text","text":"Look"},{"$type":"localImage","path":"C:\\catalog\\sessions\\2026\\09\\23\\session.attachments\\one.png","displayName":"One","mediaType":"image/png"}]}""");
+        SessionAgentEvent Message(AgentContentKind kind, string contentId) => new("session", new AgentContentCompletedEvent(new ModelProviderId("fake"),
+            "session", DateTimeOffset.UtcNow, new AgentRunId("run"), kind, contentId, null, $"Look{Environment.NewLine}Local image (One): {path}", details.RootElement));
+        publisher.TryPublish(Message(AgentContentKind.User, "user"));
+        publisher.TryPublish(Message(AgentContentKind.Assistant, "assistant"));
+        var text = publisher.Display.GetSnapshot().Sessions.Single().Text;
+        Assert.AreEqual("Look", text.Single(row => row.Kind == AgentContentKind.User).Text);
+        // Only a user message records its own images: other text is never rewritten.
+        StringAssert.EndsWith(text.Single(row => row.Kind == AgentContentKind.Assistant).Text, path);
+        publisher.Complete();
+    }
+
+    [TestMethod]
     public void CatalogAndMetadata_AreCopiedAsValues_NotMutableRecordsOrJsonGraphs()
     {
         var publisher = new SessionRuntimeEventPublisher(1);

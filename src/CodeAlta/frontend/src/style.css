@@ -1462,3 +1462,17 @@ dialog.session-browser .session-batch-delete summary { cursor: pointer; color: v
 .ask-draft-recovery p { margin: 4px 0 0; }
 .ask-unsettled { padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--yellow); font-size: 12px; }
 .ask-unsettled span { flex: 1 1 auto; color: var(--text); }
+/* Images attached to a user message (timeline): a strip of compact thumbnails under the text, with a neutral
+   tile while an image is read and an icon when it cannot be shown; a thumbnail opens the image viewer window,
+   where the image is scaled down to fit and keeps its aspect ratio. */
+.timeline-images { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.timeline-image-thumbnail.bp6-button { flex: none; min-width: 48px; min-height: 0; height: 72px; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); color: var(--muted); transition: border-color 120ms, box-shadow 120ms; }
+.timeline-image-thumbnail.bp6-button:hover, .timeline-image-thumbnail.bp6-button:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.timeline-image-thumbnail.bp6-button[data-state="failed"] { width: 72px; }
+.timeline-image-thumbnail > .bp6-button-text { display: flex; align-items: center; justify-content: center; height: 100%; }
+.timeline-image-thumbnail img { display: block; width: auto; max-width: 180px; height: 70px; object-fit: cover; }
+.timeline-image-placeholder { display: block; width: 96px; height: 70px; background: color-mix(in srgb, var(--muted) 12%, transparent); }
+dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body { padding: 12px; overflow: hidden; }
+dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body > .timeline-image-view { position: relative; flex: 1 1 0; min-height: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.timeline-image-view img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: scale-down; }
+.timeline-image-position { padding: 0 4px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }

@@ -23,6 +23,21 @@ test("capability commits denial before notifying, isolates subscriber faults and
   assert.deepEqual(seen, [false, false]);
   removeFault(); removeGood();
 });
+test("an outgoing echo carries the images of its prompt, and only the newest eight keep them", async () => {
+  const capability = createMutationCapability("epoch");
+  const store = createOwnedSubmissions(async () => { throw new Error("lost"); }, async () => { throw new Error("unused"); });
+  const send = (sessionId: string): SessionSendRequest => ({ expectedEpoch: "epoch", clientRequestId: "key-" + sessionId, sessionId, text: "",
+    selection: { providerKey: "provider", modelId: "model", reasoningEffort: null, agentPromptId: "prompt" }, references: null,
+    images: [{ title: "Shot", mediaType: "image/png", base64: "AAAA" }] });
+  for (let index = 0; index < 9; index++) await store.submit(send("session-" + index), new AbortController().signal, capability, () => {});
+  const [newest] = store.outgoing("epoch", "session-8");
+  assert.deepEqual(newest.images, [{ title: "Shot", mediaType: "image/png", url: "data:image/png;base64,AAAA" }]);
+  assert.equal(newest.state, "uncertain");
+  assert.equal(store.outgoing("epoch", "session-1")[0].images?.length, 1);
+  // The oldest echo is still shown, with the count of its images only.
+  assert.equal(store.outgoing("epoch", "session-0")[0].images, undefined);
+  assert.equal(store.outgoing("epoch", "session-0")[0].imageCount, 1);
+});
 const control = "abcdefab-1234-5678-9abc-abcdefabcdee";
 function row(): SessionReceiptView {
   return { clientRequestId: "key", sessionId: "session", operationId: operation, targetOperationId: null, kind: "Send",

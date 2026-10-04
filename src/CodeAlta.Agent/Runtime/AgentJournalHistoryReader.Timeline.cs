@@ -128,6 +128,50 @@ internal static partial class AgentJournalHistoryReader
         return new(text, offset + used < end ? offset + used : null);
     }
 
+    // One physical record by its starting offset, for a reader that kept the offset of a page entry. A journal
+    // only grows, so no revision is asked for: the offset must still be a record boundary.
+    internal static async Task<AgentEvent?> ReadRecordAsync(Stream stream, long offset, CancellationToken token)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        token.ThrowIfCancellationRequested();
+        var length = stream.Length;
+        if (offset < 0 || offset >= length) throw Failure("invalid_cursor");
+        var probe = new byte[3];
+        if (offset != 0)
+        {
+            stream.Position = offset - 1;
+            await FillAsync(stream, probe.AsMemory(0, 1), token).ConfigureAwait(false);
+            if (probe[0] != (byte)'\n')
+            {
+                stream.Position = 0;
+                await FillAsync(stream, probe, token).ConfigureAwait(false);
+                if (offset != 3 || probe[0] != 0xef || probe[1] != 0xbb || probe[2] != 0xbf) throw Failure("invalid_cursor");
+            }
+        }
+        stream.Position = offset;
+        using var record = new MemoryStream();
+        var block = new byte[64 * 1024];
+        while (true)
+        {
+            var count = await FillAsync(stream, block.AsMemory(0, (int)Math.Min(block.Length, length - offset - record.Length)), token).ConfigureAwait(false);
+            if (count == 0) break;
+            var newline = block.AsSpan(0, count).IndexOf((byte)'\n');
+            record.Write(block, 0, newline >= 0 ? newline : count);
+            if (record.Length > TimelineRecordBytes) throw Failure("record_too_large");
+            if (newline >= 0 || offset + record.Length >= length) break;
+        }
+        var size = (int)record.Length;
+        var bytes = record.GetBuffer();
+        if (size > 0 && bytes[size - 1] == (byte)'\r') size--;
+        if (bytes.AsSpan(0, size).IndexOfAny((byte)'\r', (byte)0) >= 0) throw Failure("unsupported_format");
+        string text;
+        try { text = StrictUtf8.GetString(bytes, 0, size); }
+        catch (DecoderFallbackException) { throw Failure("unsupported_format"); }
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        try { return JsonSerializer.Deserialize(text, AgentJsonSerializerContext.Default.AgentEvent); }
+        catch (Exception error) when (error is JsonException or NotSupportedException) { throw Failure("corrupt_record"); }
+    }
+
     private static void CheckStamp(Stream stream, Stamp expected, Func<Stamp> getStamp)
     {
         if (stream.Length != expected.Length || getStamp() != expected) throw Failure("history_changed");

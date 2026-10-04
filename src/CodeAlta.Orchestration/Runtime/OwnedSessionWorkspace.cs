@@ -18,6 +18,7 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     private readonly Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>>? _timelineHistory;
     private readonly Func<AgentHistoryRevision, long, long, long, CancellationToken, Task<AgentHistorySourceChunk>>? _historySource;
     private readonly SessionViewJournalStore? _journals;
+    private readonly Func<string, long, int, Task<PromptImageReadResult>>? _promptImage;
     private readonly Func<string, CancellationToken, Task<string>> _notes = static (_, _) => Task.FromException<string>(new InvalidOperationException("Notes reader not configured."));
     private readonly HashSet<ReadOperation> _active = [];
     private bool _closed;
@@ -37,6 +38,8 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         _tailHistory = store.ReadHistoryTailPageAsync;
         _timelineHistory = store.ReadTimelinePageAsync;
         _historySource = store.ReadHistorySourceAsync;
+        var images = new PromptImageAttachmentStore(projects.Options);
+        _promptImage = (sessionId, offset, index) => ReadPromptImageCoreAsync(store, images, sessionId, offset, index);
     }
 
     internal OwnedSessionWorkspace(ProjectCatalog projects, SessionViewJournalStore journals, SessionRuntimeService runtime)
@@ -163,6 +166,54 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(revision.SessionId);
         return Admit(() => (_historySource ?? throw new InvalidOperationException("Source reader not configured."))
             (revision, start, end, offset, CancellationToken.None), cancellationToken);
+    }
+
+    /// <summary>Reads one image of a persisted user message through the same admitted/drained store owner.</summary>
+    /// <param name="sessionId">Selected durable session identity.</param>
+    /// <param name="offset">Journal offset of the user message, as a history page reported it.</param>
+    /// <param name="index">Position of the image among those of the message (<see cref="PromptImageHistory.ReadImages"/>).</param>
+    /// <param name="cancellationToken">Cancels this wait, not an admitted underlying read.</param>
+    /// <returns>
+    /// The image, when the message records a file of the session's prompt-image folder that is a supported
+    /// image of at most <see cref="PromptImageHistory.MaximumImageBytes"/>; otherwise the reason.
+    /// </returns>
+    /// <exception cref="ArgumentException">The session identity is blank.</exception>
+    /// <exception cref="ObjectDisposedException">Admission is closed.</exception>
+    /// <exception cref="InvalidOperationException">Admission is full or the route is not configured.</exception>
+    /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
+    /// <exception cref="Exception">The session lookup fails.</exception>
+    public Task<PromptImageReadResult> ReadPromptImageAsync(string sessionId, long offset, int index, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return Admit(() => (_promptImage ?? throw new InvalidOperationException("Prompt image reader not configured."))
+            (sessionId, offset, index), cancellationToken);
+    }
+
+    private static async Task<PromptImageReadResult> ReadPromptImageCoreAsync(FileSystemAgentSessionStore store,
+        PromptImageAttachmentStore images, string sessionId, long offset, int index)
+    {
+        var session = await store.GetSessionAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+        if (session is null) return new(PromptImageReadStatus.MissingSession);
+        AgentEvent? record;
+        try { record = await store.ReadHistoryRecordAsync(sessionId, offset, CancellationToken.None).ConfigureAwait(false); }
+        catch (AgentSessionHistoryException error)
+        {
+            return new(error.Code switch
+            {
+                "missing_session" => PromptImageReadStatus.MissingSession,
+                "invalid_cursor" => PromptImageReadStatus.MissingRecord,
+                _ => PromptImageReadStatus.ReadFailed,
+            });
+        }
+
+        if (record is not AgentContentCompletedEvent { Kind: AgentContentKind.User } message) return new(PromptImageReadStatus.MissingRecord);
+        var recorded = PromptImageHistory.ReadImages(message.Details);
+        if (index < 0 || index >= recorded.Count) return new(PromptImageReadStatus.MissingImage);
+        string directory;
+        // The folder images are saved to: the path comes from the record, the authority from the session.
+        try { directory = images.GetAttachmentDirectory(new SessionViewDescriptor { SessionId = sessionId, CreatedAt = session.CreatedAt }); }
+        catch (ArgumentException) { return new(PromptImageReadStatus.OutsideStore); }
+        return await PromptImageHistory.ReadFileAsync(directory, recorded[index].Path, PromptImageHistory.MaximumImageBytes, CancellationToken.None).ConfigureAwait(false);
     }
 
     private async Task<OwnedWorkspaceSnapshot> ReadSnapshotCoreAsync()

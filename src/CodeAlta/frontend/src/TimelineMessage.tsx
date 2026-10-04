@@ -8,6 +8,8 @@ import { FileChangeInspection } from "./FileChangeInspection";
 import { ToolRecordInspection } from "./ToolRecordInspection";
 import type { HistorySourceTarget } from "./HistorySource";
 import { TimelineDetails } from "./TimelineDetails";
+import { TimelineImages } from "./TimelineImageStrip";
+import type { TimelineImageSource } from "./timelineImages";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
@@ -22,8 +24,10 @@ export function commandPreview(source: string): string {
   return line.slice(0, end) + "…";
 }
 
-export function TimelineMessage({ item, canInspect, historySource, onOpenSource, toolTile = false }: { item: TimelineItem; canInspect?: () => boolean; toolTile?: boolean;
-  historySource?: HistorySourceTarget; onOpenSource?: (target: HistorySourceTarget) => void }) {
+export function TimelineMessage({ item, canInspect, historySource, onOpenSource, toolTile = false, imageSource }: { item: TimelineItem; canInspect?: () => boolean; toolTile?: boolean;
+  historySource?: HistorySourceTarget; onOpenSource?: (target: HistorySourceTarget) => void;
+  /** Reads the images of the item, when it has some. */
+  imageSource?: TimelineImageSource }) {
   const { t, locale } = useShellLanguage();
   const timestamp = timelineTime(item.timestamp, locale);
   const toolTrigger = useRef<HTMLButtonElement>(null);
@@ -164,6 +168,7 @@ export function TimelineMessage({ item, canInspect, historySource, onOpenSource,
         <div id={bodyId}>{expanded ? <MarkdownContent source={body} timelineCodeBlocks />
           : <p className="long-message-preview">{t("Preview (plain text):")} {plainTextPreview(body)}…</p>}</div>
       </> : body && <MarkdownContent source={body} timelineCodeBlocks />)}
+      {item.images && <TimelineImages images={item.images} source={imageSource} />}
       {item.fileChanges && <FileChangeInspection key={item.fileChanges.source} changes={item.fileChanges} canInspect={canInspect} />}
       {details && <TimelineDetails item={details.item} current={detailCurrent} onClose={closeDetails} />}
     </div>

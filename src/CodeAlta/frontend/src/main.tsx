@@ -9,7 +9,7 @@ import { settingsNavigation } from "./settingsNavigation";
 import { colorSchemeAttribute } from "./colorSchemes";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
-  sessionAsks, sessionNotes, sessionPluginEvents, projectGit, composerStatus, sessionUserInput, type BootStatus,
+  sessionAsks, sessionNotes, sessionPluginEvents, projectGit, promptImages, composerStatus, sessionUserInput, type BootStatus,
   type ReminderListRequest,
   type ReminderListResponse,
   type ReminderDetailRequest,
@@ -18,6 +18,7 @@ import {
 import { loadWorkspace, sessionListSignature, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
 import { readTimeline } from "./readTimeline";
+import { createTimelineImageCache } from "./timelineImages";
 import { SessionContentLayout } from "./SessionContentLayout";
 import { SessionTabStrip } from "./SessionTabStrip";
 import { sessionTabPresentation } from "./sessionTabLayout";
@@ -328,6 +329,7 @@ function App() {
     return () => { lifetime.abort(); unsubscribe(); };
   }, []);
   const [submissions] = useState(() => createOwnedSubmissions(sessionOperations.send, sessionOperations.abort));
+  const [timelineImages] = useState(() => createTimelineImageCache(promptImages.read));
   const reminderCapability = useRef<ReturnType<typeof createMutationCapability> | undefined>(undefined);
   const [reminderActions] = useState(() => createReminderActions(reminder.create, reminder.delete, (target, reply) => {
     const capability = reminderCapability.current;
@@ -1785,7 +1787,7 @@ function App() {
                 readReminders={readReminders} reminderActions={reminderActions} status={status} mutation={mutation}
                 activeReminderCount={activeReminders ? activeReminders.get(row.id) ?? 0 : null}
                 autoSend={autoSend.current?.sessionId === row.id ? { text: autoSend.current.text, consume: () => { autoSend.current = null; } } : null}
-                submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} draftIndicators={draftIndicators}
+                submissions={submissions} timelineImages={timelineImages} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} draftIndicators={draftIndicators}
                 askActions={askActions} display={owners.display} scrollMemory={scrollMemory} runtimeReader={owners.runtimeReader}
                 permissionReviewer={owners.permissionReviewer} inputReviewer={owners.inputReviewer} configuration={configurationState.snapshot}
                 selections={nextSendSelections} timelineCommand={timelineCommand} /></ProjectReferenceContext.Provider>;
@@ -1997,7 +1999,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   status: epoch ? <ComposerStatus epoch={epoch} projectId={id ?? null} read={composerStatus.read} /> : undefined }), [epoch, id, name, path]);
 }
 
-function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity }: {
+function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, timelineImages, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity }: {
   /** Reports whether the session is working while its panel watches it. */
   onRunActivity?: (running: boolean | null) => void;
   /** A draft prompt to send once this session's composer holds it. */
@@ -2025,6 +2027,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   status: BootStatus | undefined;
   mutation: { epoch: string; capability: ReturnType<typeof createMutationCapability> } | undefined;
   submissions: ReturnType<typeof createOwnedSubmissions>;
+  timelineImages: ReturnType<typeof createTimelineImageCache>;
   steering: ReturnType<typeof createSteeringSubmissions>;
   compaction: ReturnType<typeof createCompactionSubmissions>;
   abortRuns: ReturnType<typeof createAbortRunSubmissions>;
@@ -2115,6 +2118,9 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   const readPluginEvents = useMemo(() => pluginEpoch === null ? undefined
     : createPluginEventsRead(sessionPluginEvents.read, { epoch: pluginEpoch, sessionId: session.id, projectId: selectedProjectId }),
   [pluginEpoch, session.id, selectedProjectId]);
+  // Reading is not sending: the images of an archived project's session are shown too.
+  const readImages = useMemo(() => pluginEpoch === null ? undefined : timelineImages.reader(pluginEpoch, session.id),
+    [timelineImages, pluginEpoch, session.id]);
   const infoControl = <Button ref={infoTrigger} variant="minimal" className="session-info-trigger" icon={<AppIcon name="info" size={16} />}
     aria-label={t("Session info")} title={`${t("Session info")} (Ctrl+G, Ctrl+T)`} aria-haspopup="dialog" aria-expanded={infoOpen}
     onClick={openInfo} />;
@@ -2136,7 +2142,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
         }}
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}
           onNavigationReset={resetMessageNotice} newestRequest={newest.requestRef} onNewestResult={newest.onResult}
-          read={readTimeline} readPluginEvents={readPluginEvents}
+          read={readTimeline} readPluginEvents={readPluginEvents} readImages={readImages}
           outgoing={ownedSession && status?.hostEpoch ? submissions.outgoing(status.hostEpoch, session.id) : []}
           onAcknowledgeOutgoing={submissions.acknowledgeOutgoing}
           live={ownedSession ? live?.snapshot?.session ?? null : null} />

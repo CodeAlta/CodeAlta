@@ -35,7 +35,9 @@ type PendingSend = { request: Readonly<SessionSendRequest>; inFlight: boolean; w
 type PendingAbort = { intent: AbortIntent; inFlight: boolean; waiter?: Promise<SessionAdmission> };
 
 export type OutgoingMessage = Readonly<{ key: string; epoch: string; sessionId: string; text: string;
-  imageCount: number; timestamp: string; runId: string | null; state: "sending" | "accepted" | "uncertain" | "failed" }>;
+  imageCount: number; timestamp: string; runId: string | null; state: "sending" | "accepted" | "uncertain" | "failed";
+  /** The images of the prompt, for its card: each URL is built once and shares the request's content. */
+  images?: readonly Readonly<{ title: string; mediaType: string; url: string }>[] }>;
 
 function wellFormed(value: string): boolean {
   for (let index = 0; index < value.length; index++) {
@@ -203,7 +205,13 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
       const previousEcho = outgoing.get(echoKey);
       if (!previousEcho && outgoing.size >= 256) outgoing.delete(outgoing.keys().next().value!);
       outgoing.set(echoKey, Object.freeze({ key: echoKey, epoch: request.expectedEpoch, sessionId: request.sessionId,
-        text: request.text, imageCount: request.images?.length ?? 0, timestamp: previousEcho?.timestamp ?? new Date().toISOString(), runId: previousEcho?.runId ?? null, state: "sending" }));
+        text: request.text, imageCount: request.images?.length ?? 0, timestamp: previousEcho?.timestamp ?? new Date().toISOString(), runId: previousEcho?.runId ?? null, state: "sending",
+        images: previousEcho?.images ?? Object.freeze((entry.request.images ?? []).map(image =>
+          Object.freeze({ title: image.title, mediaType: image.mediaType, url: `data:${image.mediaType};base64,${image.base64}` }))) }));
+      // Only the newest eight echoes keep their images: a card that stays failed or pending does not hold them forever.
+      let withImages = 0;
+      for (const [key, row] of [...outgoing].reverse())
+        if (row.images?.length && ++withImages > 8) outgoing.set(key, Object.freeze({ ...row, images: undefined }));
       change.changed();
       const captured = entry.request;
       const started = Date.now();

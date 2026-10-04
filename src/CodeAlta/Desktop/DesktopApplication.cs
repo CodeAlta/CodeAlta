@@ -224,6 +224,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionPluginEventsService(new SessionPluginEventsService(host.WorkspaceReads, host.ProjectCatalog, epoch));
                     builder.AddProjectFilesService(new ProjectFilesService(host.ProjectCatalog, epoch, host.ProjectFileSearchService));
                     builder.AddProjectGitService(new ProjectGitService(host.ProjectCatalog, epoch));
+                    builder.AddPromptImagesService(new PromptImagesService(host.WorkspaceReads, epoch));
                     builder.AddComposerStatusService(new ComposerStatusService(host.ProjectCatalog, epoch, roots.Home));
                     builder.AddSessionUserInputService(new SessionUserInputService(host.RuntimeService.Permissions, epoch, options.EnableOwnedUserInput));
                     builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));
@@ -365,6 +366,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddSessionPluginEventsService(new SessionPluginEventsService());
             builder.AddProjectFilesService(new ProjectFilesService());
             builder.AddProjectGitService(new ProjectGitService());
+            builder.AddPromptImagesService(new PromptImagesService());
             builder.AddComposerStatusService(new ComposerStatusService());
             builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
             builder.AddModelCatalogService(new ModelCatalogService());

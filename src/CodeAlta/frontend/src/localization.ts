@@ -670,6 +670,8 @@ export const messages = dictionary({
   "Unavailable": ["No disponible", "Indisponible", "Nicht verfügbar", "利用不可", "不可用"],
   "Changed on disk": ["Cambiado en disco", "Modifié sur le disque", "Auf Datenträger geändert", "ディスク上で変更", "磁盘上已更改"],
   "Ln {line}, Col {column}": ["Lín. {line}, col. {column}", "Li {line}, col {column}", "Zeile {line}, Spalte {column}", "{line} 行、{column} 列", "行 {line}，列 {column}"],
+  "Previous image": ["Imagen anterior", "Image précédente", "Vorheriges Bild", "前の画像", "上一张图片"],
+  "Next image": ["Imagen siguiente", "Image suivante", "Nächstes Bild", "次の画像", "下一张图片"],
   "Working folder": ["Carpeta de trabajo", "Dossier de travail", "Arbeitsordner", "作業フォルダー", "工作文件夹"],
   "Branch {branch}": ["Rama {branch}", "Branche {branch}", "Branch {branch}", "ブランチ {branch}", "分支 {branch}"],
   "Detached at {branch}": ["Separado en {branch}", "Détaché sur {branch}", "Losgelöst bei {branch}", "{branch} でデタッチ", "分离于 {branch}"],

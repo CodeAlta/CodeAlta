@@ -506,6 +506,26 @@ prompt with a routing envelope. The timeline shows it as an **Agent message** ca
 message and the start of the sending session's id, and only the text that was sent; **Details** names
 the sending session.
 
+### Images of a prompt
+
+A prompt sent with pasted images shows them in its **You** card, as a row of thumbnails under the text
+(or alone, for a prompt of images only). The card's text is what was typed: the lines that name the
+image files are left out, and the card's **Details** list the images without their paths. Thumbnails
+appear as soon as the prompt is sent, from the images the page still holds, and stay when the persisted
+message replaces the pending card. Images of earlier messages, including those sent from the terminal
+UI and those of an archived project's sessions, are read from the host when their card scrolls into
+view; the 32 most recently shown (48 MiB of text at most) are kept, so a card drawn again does not
+read them again. A tile is neutral while its image is read and shows a
+crossed-out picture when the image cannot be shown (the file is gone, is not a supported image, or is
+over 8 MiB); clicking that tile reads the image again.
+
+Clicking a thumbnail opens the image in a window titled with the image's title. The window opens at
+the image's own size when it fits and otherwise at no more than 80% of the main window's width and
+height, with the image scaled down to fit and never enlarged or distorted. It moves and resizes like
+the other windows, and its title bar restores the default size. `Left`/`Right` or the two arrows in
+the title bar go to the previous or next image of the same message (past the last comes the first),
+and `Escape` closes the window.
+
 ### Turn statistics
 
 When a turn ends, the built-in Statistics plugin adds a **Turn statistics** row after it, as in the
@@ -615,6 +635,27 @@ its tracked files differ from the last commit. Archived projects are answered to
   fails (for example in a repository without a commit) or is stopped, the answer is still `ok` with
   the branch and the three counts unset.
 - An answer is reused for 5 seconds per project folder, and the host runs one git process at a time.
+
+`promptImages.read` returns one image of a persisted user message as base64 with its media type. It
+takes the host epoch, a session id, the journal offset of the message (the `offset` of its history
+row) and the index of the image in the row's `images` list (`index`, `title`, `mediaType`); it takes
+no path and no project id, so the sessions of archived projects are answered too.
+
+- The host reads that journal record again and takes the path the record holds. The record must be a
+  user message (`missing_record` otherwise, `missing_session` for an unknown session) and have an
+  image at that index (`missing_image`).
+- The file must be in the session's prompt-image folder (`<catalog>/sessions/yyyy/MM/dd/<session
+  id>.attachments`, where sent images are saved). A path elsewhere, a relative path, and a path that
+  crosses a symbolic link or junction at or below that folder are `outside_store`; a file that is gone
+  is `missing_file`.
+- The content decides the type: PNG, JPEG, GIF, WebP and BMP are served, anything else (SVG included)
+  is `unsupported_type`. A file over 8 MiB is `too_large`.
+- Other refusals are `stale_epoch`, `unavailable` (catalog-only mode), `invalid` (a malformed
+  request), `capacity` (eight host reads are already running; the page asks again), `closed` and
+  `read_failed`.
+
+The page shows the image through a `data:` URL: the content security policy allows `data:` images and
+no `blob:` URL, and is unchanged.
 
 ### Commands, help and keyboard shortcuts
 

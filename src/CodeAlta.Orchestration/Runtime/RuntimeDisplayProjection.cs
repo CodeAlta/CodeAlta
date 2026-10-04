@@ -191,7 +191,11 @@ public sealed class RuntimeDisplayProjection
             case SessionAgentEvent { Event: AgentContentDeltaEvent delta }:
                 return ProjectText(session, delta.RunId?.Value, delta.ContentId, delta.Kind, delta.Delta, delta.Timestamp, complete: false);
             case SessionAgentEvent { Event: AgentContentCompletedEvent completed }:
-                return ProjectText(session, completed.RunId?.Value, completed.ContentId, completed.Kind, completed.Content, completed.Timestamp, complete: true);
+                // A user message is shown without the lines that name its image files, like its persisted record.
+                return ProjectText(session, completed.RunId?.Value, completed.ContentId, completed.Kind,
+                    completed is { Kind: AgentContentKind.User, Content: { } typed }
+                        ? PromptImageHistory.RemoveImageLines(typed, PromptImageHistory.ReadImages(completed.Details)) : completed.Content,
+                    completed.Timestamp, complete: true);
             case SessionAgentEvent { Event: AgentActivityEvent activity }:
                 return ProjectToolActivity(session, activity);
             default:
