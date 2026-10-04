@@ -29,7 +29,8 @@ internal sealed partial class WorkspaceService
         {
             var actual = reads.ReadSnapshotAsync(token);
             var snapshot = await actual.ConfigureAwait(false);
-            return ProjectSnapshot(snapshot.Projects, snapshot.Sessions, snapshot.SessionHeaders);
+            var (projects, sessions) = WithExistingFolders(snapshot.Projects, snapshot.Sessions, Directory.Exists);
+            return ProjectSnapshot(projects, sessions, snapshot.SessionHeaders);
         };
     }
 
@@ -85,23 +86,28 @@ internal sealed partial class WorkspaceService
                 sessions.Add(session);
             }
             if (journals is null) return ProjectSnapshot(projects, sessions);
-            var headers = new Dictionary<string, SessionViewJournalHeader>(StringComparer.Ordinal);
-            foreach (var session in sessions.OrderByDescending(static value => value.UpdatedAt)
-                         .ThenByDescending(static value => value.SessionId, StringComparer.Ordinal).Take(500))
-            {
-                if (session.SessionId.Length is < 1 or > 256 || session.CreatedAt == default) continue;
-                SessionViewJournalHeader? header;
-                try { header = await journals.ReadHeaderAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false); }
-                catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
-                {
-                    continue; // Unreadable scope evidence cannot suppress an otherwise visible session.
-                }
-                if (header is not null && header.SessionId == session.SessionId && header.CreatedAt == session.CreatedAt
-                    && header.WorkingDirectory == session.WorkspacePath)
-                    headers.TryAdd(session.SessionId, header);
-            }
-            return ProjectSnapshot(projects, sessions, headers);
+            // Unreadable scope evidence cannot suppress an otherwise visible session.
+            var headers = await CodeAlta.Orchestration.Runtime.OwnedSessionWorkspace.ReadSessionHeadersAsync(sessions, journals, cancellationToken).ConfigureAwait(false);
+            var shown = WithExistingFolders(projects, sessions, Directory.Exists);
+            return ProjectSnapshot(shown.Projects, shown.Sessions, headers);
         }
+    }
+
+    /// <summary>
+    /// Leaves out what points to a folder that is no longer there: a project whose folder is gone, and a
+    /// session recorded in such a folder. Nothing is removed from the catalog, so both are back with the folder.
+    /// </summary>
+    internal static (IReadOnlyList<ProjectDescriptor> Projects, IReadOnlyList<AgentSessionMetadata> Sessions) WithExistingFolders(
+        IReadOnlyList<ProjectDescriptor> projects, IReadOnlyList<AgentSessionMetadata> sessions, Func<string, bool> folderExists)
+    {
+        var known = new Dictionary<string, bool>(StringComparer.Ordinal);
+        bool Exists(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return true; // Nothing to look for: the row is kept as it is.
+            if (!known.TryGetValue(path, out var exists)) known[path] = exists = folderExists(path);
+            return exists;
+        }
+        return (projects.Where(project => Exists(project.ProjectPath)).ToArray(), sessions.Where(session => Exists(session.WorkspacePath)).ToArray());
     }
 
     internal static WorkspaceSnapshot ProjectSnapshot(

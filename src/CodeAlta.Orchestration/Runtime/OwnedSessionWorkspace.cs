@@ -223,27 +223,47 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         var sessions = new List<AgentSessionMetadata>();
         // Fully consume the cached iterator, including its final awaited cache-completion write.
         await foreach (var session in _sessions(CancellationToken.None).ConfigureAwait(false)) sessions.Add(session);
-        var headers = new Dictionary<string, SessionViewJournalHeader>(StringComparer.Ordinal);
-        if (_journals is not null)
-        {
-            // Only the rows eligible for the bounded desktop projection need header scope evidence.
-            foreach (var session in sessions.OrderByDescending(static value => value.UpdatedAt)
-                         .ThenByDescending(static value => value.SessionId, StringComparer.Ordinal).Take(500))
-            {
-                if (session.SessionId.Length is < 1 or > 256 || session.CreatedAt == default) continue;
-                SessionViewJournalHeader? header;
-                try { header = await _journals.ReadHeaderAsync(session.SessionId, session.CreatedAt, CancellationToken.None).ConfigureAwait(false); }
-                catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
-                {
-                    // Header enrichment is optional authority, not a reason to omit a cached session row.
-                    continue;
-                }
-                if (header is not null && header.SessionId == session.SessionId && header.CreatedAt == session.CreatedAt
-                    && header.WorkingDirectory == session.WorkspacePath)
-                    headers.TryAdd(session.SessionId, header);
-            }
-        }
+        var headers = _journals is null ? new Dictionary<string, SessionViewJournalHeader>(StringComparer.Ordinal)
+            : await ReadSessionHeadersAsync(sessions, _journals, CancellationToken.None).ConfigureAwait(false);
         return new(projects, sessions) { SessionHeaders = headers };
+    }
+
+    /// <summary>
+    /// Reads the journal header of each listed session that the bounded desktop projection can show: the
+    /// evidence of its scope. A header that names the session and its working directory is the session's,
+    /// and the instant it records is the session's creation time: <paramref name="sessions"/> is updated
+    /// where the listed time is another one.
+    /// </summary>
+    /// <remarks>
+    /// A session's list entry comes from the provider's own record. Sessions created before the two shared
+    /// one instant have a record stamped a few milliseconds after the header, until they are resumed.
+    /// </remarks>
+    /// <exception cref="OperationCanceledException">The caller canceled.</exception>
+    public static async Task<Dictionary<string, SessionViewJournalHeader>> ReadSessionHeadersAsync(
+        List<AgentSessionMetadata> sessions, SessionViewJournalStore journals, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(sessions);
+        ArgumentNullException.ThrowIfNull(journals);
+        var headers = new Dictionary<string, SessionViewJournalHeader>(StringComparer.Ordinal);
+        // Only the rows eligible for the bounded desktop projection need header scope evidence.
+        var eligible = sessions.Select(static (session, index) => (session, index))
+            .OrderByDescending(static value => value.session.UpdatedAt)
+            .ThenByDescending(static value => value.session.SessionId, StringComparer.Ordinal).Take(500).ToArray();
+        foreach (var (session, index) in eligible)
+        {
+            if (session.SessionId.Length is < 1 or > 256 || session.CreatedAt == default) continue;
+            SessionViewJournalHeader? header;
+            try { header = await journals.ReadHeaderAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
+            {
+                // Header enrichment is optional authority, not a reason to omit a cached session row.
+                continue;
+            }
+            if (header is null || header.SessionId != session.SessionId || header.WorkingDirectory != session.WorkspacePath
+                || header.CreatedAt == default || !headers.TryAdd(session.SessionId, header)) continue;
+            if (header.CreatedAt != session.CreatedAt) sessions[index] = session with { CreatedAt = header.CreatedAt };
+        }
+        return headers;
     }
 
     private Task<T> Admit<T>(Func<Task<T>> read, CancellationToken cancellationToken)

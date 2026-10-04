@@ -749,6 +749,7 @@ export const messages = dictionary({
   "Stop": ["Detener", "Arrêter", "Anhalten", "停止", "停止"],
   "Load all previous messages": ["Cargar todos los mensajes anteriores", "Charger tous les messages précédents", "Alle früheren Nachrichten laden", "以前のメッセージをすべて読み込む", "加载全部之前的消息"],
   "Load options": ["Opciones de carga", "Options de chargement", "Ladeoptionen", "読み込みオプション", "加载选项"],
+  "This session was recorded for another project or folder than the one it is listed under.": ["Esta sesión se registró para otro proyecto o carpeta distinto de aquel en el que aparece.", "Cette session a été enregistrée pour un autre projet ou dossier que celui sous lequel elle est listée.", "Diese Sitzung wurde für ein anderes Projekt oder einen anderen Ordner aufgezeichnet als den, unter dem sie aufgeführt ist.", "このセッションは、一覧に表示されているものとは別のプロジェクトまたはフォルダーで記録されました。", "此会话记录在与其所列项目或文件夹不同的项目或文件夹下。"],
   "Open settings": ["Abrir configuración", "Ouvrir les paramètres", "Einstellungen öffnen", "設定を開く", "打开设置"],
   "Copy project name": ["Copiar nombre del proyecto", "Copier le nom du projet", "Projektnamen kopieren", "プロジェクト名をコピー", "复制项目名称"],
   "Copy project ID": ["Copiar ID del proyecto", "Copier l'ID du projet", "Projekt-ID kopieren", "プロジェクト ID をコピー", "复制项目 ID"],

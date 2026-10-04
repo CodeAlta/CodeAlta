@@ -87,6 +87,99 @@ public sealed class DesktopSessionHierarchyTests
     }
 
     [TestMethod]
+    public async Task SessionWhoseRecordIsStampedAfterItsHeader_KeepsItsProjectAndTheHeaderTime()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-header-time-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var global = Path.Combine(root, "global"); var projectPath = Path.Combine(root, "project");
+            foreach (var path in new[] { global, projectPath }) Directory.CreateDirectory(path);
+            var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = global });
+            var project = await catalog.UpsertFromPathAsync(projectPath);
+            var journals = new SessionViewJournalStore(catalog.Options);
+            var store = journals.CreateSessionStore();
+            // Older sessions: the header names the instant the session was created, the provider's own record
+            // an instant a few milliseconds later. Until such a session is resumed the list has the later one.
+            var header = new DateTimeOffset(2026, 9, 21, 17, 28, 57, 648, TimeSpan.Zero);
+            var recorded = header.AddMilliseconds(11);
+            await journals.EnsureHeaderAsync(new SessionViewDescriptor
+            {
+                SessionId = "older", Kind = SessionViewKind.ProjectSession, ProjectRef = project.Id, ProviderId = "fixture",
+                ProviderKey = "fixture", WorkingDirectory = projectPath, Title = "Older", CreatedAt = header, UpdatedAt = header,
+            });
+            await store.UpsertSessionAsync(new AgentSessionSummary
+            {
+                SessionId = "older", ProviderId = new("fixture"), ProviderKey = "fixture", WorkingDirectory = projectPath,
+                Title = "Older", CreatedAt = recorded, UpdatedAt = recorded,
+            });
+
+            await using var reads = new OwnedSessionWorkspace(catalog, journals);
+            var owned = await reads.ReadSnapshotAsync(CancellationToken.None);
+            Assert.AreEqual(header, owned.Sessions.Single().CreatedAt, "the header's instant is the session's");
+            Assert.AreEqual(header, owned.SessionHeaders["older"].CreatedAt);
+
+            foreach (var service in new[] { new WorkspaceService(reads, catalog, "11111111-1111-4111-8111-111111111111"), new WorkspaceService(global) })
+            {
+                var row = (await service.SnapshotAsync(new(), CancellationToken.None)).Sessions.Single();
+                Assert.AreEqual("project", row.ScopeKind);
+                Assert.AreEqual(project.Id, row.ProjectId);
+                Assert.AreEqual(header, row.CreatedAt);
+            }
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
+    public async Task ProjectWhoseFolderIsGone_IsLeftOutWithItsSessions()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-missing-folder-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var global = Path.Combine(root, "global"); var keptPath = Path.Combine(root, "kept"); var gonePath = Path.Combine(root, "gone");
+            foreach (var path in new[] { global, keptPath, gonePath }) Directory.CreateDirectory(path);
+            var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = global });
+            var kept = await catalog.UpsertFromPathAsync(keptPath);
+            var gone = await catalog.UpsertFromPathAsync(gonePath);
+            var journals = new SessionViewJournalStore(catalog.Options);
+            var store = journals.CreateSessionStore();
+            var created = new DateTimeOffset(2026, 9, 23, 0, 0, 0, TimeSpan.Zero);
+            foreach (var (id, project, path) in new[] { ("in-kept", kept.Id, keptPath), ("in-gone", gone.Id, gonePath) })
+            {
+                await journals.EnsureHeaderAsync(new SessionViewDescriptor
+                {
+                    SessionId = id, Kind = SessionViewKind.ProjectSession, ProjectRef = project, ProviderId = "fixture",
+                    ProviderKey = "fixture", WorkingDirectory = path, Title = id, CreatedAt = created, UpdatedAt = created,
+                });
+                await store.UpsertSessionAsync(new AgentSessionSummary
+                {
+                    SessionId = id, ProviderId = new("fixture"), ProviderKey = "fixture", WorkingDirectory = path,
+                    Title = id, CreatedAt = created, UpdatedAt = created,
+                });
+            }
+            await using var reads = new OwnedSessionWorkspace(catalog, journals);
+            var services = new[] { new WorkspaceService(reads, catalog, "11111111-1111-4111-8111-111111111111"), new WorkspaceService(global) };
+            foreach (var service in services)
+                Assert.HasCount(2, (await service.SnapshotAsync(new(), CancellationToken.None)).Sessions);
+
+            Directory.Delete(gonePath, recursive: true);
+            foreach (var service in services)
+            {
+                var snapshot = await service.SnapshotAsync(new(), CancellationToken.None);
+                Assert.AreEqual(kept.Id, snapshot.Projects.Single().Id);
+                Assert.AreEqual("in-kept", snapshot.Sessions.Single().Id);
+            }
+
+            // Nothing was removed from the catalog: the project and its session are back with the folder.
+            Directory.CreateDirectory(gonePath);
+            foreach (var service in services)
+                Assert.HasCount(2, (await service.SnapshotAsync(new(), CancellationToken.None)).Sessions);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
     public void OversizeParentAndFullTitle_DoNotHideRowOrExceedWireBudget()
     {
         var session = new AgentSessionMetadata("id", DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch,

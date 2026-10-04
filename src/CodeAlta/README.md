@@ -58,8 +58,14 @@ switch themes. Demo messages disappear on refresh. `npm run build:demo` produces
 as static files under `dist/`; `npm run build` builds the production NeoAstra-connected frontend.
 The packaged desktop uses the generated bridge and never includes the demo backend.
 
-Session Info's **Recorded creation time** is the already-loaded catalog summary's
-creation timestamp (possibly cached), not runtime start, elapsed time or last activity.
+Session Info's **Recorded creation time** is the instant the session's journal header records; a
+session whose header cannot be read shows the catalog summary's (possibly cached) timestamp. It is
+not runtime start, elapsed time or last activity.
+
+A project whose folder no longer exists is left out of the workspace, with the sessions recorded in
+that folder; nothing is removed from the catalog, so they are back when the folder is. A listed
+session that was recorded for another project or folder than the one it is listed under opens as
+**Session unavailable**.
 Year-1/default values are unavailable; no header, update-time, clock or filesystem
 fallback is used. The dialog preserves the supplied ISO representation, whose offset
 may already be UTC after cache projection. Missing/null/malformed client fields show

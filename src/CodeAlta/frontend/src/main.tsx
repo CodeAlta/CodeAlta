@@ -1846,6 +1846,10 @@ function App() {
                        onClick={() => { invalidateCreation(); setDraftHandoffNotice("Transfer canceled locally. Creation may still complete; original text retained. Inspect sessions; nothing sent."); }} />}
                   </> }} />
                </NewSessionWorkspace>
+            // A listed session whose recorded project or folder is not the one it is listed under has no tab.
+            : snapshot && !selectedTab(snapshot, projectId, sessionId)
+              ? <NonIdealState className="session-unavailable" icon={<AppIcon name="error" size={32} />} title={t("Session unavailable")}
+                  description={t("This session was recorded for another project or folder than the one it is listed under.")} />
             : null}
           </div></SessionTabStrip></main></ProjectReferenceContext.Provider>} />
       </div>
