@@ -80,7 +80,7 @@ public sealed class SessionNotesRpcTests
     });
 
     [TestMethod]
-    public Task GeneratedInboundAndFullEscaping_RoundTripWithinFramedBudget() => Fixture.Run(_ => Task.FromResult(new string('\u0001', 16384)), async f =>
+    public Task GeneratedInboundAndFullEscaping_RoundTripWithinFramedBudget() => Fixture.Run(_ => Task.FromResult(new string('\u0001', SessionNotesService.MaximumMarkdownUnits)), async f =>
     {
         var request = new SessionNotesRequest(Epoch, new string('\u4e00', 256));
         var json = JsonSerializer.Serialize(request, DesktopJsonContext.Default.SessionNotesRequest);
@@ -90,13 +90,13 @@ public sealed class SessionNotesRpcTests
         Assert.AreEqual(json, JsonSerializer.Serialize(incoming, DesktopJsonContext.Default.SessionNotesRequest));
         var result = await f.Call(incoming);
         Assert.AreEqual("ok", result.Status);
-        Assert.AreEqual(new string('\u0001', 16384), result.Markdown);
+        Assert.AreEqual(new string('\u0001', SessionNotesService.MaximumMarkdownUnits), result.Markdown);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(result, DesktopJsonContext.Default.SessionNotesResponse);
         using var document = JsonDocument.Parse(bytes);
         var escapedMarkdown = document.RootElement.GetProperty("markdown").GetRawText();
         var escapedIdentity = document.RootElement.GetProperty("sessionId").GetRawText();
-        Assert.AreEqual(2 + 6 * 16384, escapedMarkdown.Length);
-        Assert.AreEqual(16384, escapedMarkdown.Split("\\u0001", StringSplitOptions.None).Length - 1);
+        Assert.AreEqual(2 + 6 * SessionNotesService.MaximumMarkdownUnits, escapedMarkdown.Length);
+        Assert.AreEqual(SessionNotesService.MaximumMarkdownUnits, escapedMarkdown.Split("\\u0001", StringSplitOptions.None).Length - 1);
         Assert.AreEqual(2 + 6 * 256, escapedIdentity.Length);
         Assert.AreEqual(256, escapedIdentity.Split("\\u4E00", StringSplitOptions.None).Length - 1);
         Console.WriteLine($"Owned notes generated serializer: Markdown UTF-16={result.Markdown!.Length}, escaped JSON={escapedMarkdown.Length}; identity UTF-16={result.SessionId!.Length}, escaped JSON={escapedIdentity.Length}; payload UTF-8={bytes.Length}; framing=4096; framed={bytes.Length + 4096}; budget={SessionNotesService.MaximumResponseBytes}.");
@@ -107,11 +107,12 @@ public sealed class SessionNotesRpcTests
     [TestMethod]
     public async Task CompleteText_EmptyUnicodeAndLimitsAreNotTruncated()
     {
-        foreach (var markdown in new[] { "", "# Exact\r\n😀\u0085\ufeff  ", string.Concat(Enumerable.Repeat("😀", 8192)), new string('x', 16385), "\ud800", "\udc00" })
+        foreach (var markdown in new[] { "", "# Exact\r\n😀\u0085\ufeff  ", string.Concat(Enumerable.Repeat("😀", SessionNotesService.MaximumMarkdownUnits / 2)),
+                     new string('x', 16385), new string('x', SessionNotesService.MaximumMarkdownUnits + 1), "\ud800", "\udc00" })
             await Fixture.Run(_ => Task.FromResult(markdown), async f =>
             {
                 var result = await f.Call(new(Epoch, "session"));
-                var valid = markdown.Length <= 16384 && markdown is not ("\ud800" or "\udc00");
+                var valid = markdown.Length <= SessionNotesService.MaximumMarkdownUnits && markdown is not ("\ud800" or "\udc00");
                 Assert.AreEqual(valid ? "ok" : "wire_limit", result.Status);
                 Assert.AreEqual(valid ? markdown : null, result.Markdown);
             });

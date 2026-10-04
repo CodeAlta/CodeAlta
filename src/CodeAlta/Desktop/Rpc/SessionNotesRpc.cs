@@ -7,8 +7,11 @@ namespace CodeAlta.Desktop.Rpc;
 [NeoRpcService("sessionNotes", Version = 1)]
 internal sealed class SessionNotesService
 {
-    internal const int MaximumMarkdownUnits = 16384;
-    internal const int MaximumResponseBytes = 128 * 1024;
+    // Agents write notes of any length through the alta tool; a plan or a report runs to tens of thousands
+    // of characters. The response stays far below the frame limit of the window even when every unit is
+    // escaped as six bytes.
+    internal const int MaximumMarkdownUnits = 262_144;
+    internal const int MaximumResponseBytes = 2 * 1024 * 1024;
     private readonly OwnedSessionWorkspace _reads;
     private readonly Func<string, CancellationToken, Task>? _clear;
     private readonly string _epoch;

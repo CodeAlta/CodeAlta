@@ -1089,7 +1089,7 @@ It travels with that session pane, starts collapsed when empty, and can be expan
 labelled buttons or the existing notes shortcut. It does not consume composer space. It reads current durable notes
 automatically, refreshes every ten seconds after the previous read completes, and supports explicit
 **Refresh notes**. It displays the latest stored notes as sanitized Markdown. Complete notes up to
-16,384 UTF-16 units are shown without truncation; larger or invalid text produces an error. Empty
+262,144 UTF-16 units are shown without truncation; larger or invalid text produces an error. Empty
 notes, cleared notes and no notes event share the same empty result; a failed read is distinct.
 There is no editing, automatic mutation retry or browser persistence. This feature does not require ask opt-in.
 

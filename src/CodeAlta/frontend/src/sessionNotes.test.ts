@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canClearNotes, copyNotesMarkdown, createNotesReader, type NotesClearState, type NotesState } from "./sessionNotes";
+import { canClearNotes, copyNotesMarkdown, createNotesReader, maximumNotesUnits, type NotesClearState, type NotesState } from "./sessionNotes";
 import { createMutationCapability } from "./sessionOperations";
 
 const epoch = "11111111-1111-4111-8111-111111111111";
@@ -96,7 +96,7 @@ test("late notes epoch evidence revokes shared capability before obsolete presen
 });
 
 test("notes validate complete responses and distinguish failures from empty notes", async () => {
-  const invalid: unknown[] = [null, {}, reply("x".repeat(16385)), reply("\ud800"), reply("\udc00"),
+  const invalid: unknown[] = [null, {}, reply("x".repeat(maximumNotesUnits + 1)), reply("\ud800"), reply("\udc00"),
     { ...reply(), sessionId: "other" }, { ...reply(), hostEpoch: epoch + "\n" },
     { ...reply(), markdown: null }, { ...reply(), status: "unknown" },
     { ...reply("private"), status: "read_failed" }, { ...reply(), extra: "ignored" }];
@@ -124,6 +124,19 @@ test("notes validate complete responses and distinguish failures from empty note
     catch (error) { primary = error; throw error; }
     finally { controller.abort(); await finish(originals, owner, primary); }
   }
+});
+
+test("notes as long as the host sends are shown whole", async () => {
+  const long = "# Plan\n" + "x".repeat(maximumNotesUnits - 7);
+  const owner = createNotesReader(async () => reply(long));
+  const controller = new AbortController();
+  const states: NotesState[] = [];
+  const originals: Promise<unknown>[] = [];
+  const work = acquire(originals, () => owner.forSelection(epoch, "session", controller.signal, value => states.push(value), () => {}).refresh());
+  let primary: unknown;
+  try { await join(work, owner); assert.deepEqual(states.at(-1), { kind: "ready", markdown: long }); }
+  catch (error) { primary = error; throw error; }
+  finally { controller.abort(); await finish(originals, owner, primary); }
 });
 
 test("notes reject invalid captured identities without invoking transport", async () => {

@@ -354,10 +354,10 @@ command disposal independently, joins reads, then disposes runtime dependencies.
 is added. Synchronous capacity refusal is distinguished from downstream read failure; error responses
 contain sanitized status and validated identity, never exception details or Markdown.
 
-Only `ok` carries complete well-formed text, capped at **16,384 UTF-16 units** without truncation.
+Only `ok` carries complete well-formed text, capped at **262,144 UTF-16 units** without truncation.
 Empty Set, Clear and no notes event all remain `""`; no timestamp, revision or update kind is invented.
 Journal order and incomplete-final-record tolerance are preserved. Generated worst-escaping response
-measures **99,935 UTF-8 bytes /104,031 with framing**, below 128 KiB. This is a wire bound, not a bound
+measures **1,574,495 UTF-8 bytes /1,578,591 with framing**, below 2 MiB. This is a wire bound, not a bound
 on journal scanning, allocation or latency: the first read of a journal scans it completely, and
 later reads reuse that scan as described under durable session notes.
 

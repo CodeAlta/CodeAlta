@@ -167,7 +167,7 @@ without starting a provider and renders the complete text as Markdown. Empty not
 content opens the overlay by default. Use its labelled disclosure/collapse buttons at the top right
 above the timeline. Notes stay with their session pane, with no nested dock, notes splitter or loss of
 composer space. Collapsing notes is respected on subsequent reads. Reads refresh every ten seconds after completion. The read remains bounded
-at 16,384 UTF-16 units; oversized notes are refused without truncation, and read failure is distinct
+at 262,144 UTF-16 units; oversized notes are refused without truncation, and read failure is distinct
 from empty notes. Switching sessions does not stop an already-started read. Editing is not provided.
 
 If Send stops working, preserve developer-console entries beginning `[CodeAlta Send]` or

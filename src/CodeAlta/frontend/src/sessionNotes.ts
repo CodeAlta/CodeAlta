@@ -7,6 +7,8 @@ export function canClearNotes(state: NotesState | undefined, uncertain: NotesCle
   return canMutate && state?.kind === "ready" && !!state.markdown && !uncertain && action?.kind !== "clearing"
     && !(action?.kind === "error" && action.code === "clear_unconfirmed");
 }
+/** The longest notes the host sends, in UTF-16 units; longer notes are refused whole, never cut. */
+export const maximumNotesUnits = 262_144;
 type Invoke = (request: SessionNotesRequest, options: { timeoutMilliseconds: number }) => Promise<unknown>;
 type Original = { work?: Promise<void>; waiter?: Promise<unknown> };
 
@@ -81,7 +83,7 @@ export function createNotesReader(invoke: Invoke, clear?: Invoke) {
             observeEpoch(value, request.expectedHostEpoch, revoke);
             if (invalid || hostEpoch !== epoch) { show({ kind: "error", code: "stale_epoch" }); return; }
             if (!object(value) || !guid(value.hostEpoch) || value.hostEpoch !== epoch || !status(value.status)
-              || value.sessionId !== sessionId || (value.status === "ok" ? !text(value.markdown, 16384) : value.markdown !== null)) {
+              || value.sessionId !== sessionId || (value.status === "ok" ? !text(value.markdown, maximumNotesUnits) : value.markdown !== null)) {
               show({ kind: "error", code: "invalid_response" }); return;
             }
             if (value.status === "ok") {
