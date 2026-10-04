@@ -159,7 +159,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
   } else if (entry.eventType === "planSnapshot") {
     category = "plan"; icon = "plan"; title = "Plan"; subtitle = friendly(kind);
   } else if (entry.eventType === "notes") {
-    category = "notes"; icon = "notes"; title = "Alta notes"; subtitle = friendly(kind);
+    category = "notes"; icon = "notes"; title = "Notes"; subtitle = friendly(kind);
   } else if (entry.eventType === "error") {
     category = "error"; icon = "error"; title = "Error";
   } else if (entry.eventType.startsWith("permission")) {

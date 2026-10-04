@@ -72,7 +72,7 @@ Drag a tab along the tab strip to reorder it, to a pane edge to create a split v
 stable content slots and one vertical Explorer with Projects above Sessions. Its width is locally
 saved (220–720 pixels, never more than 60% of the window); the Explorer button in the title bar hides it without discarding the width.
 The command palette and Settings are the two buttons next to it, right after the CodeAlta mark. The compact composer keeps secondary
-actions under **More composer actions**, with retained-request recovery separate. Alta notes belong
+actions under **More composer actions**, with retained-request recovery separate. Notes belong
 to each session, start collapsed when empty, and open when meaningful content arrives. A small disclosure
 at the top right of the timeline expands/collapses their floating panel without resizing the timeline or
 composer. The panel (or its collapsed disclosure) can be dragged anywhere over the timeline and the open
@@ -1054,7 +1054,7 @@ does not reveal a lost outcome. Closing the application or cancelling the origin
 invalidates pending attempts; host restart restores no old input authority. Native UI and configured-provider
 qualification remain incomplete.
 
-Each open owned-host session has a read-only **Alta notes** overlay at the top right above its timeline.
+Each open owned-host session has a read-only **Notes** overlay at the top right above its timeline.
 It travels with that session pane, starts collapsed when empty, and can be expanded/collapsed with its
 labelled buttons or the existing notes shortcut. It does not consume composer space. It reads current durable notes
 automatically, refreshes every ten seconds after the previous read completes, and supports explicit

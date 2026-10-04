@@ -60,7 +60,7 @@ export function SessionNotesOverlay({ sessionId, epoch, capability, fallbackMark
   // Convert the right-anchored placement to left/top coordinates inside the pane.
   const geometry = ready ? clampWindowGeometry({ ...preferred, x: area.width - preferred.x - preferred.width }, area, minimum) : null;
   const place = (x: number, y: number, width: number, height: number) => update({ x: Math.max(0, Math.round(area.width - x - width)), y: Math.round(y), width, height });
-  return <aside ref={setBounds} className="session-notes-overlay" data-collapsed={collapsed} aria-label={t("Alta notes")}>
+  return <aside ref={setBounds} className="session-notes-overlay" data-collapsed={collapsed} aria-label={t("Notes")}>
     {geometry && <Rnd className="session-notes-window" bounds="parent" enableResizing={!collapsed}
       dragHandleClassName={collapsed ? "session-notes-toggle" : "window-drag-handle"} cancel=".window-drag-handle button"
       size={{ width: geometry.width, height: geometry.height }} position={{ x: geometry.x, y: geometry.y }}
@@ -69,10 +69,10 @@ export function SessionNotesOverlay({ sessionId, epoch, capability, fallbackMark
       onDragStop={(_event, data) => { if (dragged.current) place(data.x, data.y, geometry.width, geometry.height); }}
       onResizeStop={(_event, _direction, element, _delta, position) => place(position.x, position.y, element.offsetWidth, element.offsetHeight)}>
       <button ref={trigger} type="button" className="session-notes-toggle" hidden={!collapsed}
-        title={t("Expand Alta notes")} aria-label={t("Expand Alta notes")} aria-expanded={!collapsed} aria-controls={panelId}
+        title={t("Expand notes")} aria-label={t("Expand notes")} aria-expanded={!collapsed} aria-controls={panelId}
         // A drag that moved the chip must not also expand the panel.
         onClick={() => { if (dragged.current) dragged.current = false; else setCollapsed(false); }}>
-        <AppIcon name="notes" size={14} />{t("Alta notes")}<AppIcon name="chevronDown" size={14} /></button>
+        <AppIcon name="notes" size={14} />{t("Notes")}<AppIcon name="chevronDown" size={14} /></button>
       <div className="session-notes-content" hidden={collapsed}>
         <NotesPanel observing={observing} epoch={epoch} sessionId={sessionId} reader={reader} capability={capability}
           fallbackMarkdown={fallbackMarkdown} embedded panelId={panelId} onContent={showContent} preferredHeight={320}

@@ -325,3 +325,29 @@ test("older history is read page after page until it brings in one more whole tu
   assert.equal(start.next, null);
   assert.equal(historySettled({ kind: "ready", request: { sessionId: "s", cursor: window.next }, page }, start), true);
 });
+
+test("a window cut at a turn keeps the preparation records written before the user's message", () => {
+  const record = (offset: string, eventType: string, kind: string | null, runId: string | null) => ({
+    offset, eventType, providerId: "p", sessionId: "runtime", runId, timestamp: "2026-01-01T00:00:00Z", kind, phase: null,
+    contentId: eventType === "contentCompleted" ? offset : null, activityId: null, parentActivityId: null, interactionId: null, name: null,
+    text: "text", details: null, textTruncated: false, tool: null, files: null, detailsTruncated: false, bodyOmitted: false,
+  } satisfies HistoryResponse["entries"][number]);
+  const revision = { sessionId: "s", length: "900", lastWriteUtcTicks: "900" };
+  // A new session: nothing precedes the first turn, so nothing is left to load.
+  const first = [record("0", "sessionUpdate", "ModelChanged", "r1"), record("100", "system_prompt", "session_start", "r1"),
+    record("200", "contentCompleted", "User", "r1"), record("300", "contentCompleted", "Assistant", "r1")];
+  const fresh = mergeHistoryPage(undefined, { sessionId: "s", cursor: null }, { status: "ok", entries: first, next: null, tailOmitted: false, revision });
+  assert.deepEqual(fresh.entries.map(entry => entry.offset), ["0", "100", "200", "300"]);
+  assert.equal(fresh.next, null);
+  // A later turn starts at its own model record; the turn before it stays behind the cursor.
+  const second = [...first, record("400", "raw", null, null), record("500", "sessionUpdate", "ModelChanged", "r2"),
+    record("600", "raw", null, null), record("700", "contentCompleted", "User", "r2"), record("800", "contentCompleted", "Assistant", "r2")];
+  const later = mergeHistoryPage(undefined, { sessionId: "s", cursor: null }, { status: "ok", entries: second, next: null, tailOmitted: false, revision });
+  assert.deepEqual(later.entries.map(entry => entry.offset), ["500", "600", "700", "800"]);
+  assert.equal(later.next?.offset, "500");
+  // A record of another run before the message is not part of its preparation.
+  const foreign = [record("0", "contentCompleted", "Assistant", "r1"), record("100", "sessionUpdate", "ModelChanged", "r1"),
+    record("200", "contentCompleted", "User", "r2")];
+  const cut = mergeHistoryPage(undefined, { sessionId: "s", cursor: null }, { status: "ok", entries: foreign, next: null, tailOmitted: false, revision });
+  assert.deepEqual(cut.entries.map(entry => entry.offset), ["200"]);
+});

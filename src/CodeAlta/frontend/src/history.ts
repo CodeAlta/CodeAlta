@@ -53,6 +53,24 @@ const offsetAfter = (left: string, right: string) => left.length > right.length 
  * are appended. `olderFrom` is the first record of the window when the reader asked for older history: that
  * read continues page after page until it has brought in one more whole turn.
  */
+/**
+ * A turn's preparation records (the model in use, the system prompt) are written just before the user's
+ * message and belong to its run. Returns the index where the turn of the message at `index` really starts,
+ * so a window cut at a turn keeps them and does not leave them behind as "previous" history.
+ */
+function turnStart(entries: readonly HistoryResponse["entries"][number][], index: number): number {
+  const run = entries[index].runId;
+  let start = index;
+  for (let at = index - 1; at >= 0; at--) {
+    const entry = entries[at];
+    if (entry.eventType === "raw") continue;
+    const setup = entry.eventType === "system_prompt" || entry.eventType === "sessionUpdate" && entry.kind?.toLowerCase() === "modelchanged";
+    if (!setup || entry.runId !== run) break;
+    start = at;
+  }
+  return start;
+}
+
 export function mergeHistoryPage(previous: HistoryTimeline | undefined, request: HistoryRequest, page: TimelinePage,
   explicitOlder = false, retainedStart?: string, options: { known?: HistoryTimeline; olderFrom?: string } = {}): HistoryTimeline {
   const current = previous?.next;
@@ -109,6 +127,7 @@ export function mergeHistoryPage(previous: HistoryTimeline | undefined, request:
       let start = lastUser;
       while (start > 0 && entries[start - 1].contentId === entries[lastUser].contentId
         && entries[start - 1].runId === entries[lastUser].runId && entries[start - 1].kind?.toLowerCase() === "user") start--;
+      start = turnStart(entries, start);
       const cursor = page.next ?? request.cursor;
       if (start > 0 && cursor?.version === 2) {
         next = { ...cursor, offset: entries[start].offset };
@@ -126,6 +145,7 @@ export function mergeHistoryPage(previous: HistoryTimeline | undefined, request:
       let start = lastUser;
       while (start > 0 && entries[start - 1].contentId === entries[lastUser].contentId
         && entries[start - 1].runId === entries[lastUser].runId && entries[start - 1].kind?.toLowerCase() === "user") start--;
+      start = turnStart(entries, start);
       const boundary = page.next ?? request.cursor ?? (page.revision ? { version: 2, ...page.revision, offset: "0" } : null);
       if (start > 0 && boundary?.version === 2) {
         next = { ...boundary, offset: entries[start].offset };

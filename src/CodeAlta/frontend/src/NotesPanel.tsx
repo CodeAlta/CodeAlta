@@ -96,7 +96,7 @@ export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkd
     else onResize(change);
   }
   return <>
-    {!embedded && <div className="notes-splitter" role="separator" aria-label="Resize Alta notes" aria-orientation="horizontal"
+    {!embedded && <div className="notes-splitter" role="separator" aria-label="Resize notes" aria-orientation="horizontal"
       aria-valuemin={112} aria-valuemax={Math.max(112, Math.floor(railHeight * 0.65))} aria-valuenow={renderedHeight || height}
       tabIndex={0} onKeyDown={keyDown} onDoubleClick={onReset}
       onPointerDown={event => { lastY.current = event.clientY; event.currentTarget.setPointerCapture(event.pointerId); }}
@@ -104,8 +104,8 @@ export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkd
         if (lastY.current === undefined || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
         const delta = event.clientY - lastY.current; lastY.current = event.clientY; onResize(delta);
       }} onPointerUp={pointerEnd} onPointerCancel={pointerEnd}><span /></div>}
-    <section ref={pane} id={panelId} className="notes-pane" aria-label={t("Alta notes")} tabIndex={-1} style={{ height: embedded ? "100%" : height }}>
-      <header className="window-drag-handle"><span><strong>{t("Alta notes")}</strong><small>Markdown · session scoped</small></span><span>
+    <section ref={pane} id={panelId} className="notes-pane" aria-label={t("Notes")} tabIndex={-1} style={{ height: embedded ? "100%" : height }}>
+      <header className="window-drag-handle"><span><strong>{t("Notes")}</strong><small>Markdown · session scoped</small></span><span>
         {headerActions}
         {current && <button type="button" title="Refresh notes" aria-label="Refresh notes" disabled={result?.kind === "clearing"}
           onClick={() => void current.reconcile().then(() => {
@@ -119,7 +119,7 @@ export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkd
             .then(kind => { if (selection.current === selected) setCopyStatus({ epoch, sessionId, kind }); }); }}>Copy</button>
         <button type="button" title="Clear notes" aria-label="Clear notes" disabled={!clearEnabled}
           onClick={() => { if (clearEnabled && current && sessionId) void current.clear(showAction, () => onCleared(sessionId)); }}>Clear</button>
-        <button type="button" title={embedded ? t("Collapse Alta notes") : "Hide notes"} aria-label={embedded ? t("Collapse Alta notes") : "Hide notes"}
+        <button type="button" title={embedded ? t("Collapse notes") : "Hide notes"} aria-label={embedded ? t("Collapse notes") : "Hide notes"}
           aria-expanded={embedded ? true : undefined} aria-controls={embedded ? panelId : undefined}
           onClick={onClose}><AppIcon name={embedded ? "chevronDown" : "close"} className={embedded ? "notes-collapse-icon" : undefined} size={14} /></button>
       </span></header>
