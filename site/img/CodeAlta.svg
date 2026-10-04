@@ -1,106 +1,48 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
   <title id="title">CodeAlta</title>
-  <desc id="desc">A modern icon combining code brackets with a mountain peak.</desc>
+  <desc id="desc">A summit shaped as the letter A, lit on one face, with a prompt cursor as its crossbar, between two code brackets.</desc>
   <defs>
-    <!-- Theme: tweak these CSS variables to recolor the logo -->
-    <style>
-      :root {
-        --ca-bg-0: #0B122050;
-        --ca-bg-1: #111B3050;
-        --ca-ink: #EAF2FF;
-        --ca-ink-opacity: 0.92;
-        --ca-accent-0: #00D1FF;
-        --ca-accent-1: #4F46E5;
-        --ca-accent-2: #A855F7;
-        --ca-accentb-0: #7AE8FF;
-        --ca-accentb-1: #7C74FF;
-        --ca-accentb-2: #D8A5FF;
-        --ca-shine-0-opacity: 0.18;
-        --ca-shine-1-opacity: 0.06;
-        --ca-outline: #FFFFFF;
-        --ca-outline-opacity: 0.16;
-        --ca-plate-stroke-opacity: 0.55;
-        --ca-plate-ring-opacity: 0.60;
-        --ca-shadow: #000000;
-        --ca-shadow-opacity: 0.35;
-      }
-    </style>
-
-    <!-- Background plate gradient -->
-    <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="var(--ca-bg-0)"/>
-      <stop offset="1" stop-color="var(--ca-bg-1)"/>
+    <!-- Opaque tile: the mark carries its own background, so it reads the same on light and dark surfaces. -->
+    <linearGradient id="tile" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#19C2FF"/>
+      <stop offset="0.42" stop-color="#4B4DED"/>
+      <stop offset="1" stop-color="#A12BE8"/>
     </linearGradient>
-
-    <!-- Soft top-left shine overlay -->
-    <radialGradient id="shine" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(194.6 115.4) rotate(52) scale(344.6 270.8)">
-      <stop offset="0" stop-color="var(--ca-outline)" stop-opacity="var(--ca-shine-0-opacity)"/>
-      <stop offset="0.55" stop-color="var(--ca-outline)" stop-opacity="var(--ca-shine-1-opacity)"/>
-      <stop offset="1" stop-color="var(--ca-outline)" stop-opacity="0"/>
+    <!-- Light behind the summit. -->
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(256 140) scale(300)">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
     </radialGradient>
-
-    <!-- Accent gradient used by the "A/mountain" and plate stroke -->
-    <linearGradient id="accent" x1="164" y1="124" x2="360" y2="396" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="var(--ca-accent-0)"/>
-      <stop offset="0.55" stop-color="var(--ca-accent-1)"/>
-      <stop offset="1" stop-color="var(--ca-accent-2)"/>
+    <!-- Depth at the foot of the tile. -->
+    <linearGradient id="shade" x1="0" y1="300" x2="0" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1B0B4A" stop-opacity="0"/>
+      <stop offset="1" stop-color="#1B0B4A" stop-opacity="0.28"/>
     </linearGradient>
-
-    <!-- Brighter accent for the subtle outer ring -->
-    <linearGradient id="accentBright" x1="156" y1="108" x2="372" y2="412" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="var(--ca-accentb-0)"/>
-      <stop offset="0.55" stop-color="var(--ca-accentb-1)"/>
-      <stop offset="1" stop-color="var(--ca-accentb-2)"/>
+    <!-- The two faces of the summit: lit and in shade. -->
+    <linearGradient id="lit" x1="256" y1="88" x2="120" y2="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#EEF2FF"/>
     </linearGradient>
-
-    <!-- Drop shadow for the foreground glyph group -->
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="var(--ca-shadow)" flood-opacity="var(--ca-shadow-opacity)"/>
-    </filter>
-
-    <!-- Mask used to keep the inner accent stroke entirely inside the mountain/A shape -->
-    <mask id="mountainMask" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
-      <rect x="0" y="0" width="512" height="512" fill="black"/>
-      <path fill-rule="evenodd" clip-rule="evenodd"
-        d="M256 118L122 404H198L256 268L314 404H390L256 118Z
-           M256 186L216 304H296L256 186Z"
-        fill="white"/>
-    </mask>
+    <linearGradient id="shaded" x1="256" y1="88" x2="400" y2="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#D5DCFF"/>
+      <stop offset="1" stop-color="#B4C0FF"/>
+    </linearGradient>
   </defs>
 
-  <!-- Background plate -->
-  <rect x="0" y="0" width="512" height="512" rx="128" fill="url(#bg)"/>
-  <rect x="0" y="0" width="512" height="512" rx="128" fill="url(#shine)"/>
+  <!-- Tile, edge to edge with rounded corners -->
+  <rect width="512" height="512" rx="116" fill="url(#tile)"/>
+  <rect width="512" height="512" rx="116" fill="url(#glow)"/>
+  <rect width="512" height="512" rx="116" fill="url(#shade)"/>
 
-  <!-- Plate strokes (both inset so they stay inside the rounded plate) -->
-  <rect x="7" y="7" width="498" height="498" rx="121" fill="none" stroke="url(#accent)" stroke-opacity="var(--ca-plate-stroke-opacity)" stroke-width="14"/>
-  <rect x="16" y="16" width="480" height="480" rx="112" fill="none" stroke="url(#accentBright)" stroke-opacity="var(--ca-plate-ring-opacity)" stroke-width="4"/>
+  <!-- Code brackets -->
+  <path d="M126 148L58 218L126 288" stroke="#FFFFFF" stroke-opacity="0.30" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M386 148L454 218L386 288" stroke="#FFFFFF" stroke-opacity="0.30" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
 
-  <!-- Foreground glyphs: code brackets + mountain/A -->
-  <g filter="url(#shadow)" transform="matrix(1.230769 0 0 1.230769 -59.076923 -59.076923)">
-    <!-- Left/right code brackets -->
-    <path d="M168 178L112 256L168 334" stroke="var(--ca-ink)" stroke-opacity="var(--ca-ink-opacity)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M344 178L400 256L344 334" stroke="var(--ca-ink)" stroke-opacity="var(--ca-ink-opacity)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Summit / letter A -->
+  <path d="M256 88L94 420H172L256 247.9Z" fill="url(#lit)"/>
+  <path d="M256 88L418 420H340L256 247.9Z" fill="url(#shaded)"/>
 
-    <!-- Mountain / letter 'A' fill -->
-    <path fill-rule="evenodd" clip-rule="evenodd"
-      d="M256 118L122 404H198L256 268L314 404H390L256 118Z
-         M256 186L216 304H296L256 186Z"
-      fill="url(#accent)"/>
-
-    <!-- Inner accent stroke (masked so it stays within the mountain/A silhouette) -->
-    <path fill-rule="evenodd" clip-rule="evenodd"
-      d="M256 118L122 404H198L256 268L314 404H390L256 118Z
-         M256 186L216 304H296L256 186Z"
-      fill="none"
-      stroke="url(#accent)"
-      stroke-opacity="0.70"
-      stroke-width="16"
-      stroke-linejoin="round"
-      mask="url(#mountainMask)"/>
-
-    <!-- Subtle white outline to lift the A/mountain off the background -->
-    <path d="M256 118L122 404H198L256 268L314 404H390L256 118Z" stroke="var(--ca-outline)" stroke-opacity="var(--ca-outline-opacity)" stroke-width="6" stroke-linejoin="round"/>
-  </g>
+  <!-- Prompt cursor -->
+  <rect x="219" y="334" width="74" height="38" rx="8" fill="#7CF3FF"/>
 </svg>

@@ -26,6 +26,8 @@
     <None Update="README.md" Pack="true" PackagePath="/" />
     <!-- The window's own icon (Alt+Tab, task switcher): the executable's icon resource does not reach the native window. -->
     <Content Include="../../img/alta.ico" Link="alta.ico" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The page imports the logo from outside its folder: without this, changing it does not rebuild the page. -->
+    <NeoAstraFrontendInput Include="../../img/CodeAlta.svg" />
     <PackageReference Include="NeoAstra" />
     <PackageReference Include="MinVer" PrivateAssets="all" />
     <InternalsVisibleTo Include="CodeAlta.Desktop.Tests" />

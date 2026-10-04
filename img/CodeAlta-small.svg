@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
   <title id="title">CodeAlta</title>
-  <desc id="desc">A summit shaped as the letter A, lit on one face, with a prompt cursor as its crossbar, between two code brackets.</desc>
+  <desc id="desc">The CodeAlta mark for sizes up to 24 pixels: a heavier summit and cursor, without the code brackets.</desc>
   <defs>
     <!-- Opaque tile: the mark carries its own background, so it reads the same on light and dark surfaces. -->
     <linearGradient id="tile" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
@@ -35,14 +35,10 @@
   <rect width="512" height="512" rx="116" fill="url(#glow)"/>
   <rect width="512" height="512" rx="116" fill="url(#shade)"/>
 
-  <!-- Code brackets -->
-  <path d="M126 148L58 218L126 288" stroke="#FFFFFF" stroke-opacity="0.30" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M386 148L454 218L386 288" stroke="#FFFFFF" stroke-opacity="0.30" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
-
   <!-- Summit / letter A -->
-  <path d="M256 88L94 420H172L256 247.9Z" fill="url(#lit)"/>
-  <path d="M256 88L418 420H340L256 247.9Z" fill="url(#shaded)"/>
+  <path d="M256 82L84 426H166L256 246Z" fill="url(#lit)"/>
+  <path d="M256 82L428 426H346L256 246Z" fill="url(#shaded)"/>
 
   <!-- Prompt cursor -->
-  <rect x="219" y="334" width="74" height="38" rx="8" fill="#7CF3FF"/>
+  <rect x="216" y="342" width="80" height="46" rx="8" fill="#7CF3FF"/>
 </svg>
