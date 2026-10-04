@@ -29,6 +29,21 @@ export function UnsavedFileDialog({ name, mode, busy = false, onSave, onDiscard,
   </Dialog>;
 }
 
+/** The question asked before exiting while files hold unsaved edits (Save all / Exit without saving / Cancel). */
+export function UnsavedExitDialog({ names, busy = false, onSave, onDiscard, onCancel }: {
+  names: readonly string[]; busy?: boolean; onSave: () => void; onDiscard: () => void; onCancel: () => void;
+}) {
+  const { t } = useShellLanguage();
+  return <Dialog isOpen className="unsaved-file-dialog" title={t("Unsaved changes")} isCloseButtonShown={false} canOutsideClickClose={false} onClose={onCancel}>
+    <DialogBody>{t("Save the changes to {name} before exiting?", { name: names.join(", ") })}</DialogBody>
+    <DialogFooter actions={<>
+      <Button disabled={busy} onClick={onCancel}>{t("Cancel")}</Button>
+      <Button intent="danger" disabled={busy} onClick={onDiscard}>{t("Exit without saving")}</Button>
+      <Button intent="primary" loading={busy} autoFocus onClick={onSave}>{t("Save all")}</Button>
+    </>} />
+  </Dialog>;
+}
+
 /**
  * The editor of one project file in a tab: read through `projectFiles.read`, edited in Monaco with the
  * language of its extension, and saved (Ctrl+S) against the revision that was read. A file changed on

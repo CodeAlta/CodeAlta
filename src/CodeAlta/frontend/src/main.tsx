@@ -31,7 +31,7 @@ import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, 
 import { activateFileTab, closeFileTab, cycleTab, emptyFileTabs, fileTabKey, fileTabName, fileTabsKey, openFileTab, persistFileTabs, reconcileFileTabs, reopenTabKind, restoreFileTabs, sameFileTab, type FileTab, type TabKind, type TabPosition } from "./fileTabs";
 import { createFileEditors } from "./fileEditors";
 import { OpenFileDialog } from "./OpenFileDialog";
-import { ProjectFileEditor, UnsavedFileDialog } from "./ProjectFileEditor";
+import { ProjectFileEditor, UnsavedExitDialog, UnsavedFileDialog } from "./ProjectFileEditor";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { ReadOnlyComposer } from "./ReadOnlyComposer";
 import { useLocalDraftImages } from "./useLocalDraftImages";
@@ -581,6 +581,24 @@ function App() {
     tabFocusPending.current = true;
     setFileTabs(state => closeFileTab(state, tab));
   }
+  // Exit asks first while files hold unsaved edits; saving stops at the first file that could not be saved.
+  const [exiting, setExiting] = useState<{ tabs: FileTab[]; busy: boolean } | null>(null);
+  function exitApplication() {
+    const unsaved = fileTabs.open.filter(tab => fileEditors.dirty(fileTabKey(tab)));
+    if (unsaved.length === 0) { closeApplicationWindow(); return; }
+    setExiting(current => current?.busy ? current : { tabs: unsaved, busy: false });
+  }
+  const requestExit = useRef(exitApplication);
+  requestExit.current = exitApplication;
+  async function saveAllAndExit(unsaved: FileTab[]) {
+    setExiting({ tabs: unsaved, busy: true });
+    for (const tab of unsaved) {
+      if (await fileEditors.save(fileTabKey(tab))) continue;
+      if (creationAlive.current) { setExiting(null); activateFile(tab); }
+      return;
+    }
+    closeApplicationWindow();
+  }
   async function saveAndCloseFile(tab: FileTab) {
     setFileClosing({ tab, busy: true });
     const saved = await fileEditors.save(fileTabKey(tab));
@@ -852,7 +870,7 @@ function App() {
 
   function runCommand(command: CommandId) {
     if (!commandAvailable(command)) return;
-    if (command === "exit") { closeApplicationWindow(); return; }
+    if (command === "exit") { exitApplication(); return; }
     // Settings is a modal window: only commands that move to another Settings page run while it is open.
     const pages: Partial<Record<CommandId, View>> = { settings: "appearance", about: "about", skills: "skills", plugins: "plugins", mcp: "mcp",
       config: "config", prompts: "prompts", providers: "providers", models: "models", logs: "logs" };
@@ -883,7 +901,7 @@ function App() {
       if (event.key === "Escape") { commandChord.current = false; return; }
       // Exit is global, as in the terminal UI: it also works while a window of the app is open.
       if (!commandChord.current && resolveCommandKey(event, false, "none").command === "exit") {
-        event.preventDefault(); event.stopPropagation(); closeApplicationWindow(); return;
+        event.preventDefault(); event.stopPropagation(); requestExit.current(); return;
       }
       const target = event.target instanceof HTMLElement ? event.target : null;
       const settingsOnly = settingsVisible.current && !dialog && !paletteOpen
@@ -1843,6 +1861,9 @@ function App() {
     {dialog === "file" && filePickerProject && <OpenFileDialog epoch={status!.hostEpoch!} project={filePickerProject}
       observe={value => mutation?.capability.observe(value)} onClose={() => setDialog(null)}
       onOpen={path => { setDialog(null); openFile({ projectId: filePickerProject.id, projectPath: filePickerProject.path, path }); }} />}
+    {exiting && <UnsavedExitDialog names={exiting.tabs.map(fileTabName)} busy={exiting.busy}
+      onSave={() => void saveAllAndExit(exiting.tabs)} onDiscard={closeApplicationWindow}
+      onCancel={() => { if (!exiting.busy) setExiting(null); }} />}
     {fileClosing && <UnsavedFileDialog name={fileTabName(fileClosing.tab)} mode="close" busy={fileClosing.busy}
       onSave={() => void saveAndCloseFile(fileClosing.tab)} onDiscard={() => closeFile(fileClosing.tab, true)}
       onCancel={() => { if (!fileClosing.busy) setFileClosing(null); }} />}

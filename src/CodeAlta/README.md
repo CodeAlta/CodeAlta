@@ -527,7 +527,9 @@ path, a **Wrap lines** switch (on by default), **Reload** and **Save**.
 - A file with the read-only attribute opens read-only. A binary file, a file over 1 MiB, a missing
   file, a path outside the project folder and an archived or unavailable project show the reason in
   place of the editor, with **Reload** to read again.
-- Unsaved edits live in the open tab only: they are not stored, and closing the window drops them.
+- Unsaved edits live in the open tab only and are not stored. **Exit** (`Ctrl+Q`, `/exit`) asks **Save all**,
+  **Exit without saving** or **Cancel** while files hold unsaved edits; the window's own close button and
+  `Alt+F4` close without asking and drop them.
 
 ### Project files and git status
 
