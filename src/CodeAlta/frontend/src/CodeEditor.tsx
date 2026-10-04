@@ -7,7 +7,9 @@ import type { EditorLanguage } from "./fileLanguage";
 /** One diagnostic shown as an error marker; lines and columns are 1-based. */
 export type CodeEditorMarker = Readonly<{ line: number; column: number; message: string }>;
 /** What a host can ask of the mounted editor. */
-export type CodeEditorHandle = Readonly<{ focus: () => void }>;
+export type CodeEditorHandle = Readonly<{ focus: () => void;
+  /** Puts the caret at a 1-based position, in the middle of the view, and focuses the editor. */
+  reveal: (line: number, column: number) => void }>;
 
 /** A full-size Monaco source editor for configuration and project text, with line numbers and one optional error marker. */
 export function CodeEditor({ value, onChange, language, label, readOnly = false, marker = null, wrap = false, onSave, onCursor, handle }: {
@@ -35,7 +37,11 @@ export function CodeEditor({ value, onChange, language, label, readOnly = false,
       scrollBeyondLastLine: false, wordWrap: wrap ? "on" : "off", renderLineHighlight: "line", stickyScroll: { enabled: false },
       padding: { top: 8, bottom: 8 }, quickSuggestions: false, suggestOnTriggerCharacters: false, links: false, tabSize: 2 });
     editor.current = instance;
-    if (handle) handle.current = { focus: () => instance.focus() };
+    if (handle) handle.current = { focus: () => instance.focus(), reveal: (line, column) => {
+      const lineNumber = Math.min(Math.max(line, 1), model.getLineCount());
+      const position = { lineNumber, column: Math.min(Math.max(column, 1), model.getLineMaxColumn(lineNumber)) };
+      instance.setPosition(position); instance.revealPositionInCenter(position); instance.focus();
+    } };
     let disposed = false;
     void ensureMonacoLanguage(language).then(registered => { if (registered && !disposed) monaco.editor.setModelLanguage(model, language); });
     const unfollowTheme = followShellTheme();

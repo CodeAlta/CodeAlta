@@ -8,6 +8,7 @@ import { ComposerStatus } from "./ComposerStatus";
 import { settingsNavigation } from "./settingsNavigation";
 import { colorSchemeAttribute } from "./colorSchemes";
 import { dismissStartupScreen, rememberAppearance } from "./startupScreen";
+import { ConfigRecoveryScreen } from "./ConfigRecoveryScreen";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionPluginEvents, projectGit, promptImages, composerStatus, sessionUserInput, type BootStatus,
@@ -2297,4 +2298,18 @@ function PaneSplitter({ className, hidden, label, value, onResize, onReset }: {
 }
 
 installKeyboardClickGuard(window);
-createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);
+// The host says first what this window is for: the workspace, or the repair of a configuration file that
+// cannot be loaded. The start-up screen stays until one of them has something to show.
+function Root() {
+  const [purpose, setPurpose] = useState<{ recovery: boolean; developer: boolean }>();
+  useEffect(() => {
+    const abort = new AbortController();
+    void boot.status({}, { signal: abort.signal, timeoutMilliseconds: 8_000 }).then(
+      value => { if (!abort.signal.aborted) setPurpose({ recovery: value.configRecovery, developer: value.developerMode }); },
+      () => { if (!abort.signal.aborted) setPurpose({ recovery: false, developer: false }); }); // The workspace reports a bridge that does not answer.
+    return () => abort.abort();
+  }, []);
+  return !purpose ? null : purpose.recovery ? <ConfigRecoveryScreen developer={purpose.developer} /> : <App />;
+}
+
+createRoot(document.getElementById("root")!).render(<StrictMode><Root /></StrictMode>);

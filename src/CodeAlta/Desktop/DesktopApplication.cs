@@ -86,6 +86,20 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         finally { GC.KeepAlive(desktop); } // Strong owner/lease lifetime across the synchronous native loop.
     }
 
+    /// <summary>
+    /// Whether no model provider is enabled, which is how a new profile starts: the page then opens the
+    /// provider settings, as the terminal application does. A configuration that cannot be read asks nothing.
+    /// </summary>
+    internal static bool NeedsProviderSetup(CodeAltaConfigStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        try { return store.LoadGlobal().Providers?.Values.Any(static definition => definition.Enabled != false) != true; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
     internal static bool CanReleaseOwnedLease(Task? creation, Task? disposal, bool nativeConfirmed)
         => nativeConfirmed && ((creation is null && disposal is null) ||
             (creation?.IsCompletedSuccessfully == true && disposal?.IsCompletedSuccessfully == true));
@@ -147,8 +161,14 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // Plugins read the user's profile (the MCP servers and their sign-ins, the GitHub CLI): they
             // run in the normal launch and stay off when the roots are explicit.
             var pluginAlta = roots.Home is null ? new PluginAltaServiceBridge() : null;
+            // A configuration file that cannot be loaded is repaired in the window before anything reads it: the
+            // host would fail on it. A missing file is created with the defaults.
+            var configRecovery = new ConfigRecoveryService(options.CatalogRoot!, new TextFileCodec());
+            configRecovery.Reload();
             // Off the window's thread: the host reads the catalog and the configuration and starts the plugins
             // while the window creates its view and shows the start-up screen.
+            void StartHost()
+            {
             _hostCreation = Task.Run(() => CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
                 GlobalRoot = options.CatalogRoot, StateRoot = options.StateRoot, CurrentProjectPath = roots.Project,
@@ -178,6 +198,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 if (providers is not null) await providers.DrainAsync();
                 if (providerLogin is not null) await providerLogin.CloseAsync(); // A running sign-in is canceled and joined.
             });
+            }
+            if (configRecovery.IsReady) StartHost();
             // The window's own parts do not wait for the host: the view exists and shows the start-up screen
             // (the logo on the window's theme) as soon as the browser is ready.
             var assets = Path.Combine(AppContext.BaseDirectory, "assets");
@@ -216,6 +238,44 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 DesktopWindowReveal.Reveal(window);
             }
             Mark("window shown with the start-up screen");
+            // The page's theme: kept for the next start, and the window controls follow it now.
+            void RememberAppearance(DesktopAppearance remembered)
+            {
+                remembered.Save(options.DataRoot);
+                application.Dispatcher.Post(() => { if (!startedWindow.IsClosed) startedWindow.TitleBar = DesktopWindowChrome.TitleBar(remembered); });
+            }
+            if (_hostCreation is null)
+            {
+                // No host yet: the page gets the configuration editor alone. Saving a valid file starts the
+                // application as if it had been valid from the start; leaving closes the window.
+                Mark("configuration recovery");
+                var repaired = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var recoveryBuilder = new NeoRpcBuilder(chrome.Authorize(new NeoRpcOptions { ContractHash = NeoRpcGeneratedContract.Hash, Release = true }));
+                chrome.AddHandlers(recoveryBuilder);
+                recoveryBuilder.AddBootService(new BootService { ConfigRecovery = true, Developer = options.Developer, RememberAppearance = RememberAppearance });
+                recoveryBuilder.AddStartupConfigService(new StartupConfigService(configRecovery)
+                {
+                    Continue = () => repaired.TrySetResult(), Exit = () => closeRequested.TrySetResult(),
+                });
+                await using (var recoveryRpc = recoveryBuilder.Build())
+                {
+                    await using (NeoRpcViewBinding.Bind(recoveryRpc, view))
+                    {
+                        var recovering = view.NavigateAsync(ApplicationDocument);
+                        await recovering;
+                        await Task.WhenAny(repaired.Task, closeRequested.Task);
+                        // Back to the start-up screen while the host starts: the editor is gone before its bridge is.
+                        if (!closeRequested.Task.IsCompleted)
+                        {
+                            var restarting = view.NavigateAsync(StartupDocument);
+                            await restarting;
+                        }
+                    }
+                }
+                if (!closeRequested.Task.IsCompleted) StartHost();
+            }
+            if (_hostCreation is not null)
+            {
             await AwaitOwnedAsync(_hostCreation, window);
             var host = await _hostCreation;
             Mark("host created");
@@ -245,18 +305,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         DiagnosticSink = new DesktopRpcDiagnostics(),
                     }));
                     chrome.AddHandlers(builder);
+                    var configStore = new CodeAltaConfigStore(catalog);
                     builder.AddBootService(new BootService(epoch, options.ReviewOwnedCommandPermissions, options.EnableOwnedUserInput, options.Developer)
                     {
-                        // The page's theme: kept for the next start, and the window controls follow it now.
-                        RememberAppearance = remembered =>
-                        {
-                            remembered.Save(options.DataRoot);
-                            application.Dispatcher.Post(() => { if (!startedWindow.IsClosed) startedWindow.TitleBar = DesktopWindowChrome.TitleBar(remembered); });
-                        },
+                        RememberAppearance = RememberAppearance, ProviderSetup = NeedsProviderSetup(configStore),
                     });
                     builder.AddWorkspaceService(workspace);
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime));
-                    var configStore = new CodeAltaConfigStore(catalog);
                     var globalConfig = new GlobalConfigService(configStore, host.ModelProviderRegistry, options.CatalogRoot!, epoch);
                     builder.AddGlobalConfigService(globalConfig);
                     providerLogin = new ProviderLoginService(configStore, globalConfig, options.CatalogRoot!, epoch);
@@ -297,6 +352,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         Mark("application loading");
                     }
                 }
+            }
+            else workspacePrepared.TrySetResult();
             }
             else workspacePrepared.TrySetResult();
             await closeRequested.Task;

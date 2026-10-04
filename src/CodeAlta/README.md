@@ -298,6 +298,15 @@ the dark themes, and they follow a theme change at once. The theme and its backg
 `appearance.json` in the WebView data directory, which is what lets the window open in the right
 colors before any page exists.
 
+When the global `config.toml` cannot be loaded, the window opens on **configuration recovery** instead
+of failing: the file in an editor with TOML highlighting, the error marked on its line and the caret
+on it. The text is checked as it is typed, and the status under the editor says where it is still
+wrong (select it to jump there) or that it is valid. **Save and continue** (Ctrl+S) writes a valid file
+and starts the application; **Reload** reads the file again, after a confirmation when there are
+edits; **Exit** closes the application without changing the file. A file that changed on disk in the
+meantime is not overwritten. Recovery reads, checks and writes that one file only: no provider,
+plugin or session is started before it is valid.
+
 The view is an application shell rather than a browser page: the browser's own find, print, reload
 and zoom shortcuts, its context menu and its status bubble are turned off, so those keys reach
 CodeAlta's commands. Text-editing keys work as usual.

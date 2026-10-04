@@ -1572,3 +1572,21 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 
 /* The developer instance says so beside its name, so two CodeAlta windows are told apart. */
 .window-brand-tag { flex: none; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--yellow) 60%, transparent); border-radius: 999px; color: var(--yellow); font-size: 10px; font-weight: 600; letter-spacing: .06em; line-height: 16px; text-transform: uppercase; }
+
+/* Configuration recovery: the whole window when config.toml cannot be loaded. */
+.config-recovery-shell { --titlebar-height: var(--neoastra-titlebar-height, 38px); display: grid; grid-template-rows: var(--titlebar-height) minmax(0, 1fr); height: 100vh; overflow: hidden; background: var(--bg); color: var(--text); }
+.config-recovery-titlebar { display: flex; align-items: stretch; justify-content: space-between; padding-right: var(--neoastra-titlebar-inset-right, 0px); border-bottom: 1px solid var(--line); background: var(--panel); app-region: drag; }
+.config-recovery-titlebar .window-brand { flex: 1 1 auto; }
+.config-recovery { display: flex; flex-direction: column; gap: 14px; width: min(1180px, 100%); min-height: 0; margin: 0 auto; padding: 22px 28px 20px; }
+.config-recovery > .bp6-non-ideal-state { flex: 1 1 auto; }
+.config-recovery-heading { display: flex; align-items: flex-start; gap: 14px; }
+.config-recovery-heading h1 { margin: 0 0 4px; font-size: 20px; line-height: 1.25; }
+.config-recovery-heading p { margin: 0 0 6px; color: var(--muted); }
+.config-recovery-icon { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid color-mix(in srgb, var(--red) 45%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red); }
+.config-recovery-path { display: inline-block; max-width: 100%; padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--muted); font: 12px/1.6 "Cascadia Code", Consolas, monospace; overflow-wrap: anywhere; user-select: text; }
+.config-recovery-editor { display: grid; background: var(--panel); }
+.config-recovery-footer { display: flex; flex-direction: column; gap: 12px; }
+.config-recovery-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-height: 36px; }
+.config-recovery-status .config-editor-diagnostic { margin-top: 0; }
+.config-recovery-position { padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.config-recovery-actions { display: flex; align-items: center; gap: 8px; }

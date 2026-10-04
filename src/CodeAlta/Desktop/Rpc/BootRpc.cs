@@ -23,6 +23,18 @@ internal sealed class BootService
     /// </summary>
     internal Action<DesktopAppearance>? RememberAppearance { get; init; }
 
+    /// <summary>
+    /// True while the window repairs a configuration file that cannot be loaded: there is no host yet, and the
+    /// page shows the <c>startupConfig</c> editor instead of the workspace.
+    /// </summary>
+    internal bool ConfigRecovery { get; init; }
+
+    /// <summary>True when the application started without any enabled model provider.</summary>
+    internal bool ProviderSetup { get; init; }
+
+    /// <summary>True for the developer instance, for a window that has no host.</summary>
+    internal bool Developer { get; init; }
+
     /// <summary>Remembers the window's theme and background for the next start.</summary>
     [NeoRpcMethod("appearance")]
     public BootAppearanceResponse Appearance(BootAppearanceRequest request)
@@ -34,9 +46,11 @@ internal sealed class BootService
     }
 
     [NeoRpcMethod("status")]
-    public BootStatus Status(BootRequest request) => _epoch is null
+    public BootStatus Status(BootRequest request) => ConfigRecovery
+        ? new("config-recovery", "CodeAlta", DesktopCommandLine.Version, false) { ConfigRecovery = true, DeveloperMode = Developer || _developer }
+        : _epoch is null
         ? new("in-development", "CodeAlta", DesktopCommandLine.Version, false)
-        : new("owned-text-only", "CodeAlta", DesktopCommandLine.Version, true) { HostEpoch = _epoch, CommandReviewEnabled = _commandReview, OwnedAsksEnabled = true, OwnedUserInputEnabled = _userInput, DeveloperMode = _developer };
+        : new("owned-text-only", "CodeAlta", DesktopCommandLine.Version, true) { HostEpoch = _epoch, CommandReviewEnabled = _commandReview, OwnedAsksEnabled = true, OwnedUserInputEnabled = _userInput, DeveloperMode = Developer || _developer, ProviderSetup = ProviderSetup };
 }
 
 internal sealed record BootRequest;
@@ -55,11 +69,26 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 
     /// <summary>True for the developer instance, which runs beside the normal one with its own sessions.</summary>
     public bool DeveloperMode { get; init; }
+
+    /// <summary>True while the configuration file is being repaired; the page then shows only its editor.</summary>
+    public bool ConfigRecovery { get; init; }
+
+    /// <summary>
+    /// True when the application started without any enabled model provider (a first start, usually): the
+    /// page opens the provider settings and guides through them, as the terminal application opens its own.
+    /// </summary>
+    public bool ProviderSetup { get; init; }
 }
 
 [JsonSerializable(typeof(BootRequest))]
 [JsonSerializable(typeof(BootAppearanceRequest))]
 [JsonSerializable(typeof(BootAppearanceResponse))]
+[JsonSerializable(typeof(StartupConfigRequest))]
+[JsonSerializable(typeof(StartupConfigContentRequest))]
+[JsonSerializable(typeof(StartupConfigDocument))]
+[JsonSerializable(typeof(StartupConfigValidation))]
+[JsonSerializable(typeof(StartupConfigSaveResponse))]
+[JsonSerializable(typeof(StartupConfigExitResponse))]
 [JsonSerializable(typeof(ApplicationLogsRequest))]
 [JsonSerializable(typeof(ApplicationLogsResponse))]
 [JsonSerializable(typeof(ApplicationLogsClearRequest))]
