@@ -14,6 +14,7 @@ public sealed class HostingCompositionBoundaryTests
             typeof(ProviderInspectionTestResult), typeof(ProviderInspectionModelListResult),
             typeof(ConfiguredCopilotAuthentication), typeof(ConfiguredXaiAuthentication),
             typeof(ConfiguredCodexAuthentication), typeof(CodexAccountMetadata),
+            typeof(ConfiguredProviderLogin), typeof(ProviderLoginPrompt), typeof(ProviderLoginStatus),
             typeof(CodeAltaSingleInstanceGuard), typeof(CodeAltaAlreadyRunningException), typeof(CodeAltaStartupAdmission),
         }, assembly.GetExportedTypes());
         Assert.IsFalse(assembly.GetReferencedAssemblies().Any(reference =>

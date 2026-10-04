@@ -27,6 +27,27 @@ public sealed class CodexSubscriptionPresentationTests
     }
 
     [TestMethod]
+    public void LoginStatus_IsSignedInOnlyWhileTheRegistrationHoldsTokens()
+    {
+        var credential = new OpenAICodexSubscriptionCredential
+        {
+            AccountLabel = "Workspace", Subject = "subject", ClientId = "issued-client",
+            AccessToken = "must-not-escape", RefreshToken = "must-not-escape",
+            Scopes = [OpenAICodexSubscriptionOAuthDefaults.DirectTokenScope, "resource.invoke"],
+        };
+
+        var signedIn = ConfiguredProviderLogin.FromCodex(credential);
+        Assert.AreEqual(new ProviderLoginStatus(true, "Workspace", null, null), signedIn);
+        Assert.IsFalse(signedIn.ToString().Contains("must-not-escape", StringComparison.Ordinal));
+
+        // Sign-out keeps the registration and clears its tokens.
+        credential.AccessToken = string.Empty;
+        credential.RefreshToken = null;
+        Assert.AreEqual(new ProviderLoginStatus(false, null, null, null), ConfiguredProviderLogin.FromCodex(credential));
+        Assert.IsFalse(ConfiguredProviderLogin.FromCodex((OpenAICodexSubscriptionCredential?)null).SignedIn);
+    }
+
+    [TestMethod]
     [DataRow(true)]
     [DataRow(false)]
     public void BrowserLogin_ReportsPlanPermissionAndIssuedRegistration(bool permitted)
