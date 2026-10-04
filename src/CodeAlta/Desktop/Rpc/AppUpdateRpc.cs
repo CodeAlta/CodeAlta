@@ -42,6 +42,19 @@ internal sealed class AppUpdateService : IDisposable
         _open = open ?? OpenInBrowser;
     }
 
+    /// <summary>
+    /// Updates the installed tool and starts the application again: it hands the update to a helper that
+    /// outlives this process and asks the application to exit. Its argument says whether the newer version
+    /// is a prerelease. Null where the application is not an installed tool.
+    /// </summary>
+    internal Func<bool, bool>? Install { get; init; }
+
+    /// <summary>Calls a started update off, when the user decided not to exit after all.</summary>
+    internal Action? CancelInstall { get; init; }
+
+    /// <summary>How the update started by the previous run went (<c>ok</c> or <c>failed</c>); null when none ran.</summary>
+    internal string? Installed { get; init; }
+
     /// <summary>Starts the one check of this run; the page asks for its result later.</summary>
     internal void Start() => _ = Result();
 
@@ -54,7 +67,32 @@ internal sealed class AppUpdateService : IDisposable
     public async Task<AppUpdateResponse> CheckAsync(AppUpdateRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return await Result().WaitAsync(cancellationToken).ConfigureAwait(false);
+        var result = await Result().WaitAsync(cancellationToken).ConfigureAwait(false);
+        return result with { CanInstall = Install is not null && result.Status == "available", Installed = Installed };
+    }
+
+    /// <summary>
+    /// Updates to the newer version and starts the application again. <c>started</c>: the application now
+    /// exits as it does for Exit, with its questions. <c>unavailable</c>: there is nothing to install, or
+    /// the application is not an installed tool. <c>failed</c>: the helper could not be started.
+    /// </summary>
+    [NeoRpcMethod("install")]
+    public async Task<AppUpdateOpenResponse> InstallAsync(AppUpdateRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var result = await Result().WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (Install is null || result is not { Status: "available", LatestVersion: { } latest }) return new("unavailable");
+        return new(Install(NuGetVersion.TryParse(latest, out var version) && version.IsPrerelease) ? "started" : "failed");
+    }
+
+    /// <summary>Calls off an update whose exit the user canceled.</summary>
+    [NeoRpcMethod("cancelInstall")]
+    public AppUpdateOpenResponse CancelInstallation(AppUpdateRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (CancelInstall is null) return new("unavailable");
+        CancelInstall();
+        return new("ok");
     }
 
     /// <summary>Opens the release notes of the newer version in the user's browser.</summary>
@@ -119,7 +157,14 @@ internal sealed record AppUpdateRequest;
 /// <param name="LatestVersion">The newest published version, when known.</param>
 /// <param name="Command">The command that updates the installed tool, when a newer version exists.</param>
 /// <param name="ReleaseNotes">The address of the newer version's release notes.</param>
-internal sealed record AppUpdateResponse(string Status, string PackageId, string CurrentVersion, string? LatestVersion, string? Command, string? ReleaseNotes);
+internal sealed record AppUpdateResponse(string Status, string PackageId, string CurrentVersion, string? LatestVersion, string? Command, string? ReleaseNotes)
+{
+    /// <summary>The application can install the newer version itself and start again.</summary>
+    public bool CanInstall { get; init; }
 
-/// <summary><c>ok</c> or <c>unavailable</c>.</summary>
+    /// <summary>How the update started by the previous run went: <c>ok</c>, <c>failed</c>, or null when none ran.</summary>
+    public string? Installed { get; init; }
+}
+
+/// <summary><c>ok</c>, <c>started</c>, <c>failed</c> or <c>unavailable</c>.</summary>
 internal sealed record AppUpdateOpenResponse(string Status);

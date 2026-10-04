@@ -24,10 +24,10 @@ function aboutFacts(status: BootStatus | undefined, bootError: boolean, demo: bo
 }
 
 /** The About page of Settings: product, version and build of the running app. */
-export function AboutSettings({ status, bootError, demo, logo, update, onOpenReleaseNotes }: {
+export function AboutSettings({ status, bootError, demo, logo, update, onOpenReleaseNotes, onInstallUpdate }: {
   status: BootStatus | undefined; bootError: boolean; demo: boolean; logo?: string;
   /** The result of this run's update check: undefined where there is none to make, null while it runs. */
-  update?: AppUpdateResponse | null; onOpenReleaseNotes?: () => void;
+  update?: AppUpdateResponse | null; onOpenReleaseNotes?: () => void; onInstallUpdate?: () => void;
 }) {
   const { t, locale } = useShellLanguage();
   const about = aboutFacts(status, bootError, demo);
@@ -44,7 +44,7 @@ export function AboutSettings({ status, bootError, demo, logo, update, onOpenRel
       {about.build && <div><dt>{t("Build metadata")}</dt><dd>{about.build}</dd></div>}
       <div><dt>{t("Mode")}</dt><dd>{t(about.mode)}</dd></div>
       {updates && <div><dt>{t("Updates")}</dt><dd>{t(updates.key, updates.parameters)}
-        {available && <UpdateNotice update={available} locale={locale} title={false} onOpenReleaseNotes={() => onOpenReleaseNotes?.()} />}</dd></div>}
+        {available && <UpdateNotice update={available} locale={locale} title={false} onOpenReleaseNotes={() => onOpenReleaseNotes?.()} onInstall={onInstallUpdate} />}</dd></div>}
     </dl>
   </main>;
 }

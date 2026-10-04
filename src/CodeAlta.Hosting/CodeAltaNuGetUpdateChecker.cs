@@ -40,9 +40,14 @@ public static class CodeAltaNuGetUpdateChecker
     /// <summary>The command that updates a globally installed tool to the newest version of that kind.</summary>
     /// <exception cref="ArgumentException"><paramref name="packageId"/> is blank.</exception>
     public static string UpdateCommand(string packageId, bool prerelease)
+        => "dotnet " + string.Join(' ', UpdateArguments(packageId, prerelease));
+
+    /// <summary>The arguments of <c>dotnet</c> in <see cref="UpdateCommand"/>, for running it directly.</summary>
+    /// <exception cref="ArgumentException"><paramref name="packageId"/> is blank.</exception>
+    public static IReadOnlyList<string> UpdateArguments(string packageId, bool prerelease)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
-        return prerelease ? $"dotnet tool update -g {packageId} --prerelease" : $"dotnet tool update -g {packageId}";
+        return prerelease ? ["tool", "update", "-g", packageId, "--prerelease"] : ["tool", "update", "-g", packageId];
     }
 
     /// <summary>The address of a version's release notes; null without a version.</summary>

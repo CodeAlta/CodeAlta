@@ -1622,3 +1622,7 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .update-notice-notes { justify-self: start; margin-left: -6px; }
 .bp6-toast .update-notice-notes.bp6-button { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 .about-settings-facts .update-notice { margin-top: 8px; max-width: 520px; }
+.update-notice-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 2px; }
+.update-notice-actions .update-notice-notes { margin-left: 0; }
+.bp6-toast .update-notice-actions .bp6-button.bp6-intent-primary { background: var(--bp-palette-white, #fff); color: var(--bp-palette-blue-2, #215db0); box-shadow: none; }
+.bp6-toast .update-notice-actions .bp6-button.bp6-intent-primary:hover { background: color-mix(in srgb, #fff 90%, transparent); }

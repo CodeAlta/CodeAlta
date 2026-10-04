@@ -328,6 +328,11 @@ with unsaved edits, then, while sessions are running, says how many and that exi
 **Exit CodeAlta** or **Cancel**. The end of the user's session at sign-out or shutdown exits without
 a question.
 
+On Windows the page's files are read by path, and Windows refuses a path of 260 characters or more.
+When CodeAlta is installed so deep that its files reach that length (a tool path inside a long
+folder, not the usual `.dotnet\tools`), it says so in a message at start, naming the folder and the
+length, and exits, instead of staying on its start-up screen with half of its files.
+
 ### Updates
 
 Once per start the desktop asks nuget.org whether a newer `CodeAlta` package is published, as the
@@ -338,6 +343,14 @@ it, and **View release notes**, which opens the release page in the browser. The
 be exited first (**Exit** in the tray, or `alta --exit`): the tool cannot be replaced while it runs.
 Settings → About keeps the result under **Updates**. A build that is not a published version, and an
 instance on explicit roots, make no request.
+
+For a tool installed with `dotnet tool install -g`, the notice and the About page also have **Update
+and restart**. It hands the update to a small script in the application data directory (`update/`),
+then exits as **Exit** does, with its questions; the script waits for the application to end, runs
+the same `dotnet tool update` command with the .NET installation the application runs on, records
+the outcome and starts CodeAlta again, which says whether it was updated. Canceling the exit calls
+the update off, and the script gives up after fifteen minutes. `update/update.log` keeps the
+command's output. A build output and the developer instance have no such button.
 
 ### Desktop entry of the installed tool
 

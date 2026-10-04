@@ -102,8 +102,8 @@ export const sessionPluginEvents = Object.freeze({ read: unavailable });
 // The demo has no host process: nothing to repair, nothing to keep running.
 export const startupConfig = Object.freeze({ read: unavailable, reload: unavailable, validate: unavailable, save: unavailable, leave: unavailable });
 export const appUpdate = Object.freeze({
-  check: async () => ({ status: "unavailable", packageId: "CodeAlta", currentVersion: "demo", latestVersion: null, command: null, releaseNotes: null }),
-  openReleaseNotes: async () => ({ status: "unavailable" }),
+  check: async () => ({ status: "unavailable", packageId: "CodeAlta", currentVersion: "demo", latestVersion: null, command: null, releaseNotes: null, canInstall: false, installed: null }),
+  openReleaseNotes: async () => ({ status: "unavailable" }), install: async () => ({ status: "unavailable" }), cancelInstallation: async () => ({ status: "unavailable" }),
 });
 export const desktopShell = Object.freeze({
   preferences: async () => ({ status: "unavailable", closeToTray: false, canKeepRunning: false, platform: "windows", entryAdded: false }),

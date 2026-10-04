@@ -145,6 +145,30 @@ public sealed class DesktopShellTests
     }
 
     [TestMethod]
+    public void InstallationTooDeepForWindows_IsSaidInPlainWords()
+    {
+        // A usual global tool installation is far from the limit.
+        var usual = @"C:\Users\me\.dotnet\tools\.store\codealta\1.2.3\codealta\1.2.3\tools\net10.0\any\assets";
+        var files = new[] { "index.html", "splash.js", "assets/index-hIHksSFA.js" };
+        var longest = DesktopAssetPaths.Longest(usual, files);
+        Assert.IsTrue(longest.EndsWith(Path.Combine("assets", "index-hIHksSFA.js"), StringComparison.Ordinal));
+        Assert.IsNull(DesktopAssetPaths.Problem(usual, longest));
+
+        // One character short of the limit still works; at the limit Windows refuses the path.
+        var root = @"C:\" + new string('d', DesktopAssetPaths.WindowsLimit - 5 - "index.html".Length);
+        Assert.AreEqual(DesktopAssetPaths.WindowsLimit - 1, DesktopAssetPaths.Longest(root, ["index.html"]).Length);
+        Assert.IsNull(DesktopAssetPaths.Problem(root, DesktopAssetPaths.Longest(root, ["index.html"])));
+        var tooLong = DesktopAssetPaths.Longest(root, ["splash.html"]);
+        Assert.AreEqual(DesktopAssetPaths.WindowsLimit, tooLong.Length);
+        var problem = DesktopAssetPaths.Problem(root, tooLong);
+        Assert.IsNotNull(problem);
+        StringAssert.Contains(problem, root);
+        StringAssert.Contains(problem, "260 characters");
+        StringAssert.Contains(problem, "shorter path");
+        Assert.AreEqual(string.Empty, DesktopAssetPaths.Longest(root, []));
+    }
+
+    [TestMethod]
     public void WindowsShortcut_IsWrittenForTheLauncher()
     {
         if (!OperatingSystem.IsWindows())

@@ -12,7 +12,7 @@ import { ConfigRecoveryScreen } from "./ConfigRecoveryScreen";
 import { RunningExitDialog } from "./RunningExitDialog";
 import { entryAddedNotice } from "./desktopShell";
 import { showToast } from "./appToaster";
-import { availableUpdate, UpdateNotice } from "./UpdateNotice";
+import { availableUpdate, installedNotice, UpdateNotice } from "./UpdateNotice";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionPluginEvents, projectGit, promptImages, composerStatus, sessionUserInput, type BootStatus,
@@ -670,6 +670,23 @@ function App() {
   // One look for a newer version per run, as the terminal application does: a newer one is announced once,
   // with the command that installs it; Settings > About keeps the result.
   const [appUpdateResult, setAppUpdateResult] = useState<AppUpdateResponse | null>(null);
+  // Update and restart: the host hands the update to a helper and exits as it does for Exit. An exit the
+  // user cancels (unsaved files, running sessions) calls the update off.
+  const updatePending = useRef(false);
+  function installUpdate() {
+    if (updatePending.current) return;
+    updatePending.current = true;
+    void appUpdate.install({}, { timeoutMilliseconds: 30_000 }).then(reply => reply.status === "started", () => false).then(started => {
+      if (started) return;
+      updatePending.current = false;
+      showToast({ intent: "danger", icon: "error", timeout: 12_000, message: translate(shownLocale.current, "The update could not be started. Run the command in a terminal.") });
+    });
+  }
+  function exitCanceled() {
+    if (!updatePending.current) return;
+    updatePending.current = false;
+    void appUpdate.cancelInstallation({}, { timeoutMilliseconds: 15_000 }).catch(() => { /* The helper gives up by itself after its wait. */ });
+  }
   function openReleaseNotes() { void appUpdate.openReleaseNotes({}, { timeoutMilliseconds: 15_000 }).catch(() => { /* The address is in the toast's command line. */ }); }
   useEffect(() => {
     if (!status?.hostEpoch) return;
@@ -677,10 +694,14 @@ function App() {
     void appUpdate.check({}, { signal: abort.signal, timeoutMilliseconds: 30_000 }).then(value => {
       if (abort.signal.aborted) return;
       setAppUpdateResult(value);
+      // What became of the update the previous run started, then what is available now.
+      const installed = installedNotice(value);
+      if (installed) showToast({ intent: installed.intent, icon: installed.intent === "success" ? "tick" : "error", timeout: 12_000,
+        message: translate(shownLocale.current, installed.key, installed.parameters) });
       const available = availableUpdate(value);
       if (available) showToast({ intent: "primary", icon: "automatic-updates", timeout: 20_000,
-        message: <UpdateNotice update={available} locale={shownLocale.current} onOpenReleaseNotes={openReleaseNotes} /> });
-    }, () => { if (!abort.signal.aborted) setAppUpdateResult({ status: "failed", packageId: "CodeAlta", currentVersion: "", latestVersion: null, command: null, releaseNotes: null }); });
+        message: <UpdateNotice update={available} locale={shownLocale.current} onOpenReleaseNotes={openReleaseNotes} onInstall={installUpdate} /> });
+    }, () => { if (!abort.signal.aborted) setAppUpdateResult({ status: "failed", packageId: "CodeAlta", currentVersion: "", latestVersion: null, command: null, releaseNotes: null, canInstall: false, installed: null }); });
     return () => abort.abort();
   }, [status?.hostEpoch]);
   const shownLocale = useRef(language.locale); shownLocale.current = language.locale;
@@ -1936,7 +1957,7 @@ function App() {
       {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, shownTheme, colorScheme, setColorScheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); },
         keepRunning: shellPreferences?.canKeepRunning ? { enabled: shellPreferences.closeToTray, platform: shellPreferences.platform, set: setCloseToTray } : null }} />
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}
-        update={owned ? appUpdateResult : undefined} onOpenReleaseNotes={openReleaseNotes} />
+        update={owned ? appUpdateResult : undefined} onOpenReleaseNotes={openReleaseNotes} onInstallUpdate={installUpdate} />
       : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
       : settingsSection === "skills" ? <SkillSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
       : settingsSection === "mcp" ? <McpServerSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
@@ -2007,8 +2028,8 @@ function App() {
       onOpen={path => { setDialog(null); openFile({ projectId: filePickerProject.id, projectPath: filePickerProject.path, path }); }} />}
     {exiting && <UnsavedExitDialog names={exiting.tabs.map(fileTabName)} busy={exiting.busy}
       onSave={() => void saveAllAndExit(exiting.tabs)} onDiscard={() => { setExiting(null); quitApplication(); }}
-      onCancel={() => { if (!exiting.busy) setExiting(null); }} />}
-    {exitQuestionFor !== null && <RunningExitDialog runningSessions={exitQuestionFor} onCancel={() => setExitQuestionFor(null)}
+      onCancel={() => { if (!exiting.busy) { setExiting(null); exitCanceled(); } }} />}
+    {exitQuestionFor !== null && <RunningExitDialog runningSessions={exitQuestionFor} onCancel={() => { setExitQuestionFor(null); exitCanceled(); }}
       onExit={() => { setExitQuestionFor(null); quitApplication(true); }} />}
     {fileClosing && <UnsavedFileDialog name={fileTabName(fileClosing.tab)} mode="close" busy={fileClosing.busy}
       onSave={() => void saveAndCloseFile(fileClosing.tab)} onDiscard={() => closeFile(fileClosing.tab, true)}

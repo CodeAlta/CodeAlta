@@ -214,6 +214,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         var bodyFailed = false;
         try
         {
+            // Before anything is set up: the page's files, which Windows cannot read from too deep a folder.
+            var assets = Path.Combine(AppContext.BaseDirectory, "assets");
+            var manifest = NeoAssetManifest.Load(Path.Combine(assets, "neoastra-assets.json"));
+            DesktopAssetPaths.EnsureUsable(assets, manifest);
             var appearance = DesktopAppearance.Load(options.DataRoot);
             appearance.ApplyToBrowser();
             window = application.CreateWindow(DesktopWindowChrome.WindowOptions(options.Developer, appearance));
@@ -298,8 +302,6 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             if (configRecovery.IsReady) StartHost();
             // The window's own parts do not wait for the host: the view exists and shows the start-up screen
             // (the logo on the window's theme) as soon as the browser is ready.
-            var assets = Path.Combine(AppContext.BaseDirectory, "assets");
-            var manifest = NeoAssetManifest.Load(Path.Combine(assets, "neoastra-assets.json"));
             var creatingEnvironment = application.CreateEnvironmentAsync(new NeoEnvironmentOptions
             {
                 UserDataRoot = Path.Combine(options.DataRoot, "webview"),
@@ -417,7 +419,23 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddDesktopShellService(new DesktopShellService(shell));
                     // As the terminal application does: one look at nuget.org for a newer version. An instance on
                     // explicit roots is automation and stays off the network.
-                    appUpdate = roots.Home is null ? new AppUpdateService(DesktopCommandLine.Version) : new AppUpdateService();
+                    // Only an installed tool can replace itself: a helper waits for this process to end, runs
+                    // the update and starts CodeAlta again.
+                    var updateLauncher = options.Developer ? null : DesktopIntegration.InstalledLauncher(AppContext.BaseDirectory, OperatingSystem.IsWindows());
+                    var updateDotnet = DesktopUpdateInstaller.DotnetPath();
+                    var selfUpdate = updateLauncher is not null && updateDotnet is not null && File.Exists(updateLauncher);
+                    appUpdate = roots.Home is not null ? new AppUpdateService() : new AppUpdateService(DesktopCommandLine.Version)
+                    {
+                        Installed = DesktopUpdateInstaller.ConsumeResult(options.DataRoot),
+                        Install = !selfUpdate ? null : prerelease =>
+                        {
+                            if (!DesktopUpdateInstaller.Start(options.DataRoot, updateLauncher!, updateDotnet!,
+                                CodeAltaNuGetUpdateChecker.UpdateArguments(AppUpdateService.PackageId, prerelease))) return false;
+                            shell.RequestUserExit();
+                            return true;
+                        },
+                        CancelInstall = () => DesktopUpdateInstaller.Cancel(options.DataRoot),
+                    };
                     appUpdate.Start();
                     builder.AddAppUpdateService(appUpdate);
                     builder.AddWorkspaceService(workspace);
@@ -566,6 +584,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
 
             var assets = Path.Combine(AppContext.BaseDirectory, "assets");
             var manifest = NeoAssetManifest.Load(Path.Combine(assets, "neoastra-assets.json"));
+            DesktopAssetPaths.EnsureUsable(assets, manifest);
             await using var environment = await application.CreateEnvironmentAsync(new NeoEnvironmentOptions
             {
                 UserDataRoot = Path.Combine(options.DataRoot, "webview"),
