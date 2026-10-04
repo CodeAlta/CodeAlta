@@ -37,6 +37,12 @@ internal sealed class ReminderService : IAsyncDisposable, IAltaReminderDelivery
         _reminders = new AltaReminderService(new AltaServiceCollection(), clock ?? TimeProvider.System, this);
     }
 
+    /// <summary>
+    /// Gets the reminders this service lists and delivers, so the host's <c>alta reminder</c> commands create
+    /// reminders the Reminders view shows.
+    /// </summary>
+    internal AltaReminderService Reminders => _reminders;
+
     [NeoRpcMethod("list")]
     public async Task<ReminderListResponse> List(ReminderListRequest request, CancellationToken cancellationToken)
     {

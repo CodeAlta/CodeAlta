@@ -2,6 +2,13 @@ using CodeAlta.Agent;
 
 namespace CodeAlta.Orchestration.Runtime;
 
+/// <summary>What an owned session's tools are created for.</summary>
+/// <param name="SessionId">The session, or null while it is being created.</param>
+/// <param name="ProjectId">The session's project, or null for a global session.</param>
+/// <param name="WorkingDirectory">The directory the session works in.</param>
+/// <param name="ProviderKey">The provider the session runs on.</param>
+public sealed record OwnedSessionToolRequest(string? SessionId, string? ProjectId, string WorkingDirectory, string ProviderKey);
+
 /// <summary>Text and optional bounded image admission input; no caller-owned execution objects are accepted.</summary>
 /// <param name="ClientRequestId">Ordinal owner-lifetime retry key.</param>
 /// <param name="SessionId">Case-insensitive durable session identity, without leading or trailing whitespace.</param>

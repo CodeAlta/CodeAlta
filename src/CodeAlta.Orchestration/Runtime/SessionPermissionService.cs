@@ -94,8 +94,15 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
 
     // Immutable host-policy capabilities, not per-send or mutable latest-callback associations.
     // Owned sends reject a reused coordinator whose session defaults came from another caller.
-    internal AgentPermissionRequestHandler OwnedDefaultPermissionHandler { get; }
-    internal AgentUserInputRequestHandler OwnedDefaultUserInputHandler { get; }
+
+    /// <summary>
+    /// Gets the host's default permission decision for sessions it owns: allow once when the host approves
+    /// automatically, otherwise deny. A session created with it can later be driven by the owner's commands.
+    /// </summary>
+    public AgentPermissionRequestHandler OwnedDefaultPermissionHandler { get; }
+
+    /// <summary>Gets the host's default user-input answer for sessions it owns: the request is canceled.</summary>
+    public AgentUserInputRequestHandler OwnedDefaultUserInputHandler { get; }
         = static (_, _) => Task.FromCanceled<AgentUserInputResponse>(new CancellationToken(true));
 
     // Only the command owner creates one of these per immutable receipt. Closed records are removed

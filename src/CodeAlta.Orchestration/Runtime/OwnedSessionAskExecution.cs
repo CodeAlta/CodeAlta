@@ -2,6 +2,8 @@ using System.Text.Json;
 using System.Runtime.ExceptionServices;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.LiveTool;
+using CodeAlta.Orchestration.Runtime.Prompts;
 
 namespace CodeAlta.Orchestration.Runtime;
 
@@ -61,14 +63,35 @@ internal sealed class OwnedSessionAskExecution : AgentRunLifecycle
     // Acquiring the gate joins any synchronous producer body. No answer dispatch is joined here.
     internal void Close() { lock (_gate) _closed = true; }
 
-    internal AgentSendOptions Compose(AgentSendOptions options) => new()
+    internal AgentSendOptions Compose(AgentSendOptions options) => Compose(options, includeTool: true);
+
+    // A session whose own tools include `alta` reaches this execution through that tool (see Queue): adding the
+    // per-send tool as well would give the run two tools of one name.
+    internal AgentSendOptions Compose(AgentSendOptions options, bool includeTool) => new()
     {
         Input = options.Input, AskId = options.AskId, OnPermissionRequest = options.OnPermissionRequest,
         OnUserInputRequest = options.OnUserInputRequest,
         EnableUserInputTool = options.EnableUserInputTool,
-        AdditionalTools = System.Array.AsReadOnly<AgentToolDefinition>([.. (options.AdditionalTools ?? []), Tool]),
+        AdditionalTools = includeTool ? System.Array.AsReadOnly<AgentToolDefinition>([.. (options.AdditionalTools ?? []), Tool]) : options.AdditionalTools,
         RunLifecycle = new Lifecycle(this, options.RunLifecycle),
     };
+
+    internal string SessionId => _session;
+
+    // The same admission as the per-send tool, for an already validated request: one ask per send, only while
+    // this send's run is open.
+    internal AltaAskQueueResult? Queue(AltaAskRequest request, CancellationToken token)
+    {
+        lock (_gate)
+        {
+            if (_closed || !_bound || _run is null || _committed || _operationToken.IsCancellationRequested
+                || _runToken.IsCancellationRequested || token.IsCancellationRequested) return null;
+            var queued = _owner.Queue(new(_operation, _runtime, _attachment, _provider.Value, _session, _run, "", 0), request);
+            if (queued is null) return null;
+            _committed = true;
+            return queued;
+        }
+    }
 
     internal static AgentRunLifecycle Combine(AgentRunLifecycle? first, AgentRunLifecycle second)
         => first is null ? second : new Combined(first, second);

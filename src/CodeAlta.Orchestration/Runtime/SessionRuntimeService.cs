@@ -1396,7 +1396,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 if (askExecution is not null)
                 {
                     askExecution.Bind(_runtimeInstanceId, candidate.Attachment.Ordinal, candidate.ProviderId);
-                    sendOptions = askExecution.Compose(sendOptions);
+                    sendOptions = askExecution.Compose(sendOptions,
+                        includeTool: !candidate.Tools.Any(static tool => string.Equals(tool.Spec.Name, "alta", StringComparison.Ordinal)));
                 }
                 Task<AgentRunId>? runOriginal = null;
                 runInvocation.Launch(() => runOriginal = RunCapturedAsync(sessionHandleId, sendOptions, execution.Token));

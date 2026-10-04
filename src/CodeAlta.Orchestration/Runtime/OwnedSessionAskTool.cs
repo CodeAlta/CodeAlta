@@ -77,6 +77,41 @@ internal static class OwnedSessionAskTool
         { throw new ArgumentException("Invalid ask input.", nameof(json), ex); }
     }
 
+    // The limits of ParseRequest for a request that arrives already parsed: no file to review, the same counts and
+    // text budgets.
+    internal static AltaAskRequest Restrict(AltaAskRequest request)
+    {
+        if (request.File is not null) throw new ArgumentException("An ask with a file to review is not available here.");
+        if (request.Questions is null || request.Questions.Count is 0 or > 12) throw new ArgumentException("Invalid array length.");
+        var budget = 8192;
+        string? Bounded(string? text, int maximum)
+        {
+            if (text is null) return null;
+            if (!Text(text, maximum) || (budget -= text.Length) < 0) throw new ArgumentException("Ask text exceeds its budget.");
+            return text;
+        }
+
+        var questions = new List<AltaAskQuestion>(request.Questions.Count);
+        foreach (var question in request.Questions)
+        {
+            if (question is null || question.Choices is { Count: > 20 }) throw new ArgumentException("Invalid array length.");
+            var choices = (question.Choices ?? []).Select(choice => new AltaAskChoice
+            {
+                Title = Bounded(choice?.Title, 120),
+                Description = Bounded(choice?.Description, 4000),
+            }).ToList();
+            questions.Add(new()
+            {
+                Title = Bounded(question.Title, 120), Question = Bounded(question.Question, 4000), Description = Bounded(question.Description, 4000),
+                Choices = choices.AsReadOnly(),
+                Freeform = question.Freeform is null ? null
+                    : new() { Title = Bounded(question.Freeform.Title, 120), Placeholder = Bounded(question.Freeform.Placeholder, 500) },
+            });
+        }
+
+        return AltaAskValidator.ValidateAndNormalize(new() { Questions = questions.AsReadOnly() });
+    }
+
     internal static IReadOnlyList<AltaAskAnswer> CaptureAnswers(AltaAskRequest request, IReadOnlyList<AltaAskAnswer> answers)
     {
         if (answers is null || answers.Count != request.Questions.Count || answers.Count > 12) throw new ArgumentException("Answer every original question.");

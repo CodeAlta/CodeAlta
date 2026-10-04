@@ -3323,6 +3323,15 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         }
     }
 
+    // Without a host policy, sessions run by alta commands allow every permission once and answer user input
+    // with nothing. The instances are shared: the runtime compares a session's handlers by reference.
+    private static readonly AltaSessionInteractionDefaults UnattendedDefaults = new(
+        static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        static (_, _) => Task.FromResult(new AgentUserInputResponse(new Dictionary<string, string>(StringComparer.Ordinal))));
+
+    private static IAltaSessionInteractionDefaults InteractionDefaults(AltaCommandContext context)
+        => context.Services.Get<IAltaSessionInteractionDefaults>() ?? UnattendedDefaults;
+
     private static SessionExecutionOptions BuildExecutionOptions(
         AltaCommandContext context,
         AltaModelSelection selection,
@@ -3341,8 +3350,8 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             ReasoningEffort = selection.ReasoningEffort,
             AgentPromptId = NormalizeOptionalText(promptId),
             Tools = CreateAltaSessionTools(context, selection.ProviderKey, sourceSessionIdProvider, sourceProjectId, workingDirectory),
-            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
-            OnUserInputRequest = static (_, _) => Task.FromResult(new AgentUserInputResponse(new Dictionary<string, string>(StringComparer.Ordinal))),
+            OnPermissionRequest = InteractionDefaults(context).OnPermissionRequest,
+            OnUserInputRequest = InteractionDefaults(context).OnUserInputRequest,
         };
 
     private static async Task<SessionExecutionOptions> BuildExecutionOptionsForSessionAsync(AltaCommandContext context, AltaSessionInfo info, string? promptId)
@@ -3369,8 +3378,8 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             ReasoningEffort = info.Preference?.ReasoningEffort ?? info.Session.ReasoningEffort,
             AgentPromptId = NormalizeOptionalText(promptId) ?? NormalizeOptionalText(info.Session.AgentPromptId),
             Tools = CreateAltaSessionTools(context, info.Session.ProviderId, () => info.Session.SessionId, info.Session.ProjectRef, workingDirectory),
-            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
-            OnUserInputRequest = static (_, _) => Task.FromResult(new AgentUserInputResponse(new Dictionary<string, string>(StringComparer.Ordinal))),
+            OnPermissionRequest = InteractionDefaults(context).OnPermissionRequest,
+            OnUserInputRequest = InteractionDefaults(context).OnUserInputRequest,
         };
     }
 

@@ -105,6 +105,40 @@ public sealed class OwnedSessionAskServiceTests
     }
 
     [TestMethod]
+    public async Task SessionTool_AsksThroughTheOpenSendOfItsSessionOncePerSend()
+    {
+        var owner = new OwnedSessionAskService(true, static (_, _) => throw new AssertFailedException("No send expected."));
+        var adapter = new OwnedSessionAltaAskService(owner);
+        var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session" };
+        var request = new AltaAskRequest { Questions = [new() { Title = "Decision", Question = "How?", Freeform = new() }] };
+        // No send of the session is running yet, then one that the provider has not started.
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => adapter.QueueAsync(request, "session", caller));
+        var send = owner.CreateExecution(Guid.NewGuid(), "session", default);
+        send.Bind(Guid.NewGuid(), 1, new("fixture"));
+        Assert.IsNull(owner.QueueFromSession("session", request));
+        // A session with its own alta tool gets no second tool of that name; the lifecycle is still joined.
+        var composed = send.Compose(new AgentSendOptions { Input = new AgentInput([]) }, includeTool: false);
+        Assert.IsNull(composed.AdditionalTools);
+        Assert.IsNotNull(composed.RunLifecycle);
+        await send.StartedAsync(new("run"), default);
+        try
+        {
+            Assert.IsNull(owner.QueueFromSession("other", request), "Another session has no open send.");
+            var queued = await adapter.QueueAsync(request, " session ", caller);
+            Assert.AreEqual("session", queued.SessionId);
+            Assert.AreEqual(queued.AskId, owner.List("session").Head!.Handle.AskId);
+            Assert.IsNull(owner.QueueFromSession("session", request), "One ask per send.");
+            Assert.IsFalse((await send.Tool.Handler(Invocation(), default)).Success, "The per-send tool shares that one ask.");
+            Assert.Throws<ArgumentException>(() => owner.QueueFromSession("session", request with { File = new() { Path = "plan.md" } }));
+            Assert.Throws<ArgumentException>(() => owner.QueueFromSession("session", new AltaAskRequest()));
+            Assert.AreEqual(0, adapter.GetPending("session").Count);
+            Assert.IsNull(adapter.Peek("session"));
+        }
+        finally { send.Close(); owner.CloseAdmission(); await Join(owner); }
+        Assert.IsNull(owner.QueueFromSession("session", request), "A closed owner admits nothing.");
+    }
+
+    [TestMethod]
     public async Task AskCapacity_DoesNotPreventLaterSendLifecycleBinding()
     {
         var owner = new OwnedSessionAskService(true, static (_, _) => throw new AssertFailedException("No dispatch."));

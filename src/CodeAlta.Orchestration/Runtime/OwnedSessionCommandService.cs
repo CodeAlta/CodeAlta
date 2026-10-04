@@ -123,6 +123,20 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     /// <summary>Gets the command-owned restricted ask service, disabled unless explicitly configured.</summary>
     public OwnedSessionAskService Asks { get; }
 
+    /// <summary>
+    /// Supplies the session-level tools of the sessions this owner creates and sends to (the host's <c>alta</c>
+    /// tool). Null, the default, gives them none.
+    /// </summary>
+    /// <remarks>
+    /// The runtime compares a session's tools by name, description and schema: the supplier must return tools
+    /// with the same three for every call, or each send would replace the session's attachment. Set it once,
+    /// before the first send.
+    /// </remarks>
+    public Func<OwnedSessionToolRequest, IReadOnlyList<AgentToolDefinition>>? SessionTools { get; set; }
+
+    private IReadOnlyList<AgentToolDefinition> ToolsFor(string? sessionId, string? projectId, string workingDirectory, string providerKey)
+        => SessionTools?.Invoke(new(sessionId, projectId, workingDirectory, providerKey)) ?? [];
+
     /// <summary>Creates a draft through the host runtime using the same restricted permission and input policy as owned sends.</summary>
     /// <remarks>The caller owns admission and must drain the returned task before disposing the host.</remarks>
     /// <param name="project">An already resolved, trusted catalog project; null creates a global session.</param>
@@ -140,8 +154,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         var directory = project?.ProjectPath ?? _catalog.GlobalRoot;
         var policy = SessionExecutionPolicy.CapturePreferred(provider.ProviderId, directory,
             project is null ? [] : [directory], project, provider.DefaultModelId, provider.DefaultReasoningEffort, null);
-        var options = SessionExecutionPolicy.BuildOptions(policy, [], _runtime.Permissions.OwnedDefaultPermissionHandler,
-            _runtime.Permissions.OwnedDefaultUserInputHandler);
+        var options = SessionExecutionPolicy.BuildOptions(policy, ToolsFor(null, project?.Id, directory, provider.ProviderId.Value),
+            _runtime.Permissions.OwnedDefaultPermissionHandler, _runtime.Permissions.OwnedDefaultUserInputHandler);
         return project is null ? _runtime.CreateGlobalSessionAsync(options, title, CancellationToken.None)
             : _runtime.CreateProjectSessionAsync(project, options, title, CancellationToken.None);
     }
@@ -808,7 +822,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 selection is null || keepsSessionModel ? session.ReasoningEffort : selection.ReasoningEffort,
                 selection?.AgentPromptId ?? session.AgentPromptId);
             var options = SessionExecutionPolicy.BuildOptions(
-                policy, [],
+                policy, ToolsFor(session.SessionId, project?.Id, project?.ProjectPath ?? _catalog.GlobalRoot, session.ResolvedProviderKey),
                 _runtime.Permissions.OwnedDefaultPermissionHandler,
                 _runtime.Permissions.OwnedDefaultUserInputHandler);
             if (selection is null)

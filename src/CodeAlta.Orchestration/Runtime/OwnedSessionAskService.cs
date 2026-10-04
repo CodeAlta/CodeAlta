@@ -40,6 +40,35 @@ public sealed class OwnedSessionAskService
         return execution;
     }
 
+    /// <summary>
+    /// Queues an ask on behalf of a session's own <c>alta</c> tool, through the open send of that session.
+    /// </summary>
+    /// <param name="sessionId">The session that asks.</param>
+    /// <param name="request">A validated ask; it is checked again against this owner's limits.</param>
+    /// <param name="cancellationToken">Cancels before admission.</param>
+    /// <returns>
+    /// The queued ask, or null when asks are disabled, no send of the session is running, that send already
+    /// asked, or capacity is exhausted.
+    /// </returns>
+    /// <exception cref="ArgumentException">The request has a file to review, or exceeds the owner's limits.</exception>
+    public AltaAskQueueResult? QueueFromSession(string sessionId, AltaAskRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!OwnedSessionAskTool.Identity(sessionId)) throw new ArgumentException("Invalid session.", nameof(sessionId));
+        var restricted = OwnedSessionAskTool.Restrict(request);
+        OwnedSessionAskExecution[] candidates;
+        lock (_gate)
+        {
+            if (_closed || !Enabled) return null;
+            candidates = [.. _executions.Where(execution => execution.SessionId == sessionId)];
+        }
+
+        // The newest send of the session is the one whose run is open; older ones refuse.
+        for (var index = candidates.Length - 1; index >= 0; index--)
+            if (candidates[index].Queue(restricted, cancellationToken) is { } queued) return queued;
+        return null;
+    }
+
     internal AltaAskQueueResult? Queue(OwnedAskHandle origin, AltaAskRequest request)
     {
         lock (_gate)
