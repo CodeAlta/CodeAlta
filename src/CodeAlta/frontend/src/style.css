@@ -1431,3 +1431,12 @@ dialog.session-browser .session-batch-delete summary { cursor: pointer; color: v
 
 /* Toasts appear below the title bar, clear of the window controls. */
 .app-toaster.bp6-toast-container { padding-top: 46px; }
+
+/* Notes window: a title with its icon, icon actions, and text at the reading size of the timeline. */
+.notes-pane > header > .notes-title { display: inline-flex; grid-auto-flow: column; align-items: center; gap: 6px; color: var(--text); }
+.notes-pane > header .notes-title strong { font-size: 12px; font-weight: 600; }
+.notes-pane > header button { display: inline-grid; place-items: center; }
+.session-notes-overlay .notes-pane { background: var(--panel); border-color: var(--line-strong); }
+.session-notes-overlay .notes-pane > header { padding: 5px 6px 5px 10px; background: var(--panel-2); }
+.session-notes-overlay .notes-content { padding: 8px 12px 12px; overflow-y: auto; font-size: 12.5px; }
+.session-notes-overlay .notes-content .markdown-content > :first-child { margin-top: 0; }
