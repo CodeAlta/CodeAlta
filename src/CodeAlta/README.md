@@ -45,7 +45,7 @@ the next section to generate the typed contracts/client, then return here and ru
 generates build inputs only; it does not launch the native host or read a profile.
 
 Select projects and sessions, send messages in the local composer, open **Settings** from the
-bottom-left activity rail (or a supported shortcut/palette action), and
+gear button in the title bar (or a supported shortcut/palette action), and
 switch themes. Demo messages disappear on refresh. `npm run build:demo` produces the same preview
 as static files under `dist/`; `npm run build` builds the production NeoAstra-connected frontend.
 The packaged desktop uses the generated bridge and never includes the demo backend.
@@ -70,8 +70,8 @@ global workspace, not the selected project: sessions from different projects can
 Drag a tab along the tab strip to reorder it, to a pane edge to create a split view, or to its center to merge
 (up to 32 open sessions); drag the divider between panes to resize them. The presentation uses
 stable content slots and one vertical Explorer with Projects above Sessions. Its width is locally
-saved (220–720 pixels, never more than 60% of the window); the Explorer button on the activity rail hides it without discarding the width.
-The command palette and Settings are the other two buttons of the activity rail. The compact composer keeps secondary
+saved (220–720 pixels, never more than 60% of the window); the Explorer button in the title bar hides it without discarding the width.
+The command palette and Settings are the two buttons next to it, right after the CodeAlta mark. The compact composer keeps secondary
 actions under **More composer actions**, with retained-request recovery separate. Alta notes belong
 to each session, start collapsed when empty, and open when meaningful content arrives. A small disclosure
 at the top right of the timeline expands/collapses their floating panel without resizing the timeline or
@@ -176,8 +176,9 @@ words, **Include closed** (`Ctrl+I`) filters closed issues, and Enter inserts `[
 The token comes from `GITHUB_TOKEN`, `GH_TOKEN` or `gh auth token`; pull requests are not listed.
 Both windows are resizable and remember their size. Catalog-only and unverified inputs have no picker.
 
-**Settings → Overview → General → Appearance & navigator** manages the local dark/light theme,
-project sorting and desktop project-rail collapse. The rail's Sort projects selector and
+**Settings → Appearance** manages the language, the theme (Dark, Light, or System, which follows the
+operating system), project sorting, the recent-session count and desktop project-rail collapse. The
+button before the window controls at the top right switches between the three themes. The rail's Sort projects selector and
 Show/Hide projects button use the same live preferences; changes apply immediately and are
 saved only to this WebView's local storage (theme, projectSort and projectRail v1 keys).
 If storage is invalid or unavailable, the screen reports the fallback; if a write fails,
@@ -194,29 +195,23 @@ version `+metadata` suffix) and the mode of the running app (desktop app, catalo
 unavailable host). The implemented-actions palette opens the same facts as a window. Nothing is fetched
 or written; update checks are not available in the desktop app.
 
-**Settings → Logs** (also in the implemented-actions palette) offers an
-explicit **Refresh logs** and a **Wrap lines** toggle. It displays at most 64 newest
-plain-text rows from this desktop process's bounded in-memory capture (128 rows and
-128 KiB estimated UTF-8 payload budget, 2,048 characters per message, and a 48 KiB
-JSON response cap). Older captured entries and response-limited rows are reported;
-long messages are marked truncated. Logging keeps its existing file writer, levels,
-rotation and lifetime, but this screen **never opens log files**: it cannot show earlier
-processes, all file records, or exception attachments/structured properties. If another
-owner initialized logging first, in-memory capture is unavailable and no attempt is made
-to replace that logger; the browser demo also has no desktop capture. An available,
-nonempty snapshot offers **Clear captured messages…** with a typed confirmation.
-The request is tied to this capture's identity and that explicit snapshot's high-water
-boundary; it removes only captured in-memory messages through that boundary, including
-older entries already omitted by capacity or the bounded read. Newer messages appended
-after the snapshot survive. Confirmed counts report remaining captured rows removed
-and older capacity-omitted entries covered separately; read omissions are not counted
-as lost messages. Refresh remains read-only, and Wrap lines is unaffected. Pending or
+**Settings → Application Logs** is a live log view of this desktop process: it reads the captured
+messages when the page opens and every two seconds after, one line per message with its local time,
+level, logger and text, coloured by level (warnings in gold, errors in red). The view stays at its end
+unless you scroll up. A filter box and **All / Info / Warnings / Errors** narrow the lines, **Wrap
+lines** wraps long ones, and **Clear** (one confirmation) removes the captured messages. The capture
+holds the newest 1,000 messages (1 MiB, 2,048 characters per message, an exception appended to its
+message); one read returns at most the newest 400 (256 KiB). Logging keeps its existing file writer,
+levels, rotation and lifetime, but this screen **never opens log files**: it cannot show earlier
+processes. If another owner initialized logging first, in-memory capture is unavailable; the browser
+demo also has no desktop capture. A clear is tied to this capture's identity and the boundary of the
+snapshot it was asked from: messages appended after it survive. Pending or
 uncertain clear requests retain their original identity and boundary across screen
 switches; a failed/mismatched reply cannot be retried or unlocked by Refresh. The
 application must be restarted to discard uncertain in-process evidence. Clear never
 alters persisted log files, the rolling writer, configuration, or logging lifetime;
 it cannot clear another process's capture or an unavailable/external logger. No
-automatic polling, export, file deletion or logging-policy controls are provided.
+export, file deletion or logging-policy controls are provided.
 Logs may contain sensitive content; this screen renders them as inert text locally,
 without link activation or external requests.
 
@@ -344,7 +339,11 @@ switches remain TUI workflows. Enabling or disabling rewrites `config.toml` with
 
 The **Skills** Settings section lists discovered skills (project, user, plugin and built-in) with a
 switch per skill, a filter, **Enable all** / **Disable all** for the shown skills, and **New skill**,
-which creates `<name>/SKILL.md` under the global or project skills folder. The **Plugins** Settings
+which creates `<name>/SKILL.md` under the global or project skills folder. Selecting a skill shows its
+details beside the list: source and state, the path of its `SKILL.md`, the skill that overrides it,
+license, compatibility and allowed tools when declared, related files, validation diagnostics, and the
+instructions of the `SKILL.md` rendered as Markdown (the first 64 Ki characters of a file up to 256 KiB).
+The **Models** section's table fills the page height. The **Plugins** Settings
 section has a switch per plugin, including the built-in MCP, GitHub and Statistics plugins; a change
 applies the next time CodeAlta starts, except for the Statistics rows described below, which follow
 the switch from their next read on. With an unarchived project selected, both pages can store a
@@ -492,21 +491,28 @@ Cache/read failures are surfaced; the desktop does not substitute a header scan.
 The screen shows a bounded persisted snapshot, project/session selection and metadata, not
 live run status. Wire responses are capped at 200 projects and 500 sessions with a truncation
 notice; these limits do not bound the underlying catalog load or implement paging/history.
-**Open project** (`Ctrl+O`) is a resizable window: search the saved-project list by name or full
-path, use Up/Down and Enter or click a row, and Escape closes it. A folder that is not yet a project
-is added from the path field underneath. It uses deterministic name order, **not** last-active or recent order.
+**Open project** (`Ctrl+O`) is a resizable window with one field for a saved project's name or a
+folder path. Saved projects that match by name or path are listed first; for an absolute path, the
+folders below it are suggested as you type (at most 16, never at a filesystem root). Up/Down move, Enter
+opens the selected project, Tab or Enter on a suggested folder completes it into the field, and Enter
+on the typed folder itself checks it and offers **Trust and open folder**, which adds it as a project.
+Escape closes the window. Saved projects use deterministic name order, **not** last-active or recent order.
 Navigation requires the row's unique, unchanged ID/path/name/archive state in the current bounded
 snapshot. It selects existing sessions without importing, creating a runtime, or discarding their
 drafts. Archived projects are labeled and their sessions open read-only; a catalog-only launch
-can also navigate saved projects read-only. **Details** in the selected project's Sessions
-header opens a read-only modal with only the current bounded catalog's ID, display name,
-full recorded path and archive flag. The global Other sessions root has no project details;
+can also navigate saved projects read-only. **Details** in a project's **…** menu
+opens a read-only window with the display name, full recorded path, ID and archive flag, each value
+with a copy button at the end of its row. The global Other sessions root has no project details;
 missing, duplicated or changed ID/path rows cannot open it. A failed/pending catalog refresh
 disables inspection until a successful fresh snapshot, and project, session or host changes
-dismiss stale details. The dialog discloses partial/shortened snapshot evidence; it has no
-authoritative total session count or branch, tags, description or source metadata. Copy ID
-and Copy path are explicit, with success, denied or unavailable clipboard feedback; no
-catalog/filesystem reads, metadata writes or project actions occur on opening.
+dismiss stale details. It has no total session count, tags, description or source metadata. A copy
+button shows whether the copy succeeded; no catalog/filesystem reads, metadata writes or project
+actions occur on opening.
+
+**Browse saved sessions** (`Ctrl+Alt+B`, or a project's **…** menu) lists the sessions of the project
+(or the global ones) in a table: title, provider, last update and message count. Click a column to
+sort, type to filter by title or ID, use Up/Down and Enter or double-click to open. A session that is
+running shows a spinner. Exact deletion of several sessions stays in the collapsed panel under the table.
 
 Owned project/global session creation is effectful even while the new session is labeled
 **Draft**: it starts a provider runtime, creates a provider session and persists its identity,

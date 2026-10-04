@@ -1,54 +1,68 @@
 import { AppWindowSurface } from "./AppWindow";
-import { HTMLSelect } from "@blueprintjs/core";
+import { HTMLSelect, InputGroup } from "@blueprintjs/core";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { WorkspaceSnapshot } from "#neoastra";
+import { ActivitySpinner } from "./ActivitySpinner";
+import { AppIcon } from "./AppIcon";
 import type { SessionTab } from "./sessionTabs";
 import { browseSessions } from "./sessionBrowser";
-import { RuntimeObservationBadge, RuntimeObservationRefresh, type RuntimeObservationControls } from "./RuntimeObservation";
+import type { RuntimeObservationControls } from "./RuntimeObservation";
+import { sessionRunning } from "./runtimeObservations";
 import { tabKey } from "./sessionTabs";
-import { defaultRecentSessionCount, orderObservedActivity } from "./recentSessions";
 import { batchDeleteCandidate } from "./sessionBatchDeletion";
 import { SessionBatchDeletePanel, type BatchDeleteControls } from "./SessionBatchDeletePanel";
+import { sessionTime } from "./sessionTime";
+import { plainTitle } from "./sessionTitle";
 import { useShellLanguage } from "./shellLanguage";
+import type { MessageKey } from "./localization";
 
 const noSubscribe = () => () => {};
 const noSnapshot = () => null;
 
-export function SessionBrowser({ snapshot, projectId, stale, open, close, observations, recentCount = defaultRecentSessionCount, activeSessionId = null, batch }: {
+type SortColumn = "title" | "provider" | "updated" | "messages";
+const columns: readonly [SortColumn, MessageKey][] = [["title", "Session"], ["provider", "Provider"], ["updated", "Updated"], ["messages", "Messages"]];
+
+/**
+ * The saved sessions of a project (or the global ones) as a sortable table: title, provider, last update and
+ * message count. Typing filters by title or id, the arrows move the selection and Enter opens it.
+ */
+export function SessionBrowser({ snapshot, projectId, stale, open, close, observations, batch }: {
   snapshot: WorkspaceSnapshot; projectId: string | null; stale: boolean;
   open: (tab: SessionTab) => boolean; close: () => void;
   observations?: RuntimeObservationControls;
   recentCount?: number; activeSessionId?: string | null;
   batch?: BatchDeleteControls;
 }) {
-  const { t } = useShellLanguage();
+  const { t, locale } = useShellLanguage();
   const dialog = useRef<HTMLDialogElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const [scope, setScope] = useState(projectId);
   const [query, setQuery] = useState("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [showAll, setShowAll] = useState(false);
-  const [sort, setSort] = useState("saved");
+  const [sort, setSort] = useState<{ column: SortColumn; descending: boolean }>({ column: "updated", descending: true });
   const observed = useSyncExternalStore(observations?.store.subscribe ?? noSubscribe, observations?.store.getSnapshot ?? noSnapshot);
   const [refused, setRefused] = useState(false);
+  const [now] = useState(Date.now);
   const page = browseSessions(snapshot, scope, query);
-  const activity = (tab: SessionTab) => {
-    const value = observed?.rows.get(tabKey(tab));
-    return !stale && observations?.enabled && observations.canObserve(tab) && !value?.stale ? value?.activity : undefined;
+  const order = (a: typeof page.rows[number], b: typeof page.rows[number]) => {
+    const value = sort.column === "title" ? plainTitle(a.row.title).localeCompare(plainTitle(b.row.title), locale)
+      : sort.column === "provider" ? (a.row.providerKey ?? "").localeCompare(b.row.providerKey ?? "")
+      : sort.column === "messages" ? (a.row.messageCount ?? -1) - (b.row.messageCount ?? -1)
+      : (Date.parse(a.row.updatedAt) || 0) - (Date.parse(b.row.updatedAt) || 0);
+    return sort.descending ? -value : value;
   };
-  const savedRows = [...page.rows].sort((a, b) => (Date.parse(b.row.updatedAt) || 0) - (Date.parse(a.row.updatedAt) || 0));
-  const ordered = sort === "activity" ? orderObservedActivity(savedRows, item => activity(item.tab)?.timestamp ?? null)
-    : sort === "name" ? [...page.rows].sort((a, b) => a.row.title.localeCompare(b.row.title)) : savedRows;
-  const rows = showAll ? ordered : ordered.filter((item, index) => index < recentCount || item.row.id === activeSessionId || tabKey(item.tab) === selectedKey);
+  const rows = [...page.rows].sort(order);
   const selected = Math.max(0, rows.findIndex(item => tabKey(item.tab) === selectedKey));
   function setSelected(index: number) { setSelectedKey(rows[index] ? tabKey(rows[index].tab) : null); }
   const project = snapshot.projects.filter(row => row.id === projectId);
+  const scopeName = scope === null ? t("Global sessions") : project.length === 1 ? project[0].name : t("ambiguous or missing");
   useEffect(() => { const element = dialog.current!; element.showModal(); search.current?.focus(); return () => element.close(); }, []);
   useEffect(() => { dialog.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" }); }, [selected, query, scope]);
   function activate(index: number) {
     const item = rows[index];
     if (stale || !item?.valid || !open(item.tab)) setRefused(true);
   }
+  function change(action: () => void) { batch?.owner.invalidate(); action(); }
   return <dialog ref={dialog} className="session-browser" aria-labelledby="session-browser-title"
     onCancel={event => { event.preventDefault(); close(); }} onKeyDown={event => {
       event.stopPropagation();
@@ -63,37 +77,52 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
         event.preventDefault(); setSelected(Math.max(0, Math.min(rows.length - 1, selected + (event.key === "ArrowDown" ? 1 : -1))));
       } else if (event.key === "Enter") { event.preventDefault(); activate(selected); }
     }}>
-    <AppWindowSurface storageKey="codealta.desktop.window.session-browser.v1" title={t("Browse saved sessions")} titleId="session-browser-title" preferredSize={viewport => ({ width: Math.min(900, viewport.width - 40), height: Math.min(680, viewport.height - 40) })}
+    <AppWindowSurface storageKey="codealta.desktop.window.session-browser.v2" title={t("Sessions · {name}", { name: scopeName })} titleId="session-browser-title"
+      preferredSize={viewport => ({ width: Math.min(980, viewport.width - 40), height: Math.min(680, viewport.height - 40) })}
       onClose={close} closeLabel={t("Close")}>
-    <label>{t("Scope")} <HTMLSelect aria-label={t("Session browser scope")} value={scope === null ? "global" : "project"} onChange={event => { batch?.owner.invalidate(); observations?.store.invalidate(); setScope(event.target.value === "global" ? null : projectId); setSelected(0); }}>
-      {projectId !== null && <option value="project">{t("Selected project: {name}", { name: project.length === 1 ? project[0].name : t("ambiguous or missing") })}{project[0]?.archived ? t(" (archived, read-only)") : ""}</option>}
-      <option value="global">{t("Global sessions")}</option>
-    </HTMLSelect></label>
-    <label>{t("Title or ID")} <input ref={search} aria-label={t("Find saved sessions")} maxLength={256} value={query}
-      onChange={event => { batch?.owner.invalidate(); observations?.store.invalidate(); setQuery(event.target.value); setSelected(0); }} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="session-browser-results"
-      aria-activedescendant={rows[selected] ? `session-browser-row-${selected}` : undefined} /></label>
-    <label>{t("Order loaded sessions")} <HTMLSelect aria-label={t("Order loaded sessions")} value={sort} onChange={event => { batch?.owner.invalidate(); setSelected(selected); setSort(event.target.value); }}>
-      <option value="saved">{t("Saved update")}</option><option value="name">{t("Name")}</option><option value="activity">{t("Observed activity (explicit refresh)")}</option>
-    </HTMLSelect></label>
-    <button type="button" onClick={() => { batch?.owner.invalidate(); setShowAll(value => !value); }}>{t(showAll ? "Use recent session limit" : "Show all loaded matches")}</button>
-    <p role="status">{t("{shown} of {matching} sessions", { shown: rows.length, matching: page.matched })}{page.hidden > 0 && <>{" · "}{t("{count} matches omitted by the 200-row display limit.", { count: page.hidden })}</>}</p>
-    {(stale || refused) && <p role="alert">{t("Catalog, host or selection changed, or identity is ambiguous. Close and reopen the browser; nothing was opened.")}</p>}
-    {batch && <SessionBatchDeletePanel controls={{ ...batch, canReview: batch.canReview && !stale }}
-      inputKey={JSON.stringify([scope, query, sort, showAll, recentCount, stale, rows.map(item => tabKey(item.tab))])}
-      candidates={rows.flatMap(item => { const request = batchDeleteCandidate(snapshot, item.tab, batch.epoch); return request ? [request] : []; })} />}
-    {observations && <RuntimeObservationRefresh controls={{ ...observations, refresh: tabs => { setSelected(selected); observations.refresh(tabs); } }} disabled={stale} tabs={page.rows.map(item => item.tab)} />}
-    <div id="session-browser-results" role="listbox" aria-label={t("Saved sessions")} className="session-browser-results">
-      {rows.map(({ row, valid, tab }, index) => <button type="button" id={`session-browser-row-${index}`} key={valid ? tabKey(tab) : `${tabKey(tab)}:${index}`} role="option" aria-selected={index === selected}
-        disabled={stale || !valid} onFocus={() => setSelected(index)} onClick={() => activate(index)}>
-        <strong>{row.fullTitle || row.title || t("Untitled session")}</strong><span>{row.id}</span>
-        <small>{!valid ? t("Ambiguous or unverified identity — unavailable") : t("Saved metadata · updated {time}", { time: row.updatedAt || t("unknown") })}{row.fullTitleTruncated ? t(" · title truncated") : ""}</small>
-        {observations && <RuntimeObservationBadge controls={observations} tab={tab} />}
-        {sort === "activity" && <small className={activity(tab)?.timestamp ? "observed-activity" : "unknown-activity"}>
-          {activity(tab)?.timestamp ? t("Observed activity · {time}", { time: activity(tab)!.timestamp! }) : t("Unknown activity · missing, stale, omitted or not yet observed")}
-          {activity(tab) && t(" · {admitted} admitted / {omitted} omitted events · this attachment only", { admitted: activity(tab)!.admittedEvents, omitted: activity(tab)!.omittedEvents })}
-        </small>}
-      </button>)}
-      {!rows.length && <p>{t("No matching saved sessions in the loaded scope.")}</p>}
+    <div className="session-browser-toolbar">
+      <InputGroup inputRef={search} className="session-browser-filter" type="search" size="small" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />}
+        placeholder={t("Title or ID")} aria-label={t("Find saved sessions")} maxLength={256} value={query}
+        onChange={event => change(() => { setQuery(event.target.value); setSelectedKey(null); })} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="session-browser-results"
+        aria-activedescendant={rows[selected] ? `session-browser-row-${selected}` : undefined} />
+      <HTMLSelect aria-label={t("Session browser scope")} value={scope === null ? "global" : "project"}
+        onChange={event => change(() => { setScope(event.target.value === "global" ? null : projectId); setSelectedKey(null); })}>
+        {projectId !== null && <option value="project">{project.length === 1 ? project[0].name : t("ambiguous or missing")}{project[0]?.archived ? t(" (archived, read-only)") : ""}</option>}
+        <option value="global">{t("Global sessions")}</option>
+      </HTMLSelect>
+      <span className="settings-editor-spacer" />
+      <span className="bp6-text-muted" role="status">{t("{shown} of {matching} sessions", { shown: rows.length, matching: page.matched })}{page.hidden > 0 && <>{" · "}{t("{count} matches omitted by the 200-row display limit.", { count: page.hidden })}</>}</span>
     </div>
+    {(stale || refused) && <p role="alert">{t("Catalog, host or selection changed, or identity is ambiguous. Close and reopen the browser; nothing was opened.")}</p>}
+    <div className="session-browser-results">
+      <table id="session-browser-results" aria-label={t("Saved sessions")}>
+        <thead><tr>{columns.map(([column, label]) => <th key={column} scope="col" data-column={column}
+          aria-sort={sort.column === column ? sort.descending ? "descending" : "ascending" : "none"}>
+          <button type="button" onClick={() => change(() => setSort(current => ({ column, descending: current.column === column ? !current.descending : column === "updated" || column === "messages" })))}>
+            {t(label)}{sort.column === column && <AppIcon name="chevronDown" size={12} className={sort.descending ? undefined : "sort-ascending"} />}</button></th>)}</tr></thead>
+        <tbody>{rows.map(({ row, valid, tab }, index) => {
+          const time = sessionTime(row.updatedAt, locale, now);
+          const running = !stale && !!observations?.enabled && !!observed && observations.canObserve(tab) && sessionRunning(observed, tab);
+          return <tr id={`session-browser-row-${index}`} key={valid ? tabKey(tab) : `${tabKey(tab)}:${index}`} aria-selected={index === selected}
+            aria-disabled={stale || !valid || undefined} title={`${row.fullTitle || row.title}\n${row.id}`}
+            onClick={() => setSelected(index)} onDoubleClick={() => activate(index)}>
+            <td data-column="title"><span>{running ? <ActivitySpinner size={12} label={t("Running")} /> : <AppIcon name="assistant" size={13} />}
+              <strong>{plainTitle(row.fullTitle || row.title) || t("Untitled session")}</strong>
+              {!valid && <small>{t("Ambiguous or unverified identity — unavailable")}</small>}</span></td>
+            <td data-column="provider">{row.providerKey ?? "—"}</td>
+            <td data-column="updated"><time dateTime={time.dateTime} title={time.title}>{time.label || t("unknown")}</time></td>
+            <td data-column="messages">{row.messageCount ?? "—"}</td>
+          </tr>;
+        })}</tbody>
+      </table>
+      {!rows.length && <p className="bp6-text-muted">{t("No matching saved sessions in the loaded scope.")}</p>}
+    </div>
+    <footer className="session-browser-footer">
+      <span className="bp6-text-muted">{t("Enter or double-click opens the selected session.")}</span>
+      <button type="button" className="bp6-button bp6-small bp6-intent-primary" disabled={stale || !rows[selected]?.valid} onClick={() => activate(selected)}>{t("Open")}</button>
+    </footer>
+    {batch && <SessionBatchDeletePanel controls={{ ...batch, canReview: batch.canReview && !stale }}
+      inputKey={JSON.stringify([scope, query, sort, stale, rows.map(item => tabKey(item.tab))])}
+      candidates={rows.flatMap(item => { const request = batchDeleteCandidate(snapshot, item.tab, batch.epoch); return request ? [request] : []; })} />}
   </AppWindowSurface></dialog>;
 }

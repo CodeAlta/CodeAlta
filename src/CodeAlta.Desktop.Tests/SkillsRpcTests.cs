@@ -162,6 +162,41 @@ public sealed class SkillsRpcTests
         Assert.IsFalse(Directory.Exists(Path.Combine(fixture.ProjectPath, ".alta", "skills", "valid-name")));
     }
 
+    [TestMethod]
+    public async Task Detail_DescribesTheNamedSkillWithItsFileTextAndRelatedFiles()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var root = Path.Combine(fixture.GlobalRoot, "skills", "alpha");
+        Directory.CreateDirectory(Path.Combine(root, "scripts"));
+        File.WriteAllText(Path.Combine(root, "scripts", "run.ps1"), "Write-Output 1");
+
+        var detail = await fixture.Service.DetailAsync(new(Epoch, null, "alpha", "UserAlta"), default);
+        Assert.AreEqual("ok", detail.Status);
+        Assert.AreEqual("alpha", detail.Name);
+        Assert.AreEqual(Path.Combine(root, "SKILL.md"), detail.SkillFilePath);
+        Assert.AreEqual(root, detail.SkillRootPath);
+        Assert.IsNull(detail.ShadowedBy);
+        StringAssert.Contains(detail.Content, "# alpha");
+        Assert.IsFalse(detail.ContentTruncated);
+        CollectionAssert.AreEqual(new[] { "scripts/run.ps1" }, detail.RelatedFiles.Select(static file => file.Path).ToArray());
+        Assert.AreEqual(0, detail.Diagnostics.Count);
+
+        // A long file is cut, never refused, and says so.
+        File.WriteAllText(Path.Combine(root, "SKILL.md"), string.Join('\n', "---", "name: alpha", "description: Alpha workflow", "---", "",
+            new string('x', SkillsService.MaximumContentLength + 10)));
+        var cut = await fixture.Service.DetailAsync(new(Epoch, null, "alpha", "UserAlta"), default);
+        Assert.AreEqual(SkillsService.MaximumContentLength, cut.Content!.Length);
+        Assert.IsTrue(cut.ContentTruncated);
+
+        // The project's skill is only known with its project; a name with another source is not found.
+        Assert.AreEqual("not_found", (await fixture.Service.DetailAsync(new(Epoch, null, "beta", "ProjectAlta"), default)).Status);
+        Assert.AreEqual("ok", (await fixture.Service.DetailAsync(new(Epoch, fixture.Project.Id, "beta", "ProjectAlta"), default)).Status);
+        Assert.AreEqual("not_found", (await fixture.Service.DetailAsync(new(Epoch, null, "alpha", "Builtin"), default)).Status);
+        Assert.AreEqual("invalid", (await fixture.Service.DetailAsync(new(Epoch, null, "", "UserAlta"), default)).Status);
+        Assert.AreEqual("stale_epoch", (await fixture.Service.DetailAsync(new("another", null, "alpha", "UserAlta"), default)).Status);
+        Assert.AreEqual("unavailable", (await new SkillsService().DetailAsync(new(Epoch, null, "alpha", "UserAlta"), default)).Status);
+    }
+
     private sealed class Fixture : IDisposable
     {
         private readonly string _root;

@@ -18,6 +18,13 @@ internal sealed class SkillsService
     private const int MaximumNameLength = 128;
     private const int MaximumDescriptionLength = 1024;
     private const int MaximumMessageLength = 512;
+    private const int MaximumPathLength = 1024;
+    private const int MaximumRelatedFiles = 64;
+    private const int MaximumDiagnostics = 32;
+    private const int MaximumSkillFileBytes = 256 * 1024;
+
+    /// <summary>Largest number of characters of a <c>SKILL.md</c> returned by <c>detail</c>.</summary>
+    internal const int MaximumContentLength = 64 * 1024;
     private readonly ProjectCatalog? _projects;
     private readonly SkillManagementService? _management;
     private readonly string? _epoch;
@@ -72,6 +79,58 @@ internal sealed class SkillsService
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             return Failed("read_failed");
+        }
+    }
+
+    /// <summary>
+    /// Describes one listed skill: where it lives, why it is or is not offered to the model, its validation
+    /// diagnostics, its related files and the text of its <c>SKILL.md</c>.
+    /// </summary>
+    [NeoRpcMethod("detail")]
+    public async Task<SkillsDetailResponse> DetailAsync(SkillsDetailRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        SkillsDetailResponse Failed(string status) => new(status, request.Name, request.Source, null, null, null, null, false, null, null, null, null, false, [], [], 0);
+        if (_projects is null || _management is null) return Failed("unavailable");
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return Failed("stale_epoch");
+        if (request.Name is not { Length: > 0 and <= MaximumNameLength } || request.Source is not { Length: > 0 and <= 64 }) return Failed("invalid");
+        var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
+        if (project.Status != "ok") return Failed(project.Status);
+        try
+        {
+            var descriptors = await _management.LoadAsync(SkillListingScope.Combined, project.Root, cancellationToken).ConfigureAwait(false);
+            // A shadowed skill shares its name with the one that hides it; the source tells them apart.
+            var skill = descriptors.FirstOrDefault(candidate => string.Equals(candidate.Name, request.Name, StringComparison.Ordinal)
+                && string.Equals(candidate.SourceKind.ToString(), request.Source, StringComparison.Ordinal));
+            if (skill is null) return Failed("not_found");
+            // The document lookup refuses a skill file reached through a link.
+            var document = await _management.GetFileDocumentAsync(skill.SkillFilePath, null, project.Root, cancellationToken).ConfigureAwait(false);
+            string? content = null;
+            var truncated = false;
+            var file = new FileInfo(document.FullPath);
+            if (file.Exists && file.Length <= MaximumSkillFileBytes)
+            {
+                content = await File.ReadAllTextAsync(document.FullPath, cancellationToken).ConfigureAwait(false);
+                truncated = content.Length > MaximumContentLength;
+                if (truncated) content = content[..(char.IsHighSurrogate(content[MaximumContentLength - 1]) ? MaximumContentLength - 1 : MaximumContentLength)];
+            }
+
+            var related = _management.ListRelatedFiles(skill, cancellationToken);
+            return new("ok", skill.Name, skill.SourceKind.ToString(), Bound(skill.SkillFilePath, MaximumPathLength), Bound(skill.SkillRootPath, MaximumPathLength),
+                Bound(skill.SourceId, MaximumNameLength), skill.ShadowedBySkillFilePath is { } shadow ? Bound(shadow, MaximumPathLength) : null, skill.IsModelVisible,
+                Optional(skill.Frontmatter.License), Optional(skill.Frontmatter.Compatibility), Optional(skill.Frontmatter.AllowedTools),
+                content, truncated || content is null && file.Exists,
+                [.. related.Take(MaximumRelatedFiles).Select(static item => new SkillsRelatedFile(Bound(item.Category, 64), Bound(item.RelativePath, 512)))],
+                [.. skill.Diagnostics.Take(MaximumDiagnostics).Select(static item => new SkillsDiagnostic(item.Severity.ToString(), Bound(item.Code, 64), Bound(item.Message, MaximumMessageLength)))],
+                Math.Max(0, related.Count - MaximumRelatedFiles));
+        }
+        catch (InvalidDataException)
+        {
+            return Failed("config_invalid");
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return Failed("read_failed"); // Includes a skill file that is reached through a link.
         }
     }
 
@@ -175,6 +234,7 @@ internal sealed class SkillsService
     }
 
     private static string Bound(string value, int maximum) => value.Length <= maximum ? value : value[..maximum];
+    private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : Bound(value.Trim(), MaximumMessageLength);
 
     // The validation sentence without the runtime's parameter-name suffix.
     private static string Reason(ArgumentException exception)
@@ -193,6 +253,18 @@ internal sealed record SkillsListResponse(string Status, string? ProjectId, IRea
 /// </summary>
 internal sealed record SkillsEntry(string Name, string Title, string Description, string Source, string Scope, bool EnabledGlobal,
     bool EnabledProject, bool Enabled, bool Valid, bool Shadowed, bool Trusted);
+/// <summary>Names one listed skill by its name and source.</summary>
+internal sealed record SkillsDetailRequest(string? ExpectedEpoch, string? ProjectId, string? Name, string? Source);
+
+/// <summary>
+/// The detail of one skill. <c>Content</c> is the <c>SKILL.md</c> text, cut at 64 Ki characters
+/// (<c>ContentTruncated</c>) and null when the file is larger than 256 KiB or gone.
+/// </summary>
+internal sealed record SkillsDetailResponse(string Status, string? Name, string? Source, string? SkillFilePath, string? SkillRootPath, string? SourceId,
+    string? ShadowedBy, bool ModelVisible, string? License, string? Compatibility, string? AllowedTools, string? Content, bool ContentTruncated,
+    IReadOnlyList<SkillsRelatedFile> RelatedFiles, IReadOnlyList<SkillsDiagnostic> Diagnostics, int RelatedFilesOmitted);
+internal sealed record SkillsRelatedFile(string Category, string Path);
+internal sealed record SkillsDiagnostic(string Severity, string Code, string Message);
 internal sealed record SkillsSetEnabledRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? Name, bool Enabled);
 internal sealed record SkillsSetAllEnabledRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, IReadOnlyList<string>? Names, bool Enabled);
 internal sealed record SkillsMutationResponse(string Status, int Changed, string? Message);

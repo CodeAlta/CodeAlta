@@ -148,7 +148,7 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
             {loadingModels && rows.length === 0 && <p role="status">{t("Loading models…")}</p>}
             {!loadingModels && rows.length === 0 && modelErrors.size === 0 && <p role="status">{t("This provider reported no models. A configured default is not inventory.")}</p>}
             {rows.length > 0 && visible.length === 0 && <p role="status">{t("No models match this search.")}</p>}
-            {visible.length > 0 && <div className="model-catalog-grid" style={{ height: Math.min(402, 50 + visible.length * 28) }}>
+            {visible.length > 0 && <div className="model-catalog-grid">
               <Table2 numRows={visible.length} enableRowHeader={false} enableMultipleSelection={false} defaultRowHeight={28}
                 columnWidths={[130, 230, 230, 112, 100, 108, 88, 64, 92, 104]} selectionModes={SelectionModes.ROWS_AND_CELLS}
                 selectedRegionTransform={region => region.rows ? Regions.row(region.rows[0]) : region}

@@ -11,7 +11,7 @@ export function logClearTarget(page: ApplicationLogsResponse): LogClearTarget | 
     || typeof page.grant !== "string" || !/^[0-9a-f-]{36}$/.test(page.grant)
     || typeof page.boundary !== "string" || !/^[1-9]\d{0,18}$/.test(page.boundary)
     || !/^\d{1,19}$/.test(page.captureOmitted) || !Number.isInteger(page.readOmitted)
-    || page.readOmitted < 0 || page.readOmitted > 128) return null;
+    || page.readOmitted < 0 || page.readOmitted > 1000) return null;
   return { captureId: page.captureId, boundary: page.boundary, grant: page.grant,
     rows: page.rows.length, captureOmitted: page.captureOmitted, readOmitted: page.readOmitted };
 }

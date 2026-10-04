@@ -13,10 +13,9 @@ import { AboutSettings } from "./AboutDialog";
 
 test("support labels translate while recorded host identity and confirmation bytes stay literal", () => {
   for (const locale of locales) {
-    for (const key of ["Refresh logs", "Clear captured messages…", "Check reference metadata", "Path metadata observed; Send revalidates", "Raw prompt reference preview"] as const) {
+    for (const key of ["Filter messages", "Check reference metadata", "Path metadata observed; Send revalidates", "Raw prompt reference preview"] as const) {
       if (locale !== "en") assert.notEqual(translate(locale, key), key);
     }
-    assert.ok(translate(locale, "Type {confirmation} to confirm", { confirmation: "CLEAR CAPTURED LOGS" }).includes("CLEAR CAPTURED LOGS"));
     const markup = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: () => {} } },
       createElement(AboutSettings, { demo: false, bootError: false,
         status: { productName: "Settings", version: "1.2.3+Copy", state: "owned-text-only", hostAvailable: true, hostEpoch: "Close",
@@ -29,7 +28,7 @@ test("project/session workflow labels translate while literal titles, paths and 
   const literal = "Settings Unknown Archived C:/Settings/<literal>";
   for (const locale of locales) {
     for (const key of ["Project details", "Copy project path","Confirm archive", "Confirm unarchive",
-      "Find a saved project by name or full path", "Suggest folders", "Import and open folder", "Create and open", "Save title", "Save project name"] as const) {
+      "Project name or folder path", "Trust and open folder", "Create and open", "Save title", "Save project name"] as const) {
       if (locale !== "en") assert.notEqual(translate(locale, key), key);
     }
     assert.equal(workflowNotice(locale, literal), literal);
@@ -98,7 +97,7 @@ test("all six shell dictionaries are complete immutable plain-text messages with
       assert.deepEqual(value.match(/\{\w+\}/g)?.sort() ?? [], key.match(/\{\w+\}/g)?.sort() ?? [], `${locale}: ${key}`);
     }
   }
-  const text = translate("es", "{count} sessions", { count: "<img src=x onerror=alert(1)>" });
+  const text = translate("es", "{count} models", { count: "<img src=x onerror=alert(1)>" });
   assert.ok(renderToStaticMarkup(createElement("p", null, text)).includes("&lt;img"));
   assert.equal(translate("unknown", "Settings"), "Settings");
 });

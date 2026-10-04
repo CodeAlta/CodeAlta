@@ -7,8 +7,8 @@ namespace CodeAlta.Desktop.Rpc;
 [NeoRpcService("applicationLogs", Version = 1)]
 internal sealed class ApplicationLogsService(DesktopLogCapture? capture)
 {
-    internal const int MaximumResponseBytes = 48 * 1024;
-    internal const int MaximumResponseRows = 64;
+    internal const int MaximumResponseBytes = 256 * 1024;
+    internal const int MaximumResponseRows = 400;
 
     [NeoRpcMethod("read")]
     public ApplicationLogsResponse Read(ApplicationLogsRequest request)
@@ -27,7 +27,7 @@ internal sealed class ApplicationLogsService(DesktopLogCapture? capture)
                 { CaptureId = capture.CaptureId, Boundary = boundary, Grant = grant };
                 if (JsonSerializer.SerializeToUtf8Bytes(response, DesktopJsonContext.Default.ApplicationLogsResponse).Length <= MaximumResponseBytes)
                     return response;
-                rows.RemoveAt(0); // Keep the newest rows; report the omitted prefix.
+                rows.RemoveRange(0, Math.Max(1, rows.Count / 8)); // Keep the newest rows; report the omitted prefix.
             } while (rows.Count > 0);
             return new("ok", [], omitted.ToString(CultureInfo.InvariantCulture), snapshot.Length)
             { CaptureId = capture.CaptureId, Boundary = boundary, Grant = grant };

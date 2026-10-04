@@ -30,7 +30,7 @@ public sealed class ApplicationLogsTests
     {
         var capture = new DesktopLogCapture();
         var rpc = new ApplicationLogsService(capture);
-        for (var i = 0; i < 200; i++) capture.Append("t", "Warn", "test", $"before {i}");
+        for (var i = 0; i < DesktopLogCapture.MaximumRows + 72; i++) capture.Append("t", "Warn", "test", $"before {i}");
         var observed = rpc.Read(new());
         capture.Append("t", "Warn", "test", "newer");
         Assert.AreEqual("invalid_request", rpc.Clear(new(Guid.NewGuid().ToString("D"), observed.Boundary, observed.Grant, "CLEAR CAPTURED LOGS")).Status);
@@ -40,9 +40,9 @@ public sealed class ApplicationLogsTests
         Assert.AreEqual("invalid_request", rpc.Clear(new(observed.CaptureId!, observed.Boundary, "unissued", "CLEAR CAPTURED LOGS")).Status);
         var cleared = rpc.Clear(new(observed.CaptureId!, observed.Boundary, observed.Grant, "CLEAR CAPTURED LOGS"));
         Assert.AreEqual("cleared", cleared.Status);
-        Assert.AreEqual(64, observed.Rows.Count);
-        Assert.AreEqual(64, observed.ReadOmitted);
-        Assert.AreEqual(127, cleared.ClearedRows); // 64 read-omitted rows remain real captured rows, not capacity loss.
+        Assert.AreEqual(ApplicationLogsService.MaximumResponseRows, observed.Rows.Count);
+        Assert.AreEqual(DesktopLogCapture.MaximumRows - ApplicationLogsService.MaximumResponseRows, observed.ReadOmitted);
+        Assert.AreEqual(DesktopLogCapture.MaximumRows - 1, cleared.ClearedRows); // Read-omitted rows remain real captured rows, not capacity loss.
         Assert.AreEqual(long.Parse(observed.CaptureOmitted) + 1, long.Parse(cleared.CoveredOmitted)); // Evicted after read, still covered by boundary.
         var next = rpc.Read(new());
         Assert.AreEqual("0", next.CaptureOmitted);
@@ -99,6 +99,7 @@ public sealed class ApplicationLogsTests
         Assert.AreEqual(2047, first.Text.Length);
         Assert.IsTrue(first.TextTruncated);
         for (var i = 0; i < 300; i++) capture.Append("time", "Warn", "test", new string('界', 2048));
+        for (var i = 0; i < DesktopLogCapture.MaximumRows; i++) capture.Append("time", "Warn", "test", "short");
         var (rows, omitted) = capture.Snapshot();
         Assert.IsTrue(omitted > 0);
         Assert.IsTrue(rows.Length <= DesktopLogCapture.MaximumRows);
@@ -112,7 +113,7 @@ public sealed class ApplicationLogsTests
     public void Read_BoundsEscapedWireAndDisclosesCaptureAndResponseOmissions()
     {
         var capture = new DesktopLogCapture();
-        for (var i = 0; i < 250; i++) capture.Append("2026-01-01T00:00:00Z", "Warn", "CodeAlta.Test", new string('\0', 2048) + i);
+        for (var i = 0; i < DesktopLogCapture.MaximumRows + 50; i++) capture.Append("2026-01-01T00:00:00Z", "Warn", "CodeAlta.Test", new string('\0', 2048) + i);
         var result = new ApplicationLogsService(capture).Read(new());
         Assert.AreEqual("ok", result.Status);
         Assert.IsTrue(long.Parse(result.CaptureOmitted) > 0);

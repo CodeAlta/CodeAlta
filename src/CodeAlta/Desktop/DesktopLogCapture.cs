@@ -7,8 +7,8 @@ namespace CodeAlta.Desktop;
 // Owned only by the desktop logger configuration. Never reads the rolling files.
 internal sealed class DesktopLogCapture
 {
-    internal const int MaximumRows = 128;
-    internal const int MaximumStoredBytes = 128 * 1024;
+    internal const int MaximumRows = 1000;
+    internal const int MaximumStoredBytes = 1024 * 1024;
     internal const int MaximumTextChars = 2048;
     private readonly object _gate = new();
     private readonly Queue<(long Sequence, DesktopLogLine Line)> _rows = new();
@@ -91,6 +91,11 @@ internal sealed record DesktopLogLine(string Timestamp, string Level, string Log
 
 internal sealed class DesktopCaptureLogWriter(DesktopLogCapture capture) : LogWriter
 {
-    protected override void Log(LogMessage message) => capture.Append(message.Timestamp.ToString("O"),
-        message.Level.ToString(), message.Logger.Name, message.Text);
+    protected override void Log(LogMessage message)
+    {
+        // The exception follows the message on the same row, as in the terminal log view.
+        if (message.Exception is { } exception)
+            capture.Append(message.Timestamp.ToString("O"), message.Level.ToString(), message.Logger.Name, $"{message.Text} | {exception}");
+        else capture.Append(message.Timestamp.ToString("O"), message.Level.ToString(), message.Logger.Name, message.Text);
+    }
 }

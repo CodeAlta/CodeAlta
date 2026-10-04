@@ -128,6 +128,7 @@ export const skills = Object.freeze({
   list: async () => ({ status: "unavailable", projectId: null, skills: [], omitted: 0 }),
   setEnabled: async () => ({ status: "unavailable", changed: 0, message: null }),
   setAllEnabled: async () => ({ status: "unavailable", changed: 0, message: null }),
+  detail: unavailable,
   create: async () => ({ status: "unavailable", name: null, message: null }),
 });
 export const plugins = Object.freeze({
