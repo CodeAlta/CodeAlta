@@ -348,6 +348,8 @@ export const sessionAsks = { answer: unavailable, cancel: unavailable };
 export const sessionNotes = { current: (request: unknown) => { notesCalls.push(request); return unavailable(); }, clear: unavailable };
 // Outside the observed set below: plugin cards are an optional decoration of a settled timeline.
 export const sessionPluginEvents = { read: unavailable };
+export const projectFiles = { read: unavailable, write: unavailable };
+export const projectGit = { status: unavailable };
 export const sessionUserInput = {
   list: (request: { expectedHostEpoch: string; sessionId: string }) => new Promise(resolve => inputReads.push({ request, resolve })),
   resolve: (request: InputRequest) => new Promise((resolve, reject) => inputAnswers.push({ request, resolve, reject })),

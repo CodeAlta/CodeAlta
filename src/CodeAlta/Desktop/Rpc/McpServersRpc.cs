@@ -373,7 +373,15 @@ internal static class SettingsProjectScope
     /// Returns <c>ok</c> with the project root (null for the global scope), or the refusal for a project
     /// that is unknown, archived or whose folder is gone. The frontend only ever names a project id.
     /// </summary>
-    internal static async Task<(string Status, string? Root)> ResolveAsync(ProjectCatalog projects, string? projectId, CancellationToken cancellationToken)
+    internal static Task<(string Status, string? Root)> ResolveAsync(ProjectCatalog projects, string? projectId, CancellationToken cancellationToken)
+        => ResolveAsync(projects, projectId, allowArchived: false, cancellationToken);
+
+    /// <summary>
+    /// Resolves like the overload above; with <paramref name="allowArchived"/> an archived project resolves
+    /// to its root too, for requests that only read information about it.
+    /// </summary>
+    internal static async Task<(string Status, string? Root)> ResolveAsync(ProjectCatalog projects, string? projectId, bool allowArchived,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(projects);
         if (projectId is null) return ("ok", null);
@@ -389,7 +397,7 @@ internal static class SettingsProjectScope
         }
 
         if (project is null || !string.Equals(project.Id, projectId, StringComparison.Ordinal)) return ("unknown_project", null);
-        if (project.Archived) return ("archived_project", null);
+        if (project.Archived && !allowArchived) return ("archived_project", null);
         return Path.IsPathFullyQualified(project.ProjectPath) && Directory.Exists(project.ProjectPath)
             ? ("ok", Path.GetFullPath(project.ProjectPath))
             : ("project_unavailable", null);

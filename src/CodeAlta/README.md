@@ -416,6 +416,47 @@ records; a turn that begins further back gets no row) and returns at most 32 row
 With the Statistics plugin turned off in **Settings > Plugins**, the next read (the next turn, or
 reopening the session) returns no rows.
 
+### Project files and git status
+
+Two host RPC services give the page a project's files and repository state. Both take a project id,
+never a folder, refuse another host epoch (`stale_epoch`) and answer `unavailable` in catalog-only
+mode. Other refusals shared by both are `invalid` (no project id, or a malformed request),
+`unknown_project`, `project_unavailable` (the folder is gone) and `read_failed`.
+
+`projectFiles.read` and `projectFiles.write` read and replace one existing text file, addressed by a
+path relative to the project folder (forward or back slashes, at most 1024 characters; responses use
+forward slashes). The service does not create, rename or delete files, and refuses archived projects
+(`archived_project`).
+
+- A path that is rooted, names a drive or a stream (`:`), has a `..` segment or crosses a link
+  (a symbolic link or junction below the project folder) is refused as `outside_root`. Empty or `.`
+  segments, control characters and names ending in a dot or a space are `invalid`.
+- A file larger than 1 MiB on disk is `too_large` and is not read; the same limit applies to the
+  bytes a write would produce. A file that is not UTF-8, or UTF-16/UTF-32 with a BOM, or that
+  contains a NUL character, is `binary`. A missing file, and a folder, are `not_found`.
+- A read returns the text with its newlines unchanged, its size in bytes, whether the file has the
+  read-only attribute, and a revision (SHA-256 of the file's bytes). It also records the file among
+  the project's recent files.
+- A write keeps the file's encoding and BOM and writes the newlines it is given. It must name the
+  revision that was read: when the file on disk has another one the answer is `conflict` with the
+  current revision and nothing is written. With `overwrite` the revision is not compared. A
+  read-only file is `read_only`; a failure while replacing the file is `write_failed`.
+
+`projectGit.status` returns the branch of the repository containing the project folder and how much
+its tracked files differ from the last commit. Archived projects are answered too.
+
+- The repository is the nearest `.git` at or above the project folder; a `.git` file (a linked
+  worktree or a submodule) is followed to the directory it names. Without one the answer is
+  `not_repository`.
+- The branch is read from the `HEAD` file, without starting git. On a detached `HEAD` the branch is
+  the first seven digits of the commit and `detached` is set.
+- `insertions`, `deletions` and `changedFiles` come from one `git diff --shortstat HEAD`: staged and
+  unstaged changes of tracked files in the whole repository. Untracked files are not counted.
+- Git runs without a shell or prompts and is stopped after 3 seconds. When it is not installed,
+  fails (for example in a repository without a commit) or is stopped, the answer is still `ok` with
+  the branch and the three counts unset.
+- An answer is reused for 5 seconds per project folder, and the host runs one git process at a time.
+
 ### Commands, help and keyboard shortcuts
 
 The desktop app uses the TUI's key map. `Ctrl+P` (or `/` in an empty prompt, or the search icon on

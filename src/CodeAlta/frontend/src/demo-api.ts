@@ -96,6 +96,8 @@ export const sessionOperations = Object.freeze({
 export const sessionAsks = Object.freeze({ answer: unavailable, cancel: unavailable, list: emptyPage, observe: unavailable });
 export const sessionNotes = Object.freeze({ current: unavailable });
 export const sessionPluginEvents = Object.freeze({ read: unavailable });
+export const projectFiles = Object.freeze({ read: unavailable, write: unavailable });
+export const projectGit = Object.freeze({ status: unavailable });
 export const sessionUserInput = Object.freeze({ cancel: unavailable, list: emptyPage, resolve: unavailable });
 
 // The demo has no host configuration file: the editor reports itself unavailable.
