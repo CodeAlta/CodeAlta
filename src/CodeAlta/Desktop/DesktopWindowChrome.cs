@@ -34,11 +34,37 @@ internal sealed class DesktopWindowChrome : IAsyncDisposable
     internal static NeoWindowOptions WindowOptions() => WindowOptions(developer: false);
 
     /// <summary>Options of the main window; the developer instance says so in its title.</summary>
-    internal static NeoWindowOptions WindowOptions(bool developer) => DesktopWindowPlacement.Apply(new NeoWindowOptions
+    internal static NeoWindowOptions WindowOptions(bool developer) => WindowOptions(developer, DesktopAppearance.Default);
+
+    /// <summary>
+    /// Options of the main window in the theme it last had: the window is painted in that background from
+    /// the moment it is shown, before its view and the page exist.
+    /// </summary>
+    internal static NeoWindowOptions WindowOptions(bool developer, DesktopAppearance appearance)
     {
-        Label = "main", Title = developer ? "CodeAlta (dev)" : "CodeAlta", IsVisible = false,
-        TitleBar = new NeoWindowTitleBar(NeoWindowTitleBarStyle.Overlay) { Height = TitleBarHeight },
-    });
+        ArgumentNullException.ThrowIfNull(appearance);
+        return DesktopWindowPlacement.Apply(new NeoWindowOptions
+        {
+            Label = "main", Title = developer ? "CodeAlta (dev)" : "CodeAlta", IsVisible = false,
+            BackgroundColor = appearance.Background,
+            TitleBar = TitleBar(appearance),
+        });
+    }
+
+    /// <summary>
+    /// The title bar the page draws over, with window controls whose symbols suit the page's theme: light
+    /// on a dark theme and dark on a light one. Left to the platform they follow the system's theme, which
+    /// makes them invisible when the page's theme is the other one.
+    /// </summary>
+    internal static NeoWindowTitleBar TitleBar(DesktopAppearance appearance)
+    {
+        ArgumentNullException.ThrowIfNull(appearance);
+        return new NeoWindowTitleBar(NeoWindowTitleBarStyle.Overlay)
+        {
+            Height = TitleBarHeight,
+            SymbolColor = appearance.Dark ? new NeoColor(0xf6, 0xf7, 0xf9, 0xff) : new NeoColor(0x1c, 0x21, 0x27, 0xff),
+        };
+    }
 
     /// <summary>
     /// Options of the main view. The application owns its shortcuts and menus, so the browser's find, print,

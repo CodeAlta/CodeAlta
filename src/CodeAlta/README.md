@@ -283,6 +283,15 @@ move the window, and double-click it to maximize or restore; tabs and buttons in
 their own clicks and drags. With the Explorer hidden the tabs start right after the name. In a split
 layout only the panes along the top edge are part of the title bar.
 
+The window appears with a **start-up screen**: the title strip with the mark and name, the logo and a
+progress bar, in the colors of the theme the window last had (dark on a first start). It stays until
+the workspace has its first data, so the window is never shown empty. The host (catalog, providers,
+plugins and their MCP servers) starts beside the view rather than before it. The window controls are
+drawn for the application's theme, not the system's: dark symbols on the light theme, light ones on
+the dark themes, and they follow a theme change at once. The theme and its background are kept in
+`appearance.json` in the WebView data directory, which is what lets the window open in the right
+colors before any page exists.
+
 The view is an application shell rather than a browser page: the browser's own find, print, reload
 and zoom shortcuts, its context menu and its status bubble are turned off, so those keys reach
 CodeAlta's commands. Text-editing keys work as usual.

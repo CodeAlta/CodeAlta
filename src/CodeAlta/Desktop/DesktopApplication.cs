@@ -51,9 +51,15 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         return result == 0 ? desktop.ExitCode : result;
     }
 
+    /// <summary>The start-up screen: the document the view shows while the host starts.</summary>
+    internal static Uri StartupDocument { get; } = new("app://codealta/splash.html");
+
+    /// <summary>The application's page.</summary>
+    internal static Uri ApplicationDocument { get; } = new("app://codealta/index.html");
+
     internal static bool IsApplicationDocument(Uri uri) =>
         uri.IsAbsoluteUri && uri.Scheme == "app" && uri.Host == "codealta" && uri.Port == -1 &&
-        string.IsNullOrEmpty(uri.UserInfo) && uri.AbsolutePath == "/index.html" && string.IsNullOrEmpty(uri.Query);
+        string.IsNullOrEmpty(uri.UserInfo) && uri.AbsolutePath is "/index.html" or "/splash.html" && string.IsNullOrEmpty(uri.Query);
 
     private static int RunOwned(DesktopLaunchOptions options, DesktopLogCapture? capture)
     {
@@ -113,7 +119,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         var bodyFailed = false;
         try
         {
-            window = application.CreateWindow(DesktopWindowChrome.WindowOptions(options.Developer));
+            var appearance = DesktopAppearance.Load(options.DataRoot);
+            appearance.ApplyToBrowser();
+            window = application.CreateWindow(DesktopWindowChrome.WindowOptions(options.Developer, appearance));
             application.MainWindow = window;
             window.Closed += (_, _) => closed.TrySetResult();
             window.CloseRequested += request =>
@@ -130,12 +138,18 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 }
                 return ValueTask.CompletedTask; // Never await host cleanup inside the native deadline.
             };
-            window.Show();
+            // The window is shown once its view has the start-up screen (see below): a window without a view
+            // is a white rectangle, whatever the theme.
+            var startupClock = System.Diagnostics.Stopwatch.StartNew();
+            void Mark(string step) => LogManager.GetLogger("CodeAlta.Desktop").Info($"Startup: {step} at {startupClock.ElapsedMilliseconds} ms");
+            var startedWindow = window;
             var catalog = new CatalogOptions { GlobalRoot = options.CatalogRoot!, StateRoot = options.StateRoot ?? options.CatalogRoot! };
             // Plugins read the user's profile (the MCP servers and their sign-ins, the GitHub CLI): they
             // run in the normal launch and stay off when the roots are explicit.
             var pluginAlta = roots.Home is null ? new PluginAltaServiceBridge() : null;
-            _hostCreation = CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            // Off the window's thread: the host reads the catalog and the configuration and starts the plugins
+            // while the window creates its view and shows the start-up screen.
+            _hostCreation = Task.Run(() => CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
                 GlobalRoot = options.CatalogRoot, StateRoot = options.StateRoot, CurrentProjectPath = roots.Project,
                 DiscoveryScope = roots.Home is null || roots.Instructions is null
@@ -153,7 +167,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta),
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!),
-            }, CancellationToken.None);
+            }, CancellationToken.None));
             // The retained application flow reacts even while a native acquisition is awaiting.
             // No native callback awaits this work; a close during host creation waits its actual result.
             _closeFlow = CloseOwnedHostWhenRequestedAsync(closeRequested.Task, _hostCreation, async () =>
@@ -164,8 +178,47 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 if (providers is not null) await providers.DrainAsync();
                 if (providerLogin is not null) await providerLogin.CloseAsync(); // A running sign-in is canceled and joined.
             });
+            // The window's own parts do not wait for the host: the view exists and shows the start-up screen
+            // (the logo on the window's theme) as soon as the browser is ready.
+            var assets = Path.Combine(AppContext.BaseDirectory, "assets");
+            var manifest = NeoAssetManifest.Load(Path.Combine(assets, "neoastra-assets.json"));
+            var creatingEnvironment = application.CreateEnvironmentAsync(new NeoEnvironmentOptions
+            {
+                UserDataRoot = Path.Combine(options.DataRoot, "webview"),
+                CustomSchemes = [NeoCustomScheme.Application("app", new NeoManifestResourceProvider(assets, manifest))],
+            });
+            var environment = await creatingEnvironment;
+            Mark("environment created");
+            environmentLifetime = environment;
+            var chrome = await DesktopWindowChrome.StartAsync(application, options.DataRoot);
+            chromeLifetime = chrome;
+            await chrome.ApplyWindowIconAsync(window);
+            var creatingView = environment.CreateWebViewAsync(NeoAstraHost.FillWindow(window), DesktopWindowChrome.ViewOptions());
+            var view = await creatingView;
+            Mark("view created");
+            viewLifetime = view;
+            view.NavigationRequested = request => ValueTask.FromResult(new NeoNavigationDecision(
+                IsApplicationDocument(request.Uri) ? NeoDecisionAction.Allow : NeoDecisionAction.Cancel));
+            view.NewWindowRequested = static _ => ValueTask.FromResult(new NeoNewWindowDecision(NeoDecisionAction.Cancel));
+            // The start-up screen first, then the window: it appears with the logo on its theme, never empty.
+            // The browser draws into a shown window only, so the window is shown out of sight until the
+            // document is there and has had a moment to be drawn. A view that does not report the document
+            // does not keep the window out of sight.
+            var startupShown = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            view.NavigationCompleted += (_, _) => startupShown.TrySetResult();
+            var cloaked = DesktopWindowReveal.ShowCloaked(window);
+            var starting = view.NavigateAsync(StartupDocument);
+            await starting;
+            await Task.WhenAny(startupShown.Task, Task.Delay(TimeSpan.FromSeconds(2)));
+            if (cloaked)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(80));
+                DesktopWindowReveal.Reveal(window);
+            }
+            Mark("window shown with the start-up screen");
             await AwaitOwnedAsync(_hostCreation, window);
             var host = await _hostCreation;
+            Mark("host created");
             DesktopPlugins.LogStartupDiagnostics(host.PluginRuntime);
             if (!closeRequested.Task.IsCompleted)
             {
@@ -176,22 +229,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 reminders = new ReminderService(host.WorkspaceReads, host.Commands, epoch);
                 DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta);
                 workspacePrepared.TrySetResult();
-                var assets = Path.Combine(AppContext.BaseDirectory, "assets");
-                var manifest = NeoAssetManifest.Load(Path.Combine(assets, "neoastra-assets.json"));
-                var creatingEnvironment = application.CreateEnvironmentAsync(new NeoEnvironmentOptions
-                {
-                    UserDataRoot = Path.Combine(options.DataRoot, "webview"),
-                    CustomSchemes = [NeoCustomScheme.Application("app", new NeoManifestResourceProvider(assets, manifest))],
-                });
-                var environment = await creatingEnvironment;
-                environmentLifetime = environment;
-                if (!closeRequested.Task.IsCompleted)
                 {
                     // Leave room for ordinary pasted images and their base64/JSON overhead.
                     // Owned-only host-wide inbound UTF-8 framing cap, not a per-image/response limit.
-                    var chrome = await DesktopWindowChrome.StartAsync(application, options.DataRoot);
-                    chromeLifetime = chrome;
-                    await chrome.ApplyWindowIconAsync(window);
                     var builder = new NeoRpcBuilder(chrome.Authorize(new NeoRpcOptions
                     {
                         ContractHash = NeoRpcGeneratedContract.Hash, Release = true, MaximumFrameBytes = 128 * 1024 * 1024,
@@ -205,7 +245,15 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         DiagnosticSink = new DesktopRpcDiagnostics(),
                     }));
                     chrome.AddHandlers(builder);
-                    builder.AddBootService(new BootService(epoch, options.ReviewOwnedCommandPermissions, options.EnableOwnedUserInput, options.Developer));
+                    builder.AddBootService(new BootService(epoch, options.ReviewOwnedCommandPermissions, options.EnableOwnedUserInput, options.Developer)
+                    {
+                        // The page's theme: kept for the next start, and the window controls follow it now.
+                        RememberAppearance = remembered =>
+                        {
+                            remembered.Save(options.DataRoot);
+                            application.Dispatcher.Post(() => { if (!startedWindow.IsClosed) startedWindow.TitleBar = DesktopWindowChrome.TitleBar(remembered); });
+                        },
+                    });
                     builder.AddWorkspaceService(workspace);
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime));
                     var configStore = new CodeAltaConfigStore(catalog);
@@ -241,17 +289,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionPermissionsService(new SessionPermissionsService(host.RuntimeService.Permissions, epoch, options.ReviewOwnedCommandPermissions));
                     var rpc = builder.Build();
                     rpcLifetime = rpc;
-                    var creatingView = environment.CreateWebViewAsync(NeoAstraHost.FillWindow(window), DesktopWindowChrome.ViewOptions());
-                    var view = await creatingView;
-                    viewLifetime = view;
                     if (!closeRequested.Task.IsCompleted)
                     {
-                        view.NavigationRequested = request => ValueTask.FromResult(new NeoNavigationDecision(
-                            IsApplicationDocument(request.Uri) ? NeoDecisionAction.Allow : NeoDecisionAction.Cancel));
-                        view.NewWindowRequested = static _ => ValueTask.FromResult(new NeoNewWindowDecision(NeoDecisionAction.Cancel));
                         bindingLifetime = NeoRpcViewBinding.Bind(rpc, view);
-                        var navigation = view.NavigateAsync(new Uri("app://codealta/index.html"));
+                        var navigation = view.NavigateAsync(ApplicationDocument);
                         await navigation;
+                        Mark("application loading");
                     }
                 }
             }
@@ -346,7 +389,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
     {
         try
         {
-            await using var window = application.CreateWindow(DesktopWindowChrome.WindowOptions());
+            var appearance = DesktopAppearance.Load(options.DataRoot);
+            appearance.ApplyToBrowser();
+            await using var window = application.CreateWindow(DesktopWindowChrome.WindowOptions(developer: false, appearance));
             application.MainWindow = window;
             var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             window.Closed += (_, _) => closed.TrySetResult();
@@ -385,7 +430,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 IsApplicationDocument(request.Uri) ? NeoDecisionAction.Allow : NeoDecisionAction.Cancel));
             view.NewWindowRequested = static _ => ValueTask.FromResult(new NeoNewWindowDecision(NeoDecisionAction.Cancel));
             await using var binding = NeoRpcViewBinding.Bind(rpc, view);
-            await view.NavigateAsync(new Uri("app://codealta/index.html"));
+            await view.NavigateAsync(ApplicationDocument);
             await closed.Task;
             ExitCode = 0;
         }

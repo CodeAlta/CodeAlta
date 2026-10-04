@@ -7,6 +7,7 @@ import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { ComposerStatus } from "./ComposerStatus";
 import { settingsNavigation } from "./settingsNavigation";
 import { colorSchemeAttribute } from "./colorSchemes";
+import { dismissStartupScreen, rememberAppearance } from "./startupScreen";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionPluginEvents, projectGit, promptImages, composerStatus, sessionUserInput, type BootStatus,
@@ -478,7 +479,19 @@ function App() {
     const scheme = colorSchemeAttribute(colorScheme);
     if (scheme) document.documentElement.dataset.colorScheme = scheme;
     else delete document.documentElement.dataset.colorScheme;
+    // The next start shows these colors before the application has loaded.
+    rememberAppearance(shownTheme, appearance => void boot.appearance({ theme: appearance.theme, background: appearance.background },
+      { timeoutMilliseconds: 8_000 }).catch(() => { /* The window keeps the colors it started with. */ }));
   }, [shownTheme, colorScheme]);
+  // The start-up screen stays until the window has something to show in its place: the host's answer and the
+  // workspace, or the reason there is none. It never stays longer than a few seconds.
+  useEffect(() => {
+    if (error || status && workspaceState.kind !== "loading") dismissStartupScreen();
+  }, [status, workspaceState.kind, error]);
+  useEffect(() => {
+    const timer = window.setTimeout(dismissStartupScreen, 8_000);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 60_000);

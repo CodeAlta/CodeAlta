@@ -208,7 +208,8 @@ const choices = (request: { expectedEpoch: string; sessionId: string }) => ({ st
     ? [{ id: "new", name: "New", efforts: ["High"], imageInput: true }] : [])] });
 export const boot = { status: async () => ({ state: owned() ? "owned" : "catalog", hostAvailable: owned(),
   hostEpoch: owned() ? epoch : null, commandReviewEnabled: localStorage.getItem("permissionFixtureEnabled") === "true",
-  ownedUserInputEnabled: localStorage.getItem("inputFixtureEnabled") === "true", developerMode: false, productName: "CodeAlta", version: "development" }) };
+  ownedUserInputEnabled: localStorage.getItem("inputFixtureEnabled") === "true", developerMode: false, productName: "CodeAlta", version: "development" }),
+  appearance: async () => ({ status: "ok" }) };
 export const workspace = { snapshot: async () => {
   snapshotCalls.push({});
   if (localStorage.getItem("creationFixtureHoldSnapshot") === "true")

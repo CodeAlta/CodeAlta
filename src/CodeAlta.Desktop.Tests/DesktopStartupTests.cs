@@ -145,6 +145,7 @@ public sealed class DesktopStartupTests
     [TestMethod]
     [DataRow("app://codealta/index.html", true)]
     [DataRow("app://codealta/index.html#workspace", true)]
+    [DataRow("app://codealta/splash.html", true)]
     [DataRow("app://codealta/other.html", false)]
     [DataRow("app://user@codealta/index.html", false)]
     [DataRow("app://codealta:123/index.html", false)]

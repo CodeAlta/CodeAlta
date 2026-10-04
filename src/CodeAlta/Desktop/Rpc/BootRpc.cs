@@ -17,6 +17,22 @@ internal sealed class BootService
     internal BootService(string epoch, bool commandReview) { _epoch = epoch; _commandReview = commandReview; }
     internal BootService(string epoch, bool commandReview, bool userInput) : this(epoch, commandReview) { _userInput = userInput; }
     internal BootService(string epoch, bool commandReview, bool userInput, bool developer) : this(epoch, commandReview, userInput) { _developer = developer; }
+    /// <summary>
+    /// Receives the theme the window shows, so the next start can paint the window in its background before
+    /// any page exists. Null when this host keeps no appearance.
+    /// </summary>
+    internal Action<DesktopAppearance>? RememberAppearance { get; init; }
+
+    /// <summary>Remembers the window's theme and background for the next start.</summary>
+    [NeoRpcMethod("appearance")]
+    public BootAppearanceResponse Appearance(BootAppearanceRequest request)
+    {
+        if (!DesktopAppearance.TryCreate(request?.Theme, request?.Background, out var appearance)) return new("invalid_request");
+        if (RememberAppearance is null) return new("unavailable");
+        RememberAppearance(appearance);
+        return new("ok");
+    }
+
     [NeoRpcMethod("status")]
     public BootStatus Status(BootRequest request) => _epoch is null
         ? new("in-development", "CodeAlta", DesktopCommandLine.Version, false)
@@ -24,6 +40,12 @@ internal sealed class BootService
 }
 
 internal sealed record BootRequest;
+
+/// <summary>The window's theme (<c>dark</c> or <c>light</c>) and its background as <c>#rrggbb</c>.</summary>
+internal sealed record BootAppearanceRequest(string? Theme, string? Background);
+
+/// <summary><c>ok</c>, <c>invalid_request</c>, or <c>unavailable</c> when the host keeps no appearance.</summary>
+internal sealed record BootAppearanceResponse(string Status);
 internal sealed record BootStatus(string State, string ProductName, string Version, bool HostAvailable)
 {
     public string? HostEpoch { get; init; }
@@ -36,6 +58,8 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 }
 
 [JsonSerializable(typeof(BootRequest))]
+[JsonSerializable(typeof(BootAppearanceRequest))]
+[JsonSerializable(typeof(BootAppearanceResponse))]
 [JsonSerializable(typeof(ApplicationLogsRequest))]
 [JsonSerializable(typeof(ApplicationLogsResponse))]
 [JsonSerializable(typeof(ApplicationLogsClearRequest))]
