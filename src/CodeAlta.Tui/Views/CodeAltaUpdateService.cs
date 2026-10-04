@@ -26,9 +26,7 @@ internal sealed record CodeAltaUpdateCheckSnapshot(
 
     public bool IsCompleted => Status is CodeAltaUpdateCheckStatus.Latest or CodeAltaUpdateCheckStatus.UpdateAvailable or CodeAltaUpdateCheckStatus.PackageNotFound or CodeAltaUpdateCheckStatus.Failed;
 
-    public string UpdateCommand => LatestVersionIsPrerelease
-        ? $"dotnet tool update -g {PackageId} --prerelease"
-        : $"dotnet tool update -g {PackageId}";
+    public string UpdateCommand => CodeAlta.Hosting.CodeAltaNuGetUpdateChecker.UpdateCommand(PackageId, LatestVersionIsPrerelease);
 
     public static CodeAltaUpdateCheckSnapshot CreateNotStarted()
         => new(

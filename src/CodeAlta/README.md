@@ -328,6 +328,17 @@ with unsaved edits, then, while sessions are running, says how many and that exi
 **Exit CodeAlta** or **Cancel**. The end of the user's session at sign-out or shutdown exits without
 a question.
 
+### Updates
+
+Once per start the desktop asks nuget.org whether a newer `CodeAlta` package is published, as the
+terminal application does for its own package (a prerelease build also considers prereleases). A
+newer version is announced by a notice with the version, the command that installs it
+(`dotnet tool update -g CodeAlta`, with `--prerelease` for a prerelease) and a button that copies
+it, and **View release notes**, which opens the release page in the browser. The application has to
+be exited first (**Exit** in the tray, or `alta --exit`): the tool cannot be replaced while it runs.
+Settings → About keeps the result under **Updates**. A build that is not a published version, and an
+instance on explicit roots, make no request.
+
 ### Desktop entry of the installed tool
 
 The first start of a tool installed with `dotnet tool install -g CodeAlta` adds CodeAlta to the

@@ -12,6 +12,7 @@ import { ConfigRecoveryScreen } from "./ConfigRecoveryScreen";
 import { RunningExitDialog } from "./RunningExitDialog";
 import { entryAddedNotice } from "./desktopShell";
 import { showToast } from "./appToaster";
+import { availableUpdate, UpdateNotice } from "./UpdateNotice";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionPluginEvents, projectGit, promptImages, composerStatus, sessionUserInput, type BootStatus,
@@ -19,7 +20,7 @@ import {
   type ReminderListResponse,
   type ReminderDetailRequest,
   type ConfigurationSnapshot, type WorkspaceSession, type WorkspaceSnapshot,
-  desktopShell, type DesktopShellPreferences,
+  desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse,
 } from "#neoastra";
 import { loadWorkspace, sessionListSignature, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
@@ -666,9 +667,25 @@ function App() {
   // requests to exit (Exit in the tray) or to ask before an exit that stops running sessions.
   const [shellPreferences, setShellPreferences] = useState<DesktopShellPreferences | null>(null);
   const [exitQuestionFor, setExitQuestionFor] = useState<number | null>(null);
+  // One look for a newer version per run, as the terminal application does: a newer one is announced once,
+  // with the command that installs it; Settings > About keeps the result.
+  const [appUpdateResult, setAppUpdateResult] = useState<AppUpdateResponse | null>(null);
+  function openReleaseNotes() { void appUpdate.openReleaseNotes({}, { timeoutMilliseconds: 15_000 }).catch(() => { /* The address is in the toast's command line. */ }); }
+  useEffect(() => {
+    if (!status?.hostEpoch) return;
+    const abort = new AbortController();
+    void appUpdate.check({}, { signal: abort.signal, timeoutMilliseconds: 30_000 }).then(value => {
+      if (abort.signal.aborted) return;
+      setAppUpdateResult(value);
+      const available = availableUpdate(value);
+      if (available) showToast({ intent: "primary", icon: "automatic-updates", timeout: 20_000,
+        message: <UpdateNotice update={available} locale={shownLocale.current} onOpenReleaseNotes={openReleaseNotes} /> });
+    }, () => { if (!abort.signal.aborted) setAppUpdateResult({ status: "failed", packageId: "CodeAlta", currentVersion: "", latestVersion: null, command: null, releaseNotes: null }); });
+    return () => abort.abort();
+  }, [status?.hostEpoch]);
+  const shownLocale = useRef(language.locale); shownLocale.current = language.locale;
   // Said once, the first time the installed tool is added to the desktop's applications.
   const entryAnnounced = useRef(false);
-  const shownLocale = useRef(language.locale); shownLocale.current = language.locale;
   const currentPlatform = useRef("windows");
   function announceEntry(platform: string) {
     if (entryAnnounced.current) return;
@@ -1918,7 +1935,8 @@ function App() {
     {settingsOpen && <SettingsOverlay section={settingsSection} onSection={navigate} onClose={closeSettings}>
       {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, shownTheme, colorScheme, setColorScheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); },
         keepRunning: shellPreferences?.canKeepRunning ? { enabled: shellPreferences.closeToTray, platform: shellPreferences.platform, set: setCloseToTray } : null }} />
-      : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl} />
+      : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}
+        update={owned ? appUpdateResult : undefined} onOpenReleaseNotes={openReleaseNotes} />
       : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
       : settingsSection === "skills" ? <SkillSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
       : settingsSection === "mcp" ? <McpServerSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />

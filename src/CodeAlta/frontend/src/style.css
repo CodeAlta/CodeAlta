@@ -1613,3 +1613,12 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .settings-field-help { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; }
 .running-exit-dialog { width: min(440px, calc(100vw - 32px)); }
 .running-exit-dialog .bp6-dialog-header > svg { flex: none; margin-right: 8px; color: var(--red); }
+
+/* The update notice: the new version, the command that installs it and the way to its release notes. */
+.update-notice { display: grid; gap: 6px; min-width: 0; }
+.update-notice-command { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 2px 2px 2px 8px; border: 1px solid color-mix(in srgb, currentColor 28%, transparent); border-radius: 6px; background: color-mix(in srgb, currentColor 10%, transparent); }
+.update-notice-command code { flex: 1 1 auto; min-width: 0; font: 12px/1.6 "Cascadia Code", Consolas, monospace; overflow-wrap: anywhere; user-select: text; }
+.update-notice-hint { font-size: 12px; opacity: .82; }
+.update-notice-notes { justify-self: start; margin-left: -6px; }
+.bp6-toast .update-notice-notes.bp6-button { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.about-settings-facts .update-notice { margin-top: 8px; max-width: 520px; }

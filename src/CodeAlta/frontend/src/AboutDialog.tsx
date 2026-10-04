@@ -1,3 +1,5 @@
+import type { AppUpdateResponse } from "#neoastra";
+import { availableUpdate, UpdateNotice, updateStatus } from "./UpdateNotice";
 import type { BootStatus } from "#neoastra";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
@@ -22,9 +24,15 @@ function aboutFacts(status: BootStatus | undefined, bootError: boolean, demo: bo
 }
 
 /** The About page of Settings: product, version and build of the running app. */
-export function AboutSettings({ status, bootError, demo, logo }: { status: BootStatus | undefined; bootError: boolean; demo: boolean; logo?: string }) {
-  const { t } = useShellLanguage();
+export function AboutSettings({ status, bootError, demo, logo, update, onOpenReleaseNotes }: {
+  status: BootStatus | undefined; bootError: boolean; demo: boolean; logo?: string;
+  /** The result of this run's update check: undefined where there is none to make, null while it runs. */
+  update?: AppUpdateResponse | null; onOpenReleaseNotes?: () => void;
+}) {
+  const { t, locale } = useShellLanguage();
   const about = aboutFacts(status, bootError, demo);
+  const updates = update === undefined ? null : updateStatus(update);
+  const available = availableUpdate(update);
   return <main className="configuration-page settings-editor about-settings" aria-label={t("About")}>
     <header className="page-heading"><span className="eyebrow">{t("Diagnostics")}</span><h1>{t("About")}</h1></header>
     <section className="about-settings-card">
@@ -35,6 +43,8 @@ export function AboutSettings({ status, bootError, demo, logo }: { status: BootS
       <div><dt>{t("Version")}</dt><dd>{about.version ?? t("Development build")}</dd></div>
       {about.build && <div><dt>{t("Build metadata")}</dt><dd>{about.build}</dd></div>}
       <div><dt>{t("Mode")}</dt><dd>{t(about.mode)}</dd></div>
+      {updates && <div><dt>{t("Updates")}</dt><dd>{t(updates.key, updates.parameters)}
+        {available && <UpdateNotice update={available} locale={locale} title={false} onOpenReleaseNotes={() => onOpenReleaseNotes?.()} />}</dd></div>}
     </dl>
   </main>;
 }

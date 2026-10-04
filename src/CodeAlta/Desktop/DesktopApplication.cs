@@ -205,6 +205,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         SessionAsksService? asks = null;
         ReminderService? reminders = null;
         GithubIssuesService? githubIssues = null;
+        AppUpdateService? appUpdate = null;
         ModelCatalogService? providers = null;
         ProviderLoginService? providerLogin = null;
         WorkspaceService? workspace = null;
@@ -414,6 +415,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         RememberAppearance = RememberAppearance, ProviderSetup = NeedsProviderSetup(configStore),
                     });
                     builder.AddDesktopShellService(new DesktopShellService(shell));
+                    // As the terminal application does: one look at nuget.org for a newer version. An instance on
+                    // explicit roots is automation and stays off the network.
+                    appUpdate = roots.Home is null ? new AppUpdateService(DesktopCommandLine.Version) : new AppUpdateService();
+                    appUpdate.Start();
+                    builder.AddAppUpdateService(appUpdate);
                     builder.AddWorkspaceService(workspace);
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime));
                     var globalConfig = new GlobalConfigService(configStore, host.ModelProviderRegistry, options.CatalogRoot!, epoch);
@@ -524,6 +530,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             return;
         }
         githubIssues?.Dispose(); // Its RPC host is gone: no lookup can still use the HTTP client.
+        appUpdate?.Dispose();
         if (window is not null)
         {
             allowClose = true;

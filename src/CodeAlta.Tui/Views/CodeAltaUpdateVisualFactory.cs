@@ -101,12 +101,11 @@ internal static class CodeAltaUpdateVisualFactory
 
     private static Visual? CreateReleaseNotesLink(string? versionText)
     {
-        if (string.IsNullOrWhiteSpace(versionText))
+        if (CodeAlta.Hosting.CodeAltaNuGetUpdateChecker.ReleaseNotesUri(versionText) is not { } uri)
         {
             return null;
         }
 
-        var uri = $"{AboutDialog.GitHubProjectUri}/releases/tag/{Uri.EscapeDataString(versionText.Trim())}";
         return new Link(uri, SR.T("View release notes"))
             .Opened((_, e) =>
             {
