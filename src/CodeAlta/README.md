@@ -110,8 +110,9 @@ until an idle attachment is verified. Send and Stop occupy one slot, not two adj
 Missed background reads retain receipts and ask drafts and recover on the next observation;
 prolonged unavailability shows a small status indicator rather than raw timeline diagnostics.
 
-For a Send lockup, preserve the developer-console entries prefixed `[CodeAlta Send]` and
-`[CodeAlta RPC]`. They report composer guards, dispatch, safe framework error codes, elapsed time
+For a Send lockup, turn on the Send diagnostics from DevTools
+(`localStorage.setItem("codealta.debug.send", "1")`, then reload; they are off otherwise) and preserve
+the developer-console entries prefixed `[CodeAlta Send]` and `[CodeAlta RPC]`. They report composer guards, dispatch, safe framework error codes, elapsed time
 and UUID request keys, never prompt text or provider credentials. Match a dispatch key with
 `Send reached backend (<key>)` in application logs. With NeoAstra 0.3.2, `duplicate_request`
 means an active or retained completed request identity was reused;

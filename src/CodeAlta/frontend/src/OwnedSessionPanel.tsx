@@ -41,6 +41,7 @@ import { imagePasteFailure, readPastedImage } from "./promptImages";
 import { useShellLanguage } from "./shellLanguage";
 import type { ClipboardEvent } from "react";
 import type { SessionSteerRequest } from "#neoastra";
+import { sendDiagnostics } from "./sendDiagnostics";
 
 // Sent prompts of this window, for Alt+Up / Alt+Down in the prompt editor.
 const promptHistory = createPromptHistory();
@@ -322,7 +323,7 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
 
   const pending = submissions.pending(sessionId);
   useEffect(() => {
-    if (active) console.info("[CodeAlta Send] composer availability", { invalidEpoch,
+    if (active) sendDiagnostics.info("composer availability", { invalidEpoch,
       capabilityValid: capability.canMutate(), retainedRequest: !!pending, inFlight: pending?.inFlight ?? false });
   }, [active, invalidEpoch, !!pending, pending?.inFlight, capability]);
   const pendingAborts = submissions.aborts(sessionId);
@@ -428,7 +429,7 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
   }
   function submit() {
     const signal = scope.current?.signal;
-    console.info("[CodeAlta Send] composer action", { mounted: !!signal, aborted: signal?.aborted ?? false,
+    sendDiagnostics.info("composer action", { mounted: !!signal, aborted: signal?.aborted ?? false,
       capabilityValid: capability.canMutate(), pending: !!submissions.pending(sessionId),
       inFlight: submissions.pending(sessionId)?.inFlight ?? false, enqueue, hasImages: images.length > 0 });
     if (!signal || signal.aborted || !capability.canMutate()) return;
@@ -438,7 +439,7 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
     const latest = selections.current(epoch, sessionId);
     if (!retained && (latest || selection) && (!choices || choices.status !== "ok" || choices.epoch !== epoch || choices.sessionId !== sessionId
       || !validSelection(choices, latest ?? selection!) || latest && selection !== latest)) {
-      console.warn("[CodeAlta Send] blocked: next-send selection has not been validated");
+      sendDiagnostics.warn("blocked: next-send selection has not been validated");
       setMessage("Next Send choices changed. Wait for the mounted composer to show the validated selection before sending.");
       return;
     }
@@ -453,7 +454,7 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
     const request = retained?.request ?? captureSubmission(epoch, sessionId, text, crypto.randomUUID(), sendSelection, references, images);
     if (!request && images.length) setImageNotice("Image Send requires empty or nonblank text up to 32768 characters and an explicit supported model.");
     if (!request || !capability.canSubmit(request)) {
-      console.warn("[CodeAlta Send] blocked: invalid request or revoked capability"); return;
+      sendDiagnostics.warn("blocked: invalid request or revoked capability"); return;
     }
     draftIndicators.clear(sessionId);
     promptHistory.add(sessionId, request.text);

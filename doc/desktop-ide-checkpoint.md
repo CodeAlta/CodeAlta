@@ -94,7 +94,7 @@ limit to one million is not indefinite uptime. Upstream needs safe ID retirement
 or supported RPC renewal, a distinct capacity error and request-budget telemetry. The user's latest
 lockup has not been reproduced; this is an evidenced failure mode, not a proven incident diagnosis.
 
-Developer-console `[CodeAlta Send]` events distinguish composer action/guard state, RPC dispatch,
+Developer-console `[CodeAlta Send]` events (off unless `localStorage["codealta.debug.send"]` is `1`) distinguish composer action/guard state, RPC dispatch,
 settlement and sanitized failure codes/timing. `[CodeAlta RPC]` reports transport closure/failure.
 The .NET arrival log uses the same UUID key. No arguments, prompt text, paths, credentials, raw error
 objects or messages are logged. No mutation replay, reload or authority reset is introduced.
