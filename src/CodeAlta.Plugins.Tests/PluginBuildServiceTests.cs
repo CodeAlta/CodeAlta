@@ -19,6 +19,17 @@ public sealed class PluginBuildServiceTests
     }
 
     [TestMethod]
+    public void BuildRunsWithoutAConsoleWindowOfItsOwn()
+    {
+        using var temp = new TestTempDirectory();
+        var startInfo = PluginBuildService.CreateFileBuildStartInfo(CreatePackage(temp.Path, "public sealed class Plugin { }"));
+
+        // The desktop has no console: a build that created one would put a console window over the application.
+        Assert.IsTrue(startInfo.CreateNoWindow);
+        Assert.IsFalse(startInfo.UseShellExecute);
+    }
+
+    [TestMethod]
     public async Task BuildAsyncReportsMissingSdkFromGlobalJsonMismatch()
     {
         //CodeAltaPluginRuntimeStartup.RegisterMsBuildDefaults();

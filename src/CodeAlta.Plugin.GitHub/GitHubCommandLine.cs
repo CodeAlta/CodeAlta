@@ -16,6 +16,9 @@ internal static class GitHubCommandLine
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
+                // The desktop has no console to share: without this each command opens a console window,
+                // which takes the foreground from the application's own window.
+                CreateNoWindow = true,
             },
             EnableRaisingEvents = true,
         };

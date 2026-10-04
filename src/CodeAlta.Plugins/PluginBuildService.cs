@@ -372,7 +372,7 @@ public sealed class PluginBuildService : IPluginBuildService
         };
     }
 
-    private static ProcessStartInfo CreateFileBuildStartInfo(SourcePluginPackage package)
+    internal static ProcessStartInfo CreateFileBuildStartInfo(SourcePluginPackage package)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -381,6 +381,8 @@ public sealed class PluginBuildService : IPluginBuildService
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            // A host without a console (the desktop) must not get a console window for the build.
+            CreateNoWindow = true,
         };
         startInfo.ArgumentList.Add("build");
         startInfo.ArgumentList.Add(Path.GetRelativePath(package.PackageDirectory, package.EntryFilePath));
