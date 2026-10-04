@@ -262,6 +262,7 @@ function App() {
     invalidateCreation();
     settingsVisible.current = false;
     setSettingsOpen(false);
+    setProviderGuide(false);
     const origin = settingsOrigin.current;
     focusRestoration.schedule(origin, () => currentView.current === settingsOriginView.current,
       () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
@@ -821,6 +822,16 @@ function App() {
   useEffect(() => { if (menuTarget && !activeMenu) setMenuTarget(null); }, [menuTarget, activeMenu]);
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
+  // A start without any enabled provider opens their settings, as the terminal application does; there the
+  // setup guide starts by itself the first time.
+  const [providerGuide, setProviderGuide] = useState(false);
+  const providerSetupOffered = useRef(false);
+  useEffect(() => {
+    if (!owned || !status?.providerSetup || providerSetupOffered.current) return;
+    providerSetupOffered.current = true;
+    setProviderGuide(true);
+    navigate("providers");
+  }, [owned, status]);
   const draftChrome = useComposerChrome(owned ? status?.hostEpoch ?? null : null, selectedProject);
   // Explorer markers for sessions with active reminders: read when the host is ready, after every reminder
   // change made here, and on a slow interval because reminders also fire and complete on their own.
@@ -1867,7 +1878,8 @@ function App() {
           ? async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }) : applicationLogs.read} /></>
       : settingsSection === "providers" ? owned && status?.hostEpoch
         ? <ProviderSettings epoch={status.hostEpoch} readRuntime={modelCatalog.providers} probe={modelCatalog.probe}
-          onOpenModels={() => navigate("models")} onOpenConfiguration={() => navigate("config")} onApplied={() => void refreshConfiguration()} />
+          onOpenModels={() => navigate("models")} onOpenConfiguration={() => navigate("config")} onApplied={() => void refreshConfiguration()}
+          guide={providerGuide} onGuideClosed={() => setProviderGuide(false)} />
         : <ProvidersPanel epoch={null} read={modelCatalog.providers} probe={modelCatalog.probe} catalogProviders={configurationState.snapshot?.providers}
           holds={providerProbeHolds} onOpenModels={() => navigate("models")} />
       : <ModelCatalogPanel epoch={owned ? status!.hostEpoch : null}

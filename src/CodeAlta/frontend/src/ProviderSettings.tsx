@@ -8,6 +8,8 @@ import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import { configReadNotice, configSaveNotice, type ConfigNotice } from "./configEditor";
 import { providerEdit, providerForm, providerFormDirty, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
+import { GuidedTour, type GuidedTourStep } from "./GuidedTour";
+import { providerTourSteps, providerTourStorageKey, startsProviderTour } from "./providerTour";
 import { useShellLanguage } from "./shellLanguage";
 
 type CallOptions = { signal: AbortSignal; timeoutMilliseconds: number };
@@ -30,14 +32,19 @@ function DefaultedInput({ id, value, fallback, disabled, onChange }: {
  * Settings page for model providers: the configured definitions on the left, an edit form on the right.
  * Saving writes the global configuration and re-registers the providers in the running host.
  */
-export function ProviderSettings({ epoch, config = globalConfig, login = providerLogin, readRuntime, probe, onOpenModels, onOpenConfiguration, onApplied }: {
+export function ProviderSettings({ epoch, config = globalConfig, login = providerLogin, readRuntime, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed }: {
   epoch: string; config?: Pick<typeof globalConfig, "providers" | "saveProvider" | "deleteProvider">;
   login?: Pick<typeof providerLogin, "status" | "login" | "logout">;
   readRuntime: (request: ModelCatalogProvidersRequest, options: CallOptions) => Promise<ModelCatalogProvidersResponse>;
   probe: (request: ModelCatalogProbeRequest, options: CallOptions) => Promise<ModelCatalogProbeResponse>;
   onOpenModels: () => void; onOpenConfiguration: () => void; onApplied?: () => void;
+  /** The application started without an enabled provider: the setup guide starts by itself, the first time. */
+  guide?: boolean; onGuideClosed?: () => void;
 }) {
   const { t } = useShellLanguage();
+  const page = useRef<HTMLElement>(null);
+  const [tour, setTour] = useState(false);
+  const guided = useRef(false);
   const [listing, setListing] = useState<GlobalConfigProvidersResponse | null>(null);
   const [availability, setAvailability] = useState<ReadonlyMap<string, string>>(new Map());
   const [selected, setSelected] = useState<string | null>(null);
@@ -79,6 +86,18 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
   }, [config, readRuntime, epoch, generation]);
 
   const providers = listing?.providers ?? [];
+  // Once the providers are listed, and only the first time nothing is enabled.
+  useEffect(() => {
+    if (!guide || !listing || guided.current) return;
+    guided.current = true;
+    let shown = false;
+    try { shown = localStorage.getItem(providerTourStorageKey) !== null; } catch { /* Without storage the guide shows on each such start. */ }
+    if (!startsProviderTour(listing.providers, shown)) { onGuideClosed?.(); return; }
+    // Shown once: leaving it in any way, closing this window included, does not bring it back by itself.
+    try { localStorage.setItem(providerTourStorageKey, "shown"); } catch { /* It may show again on a later start. */ }
+    setTour(true);
+  }, [guide, listing]);
+  function closeTour() { setTour(false); onGuideClosed?.(); }
   const original = selected && selected !== newProvider ? providers.find(provider => provider.key === selected) ?? null : null;
   const baseline = listing && selected ? providerForm(original, listing.defaultProvider, listing.providerTypes) : null;
   const dirty = !!form && !!baseline && providerFormDirty(form, baseline);
@@ -134,12 +153,20 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
     finally { if (alive.current) setProbing(false); }
   }
 
-  return <main className="configuration-page provider-settings" aria-label={t("Provider management")}>
+  const tourSteps: GuidedTourStep[] = !tour || !listing ? [] : providerTourSteps(providers).map(step => ({
+    id: step.id, title: t(step.title, step.parameters), body: t(step.body, step.parameters), placement: step.target === "account" ? "top" : "right",
+    enter: step.provider === null ? undefined : () => choose(step.provider!),
+    target: () => page.current?.querySelector(step.target === "list" ? ".provider-settings-list" : step.target === "account" ? ".provider-account"
+      : `[data-provider-key="${CSS.escape(step.provider ?? "")}"]`) ?? null,
+  }));
+
+  return <main ref={page} className="configuration-page provider-settings" aria-label={t("Provider management")}>
     <header className="page-heading provider-settings-heading">
       <div><span className="eyebrow">{t("Agent & models")}</span><h1>{t("Providers")}</h1>
         <p>{t("Model providers CodeAlta can use. Saving writes the global configuration and applies it to the running app.")}</p></div>
       <div className="provider-settings-actions">
         {(loading || busy) && <ActivitySpinner size={14} />}
+        <Button variant="minimal" icon={<AppIcon name="question" size={15} />} disabled={!listing || tour} aria-label={t("Setup guide")} title={t("Setup guide")} onClick={() => setTour(true)} />
         <Button icon={<AppIcon name="refresh" size={15} />} disabled={loading || busy} onClick={() => setGeneration(value => value + 1)}>{t("Reload")}</Button>
         <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!listing || busy} onClick={() => choose(newProvider)}>{t("Add provider")}</Button>
       </div>
@@ -151,7 +178,7 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
       : <div className="provider-settings-layout">
         <CardList compact className="provider-settings-list" aria-label={t("Configured providers")}>
           {providers.map(provider => { const state = status(provider.key, provider.enabled); return <Card key={provider.key} interactive selected={selected === provider.key}
-            aria-current={selected === provider.key ? "true" : undefined} onClick={() => choose(provider.key)}>
+            data-provider-key={provider.key} aria-current={selected === provider.key ? "true" : undefined} onClick={() => choose(provider.key)}>
             <span className="provider-settings-name"><strong>{provider.effectiveName}</strong><small>{provider.key} · {provider.type}</small></span>
             <span className="provider-settings-tags">{provider.key === listing.defaultProvider && <Tag minimal round intent="primary">{t("Default")}</Tag>}
               <Tag minimal round intent={state.intent}>{state.label}</Tag></span>
@@ -214,5 +241,6 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
           </SectionCard>
         </Section>}
       </div>}
+    {tourSteps.length > 0 && <GuidedTour steps={tourSteps} label={t("Setup guide")} onClose={closeTour} />}
   </main>;
 }

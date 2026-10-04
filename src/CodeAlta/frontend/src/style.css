@@ -1590,3 +1590,23 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .config-recovery-status .config-editor-diagnostic { margin-top: 0; }
 .config-recovery-position { padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .config-recovery-actions { display: flex; align-items: center; gap: 8px; }
+
+/* Guided tour: the element of the current stop is lit, the rest dims, and a card beside it explains it. */
+.guided-tour { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
+.guided-tour-spotlight { position: fixed; border-radius: 10px; pointer-events: none; box-shadow: 0 0 0 2px var(--accent), 0 0 0 6px color-mix(in srgb, var(--accent) 28%, transparent), 0 0 0 200vmax color-mix(in srgb, var(--bg) 62%, transparent);
+  transition: top .22s ease, left .22s ease, width .22s ease, height .22s ease; animation: guided-tour-pulse 2.2s ease-in-out infinite; }
+.guided-tour-spotlight:not([data-placed]) { box-shadow: 0 0 0 200vmax color-mix(in srgb, var(--bg) 62%, transparent); animation: none; }
+@keyframes guided-tour-pulse { 50% { box-shadow: 0 0 0 2px var(--accent), 0 0 0 10px color-mix(in srgb, var(--accent) 12%, transparent), 0 0 0 200vmax color-mix(in srgb, var(--bg) 62%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .guided-tour-spotlight { transition: none; animation: none; } }
+.guided-tour .bp6-popover-transition-container, .guided-tour .guided-tour-popover { pointer-events: auto; }
+.guided-tour-popover.bp6-popover { border-radius: 10px; box-shadow: var(--shadow), 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent), 0 0 34px color-mix(in srgb, var(--accent) 18%, transparent); }
+.guided-tour-popover .bp6-popover-content { border-radius: 10px; }
+.guided-tour-card { display: grid; gap: 8px; width: min(340px, calc(100vw - 48px)); padding: 12px 14px 12px; }
+.guided-tour-card header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.guided-tour-count { color: var(--accent); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.guided-tour-card h3 { margin: 0; font-size: 16px; line-height: 1.3; }
+.guided-tour-card p { margin: 0; color: var(--muted); line-height: 1.5; }
+.guided-tour-card footer { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.guided-tour-dots { display: flex; gap: 5px; margin-right: auto; }
+.guided-tour-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong, var(--line)); transition: background .2s ease, width .2s ease; }
+.guided-tour-dots i[data-current] { width: 16px; border-radius: 3px; background: var(--accent); }

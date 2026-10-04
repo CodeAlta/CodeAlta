@@ -351,6 +351,16 @@ launch. The result is a completed initialization/probe, not proof of authenticat
 connection, and arbitrary provider error messages/URLs/categories are not shown. An abandoned
 probe is still joined by the host before disposal; do not assume its outcome from a timed-out
 browser request. Catalog-only mode lists saved descriptors read-only without runtime tests.
+When the application starts without any enabled model provider, which is how a new profile starts,
+Settings opens on **Providers**, as the terminal application opens its own providers window. The
+first time, a **setup guide** runs over the page in three stops, each lighting the control it is
+about: the providers that sign in with a subscription you already have (Codex with ChatGPT, Copilot
+with GitHub Copilot; the guide continues with Codex and selects it), its **Sign in with the
+browser** button, and the other providers, which take an API key through an environment variable.
+**Next** (Enter or →), **Back** (←) and **Skip** (Escape) move through it; the page stays usable
+underneath, so the sign-in can be started from its stop. It starts by itself once per window
+profile; the question-mark button beside **Reload** shows it again at any time.
+
 In an owned launch the **Providers** section is an editor: the configured definitions (including
 disabled ones) are listed on the left with their cached availability and the configured default, and
 the selected one has a form for its key, adapter type, enabled state, display name, default model,
