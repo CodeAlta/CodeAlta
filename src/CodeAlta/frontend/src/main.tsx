@@ -59,7 +59,7 @@ import { createSteeringSubmissions } from "./sessionSteering";
 import { createCompactionSubmissions } from "./sessionCompaction";
 import { createAbortRunSubmissions } from "./sessionAbortRun";
 import { createQueueSubmissions } from "./sessionQueue";
-import { AskPanel } from "./AskPanel";
+import { AskPanel, type AskMode } from "./AskPanel";
 import { askWireRequest, createAskActions } from "./sessionAsks";
 import { SessionNotesOverlay } from "./SessionNotesOverlay";
 import { RunningSessionBadge } from "./RuntimeObservation";
@@ -901,6 +901,7 @@ function App() {
       case "sessionInfo": case "messagePrevious": case "messageNext": case "messageFirst": case "messageLatest": case "toggleNotes": return session;
       case "usage": case "reminders": case "compact": case "abort": case "clearQueue": case "nextPrompt": case "modelSelector": case "send": case "steer": return ownedSession;
       case "expandPrompt": case "focusPrompt": return view === "workspace" && !fileTabs.active;
+      case "focusAskFile": return session && !!visibleAsk(".ask-file-review");
       case "closeTab": case "previousTab": case "nextTab": return tabs.open.length + fileTabs.open.length > 0;
       case "reopenTab": return tabs.closed.length + fileTabs.closed.length > 0;
       case "editFile": return owned && view === "workspace" && !!selectedProject && !selectedProject.archived;
@@ -933,6 +934,7 @@ function App() {
       case "editFile": openFilePicker(); break;
       case "newSession": selectProject(projectId); requestAnimationFrame(() => document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt")?.focus()); break;
       case "focusSidebar": runShortcut("focusProjects"); break;
+      case "focusAskFile": visibleAsk(".ask-file-review")?.dispatchEvent(new CustomEvent("codealta-ask-file-focus")); break;
       case "toggleNavigator": toggleProjects(); break;
       case "modelSelector": invokeComposerControl(activeComposerControl(".composer-selection")); break;
       case "usage": invokeComposerControl(activeComposerControl("#session-usage-trigger")); break;
@@ -958,6 +960,9 @@ function App() {
         && document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]').length === 1;
       const modal = paletteOpen || !!dialog || !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]');
       if (modal && !settingsOnly) { commandChord.current = false; return; }
+      // In an open ask Ctrl+N and Ctrl+P move between its questions and between the comments of its file.
+      if (!commandChord.current && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && ["n", "p"].includes(event.key.toLowerCase())
+        && target?.closest("[data-ask-keys]")) return;
       const focus = target?.closest("#session-prompt, #catalog-prompt") ? "prompt" : target?.closest(workspaceEditingSelector) ? "text" : "none";
       // "?" outside text opens help, as it does when typed into an empty prompt.
       const resolved = focus === "none" && !commandChord.current && event.key === "?" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.repeat
@@ -1022,7 +1027,9 @@ function App() {
       else { setDialog(null); (document.activeElement as HTMLElement | null)?.blur(); }
     }
     else if (action === "toggleNotes") setNotesVisible(value => !value);
-    else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
+    // An open ask has the place of the prompt: its questions take the focus.
+    else if (action === "focusPrompt") (visibleAsk(".ask-form")?.querySelector<HTMLElement>("[data-ask-question] input:checked, [data-ask-question] textarea, [data-ask-question] input")
+      ?? document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt"))?.focus();
     else if (action === "focusSearch") showSessionSearch();
     else if (action === "focusProjects") {
       if (!railVisible) toggleProjects();
@@ -1984,6 +1991,11 @@ function createSessionPaneOwners() {
 
 // The working folder shown beside a composer (global sessions have none) and the plugin status items above
 // it, which are those of the composer's session once it has one.
+// The part of an open ask (its questions, its file) in the session tab that is shown.
+function visibleAsk(selector: string): HTMLElement | null {
+  return Array.from(document.querySelectorAll<HTMLElement>(selector)).find(element => element.offsetParent !== null) ?? null;
+}
+
 function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["projects"][number] | undefined, sessionId: string | null = null): ComposerChromeValue {
   const id = project?.id, name = project?.name, path = project?.path;
   return useMemo(() => ({ context: id !== undefined && name !== undefined && path !== undefined
@@ -2046,6 +2058,11 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   const [infoOpen, setInfoOpen] = useState(false);
   const infoActive = useRef(false);
   const askRefresh = useRef<(() => void) | null>(null);
+  // An open ask takes the place of the prompt with its questions and, with a file to review, of the timeline.
+  const [askMode, setAskMode] = useState<AskMode>("none");
+  const [askFormSlot, setAskFormSlot] = useState<HTMLDivElement | null>(null);
+  const [askFileSlot, setAskFileSlot] = useState<HTMLDivElement | null>(null);
+  const [running, setRunning] = useState<boolean | null>(null);
   const [timelineNotices, setTimelineNotices] = useState<HTMLDivElement | null>(null);
   const [infoFocusRestoration] = useState(createPaletteFocusRestoration);
   useEffect(() => () => infoFocusRestoration.cancel(), [infoFocusRestoration]);
@@ -2124,7 +2141,8 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
     {demoMode
       ? <DemoConversation session={session} />
       : <>
-        <div className="session-timeline-area">
+        <div className="session-timeline-area" data-ask={askMode}>
+        <div className="ask-file-slot" ref={setAskFileSlot} hidden={askMode !== "file"} />
         <div className="timeline-scroll" ref={timeline.elementRef}
           onScroll={event => { newest.onScroll(); if (!newest.pending()) timeline.scroll(event.currentTarget); }}
           onWheel={event => { newest.cancel(); timeline.wheel(event); }} onKeyDown={timeline.keyDown}
@@ -2143,7 +2161,8 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
         ? <>
           <LiveSessionPanel observing={observing} store={display} hostEpoch={status.hostEpoch} sessionId={session.id} capability={mutation!.capability} />
           <div className="timeline-notices" ref={setTimelineNotices} />
-          {status.ownedAsksEnabled && <AskPanel observing={observing} epoch={status.hostEpoch} sessionId={session.id} actions={askActions} capability={mutation!.capability} refreshTrigger={askRefresh} />}
+          {status.ownedAsksEnabled && <AskPanel observing={observing} epoch={status.hostEpoch} sessionId={session.id} actions={askActions} capability={mutation!.capability} refreshTrigger={askRefresh}
+            projectId={selectedProjectId} idle={running !== true} formSlot={askFormSlot} fileSlot={askFileSlot} onMode={setAskMode} />}
           {status.ownedUserInputEnabled && <UserInputPanel epoch={status.hostEpoch} sessionId={session.id} reviewer={inputReviewer} capability={mutation!.capability}
             canReview={() => infoLifetime.current()} />}
         </>
@@ -2155,14 +2174,15 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
         {!timeline.following && <button type="button" className="timeline-bottom-button" onClick={() => { newest.cancel(); timeline.jump(); }}><AppIcon name="arrowDown" size={14} />{t(newerOmitted ? "Bottom of retained window (not newest)" : "Jump to latest visible")}</button>}
         {/* Message navigation is announced to assistive technology only: nothing is written above the prompt. */}
         {messageNotice && <p role="status" className="sr-only">{timelineNotice(languageLocale, messageNotice)}</p>}
-        <div className="composer-resize-bar" ref={composer.barRef}>
+        <div className="composer-resize-bar" ref={composer.barRef} hidden={askMode !== "none"}>
           <ComposerSplitter {...composer.splitter} />
         </div>
-        <div ref={composer.regionRef} className={`composer-region${composer.height === undefined ? "" : " resized"}`}
-          style={composer.height === undefined ? undefined : { height: composer.height }}>
+        <div ref={composer.regionRef} className={`composer-region${composer.height === undefined || askMode !== "none" ? "" : " resized"}`} data-ask={askMode}
+          style={composer.height === undefined || askMode !== "none" ? undefined : { height: composer.height }}>
+        <div className="ask-form-slot" ref={setAskFormSlot} hidden={askMode === "none"} />
         <SessionComposerGate snapshot={snapshot} projectId={selectedProjectId} session={session} chrome={chrome}
           epoch={ownedHost ? status!.hostEpoch! : null}
-          owned={status?.hostEpoch && mutation ? <OwnedSessionPanel observing={observing} active={active} onRunActivity={onRunActivity} sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
+          owned={status?.hostEpoch && mutation ? <OwnedSessionPanel observing={observing} active={active} onRunActivity={value => { setRunning(value); onRunActivity?.(value); }} sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
               persistedUsage={persistedUsage} usageTarget={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? {
                 epoch: status.hostEpoch, sessionId: session.id, scope: selectedProjectId === null ? "global" : "project",
                 projectId: selectedProjectId, expectedProjectPath: selectedProjectId === null ? null : session.workspacePath } : null}

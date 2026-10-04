@@ -6,7 +6,7 @@ import type { MessageKey } from "./localization";
  */
 export type CommandId =
   | "help" | "palette" | "openProject" | "editFile" | "about" | "skills" | "plugins" | "settings" | "prompts" | "nextPrompt"
-  | "providers" | "models" | "logs" | "mcp" | "config" | "focusSidebar" | "toggleNavigator" | "focusPrompt" | "modelSelector"
+  | "providers" | "models" | "logs" | "mcp" | "config" | "focusSidebar" | "toggleNavigator" | "focusPrompt" | "focusAskFile" | "modelSelector"
   | "usage" | "sessionInfo" | "reminders" | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest"
   | "expandPrompt" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "clearQueue" | "compact"
   | "newSession" | "browseSessions" | "searchSessions" | "toggleNotes" | "previousSession" | "nextSession"
@@ -49,6 +49,7 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "prompts", name: "prompt", label: "Agent Prompts", description: "Create and edit agent and system prompts.", category: "General", keys: ["Ctrl+G Ctrl+H"], search: "prompts agent_prompt instructions system_prompt" },
   { id: "providers", name: "model_providers", label: "Model Providers", description: "Configure and test model providers.", category: "General", keys: ["Ctrl+G Ctrl+R"], search: "providers" },
   { id: "focusPrompt", name: "go_to_prompt", label: "Go to Prompt", description: "Move focus to the prompt editor.", category: "General", keys: ["Ctrl+G Ctrl+P"], search: "prompt" },
+  { id: "focusAskFile", name: "go_to_ask_file", label: "Go to Ask File", description: "Move focus to the file under review.", category: "General", keys: ["Ctrl+G Ctrl+E"], search: "plan review ask file" },
   { id: "focusSidebar", name: "go_to_sidebar", label: "Go to Sidebar", description: "Move focus to the project explorer.", category: "General", keys: ["Ctrl+G Ctrl+S"], search: "sidebar explorer" },
   { id: "modelSelector", name: "model", label: "Model", description: "Choose the agent, model and reasoning for the next send.", category: "General", search: "model_selector provider selector reasoning" },
   { id: "toggleNotes", name: "notes", label: "Toggle Notes", description: "Show or hide the session notes.", category: "General", keys: ["Ctrl+Shift+N"], search: "alta notes" },

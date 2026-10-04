@@ -77,12 +77,13 @@ internal static class OwnedSessionAskTool
         { throw new ArgumentException("Invalid ask input.", nameof(json), ex); }
     }
 
-    // The limits of ParseRequest for a request that arrives already parsed: no file to review, the same counts and
-    // text budgets.
+    // The limits of ParseRequest for a request that arrives already parsed (from the session's alta command): the
+    // same counts and text budgets. Such a request may name a file to review; the command resolved its path
+    // against the session's roots and left it relative to one of them.
     internal static AltaAskRequest Restrict(AltaAskRequest request)
     {
-        if (request.File is not null) throw new ArgumentException("An ask with a file to review is not available here.");
         if (request.Questions is null || request.Questions.Count is 0 or > 12) throw new ArgumentException("Invalid array length.");
+        var file = request.File is null ? null : new AltaAskFile { Path = ReviewPath(request.File.Path) };
         var budget = 8192;
         string? Bounded(string? text, int maximum)
         {
@@ -109,7 +110,52 @@ internal static class OwnedSessionAskTool
             });
         }
 
-        return AltaAskValidator.ValidateAndNormalize(new() { Questions = questions.AsReadOnly() });
+        return AltaAskValidator.ValidateAndNormalize(new() { File = file, Questions = questions.AsReadOnly() });
+    }
+
+    /// <summary>Longest path of a file to review, in UTF-16 units.</summary>
+    internal const int MaximumReviewPathLength = 1000;
+
+    /// <summary>Most line comments in one file review.</summary>
+    internal const int MaximumReviewComments = 200;
+
+    /// <summary>Longest line comment, in UTF-16 units; all comments of a review share <see cref="MaximumReviewCommentsLength"/>.</summary>
+    internal const int MaximumReviewCommentLength = 4000;
+
+    /// <summary>Total length of the line comments of one review, in UTF-16 units.</summary>
+    internal const int MaximumReviewCommentsLength = 16384;
+
+    // A relative path of plain segments below a root the reader chooses: never rooted, never climbing.
+    private static string ReviewPath(string? path)
+    {
+        if (!Text(path, MaximumReviewPathLength) || string.IsNullOrWhiteSpace(path) || path.Any(char.IsControl)
+            || Path.IsPathRooted(path) || path.Contains(':'))
+            throw new ArgumentException("Invalid file to review.");
+        var normalized = path.Trim().Replace('\\', '/');
+        if (normalized.Split('/').Any(static part => part.Length == 0 || part is "." or ".."))
+            throw new ArgumentException("Invalid file to review.");
+        return normalized;
+    }
+
+    // The review of the ask's file as the user submitted it: comments in line order, blank ones refused.
+    internal static AltaAskFileReview? CaptureFileReview(AltaAskRequest request, AltaAskFileReview? review)
+    {
+        if (review is null) return null;
+        if (request.File is null) throw new ArgumentException("This ask has no file to review.");
+        var comments = review.Comments ?? [];
+        if (comments.Count > MaximumReviewComments) throw new ArgumentException("Too many file comments.");
+        var budget = MaximumReviewCommentsLength;
+        var captured = new List<AltaAskFileComment>(comments.Count);
+        foreach (var comment in comments)
+        {
+            if (comment is null || comment.Line is < 1 or > 1_000_000 || !Text(comment.Text, MaximumReviewCommentLength)
+                || string.IsNullOrWhiteSpace(comment.Text) || (budget -= comment.Text.Length) < 0)
+                throw new ArgumentException("Invalid file comment.");
+            captured.Add(new() { Line = comment.Line, Text = comment.Text });
+        }
+
+        // A stable sort: several comments on one line keep the order they were written in.
+        return new() { FileModifiedAndSaved = review.FileModifiedAndSaved, Comments = captured.OrderBy(static comment => comment.Line).ToArray().AsReadOnly() };
     }
 
     internal static IReadOnlyList<AltaAskAnswer> CaptureAnswers(AltaAskRequest request, IReadOnlyList<AltaAskAnswer> answers)
@@ -132,7 +178,7 @@ internal static class OwnedSessionAskTool
             {
                 if (question.Freeform is null || !Text(text, 8192) || (budget -= text.Length) < 0) throw new ArgumentException("Invalid freeform answer.");
             }
-            if (choices.Length == 0 && string.IsNullOrWhiteSpace(answer.FreeformText)) throw new ArgumentException("An answer is required.");
+            // A question may be left without a choice or text; the response then says "No answer provided."
             captured[i] = answer with { SelectedChoiceIndexes = System.Array.AsReadOnly(choices) };
         }
         return System.Array.AsReadOnly(captured);

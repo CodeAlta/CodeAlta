@@ -50,7 +50,7 @@ public sealed class OwnedSessionAskService
     /// The queued ask, or null when asks are disabled, no send of the session is running, that send already
     /// asked, or capacity is exhausted.
     /// </returns>
-    /// <exception cref="ArgumentException">The request has a file to review, or exceeds the owner's limits.</exception>
+    /// <exception cref="ArgumentException">The request exceeds the owner's limits, or its file to review is not a plain relative path.</exception>
     public AltaAskQueueResult? QueueFromSession(string sessionId, AltaAskRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -129,7 +129,9 @@ public sealed class OwnedSessionAskService
             var answers = cancel
                 ? request.Answers.Count == 0 ? System.Array.Empty<AltaAskAnswer>() : throw new ArgumentException("Cancel has no answers.")
                 : OwnedSessionAskTool.CaptureAnswers(ask.Request, request.Answers);
-            var text = cancel ? "" : AltaAskAnswerMarkdownFormatter.Format(ask.Request, answers);
+            if (cancel && request.FileReview is not null) throw new ArgumentException("Cancel has no file review.");
+            var review = cancel ? null : OwnedSessionAskTool.CaptureFileReview(ask.Request, request.FileReview);
+            var text = cancel ? "" : AltaAskAnswerMarkdownFormatter.Format(ask.Request, answers, review);
             if (!OwnedSessionAskTool.Text(text, 32768)) throw new ArgumentException("Formatted answer exceeds the limit.");
             if (_actions.TryGetValue(request.ActionId, out var previous))
                 return previous.Cancel == cancel && previous.Request.Handle == request.Handle && previous.Text == text
@@ -139,7 +141,7 @@ public sealed class OwnedSessionAskService
             var head = _queue.Peek(request.Handle.SessionId);
             if (head?.ResponseHandle is null || head.AskId != request.Handle.AskId || head.ResponseHandle.Generation != request.Handle.ResponseGeneration)
                 return Task.FromResult(new OwnedAskDisposition(request.ActionId, request.Handle, "rejected"));
-            work = new(request with { Answers = answers }, cancel, text, head.ResponseHandle);
+            work = new(request with { Answers = answers, FileReview = review }, cancel, text, head.ResponseHandle);
             _actions.Add(request.ActionId, work);
             work.Work = RunAsync(work); // First await is the unreleased launch gate.
         }

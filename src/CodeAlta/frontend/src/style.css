@@ -1443,6 +1443,46 @@ dialog.session-browser .session-batch-delete summary { cursor: pointer; color: v
 
 /* Ask card: the question an agent put to the user, answered above the prompt. */
 .ask-panel { display: grid; gap: 6px; min-width: 0; }
+/* An open ask: its file takes the place of the timeline, its questions the place of the prompt. */
+.session-timeline-area[data-ask="file"] > .timeline-scroll, .session-timeline-area[data-ask="file"] > .session-notes-overlay { display: none; }
+.ask-file-slot { flex: 1 1 0; display: flex; min-width: 0; min-height: 0; }
+.ask-file-slot[hidden], .ask-form-slot[hidden], .composer-resize-bar[hidden] { display: none; }
+.composer-region:is([data-ask="file"], [data-ask="questions"]) > :not(.ask-form-slot) { display: none; }
+.composer-region:is([data-ask="file"], [data-ask="questions"]) { display: flex; flex-direction: column; padding-top: 6px; }
+.composer-region[data-ask="file"] { flex: 0 1 auto; min-height: 200px; max-height: 45%; }
+.composer-region[data-ask="questions"] { flex: 0 1 auto; max-height: 60%; }
+.ask-form-slot { flex: 1 1 auto; display: flex; min-width: 0; min-height: 0; }
+.ask-file-review { flex: 1 1 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--panel); overflow: hidden; }
+.ask-file-header { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 6px 4px 10px; border-bottom: 1px solid var(--line); }
+.ask-file-header strong { flex: 1 1 auto; min-width: 0; overflow: hidden; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.ask-file-count { flex: 0 0 auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ask-file-surface { flex: 1 1 0; min-width: 0; min-height: 0; }
+.ask-file-review .file-editor-notice { flex: 0 0 auto; margin: 6px 8px 0; }
+.ask-file-review .ask-comment-glyph { margin-left: 4px; border-radius: 2px; background: var(--accent); width: 8px !important; height: 8px !important; margin-top: 6px; }
+.ask-file-review .ask-comment-add { cursor: pointer; }
+.ask-file-review .ask-comment-add::after { content: "+"; display: block; color: var(--accent); font-weight: 700; line-height: 20px; text-align: center; }
+.ask-file-review .ask-comment-line { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.ask-file-review .margin-view-overlays .cgmr, .ask-file-review .glyph-margin-widgets { cursor: pointer; }
+.ask-comment-zone { box-sizing: border-box; padding: 2px 14px 6px 0; }
+.ask-comment { box-sizing: border-box; display: grid; gap: 4px; max-width: 760px; padding: 6px 8px 8px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line-strong)); border-left-width: 3px; border-radius: 6px; background: var(--panel-2); font-family: var(--font-sans, system-ui, sans-serif); }
+.ask-comment > header { display: flex; align-items: center; gap: 6px; color: var(--accent); font-size: 12px; }
+.ask-comment > header strong { color: var(--text); font-weight: 600; }
+.ask-comment > header span { color: var(--muted); }
+.ask-comment > header .bp6-button { margin-left: auto; }
+.ask-comment-done { display: inline-flex; color: var(--green) !important; }
+.ask-comment textarea { min-height: 30px; max-height: 168px; font-size: 13px; line-height: 1.4; }
+.ask-form { flex: 1 1 auto; align-content: flex-start; min-height: 0; overflow-y: auto; }
+.ask-form .ask-tabs { flex: 0 0 100%; min-width: 0; }
+.ask-form .ask-tabs .bp6-tab-list { flex-wrap: wrap; column-gap: 16px; }
+.ask-form .ask-tabs .bp6-tab { font-size: 13px; line-height: 26px; }
+.ask-form .ask-question { padding-left: 0; }
+.ask-form .ask-question h4 { margin: 0; font-size: 13px; font-weight: 600; }
+.ask-form .ask-choices { display: grid; gap: 2px; }
+.ask-form .ask-choice-number { color: var(--muted); font-variant-numeric: tabular-nums; }
+.ask-form .ask-freeform textarea { min-height: 30px; }
+.ask-actions { flex: 0 0 100%; display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
+.ask-actions .ask-hint { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.ask-confirmation .detail { color: var(--muted); }
 .timeline-scroll > section.ask-panel:not(.conversation):not(.live-indicator) { margin: 6px 12px 8px; padding: 0; border: 0; border-radius: 0; background: transparent; }
 .ask-card { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; margin: 0; padding: 8px 12px 10px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line-strong)); border-left-width: 3px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
 .ask-card > .ask-card-header, .ask-card > .ask-question { flex: 0 0 100%; min-width: 0; }

@@ -14,7 +14,11 @@ public sealed record OwnedAskHead(OwnedAskHandle Handle, AltaAskRequest Request,
 public sealed record OwnedAskPage(OwnedAskHead? Head, OwnedAskDisposition? Latest, bool HasMore);
 
 /// <summary>One explicit user action, copied and validated before admission.</summary>
-public sealed record OwnedAskAction(Guid ActionId, OwnedAskHandle Handle, IReadOnlyList<AltaAskAnswer> Answers);
+/// <param name="ActionId">The identity of this action; a repeat with the same content returns the original outcome.</param>
+/// <param name="Handle">The pending ask being answered or cancelled.</param>
+/// <param name="Answers">One answer per question; empty for a cancel.</param>
+/// <param name="FileReview">The review of the ask's file (line comments, whether it was edited and saved); only for an ask that has one.</param>
+public sealed record OwnedAskAction(Guid ActionId, OwnedAskHandle Handle, IReadOnlyList<AltaAskAnswer> Answers, AltaAskFileReview? FileReview = null);
 
 /// <summary>Retained backend evidence for an original action, not transport acknowledgment or provider success.</summary>
 public sealed record OwnedAskDisposition(Guid ActionId, OwnedAskHandle Handle, string Status, string? RunId = null);

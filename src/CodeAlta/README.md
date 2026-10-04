@@ -530,7 +530,8 @@ active plugins (`alta mcp`, `alta statistics`).
 
 - `alta notes set` writes the session's notes; the **Notes** window at the top right of the session
   opens with them.
-- `alta ask` shows its questions as a card above the prompt (see the ask card below).
+- `alta ask` puts its questions in the place of the prompt and, with a file to review, that file in the
+  place of the timeline (see "Asks and plan review" below).
 - `alta reminder create` creates reminders the **Reminders** view lists and delivers.
 - `alta session create` creates a sub-session. It appears in the Explorer under its parent within ten
   seconds while a run is live, and at the latest when the run ends. A sub-session is an ordinary
@@ -1100,21 +1101,46 @@ Aborting the owning submission or closing the application invalidates still-pend
 but cannot revoke a decision already accepted by the backend. Native/provider qualification and
 the broader permission, file-review and ask workflows remain incomplete.
 
-An agent asks the user a question with **`alta ask --stdin`**. The question appears as a card at the
-end of the timeline, above the prompt: its title, the question, its choices as checkboxes and, when the
-ask allows one, a text answer. **Answer** sends the answers of every question as a new prompt to the
-session that asked; **Cancel** withdraws the ask without stopping anything. An ask with several
-questions shows its position (`1 / 3`) with previous and next buttons, and `Ctrl+N` / `Ctrl+P` move
-between questions while the focus is in the card. Choices and text are kept while moving between
-questions and across refreshes of the same ask. The card leaves the timeline once the ask is answered
-or cancelled; the answer is then an ordinary **You** card.
+### Asks and plan review
 
-An answer and an ask each hold at most 8,192 UTF-16 units of text. A run can ask once, and only a run
-started from the window can ask; asks do not survive closing the application. When the ask an answer
-was written for changes or disappears before it is sent, the text stays in the card as an **Unsent
-answer** that can be copied or discarded, never sent to another ask. When the host does not confirm an
-answer or a cancel within eight seconds, the card says so with a **Check** button that reads what the
-host recorded, without sending again.
+An agent asks the user with **`alta ask --stdin`**: one or more questions, and optionally a file to
+review. This is how the **Plan** agent prompt ends a planning turn: it saves the plan under
+`.alta/plans/` and asks for its review together with the questions that remain. The ask opens once the
+run that asked has ended, as in the terminal UI:
+
+- **The questions take the place of the prompt.** Each question is a tab (`Title →`, the last one
+  `Title ✓`) with its text, its description, its choices as a single selection (numbered, the first one
+  selected) and, when the ask allows one, a text answer. `Enter` and the button go to the next
+  question that was not shown yet (**Next**) and send once all were shown (**Submit**); `Shift+Enter`
+  is a new line in a text answer. `Ctrl+N` / `Ctrl+P` and, outside text, `Left` / `Right` change the
+  question; `Up` / `Down` change the choice. A question may be left without an answer.
+- **A file to review takes the place of the timeline.** It is the file's source in an editor, with
+  line numbers, the highlighting of its type and wrapped lines, under a header `File context: <path>`
+  (` *` while it has unsaved edits). `Ctrl+K`, the **Comment** button or a click in the margin beside a
+  line adds a comment on that line: a **User Comment** box under the line, one per line, marked in the
+  margin. In a comment `Esc` finishes it (a check mark shows it is done), `Ctrl+D` deletes it and
+  `Ctrl+N` / `Ctrl+P` go to the next and previous comment; **Clear comments** removes them all. The
+  file can be edited and saved (`Ctrl+S`, **Save**); comments stay on their lines while it is edited,
+  and a file that changed on disk asks before it is overwritten.
+- `Ctrl+G Ctrl+E` (**Go to Ask File**) moves to the file and `Ctrl+G Ctrl+P` (**Go to Prompt**), or
+  `Esc` in the editor, back to the questions.
+- **Submit** sends one prompt to the session that asked: the file, its comments by line (every comment
+  with text, finished or not), whether the file was edited and saved, and the answers. It is an
+  ordinary **You** card in the timeline. With unsaved edits it first asks **Save and submit**,
+  **Submit without saving** or **Keep answering**.
+- **Cancel** (`Esc`) asks before it withdraws the ask (**Exit without responding**); nothing is sent
+  and nothing is stopped. With unsaved edits it offers to save them first.
+
+The timeline and the prompt return when the ask is answered or cancelled. A session without a project
+has no folder to read the file from: its questions are shown and the file is reported as unavailable.
+
+An ask holds at most 8,192 UTF-16 units of text and a file path of 1,000; an answer holds 8,192 units
+of text, and its review at most 200 comments of 4,000 units each, 16,384 in all. A run can ask once,
+and only a run started from the window can ask; asks do not survive closing the application. When the
+ask an answer was written for changes or disappears before it is sent, the text stays in the timeline
+as an **Unsent answer** that can be copied or discarded, never sent to another ask. When the host does
+not confirm an answer or a cancel within eight seconds, the timeline says so with a **Check** button
+that reads what the host recorded, without sending again.
 
 Add **`--enable-owned-user-input`** to the complete owned-mode command for **Nonsecret provider input**.
 It is off by default, requires owned mode, and is independent of command review and restricted asks.

@@ -23,8 +23,9 @@ internal sealed class SessionAsksService(OwnedSessionAskService owner, string ep
         if (error is not null) return Task.FromResult(new SessionAsksPage(error, _epoch, validSession ? request!.SessionId : null, null, null, false));
         cancellationToken.ThrowIfCancellationRequested();
         var page = owner.List(request!.SessionId);
-        // One <=8192-unit request, at most 12 questions/240 choices, two scalar envelopes and one
-        // scalar disposition. Generated-serializer escaping/framing is independently tested.
+        // One <=8192-unit request (plus a file path of at most 1000 units), at most 12 questions/240
+        // choices, two scalar envelopes and one scalar disposition. Generated-serializer
+        // escaping/framing is independently tested.
         return Task.FromResult(new SessionAsksPage("ok", _epoch, request.SessionId, ToWire(page.Head), ToWire(page.Latest), page.HasMore));
     }
 
@@ -59,7 +60,7 @@ internal sealed class SessionAsksService(OwnedSessionAskService owner, string ep
         {
             // Owner retains the original before return. Only this transport wait is cancellable.
             // Decimal parsing supplies only scalar context. The owner still recovers its exact queue handle.
-            var domain = new OwnedAskAction(action.ActionId, handle, action.Answers);
+            var domain = new OwnedAskAction(action.ActionId, handle, action.Answers, action.FileReview);
             var original = cancel ? owner.CancelAsync(domain, token) : owner.AnswerAsync(domain, token);
             var result = await original.WaitAsync(token).ConfigureAwait(false);
             return new("ok", _epoch, ToWire(result));
@@ -109,7 +110,8 @@ internal sealed record SessionAskHandle(Guid OperationId, Guid RuntimeInstanceId
     string ProviderId, string SessionId, string RunId, string AskId, string ResponseGeneration);
 internal sealed record SessionAskHead(SessionAskHandle Handle, AltaAskRequest Request, string State);
 internal sealed record SessionAskDisposition(Guid ActionId, SessionAskHandle Handle, string Status, string? RunId);
-internal sealed record SessionAskAction(Guid ActionId, SessionAskHandle Handle, IReadOnlyList<AltaAskAnswer> Answers);
+/// <summary>An answer or a cancel of the pending ask. <paramref name="FileReview"/> is for an ask with a file to review.</summary>
+internal sealed record SessionAskAction(Guid ActionId, SessionAskHandle Handle, IReadOnlyList<AltaAskAnswer> Answers, AltaAskFileReview? FileReview = null);
 internal sealed record SessionAsksRequest(string ExpectedHostEpoch, string SessionId);
 internal sealed record SessionAsksPage(string Status, string HostEpoch, string? SessionId, SessionAskHead? Head, SessionAskDisposition? Latest, bool HasMore);
 internal sealed record SessionAskActionRequest(string ExpectedHostEpoch, SessionAskAction Action);

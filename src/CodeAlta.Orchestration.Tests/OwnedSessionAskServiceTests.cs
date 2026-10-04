@@ -129,13 +129,93 @@ public sealed class OwnedSessionAskServiceTests
             Assert.AreEqual(queued.AskId, owner.List("session").Head!.Handle.AskId);
             Assert.IsNull(owner.QueueFromSession("session", request), "One ask per send.");
             Assert.IsFalse((await send.Tool.Handler(Invocation(), default)).Success, "The per-send tool shares that one ask.");
-            Assert.Throws<ArgumentException>(() => owner.QueueFromSession("session", request with { File = new() { Path = "plan.md" } }));
+            // A file to review is a plain relative path below the session's folder.
+            foreach (var path in new[] { "../plan.md", "/plan.md", "C:/plan.md", "a//b.md", "a/./b.md", " " })
+                Assert.Throws<ArgumentException>(() => owner.QueueFromSession("session", request with { File = new() { Path = path } }), path);
             Assert.Throws<ArgumentException>(() => owner.QueueFromSession("session", new AltaAskRequest()));
             Assert.AreEqual(0, adapter.GetPending("session").Count);
             Assert.IsNull(adapter.Peek("session"));
         }
         finally { send.Close(); owner.CloseAdmission(); await Join(owner); }
         Assert.IsNull(owner.QueueFromSession("session", request), "A closed owner admits nothing.");
+    }
+
+    [TestMethod]
+    public async Task SessionAsk_WithAFileToReview_IsAnsweredWithTheReview()
+    {
+        var receipt = new OwnedSessionCommandReceipt("answer", OwnedSessionCommandKind.Send, "session");
+        OwnedTextSendRequest? sent = null;
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var owner = new OwnedSessionAskService(true, (request, context) =>
+        {
+            sent = request;
+            context.RecordRunReturned(new("run-answer"));
+            entered.TrySetResult();
+            return new(OwnedSessionCommandAdmissionKind.Accepted, receipt);
+        });
+        var send = owner.CreateExecution(Guid.NewGuid(), "session", default);
+        send.Bind(Guid.NewGuid(), 1, new("fixture"));
+        await send.StartedAsync(new("run"), default);
+        Task? answer = null;
+        try
+        {
+            // What a planning run ends with: the plan to review and a question about it.
+            var request = new AltaAskRequest
+            {
+                File = new() { Path = ".alta\\plans\\plan.md" },
+                Questions = [new() { Title = "Plan", Question = "Proceed?", Choices = [new() { Title = "Approve" }, new() { Title = "Revise" }], Freeform = new() }],
+            };
+            Assert.IsNotNull(owner.QueueFromSession("session", request));
+            var head = owner.List("session").Head!;
+            Assert.AreEqual(".alta/plans/plan.md", head.Request.File!.Path);
+
+            AltaAskAnswer[] answers = [new() { QuestionIndex = 0, SelectedChoiceIndexes = [1] }];
+            // A review is refused when a comment is blank, has no line, or there are too many.
+            foreach (var comments in new AltaAskFileComment[][]
+            {
+                [new() { Line = 0, Text = "x" }], [new() { Line = 3, Text = "  " }],
+                [.. Enumerable.Range(1, 201).Select(static line => new AltaAskFileComment { Line = line, Text = "x" })],
+            })
+                await Assert.ThrowsExactlyAsync<ArgumentException>(() => owner.AnswerAsync(
+                    new(Guid.NewGuid(), head.Handle, answers, new() { Comments = comments }), default));
+            await Assert.ThrowsExactlyAsync<ArgumentException>(() => owner.CancelAsync(new(Guid.NewGuid(), head.Handle, [], new()), default));
+
+            var review = new AltaAskFileReview
+            {
+                FileModifiedAndSaved = true,
+                Comments = [new() { Line = 12, Text = "Split this step." }, new() { Line = 4, Text = "Why not reuse the cache?" }],
+            };
+            var pending = owner.AnswerAsync(new(Guid.NewGuid(), head.Handle, answers, review), default);
+            answer = pending;
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            receipt.Complete(new(OwnedSessionCommandOutcome.Completed, new AgentRunId("run-answer")));
+            Assert.AreEqual("admitted", (await pending.WaitAsync(TimeSpan.FromSeconds(5))).Status);
+
+            // The prompt the agent receives names the file, then the review in line order, then the answers.
+            var text = sent!.Text.ReplaceLineEndings("\n");
+            StringAssert.StartsWith(text, "# Ask response\n\nFile: `.alta/plans/plan.md`\n\n## File User Comments\n\n"
+                + "The file has been modified by the user and saved on disk.\n\nLine 4:\nWhy not reuse the cache?\n\nLine 12:\nSplit this step.\n\n## Answers\n");
+            StringAssert.Contains(text, "Revise");
+        }
+        finally
+        {
+            receipt.Complete(new(OwnedSessionCommandOutcome.Cancelled));
+            send.Close(); owner.CloseAdmission(); await Join(owner, answer ?? Task.CompletedTask);
+        }
+    }
+
+    [TestMethod]
+    public async Task FileReview_OfAnAskWithoutAFile_IsRefused()
+    {
+        var owner = new OwnedSessionAskService(true, static (_, _) => throw new AssertFailedException("No send expected."));
+        var execution = await Produce(owner);
+        try
+        {
+            var handle = owner.List("session").Head!.Handle;
+            await Assert.ThrowsExactlyAsync<ArgumentException>(() => owner.AnswerAsync(new(Guid.NewGuid(), handle,
+                [new() { QuestionIndex = 0, FreeformText = "answer" }], new() { Comments = [new() { Line = 1, Text = "x" }] }), default));
+        }
+        finally { execution.Close(); owner.CloseAdmission(); await Join(owner); }
     }
 
     [TestMethod]

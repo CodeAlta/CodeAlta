@@ -1,12 +1,19 @@
 export type AskHandle = Readonly<{ operationId: string; runtimeInstanceId: string; attachmentGeneration: string;
   providerId: string; sessionId: string; runId: string; askId: string; responseGeneration: string }>;
 export type AskAnswer = Readonly<{ questionIndex: number; selectedChoiceIndexes: readonly number[]; freeformText: string | null }>;
-export type AskActionRequest = Readonly<{ expectedHostEpoch: string; action: Readonly<{ actionId: string; handle: AskHandle; answers: readonly AskAnswer[] }> }>;
+/** A comment on one line (1-based) of the file an ask attaches for review. */
+export type AskFileComment = Readonly<{ line: number; text: string }>;
+/** What the user did with the file of an ask: the line comments, and whether the file was edited and saved. */
+export type AskFileReview = Readonly<{ fileModifiedAndSaved: boolean; comments: readonly AskFileComment[] }>;
+export type AskActionRequest = Readonly<{ expectedHostEpoch: string; action: Readonly<{ actionId: string; handle: AskHandle; answers: readonly AskAnswer[];
+  fileReview: AskFileReview | null }> }>;
 export type AskDisposition = Readonly<{ actionId: string; handle: AskHandle; status: string; runId: string | null }>;
 export type AskQuestion = Readonly<{ title: string; question: string; description: string | null;
   choices: readonly Readonly<{ title: string; description: string | null }>[];
   freeform: Readonly<{ title: string | null; placeholder: string | null }> | null }>;
-export type AskPage = Readonly<{ head: Readonly<{ handle: AskHandle; request: Readonly<{ questions: readonly AskQuestion[] }>; state: string }> | null;
+/** The file an ask attaches for review: a path relative to the session's folder, with forward slashes. */
+export type AskFile = Readonly<{ path: string }>;
+export type AskPage = Readonly<{ head: Readonly<{ handle: AskHandle; request: Readonly<{ file: AskFile | null; questions: readonly AskQuestion[] }>; state: string }> | null;
   latest: AskDisposition | null; hasMore: boolean }>;
 type Rpc = (request: AskActionRequest) => Promise<unknown>;
 type Observation = { waiter?: Promise<unknown>; work?: Promise<void>; finished: boolean };
@@ -68,9 +75,26 @@ function disposition(value: unknown): AskDisposition | null {
   return Object.freeze({ actionId: value.actionId, handle: Object.freeze(askWireHandle(value.handle)), status: value.status, runId: value.runId as string | null });
 }
 
+export const maximumFileComments = 200, maximumFileCommentLength = 4000, maximumFileCommentsLength = 16384;
+
+/** Copies a file review within the host's limits: at most 200 nonblank comments, in line order. */
+export function captureFileReview(review: { fileModifiedAndSaved: boolean; comments: readonly { line: number; text: string }[] }): AskFileReview {
+  if (typeof review.fileModifiedAndSaved !== "boolean" || review.comments.length > maximumFileComments) throw new Error("Invalid file review");
+  let budget = maximumFileCommentsLength;
+  const comments = review.comments.map(comment => {
+    if (!Number.isInteger(comment.line) || comment.line < 1 || comment.line > 1_000_000 || !text(comment.text, maximumFileCommentLength)
+      || !dotNetTrim(comment.text) || (budget -= comment.text.length) < 0) throw new Error("Invalid file comment");
+    return Object.freeze({ line: comment.line, text: comment.text });
+  });
+  // Array.prototype.sort is stable: comments on one line keep the order they were written in.
+  return Object.freeze({ fileModifiedAndSaved: review.fileModifiedAndSaved, comments: Object.freeze(comments.sort((a, b) => a.line - b.line)) });
+}
+
 export function captureAskAction(epoch: string, handle: AskHandle,
-  answers: readonly { questionIndex: number; selectedChoiceIndexes?: readonly number[]; freeformText?: string | null }[], actionId: string): AskActionRequest {
+  answers: readonly { questionIndex: number; selectedChoiceIndexes?: readonly number[]; freeformText?: string | null }[], actionId: string,
+  fileReview: { fileModifiedAndSaved: boolean; comments: readonly { line: number; text: string }[] } | null = null): AskActionRequest {
   if (!guid(epoch) || !guid(actionId) || !validAskHandle(handle) || answers.length > 12) throw new Error("Invalid ask action");
+  const review = fileReview ? captureFileReview(fileReview) : null;
   let budget = 8192;
   const seen = new Set<number>();
   const copied = answers.map(answer => {
@@ -83,13 +107,24 @@ export function captureAskAction(epoch: string, handle: AskHandle,
     if (freeformText !== null && (!text(freeformText, 8192) || (budget -= freeformText.length) < 0)) throw new Error("Answer too large");
     return Object.freeze({ questionIndex: answer.questionIndex, selectedChoiceIndexes: Object.freeze([...choices]), freeformText });
   });
-  return Object.freeze({ expectedHostEpoch: epoch, action: Object.freeze({ actionId, handle: Object.freeze(askWireHandle(handle)), answers: Object.freeze(copied) }) });
+  return Object.freeze({ expectedHostEpoch: epoch, action: Object.freeze({ actionId, handle: Object.freeze(askWireHandle(handle)), answers: Object.freeze(copied),
+    fileReview: review }) });
 }
 
 // Mutable wire copy only at the generated-client boundary; the retained original is never replaced.
 export function askWireRequest(request: AskActionRequest) {
   return { expectedHostEpoch: request.expectedHostEpoch, action: { actionId: request.action.actionId, handle: askWireHandle(request.action.handle),
-    answers: request.action.answers.map(a => ({ questionIndex: a.questionIndex, freeformText: a.freeformText, selectedChoiceIndexes: [...a.selectedChoiceIndexes] })) } };
+    answers: request.action.answers.map(a => ({ questionIndex: a.questionIndex, freeformText: a.freeformText, selectedChoiceIndexes: [...a.selectedChoiceIndexes] })),
+    fileReview: request.action.fileReview ? { fileModifiedAndSaved: request.action.fileReview.fileModifiedAndSaved,
+      comments: request.action.fileReview.comments.map(comment => ({ line: comment.line, text: comment.text })) } : null } };
+}
+
+// The host sends a relative path of plain segments; anything else is not a file this page reads.
+function askFile(value: unknown): AskFile | null {
+  if (value == null) return null;
+  if (!object(value) || !text(value.path, 1000) || !value.path || /[\u0000-\u001f\u007f:\\]/u.test(value.path)
+    || value.path.split("/").some(part => !part || part === "." || part === "..")) throw new Error("Invalid ask file");
+  return Object.freeze({ path: value.path });
 }
 
 export function parseAskPage(value: unknown, epoch: string, session: string): AskPage {
@@ -98,7 +133,8 @@ export function parseAskPage(value: unknown, epoch: string, session: string): As
   if (value.head !== null) {
     const h = value.head;
     if (!object(h) || !validAskHandle(h.handle) || h.handle.sessionId !== session || !["pending", "submitting", "indeterminate"].includes(h.state as string)
-      || !object(h.request) || h.request.file != null || !Array.isArray(h.request.questions) || h.request.questions.length < 1 || h.request.questions.length > 12) throw new Error("Invalid pending ask");
+      || !object(h.request) || !Array.isArray(h.request.questions) || h.request.questions.length < 1 || h.request.questions.length > 12) throw new Error("Invalid pending ask");
+    const file = askFile(h.request.file);
     let budget = 8192;
     const field = (v: unknown, max: number, required = false): string | null => {
       if (v === null && !required) return null;
@@ -121,7 +157,7 @@ export function parseAskPage(value: unknown, epoch: string, session: string): As
       if (!choices.length && !freeform) throw new Error("No answer route");
       return Object.freeze({ title, question, description, choices: Object.freeze(choices), freeform });
     });
-    head = Object.freeze({ handle: Object.freeze(askWireHandle(h.handle)), request: Object.freeze({ questions: Object.freeze(questions) }), state: h.state as string });
+    head = Object.freeze({ handle: Object.freeze(askWireHandle(h.handle)), request: Object.freeze({ file, questions: Object.freeze(questions) }), state: h.state as string });
   }
   const latest = value.latest === null ? null : disposition(value.latest);
   if (value.latest !== null && (!latest || latest.handle.sessionId !== session)) throw new Error("Invalid disposition");
