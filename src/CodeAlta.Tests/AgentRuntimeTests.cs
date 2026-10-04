@@ -110,6 +110,28 @@ public sealed class AgentRuntimeTests
     }
 
     [TestMethod]
+    public void AgentRuntime_WithoutAStateRoot_IsRefusedInsteadOfUsingTheUserProfile()
+    {
+        var registration = new AgentRuntimeProviderRegistration
+        {
+            Provider = new ModelProviderRuntimeDescriptor
+            {
+                ProtocolFamily = "openai-responses",
+                ProviderKey = "openai",
+                DisplayName = "OpenAI",
+                TransportKind = AgentTransportKind.OpenAIResponses,
+            },
+            TurnExecutor = new RecordingTurnExecutor(),
+        };
+
+        foreach (var root in new[] { null, "", "  " })
+        {
+            Assert.ThrowsExactly<ArgumentException>(() => new AgentRuntime(
+                ModelProviderIds.OpenAIResponses, "OpenAI", new AgentRuntimeOptions { StateRootPath = root, Providers = [registration] }));
+        }
+    }
+
+    [TestMethod]
     public async Task AgentRuntime_CreateSession_RecordsTheCreationTimeItIsGiven()
     {
         using var temp = TestTempDirectory.Create();

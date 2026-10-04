@@ -24,6 +24,7 @@ public sealed class AgentRuntime : IAsyncDisposable
     /// <param name="providerId">The provider identifier persisted in legacy backend-id fields.</param>
     /// <param name="displayName">The user-facing runtime name.</param>
     /// <param name="options">Runtime options.</param>
+    /// <exception cref="ArgumentException">The display name is empty, no provider is registered, or the options name no state root path.</exception>
     public AgentRuntime(
         ModelProviderId providerId,
         string displayName,
@@ -39,12 +40,13 @@ public sealed class AgentRuntime : IAsyncDisposable
         ProviderId = new ModelProviderId(providerId.Value);
         DisplayName = displayName.Trim();
         _options = options;
-        var stateRootPath = string.IsNullOrWhiteSpace(options.StateRootPath)
-            ? Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".alta")
-            : options.StateRootPath;
-        _layout = new AgentRuntimePathLayout(stateRootPath);
+        // No default: a caller that forgets the root must not write session journals into the user's profile.
+        if (string.IsNullOrWhiteSpace(options.StateRootPath))
+        {
+            throw new ArgumentException("The agent runtime requires a state root path.", nameof(options));
+        }
+
+        _layout = new AgentRuntimePathLayout(options.StateRootPath);
         _providersByKey = options.Providers.ToDictionary(
             static provider => provider.Provider.ProviderKey,
             StringComparer.OrdinalIgnoreCase);

@@ -6,8 +6,9 @@ namespace CodeAlta.Agent.Runtime;
 public sealed class AgentRuntimeOptions
 {
     /// <summary>
-    /// Gets or initializes the agent runtime storage root path.
-    /// Defaults to <c>~/.alta</c>, with session journals stored under <c>~/.alta/sessions</c>.
+    /// Gets or initializes the agent runtime storage root path; session journals are stored under its
+    /// <c>sessions</c> directory. Required: the runtime has no default location, so the host decides
+    /// where sessions are written (normally the state root of its CodeAlta profile).
     /// </summary>
     public string? StateRootPath { get; init; }
 

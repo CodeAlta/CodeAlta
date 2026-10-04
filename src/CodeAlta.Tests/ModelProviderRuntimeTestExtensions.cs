@@ -5,6 +5,11 @@ namespace CodeAlta.Tests;
 
 internal static class ModelProviderRuntimeTestExtensions
 {
+    // Sessions of tests that name no working directory are written under the test output, one folder per
+    // test process. They never reach the user's profile, and a session created without a working
+    // directory can be resumed without one.
+    private static readonly string DefaultStateRoot = Path.Combine(AppContext.BaseDirectory, "test-state", Guid.NewGuid().ToString("N"));
+
     public static void RegisterOrReplaceSessionRuntime(
         this ModelProviderRegistry registry,
         ModelProviderDescriptor descriptor,
@@ -26,7 +31,7 @@ internal static class ModelProviderRuntimeTestExtensions
         AgentSessionCreateOptions options,
         CancellationToken cancellationToken = default)
     {
-        var sessionRuntime = CreateSessionRuntime(runtime, options.WorkingDirectory);
+        var sessionRuntime = CreateSessionRuntime(runtime, string.IsNullOrWhiteSpace(options.WorkingDirectory) ? DefaultStateRoot : options.WorkingDirectory);
         await TryPrimeModelCacheAsync(sessionRuntime, cancellationToken).ConfigureAwait(false);
         return await sessionRuntime.CreateSessionAsync(options, cancellationToken).ConfigureAwait(false);
     }
@@ -40,7 +45,7 @@ internal static class ModelProviderRuntimeTestExtensions
         var stateRootPath = options.WorkingDirectory;
         if (string.IsNullOrWhiteSpace(stateRootPath))
         {
-            stateRootPath = FindStateRootForSession(sessionId);
+            stateRootPath = FindStateRootForSession(sessionId) ?? DefaultStateRoot;
         }
 
         var sessionRuntime = CreateSessionRuntime(runtime, stateRootPath);
@@ -48,7 +53,7 @@ internal static class ModelProviderRuntimeTestExtensions
         return await sessionRuntime.ResumeSessionAsync(sessionId, options, cancellationToken).ConfigureAwait(false);
     }
 
-    private static AgentRuntime CreateSessionRuntime(IAgentModelProviderRuntime runtime, string? stateRootPath)
+    private static AgentRuntime CreateSessionRuntime(IAgentModelProviderRuntime runtime, string stateRootPath)
         => new(
             runtime.Descriptor.ProviderId,
             runtime.Descriptor.DisplayName,
