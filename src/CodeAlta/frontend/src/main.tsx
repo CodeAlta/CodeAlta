@@ -71,7 +71,7 @@ import { composerSizeKey, rememberComposerHeight } from "./composerHeight";
 import { ComposerSplitter, useComposerLayout } from "./ComposerLayout";
 import { NewSessionWorkspace } from "./NewSessionWorkspace";
 import { useNewSessionChoices } from "./newSessionChoices";
-import { ComposerSelectionFields, ReasoningSlider } from "./ComposerSurface";
+import { ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
 import { validSelection } from "./sessionSelection";
 import { AppIcon, type IconName } from "./AppIcon";
 import { AppWindow } from "./AppWindow";
@@ -1158,9 +1158,11 @@ function App() {
       && provider.id.length > 0 && provider.id.length <= 256 && provider.id === provider.id.trim()
       && !/[\u0000-\u001f\u007f-\u009f\ud800-\udfff]/u.test(provider.id)
       && inventory.providers.filter(other => other.id === provider.id).length === 1) : [];
-    const select = <HTMLSelect fill value={creatingProvider} aria-label={t("Provider for new session")} disabled={creatingBusy || creationLocked || !owned} onChange={event => setCreatingProvider(event.target.value)}>
-      <option value="">{t("Default or first enabled provider")}</option>
-      {creatingProvider && !providers.some(provider => provider.id === creatingProvider) && <option value={creatingProvider} disabled>{creatingProvider}</option>}
+    // The provider in use is named even before the user picks one: the default provider, else the first enabled one.
+    const usedProvider = creatingProvider || draftChoices.value.providerKey;
+    const select = <HTMLSelect fill value={usedProvider} aria-label={t("Provider for new session")} disabled={creatingBusy || creationLocked || !owned} onChange={event => setCreatingProvider(event.target.value)}>
+      {!usedProvider && <option value="">{t("No provider")}</option>}
+      {usedProvider && !providers.some(provider => provider.id === usedProvider) && <option value={usedProvider} disabled>{usedProvider}</option>}
       {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.id}</option>)}
     </HTMLSelect>;
     if (compact) {
@@ -1172,9 +1174,9 @@ function App() {
       };
       return <ComposerSelectionFields sessionId="new" onOpenCatalog={navigate}
         summary={{ agent: draftChoices.prompts.find(prompt => prompt.id === value.agentPromptId)?.name ?? t(draftChoices.loadingPrompts ? "Loading…" : "Host default"),
-          provider: creatingProvider || t("Default"),
+          provider: usedProvider || t("No provider"),
           model: value.modelId ? draftChoices.models.find(model => model.id === value.modelId)?.name ?? value.modelId : t(draftChoices.loadingModels ? "Loading…" : "Provider default"),
-          reasoning: value.reasoningEffort ?? t("Default") }}
+          reasoning: value.reasoningEffort ?? t(draftChoices.loadingModels ? "Loading…" : "Model default") }}
         agent={<HTMLSelect fill id="composer-agent-new" aria-label={t("Agent prompt")} value={value.agentPromptId}
           disabled={locked || draftChoices.loadingPrompts || !draftChoices.prompts.length} onChange={event => change("agentPromptId", event.target.value)}>
           {!draftChoices.prompts.some(prompt => prompt.id === value.agentPromptId) && <option value={value.agentPromptId}>{t(draftChoices.loadingPrompts ? "Loading…" : "Host default")}</option>}
@@ -1182,7 +1184,7 @@ function App() {
         </HTMLSelect>} provider={select}
         model={<HTMLSelect fill id="composer-model-new" data-model-selector aria-label={t("Model")} value={value.modelId ?? ""}
           disabled={locked || draftChoices.loadingModels} onChange={event => change("modelId", event.target.value)}>
-          <option value="">{t(draftChoices.loadingModels ? "Loading…" : "Provider default")}</option>
+          {!value.modelId && <option value="">{t(draftChoices.loadingModels ? "Loading…" : "Provider default")}</option>}
           {value.modelId && !draftChoices.models.some(model => model.id === value.modelId) && <option value={value.modelId}>{value.modelId} · {t("Unverified")}</option>}
           {draftChoices.models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
         </HTMLSelect>}
@@ -1680,12 +1682,17 @@ function App() {
                   reason={t("Draft kept locally. Start a session to send it.")}
                   localDraft={{ text: localDraft.text, edit: editLocalDraft, options: creationProviderChoice(true),
                     notice: draftChoices.failed && <p role="status" className="composer-notice">{t("Some draft choices are unavailable. Refresh choices to try again.")}</p>,
-                    disabled: newPromptDisabled, busy: creatingBusy, submit: () => void createSelectedSession(true), action: <>
+                    disabled: newPromptDisabled, busy: creatingBusy, submit: () => void createSelectedSession(true),
+                    surface: owned && status?.hostEpoch ? { epoch: status.hostEpoch, onOpenProviders: () => navigate("providers"),
+                      contextTokens: draftChoices.models.find(model => model.id === draftChoices.value.modelId)?.contextTokens ?? null } : undefined,
+                    action: <>
                       {draftChoices.failed && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />} disabled={creatingBusy || creationLocked}
                         aria-label={t("Refresh composer choices")} title={t("Refresh composer choices")} onClick={draftChoices.refresh} />}
-                     <Button intent="primary" icon={<AppIcon name="send" size={16} />} disabled={newPromptDisabled}
-                       aria-label={t("Start session")} title={t("Start the session and send (Enter)")}
-                       onClick={() => void createSelectedSession(true)} />
+                     <SendSplitButton enqueue={false} onEnqueueChange={() => { /* A session that has not started has nothing to wait for. */ }} enqueueDisabled optionsDisabled={newPromptDisabled}>
+                       <Button intent="primary" icon={<AppIcon name="send" size={16} />} disabled={newPromptDisabled}
+                         aria-label={t("Start session")} title={t("Start the session and send (Enter)")}
+                         onClick={() => void createSelectedSession(true)} />
+                     </SendSplitButton>
                      {creatingBusy && <Button variant="minimal" icon={<AppIcon name="stop" size={16} />} aria-label={t("Cancel transfer")}
                        onClick={() => { invalidateCreation(); setDraftHandoffNotice("Transfer canceled locally. Creation may still complete; original text retained. Inspect sessions; nothing sent."); }} />}
                   </> }} />

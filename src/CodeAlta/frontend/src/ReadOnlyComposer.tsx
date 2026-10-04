@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type ClipboardEvent } from "react";
 import { Button } from "@blueprintjs/core";
+import { ActiveProviderStatus } from "./ActiveProviderStatus";
 import { ActivitySpinner } from "./ActivitySpinner";
+import { compactTokens } from "./contextUsage";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import type { PromptInput } from "./PromptEditor";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
@@ -11,6 +13,18 @@ import { ProjectReferencePicker } from "./ProjectReferencePicker";
 import { GitHubIssuePicker } from "./GitHubIssuePicker";
 import { useShellLanguage } from "./shellLanguage";
 
+// The context meter of a session that has not started: nothing used yet out of the selected model's window.
+function DraftUsage({ contextTokens }: { contextTokens: number | null }) {
+  const { t } = useShellLanguage();
+  const summary = contextTokens && contextTokens > 0 ? `0 / ${compactTokens(String(contextTokens))}` : "0";
+  const label = t("Context usage: {summary}", { summary: `0% · ${summary}` });
+  return <Button variant="minimal" className="context-usage" data-intent="none" disabled aria-label={label} title={label}>
+    <span className="context-usage-meter" aria-hidden="true"><span style={{ width: "0%" }} /></span>
+    <span className="context-usage-text">0%</span>
+    <span className="context-usage-tokens">{summary}</span>
+  </Button>;
+}
+
 export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason, infoControl, onOpenHelp, onOpenPalette, localDraft, localImages, active = true }: {
   active?: boolean;
   sessionId: string; provider: string | null;
@@ -18,7 +32,9 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
   infoControl?: ReactNode;
   onOpenHelp?: () => void; onOpenPalette?: () => void;
   localDraft?: { text: string; edit: (text: string) => void; action: ReactNode; options?: ReactNode; notice?: ReactNode;
-    submit: () => void; disabled: boolean; busy: boolean };
+    submit: () => void; disabled: boolean; busy: boolean;
+    /** What the prompt bar of a session that does not exist yet shows in place of a session's own facts. */
+    surface?: { epoch: string; onOpenProviders: () => void; contextTokens: number | null } };
   localImages?: { paste: (event: ClipboardEvent<HTMLElement>) => void; attachments: ReactNode; invalidate: () => void };
 }) {
   const { t } = useShellLanguage();
@@ -64,9 +80,15 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
       }, placeholder: t("Ask CodeAlta to work on this project…") }}>
         {localDraft && !expanded && <ProjectReferencePicker text={text} edit={edit} input={promptInput} />}
         {localDraft && !expanded && <GitHubIssuePicker edit={edit} input={promptInput} />}
+        {localDraft?.surface && <ActiveProviderStatus epoch={localDraft.surface.epoch} onOpen={localDraft.surface.onOpenProviders} />}
         <details className="composer-draft-info"><summary aria-label={t("Draft information")} title={t("Draft information")}><AppIcon name="info" size={16} /></summary><p id={`catalog-draft-status-${sessionId}`} role="status">{reason ?? t("Sending requires the desktop app.")}</p></details>
         {infoControl}
+        {localDraft?.surface && <DraftUsage contextTokens={localDraft.surface.contextTokens} />}
+        {localDraft?.surface && <Button variant="minimal" icon={<AppIcon name="reminder" size={16} />} data-reminder-count="" disabled
+          aria-label={t("Reminders: {count} active", { count: 0 })} title={t("Reminders: {count} active", { count: 0 })}><span className="reminder-count" aria-hidden="true">0</span></Button>}
         <Button id={active ? "expand-session-prompt" : `expand-session-prompt-${sessionId}`} variant="minimal" icon={<AppIcon name="expand" size={16} />} aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => setExpanded(true)} />
+        {localDraft?.surface && <Button variant="minimal" icon={<AppIcon name="compact" size={16} />} disabled
+          aria-label={t("Compact the conversation (Ctrl+F11)")} title={t("Compact the conversation (Ctrl+F11)")} />}
         {localDraft?.action ?? <Button className="send-button" intent="primary" icon={<AppIcon name="send" size={16} />} disabled aria-label={t("Send unavailable")} aria-describedby={`catalog-draft-status-${sessionId}`} />}
   </ComposerSurface></>;
 }

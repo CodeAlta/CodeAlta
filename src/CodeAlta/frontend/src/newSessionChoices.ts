@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { modelCatalog, workspace, type ConfigurationSnapshot, type ModelCatalogModel, type SessionPromptChoice, type SessionSelection } from "#neoastra";
+import { defaultModelId, defaultReasoningEffort } from "./newSessionDefaults";
 import type { createMutationCapability } from "./sessionOperations";
 
 // Catalogs only. Draft choices are preferences, never send or provider-switch authority.
@@ -39,7 +40,12 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
       }).catch(() => { if (!controller.signal.aborted) setModels({ key, rows: [], loading: false, failed: true }); });
     return () => controller.abort();
   }, [epoch, provider, key, enabled, capability, revision]);
-  const value = preference?.key === key ? preference.value : { providerKey: provider, agentPromptId: "default", modelId: null, reasoningEffort: null };
+  // Until the user chooses, the draft names what the terminal would pick: the provider's model and its effort.
+  const configured = providers.find(candidate => candidate.id === provider);
+  const offered = models?.key === key ? models.rows : [];
+  const startModel = defaultModelId(offered, configured?.defaultModel);
+  const value = preference?.key === key ? preference.value : { providerKey: provider, agentPromptId: "default", modelId: startModel,
+    reasoningEffort: defaultReasoningEffort(offered.find(model => model.id === startModel), configured?.defaultReasoning) };
   const ready = !!provider && prompts?.key === key && prompts.rows.some(prompt => prompt.id === value.agentPromptId)
     && (value.modelId === null ? value.reasoningEffort === null : models?.key === key && models.rows.some(model => model.id === value.modelId
       && (value.reasoningEffort === null || model.efforts.includes(value.reasoningEffort))));
@@ -50,7 +56,8 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
     loadingModels: enabled && !!provider && (!models || models.key !== key || models.loading),
     failed: prompts?.key === key && prompts.failed || models?.key === key && models.failed,
     change(field: "agentPromptId" | "modelId" | "reasoningEffort", next: string) {
-      setPreference({ key, value: { ...value, [field]: next || null, ...(field === "modelId" ? { reasoningEffort: null } : {}) } });
+      setPreference({ key, value: { ...value, [field]: next || null,
+        ...(field === "modelId" ? { reasoningEffort: defaultReasoningEffort(offered.find(model => model.id === next), configured?.defaultReasoning) } : {}) } });
     },
     refresh: () => setRevision(previous => previous + 1),
   };

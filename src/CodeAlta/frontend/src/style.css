@@ -1294,7 +1294,7 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body {
 .ide-shell .project-rail button:not(.bp6-button):focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .ide-shell .project-action-row, .ide-shell .session-row { border-radius: 4px; }
 .ide-shell .project-action-row:hover, .ide-shell .session-row:hover { background: var(--panel-2); }
-.ide-shell .project-action-row:has(> button[aria-pressed="true"]), .ide-shell .session-row:has(> button[aria-pressed="true"]) { background: var(--accent-soft); }
+.ide-shell .project-action-row:has(> button[aria-pressed="true"]), .ide-shell .session-row:has(> button[aria-pressed="true"]) { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .ide-shell .project-action-row > button:first-child, .ide-shell .session-row > button:first-child { border-color: transparent; background: transparent; }
 .ide-shell .project-action-row:has(> button:first-child:focus-visible), .ide-shell .session-row:has(> button:first-child:focus-visible) { outline: 1px solid var(--accent); outline-offset: -1px; }
 .ide-shell .project-rail .project-action-row > button:first-child:focus-visible, .ide-shell .project-rail .session-row > button:first-child:focus-visible { outline: 0; }
@@ -1405,3 +1405,6 @@ dialog.session-browser .session-batch-delete summary { cursor: pointer; color: v
 .provider-account-copy { display: flex; align-items: center; gap: 6px; min-width: 0; margin-bottom: 6px; }
 .provider-account-copy > code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .provider-account-code > code { padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 18px; font-weight: 700; letter-spacing: .12em; background: var(--panel); }
+
+/* Blueprint outlines every focused element; only keyboard focus shows a ring, a mouse click does not. */
+:focus:not(:focus-visible) { outline: none; }
