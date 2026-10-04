@@ -15,7 +15,7 @@ test("temporary project tab, composer resizing, pointer splits and session-local
   let socket: WebSocket | undefined;
   try {
     await build({ entryPoints: [fileURLToPath(new URL("./main.tsx", import.meta.url))], outfile: join(root, "fixture.js"),
-      bundle: true, platform: "browser", format: "iife", loader: { ".css": "empty", ".flf": "text" },
+      bundle: true, platform: "browser", format: "iife", loader: { ".css": "empty", ".flf": "text", ".svg": "dataurl" },
       define: { "import.meta.env.VITE_DEMO_MODE": '"false"' }, plugins: [{ name: "isolated-dock", setup(bundle) {
         bundle.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("./settingsShell.neoastra.mount.ts", import.meta.url)) }));
         // esbuild has no Vite ?worker transform. Bundle the real editor worker into

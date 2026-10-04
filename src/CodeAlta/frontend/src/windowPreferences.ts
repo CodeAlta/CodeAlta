@@ -1,10 +1,39 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PreferenceIssue } from "./localization";
 import { readRecentSessionCount, recentSessionCountKey, validRecentSessionCount } from "./recentSessions";
 import { persistProjectSort, projectSortStorageKey, type ProjectSort } from "./projectRail";
 import { persistProjectRailCollapsed, projectRailVisibilityKey, resetNarrowRail, toggleProjectRail, type ProjectRailState } from "./projectRailVisibility";
 
-export type Theme = "dark" | "light";
+/** The theme the user picked; "system" follows the operating system. */
+export type Theme = "dark" | "light" | "system";
+/** The theme actually shown. */
+export type EffectiveTheme = "dark" | "light";
+export const themes: readonly Theme[] = ["dark", "light", "system"];
+
+/** The theme after the one given, in the order the title-bar switch cycles through. */
+export function nextTheme(theme: Theme): Theme { return themes[(themes.indexOf(theme) + 1) % themes.length]; }
+
+/** The name of a theme choice, as a translation key. */
+export function themeLabel(theme: Theme): "Dark" | "Light" | "System" { return theme === "dark" ? "Dark" : theme === "light" ? "Light" : "System"; }
+
+/** Resolves a theme choice against what the operating system prefers. */
+export function effectiveTheme(theme: Theme, systemDark: boolean): EffectiveTheme {
+  return theme === "system" ? systemDark ? "dark" : "light" : theme;
+}
+
+const systemDarkQuery = "(prefers-color-scheme: dark)";
+function useSystemDark(): boolean {
+  const [dark, setDark] = useState(() => typeof matchMedia !== "function" || matchMedia(systemDarkQuery).matches);
+  useEffect(() => {
+    if (typeof matchMedia !== "function") return;
+    const media = matchMedia(systemDarkQuery);
+    const change = () => setDark(media.matches);
+    change();
+    media.addEventListener("change", change);
+    return () => media.removeEventListener("change", change);
+  }, []);
+  return dark;
+}
 export const themeStorageKey = "codealta.desktop.theme.v1";
 type Preference = "theme" | "sort" | "rail" | "recent";
 export type PreferenceNotices = Partial<Record<Preference, PreferenceIssue>>;
@@ -22,7 +51,7 @@ function readPreference<T extends string>(key: string, valid: readonly T[], fall
 
 export function useWindowPreferences() {
   const [initial] = useState(() => ({
-    theme: readPreference(themeStorageKey, ["dark", "light"], "dark"),
+    theme: readPreference(themeStorageKey, themes, "dark"),
     recent: readRecentSessionCount(() => localStorage.getItem(recentSessionCountKey)),
     sort: readPreference(projectSortStorageKey, ["name", "recent"], "name"),
     rail: readPreference(projectRailVisibilityKey, ["expanded", "collapsed"], "expanded"),
@@ -62,5 +91,6 @@ export function useWindowPreferences() {
   function toggleRail(narrow: boolean) { changeRail(toggleProjectRail(railCurrent.current, narrow), !narrow); }
   function closeNarrowRail() { changeRail(resetNarrowRail(railCurrent.current), false); }
 
-  return { theme, setTheme, projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices, recentSessionCount, setRecentSessionCount };
+  const shownTheme = effectiveTheme(theme, useSystemDark());
+  return { theme, shownTheme, setTheme, projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices, recentSessionCount, setRecentSessionCount };
 }

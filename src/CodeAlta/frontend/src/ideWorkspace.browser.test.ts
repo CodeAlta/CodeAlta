@@ -17,7 +17,7 @@ test("actual IDE workspace geometry and width changes retain the mounted compose
   let failureEvidence: (() => Promise<unknown>) | undefined;
   try {
     await build({ entryPoints: [fileURLToPath(new URL("./main.tsx", import.meta.url))], outfile: join(root, "fixture.js"),
-      bundle: true, platform: "browser", format: "iife", loader: { ".css": "empty", ".flf": "text" }, define: { "import.meta.env.VITE_DEMO_MODE": '"false"' },
+      bundle: true, platform: "browser", format: "iife", loader: { ".css": "empty", ".flf": "text", ".svg": "dataurl" }, define: { "import.meta.env.VITE_DEMO_MODE": '"false"' },
       plugins: [{ name: "isolated-ide", setup(bundle) {
         bundle.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("./settingsShell.neoastra.mount.ts", import.meta.url)) }));
         bundle.onLoad({ filter: /[/\\]timelineScroll\.ts$/ }, async args => ({ loader: "ts", contents: (await readFile(args.path, "utf8"))

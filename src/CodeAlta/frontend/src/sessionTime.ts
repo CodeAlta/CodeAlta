@@ -31,7 +31,7 @@ export function timelineTime(value: string | null | undefined, locale: Locale): 
   const result = { label: value, title: value, dateTime: date.toISOString() };
   try {
     if (Intl.DateTimeFormat.supportedLocalesOf(locale).length)
-      result.label = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date);
+      result.label = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "medium" }).format(date);
   } catch { /* Preserve the source if Intl or the selected locale is unavailable. */ }
   return result;
 }

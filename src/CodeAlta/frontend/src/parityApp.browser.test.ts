@@ -19,7 +19,7 @@ test("actual App mounts against an isolated bridge and records parity baselines"
       resolveDir: fileURLToPath(new URL("../", import.meta.url)) }, outfile: join(root, "blueprint-reference.css"), bundle: true });
     await build({ entryPoints: [fileURLToPath(new URL("./main.tsx", import.meta.url))], outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife",
       alias: { "#neoastra": fileURLToPath(new URL("./parityApp.bridge.ts", import.meta.url)) },
-      define: { "import.meta.env.VITE_DEMO_MODE": '"false"' }, metafile: true,
+      define: { "import.meta.env.VITE_DEMO_MODE": '"false"' }, metafile: true, loader: { ".svg": "dataurl" },
     }).then(result => {
       assert.ok(!Object.keys(result.metafile!.inputs).some(path => path.includes("obj/neoastra") || path.includes("@neoastra/client")), "No native bridge may enter the fixture bundle");
     });

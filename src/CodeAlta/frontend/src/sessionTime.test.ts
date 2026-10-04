@@ -47,7 +47,7 @@ test("absolute timeline labels use selected language and retain exact timestamp 
   const raw = "2026-09-22T14:00:00.1234567+02:00";
   for (const locale of locales) {
     assert.deepEqual(timelineTime(raw, locale), {
-      label: new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(raw)),
+      label: new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "medium" }).format(new Date(raw)),
       title: raw, dateTime: "2026-09-22T12:00:00.123Z",
     });
     for (const value of ["", "unknown"]) assert.deepEqual(timelineTime(value, locale), { label: value, title: value, dateTime: undefined });

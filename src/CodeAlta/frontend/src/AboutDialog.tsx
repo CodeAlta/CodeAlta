@@ -22,13 +22,13 @@ function aboutFacts(status: BootStatus | undefined, bootError: boolean, demo: bo
 }
 
 /** The About page of Settings: product, version and build of the running app. */
-export function AboutSettings({ status, bootError, demo }: { status: BootStatus | undefined; bootError: boolean; demo: boolean }) {
+export function AboutSettings({ status, bootError, demo, logo }: { status: BootStatus | undefined; bootError: boolean; demo: boolean; logo?: string }) {
   const { t } = useShellLanguage();
   const about = aboutFacts(status, bootError, demo);
   return <main className="configuration-page settings-editor about-settings" aria-label={t("About")}>
     <header className="page-heading"><span className="eyebrow">{t("Diagnostics")}</span><h1>{t("About")}</h1></header>
     <section className="about-settings-card">
-      <span className="about-settings-mark" aria-hidden="true">A</span>
+      {logo && <img className="about-settings-mark" src={logo} alt="" draggable={false} />}
       <div><strong>{about.product ?? "CodeAlta"}</strong><span>{about.version ?? t("Development build")}</span></div>
     </section>
     <dl className="about-settings-facts" aria-label={t("Running host build information")}>

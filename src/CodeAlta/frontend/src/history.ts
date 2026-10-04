@@ -40,8 +40,21 @@ export function historyCanRetry(state: HistoryState | undefined): boolean {
   return state?.kind === "error" && (state.code === "history_changed" || state.code === "read_failed");
 }
 
+const userPrompt = (entry: HistoryResponse["entries"][number]) => entry.kind?.toLowerCase() === "user"
+  && (entry.eventType === "contentCompleted" || entry.eventType === "contentDelta");
+// Offsets are canonical decimal strings: a longer one, or a greater one of equal length, is higher.
+const offsetAfter = (left: string, right: string) => left.length > right.length || left.length === right.length && left > right;
+
+/**
+ * Merges one reverse page into the window being read.
+ *
+ * `known` is the settled window a refresh of the newest history started from: the journal only grows, so as
+ * soon as the new pages reach a record that window already has, the window is kept and only the newer records
+ * are appended. `olderFrom` is the first record of the window when the reader asked for older history: that
+ * read continues page after page until it has brought in one more whole turn.
+ */
 export function mergeHistoryPage(previous: HistoryTimeline | undefined, request: HistoryRequest, page: TimelinePage,
-  explicitOlder = false, retainedStart?: string): HistoryTimeline {
+  explicitOlder = false, retainedStart?: string, options: { known?: HistoryTimeline; olderFrom?: string } = {}): HistoryTimeline {
   const current = previous?.next;
   const cursor = request.cursor;
   // A new tail read starts afresh; never combine a forward cursor, another session or another revision.
@@ -70,12 +83,44 @@ export function mergeHistoryPage(previous: HistoryTimeline | undefined, request:
   // Initial/latest navigation stops at the last user prompt, not an arbitrary
   // thousand-event window. The omitted prefix remains reachable by a byte cursor.
   let turnReached = false;
-  if (!explicitOlder) {
+  const known = !explicitOlder && options.known?.sessionId === request.sessionId && !options.known.newerOmitted
+    && options.known.entries.length > 0 ? options.known : undefined;
+  let sourcesBefore = retained?.sources ?? [];
+  if (known) {
+    const have = new Set(known.entries.map(entry => entry.offset));
+    if (entries.some(entry => have.has(entry.offset))) {
+      const last = known.entries[known.entries.length - 1].offset;
+      const appended = entries.filter(entry => offsetAfter(entry.offset, last));
+      entries.splice(0, entries.length, ...known.entries, ...appended);
+      // The older cursor keeps its position but must name the journal revision just read.
+      const boundary = page.next ?? request.cursor ?? (page.revision ? { version: 2, ...page.revision, offset: "0" } : null);
+      next = known.next === null ? null : boundary?.version === 2 ? { ...boundary, offset: known.next.offset } : known.next;
+      sourcesBefore = [...sourcesBefore, ...(known.sources ?? [])];
+      turnReached = true;
+    }
+  } else if (explicitOlder && options.olderFrom !== undefined) {
+    // An older read brings in whole turns: it stops at the newest user prompt above the previous window start.
+    const boundary = entries.findIndex(entry => entry.offset === options.olderFrom);
+    let lastUser = -1;
+    for (let index = (boundary < 0 ? entries.length : boundary) - 1; index >= 0; index--) {
+      if (userPrompt(entries[index])) { lastUser = index; break; }
+    }
+    if (lastUser >= 0) {
+      let start = lastUser;
+      while (start > 0 && entries[start - 1].contentId === entries[lastUser].contentId
+        && entries[start - 1].runId === entries[lastUser].runId && entries[start - 1].kind?.toLowerCase() === "user") start--;
+      const cursor = page.next ?? request.cursor;
+      if (start > 0 && cursor?.version === 2) {
+        next = { ...cursor, offset: entries[start].offset };
+        entries.splice(0, start);
+      }
+      turnReached = true;
+    }
+  } else if (!explicitOlder) {
     let lastUser = retainedStart === undefined ? -1 : entries.findIndex(entry => entry.offset === retainedStart);
     for (let index = entries.length - 1; index >= 0; index--) {
       if (retainedStart !== undefined) break;
-      const entry = entries[index];
-      if (entry.kind?.toLowerCase() === "user" && (entry.eventType === "contentCompleted" || entry.eventType === "contentDelta")) { lastUser = index; break; }
+      if (userPrompt(entries[index])) { lastUser = index; break; }
     }
     if (lastUser >= 0) {
       let start = lastUser;
@@ -106,9 +151,11 @@ export function mergeHistoryPage(previous: HistoryTimeline | undefined, request:
       if (boundary?.version === 2) next = { ...boundary, offset: entries[0].offset };
     }
   }
-  const pages = (retained?.pages ?? 0) + 1;
+  // Each read of older history gets its own page budget; the first page of one starts at the window's first record.
+  const pages = explicitOlder && options.olderFrom !== undefined && retained?.entries[0]?.offset === options.olderFrom ? 1 : (retained?.pages ?? 0) + 1;
   const visible = new Set(entries.map(entry => entry.offset));
-  const sources = [...(page.sources ?? []), ...(retained?.sources ?? [])].filter(source => visible.has(source.start));
+  const listed = new Set<string>();
+  const sources = [...(page.sources ?? []), ...sourcesBefore].filter(source => visible.has(source.start) && !listed.has(source.start) && !!listed.add(source.start));
   return {
     sessionId: request.sessionId,
     entries,

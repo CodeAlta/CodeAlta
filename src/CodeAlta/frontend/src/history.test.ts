@@ -266,3 +266,62 @@ test("reading position waits for final page or explicit error, never loading or 
   await loadHistory(async () => { throw new Error("private failure"); }, request, signal, state => states.push(state));
   assert.equal(historySettled(states.at(-1), undefined), true);
 });
+
+test("a refresh of the newest history keeps the loaded window and appends what is new", () => {
+  const row = (offset: number, kind = "Assistant") => ({ offset: `${offset}`, eventType: "contentCompleted", providerId: "p", sessionId: "runtime", runId: "r",
+    timestamp: "2026-01-01T00:00:00Z", kind, phase: null, contentId: `${offset}`, activityId: null, parentActivityId: null, interactionId: null, name: null,
+    text: `${offset}`, details: null, textTruncated: false, tool: null, files: null, detailsTruncated: false, bodyOmitted: false } satisfies HistoryResponse["entries"][number]);
+  const cursor = (length: number, offset: number) => ({ version: 2, sessionId: "s", length: `${length}`, lastWriteUtcTicks: `${length}`, offset: `${offset}` });
+  // Two turns are loaded (the older one on request); the journal then grows by one answer and a new turn.
+  const known: HistoryTimeline = { sessionId: "s", entries: [row(100, "User"), row(200), row(300, "User"), row(400)], next: cursor(500, 100),
+    tailOmitted: false, limitReached: false, newerOmitted: false, turnReached: true, pages: 2,
+    revision: { sessionId: "s", length: "500", lastWriteUtcTicks: "500" }, sources: [{ start: "100", end: "200" }] };
+  const tail = { ...page, entries: [row(400), row(500), row(600, "User"), row(700)], next: cursor(800, 400),
+    revision: { sessionId: "s", length: "800", lastWriteUtcTicks: "800" }, sources: [{ start: "700", end: "800" }] };
+  const refreshed = mergeHistoryPage(undefined, { sessionId: "s", cursor: null }, tail, false, "100", { known });
+  assert.deepEqual(refreshed.entries.map(entry => entry.offset), ["100", "200", "300", "400", "500", "600", "700"]);
+  assert.equal(refreshed.turnReached, true);
+  assert.equal(historySettled({ kind: "ready", request: { sessionId: "s", cursor: null }, page: tail }, refreshed), true);
+  assert.deepEqual(refreshed.next, cursor(800, 100), "the older cursor keeps its place in the new journal revision");
+  assert.deepEqual(refreshed.sources, [{ start: "700", end: "800" }, { start: "100", end: "200" }]);
+
+  // More was appended than one page holds: the read continues until it meets the window.
+  const far = mergeHistoryPage(undefined, { sessionId: "s", cursor: null }, { ...tail, entries: [row(900), row(1000)], next: cursor(1100, 900) }, false, "100", { known });
+  assert.equal(far.turnReached, false);
+  assert.deepEqual(far.entries.map(entry => entry.offset), ["900", "1000"]);
+  const met = mergeHistoryPage(far, { sessionId: "s", cursor: far.next }, { ...tail, entries: [row(400), row(500)], next: cursor(1100, 400) }, false, "100", { known });
+  assert.deepEqual(met.entries.map(entry => entry.offset), ["100", "200", "300", "400", "500", "900", "1000"]);
+  assert.equal(met.turnReached, true);
+
+  // A window that slid away from the journal end, or another session's, is not kept.
+  for (const other of [{ ...known, newerOmitted: true }, { ...known, sessionId: "other" }]) {
+    const fresh = mergeHistoryPage(undefined, { sessionId: "s", cursor: null }, tail, false, undefined, { known: other });
+    assert.deepEqual(fresh.entries.map(entry => entry.offset), ["600", "700"]);
+  }
+  assert.equal(mergeHistoryPage(undefined, { sessionId: "s", cursor: null }, { ...tail, next: null }, false, undefined, { known: { ...known, next: null } }).next, null);
+});
+
+test("older history is read page after page until it brings in one more whole turn", () => {
+  const row = (offset: number, kind = "Assistant") => ({ offset: `${offset}`, eventType: "contentCompleted", providerId: "p", sessionId: "runtime", runId: "r",
+    timestamp: "2026-01-01T00:00:00Z", kind, phase: null, contentId: `${offset}`, activityId: null, parentActivityId: null, interactionId: null, name: null,
+    text: `${offset}`, details: null, textTruncated: false, tool: null, files: null, detailsTruncated: false, bodyOmitted: false } satisfies HistoryResponse["entries"][number]);
+  const cursor = (offset: number) => ({ version: 2, sessionId: "s", length: "900", lastWriteUtcTicks: "9", offset: `${offset}` });
+  const window: HistoryTimeline = { sessionId: "s", entries: [row(700, "User"), row(800)], next: cursor(700),
+    tailOmitted: false, limitReached: false, newerOmitted: false, turnReached: true, pages: 31 };
+  const options = { olderFrom: "700" };
+  // The first older page holds no prompt: the read is not settled and goes on.
+  const first = mergeHistoryPage(window, { sessionId: "s", cursor: window.next }, { ...page, entries: [row(500), row(600)], next: cursor(500) }, true, undefined, options);
+  assert.equal(first.turnReached, false);
+  assert.equal(first.limitReached, false, "each older read has its own page budget");
+  assert.equal(historySettled({ kind: "ready", request: { sessionId: "s", cursor: window.next }, page }, first), false);
+  // The next page holds the end of an earlier turn, a prompt and its answer: the window starts at that prompt.
+  const second = mergeHistoryPage(first, { sessionId: "s", cursor: first.next }, { ...page, entries: [row(100), row(200), row(300, "User"), row(400)], next: cursor(100) }, true, undefined, options);
+  assert.deepEqual(second.entries.map(entry => entry.offset), ["300", "400", "500", "600", "700", "800"]);
+  assert.equal(second.turnReached, true);
+  assert.deepEqual(second.next, cursor(300));
+  assert.equal(second.newerOmitted, false);
+  // The journal start ends the read even without a prompt.
+  const start = mergeHistoryPage(window, { sessionId: "s", cursor: window.next }, { ...page, entries: [row(600)], next: null }, true, undefined, options);
+  assert.equal(start.next, null);
+  assert.equal(historySettled({ kind: "ready", request: { sessionId: "s", cursor: window.next }, page }, start), true);
+});

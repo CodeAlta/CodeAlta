@@ -9,11 +9,12 @@ import { resolveSessionTab, type SessionTab, type SessionTabs as Tabs } from "./
 import { SessionTabActivity, type RuntimeObservationControls } from "./RuntimeObservation";
 import { createSessionTabModel, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction } from "./sessionTabLayout";
 import { useSessionTabDrag } from "./useSessionTabDrag";
+import { plainTitle } from "./sessionTitle";
 
 export function SessionTabLabel({ label, path, dirty }: { label: string; path: string | null; dirty: boolean }) {
   const { t } = useShellLanguage();
-  return <><span className="session-tab-label" title={`${label}\n${path ?? ""}`}>{label}</span>
-    {dirty && <span title={t("Draft edited in this window")} aria-label={t("Draft edited in this window")}>●</span>}</>;
+  return <span className="session-tab-title"><span className="session-tab-label" title={`${label}\n${path ?? ""}`}>{label}</span>
+    {dirty && <span className="session-tab-dirty" role="img" title={t("Draft edited in this window")} aria-label={t("Draft edited in this window")} />}</span>;
 }
 
 // Each pane retains its own live factory payload. App owns session authority and drafts.
@@ -55,7 +56,7 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
     resized.observe(host);
     return () => { markTitleBar.current = () => { }; cancelAnimationFrame(frame); resized.disconnect(); };
   }, []);
-  const label = (tab: SessionTab | null) => tab ? `${snapshot && resolveSessionTab(snapshot, tab)?.title || t("Unavailable session")} - ${
+  const label = (tab: SessionTab | null) => tab ? `${plainTitle(snapshot && resolveSessionTab(snapshot, tab)?.title || t("Unavailable session"))} - ${
     tab.projectId === null ? t("Global") : snapshot?.projects.find(project => project.id === tab.projectId)?.name ?? t("Unavailable project")}` : newSessionLabel ?? t("New session");
   useLayoutEffect(() => { reconcileSessionTabModel(model, state, label); });
   useLayoutEffect(() => { if (menu && !menu.current()) setMenu(null); });

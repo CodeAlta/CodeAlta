@@ -92,11 +92,13 @@ import { projectRailProjection } from "./projectRail";
 import { ProjectRailRows } from "./ProjectRailRows";
 import { defaultIdeWidth, maximumIdeWidth, minimumIdeWidth, parseIdeWidth, persistIdeWidth, resizeIdeWidth } from "./ideWidth";
 import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./projectRailVisibility";
-import { useWindowPreferences } from "./windowPreferences";
+import { nextTheme, themeLabel, useWindowPreferences } from "./windowPreferences";
+import { themeIcons } from "./GeneralSettings";
+import { plainTitle } from "./sessionTitle";
 import { GeneralSettings } from "./GeneralSettings";
 import { createHostLiveness, hostPingInterval, hostPingTimeout } from "./hostLiveness";
 import { installKeyboardClickGuard } from "./keyboardClickGuard";
-import { closeApplicationWindow, useWindowTitleBar, WindowBrand, WindowControls } from "./windowChrome";
+import { closeApplicationWindow, logoUrl, useWindowTitleBar, WindowBrand, WindowControls } from "./windowChrome";
 import { createPluginEventsRead } from "./pluginEvents";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
 import { workflowNotice, type WorkflowNotice } from "./workflowNotice";
@@ -238,7 +240,7 @@ function App() {
   const [search, writeSearch] = useState("");
   function setSearch(value: string) { invalidateCreation(); writeSearch(value); }
   const [projectFilter, setProjectFilter] = useState("");
-  const { projectSort, setProjectSort, theme, setTheme, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount } = useWindowPreferences();
+  const { projectSort, setProjectSort, theme, shownTheme, setTheme, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount } = useWindowPreferences();
   const [sessionExpansion, setSessionExpansion] = useState<{ projectId: string | null; search: string; extra: number } | null>(null);
   const [notesVisible, setNotesVisible] = useState(true);
   const [dialog, writeDialog] = useState<"project" | "help" | "sessions" | "archive" | "reminders" | null>(null);
@@ -410,9 +412,9 @@ function App() {
   const [clock, setClock] = useState(Date.now);
 
   useLayoutEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    document.documentElement.classList.toggle(Classes.DARK, theme === "dark");
-  }, [theme]);
+    document.documentElement.dataset.theme = shownTheme;
+    document.documentElement.classList.toggle(Classes.DARK, shownTheme === "dark");
+  }, [shownTheme]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 60_000);
@@ -1433,13 +1435,18 @@ function App() {
           "--project-pane-width": `${visiblePaneLayout.projects}px`,
           "--session-pane-width": `${visibleSessionWidth}px`,
         } as CSSProperties}>
-        <WindowBrand />
+        <WindowBrand>
+          <nav className="activity-rail" aria-label={t("Workspace navigation")}>
+            <Button ref={projectRailToggle} variant="minimal" size="small" active={railVisible} icon={<AppIcon name="folder" size={16} />} aria-label={t("Explorer")} title={t("Explorer")} aria-expanded={railVisible} aria-controls="project-rail" onClick={toggleProjects} />
+            <Button variant="minimal" size="small" icon={<AppIcon name="search" size={16} />} aria-label={t("Open command palette")} aria-haspopup="dialog" title={`${t("Open command palette")} (Ctrl+P)`} onClick={openPalette} />
+            <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={16} />} className="activity-settings" aria-label={t("Settings & extensions")} title={t("Settings & extensions")} onClick={() => navigate("appearance")} />
+          </nav>
+        </WindowBrand>
+        <div className="window-actions">
+          <Button variant="minimal" size="small" className="theme-switch" icon={<AppIcon name={themeIcons[theme]} size={16} />}
+            aria-label={t("Theme: {theme}", { theme: t(themeLabel(theme)) })} title={t("Theme: {theme}", { theme: t(themeLabel(theme)) })} onClick={() => setTheme(nextTheme(theme))} />
+        </div>
         <WindowControls snapshot={windowSnapshot} />
-        <nav className="activity-rail" aria-label={t("Workspace navigation")}>
-          <Button ref={projectRailToggle} variant="minimal" active={railVisible} icon={<AppIcon name="folder" size={20} />} aria-label={t("Explorer")} title={t("Explorer")} aria-expanded={railVisible} aria-controls="project-rail" onClick={toggleProjects} />
-          <Button variant="minimal" icon={<AppIcon name="search" size={20} />} aria-label={t("Open command palette")} aria-haspopup="dialog" title={`${t("Open command palette")} (Ctrl+P)`} onClick={openPalette} />
-          <Button variant="minimal" icon={<AppIcon name="settings" size={20} />} className="activity-settings" aria-label={t("Settings & extensions")} title={t("Settings & extensions")} onClick={() => navigate("appearance")} />
-        </nav>
         <SessionContentLayout sessionWidth={ideWidth.width} narrow={narrow} sessionsHidden={!railVisible}
           projects={sessions => <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}>
           <div className="panel-title"><span title={projectListing?.evidenceNotice ?? undefined}>{t("Projects")}<span className="count">{snapshot?.projects.length ?? 0}</span></span><span>
@@ -1556,7 +1563,7 @@ function App() {
               <button type="button" aria-pressed={sessionId === session.id} aria-describedby={`session-tooltip-${index}`} title={tooltip}
                 style={{ paddingLeft: 11 + Math.min(depth, 8) * 12 }}
                 onClick={() => { setMenuTarget(null); focusAction.current = null; selectedSessionId.current = session.id; setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); }}>
-                <AppIcon name="assistant" size={13} /><span className="session-title">{depth > 0 && <span aria-hidden="true">↳ </span>}{diagnostic && <span aria-hidden="true">⚠ </span>}{session.title}</span>
+                <AppIcon name="assistant" size={13} /><span className="session-title">{depth > 0 && <span aria-hidden="true">↳ </span>}{diagnostic && <span aria-hidden="true">⚠ </span>}{plainTitle(session.title)}</span>
                 <SessionDraftBadge active={draftIndicators.visible(session.id, sessionId)} />
                 {snapshot && <RunningSessionBadge controls={runtimeObservationControls()} tab={{ projectId, sessionId: session.id, path: session.workspacePath }} />}
                 <ReminderBadge count={activeReminders?.get(session.id) ?? 0} />
@@ -1674,7 +1681,7 @@ function App() {
       </div>
     {settingsOpen && <SettingsOverlay section={settingsSection} onSection={navigate} onClose={closeSettings}>
       {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); } }} />
-      : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} />
+      : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl} />
       : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
       : settingsSection === "skills" ? <SkillSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
       : settingsSection === "mcp" ? <McpServerSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
@@ -1889,7 +1896,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   const composer = useComposerLayout(preferredComposerHeight, onComposerHeight);
   const [messageNotice, setMessageNotice] = useState<TimelineNotice>(null);
   const [newerOmitted, setNewerOmitted] = useState(false);
-  const newest = useExplicitNewestHistory(session.id, selectedProjectId, status?.hostEpoch ?? null, timeline, setMessageNotice);
+  const newest = useExplicitNewestHistory(session.id, selectedProjectId, status?.hostEpoch ?? null, timeline, setMessageNotice, !newerOmitted);
   // Stable across History's auto-pages; do not cancel an admitted request on a parent render.
   const resetMessageNotice = useCallback((generation: number, explicitNewest: boolean) => {
     timeline.resetMessageNavigation();
@@ -1921,6 +1928,13 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   const archivedScope = archivedProjectScope(snapshot, selectedProjectId);
   const ownedHost = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
   const ownedSession = ownedHost && !archivedScope;
+  // A prompt sent from here is shown at once: the timeline goes to its end, wherever the reader was.
+  const outgoingCount = ownedSession && status?.hostEpoch ? submissions.outgoing(status.hostEpoch, session.id).length : 0;
+  const shownOutgoing = useRef(outgoingCount);
+  useLayoutEffect(() => {
+    if (outgoingCount > shownOutgoing.current && !newerOmitted) timeline.jump();
+    shownOutgoing.current = outgoingCount;
+  }, [outgoingCount]);
   const pluginEpoch = ownedHost ? status!.hostEpoch! : null;
   const readPluginEvents = useMemo(() => pluginEpoch === null ? undefined
     : createPluginEventsRead(sessionPluginEvents.read, { epoch: pluginEpoch, sessionId: session.id, projectId: selectedProjectId }),

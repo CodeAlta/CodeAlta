@@ -19,7 +19,10 @@ export type NewestHistoryResult = Readonly<{ sessionId: string; generation: numb
   error: string | null }>;
 export type NewestHistoryRequest = () => number;
 
-type HistoryTarget = { request: HistoryRequest; explicitOlder: boolean; explicitNewest: boolean; generation: number };
+// `olderFrom` is the first record of the window when older history was asked for; `known` is the settled
+// window a refresh of the newest history keeps and appends to.
+type HistoryTarget = { request: HistoryRequest; explicitOlder: boolean; explicitNewest: boolean; generation: number;
+  olderFrom?: string; known?: HistoryTimeline };
 
 function revisionOf(cursor: HistoryRequest["cursor"]): string | null {
   return cursor?.version === 2 ? JSON.stringify([cursor.length, cursor.lastWriteUtcTicks]) : null;
@@ -61,7 +64,10 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
   const request = target.request;
   const timeline = window?.timeline;
   function refreshNewest(keyboard: boolean): number {
-    if (keyboard) retainedStart.current = undefined;
+    // A window that still reaches the journal end is kept, older turns included: the refresh only appends.
+    // One that slid away from the end is replaced by the latest turn.
+    const known = timeline && !timeline.newerOmitted && timeline.sessionId === sessionId ? timeline : undefined;
+    if (keyboard && !known) retainedStart.current = undefined;
     const current = state?.request === request ? state : undefined;
     if (keyboard && target.explicitNewest && !historySettled(current,
       window?.generation === target.generation ? timeline : candidate?.generation === target.generation ? candidate.timeline : undefined)
@@ -72,7 +78,7 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
     const next = ++generation.current;
     requestedNewest.current = keyboard ? next : null;
     setSourceTarget(null);
-    setTarget({ request: { sessionId, cursor: null }, explicitOlder: false, explicitNewest: true, generation: next });
+    setTarget({ request: { sessionId, cursor: null }, explicitOlder: false, explicitNewest: true, generation: next, known });
     return next;
   }
   useLayoutEffect(() => {
@@ -102,7 +108,8 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
         merged.current = value.request;
         if (target.explicitOlder) beforeOlder.current();
         const update = (current: typeof window) => ({
-          timeline: mergeHistoryPage(current?.timeline, value.request, value.page, target.explicitOlder, retainedStart.current),
+          timeline: mergeHistoryPage(current?.timeline, value.request, value.page, target.explicitOlder, retainedStart.current,
+            { known: target.known, olderFrom: target.olderFrom }),
           generation: target.generation, revision: revisionOf(value.page.next ?? value.request.cursor),
         });
         if (target.explicitNewest) setCandidate(update);
@@ -139,7 +146,7 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
   liveRefresh.current = { revision: live?.revision,
     ready: (current?.kind === "ready" && window?.generation === target.generation && historySettled(current, window?.timeline)
       || historyCanRetry(current))
-      && observing && !target.explicitOlder && !timeline?.newerOmitted && !sourceTarget && (canInspect?.() ?? true),
+      && observing && !timeline?.newerOmitted && !sourceTarget && (canInspect?.() ?? true),
     retry: historyCanRetry(current),
     refresh: () => { refreshNewest(false); } };
   useEffect(() => {
@@ -161,13 +168,15 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
   const accumulation = target.explicitNewest ? candidate : window;
   useLayoutEffect(() => {
     if (accumulation?.timeline.turnReached && retainedStart.current === undefined) retainedStart.current = accumulation.timeline.entries[0]?.offset;
-  }, [accumulation]);
+    // Older turns loaded on request stay part of the window that later refreshes keep.
+    if (target.explicitOlder && accumulation?.generation === target.generation && !accumulation.timeline.newerOmitted
+      && accumulation.timeline.entries.length) retainedStart.current = accumulation.timeline.entries[0].offset;
+  }, [accumulation, target]);
   useEffect(() => {
     const accumulated = accumulation?.timeline;
     if (!observing || current?.kind !== "ready" || accumulation?.generation !== target.generation || !accumulated?.next ||
-        accumulated.sessionId !== sessionId || accumulated.limitReached || accumulated.turnReached || target.explicitOlder) return;
-    const timer = globalThis.window.setTimeout(() => setTarget({ request: { sessionId, cursor: accumulated.next },
-      explicitOlder: false, explicitNewest: target.explicitNewest, generation: target.generation }), 0);
+        accumulated.sessionId !== sessionId || accumulated.limitReached || accumulated.turnReached || accumulated.newerOmitted) return;
+    const timer = globalThis.window.setTimeout(() => setTarget({ ...target, request: { sessionId, cursor: accumulated.next } }), 0);
     return () => globalThis.window.clearTimeout(timer);
   }, [current, accumulation, sessionId, target, observing]);
   useLayoutEffect(() => {
@@ -211,7 +220,7 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
     availableUsers.splice(index, 1); acknowledged.push(echo.key); return false;
   });
   useEffect(() => { if (acknowledged.length) onAcknowledgeOutgoing?.(acknowledged); }, [JSON.stringify(acknowledged), onAcknowledgeOutgoing]);
-  for (const echo of timeline?.newerOmitted || target.explicitOlder ? [] : echoes) {
+  for (const echo of timeline?.newerOmitted ? [] : echoes) {
     const item = liveTextItem({ contentId: echo.key, runId: echo.runId, kind: "User", text: echo.text || (echo.imageCount ? t("{count} image attached", { count: echo.imageCount }) : ""),
       timestamp: echo.timestamp, sequence: null, isComplete: true, isTruncated: false, startedWithDelta: false });
     items.push({ source: "history", key: `outgoing:${echo.key}`, item: { ...item,
@@ -231,7 +240,7 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
     {timeline?.tailOmitted && <div role="status" className="banner">{t("The malformed final journal record was omitted.")}</div>}
     {timeline?.next && <button type="button" className="load-more" disabled={current?.kind === "loading" || current?.kind === "error"}
       onClick={() => setTarget({ request: { sessionId, cursor: timeline.next }, explicitOlder: true,
-        explicitNewest: false, generation: ++generation.current })}>
+        explicitNewest: false, generation: ++generation.current, olderFrom: timeline.entries[0]?.offset })}>
       <AppIcon name="history" size={14} />{olderCount ? t("Load {count} previous messages", { count: olderCount }) : t("Load previous messages")}</button>}
     {items.length === 0 && current?.kind === "ready" && <div className="empty-history">{t("No visible events in this history.")}</div>}
     <div className="messages">

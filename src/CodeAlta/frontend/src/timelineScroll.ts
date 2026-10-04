@@ -325,11 +325,13 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
 
 // Only a user-requested, generation-matched settled tail can opt a reader into follow.
 // Pending intent belongs to the mounted selection, never to a global history request.
+// With `tailLoaded` the window already reaches the journal end: going to the newest message is then an
+// immediate jump, and the refresh behind it only appends what is new, without announcing itself.
 export function useExplicitNewestHistory(sessionId: string, projectId: string | null, epoch: string | null,
-  position: ReturnType<typeof useTimelinePosition>, onNotice: (message: TimelineNotice) => void) {
+  position: ReturnType<typeof useTimelinePosition>, onNotice: (message: TimelineNotice) => void, tailLoaded = false) {
   const requestRef = useRef<NewestHistoryRequest | null>(null);
   const pending = useRef<{ generation: number; sessionId: string; projectId: string | null; epoch: string | null;
-    wasFollowing: boolean; anchor: HTMLElement | null; anchorTop: number } | null>(null);
+    wasFollowing: boolean; anchor: HTMLElement | null; anchorTop: number; quiet: boolean } | null>(null);
   useLayoutEffect(() => {
     if (pending.current && (pending.current.sessionId !== sessionId || pending.current.projectId !== projectId ||
       pending.current.epoch !== epoch)) {
@@ -339,8 +341,9 @@ export function useExplicitNewestHistory(sessionId: string, projectId: string | 
   }, [sessionId, projectId, epoch, onNotice]);
   function cancel() {
     if (!pending.current) return;
+    const quiet = pending.current.quiet;
     pending.current = null;
-    onNotice({ key: "Newest history is still loading; automatic follow canceled by newer user navigation." });
+    if (!quiet) onNotice({ key: "Newest history is still loading; automatic follow canceled by newer user navigation." });
   }
   const onTarget = useCallback((generation: number): boolean => {
     if (pending.current?.generation === generation) return true;
@@ -348,14 +351,17 @@ export function useExplicitNewestHistory(sessionId: string, projectId: string | 
     return false;
   }, []);
   function latest() {
+    const quiet = tailLoaded;
+    const wasFollowing = position.following;
+    if (quiet) position.jump();
     const generation = requestRef.current?.();
     if (generation === undefined) return;
     const element = position.elementRef.current;
     const anchor = element ? Array.from(element.querySelectorAll<HTMLElement>(".timeline-message"))
       .find(row => row.getBoundingClientRect().bottom > element.getBoundingClientRect().top) ?? null : null;
-    pending.current = { generation, sessionId, projectId, epoch, wasFollowing: position.following,
-      anchor, anchorTop: anchor?.getBoundingClientRect().top ?? 0 };
-    onNotice({ key: "Refreshing the newest persisted history window…" });
+    pending.current = { generation, sessionId, projectId, epoch, wasFollowing,
+      anchor, anchorTop: anchor?.getBoundingClientRect().top ?? 0, quiet };
+    onNotice(quiet ? null : { key: "Refreshing the newest persisted history window…" });
   }
   function onScroll() {
     const intent = pending.current;
@@ -373,7 +379,7 @@ export function useExplicitNewestHistory(sessionId: string, projectId: string | 
     }
     else {
       position.jump();
-      onNotice({ key: "Newest persisted history window loaded; following visible content." });
+      onNotice(intent.quiet ? null : { key: "Newest persisted history window loaded; following visible content." });
     }
   }
   return { requestRef, available: () => requestRef.current !== null, pending: () => pending.current !== null,

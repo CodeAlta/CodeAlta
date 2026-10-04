@@ -112,11 +112,13 @@ code, pre { font-family: var(--bp-typography-family-mono); }
 .project-rail[hidden], .session-rail[hidden], .pane-splitter[hidden] { display: none; }
 .project-rail, .session-rail { min-width: 0; min-height: 0; overflow: hidden; background: var(--panel); }
 /* Thin, transparent separators: only the grip is drawn; the pseudo-element widens the pointer target. */
-.pane-splitter { position: relative; z-index: 2; width: 5px; cursor: col-resize; touch-action: none; background: transparent; }
+/* Splitters are a hairline with a slightly stronger grip in the middle; the hit area extends around them,
+   and hover, drag and keyboard focus colour the line instead of boxing it. */
+.pane-splitter { position: relative; z-index: 2; width: 2px; cursor: col-resize; touch-action: none; background: linear-gradient(var(--line), var(--line)) center / 1px 100% no-repeat; outline: 0; }
 .pane-splitter::before { content: ""; position: absolute; inset: 0 -4px; }
-.pane-splitter span { position: absolute; top: 50%; left: 1px; width: 3px; height: 32px; border-radius: 3px; background: var(--line-strong); transform: translateY(-50%); transition: background-color .12s ease; }
-.pane-splitter:hover span, .pane-splitter:focus-visible span { background: var(--accent); }
-.pane-splitter:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pane-splitter span { position: absolute; top: 50%; left: 0; width: 2px; height: 28px; border-radius: 2px; background: var(--line-strong); transform: translateY(-50%); transition: background-color .12s ease; }
+.pane-splitter:hover, .pane-splitter:active, .pane-splitter:focus-visible { background-image: linear-gradient(var(--accent), var(--accent)); }
+.pane-splitter:hover span, .pane-splitter:active span, .pane-splitter:focus-visible span { background: var(--accent); }
 .project-rail { display: flex; flex-direction: column; overflow-y: auto; padding: 18px 12px 12px; }
 .panel-title { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 9px 12px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .panel-title > span:last-child { display: flex; align-items: center; gap: 5px; }
@@ -191,7 +193,12 @@ h1, h2, h3, p { margin-top: 0; }
 .session-dock { position: absolute; inset: 0; }
 .session-dock[hidden] { display: none; }
 .session-tab-content { height: 100%; min-width: 0; min-height: 0; overflow: hidden; overflow-anchor: none; }
-.session-dock { --flexlayout-splitter-size: 8px; --flexlayout-splitter-active-size: 8px; }
+.session-dock { --flexlayout-splitter-size: 2px; --flexlayout-splitter-active-size: 10px; --flexlayout-splitter-handle-visibility: visible; --flexlayout-color-splitter-handle: var(--line-strong); }
+.session-dock .flexlayout__splitter, .session-dock .flexlayout__splitter:hover, .session-dock .flexlayout__splitter_drag { border-radius: 0; }
+.session-dock .flexlayout__splitter:focus-visible { outline: 0; background-color: var(--accent); }
+.session-dock .flexlayout__splitter_handle_horz { width: 2px; height: 28px; }
+.session-dock .flexlayout__splitter_handle_vert { width: 28px; height: 2px; }
+.session-dock .flexlayout__splitter:hover .flexlayout__splitter_handle { background-color: var(--accent); }
 .session-tabs .flexlayout__tab_button { touch-action: none; }
 .session-tabs[data-dragging="true"] { user-select: none; cursor: grabbing; }
 .session-drop-preview { position: absolute; z-index: 20; pointer-events: none; border: 2px solid var(--accent); background: var(--accent-soft); }
@@ -222,7 +229,7 @@ h1, h2, h3, p { margin-top: 0; }
 .notes-collapse-icon { transform: rotate(180deg); }
 .session-tabs .active-session-content { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 .active-session-content > .session-workspace { flex: 1 1 0; }
-.session-tabs .session-tab-label { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-tabs .session-tab-label { display: block; flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-tab-more { padding: 2px 8px; }
 .session-tab-popup { position: fixed; z-index: 1000; max-width: calc(100vw - 8px); max-height: calc(100dvh - 8px); overflow: auto;
   padding: 4px; border: 1px solid var(--line); border-radius: var(--bp-surface-border-radius); background: var(--panel); color: var(--text); box-shadow: var(--shadow); }
@@ -249,11 +256,11 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .timeline-scroll { flex: 1 1 0; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 0 0; line-height: 1.5; }
 .composer-resize-bar { flex: 0 0 auto; display: flex; align-items: center; min-height: 4px; margin: 0 4px; }
 .composer-resize-bar .quiet-button { flex: 0 0 auto; padding: 2px 7px; font-size: 11px; }
-.composer-splitter { flex: 1 1 auto; position: relative; height: 5px; cursor: row-resize; touch-action: none; }
+.composer-splitter { flex: 1 1 auto; position: relative; height: 2px; cursor: row-resize; touch-action: none; background: linear-gradient(var(--line), var(--line)) center / 100% 1px no-repeat; outline: 0; }
 .composer-splitter::before { content: ""; position: absolute; inset: -4px 0; }
-.composer-splitter span { display: block; width: 32px; height: 3px; margin: 1px auto; border-radius: 3px; background: var(--line-strong); transition: background-color .12s ease; }
-.composer-splitter:hover span, .composer-splitter:focus-visible span { background: var(--accent); }
-.composer-splitter:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.composer-splitter span { display: block; width: 28px; height: 2px; margin: 0 auto; border-radius: 2px; background: var(--line-strong); transition: background-color .12s ease; }
+.composer-splitter:hover, .composer-splitter:active, .composer-splitter:focus-visible { background-image: linear-gradient(var(--accent), var(--accent)); }
+.composer-splitter:hover span, .composer-splitter:active span, .composer-splitter:focus-visible span { background: var(--accent); }
 .composer-region { flex: 0 1 auto; min-height: 0; min-width: 0; overflow-y: auto; }
 .composer-region.resized { flex: 0 0 auto; display: flex; flex-direction: column; }
 .composer-region.resized .catalog-composer { flex: 1 0 auto; max-height: none; display: flex; flex-direction: column; overflow: visible; }
@@ -573,10 +580,8 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 }
 
 /* IDE presentation: stable workspace slot, one hierarchical Explorer. */
-.ide-shell .workspace-shell { position: relative; grid-template-columns: 44px min(var(--explorer-width, 272px), 60vw) 5px minmax(0, 1fr); grid-template-rows: var(--titlebar-height) minmax(0, 1fr); grid-template-areas: "brand brand brand content" "activity sessions explorer-resize content"; height: 100%; }
-.ide-shell .workspace-shell:not(.project-rail-open) { grid-template-columns: 44px 0 0 minmax(0, 1fr); }
-.ide-shell .activity-rail { grid-area: activity; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 2px; border-right: 1px solid var(--line); background: var(--panel); }
-.ide-shell .activity-settings { margin-top: auto; }
+.ide-shell .workspace-shell { position: relative; grid-template-columns: min(var(--explorer-width, 272px), 60vw) 2px minmax(0, 1fr); grid-template-rows: var(--titlebar-height) minmax(0, 1fr); grid-template-areas: "brand brand content" "sessions explorer-resize content"; height: 100%; }
+.ide-shell .workspace-shell:not(.project-rail-open) { grid-template-columns: 0 0 minmax(0, 1fr); }
 .ide-shell .session-content-layout { display: contents; }
 .ide-shell .session-content-rail-slot { grid-area: sessions; min-height: 0; min-width: 0; display: flex; }
 .ide-shell .session-content-rail-slot[hidden] { display: none; }
@@ -604,9 +609,9 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .composer-actions-menu[open] > div { position: absolute; z-index: 20; right: 6px; bottom: 40px; max-height: min(360px, 65vh); max-width: min(450px, 85vw); overflow: auto; padding: 8px; display: flex; flex-wrap: wrap; gap: 6px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 4px 20px #0004; }
 .ide-shell .composer-notice { margin: 2px 0; }
 @media (max-width: 875px) {
-  .ide-shell .workspace-shell, .ide-shell .workspace-shell:not(.project-rail-open) { grid-template-columns: 44px minmax(0, 1fr); grid-template-rows: var(--titlebar-height) minmax(0, 1fr); grid-template-areas: "brand content" "activity content"; height: 100%; }
+  .ide-shell .workspace-shell, .ide-shell .workspace-shell:not(.project-rail-open) { grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--titlebar-height) minmax(0, 1fr); grid-template-areas: "content" "content"; height: 100%; }
   .ide-shell .project-rail { position: static; width: 100%; height: 100%; background: var(--panel); }
-  .ide-shell .session-content-rail-slot { position: absolute; z-index: 30; top: var(--titlebar-height); bottom: 0; height: auto; left: 44px; width: min(320px, calc(100% - 40px)); background: var(--panel); box-shadow: var(--shadow); }
+  .ide-shell .session-content-rail-slot { position: absolute; z-index: 30; top: var(--titlebar-height); bottom: 0; height: auto; left: 0; width: min(320px, 100%); background: var(--panel); box-shadow: var(--shadow); }
   .ide-shell .session-rail { height: auto; }
   .ide-shell .prompt-options { max-width: calc(100vw - 155px); }
 }
@@ -619,6 +624,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
   --flexlayout-color-4: var(--line); --flexlayout-color-5: var(--line-strong); --flexlayout-color-6: var(--line-strong);
   --flexlayout-color-tab-selected: var(--text); --flexlayout-color-tab-selected-background: var(--panel-2);
   --flexlayout-color-tab-unselected: var(--muted); --flexlayout-color-tab-unselected-background: var(--panel);
+  --flexlayout-color-splitter: var(--line); --flexlayout-color-splitter-hover: var(--accent); --flexlayout-color-splitter-drag: var(--accent);
   --flexlayout-color-tabset-background: var(--panel); --flexlayout-color-tabset-background-selected: var(--panel);
   --flexlayout-color-tab-content: var(--bg); --flexlayout-color-icon: var(--muted);
   --flexlayout-color-focus: var(--accent); --flexlayout-color-overflow: var(--muted);
@@ -808,12 +814,13 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .prompt-editor[data-placeholder]::after { content: attr(data-placeholder); position: absolute; top: 8px; left: 8px; right: 8px; color: var(--muted); pointer-events: none; font-family: inherit; font-size: 13px; line-height: 20px; }
 .prompt-editor .monaco-editor textarea { min-height: 0; padding: 0; margin: 0; border: 0; box-shadow: none; }
 .expanded-prompt-dialog .app-window-body > p { flex-shrink: 0; }
-.ide-shell .activity-rail > .bp6-button { min-width: 36px; min-height: 36px; }
 .appearance-settings h2 { margin: 0 0 12px; font-size: var(--bp-typography-size-heading-medium); font-weight: var(--bp-typography-weight-bold); }
-.appearance-settings p { margin: 8px 0 16px; color: var(--muted); line-height: 1.5; }
-.appearance-settings fieldset { padding: 0; border: 0; margin: 0 0 16px; }
-.appearance-settings legend, .appearance-settings > label:not(.bp6-control) { display: block; margin-bottom: 8px; }
-.appearance-settings > output { display: block; margin: 8px 0 16px; }
+.settings-field { display: grid; grid-template-columns: minmax(160px, 280px) minmax(0, 1fr); align-items: center; gap: 6px 20px; padding: 12px 0; border-top: 1px solid var(--line); }
+.settings-field > label, .settings-field-label { color: var(--text); }
+.settings-field-control { display: flex; align-items: center; justify-content: flex-end; min-width: 0; }
+.settings-field-control .bp6-html-select { min-width: 220px; }
+.settings-field-control .bp6-control { margin: 0; }
+.settings-field > .notice { grid-column: 1 / -1; margin: 0; color: var(--muted); line-height: 1.5; }
 .ide-shell .current-provider { display: inline-block; max-width: 20ch; }
 .provider-chooser { display: inline-flex; align-items: center; flex-wrap: wrap; min-width: 0; max-width: 100%; gap: 5px; }
 .provider-chooser [role="alert"] { color: var(--red); font-size: 11px; }
@@ -1125,10 +1132,10 @@ dialog:has(> .app-window) .tool-record-copy { align-self: flex-start; }
 
 /* Settings: About page. */
 .about-settings-card { display: flex; align-items: center; gap: 16px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, var(--panel)), var(--panel)); }
-.about-settings-mark { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 12px; color: #fff; background: var(--accent); font-size: 24px; font-weight: 700; }
+.about-settings-mark { flex: none; width: 48px; height: 48px; }
 .about-settings-card > div { display: grid; gap: 2px; }
 .about-settings-card strong { font-size: 20px; letter-spacing: -.01em; }
-.about-settings-card span:not(.about-settings-mark) { color: var(--muted); font-variant-numeric: tabular-nums; }
+.about-settings-card span { color: var(--muted); font-variant-numeric: tabular-nums; }
 .about-settings-facts { margin: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .about-settings-facts > div { display: grid; grid-template-columns: minmax(120px, 28%) minmax(0, 1fr); gap: 12px; padding: 9px 14px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .about-settings-facts > div:last-child { border-bottom: 0; }
@@ -1238,15 +1245,21 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body {
 
 /* Chromeless window: the page draws the title bar. The application mark sits over the Explorer column and the
    session tab strips along the top edge continue it up to the window controls. */
-.ide-shell { --titlebar-height: var(--neoastra-titlebar-height, 38px); --titlebar-inset-end: var(--neoastra-titlebar-inset-right, 0px); --brand-width: 132px; }
+.ide-shell { --titlebar-height: var(--neoastra-titlebar-height, 38px); --titlebar-inset-end: var(--neoastra-titlebar-inset-right, 0px); --brand-width: 220px; --window-actions-width: 40px; }
 .ide-shell .workspace-shell:has(> .window-controls) { --titlebar-inset-end: 138px; }
-.window-brand { grid-area: brand; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 0 12px 0 calc(11px + var(--neoastra-titlebar-inset-left, 0px)); overflow: hidden; background: var(--panel); white-space: nowrap; }
+.window-brand { grid-area: brand; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 0 6px 0 calc(11px + var(--neoastra-titlebar-inset-left, 0px)); overflow: hidden; background: var(--panel); white-space: nowrap; }
+.window-brand .activity-rail { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.window-brand .activity-rail > .bp6-button { min-width: 28px; min-height: 28px; padding: 0; color: var(--muted); }
+.window-brand .activity-rail > .bp6-button:hover, .window-brand .activity-rail > .bp6-button.bp6-active { color: var(--text); }
+.window-actions { position: absolute; z-index: 3; top: 0; right: var(--titlebar-inset-end); display: flex; align-items: center; justify-content: center; width: var(--window-actions-width); height: var(--titlebar-height); }
+.window-actions > .bp6-button { min-width: 28px; min-height: 28px; padding: 0; color: var(--muted); }
+.window-actions > .bp6-button:hover { color: var(--text); }
 .window-brand-mark { flex: none; width: 22px; height: 22px; }
 .window-brand-name { font-size: 13px; font-weight: 600; letter-spacing: .01em; }
 :root[data-neoastra-window-focused="false"] .window-brand-name { color: var(--muted); }
 /* Without the Explorer the mark keeps its name and the first tab strip starts after it. */
-.ide-shell .workspace-shell:not(.project-rail-open) .window-brand { position: relative; z-index: 1; width: var(--brand-width); }
-.ide-shell .workspace-shell:not(.project-rail-open) .flexlayout__tabset_tabbar_outer[data-titlebar-start] { padding-left: calc(var(--brand-width) - 44px); }
+.ide-shell .workspace-shell:not(.project-rail-open) .window-brand { position: absolute; z-index: 2; top: 0; left: 0; width: var(--brand-width); height: var(--titlebar-height); }
+.ide-shell .workspace-shell:not(.project-rail-open) .flexlayout__tabset_tabbar_outer[data-titlebar-start] { padding-left: var(--brand-width); }
 .window-controls { position: absolute; z-index: 40; top: 0; right: 0; display: flex; height: var(--titlebar-height); }
 .window-controls > button { display: grid; place-items: center; width: 46px; height: 100%; padding: 0; border: 0; color: var(--text); background: transparent; }
 .window-controls > button:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
@@ -1261,7 +1274,7 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body {
 /* Session tabs: browser-style tabs resting on the content they select. */
 .ide-shell .flexlayout__tabset_tabbar_outer_top { height: 34px; padding: 0; align-items: stretch; border-bottom: 0; background: var(--panel); box-shadow: inset 0 -1px var(--line); font-size: 12px; }
 .ide-shell .flexlayout__tabset_tabbar_outer_top[data-neoastra-drag-region] { height: var(--titlebar-height); }
-.ide-shell .flexlayout__tabset_tabbar_outer_top[data-titlebar-end] { padding-right: var(--titlebar-inset-end); }
+.ide-shell .flexlayout__tabset_tabbar_outer_top[data-titlebar-end] { padding-right: calc(var(--titlebar-inset-end) + var(--window-actions-width)); }
 .ide-shell .flexlayout__tabset_tabbar_inner { align-items: stretch; }
 .ide-shell .flexlayout__tabset_tabbar_inner_tab_container { align-items: flex-end; padding: 0 6px; border-top: 0; }
 .ide-shell .flexlayout__tabset_tab_divider { align-self: center; width: 1px; height: 14px; margin: 0 1px 2px; background: var(--line); }
@@ -1273,6 +1286,8 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body {
 .ide-shell .flexlayout__tab_button_leading:empty { display: none; }
 .ide-shell .flexlayout__tab_button_content { min-width: 0; overflow: hidden; }
 .ide-shell .flexlayout__tab_button_content > span { display: block; min-width: 0; }
+.session-tab-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.session-tab-dirty { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .ide-shell .flexlayout__tab_button_trailing { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; color: var(--muted); }
 .ide-shell .flexlayout__tab_button_trailing:hover { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }
 .ide-shell .flexlayout__tab_toolbar { align-self: center; padding: 0 6px; }

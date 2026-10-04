@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { createDesktopClient, invoke, subscribe, type DesktopRpc, type DesktopWindowSnapshot, type NeoRpcCallOptions } from "@neoastra/client";
 import { neoRpcContractHash } from "#neoastra";
-import logoUrl from "../../../../img/CodeAlta.svg";
+import logo from "../../../../img/CodeAlta.svg";
 import { useShellLanguage } from "./shellLanguage";
 
 // The host checks the contract of every call, including the desktop handlers'.
@@ -12,6 +12,9 @@ const rpc: DesktopRpc = {
     subscribe<T>(event, handler, { ...options, contractHash: neoRpcContractHash }),
 };
 const desktop = createDesktopClient(rpc);
+
+/** The application mark. */
+export const logoUrl: string = logo;
 
 /**
  * Attaches the document to the native title bar: the client then publishes the layout as
@@ -38,11 +41,15 @@ export function closeApplicationWindow(): void {
   void desktop.window.close().catch(() => { /* Not a desktop window: nothing to close. */ });
 }
 
-/** The application mark and name at the start of the title bar; the area around them moves the window. */
-export function WindowBrand() {
+/**
+ * The application mark and name at the start of the title bar, followed by the workspace navigation
+ * (`children`); the area around them moves the window.
+ */
+export function WindowBrand({ children }: { children?: ReactNode }) {
   return <div className="window-brand" data-neoastra-drag-region>
     <img className="window-brand-mark" src={logoUrl} alt="" draggable={false} />
     <span className="window-brand-name">CodeAlta</span>
+    {children}
   </div>;
 }
 
