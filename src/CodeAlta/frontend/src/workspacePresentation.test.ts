@@ -40,8 +40,8 @@ test("observation failures do not invent pending asks; retained actions and back
   assert.equal(showAskDetails(noAsks, 0), false);
   assert.equal(showAskDetails(noAsks, 1), true);
   assert.equal(showAskDetails(undefined, 1), true, "a read failure cannot hide an original action");
-  assert.equal(showAskDetails({ ...noAsks, hasMore: true }, 0), true);
-  assert.equal(showAskDetails({ ...noAsks, latest: {} as NonNullable<AskPage["latest"]> }, 0), true);
+  assert.equal(showAskDetails({ ...noAsks, hasMore: true }, 0), false);
+  assert.equal(showAskDetails({ ...noAsks, latest: {} as NonNullable<AskPage["latest"]> }, 0), false, "an answered ask leaves the panel");
   assert.equal(showAskDetails({ ...noAsks, head: {} as NonNullable<AskPage["head"]> }, 0), true);
 });
 

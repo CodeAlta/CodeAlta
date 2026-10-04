@@ -128,7 +128,7 @@ test("canonical bounded locale choice, deterministic browser auto and SSR fallba
 test("reminder and caller-ask labels preserve literal payloads and identities", () => {
   for (const locale of locales) {
     for (const key of ["Refresh reminders", "Create reminder", "Save message", "Uncertain reminder Save",
-      "Check asks", "Answer original ask", "Cancel original ask", "Ask question navigation", "Captured original ask answer", "Confirm discard local draft"] as const) {
+      "Answer not confirmed", "Cancel not confirmed", "Ask question navigation", "Unsent answer"] as const) {
       assert.ok(translate(locale, key));
       if (locale !== "en") assert.notEqual(translate(locale, key), key);
     }

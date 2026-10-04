@@ -1440,3 +1440,25 @@ dialog.session-browser .session-batch-delete summary { cursor: pointer; color: v
 .session-notes-overlay .notes-pane > header { padding: 5px 6px 5px 10px; background: var(--panel-2); }
 .session-notes-overlay .notes-content { padding: 8px 12px 12px; overflow-y: auto; font-size: 12.5px; }
 .session-notes-overlay .notes-content .markdown-content > :first-child { margin-top: 0; }
+
+/* Ask card: the question an agent put to the user, answered above the prompt. */
+.ask-panel { display: grid; gap: 6px; min-width: 0; }
+.timeline-scroll > section.ask-panel:not(.conversation):not(.live-indicator) { margin: 6px 12px 8px; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.ask-card { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; margin: 0; padding: 8px 12px 10px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line-strong)); border-left-width: 3px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.ask-card > .ask-card-header, .ask-card > .ask-question { flex: 0 0 100%; min-width: 0; }
+.ask-card-header { display: flex; align-items: center; gap: 8px; color: var(--accent); }
+.ask-card-header h4 { flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; color: var(--text); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.ask-card .ask-question-navigation { flex: 0 0 auto; margin: 0; gap: 2px; color: var(--muted); }
+.ask-card .ask-question-navigation small { margin-right: 4px; font-variant-numeric: tabular-nums; }
+.ask-question { display: grid; gap: 6px; padding-left: 23px; overflow-wrap: anywhere; }
+.ask-question p { margin: 0; }
+.ask-choices { display: flex; flex-wrap: wrap; gap: 4px 20px; margin-top: 2px; }
+.ask-choices .bp6-control { margin: 0; }
+.ask-freeform { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
+.ask-freeform textarea { min-height: 56px; max-height: 220px; }
+.ask-card > .ask-answer { order: 2; }
+.ask-draft-recovery > header, .ask-unsettled { display: flex; align-items: center; gap: 6px; }
+.ask-draft-recovery > header strong { flex: 1 1 auto; font-size: 12px; }
+.ask-draft-recovery p { margin: 4px 0 0; }
+.ask-unsettled { padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--yellow); font-size: 12px; }
+.ask-unsettled span { flex: 1 1 auto; color: var(--text); }

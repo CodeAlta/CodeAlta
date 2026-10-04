@@ -21,7 +21,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
     private static readonly TimeSpan AgentCallerSubmitAckTimeout = TimeSpan.FromSeconds(5);
     private const string NotificationFollowUpNextStep = "Do not call any tool, shell sleep, reminder, status, tail, events, or polling command to wait for completion; yield control and wait for parent-session notifications.";
     private const string NotificationFollowUpGuidance = "Do not poll or actively wait for this delegated session to complete. CodeAlta will forward the delegated session's final assistant reply to the parent session automatically.";
-    private const string AskNextStep = "Do not call another tool or poll. Yield now and wait for the next user prompt containing the ask response.";
+    private const string AskNextStep = "Do not call another tool or poll. End your turn now with one short sentence saying that you are waiting for the answer; the next user prompt contains the ask response.";
     private const string AskPayloadSchema = "{\"type\":\"object\",\"properties\":{\"file\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"additionalProperties\":false},\"questions\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"question\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"},\"choices\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"}},\"required\":[\"title\"],\"additionalProperties\":false}},\"freeform\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"placeholder\":{\"type\":\"string\"}},\"additionalProperties\":false}},\"required\":[\"title\",\"question\"],\"additionalProperties\":false}}},\"required\":[\"questions\"],\"additionalProperties\":false}";
 
     private static readonly string[] NotificationFollowUpForbiddenWaitActions =
@@ -199,7 +199,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             "Example:",
             "  `alta ask --stdin`",
             EscapeHelpText("  stdin: {\"questions\":[{\"title\":\"Plan\",\"question\":\"Does this plan look correct?\",\"choices\":[{\"title\":\"Approve\"},{\"title\":\"Revise\"}],\"freeform\":{\"title\":\"Notes\",\"placeholder\":\"Optional notes...\"}}]}"),
-            "LLM guidance: after a successful `alta.ask.queued` result, stop and yield. Do not poll; wait for the next user prompt containing the ask response.");
+            "LLM guidance: after a successful `alta.ask.queued` result, end your turn with one short sentence saying that you are waiting for the answer. Do not poll; the next user prompt contains the ask response.");
         return command;
     }
 

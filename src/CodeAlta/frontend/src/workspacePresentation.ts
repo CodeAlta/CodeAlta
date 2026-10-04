@@ -15,8 +15,8 @@ export function showLiveDisplay(state: DisplayState | null): boolean {
 }
 
 // Observation errors are rendered separately; only actual ask evidence opens these details.
-export function showAskDetails(page: AskPage | undefined, retainedCount: number): boolean {
-  return !!page?.head || !!page?.latest || !!page?.hasMore || retainedCount > 0;
+export function showAskDetails(page: AskPage | undefined, unsettledCount: number): boolean {
+  return !!page?.head || unsettledCount > 0;
 }
 
 export function showContextAction(observationPermits: boolean, retained: boolean): boolean {

@@ -7,15 +7,14 @@ import { showAskDetails } from "./workspacePresentation";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
 import { ObservationStatus } from "./ObservationStatus";
+import { Button, Checkbox, TextArea } from "@blueprintjs/core";
+import { AppIcon } from "./AppIcon";
+import { showToast } from "./appToaster";
 
 type Notice = "refresh" | "pending" | "empty" | "failed" | "invalid";
 const notices = Object.freeze({
-  refresh: "Refresh asks to read the retained backend state.",
-  pending: "Answer or cancel the original pending ask.",
-  empty: "No pending head reported. Absence is not acknowledgment.",
-  failed: "Ask read failed; no action outcome can be inferred.",
   invalid: "The answer is invalid or exceeds the 8,192-character aggregate limit.",
-} satisfies Record<Notice, MessageKey>);
+} satisfies Partial<Record<Notice, MessageKey>>);
 
 type Props = { epoch: string; sessionId: string; actions: ReturnType<typeof createAskActions>; capability: ReturnType<typeof createMutationCapability>; refreshTrigger?: RefObject<(() => void) | null>; observing?: boolean };
 type Draft = { id: number; epoch: string; sessionId: string; source: string; handle: AskHandle;
@@ -167,88 +166,83 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
     } catch { setNotice("invalid"); }
   };
   const retained = actions.forSession(sessionId).filter(entry => entry.request.expectedHostEpoch === epoch);
+  // An action that went through needs no row: the ask leaves the panel and its answer is in the timeline.
+  const unsettled = retained.filter(entry => entry.transport === "uncertain"
+    || (entry.transport === "settled" && entry.result?.status !== "admitted" && entry.result?.status !== "cancelled"));
   const refresh = () => { const version = ++readVersion.current; setReadPending({ epoch, sessionId, version }); setRevision(value => value + 1); };
   useLayoutEffect(() => {
     if (!refreshTrigger) return;
     refreshTrigger.current = refresh;
     return () => { refreshTrigger.current = null; };
   });
-  const visible = recovery.length > 0 || showAskDetails(page, retained.length);
+  useEffect(() => {
+    if (notice !== "invalid") return;
+    showToast({ message: t(notices.invalid), intent: "danger", icon: "error", timeout: 8000 });
+    setNotice(head ? "pending" : "empty");
+  }, [notice, head, t]);
+  const visible = recovery.length > 0 || showAskDetails(page, unsettled.length);
   // This component lives in the timeline. A failed read is an error, not evidence of an ask.
   if (!visible) return null;
-  return <section aria-label={t("Owned asks")}>
-    <h3>{t(head?.state === "pending" ? "Pending asks" : "Owned asks")}</h3>
+  const question = head?.request.questions[questionIndex];
+  const count = head?.request.questions.length ?? 0;
+  const guard = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.repeat) event.preventDefault();
+  };
+  return <section className="ask-panel" aria-label={t("Owned asks")}>
+    <h3 className="sr-only">{t(head?.state === "pending" ? "Pending asks" : "Owned asks")}</h3>
     <ObservationStatus unavailable={notice === "failed"} />
-    {notice !== "failed" && (!page?.head || notice === "invalid") && <p role={notice === "invalid" ? "alert" : "status"}>{t(notices[notice])}</p>}
-    {!canMutate && <p role="alert">{t("Host identity changed. Reload required; retained ask actions cannot be retargeted.")}</p>}
-    <p className="detail">{t("Restricted caller-session asks only. Answer starts a new text submission; Cancel does not stop a run. No files, provider input, automatic retry or restart recovery.")}</p>
-    {drafts.length >= maximumDrafts && !active && <p className="detail">{t("Local draft limit reached. Confirm discard of a recovery draft before editing another ask.")}</p>}
     {recovery.map(d => <div className="ask-draft-recovery" key={d.id}>
-      <p>{t("Local unsubmitted ask draft (read-only). The original ask changed, disappeared or could not be verified; this text cannot be submitted or silently rebound. Component-lifetime only.")}</p>
-      <p className="detail">{t("Host {epoch} · session {session} · operation {operation} · runtime {runtime} · attachment {attachment} · provider {provider} · run {run} · ask {ask} · generation {generation}", { epoch: d.epoch, session: d.sessionId, operation: d.handle.operationId, runtime: d.handle.runtimeInstanceId, attachment: d.handle.attachmentGeneration, provider: d.handle.providerId, run: d.handle.runId, ask: d.handle.askId, generation: d.handle.responseGeneration })}</p>
-      {d.questions.map((question, index) => <div key={index}>
-        <p>{question.title}: {question.question}{question.description && ` — ${question.description}`}</p>
-        <p>{t("Selected choices:")} {(d.choices[index] ?? []).map(choice => {
-          const option = question.choices[choice];
-          return `${choice}: ${option?.title}${option?.description ? ` — ${option.description}` : ""}`;
-        }).join(", ") || t("None")}</p>
-        {question.freeform && <><p>{question.freeform.title ?? t("Answer")}</p>
-          <pre aria-label={t("Unsubmitted answer for {title}", { title: question.title })}>{d.text[index] ?? ""}</pre></>}
-      </div>)}
-      {discard === d.id ? <><button type="button" onClick={() => { setDrafts(current => current.filter(item => item.id !== d.id)); setDiscard(null); }}>{t("Confirm discard local draft")}</button>
-        <button type="button" onClick={() => setDiscard(null)}>{t("Keep local draft")}</button></>
-        : <button type="button" onClick={() => setDiscard(d.id)}>{t("Discard local draft…")}</button>}
+      <header><AppIcon name="edit" size={14} /><strong>{t("Unsent answer")}</strong>
+        {discard === d.id ? <>
+          <Button size="small" intent="danger" text={t("Discard")} onClick={() => { setDrafts(current => current.filter(item => item.id !== d.id)); setDiscard(null); }} />
+          <Button size="small" variant="minimal" text={t("Keep")} onClick={() => setDiscard(null)} /></>
+          : <Button size="small" variant="minimal" icon={<AppIcon name="trash" size={14} />} title={t("Discard")} aria-label={t("Discard")} onClick={() => setDiscard(d.id)} />}
+      </header>
+      {d.questions.map((item, index) => {
+        const chosen = (d.choices[index] ?? []).map(choice => item.choices[choice]?.title).filter(Boolean);
+        const text = d.text[index];
+        return chosen.length || text ? <div key={index}>
+          <p><strong>{item.title}</strong>{chosen.length > 0 && ` · ${chosen.join(", ")}`}</p>
+          {text && <pre aria-label={t("Unsubmitted answer for {title}", { title: item.title })}>{text}</pre>}
+        </div> : null;
+      })}
     </div>)}
-    {page?.hasMore && <p>{t("Additional retained asks or dispositions are omitted from this bounded view.")}</p>}
-    {head && <fieldset disabled={blocked} onKeyDown={questionChord}>
-      <legend>{t("Original ask {id} · {state}", { id: head.handle.askId, state: head.state === "pending" || head.state === "submitting" || head.state === "indeterminate" ? t(head.state) : head.state })}</legend>
-      {head.request.questions.length > 1 && <div className="ask-question-navigation" role="group" aria-label={t("Ask question navigation")}>
-        <p aria-label={t("Ask question position")}>{t("Question {index} of {count}: {title}", { index: questionIndex + 1, count: head.request.questions.length, title: head.request.questions[questionIndex].title })}</p>
-        <p className="detail">{t("Ctrl+N/P moves between questions only while the current question input or these navigation buttons have focus. Browser shortcuts are unchanged elsewhere.")}</p>
-        <button type="button" data-ask-direction="-1" disabled={questionIndex === 0} onKeyDown={event => {
-          if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.repeat) event.preventDefault();
-        }} onClick={event => { if (!event.defaultPrevented) navigate(-1, event.currentTarget); }}>{t("Previous question")}</button>
-        <button type="button" data-ask-direction="1" disabled={questionIndex === head.request.questions.length - 1} onKeyDown={event => {
-          if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.repeat) event.preventDefault();
-        }} onClick={event => { if (!event.defaultPrevented) navigate(1, event.currentTarget); }}>{t("Next question")}</button>
-      </div>}
-      {head.request.questions.map((question, index) => index !== questionIndex ? null : <div key={index} data-ask-question={index}>
-        <h4>{question.title}</h4><p>{question.question}</p>{question.description && <p>{question.description}</p>}
-        {question.choices.map((choice, choiceIndex) => <label key={choiceIndex}>
-          <input type="checkbox" checked={(active?.choices[index] ?? []).includes(choiceIndex)} onChange={event => { const checked = event.target.checked; edit(current => ({ ...current,
-            choices: { ...current.choices, [index]: checked ? [...(current.choices[index] ?? []), choiceIndex]
-              : (current.choices[index] ?? []).filter(v => v !== choiceIndex) } })); }} />
-          {choice.title}{choice.description && <span> — {choice.description}</span>}
-        </label>)}
-        {question.freeform && <label>{question.freeform.title ?? t("Answer")}<textarea maxLength={8192} value={active?.text[index] ?? ""}
+    {head && question && <fieldset className="ask-card" disabled={blocked} onKeyDown={questionChord}>
+      <legend className="sr-only">{t("Original ask {id} · {state}", { id: head.handle.askId, state: head.state === "pending" || head.state === "submitting" || head.state === "indeterminate" ? t(head.state) : head.state })}</legend>
+      <header className="ask-card-header">
+        <AppIcon name="ask" size={15} />
+        <h4>{question.title}</h4>
+        {count > 1 && <span className="ask-question-navigation" role="group" aria-label={t("Ask question navigation")}>
+          <small aria-label={t("Ask question position")} title={t("Question {index} of {count}: {title}", { index: questionIndex + 1, count, title: question.title })}>{questionIndex + 1} / {count}</small>
+          <Button size="small" variant="minimal" data-ask-direction="-1" disabled={questionIndex === 0} icon={<AppIcon name="chevronLeft" size={15} />}
+            title={`${t("Previous question")} (Ctrl+P)`} aria-label={t("Previous question")} onKeyDown={guard}
+            onClick={event => { if (!event.defaultPrevented) navigate(-1, event.currentTarget); }} />
+          <Button size="small" variant="minimal" data-ask-direction="1" disabled={questionIndex === count - 1} icon={<AppIcon name="chevronRight" size={15} />}
+            title={`${t("Next question")} (Ctrl+N)`} aria-label={t("Next question")} onKeyDown={guard}
+            onClick={event => { if (!event.defaultPrevented) navigate(1, event.currentTarget); }} />
+        </span>}
+      </header>
+      <div className="ask-question" data-ask-question={questionIndex}>
+        <p>{question.question}</p>{question.description && <p className="detail">{question.description}</p>}
+        {question.choices.length > 0 && <div className="ask-choices">{question.choices.map((choice, choiceIndex) => <Checkbox key={choiceIndex}
+          checked={(active?.choices[questionIndex] ?? []).includes(choiceIndex)} onChange={event => { const checked = event.currentTarget.checked; edit(current => ({ ...current,
+            choices: { ...current.choices, [questionIndex]: checked ? [...(current.choices[questionIndex] ?? []), choiceIndex]
+              : (current.choices[questionIndex] ?? []).filter(v => v !== choiceIndex) } })); }}>
+          {choice.title}{choice.description && <span className="detail"> — {choice.description}</span>}
+        </Checkbox>)}</div>}
+        {question.freeform && <label className="ask-freeform">{question.freeform.title}<TextArea fill autoResize maxLength={8192} aria-label={question.freeform.title ?? t("Answer")} value={active?.text[questionIndex] ?? ""}
           placeholder={question.freeform.placeholder ?? undefined} onChange={event => { const value = event.target.value; edit(current => ({ ...current,
-            text: { ...current.text, [index]: value } })); }} /></label>}
-      </div>)}
-      <button type="button" disabled={reading || !pageUsable} onClick={() => submit("answer")}>{t("Answer original ask")}</button>
-      <button type="button" disabled={reading || !pageUsable} onClick={() => submit("cancel")}>{t("Cancel original ask")}</button>
+            text: { ...current.text, [questionIndex]: value } })); }} /></label>}
+      </div>
+      <Button className="ask-answer" intent="primary" size="small" disabled={reading || !pageUsable} text={t("Answer")} onClick={() => submit("answer")} />
+      <Button size="small" variant="minimal" disabled={reading || !pageUsable} text={t("Cancel")} onClick={() => submit("cancel")} />
     </fieldset>}
-    {page?.latest && <p>{t("Latest backend disposition: {status} · ask {id}. This is not acknowledgment of an earlier transport request.", { status: page.latest.status, id: page.latest.handle.askId })}</p>}
-    {retained.map(entry => <div key={entry.request.action.actionId}>
-      <p>{t("Original {kind} · ask {id} · transport: {transport}", { kind: t(entry.kind), id: entry.request.action.handle.askId, transport: t(entry.transport) })}{entry.result && ` · ${entry.result.status}`}</p>
-      {entry.kind === "answer" && <CapturedAnswer entry={entry} />}
-      {entry.observed && <p>{t("Separate backend observation:")} {entry.observed.status}{entry.observed.runId && t(" · run {id}", { id: entry.observed.runId })}</p>}
-      <button type="button" onClick={() => { void actions.observeRemote(entry.request.action.actionId, request => sessionAsks.observe({
+    {unsettled.map(entry => <div className="ask-unsettled" key={entry.request.action.actionId} role="status">
+      <AppIcon name="error" size={14} />
+      <span>{t(entry.kind === "answer" ? "Answer not confirmed" : "Cancel not confirmed")}{(entry.observed ?? entry.result) && ` · ${(entry.observed ?? entry.result)!.status}`}</span>
+      <Button size="small" variant="minimal" icon={<AppIcon name="refresh" size={14} />} text={t("Check")} onClick={() => { void actions.observeRemote(entry.request.action.actionId, request => sessionAsks.observe({
         expectedHostEpoch: request.expectedHostEpoch, actionId: request.action.actionId, handle: askWireHandle(request.action.handle),
-      }, { timeoutMilliseconds: 8000 }), () => { capability.observe({ status: "stale_epoch", epoch }); }); }}>{t("Observe original action")}</button>
-    </div>)}
-  </section>;
-}
-
-function CapturedAnswer({ entry }: { entry: RetainedAction }) {
-  const { t } = useShellLanguage();
-  const request = entry.request;
-  const handle = request.action.handle;
-  return <section className="ask-captured-answer" aria-label={t("Captured original ask answer")}>
-    <p>{t("Original captured answer (read-only). Transport {transport}; admission is not run completion. Question and choice wording was not captured by this action; indexes below are exact, not inferred from a refreshed ask. This is owner evidence, not a discardable local draft.", { transport: t(entry.transport) })}</p>
-    <p className="detail">{t("Host {epoch} · session {session} · operation {operation} · runtime {runtime} · attachment {attachment} · provider {provider} · run {run} · ask {ask} · generation {generation}", { epoch: request.expectedHostEpoch, session: handle.sessionId, operation: handle.operationId, runtime: handle.runtimeInstanceId, attachment: handle.attachmentGeneration, provider: handle.providerId, run: handle.runId, ask: handle.askId, generation: handle.responseGeneration })}{t(" · action {id}", { id: request.action.actionId })}</p>
-    {request.action.answers.map(answer => <div key={answer.questionIndex}>
-      <p>{t("Question index {index} · selected choice indexes: {choices}", { index: answer.questionIndex, choices: answer.selectedChoiceIndexes.join(", ") || t("None") })}</p>
-      {answer.freeformText !== null && <pre aria-label={t("Captured answer for question {index}", { index: answer.questionIndex })}>{answer.freeformText}</pre>}
+      }, { timeoutMilliseconds: 8000 }), () => { capability.observe({ status: "stale_epoch", epoch }); }); }} />
     </div>)}
   </section>;
 }

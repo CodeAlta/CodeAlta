@@ -138,10 +138,10 @@ test("mounted production ask editor retains only exact validated drafts through 
     await click('Refresh asks');
     assert.equal(await waitFor(`window.askFixture.requests.length===3`), 'ready');
     assert.equal(await evaluate(`[...document.querySelectorAll('[aria-label="Owned asks"] button')]
-      .find(b=>b.textContent==='Answer original ask').disabled`), true, 'no stale page submit during an explicit read');
+      .find(b=>b.textContent==='Answer').disabled`), true, 'no stale page submit during an explicit read');
     await write('Changed while refresh pending\nwith emoji 😀');
     await evaluate(`document.querySelectorAll('[aria-label="Owned asks"] input[type=checkbox]')[1].click()`);
-    await click('Answer original ask'); await click('Cancel original ask');
+    await click('Answer'); await click('Cancel');
     await languages(); // Dirty draft during an explicit pending read.
     assert.equal(await evaluate(`window.askFixture.answers.length+window.askFixture.cancellations.length`), 0);
     await evaluate(`window.askFixture.page(${JSON.stringify(head)})`);
@@ -199,7 +199,7 @@ test("mounted production ask editor retains only exact validated drafts through 
     assert.equal(await evaluate(`document.querySelector('[aria-label="Owned asks"] textarea').value`), '');
     await write('Only fresh answer should submit');
     await evaluate(`document.querySelector('[aria-label="Owned asks"] input[type=checkbox]').click()`);
-    await click('Answer original ask');
+    await click('Answer');
     assert.equal(await waitFor(`window.askFixture.answers.length===1`), 'ready');
     await languages();
     assert.equal(await evaluate(`JSON.stringify(window.askFixture.answers[0].action.answers)`),
@@ -225,7 +225,7 @@ test("mounted production ask editor retains only exact validated drafts through 
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(captured)}+' pre').textContent`), 'Only fresh answer should submit');
     await evaluate(`window.askFixture.page(${JSON.stringify(head)})`);
     assert.equal(await waitFor(`document.querySelector(${JSON.stringify(captured)}+' pre')?.textContent==='Only fresh answer should submit'`), 'ready');
-    await click('Answer original ask'); await click('Cancel original ask');
+    await click('Answer'); await click('Cancel');
     assert.equal(await evaluate(`window.askFixture.answers.length+window.askFixture.cancellations.length`), 1,
       'pending owner excludes a competing answer/cancel');
     await evaluate(`window.askFixture.failAnswer()`);
@@ -233,7 +233,7 @@ test("mounted production ask editor retains only exact validated drafts through 
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(captured)}+' pre').textContent`), 'Only fresh answer should submit');
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(captured)}).textContent.includes('Transport uncertain')`), true);
     await languages();
-    await click('Answer original ask'); await click('Cancel original ask');
+    await click('Answer'); await click('Cancel');
     assert.equal(await evaluate(`window.askFixture.answers.length+window.askFixture.cancellations.length`), 1,
       'uncertain original answer is not retried by a refreshed editor');
     await click('Refresh asks');
@@ -281,11 +281,11 @@ test("mounted production ask editor retains only exact validated drafts through 
       'scope round-trip does not silently reactivate the detached local draft');
     await languages();
     await write('Unsent when cancel was captured');
-    await click('Cancel original ask');
+    await click('Cancel');
     assert.equal(await waitFor(`window.askFixture.cancellations.length===1`), 'ready');
     await languages();
     assert.equal(await evaluate(`[...document.querySelectorAll('.ask-draft-recovery pre')].some(el=>el.textContent==='Unsent when cancel was captured')`), true);
-    await click('Cancel original ask'); await click('Answer original ask');
+    await click('Cancel'); await click('Answer');
     assert.equal(await evaluate(`window.askFixture.answers.length+window.askFixture.cancellations.length`), 2);
     await evaluate(`window.askFixture.failCancel()`);
     assert.equal(await waitFor(`document.querySelector('[aria-label="Owned asks"]')?.textContent.includes('uncertain')`), 'ready');
@@ -296,7 +296,7 @@ test("mounted production ask editor retains only exact validated drafts through 
     await click('Confirm discard local draft');
     assert.equal(await waitFor(`![...document.querySelectorAll('.ask-draft-recovery pre')]
       .some(el=>el.textContent==='Unsent when cancel was captured')`), 'ready');
-    await click('Cancel original ask');
+    await click('Cancel');
     assert.equal(await evaluate(`window.askFixture.cancellations.length`), 1);
     assert.equal(await evaluate(`document.querySelector('[aria-label="Owned asks"]').textContent.includes('Original cancel')`), true,
       'discarding the local draft cannot acknowledge an uncertain owner action');
@@ -466,7 +466,7 @@ test("mounted production ask editor retains only exact validated drafts through 
       'the actual current choice input owns the local chord');
     assert.equal(await evaluate(`document.querySelector('[data-ask-question="0"] textarea').value`), 'First answer 😀');
     await write('Edited while same-head read pending');
-    await click('Answer original ask');
+    await click('Answer');
     assert.equal(await evaluate(`window.askFixture.answers.length`), 0, 'in-flight read still fences admission');
     await evaluate(`window.askFixture.page(${JSON.stringify(multi)})`);
     assert.equal(await waitFor(`document.querySelector('[data-ask-question="0"] textarea')?.value==='Edited while same-head read pending'`), 'ready');
@@ -554,7 +554,7 @@ test("mounted production ask editor retains only exact validated drafts through 
     assert.equal(await evaluate(`document.querySelectorAll('[data-ask-question="1"] input[type=checkbox]')[1].checked`), true);
     await nav('Previous question');
     assert.equal(await evaluate(`document.querySelector('[data-ask-question="0"] textarea').value`), 'Final first answer');
-    await click('Answer original ask');
+    await click('Answer');
     assert.equal(await waitFor(`window.askFixture.answers.length===1`), 'ready');
     assert.equal(await chordProbe('[data-ask-question="0"] textarea', 'n'), false,
       'admitted action blocks further keyboard navigation');
@@ -564,7 +564,7 @@ test("mounted production ask editor retains only exact validated drafts through 
       {questionIndex:2,selectedChoiceIndexes:[],freeformText:'Final third answer\n😀'}
     ]), 'one explicit Answer captures every question, including a hidden text answer');
     assert.equal(await evaluate(`document.querySelectorAll('[aria-label="Captured original ask answer"] [aria-label^="Captured answer"]').length`), 2);
-    await click('Answer original ask'); await click('Cancel original ask');
+    await click('Answer'); await click('Cancel');
     assert.equal(await evaluate(`window.askFixture.answers.length+window.askFixture.cancellations.length`), 1);
     await evaluate(`window.askFixture.failAnswer()`);
     assert.equal(await waitFor(`document.querySelector('[aria-label="Captured original ask answer"]')?.textContent.includes('Transport uncertain')`), 'ready');
@@ -590,7 +590,7 @@ test("mounted production ask editor retains only exact validated drafts through 
     await evaluate(`window.askFixture.page(${JSON.stringify(nextMulti)})`);
     assert.equal(await waitFor(`document.querySelector('[aria-label="Ask question position"]')?.textContent.includes('Question 1 of 3')`), 'ready');
     assert.equal(await evaluate(`document.querySelector('[data-ask-question="0"] textarea').value`), '');
-    await click('Answer original ask');
+    await click('Answer');
     assert.equal(await waitFor(`window.askFixture.answers.length===2`), 'ready');
     assert.equal(await evaluate(`JSON.stringify(window.askFixture.answers[1].action.answers)`), JSON.stringify([
       {questionIndex:0,selectedChoiceIndexes:[],freeformText:null},
@@ -624,7 +624,7 @@ test("mounted production ask editor retains only exact validated drafts through 
     }
     await evaluate(`askFixture.language('en')`);
     assert.equal(await waitFor(`!!document.querySelector('[aria-label="Owned asks"]')`), 'ready');
-    await click('Answer original ask');
+    await click('Answer');
     assert.equal(await waitFor(`askFixture.answers.length===1`), 'ready');
     await languages();
     assert.equal(await evaluate(`askFixture.answers[0].action.answers[0].freeformText`), '  Answer\nNone 日本語  ');
