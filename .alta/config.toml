@@ -1,0 +1,5 @@
+[plugins]
+[plugins.mcp]
+[plugins.mcp.servers]
+[plugins.mcp.servers.chrome-devtools]
+enabled = true

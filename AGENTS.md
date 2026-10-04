@@ -32,6 +32,31 @@ lunet build
 
 All tests and the Lunet website build must pass, and docs must be updated before submitting.
 
+## Working on the desktop WebApp
+
+The desktop UI (`src/CodeAlta`, React frontend in `src/CodeAlta/frontend`) runs in a WebView2 window. Drive the running window through the Chrome DevTools Protocol instead of guessing from the source: look at it, click in it, read its DOM and console.
+
+**1. Build.** `dotnet build CodeAlta/CodeAlta.csproj` from `src` builds the host and the frontend (it restores npm packages and regenerates the typed RPC client `src/CodeAlta/obj/neoastra/neoastra.ts`). The frontend alone is checked from `src/CodeAlta/frontend` with `node node_modules/typescript/bin/tsc --noEmit` and its unit tests with `node node_modules/tsx/dist/cli.mjs --test src/<name>.test.ts`. The `src/*.browser.test.ts` files start their own Edge; do not use them to look at the app.
+
+**2. Launch with remote debugging.** WebView2 opens a DevTools port when this variable is set; the MCP configuration expects port 9222. From the repository root (PowerShell):
+
+```powershell
+$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
+Start-Process src\CodeAlta\bin\Debug\net10.0\alta.exe -WorkingDirectory (Get-Location)
+```
+
+`http://127.0.0.1:9222/json/list` then lists one page, `app://codealta/index.html`. `alta.exe` is a windowed executable: it has no console, and a startup failure only shows as the process exiting. One instance runs per profile; a second launch on the same profile exits at once.
+
+**3. Connect.** Two checked-in files register the same `chrome-devtools` MCP server ([chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp)), attached to `http://127.0.0.1:9222`: `.mcp.json` for agents that read project MCP configuration (Claude Code and others), and `.alta/mcp.json` for CodeAlta itself. Both start it with `fnm exec --using=default cmd /c npx …` (Windows, Node managed by fnm); where `npx` is on the `PATH`, use `"command": "npx"` with the arguments after `npx`. Start the app before the first tool call.
+
+- `list_pages` gives the page id; pass it as `pageId` to the other tools. The id changes each time the app restarts.
+- `take_snapshot` (accessibility tree with element ids) and `take_screenshot` show the window; `click`, `fill`, `type_text` and `press_key` act on it; `evaluate_script` runs JavaScript in the page; `list_console_messages` reads its console.
+- The title bar's native caption buttons are not part of the page, so they are not in screenshots.
+
+**4. Change, rebuild, look again.** The executable and its assets are locked while the window is open: close the window (for example `(Get-Process alta).CloseMainWindow()`), build, launch again, call `list_pages` again. Check both themes and a narrow window when a change is visual.
+
+**5. Mind the profile.** Launched without arguments, the app uses the real profile in `~/.alta`: its projects, sessions, providers and credentials. Look and navigate freely, but do not send prompts, rename or delete sessions, or change settings there unless the task asks for it, and leave the window as you found it (theme, open tabs). To test anything that writes, use an isolated profile; the flags are described in `src/CodeAlta/README.md` (`--data-root`, `--catalog-root`, `--allow-owned-host`, …).
+
 ## Contribution Rules (Do/Don't)
 
 - Keep diffs focused; avoid drive-by refactors/formatting and unnecessary dependencies.
