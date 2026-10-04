@@ -1,6 +1,7 @@
-import type { ComponentProps, ReactNode, SyntheticEvent } from "react";
+import { useContext, type ComponentProps, type ReactNode, type SyntheticEvent } from "react";
 import { Button, ButtonGroup, FormGroup, Menu, MenuItem, PopoverNext, Slider } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
+import { ComposerChrome } from "./composerChrome";
 import { PromptEditor } from "./PromptEditor";
 import { useShellLanguage } from "./shellLanguage";
 
@@ -11,8 +12,9 @@ export function ComposerSurface({ status, busy = false, children, className, edi
   editor: ComponentProps<typeof PromptEditor>; expandedEditor?: ReactNode; notice?: ReactNode; options?: ReactNode;
 }) {
   const { t } = useShellLanguage();
+  const chrome = useContext(ComposerChrome);
   return <section className={`owned-session${className ? ` ${className}` : ""}`} aria-label={t("Message composer")}>
-    <div className="composer-status-line" role="status" data-busy={busy}><span>{status}</span></div>
+    <div className="composer-status-line" role="status" data-busy={busy}><span>{status}</span>{chrome.status && <span className="composer-status-end">{chrome.status}</span>}</div>
     {expandedEditor}
     {notice}
     <label className="sr-only" htmlFor={editor.id}>{t("Message")}</label>
@@ -95,8 +97,10 @@ export function SendSplitButton({ enqueue, onEnqueueChange, enqueueDisabled = fa
 
 export function ComposerToolbar({ options, children }: { options?: ReactNode; children: ReactNode }) {
   const { t } = useShellLanguage();
+  const chrome = useContext(ComposerChrome);
   return <div className="composer-toolbar">
     {options && <div className="prompt-options" aria-label={t("Session configuration")}>{options}</div>}
+    {chrome.context && <div className="composer-context">{chrome.context}</div>}
     <div className="history-controls composer-actions">{children}</div>
   </div>;
 }

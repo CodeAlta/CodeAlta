@@ -1,4 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
+import { ComposerChrome, type ComposerChromeValue } from "./composerChrome";
 import type { WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 import { ReminderPanel } from "./ReminderPanel";
 
@@ -17,13 +18,16 @@ export function archivedRecoveryTarget(snapshot: WorkspaceSnapshot, projectId: s
     && sessions[0].projectId === session.projectId && sessions[0].workspacePath === session.workspacePath;
 }
 
-export function SessionComposerGate({ snapshot, projectId, session, epoch, owned, readOnly, recovery }: {
+const noChrome: ComposerChromeValue = {};
+
+export function SessionComposerGate({ snapshot, projectId, session, epoch, owned, readOnly, recovery, chrome = noChrome }: {
   snapshot: WorkspaceSnapshot; projectId: string | null; session: WorkspaceSession;
   epoch: string | null; owned: ReactNode; readOnly: ReactNode; recovery: ReactNode;
+  /** Shown around the composer: the working folder, the MCP status. */
+  chrome?: ComposerChromeValue;
 }) {
-  if (archivedProjectScope(snapshot, projectId)) return <>{readOnly}
-    {archivedRecoveryTarget(snapshot, projectId, session, epoch) && recovery}</>;
-  return epoch ? owned : readOnly;
+  return <ComposerChrome.Provider value={chrome}>{archivedProjectScope(snapshot, projectId) ? <>{readOnly}
+    {archivedRecoveryTarget(snapshot, projectId, session, epoch) && recovery}</> : epoch ? owned : readOnly}</ComposerChrome.Provider>;
 }
 
 export function ReminderScopeGate({ snapshot, projectId, session, epoch, ...panel }: {

@@ -2,11 +2,16 @@ import { useMemo, type ReactNode } from "react";
 import type { WorkspaceProject } from "#neoastra";
 import font from "../../../CodeAlta.Tui/Assets/3d.flf?raw";
 import { ComposerSplitter, useComposerLayout } from "./ComposerLayout";
+import { ComposerChrome, type ComposerChromeValue } from "./composerChrome";
 import { useShellLanguage } from "./shellLanguage";
 import { welcomeLogo } from "./welcomeLogo";
 
-export function NewSessionWorkspace({ project, preferredHeight, onHeight, children }: {
+const noChrome: ComposerChromeValue = {};
+
+export function NewSessionWorkspace({ project, preferredHeight, onHeight, chrome, children }: {
   project?: WorkspaceProject; preferredHeight?: number; onHeight: (height: number | undefined) => void; children: ReactNode;
+  /** Shown around the composer: the working folder, the MCP status. */
+  chrome?: ComposerChromeValue;
 }) {
   const { t } = useShellLanguage();
   const logo = useMemo(() => welcomeLogo(font), []);
@@ -27,7 +32,7 @@ export function NewSessionWorkspace({ project, preferredHeight, onHeight, childr
     </div>
     <div className="composer-resize-bar" ref={composer.barRef}><ComposerSplitter {...composer.splitter} /></div>
     <div ref={composer.regionRef} className={`composer-region${composer.height === undefined ? "" : " resized"}`}
-      style={composer.height === undefined ? undefined : { height: composer.height }}>{children}</div>
+      style={composer.height === undefined ? undefined : { height: composer.height }}><ComposerChrome.Provider value={chrome ?? noChrome}>{children}</ComposerChrome.Provider></div>
   </div>;
 }
 

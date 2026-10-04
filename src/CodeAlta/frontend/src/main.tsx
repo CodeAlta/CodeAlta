@@ -6,7 +6,7 @@ import { createRoot } from "react-dom/client";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
-  sessionAsks, sessionNotes, sessionPluginEvents, sessionUserInput, type BootStatus,
+  sessionAsks, sessionNotes, sessionPluginEvents, projectGit, sessionUserInput, type BootStatus,
   type ReminderListRequest,
   type ReminderListResponse,
   type ReminderDetailRequest,
@@ -100,6 +100,8 @@ import { createHostLiveness, hostPingInterval, hostPingTimeout } from "./hostLiv
 import { installKeyboardClickGuard } from "./keyboardClickGuard";
 import { closeApplicationWindow, logoUrl, useWindowTitleBar, WindowBrand, WindowControls } from "./windowChrome";
 import { createPluginEventsRead } from "./pluginEvents";
+import { ProjectContext } from "./ProjectContext";
+import type { ComposerChromeValue } from "./composerChrome";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
 import { workflowNotice, type WorkflowNotice } from "./workflowNotice";
 import { translate, type MessageKey } from "./localization";
@@ -667,6 +669,7 @@ function App() {
   useEffect(() => { if (menuTarget && !activeMenu) setMenuTarget(null); }, [menuTarget, activeMenu]);
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
+  const draftChrome = useComposerChrome(owned ? status?.hostEpoch ?? null : null, selectedProject);
   // Explorer markers for sessions with active reminders: read when the host is ready, after every reminder
   // change made here, and on a slow interval because reminders also fire and complete on their own.
   const [activeReminders, setActiveReminders] = useState<ActiveReminders | null>(null);
@@ -1657,7 +1660,7 @@ function App() {
           {error && <div className="banner banner-error" role="alert">{error}</div>}
           {draftHandoffNotice && <p role="status" className="notice">{draftHandoffNotice}</p>}
           {!selectedSession
-            ? <NewSessionWorkspace key={draftScope} project={selectedProject}
+            ? <NewSessionWorkspace key={draftScope} project={selectedProject} chrome={draftChrome}
                 preferredHeight={composerHeights.get(composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope))}
                 onHeight={height => setComposerHeights(sizes => rememberComposerHeight(sizes, composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope), height))}>
                 <ReadOnlyComposer key={draftScope} sessionId={draftScope} provider={null} draftIndicators={draftIndicators}
@@ -1823,6 +1826,13 @@ function createSessionPaneOwners() {
   };
 }
 
+// The working folder shown beside a composer; global sessions have none.
+function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["projects"][number] | undefined): ComposerChromeValue {
+  const id = project?.id, name = project?.name, path = project?.path;
+  return useMemo(() => ({ context: id !== undefined && name !== undefined && path !== undefined
+    ? <ProjectContext epoch={epoch} project={{ id, name, path }} read={projectGit.status} /> : undefined }), [epoch, id, name, path]);
+}
+
 function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity }: {
   /** Reports whether the session is working while its panel watches it. */
   onRunActivity?: (running: boolean | null) => void;
@@ -1936,6 +1946,8 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
     shownOutgoing.current = outgoingCount;
   }, [outgoingCount]);
   const pluginEpoch = ownedHost ? status!.hostEpoch! : null;
+  const sessionProject = snapshot.projects.find(project => project.id === selectedProjectId);
+  const chrome = useComposerChrome(pluginEpoch, sessionProject);
   const readPluginEvents = useMemo(() => pluginEpoch === null ? undefined
     : createPluginEventsRead(sessionPluginEvents.read, { epoch: pluginEpoch, sessionId: session.id, projectId: selectedProjectId }),
   [pluginEpoch, session.id, selectedProjectId]);
@@ -1984,7 +1996,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
         </div>
         <div ref={composer.regionRef} className={`composer-region${composer.height === undefined ? "" : " resized"}`}
           style={composer.height === undefined ? undefined : { height: composer.height }}>
-        <SessionComposerGate snapshot={snapshot} projectId={selectedProjectId} session={session}
+        <SessionComposerGate snapshot={snapshot} projectId={selectedProjectId} session={session} chrome={chrome}
           epoch={ownedHost ? status!.hostEpoch! : null}
           owned={status?.hostEpoch && mutation ? <OwnedSessionPanel observing={observing} active={active} onRunActivity={onRunActivity} sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
               persistedUsage={persistedUsage} usageTarget={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? {

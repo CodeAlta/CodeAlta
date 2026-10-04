@@ -1368,3 +1368,16 @@ dialog.session-browser > .app-window > .app-window-body { gap: 10px; padding: 12
 .session-browser-footer { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; }
 dialog.session-browser .session-batch-delete { flex: none; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
 dialog.session-browser .session-batch-delete summary { cursor: pointer; color: var(--muted); }
+
+/* Composer context: the working folder, its git branch and the lines changed, after the selection chip. */
+.composer-context { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.project-context { display: flex; align-items: center; gap: 12px; min-width: 0; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.project-context > span { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.project-context-folder strong { color: var(--text); font-weight: 600; }
+.project-context-folder > span { overflow: hidden; text-overflow: ellipsis; }
+.project-context-branch { flex: none; }
+.project-context-branch > span { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.project-context-changes { flex: none; font-variant-numeric: tabular-nums; }
+.project-context-changes [data-change="added"] { color: var(--green); }
+.project-context-changes [data-change="removed"] { color: var(--red); }
+.composer-status-end { margin-left: auto; }
