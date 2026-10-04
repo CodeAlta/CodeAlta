@@ -375,6 +375,12 @@ list enables or disables a server without opening it. Stored environment and hea
 sent to the page; leaving a value blank keeps the stored one. Connection tests, sign-in and per-tool
 switches remain TUI workflows. Enabling or disabling rewrites `config.toml` without its comments.
 
+The end of the status line above every prompt shows the status items of plugins. The MCP plugin shows
+`MCP {enabled}/{configured}`, `· {n} unavailable` in the warning colour when servers are disabled or
+invalid, and the state of their tools; it is absent when no MCP configuration exists or the plugin is
+disabled. Clicking it opens **Settings → MCP Servers**. The items are read again every ten seconds and
+when the window gets the focus back.
+
 The **Skills** Settings section lists discovered skills (project, user, plugin and built-in) with a
 switch per skill, a filter, **Enable all** / **Disable all** for the shown skills, and **New skill**,
 which creates `<name>/SKILL.md` under the global or project skills folder. Selecting a skill shows its
@@ -479,6 +485,12 @@ forward slashes). The service does not create, rename or delete files, and refus
   revision that was read: when the file on disk has another one the answer is `conflict` with the
   current revision and nothing is written. With `overwrite` the revision is not compared. A
   read-only file is `read_only`; a failure while replacing the file is `write_failed`.
+
+`composerStatus.read` returns the plugin status items of a composer for a project id (or none): each
+has the plugin id, a name, a label, a text, a tone (`info`, `success`, `warning`, `error`, `muted`) and
+the Settings page it opens, which is what a plugin's session status contribution carries. The desktop
+host does not start the plugin runtime, so it asks the built-in MCP plugin for its item itself, from
+the configuration only: no server is contacted and the tools read `tools not loaded`.
 
 `projectGit.status` returns the branch of the repository containing the project folder and how much
 its tracked files differ from the last commit. Archived projects are answered too.

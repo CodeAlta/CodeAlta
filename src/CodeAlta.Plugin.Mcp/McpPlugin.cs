@@ -89,6 +89,31 @@ public sealed class McpPlugin : PluginBase
         };
     }
 
+    /// <summary>
+    /// Describes the servers of a configuration snapshot as a status item, for a host that shows the MCP
+    /// status without running this plugin. No server is contacted: the tool part says what the snapshot knows.
+    /// </summary>
+    /// <param name="snapshot">The configuration snapshot.</param>
+    /// <returns>The status item, or <see langword="null"/> when no MCP configuration exists.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is <see langword="null"/>.</exception>
+    public static PluginStatusItem? CreateStatus(McpManagementSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var summary = snapshot.Summary;
+        if (!summary.HasConfiguration && summary.ConfiguredServerCount == 0 && summary.InvalidSourceCount == 0)
+        {
+            return null;
+        }
+
+        const string label = "MCP";
+        return new PluginStatusItem
+        {
+            Label = label,
+            Text = CreateStatusLabel(snapshot, new Dictionary<string, int>(), [])[(label.Length + 1)..],
+            Tone = summary.UnavailableServerCount > 0 ? PluginStatusTone.Warning : PluginStatusTone.Info,
+        };
+    }
+
     internal static string CreateStatusLabel(
         McpManagementSnapshot snapshot,
         IReadOnlyDictionary<string, int> activatedToolCounts,

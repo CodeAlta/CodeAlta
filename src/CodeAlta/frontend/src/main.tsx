@@ -4,9 +4,11 @@ import { rpcFailureCode } from "./rpcDiagnostics";
 import { StrictMode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
+import { ComposerStatus } from "./ComposerStatus";
+import { settingsNavigation } from "./settingsNavigation";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
-  sessionAsks, sessionNotes, sessionPluginEvents, projectGit, sessionUserInput, type BootStatus,
+  sessionAsks, sessionNotes, sessionPluginEvents, projectGit, composerStatus, sessionUserInput, type BootStatus,
   type ReminderListRequest,
   type ReminderListResponse,
   type ReminderDetailRequest,
@@ -239,6 +241,10 @@ function App() {
       setSettingsOpen(true);
     }
   }
+  // A control outside the shell (a composer status item) asks for a Settings page by name.
+  const openSettingsPage = useRef<(page: string) => void>(() => {});
+  openSettingsPage.current = page => { if (page === "mcp" || page === "plugins" || page === "providers" || page === "skills") navigate(page); };
+  useEffect(() => settingsNavigation.subscribe(page => openSettingsPage.current(page)), []);
   const [search, writeSearch] = useState("");
   function setSearch(value: string) { invalidateCreation(); writeSearch(value); }
   const [projectFilter, setProjectFilter] = useState("");
@@ -1826,11 +1832,12 @@ function createSessionPaneOwners() {
   };
 }
 
-// The working folder shown beside a composer; global sessions have none.
+// The working folder shown beside a composer (global sessions have none) and the plugin status items above it.
 function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["projects"][number] | undefined): ComposerChromeValue {
   const id = project?.id, name = project?.name, path = project?.path;
   return useMemo(() => ({ context: id !== undefined && name !== undefined && path !== undefined
-    ? <ProjectContext epoch={epoch} project={{ id, name, path }} read={projectGit.status} /> : undefined }), [epoch, id, name, path]);
+    ? <ProjectContext epoch={epoch} project={{ id, name, path }} read={projectGit.status} /> : undefined,
+  status: epoch ? <ComposerStatus epoch={epoch} projectId={id ?? null} read={composerStatus.read} /> : undefined }), [epoch, id, name, path]);
 }
 
 function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity }: {

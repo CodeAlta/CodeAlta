@@ -49,6 +49,7 @@
   --accent-soft: var(--bp-surface-layer-color-primary);
   --green: var(--bp-palette-green-4);
   --red: var(--bp-palette-red-4);
+  --yellow: var(--bp-palette-gold-4);
   --shadow: var(--bp-surface-shadow-3);
   --inline-code-text: var(--bp-palette-red-4);
   --inline-code-surface: color-mix(in srgb, var(--bp-palette-white) 9%, transparent);
@@ -69,6 +70,7 @@
   --accent-strong: var(--bp-palette-blue-2);
   --green: var(--bp-palette-green-3);
   --red: var(--bp-palette-red-3);
+  --yellow: var(--bp-palette-gold-2);
   --inline-code-text: var(--bp-palette-red-2);
   --inline-code-surface: color-mix(in srgb, var(--bp-palette-black) 5%, transparent);
   --inline-code-line: color-mix(in srgb, var(--bp-palette-black) 11%, transparent);
@@ -1380,7 +1382,16 @@ dialog.session-browser .session-batch-delete summary { cursor: pointer; color: v
 .project-context-changes { flex: none; font-variant-numeric: tabular-nums; }
 .project-context-changes [data-change="added"] { color: var(--green); }
 .project-context-changes [data-change="removed"] { color: var(--red); }
-.composer-status-end { margin-left: auto; }
+.composer-status-end { margin-left: auto; flex: none; }
+/* Plugin status items at the end of the composer status line (MCP servers). */
+.composer-plugin-status { display: inline-flex; align-items: center; gap: 10px; }
+.composer-plugin-status-item, .composer-plugin-status-item.bp6-button .bp6-button-text { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.composer-plugin-status-item strong { font-weight: 600; color: var(--text); }
+.composer-plugin-status-item.bp6-button { min-height: 18px; margin: -2px 0; padding: 0 5px; }
+.composer-plugin-status-item.bp6-button:hover .bp6-button-text { color: var(--text); }
+.composer-plugin-status-item[data-tone="success"] > svg, .composer-plugin-status-item[data-tone="success"] strong { color: var(--green); }
+.composer-plugin-status-item[data-tone="warning"], .composer-plugin-status-item[data-tone="warning"] :is(strong, .bp6-button-text) { color: var(--yellow); }
+.composer-plugin-status-item[data-tone="error"], .composer-plugin-status-item[data-tone="error"] :is(strong, .bp6-button-text) { color: var(--red); }
 
 /* Providers: default markers on blank fields and the account sign-in block. */
 .provider-default-tag.bp6-tag { margin: 5px 6px 0 0; color: var(--muted); }
