@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Callout, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, NonIdealState, PopoverNext, Section, SectionCard, Switch, Tag, type Intent } from "@blueprintjs/core";
-import { globalConfig, type GlobalConfigProvidersResponse, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse,
+import { globalConfig, providerLogin, type GlobalConfigProviderDefaults, type GlobalConfigProvidersResponse, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse,
   type ModelCatalogProvidersRequest, type ModelCatalogProvidersResponse } from "#neoastra";
+import { ProviderAccount } from "./ProviderAccount";
+import { providerDefault } from "./providerSignIn";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import { configReadNotice, configSaveNotice, type ConfigNotice } from "./configEditor";
@@ -11,12 +13,26 @@ import { useShellLanguage } from "./shellLanguage";
 type CallOptions = { signal: AbortSignal; timeoutMilliseconds: number };
 const newProvider = "\u0000new";
 
+// A text field that can be left to its default: blank shows the default as its placeholder with a "Default"
+// tag, and an overridden value has a button that goes back to it.
+function DefaultedInput({ id, value, fallback, disabled, onChange }: {
+  id: string; value: string; fallback: string | null; disabled: boolean; onChange: (value: string) => void;
+}) {
+  const { t } = useShellLanguage();
+  return <InputGroup id={id} value={value} disabled={disabled} spellCheck={false} onChange={event => onChange(event.target.value)}
+    placeholder={fallback ?? t("Provider default")}
+    rightElement={value ? <Button variant="minimal" size="small" disabled={disabled} icon={<AppIcon name="reset" size={13} />}
+      aria-label={t("Use the default")} title={fallback ? t("Use the default: {value}", { value: fallback }) : t("Use the default")} onClick={() => onChange("")} />
+      : <Tag minimal className="provider-default-tag">{t("Default")}</Tag>} />;
+}
+
 /**
  * Settings page for model providers: the configured definitions on the left, an edit form on the right.
  * Saving writes the global configuration and re-registers the providers in the running host.
  */
-export function ProviderSettings({ epoch, config = globalConfig, readRuntime, probe, onOpenModels, onOpenConfiguration, onApplied }: {
+export function ProviderSettings({ epoch, config = globalConfig, login = providerLogin, readRuntime, probe, onOpenModels, onOpenConfiguration, onApplied }: {
   epoch: string; config?: Pick<typeof globalConfig, "providers" | "saveProvider" | "deleteProvider">;
+  login?: Pick<typeof providerLogin, "status" | "login" | "logout">;
   readRuntime: (request: ModelCatalogProvidersRequest, options: CallOptions) => Promise<ModelCatalogProvidersResponse>;
   probe: (request: ModelCatalogProbeRequest, options: CallOptions) => Promise<ModelCatalogProbeResponse>;
   onOpenModels: () => void; onOpenConfiguration: () => void; onApplied?: () => void;
@@ -78,6 +94,8 @@ export function ProviderSettings({ epoch, config = globalConfig, readRuntime, pr
     setForm(providerForm(key === newProvider ? null : providers.find(provider => provider.key === key) ?? null, listing.defaultProvider, listing.providerTypes));
   }
   const edit = (change: Partial<ProviderForm>) => setForm(current => current ? { ...current, ...change } : current);
+  // What a blank field falls back to: this provider's built-in values, then its adapter type's.
+  const fallback = (field: keyof GlobalConfigProviderDefaults) => form ? providerDefault(field, form.type, original, listing?.typeDefaults ?? []) : null;
 
   async function settle(run: () => Promise<{ status: string; message: string | null; providersApplied: number }>, select: string | null) {
     setBusy(true); setNotice(null); setDiagnostic(null);
@@ -153,22 +171,24 @@ export function ProviderSettings({ epoch, config = globalConfig, readRuntime, pr
               <HTMLSelect id="provider-type" fill value={form.type} disabled={busy} onChange={event => edit({ type: event.target.value })}
                 options={[...new Set([form.type, ...listing.providerTypes])]} /></FormGroup>
             <FormGroup label={t("Display name")} labelFor="provider-name">
-              <InputGroup id="provider-name" value={form.displayName} disabled={busy} onChange={event => edit({ displayName: event.target.value })} placeholder={original?.effectiveName ?? ""} /></FormGroup>
+              <DefaultedInput id="provider-name" value={form.displayName} fallback={fallback("displayName") ?? (form.key.trim() || null)} disabled={busy} onChange={displayName => edit({ displayName })} /></FormGroup>
             <FormGroup label={t("Default model")} labelFor="provider-model">
-              <InputGroup id="provider-model" value={form.model} disabled={busy} spellCheck={false} onChange={event => edit({ model: event.target.value })} placeholder={t("Provider default")} /></FormGroup>
+              <DefaultedInput id="provider-model" value={form.model} fallback={fallback("model")} disabled={busy} onChange={model => edit({ model })} /></FormGroup>
             <FormGroup label={t("Reasoning")} labelFor="provider-reasoning">
               <HTMLSelect id="provider-reasoning" fill value={form.reasoningEffort} disabled={busy} onChange={event => edit({ reasoningEffort: event.target.value })}>
-                <option value="">{t("Model default")}</option>
+                <option value="">{fallback("reasoningEffort") ? t("Default ({value})", { value: fallback("reasoningEffort")! }) : t("Model default")}</option>
                 {[...new Set([...(form.reasoningEffort ? [form.reasoningEffort] : []), ...listing.reasoningEfforts])].map(effort => <option key={effort} value={effort}>{effort}</option>)}
               </HTMLSelect></FormGroup>
             <FormGroup label={t("API URL")} labelFor="provider-url">
-              <InputGroup id="provider-url" value={form.apiUrl} disabled={busy} spellCheck={false} onChange={event => edit({ apiUrl: event.target.value })}
-                placeholder={original?.effectiveApiUrl ?? "https://"} /></FormGroup>
+              <DefaultedInput id="provider-url" value={form.apiUrl} fallback={fallback("apiUrl") ?? original?.effectiveApiUrl ?? null} disabled={busy} onChange={apiUrl => edit({ apiUrl })} /></FormGroup>
             {usesAccountSignIn(form.type)
-              ? <Callout compact className="provider-settings-wide" icon={<AppIcon name="info" size={16} />}>{t("This provider signs in with its account. Sign in from the terminal app (altatui); the desktop app uses the same stored credentials.")}</Callout>
+              ? original && original.type === form.type
+                ? <ProviderAccount epoch={epoch} providerKey={original.key} api={login} blocked={dirty ? "Save before signing in." : null}
+                  onChanged={() => { selectAfterLoad.current = original.key; setGeneration(value => value + 1); onApplied?.(); }} />
+                : <Callout compact className="provider-settings-wide" icon={<AppIcon name="user" size={16} />}>{t("This provider signs in with its account. Save it, then sign in here.")}</Callout>
               : <>
                 <FormGroup label={t("API key environment variable")} labelFor="provider-key-env" helperText={t("Preferred: the key stays out of the configuration file.")}>
-                  <InputGroup id="provider-key-env" value={form.apiKeyEnv} disabled={busy} spellCheck={false} onChange={event => edit({ apiKeyEnv: event.target.value })} placeholder="MY_PROVIDER_API_KEY" /></FormGroup>
+                  <DefaultedInput id="provider-key-env" value={form.apiKeyEnv} fallback={fallback("apiKeyEnv")} disabled={busy} onChange={apiKeyEnv => edit({ apiKeyEnv })} /></FormGroup>
                 <FormGroup label={t("API key")} labelFor="provider-secret" helperText={original?.hasApiKey ? t("A key is stored in the configuration file. Leave blank to keep it.") : t("Stored as plain text in the configuration file.")}>
                   <InputGroup id="provider-secret" type="password" autoComplete="off" value={form.apiKey} disabled={busy || form.clearApiKey}
                     onChange={event => edit({ apiKey: event.target.value })} placeholder={original?.hasApiKey ? "••••••••" : ""} />

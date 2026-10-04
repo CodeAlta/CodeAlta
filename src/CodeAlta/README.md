@@ -300,8 +300,15 @@ A stored API key is never sent to the page: leaving the field blank keeps it, an
 stored key** clears it. Settings the form does not show (timeouts, request overrides, compaction and
 so on) are preserved, but this structured save rewrites the file without its comments and blank
 lines, exactly like the TUI's provider dialog; use **Configuration file** to keep hand formatting.
-Account sign-in for Codex, Copilot and xAI is still done from `altatui`. The default provider shown
-here is `[chat] default_provider`; the host's own inventory marks every registered provider as
+A field left blank uses its default: the field shows that default as its placeholder with a
+**Default** tag (the provider's built-in value, otherwise the one of its adapter type), and a field
+with a value has a button that returns it to the default. Codex, Copilot and xAI sign in with their
+account from the form's **Account** block: it shows whether the stored sign-in is valid and for which
+account, a button per sign-in method (**Sign in with the browser**, **Sign in with a device code**)
+and **Sign out**. A sign-in opens the provider's page in the system browser and shows the address,
+and the code to enter for a device flow, each with a copy button, until it completes or is canceled;
+a provider that was disabled is enabled when its sign-in succeeds. Save a new or edited provider
+before signing in. The default provider shown here is `[chat] default_provider`; the host's own inventory marks every registered provider as
 default, so it is not used for that.
 
 **Provider defaults.** `globalConfig.providers` also reports what a blank field falls back to. Each provider carries
@@ -348,8 +355,8 @@ editor shows the file's content, including any credentials stored in it. Catalog
 the browser demo report the editor as unavailable.
 
 ChatGPT subscription providers use the same token-sharing implementation and global credential
-store as the TUI. Sign in using **Continue with ChatGPT** in `altatui`, then use that configured
-provider in the owned desktop. Existing legacy Codex credentials require a new sign-in; device
+store as the TUI. Sign in from **Settings → Providers** (or with **Continue with ChatGPT** in `altatui`),
+then use that configured provider in the owned desktop. Existing legacy Codex credentials require a new sign-in; device
 login and credential import are no longer supported. No desktop-only OAuth flow or storage is added.
 
 The **Agent prompts** Settings section (or `Ctrl+G`, then `Ctrl+H`) lists agent prompts and system

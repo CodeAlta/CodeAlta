@@ -1381,3 +1381,12 @@ dialog.session-browser .session-batch-delete summary { cursor: pointer; color: v
 .project-context-changes [data-change="added"] { color: var(--green); }
 .project-context-changes [data-change="removed"] { color: var(--red); }
 .composer-status-end { margin-left: auto; }
+
+/* Providers: default markers on blank fields and the account sign-in block. */
+.provider-default-tag.bp6-tag { margin: 5px 6px 0 0; color: var(--muted); }
+.provider-account { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); }
+.provider-account-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; }
+.provider-account-running p { margin: 0 0 6px; }
+.provider-account-copy { display: flex; align-items: center; gap: 6px; min-width: 0; margin-bottom: 6px; }
+.provider-account-copy > code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.provider-account-code > code { padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 18px; font-weight: 700; letter-spacing: .12em; background: var(--panel); }

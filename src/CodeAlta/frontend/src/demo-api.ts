@@ -96,6 +96,7 @@ export const sessionOperations = Object.freeze({
 export const sessionAsks = Object.freeze({ answer: unavailable, cancel: unavailable, list: emptyPage, observe: unavailable });
 export const sessionNotes = Object.freeze({ current: unavailable });
 export const sessionPluginEvents = Object.freeze({ read: unavailable });
+export const providerLogin = Object.freeze({ status: unavailable, login: unavailable, logout: unavailable });
 export const projectFiles = Object.freeze({ read: unavailable, write: unavailable });
 export const projectGit = Object.freeze({ status: unavailable });
 export const sessionUserInput = Object.freeze({ cancel: unavailable, list: emptyPage, resolve: unavailable });
