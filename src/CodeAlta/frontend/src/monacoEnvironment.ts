@@ -12,15 +12,53 @@ import EditorWorker from "monaco-editor/editor/editor.worker.js?worker";
 globalThis.MonacoEnvironment = Object.freeze({ getWorker: () => new EditorWorker() });
 
 // Inline code in Markdown stands out in the same red as in the rendered messages (Blueprint red 4 / red 2).
-monaco.editor.defineTheme("codealta-dark", { base: "vs-dark", inherit: true, colors: {}, rules: [{ token: "variable.md", foreground: "e76a6e" }] });
-monaco.editor.defineTheme("codealta-light", { base: "vs", inherit: true, colors: {}, rules: [{ token: "variable.md", foreground: "ac2f33" }] });
+const themes = { dark: { base: "vs-dark", inline: "e76a6e" }, light: { base: "vs", inline: "ac2f33" } } as const;
+monaco.editor.defineTheme("codealta-dark", { base: themes.dark.base, inherit: true, colors: {}, rules: [{ token: "variable.md", foreground: themes.dark.inline }] });
+monaco.editor.defineTheme("codealta-light", { base: themes.light.base, inherit: true, colors: {}, rules: [{ token: "variable.md", foreground: themes.light.inline }] });
 
-/** Keeps Monaco's theme in step with the shell theme; returns the disposer. */
+// The color a custom property resolves to on the root, as #rrggbb; undefined when it is not an opaque color.
+function shellColor(probe: HTMLElement, property: string): string | undefined {
+  probe.style.color = `var(${property})`;
+  const channels = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(getComputedStyle(probe).color);
+  return channels ? `#${channels.slice(1).map(channel => Number(channel).toString(16).padStart(2, "0")).join("")}` : undefined;
+}
+
+// A color scheme tints the editor like the panels around it; Blueprint's own palette keeps Monaco's surfaces.
+function applyShellTheme() {
+  const root = document.documentElement;
+  const mode = root.dataset.theme === "light" ? "light" : "dark";
+  if (!root.dataset.colorScheme) { monaco.editor.setTheme(`codealta-${mode}`); return; }
+  const probe = root.appendChild(document.createElement("span"));
+  const color = (property: string) => shellColor(probe, property);
+  const colors: Record<string, string> = {};
+  const set = (key: string, value: string | undefined, alpha = "") => { if (value) colors[key] = value + alpha; };
+  set("editor.background", color("--panel"));
+  set("editor.foreground", color("--text"));
+  set("editorLineNumber.foreground", color("--muted"), "b0");
+  set("editorLineNumber.activeForeground", color("--text"));
+  set("editorCursor.foreground", color("--accent"));
+  set("editor.selectionBackground", color("--accent"), "55");
+  set("editor.inactiveSelectionBackground", color("--accent"), "30");
+  set("editor.lineHighlightBackground", color("--text"), "0d");
+  set("editor.lineHighlightBorder", color("--text"), "00");
+  set("editorIndentGuide.background1", color("--text"), "1a");
+  set("editorWidget.background", color("--panel-2"));
+  set("editorWidget.border", color("--text"), "33");
+  set("input.background", color("--bg"));
+  set("scrollbarSlider.background", color("--text"), "26");
+  set("scrollbarSlider.hoverBackground", color("--text"), "40");
+  set("scrollbarSlider.activeBackground", color("--text"), "59");
+  const inline = color("--inline-code-text")?.slice(1) ?? themes[mode].inline;
+  probe.remove();
+  monaco.editor.defineTheme("codealta-scheme", { base: themes[mode].base, inherit: true, colors, rules: [{ token: "variable.md", foreground: inline }] });
+  monaco.editor.setTheme("codealta-scheme");
+}
+
+/** Keeps Monaco's theme in step with the shell theme and color scheme; returns the disposer. */
 export function followShellTheme(): () => void {
-  const apply = () => monaco.editor.setTheme(document.documentElement.dataset.theme === "light" ? "codealta-light" : "codealta-dark");
-  apply();
-  const observer = new MutationObserver(apply);
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  applyShellTheme();
+  const observer = new MutationObserver(applyShellTheme);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-color-scheme"] });
   return () => observer.disconnect();
 }
 

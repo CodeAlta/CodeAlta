@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { colorSchemeIds, colorSchemeStorageKey, defaultColorScheme } from "./colorSchemes";
 import type { PreferenceIssue } from "./localization";
 import { readRecentSessionCount, recentSessionCountKey, validRecentSessionCount } from "./recentSessions";
 import { persistProjectSort, projectSortStorageKey, type ProjectSort } from "./projectRail";
@@ -35,7 +36,7 @@ function useSystemDark(): boolean {
   return dark;
 }
 export const themeStorageKey = "codealta.desktop.theme.v1";
-type Preference = "theme" | "sort" | "rail" | "recent";
+type Preference = "theme" | "scheme" | "sort" | "rail" | "recent";
 export type PreferenceNotices = Partial<Record<Preference, PreferenceIssue>>;
 
 function readPreference<T extends string>(key: string, valid: readonly T[], fallback: T): { value: T; notice?: PreferenceIssue } {
@@ -52,16 +53,18 @@ function readPreference<T extends string>(key: string, valid: readonly T[], fall
 export function useWindowPreferences() {
   const [initial] = useState(() => ({
     theme: readPreference(themeStorageKey, themes, "dark"),
+    scheme: readPreference(colorSchemeStorageKey, colorSchemeIds, defaultColorScheme),
     recent: readRecentSessionCount(() => localStorage.getItem(recentSessionCountKey)),
     sort: readPreference(projectSortStorageKey, ["name", "recent"], "name"),
     rail: readPreference(projectRailVisibilityKey, ["expanded", "collapsed"], "expanded"),
   }));
   const [theme, updateTheme] = useState<Theme>(initial.theme.value);
+  const [colorScheme, updateColorScheme] = useState(initial.scheme.value);
   const [recentSessionCount, updateRecent] = useState(initial.recent.value);
   const [projectSort, updateSort] = useState<ProjectSort>(initial.sort.value);
   const [railState, updateRail] = useState<ProjectRailState>({ desktopCollapsed: initial.rail.value === "collapsed", narrowOpen: false });
   const railCurrent = useRef(railState);
-  const [notices, setNotices] = useState<PreferenceNotices>({ theme: initial.theme.notice, sort: initial.sort.notice, rail: initial.rail.notice, recent: initial.recent.issue });
+  const [notices, setNotices] = useState<PreferenceNotices>({ theme: initial.theme.notice, scheme: initial.scheme.notice, sort: initial.sort.notice, rail: initial.rail.notice, recent: initial.recent.issue });
 
   function setRecentSessionCount(value: number) {
     if (!validRecentSessionCount(value)) return;
@@ -78,6 +81,11 @@ export function useWindowPreferences() {
     updateTheme(value);
     save("theme", () => { try { localStorage.setItem(themeStorageKey, value); return true; } catch { return false; } });
   }
+  function setColorScheme(value: string) {
+    if (!colorSchemeIds.includes(value)) return;
+    updateColorScheme(value);
+    save("scheme", () => { try { localStorage.setItem(colorSchemeStorageKey, value); return true; } catch { return false; } });
+  }
   function setProjectSort(value: ProjectSort) {
     updateSort(value);
     save("sort", () => persistProjectSort(value => localStorage.setItem(projectSortStorageKey, value), value));
@@ -92,5 +100,5 @@ export function useWindowPreferences() {
   function closeNarrowRail() { changeRail(resetNarrowRail(railCurrent.current), false); }
 
   const shownTheme = effectiveTheme(theme, useSystemDark());
-  return { theme, shownTheme, setTheme, projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices, recentSessionCount, setRecentSessionCount };
+  return { theme, shownTheme, setTheme, colorScheme, setColorScheme, projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices, recentSessionCount, setRecentSessionCount };
 }

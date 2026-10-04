@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import { Button, ButtonGroup, Card, HTMLSelect, Switch } from "@blueprintjs/core";
 import { AppIcon, type IconName } from "./AppIcon";
 import type { ProjectSort } from "./projectRail";
-import { themeLabel, themes, type Theme, type PreferenceNotices } from "./windowPreferences";
+import { colorSchemes } from "./colorSchemes";
+import { themeLabel, themes, type EffectiveTheme, type Theme, type PreferenceNotices } from "./windowPreferences";
 import { useShellLanguage } from "./shellLanguage";
 import { locales, languageNames, preferenceNotice } from "./localization";
 
@@ -18,9 +19,13 @@ function Field({ label, htmlFor, notice, children }: { label: string; htmlFor?: 
   </div>;
 }
 
-export function GeneralSettings({ theme, setTheme, sort, setSort, desktopCollapsed, setDesktopCollapsed, notices, recentSessionCount, setRecentSessionCount }: {
+export function GeneralSettings({ theme, setTheme, shownTheme, colorScheme, setColorScheme, sort, setSort, desktopCollapsed, setDesktopCollapsed, notices, recentSessionCount, setRecentSessionCount }: {
   theme: Theme;
   setTheme: (value: Theme) => void;
+  /** The theme on screen, which decides the variant of each scheme that is previewed. */
+  shownTheme: EffectiveTheme;
+  colorScheme: string;
+  setColorScheme: (value: string) => void;
   sort: ProjectSort;
   setSort: (value: ProjectSort) => void;
   desktopCollapsed: boolean;
@@ -44,6 +49,18 @@ export function GeneralSettings({ theme, setTheme, sort, setSort, desktopCollaps
         {themes.map(value => <Button key={value} active={theme === value} aria-pressed={theme === value}
           icon={<AppIcon name={themeIcons[value]} size={15} />} onClick={() => setTheme(value)}>{t(themeLabel(value))}</Button>)}
       </ButtonGroup>
+    </Field>
+    <Field label={t("Color scheme")}
+      notice={notices.scheme && <p role="status" className="notice" data-diagnostic={notices.scheme}>{preferenceNotice(locale, "Color scheme", "Blueprint", notices.scheme)}</p>}>
+      <div className="color-scheme-grid" role="radiogroup" aria-label={t("Color scheme")}>
+        {colorSchemes.map(scheme => {
+          const swatch = scheme[shownTheme];
+          return <Button key={scheme.id} role="radio" aria-checked={colorScheme === scheme.id} active={colorScheme === scheme.id} alignText="start"
+            icon={<span className="color-scheme-swatch" aria-hidden="true" style={{ background: swatch.background, borderColor: swatch.tint }}>
+              <i style={{ background: swatch.foreground }} /><i style={{ background: swatch.tint }} /><i style={{ background: swatch.accent }} /></span>}
+            onClick={() => setColorScheme(scheme.id)}>{scheme.name}</Button>;
+        })}
+      </div>
     </Field>
     <Field label={t("Sort projects")} htmlFor="settings-project-sort"
       notice={notices.sort && <p role="status" className="notice" data-diagnostic={notices.sort}>{preferenceNotice(locale, "Project sort", locale === "en" ? "name" : t("Name"), notices.sort)}</p>}>

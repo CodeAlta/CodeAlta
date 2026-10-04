@@ -17,7 +17,7 @@ const snapshot: WorkspaceSnapshot = {
 };
 
 function Window() {
-  const { theme, setTheme, projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices, recentSessionCount, setRecentSessionCount } = useWindowPreferences();
+  const { theme, shownTheme, setTheme, colorScheme, setColorScheme, projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices, recentSessionCount, setRecentSessionCount } = useWindowPreferences();
   const [settings, setSettings] = useState(true);
   const [narrow, setNarrow] = useState(window.innerWidth <= 875);
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
@@ -29,7 +29,7 @@ function Window() {
   const visible = projectRailVisible(railState, narrow);
   return <><header><button type="button" onClick={() => setSettings(!settings)}>{settings ? "Workspace" : "Settings"}</button>
     <button type="button" aria-controls="project-rail" aria-expanded={visible} onClick={() => toggleRail(narrow)}>Projects</button></header>
-    {settings ? <main className="configuration-page"><div className="settings-grid"><GeneralSettings theme={theme} setTheme={setTheme}
+    {settings ? <main className="configuration-page"><div className="settings-grid"><GeneralSettings theme={theme} setTheme={setTheme} shownTheme={shownTheme} colorScheme={colorScheme} setColorScheme={setColorScheme}
       sort={projectSort} setSort={setProjectSort} desktopCollapsed={railState.desktopCollapsed}
       setDesktopCollapsed={setDesktopCollapsed} notices={notices} recentSessionCount={recentSessionCount} setRecentSessionCount={setRecentSessionCount} /></div></main>
       : <main><aside id="project-rail" hidden={!visible} aria-label="Projects"><HTMLSelect id="project-sort" aria-label="Sort projects" value={projectSort}

@@ -682,6 +682,7 @@ export const messages = dictionary({
   "The sign-in timed out. Start it again.": ["El inicio de sesión agotó el tiempo. Inícialo de nuevo.", "La connexion a expiré. Recommencez.", "Zeitüberschreitung bei der Anmeldung. Starten Sie sie erneut.", "サインインがタイムアウトしました。もう一度開始してください。", "登录超时。请重新开始。"],
   "Another sign-in is already running.": ["Ya hay otro inicio de sesión en curso.", "Une autre connexion est déjà en cours.", "Eine andere Anmeldung läuft bereits.", "別のサインインが既に実行中です。", "另一个登录正在进行中。"],
   "The app restarted; reopen Settings and try again.": ["La aplicación se reinició; vuelve a abrir Configuración e inténtalo de nuevo.", "L'application a redémarré ; rouvrez les paramètres et réessayez.", "Die App wurde neu gestartet; öffnen Sie die Einstellungen erneut und versuchen Sie es noch einmal.", "アプリが再起動しました。設定を開き直してもう一度お試しください。", "应用已重新启动；请重新打开设置后重试。"],
+  "Color scheme": ["Esquema de colores", "Jeu de couleurs", "Farbschema", "配色", "配色方案"],
   "Open settings": ["Abrir configuración", "Ouvrir les paramètres", "Einstellungen öffnen", "設定を開く", "打开设置"],
   "Copy project name": ["Copiar nombre del proyecto", "Copier le nom du projet", "Projektnamen kopieren", "プロジェクト名をコピー", "复制项目名称"],
   "Copy project ID": ["Copiar ID del proyecto", "Copier l'ID du projet", "Projekt-ID kopieren", "プロジェクト ID をコピー", "复制项目 ID"],

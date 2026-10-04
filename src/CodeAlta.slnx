@@ -64,4 +64,5 @@
   <Folder Name="/tools/">
     <Project Path="CodeAlta.Acp.Generator/CodeAlta.Acp.Generator.csproj" />
     <Project Path="CodeAlta.Agent.ModelsDev.Updater/CodeAlta.Agent.ModelsDev.Updater.csproj" />
+    <Project Path="CodeAlta.ColorSchemes.Generator/CodeAlta.ColorSchemes.Generator.csproj" />
   </Folder></Solution>
