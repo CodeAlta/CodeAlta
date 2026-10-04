@@ -3,6 +3,7 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Tui.App.State;
 using CodeAlta.Catalog;
+using CodeAlta.LiveTool;
 using CodeAlta.Tui.Models;
 using CodeAlta.Tui.Presentation.Prompting;
 using CodeAlta.Orchestration.Runtime;

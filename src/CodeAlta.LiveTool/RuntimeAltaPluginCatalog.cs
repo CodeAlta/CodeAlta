@@ -1,23 +1,30 @@
-using CodeAlta.LiveTool;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
 
-namespace CodeAlta.Tui.App;
+namespace CodeAlta.LiveTool;
 
-internal sealed class RuntimeAltaPluginCatalog(PluginRuntimeManager runtime) : IAltaPluginCatalog
+/// <summary>
+/// The plugin catalog of the <c>alta</c> commands over a host's plugin runtime: its active plugins and the
+/// <c>alta</c> commands they contribute, as they are when asked.
+/// </summary>
+/// <param name="runtime">The host's plugin runtime.</param>
+public sealed class RuntimeAltaPluginCatalog(PluginRuntimeManager runtime) : IAltaPluginCatalog
 {
+    /// <inheritdoc />
     public IReadOnlyList<AltaPluginSummary> ListPlugins()
         => runtime.ActivePlugins
             .Select(CreateSummary)
             .OrderBy(static plugin => plugin.RuntimeKey, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
+    /// <inheritdoc />
     public AltaPluginSummary? GetPlugin(string runtimeKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(runtimeKey);
         return ListPlugins().FirstOrDefault(plugin => string.Equals(plugin.RuntimeKey, runtimeKey, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <inheritdoc />
     public IReadOnlyList<AltaCommandPolicy> ListCommandPolicies()
         => ListCommandContributions()
             .Select(static registration => new AltaCommandPolicy
@@ -30,6 +37,7 @@ internal sealed class RuntimeAltaPluginCatalog(PluginRuntimeManager runtime) : I
             })
             .ToArray();
 
+    /// <inheritdoc />
     public IReadOnlyList<AltaPluginCommandContribution> ListCommandContributions()
     {
         var activePlugins = runtime.ActivePlugins.ToDictionary(plugin => plugin.Descriptor.RuntimeKey, StringComparer.OrdinalIgnoreCase);

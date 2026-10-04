@@ -1982,12 +1982,14 @@ function createSessionPaneOwners() {
   };
 }
 
-// The working folder shown beside a composer (global sessions have none) and the plugin status items above it.
-function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["projects"][number] | undefined): ComposerChromeValue {
+// The working folder shown beside a composer (global sessions have none) and the plugin status items above
+// it, which are those of the composer's session once it has one.
+function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["projects"][number] | undefined, sessionId: string | null = null): ComposerChromeValue {
   const id = project?.id, name = project?.name, path = project?.path;
   return useMemo(() => ({ context: id !== undefined && name !== undefined && path !== undefined
     ? <ProjectContext epoch={epoch} project={{ id, name, path }} read={projectGit.status} /> : undefined,
-  status: epoch ? <ComposerStatus epoch={epoch} projectId={id ?? null} read={composerStatus.read} /> : undefined }), [epoch, id, name, path]);
+  status: epoch ? <ComposerStatus epoch={epoch} projectId={id ?? null} sessionId={sessionId} read={composerStatus.read} /> : undefined }),
+  [epoch, id, name, path, sessionId]);
 }
 
 function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, timelineImages, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity }: {
@@ -2105,7 +2107,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   }, [outgoingCount]);
   const pluginEpoch = ownedHost ? status!.hostEpoch! : null;
   const sessionProject = snapshot.projects.find(project => project.id === selectedProjectId);
-  const chrome = useComposerChrome(pluginEpoch, sessionProject);
+  const chrome = useComposerChrome(pluginEpoch, sessionProject, session.id);
   const readPluginEvents = useMemo(() => pluginEpoch === null ? undefined
     : createPluginEventsRead(sessionPluginEvents.read, { epoch: pluginEpoch, sessionId: session.id, projectId: selectedProjectId }),
   [pluginEpoch, session.id, selectedProjectId]);

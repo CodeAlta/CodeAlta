@@ -1,6 +1,7 @@
 using System.Runtime.ExceptionServices;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Orchestration.Runtime.Prompts;
 
 namespace CodeAlta.Orchestration.Runtime;
@@ -134,6 +135,16 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     /// </remarks>
     public Func<OwnedSessionToolRequest, IReadOnlyList<AgentToolDefinition>>? SessionTools { get; set; }
 
+    /// <summary>
+    /// The host's plugins. Every send asks them for the tools, instructions and input they add to the run
+    /// (the tools of the MCP servers a session activated, for example); with no active plugin nothing changes.
+    /// </summary>
+    /// <remarks>
+    /// What plugins add may change between two sends of a session, as when a run activates an MCP server:
+    /// the next send then replaces the session's attachment, which is how its tools reach the provider.
+    /// </remarks>
+    public PluginOrchestrationBridge? Plugins { get; init; }
+
     private IReadOnlyList<AgentToolDefinition> ToolsFor(string? sessionId, string? projectId, string workingDirectory, string providerKey)
         => SessionTools?.Invoke(new(sessionId, projectId, workingDirectory, providerKey)) ?? [];
 
@@ -156,8 +167,15 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             project is null ? [] : [directory], project, provider.DefaultModelId, provider.DefaultReasoningEffort, null);
         var options = SessionExecutionPolicy.BuildOptions(policy, ToolsFor(null, project?.Id, directory, provider.ProviderId.Value),
             _runtime.Permissions.OwnedDefaultPermissionHandler, _runtime.Permissions.OwnedDefaultUserInputHandler);
-        return project is null ? _runtime.CreateGlobalSessionAsync(options, title, CancellationToken.None)
-            : _runtime.CreateProjectSessionAsync(project, options, title, CancellationToken.None);
+        return Plugins is null ? Create(options) : CreateWithPluginsAsync(Plugins, options);
+
+        Task<SessionViewDescriptor> Create(SessionExecutionOptions options)
+            => project is null ? _runtime.CreateGlobalSessionAsync(options, title, CancellationToken.None)
+                : _runtime.CreateProjectSessionAsync(project, options, title, CancellationToken.None);
+
+        // With what plugins give every run of this scope, so the first send keeps this attachment.
+        async Task<SessionViewDescriptor> CreateWithPluginsAsync(PluginOrchestrationBridge plugins, SessionExecutionOptions options)
+            => await Create(await plugins.AugmentNewSessionAsync(options, project?.Id, CancellationToken.None).ConfigureAwait(false)).ConfigureAwait(false);
     }
 
     /// <summary>Renames only an exact catalog session without changing its active run.</summary>
@@ -825,13 +843,21 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 policy, ToolsFor(session.SessionId, project?.Id, project?.ProjectPath ?? _catalog.GlobalRoot, session.ResolvedProviderKey),
                 _runtime.Permissions.OwnedDefaultPermissionHandler,
                 _runtime.Permissions.OwnedDefaultUserInputHandler);
+            if (Plugins is not null)
+            {
+                // Contacts the MCP servers the session activated, so it follows the send's cancellation.
+                var augmented = await Plugins.AugmentRunAsync(options, input, session.ProjectRef, session.SessionId, operation.Execution.Token).ConfigureAwait(false);
+                if (augmented.CancelReason is not null) throw new InvalidOperationException("A plugin cancelled the run: " + augmented.CancelReason);
+                (options, input) = (augmented.ExecutionOptions, augmented.Input);
+            }
             if (selection is null)
                 await _runtime.EnsureOwnedCoordinatorSessionAsync(session, options).ConfigureAwait(false);
             else
                 await _runtime.EnsureOwnedCoordinatorSessionAsync(session, options, useExplicitPrompt: true).ConfigureAwait(false);
             return new Prepared(session, options, input);
         }
-        catch (OperationCanceledException) when ((operation.Request.References is not null || operation.Request.Images is { Count: > 0 }) && operation.Execution.IsCancellationRequested) { throw; }
+        catch (OperationCanceledException) when ((operation.Request.References is not null || operation.Request.Images is { Count: > 0 } || Plugins is not null)
+            && operation.Execution.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             RecordFailure(ex, cleanup: false, operation.ReleaseDecision);

@@ -11,13 +11,14 @@ type Read = (request: ComposerStatusRequest, options: { signal: AbortSignal; tim
 const icons: Readonly<Record<string, IconName>> = { mcp: "server" };
 
 /**
- * The plugin status items at the end of the composer's status line (the MCP servers, for example). They are
- * read when the composer appears, every ten seconds while it stays and when the window gets the focus back,
- * so a change made in Settings shows up without a reload. An item that names a Settings page opens it.
+ * The plugin status items at the end of the composer's status line (the MCP servers and the tools the
+ * session activated, for example). They are read when the composer appears, every ten seconds while it
+ * stays and when the window gets the focus back, so a change made in Settings or by a run shows up without
+ * a reload. An item that names a Settings page opens it.
  */
-export function ComposerStatus({ epoch, projectId, read }: { epoch: string | null; projectId: string | null; read: Read }) {
+export function ComposerStatus({ epoch, projectId, sessionId, read }: { epoch: string | null; projectId: string | null; sessionId: string | null; read: Read }) {
   const { t } = useShellLanguage();
-  const [shown, setShown] = useState<{ projectId: string | null; items: readonly ComposerStatusView[] }>();
+  const [shown, setShown] = useState<{ projectId: string | null; sessionId: string | null; items: readonly ComposerStatusView[] }>();
   useEffect(() => {
     if (!epoch) return;
     const abort = new AbortController();
@@ -25,10 +26,11 @@ export function ComposerStatus({ epoch, projectId, read }: { epoch: string | nul
     const refresh = () => {
       if (reading || document.visibilityState === "hidden") return;
       reading = true;
-      void read({ expectedEpoch: epoch, projectId }, { signal: abort.signal, timeoutMilliseconds: 8000 })
+      void read({ expectedEpoch: epoch, projectId, sessionId }, { signal: abort.signal, timeoutMilliseconds: 8000 })
         .then(reply => {
           const items = abort.signal.aborted ? null : composerStatusItems(reply, projectId);
-          if (items) setShown(previous => previous && previous.projectId === projectId && sameComposerStatus(previous.items, items) ? previous : { projectId, items });
+          if (items) setShown(previous => previous && previous.projectId === projectId && previous.sessionId === sessionId
+            && sameComposerStatus(previous.items, items) ? previous : { projectId, sessionId, items });
         }, () => { /* The items simply stay as last read. */ })
         .finally(() => { reading = false; });
     };
@@ -36,8 +38,8 @@ export function ComposerStatus({ epoch, projectId, read }: { epoch: string | nul
     const timer = window.setInterval(refresh, refreshMilliseconds);
     window.addEventListener("focus", refresh);
     return () => { abort.abort(); window.clearInterval(timer); window.removeEventListener("focus", refresh); };
-  }, [epoch, projectId, read]);
-  const items = epoch && shown?.projectId === projectId ? shown.items : [];
+  }, [epoch, projectId, sessionId, read]);
+  const items = epoch && shown?.projectId === projectId && shown.sessionId === sessionId ? shown.items : [];
   if (items.length === 0) return null;
   return <span className="composer-plugin-status">{items.map(item => {
     const content = <>{icons[item.pluginId] && <AppIcon name={icons[item.pluginId]} size={12} />}

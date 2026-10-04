@@ -19,8 +19,8 @@ namespace CodeAlta.Desktop;
 /// the ones the Reminders view shows and delivers.
 /// </para>
 /// <para>
-/// Plugin commands (<c>alta mcp</c>, <c>alta statistics</c>) are absent: the desktop host does not start the
-/// plugin runtime.
+/// The commands of the host's active plugins (<c>alta mcp</c>, <c>alta statistics</c>) are part of the tool,
+/// and sessions that alta commands send to get the same plugin tools and instructions as sends from the window.
 /// </para>
 /// </remarks>
 internal static class DesktopAltaTools
@@ -28,12 +28,15 @@ internal static class DesktopAltaTools
     /// <summary>Composes the alta services over a host and makes them the session tool of its owned sessions.</summary>
     /// <param name="host">The running host.</param>
     /// <param name="reminders">The reminder service the window lists and delivers from.</param>
-    /// <exception cref="ArgumentNullException">An argument is null.</exception>
-    internal static void Attach(CodeAltaHost host, AltaReminderService reminders)
+    /// <param name="pluginAlta">The bridge through which the host's plugins invoke alta commands, if they can.</param>
+    /// <exception cref="ArgumentNullException">The host or the reminders are null.</exception>
+    internal static void Attach(CodeAltaHost host, AltaReminderService reminders, PluginAltaServiceBridge? pluginAlta = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(reminders);
-        host.Commands.SessionTools = CreateSessionTools(Compose(host, reminders));
+        var dispatcher = Compose(host, reminders);
+        pluginAlta?.SetDispatcher(dispatcher);
+        host.Commands.SessionTools = CreateSessionTools(dispatcher);
     }
 
     /// <summary>Builds the dispatcher of the alta commands over a host's services.</summary>
@@ -57,7 +60,10 @@ internal static class DesktopAltaTools
             .Add<IAltaSessionToolProviderPolicy>(new AltaSessionToolProviderPolicy())
             .Add<IAltaSessionInteractionDefaults>(new AltaSessionInteractionDefaults(
                 permissions.OwnedDefaultPermissionHandler, permissions.OwnedDefaultUserInputHandler))
-            .Add(reminders);
+            .Add(reminders)
+            // The plugins as they are when a command runs; without an active plugin both add nothing.
+            .Add<IAltaPluginCatalog>(new RuntimeAltaPluginCatalog(host.PluginRuntime))
+            .AddPluginRuntimeHooks(host.PluginRuntime);
         var registry = new AltaCommandRegistry();
         var dispatcher = new AltaCommandDispatcher(registry, services);
         services.Add(registry).Add(dispatcher);

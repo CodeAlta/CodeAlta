@@ -2,6 +2,7 @@ using CodeAlta.Desktop.Rpc;
 using System.Collections.Frozen;
 using CodeAlta.Catalog;
 using CodeAlta.Hosting;
+using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra;
@@ -131,6 +132,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             };
             window.Show();
             var catalog = new CatalogOptions { GlobalRoot = options.CatalogRoot!, StateRoot = options.StateRoot ?? options.CatalogRoot! };
+            // Plugins read the user's profile (the MCP servers and their sign-ins, the GitHub CLI): they
+            // run in the normal launch and stay off when the roots are explicit.
+            var pluginAlta = roots.Home is null ? new PluginAltaServiceBridge() : null;
             _hostCreation = CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
                 GlobalRoot = options.CatalogRoot, StateRoot = options.StateRoot, CurrentProjectPath = roots.Project,
@@ -143,7 +147,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 AutoApproveOwnedPermissions = !options.ReviewOwnedCommandPermissions,
                 EnableOwnedAsks = true,
                 EnableOwnedUserInput = options.EnableOwnedUserInput,
-                StartPlugins = false, OwnsLogging = false, IsHeadless = true,
+                // Headless: plugins get no terminal, and source plugins build without startup feedback.
+                StartPlugins = pluginAlta is not null, OwnsLogging = false, IsHeadless = true,
+                PluginBuiltIns = DesktopPlugins.BuiltIns, PluginSafeMode = DesktopPlugins.SafeMode,
+                PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta),
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!),
             }, CancellationToken.None);
@@ -159,6 +166,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             });
             await AwaitOwnedAsync(_hostCreation, window);
             var host = await _hostCreation;
+            DesktopPlugins.LogStartupDiagnostics(host.PluginRuntime);
             if (!closeRequested.Task.IsCompleted)
             {
                 var epoch = Guid.NewGuid().ToString("D");
@@ -166,7 +174,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 operations = new SessionOperationsService(host.Commands, epoch);
                 asks = new SessionAsksService(host.Commands.Asks, epoch);
                 reminders = new ReminderService(host.WorkspaceReads, host.Commands, epoch);
-                DesktopAltaTools.Attach(host, reminders.Reminders);
+                DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta);
                 workspacePrepared.TrySetResult();
                 var assets = Path.Combine(AppContext.BaseDirectory, "assets");
                 var manifest = NeoAssetManifest.Load(Path.Combine(assets, "neoastra-assets.json"));
@@ -225,7 +233,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddProjectFilesService(new ProjectFilesService(host.ProjectCatalog, epoch, host.ProjectFileSearchService));
                     builder.AddProjectGitService(new ProjectGitService(host.ProjectCatalog, epoch));
                     builder.AddPromptImagesService(new PromptImagesService(host.WorkspaceReads, epoch));
-                    builder.AddComposerStatusService(new ComposerStatusService(host.ProjectCatalog, epoch, roots.Home));
+                    builder.AddComposerStatusService(new ComposerStatusService(host.ProjectCatalog, epoch, roots.Home, host.PluginRuntime));
                     builder.AddSessionUserInputService(new SessionUserInputService(host.RuntimeService.Permissions, epoch, options.EnableOwnedUserInput));
                     builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));
                     builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(host.RuntimeService, epoch));

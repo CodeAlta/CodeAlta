@@ -7,14 +7,14 @@ using Tomlyn;
 namespace CodeAlta.Desktop.Rpc;
 
 /// <summary>
-/// Lists the plugins the desktop can see without a plugin runtime (source packages under the global and
+/// Lists the plugins of the Settings page from what is on disk (source packages under the global and
 /// project plugin folders, plus plugin ids named in configuration) and saves plugin enablement in the
 /// global or project configuration.
 /// </summary>
 /// <remarks>
-/// The desktop host does not build or load plugins and does not know the terminal's built-in plugin
-/// registry, so a built-in plugin is listed only when configuration names it. Enablement can still be
-/// saved for any well-formed plugin id; it takes effect in a host that loads plugins.
+/// The page lists the built-in plugins itself, so one is returned here only when configuration names
+/// it. Enablement can be saved for any well-formed plugin id; the plugin runtime reads it when the host
+/// starts.
 /// </remarks>
 [NeoRpcService("plugins", Version = 1)]
 internal sealed class PluginsService
@@ -80,7 +80,7 @@ internal sealed class PluginsService
                 });
             }
 
-            // No built-in definitions: the registry belongs to the terminal host.
+            // No built-in definitions: the page has their rows, whichever host runs them.
             var entries = _builder.Build([], _discovery.Discover(roots), global, local);
             var plugins = new List<PluginsEntry>();
             foreach (var entry in entries)

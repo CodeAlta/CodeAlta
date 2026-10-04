@@ -31,7 +31,7 @@ normal owned agent host for the current directory and `~/.alta`, matching the TU
 select an existing session and send a prompt immediately; the running agent appears in the live view
 while persisted events appear in its timeline. The desktop acquires the same runtime lock and may
 update project catalog, journal, cache and provider state. A submission may authenticate or use the
-configured provider's storage/network. Plugins remain disabled in this desktop host. Tool permissions
+configured provider's storage/network. The built-in plugins (MCP, GitHub, Statistics) and source plugins run in this desktop host as in the terminal UI. Tool permissions
 are automatically approved by default, matching TUI AutoApprove: commands and file writes use the
 host's privileges, not a project-root sandbox. Explicit command-review mode disables auto-approval;
 provider input remains separately opt-in. Desktop-owned WebView data stays under the platform-local `CodeAlta/desktop` directory, so

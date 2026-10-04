@@ -62,6 +62,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         {
             SelectionModels = modelProviderInitializationService.GetModelsAsync,
             ProjectFileSearch = projectFileSearchService,
+            Plugins = new PluginOrchestrationBridge(pluginRuntime.Adapter, () => pluginRuntime.ActivePlugins),
             ObservedImageModels = provider => modelProviderInitializationService.CurrentStates
                 .FirstOrDefault(state => state.ProviderId == provider && state.Descriptor.IsEnabled
                     && state.Availability == ModelProviderAvailability.Ready)?.Models ?? [],

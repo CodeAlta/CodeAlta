@@ -97,6 +97,27 @@ public sealed class McpPlugin : PluginBase
     /// <returns>The status item, or <see langword="null"/> when no MCP configuration exists.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is <see langword="null"/>.</exception>
     public static PluginStatusItem? CreateStatus(McpManagementSnapshot snapshot)
+        => CreateStatus(snapshot, new Dictionary<string, int>(), []);
+
+    /// <summary>
+    /// Describes the servers of a configuration snapshot as a status item for one session of the host that
+    /// runs this plugin: the tool part counts the tools of the servers the session activated.
+    /// </summary>
+    /// <param name="snapshot">The configuration snapshot of the session's project.</param>
+    /// <param name="sessionId">The session, or <see langword="null"/> for the project as a whole.</param>
+    /// <returns>The status item, or <see langword="null"/> when no MCP configuration exists.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is <see langword="null"/>.</exception>
+    public PluginStatusItem? CreateStatus(McpManagementSnapshot snapshot, string? sessionId)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var scope = McpActivationState.ResolveScopeKey(sessionId, snapshot.ProjectDirectory);
+        return CreateStatus(snapshot, _activationState.GetToolCounts(scope), _activationState.GetActiveServers(scope));
+    }
+
+    private static PluginStatusItem? CreateStatus(
+        McpManagementSnapshot snapshot,
+        IReadOnlyDictionary<string, int> activatedToolCounts,
+        IReadOnlyCollection<string> activeServers)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         var summary = snapshot.Summary;
@@ -109,8 +130,9 @@ public sealed class McpPlugin : PluginBase
         return new PluginStatusItem
         {
             Label = label,
-            Text = CreateStatusLabel(snapshot, new Dictionary<string, int>(), [])[(label.Length + 1)..],
-            Tone = summary.UnavailableServerCount > 0 ? PluginStatusTone.Warning : PluginStatusTone.Info,
+            Text = CreateStatusLabel(snapshot, activatedToolCounts, activeServers)[(label.Length + 1)..],
+            Tone = summary.UnavailableServerCount > 0 ? PluginStatusTone.Warning
+                : activeServers.Count > 0 ? PluginStatusTone.Success : PluginStatusTone.Info,
         };
     }
 

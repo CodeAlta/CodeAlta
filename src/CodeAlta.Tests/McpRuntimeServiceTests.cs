@@ -222,6 +222,43 @@ public sealed class McpRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task PluginStatus_CountsTheToolsOfTheServersASessionActivated()
+    {
+        using var project = TempDirectory.Create();
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null);
+        WriteProjectPolicy(
+            project.Path,
+            """
+            [plugins.mcp]
+            direct_exposure = "allowlist"
+
+            [plugins.mcp.servers.tiny]
+            direct_tools = ["echo"]
+            allowed_tools = ["echo"]
+            """);
+        var plugin = new McpPlugin();
+        McpManagementSnapshot Snapshot() => new McpManagementService().RefreshSnapshot(new McpManagementRequest { ProjectDirectory = project.Path, ProbeWritability = false });
+        var before = plugin.CreateStatus(Snapshot(), "session-a");
+
+        var stdout = new StringWriter(CultureInfo.InvariantCulture);
+        var stderr = new StringWriter(CultureInfo.InvariantCulture);
+        var app = new CommandApp("alta", "test") { plugin.GetAltaCommands().Single().CreateCommandNode(CreateAltaContext(stdout, stderr, project.Path, "session-a")) };
+        Assert.AreEqual(0, await app.RunAsync(["mcp", "activate", "tiny"], new CommandRunConfig { Out = TextWriter.Null, Error = stderr }), stderr.ToString());
+        var active = plugin.CreateStatus(Snapshot(), "session-a");
+        var other = plugin.CreateStatus(Snapshot(), "session-b");
+
+        // A host shows this per session: only the session that activated the server counts its tools.
+        Assert.IsNotNull(before);
+        Assert.AreEqual(PluginStatusTone.Info, before.Tone);
+        StringAssert.EndsWith(before.Text, "tools not loaded");
+        Assert.IsNotNull(active);
+        Assert.AreEqual("MCP", active.Label);
+        Assert.AreEqual(PluginStatusTone.Success, active.Tone);
+        StringAssert.EndsWith(active.Text, "active tools 1");
+        Assert.AreEqual(before, other);
+    }
+
+    [TestMethod]
     public async Task PluginBeforeAgentRun_WrapsIncompatibleMcpToolSchemaArgumentsJson()
     {
         using var project = TempDirectory.Create();

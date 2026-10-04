@@ -10,8 +10,19 @@ namespace CodeAlta.Orchestration.Runtime.Plugins;
 /// </summary>
 public sealed class PluginOrchestrationBridge
 {
+    private static readonly AsyncLocal<PluginAdapterOperationOptions?> ToolOperation = new();
     private readonly PluginContributionAdapterService _adapter;
     private readonly Func<IReadOnlyList<ActivePluginInstance>> _getActivePlugins;
+
+    /// <summary>
+    /// Gets the scope (project, session, provider) of the plugin tool call running on the current execution
+    /// flow, or <see langword="null"/> outside one.
+    /// </summary>
+    /// <remarks>
+    /// A tool handler only receives its invocation. A host that runs several sessions at once has no single
+    /// selected project, so its plugin services answer "the selected project" from this scope.
+    /// </remarks>
+    public static PluginAdapterOperationOptions? CurrentToolOperation => ToolOperation.Value;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PluginOrchestrationBridge"/> class.
@@ -92,11 +103,21 @@ public sealed class PluginOrchestrationBridge
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The plugin run augmentation.</returns>
     /// <exception cref="ArgumentNullException">Thrown when an argument is <see langword="null" />.</exception>
-    public async Task<PluginAgentRunAugmentation> BuildAgentRunAugmentationAsync(
+    public Task<PluginAgentRunAugmentation> BuildAgentRunAugmentationAsync(
         SessionExecutionOptions executionOptions,
         AgentInput input,
         PluginAdapterOperationOptions? options = null,
         CancellationToken cancellationToken = default)
+        => BuildAugmentationAsync(executionOptions, input, options, isRun: true, cancellationToken);
+
+    // A session that is only being created gets what plugins contribute to every run of its scope (their
+    // tools and prompt parts); the before-run hooks wait for a run.
+    private async Task<PluginAgentRunAugmentation> BuildAugmentationAsync(
+        SessionExecutionOptions executionOptions,
+        AgentInput input,
+        PluginAdapterOperationOptions? options,
+        bool isRun,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(executionOptions);
         ArgumentNullException.ThrowIfNull(input);
@@ -118,28 +139,30 @@ public sealed class PluginOrchestrationBridge
             Input = input,
             ActiveToolNames = (activeTools ?? []).Select(static tool => tool.Spec.Name).ToArray(),
         };
-        var before = await _adapter.BeforeAgentRunAsync(activePlugins, beforeTemplate, effectiveOptions, cancellationToken).ConfigureAwait(false);
-        if (before.Result.Cancel)
+        var before = isRun
+            ? (await _adapter.BeforeAgentRunAsync(activePlugins, beforeTemplate, effectiveOptions, cancellationToken).ConfigureAwait(false)).Result
+            : PluginBeforeAgentRunResult.Empty;
+        if (before.Cancel)
         {
             return new PluginAgentRunAugmentation
             {
-                CancelReason = before.Result.CancelReason ?? "Plugin cancelled the agent run.",
+                CancelReason = before.CancelReason ?? "Plugin cancelled the agent run.",
             };
         }
 
-        activeTools = MergeRunTools(activeTools, before.Result.AdditionalTools, effectiveOptions);
+        activeTools = MergeRunTools(activeTools, before.AdditionalTools, effectiveOptions);
         var systemParts = await _adapter.BuildSystemPromptPartsAsync(activePlugins, PluginPromptChannel.System, effectiveOptions.IsCodeAltaManagedProvider, effectiveOptions, cancellationToken).ConfigureAwait(false);
         var developerParts = await _adapter.BuildSystemPromptPartsAsync(activePlugins, PluginPromptChannel.Developer, effectiveOptions.IsCodeAltaManagedProvider, effectiveOptions, cancellationToken).ConfigureAwait(false);
         var systemText = await BuildPromptTextAsync(
             systemParts.Parts,
-            before.Result.TemporaryPromptContributions.Where(static part => part.Channel == PluginPromptChannel.System),
+            before.TemporaryPromptContributions.Where(static part => part.Channel == PluginPromptChannel.System),
             seed,
             effectiveOptions,
             PluginPromptChannel.System,
             cancellationToken).ConfigureAwait(false);
         var developerText = await BuildPromptTextAsync(
             developerParts.Parts,
-            before.Result.TemporaryPromptContributions.Where(static part => part.Channel == PluginPromptChannel.Developer),
+            before.TemporaryPromptContributions.Where(static part => part.Channel == PluginPromptChannel.Developer),
             seed,
             effectiveOptions,
             PluginPromptChannel.Developer,
@@ -150,14 +173,75 @@ public sealed class PluginOrchestrationBridge
 
         return new PluginAgentRunAugmentation
         {
-            Input = AppendAdditionalMessages(input, before.Result.AdditionalMessages),
+            Input = AppendAdditionalMessages(input, before.AdditionalMessages),
             Tools = activeTools,
             AdditionalSystemMessage = systemText,
             AdditionalDeveloperInstructions = developerText,
             InstructionProcessor = instructionProcessor,
-            PreferredToolNames = before.Result.PreferredToolNames,
+            PreferredToolNames = before.PreferredToolNames,
         };
     }
+
+    /// <summary>
+    /// Builds the plugin augmentation of a session run and applies it to the run's execution options.
+    /// </summary>
+    /// <remarks>
+    /// Every host path that sends to a session calls this with the same arguments for the same session, so
+    /// the paths produce equal options: the runtime replaces a session's attachment when its tools or
+    /// instructions differ from the previous send.
+    /// </remarks>
+    /// <param name="executionOptions">The execution options of the run, before plugins.</param>
+    /// <param name="input">The input of the run.</param>
+    /// <param name="projectId">The project of the session, or <see langword="null"/> for a global session.</param>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The options and input to run with, or the reason a plugin cancelled the run.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when the options or the input are <see langword="null" />.</exception>
+    public async Task<PluginAugmentedRun> AugmentRunAsync(
+        SessionExecutionOptions executionOptions,
+        AgentInput input,
+        string? projectId,
+        string? sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(executionOptions);
+        var augmentation = await BuildAugmentationAsync(executionOptions, input, ScopeOf(executionOptions, projectId, sessionId), isRun: true, cancellationToken).ConfigureAwait(false);
+        return string.IsNullOrWhiteSpace(augmentation.CancelReason)
+            ? new PluginAugmentedRun(augmentation.ApplyTo(executionOptions), augmentation.Input ?? input)
+            : new PluginAugmentedRun(executionOptions, input, augmentation.CancelReason);
+    }
+
+    /// <summary>
+    /// Returns the execution options of a session that is being created, with what plugins contribute to
+    /// every run of its scope: the options its first run has when no before-run hook adds anything, so that
+    /// run keeps the attachment the creation made.
+    /// </summary>
+    /// <remarks>No before-run hook is called: nothing runs yet.</remarks>
+    /// <param name="executionOptions">The execution options of the new session, before plugins.</param>
+    /// <param name="projectId">The project of the session, or <see langword="null"/> for a global session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The options to create the session with.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="executionOptions"/> is <see langword="null" />.</exception>
+    public async Task<SessionExecutionOptions> AugmentNewSessionAsync(
+        SessionExecutionOptions executionOptions,
+        string? projectId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(executionOptions);
+        var augmentation = await BuildAugmentationAsync(executionOptions, new AgentInput([]), ScopeOf(executionOptions, projectId, sessionId: null), isRun: false, cancellationToken).ConfigureAwait(false);
+        return augmentation.ApplyTo(executionOptions);
+    }
+
+    private static PluginAdapterOperationOptions ScopeOf(SessionExecutionOptions executionOptions, string? projectId, string? sessionId)
+        => new()
+        {
+            ProjectId = projectId,
+            ProjectPath = executionOptions.WorkingDirectory,
+            SessionId = sessionId,
+            ProviderId = executionOptions.ProviderId.Value,
+            Model = executionOptions.Model,
+            IsCodeAltaManagedProvider = IsCodeAltaManagedProvider(executionOptions.ProviderId),
+        };
 
     /// <summary>
     /// Gets plugin-contributed transient session event projectors applicable to an orchestration scope.
@@ -255,6 +339,8 @@ public sealed class PluginOrchestrationBridge
         {
             Handler = async (invocation, cancellationToken) =>
             {
+                // Scoped to this call: an async method's changes to the flow do not reach its caller.
+                ToolOperation.Value = options;
                 var activePlugins = _getActivePlugins();
                 if (activePlugins.Count == 0)
                 {
@@ -368,6 +454,11 @@ public sealed class PluginOrchestrationBridge
             SupportsDirectInjection = options.IsCodeAltaManagedProvider,
             CancellationToken = cancellationToken,
         };
+
+    // Providers that run their own agent loop (Codex, Copilot) take no direct prompt injection from plugins.
+    private static bool IsCodeAltaManagedProvider(ModelProviderId providerId)
+        => !string.Equals(providerId.Value, ModelProviderIds.Codex.Value, StringComparison.OrdinalIgnoreCase) &&
+           !string.Equals(providerId.Value, ModelProviderIds.Copilot.Value, StringComparison.OrdinalIgnoreCase);
 
     private static PluginAdapterOperationOptions MarkHeadless(PluginAdapterOperationOptions? options)
         => options is null
@@ -490,4 +581,46 @@ public sealed record PluginAgentRunAugmentation
 
     /// <summary>Gets the plugin cancellation reason, when the run was cancelled.</summary>
     public string? CancelReason { get; init; }
+
+    /// <summary>Returns execution options with this augmentation's tools, instructions and hooks added.</summary>
+    /// <param name="source">The execution options of the run, before plugins.</param>
+    /// <returns>The augmented options; what this augmentation does not carry is kept from <paramref name="source"/>.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="source"/> is <see langword="null" />.</exception>
+    public SessionExecutionOptions ApplyTo(SessionExecutionOptions source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        return new()
+        {
+            ProviderId = source.ProviderId,
+            ProviderKey = source.ProviderKey,
+            WorkingDirectory = source.WorkingDirectory,
+            ProjectRoots = source.ProjectRoots,
+            Model = source.Model,
+            ReasoningEffort = source.ReasoningEffort,
+            AgentPromptId = source.AgentPromptId,
+            Tools = Tools ?? source.Tools,
+            AdditionalSystemMessage = AppendPromptText(source.AdditionalSystemMessage, AdditionalSystemMessage),
+            AdditionalDeveloperInstructions = AppendPromptText(source.AdditionalDeveloperInstructions, AdditionalDeveloperInstructions),
+            PreferredToolNames = source.PreferredToolNames.Concat(PreferredToolNames).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+            InstructionProcessor = InstructionProcessor ?? source.InstructionProcessor,
+            OnPermissionRequest = source.OnPermissionRequest,
+            OnUserInputRequest = source.OnUserInputRequest,
+        };
+    }
+
+    private static string? AppendPromptText(string? existing, string? additional)
+    {
+        if (string.IsNullOrWhiteSpace(existing))
+        {
+            return string.IsNullOrWhiteSpace(additional) ? null : additional;
+        }
+
+        return string.IsNullOrWhiteSpace(additional) ? existing : existing.TrimEnd() + "\n\n" + additional.Trim();
+    }
 }
+
+/// <summary>The options and input of a session run after plugins, or the reason a plugin cancelled it.</summary>
+/// <param name="ExecutionOptions">The execution options to run with; the original ones when cancelled.</param>
+/// <param name="Input">The input to run with; the original one when cancelled.</param>
+/// <param name="CancelReason">Why a plugin cancelled the run, or <see langword="null"/>.</param>
+public sealed record PluginAugmentedRun(SessionExecutionOptions ExecutionOptions, AgentInput Input, string? CancelReason = null);

@@ -25,8 +25,9 @@ only to build. The installed application has no UI server or external asset orig
 **This is an in-development interactive workspace, not full agent parity.** Use `CodeAlta.Tui`
 (`altatui`) for the complete agent workflow. Running `alta` with no options now matches the TUI's
 normal startup: it owns the current project and `~/.alta` runtime, so an existing session can send
-a prompt immediately. It can start configured providers and acquires the shared runtime lock; plugins,
-command permission review and provider input remain disabled by default. WebView-only data stays in
+a prompt immediately. It can start configured providers and acquires the shared runtime lock, and it
+runs the built-in plugins (MCP, GitHub, Statistics) and the source plugins of `~/.alta/plugins` and of
+the launch project. Command permission review and provider input remain disabled by default. WebView-only data stays in
 the platform-local application-data directory, and existing `.alta` storage is not migrated.
 
 `alta --dev` starts the **developer instance**: a second window, titled **CodeAlta (dev)** with a
@@ -410,11 +411,16 @@ list enables or disables a server without opening it. Stored environment and hea
 sent to the page; leaving a value blank keeps the stored one. Connection tests, sign-in and per-tool
 switches remain TUI workflows. Enabling or disabling rewrites `config.toml` without its comments.
 
+A session uses MCP servers as in the terminal: the model activates one with `alta mcp activate <id>`,
+and from the next prompt on the server's tools (`mcp__<server>__<tool>`) are part of the session. A
+server stays active for that session while the app runs.
+
 The end of the status line above every prompt shows the status items of plugins. The MCP plugin shows
 `MCP {enabled}/{configured}`, `· {n} unavailable` in the warning colour when servers are disabled or
-invalid, and the state of their tools; it is absent when no MCP configuration exists or the plugin is
-disabled. Clicking it opens **Settings → MCP Servers**. The items are read again every ten seconds and
-when the window gets the focus back.
+invalid, and the state of their tools for that session: `tools not loaded` until the session activates
+a server, then `active tools {n}` in the success colour. It is absent when no MCP configuration exists
+or the plugin is disabled. Clicking it opens **Settings → MCP Servers**. Session status items of source
+plugins follow it. The items are read again every ten seconds and when the window gets the focus back.
 
 The **Skills** Settings section lists discovered skills (project, user, plugin and built-in) with a
 switch per skill, a filter, **Enable all** / **Disable all** for the shown skills, and **New skill**,
@@ -496,11 +502,30 @@ Nothing is written above the prompt. Message navigation (`F3`/`F4`) is announced
 technology only, and a Send that was not accepted is reported in a toast at the top right of the
 window.
 
-### The alta tool, sub-sessions and agent messages
+### Plugins
+
+The normal launch (`alta`, `alta --dev`) starts the plugin runtime like the terminal UI, before the
+window's page loads:
+
+- The built-in plugins are the terminal's, under the same ids (`mcp`, `github`, `statistics`), so one
+  `[plugins.<id>]` configuration applies to both. They run as backends: the MCP plugin gives sessions
+  the `alta mcp` commands, its prompt guidance and the tools of activated servers; the GitHub plugin
+  gives sessions of CodeAlta-managed providers the `gh` tool, run in the session's project; the
+  Statistics plugin gives `alta statistics`.
+- Source plugins under `~/.alta/plugins` and the launch project's `.alta/plugins` are built and loaded
+  with the neutral authoring profile: their agent tools, prompt contributions, hooks, `alta` commands,
+  skills and session status items apply. A plugin that references the terminal UI assemblies does not
+  load here and is reported in the log.
+- Every Send asks the plugins what they add to the run, exactly as `alta session send` does, so a
+  session gets the same tools and instructions from the window and from another session. When that
+  changes between two sends (a server was activated), the next Send replaces the session's provider
+  attachment; the timeline shows **System prompt changed**.
+- `CODEALTA_DISABLE_PLUGINS=1` starts without any plugin. The explicit-root launch never starts them.
+
 
 Sessions of the desktop host have the same `alta` tool as in the terminal: notes, sessions and
-sub-sessions, reminders, skills, projects, providers, models and prompts. The plugin commands
-(`alta mcp`, `alta statistics`) are absent because the desktop host does not start the plugin runtime.
+sub-sessions, reminders, skills, projects, providers, models and prompts, and the commands of the
+active plugins (`alta mcp`, `alta statistics`).
 
 - `alta notes set` writes the session's notes; the **Notes** window at the top right of the session
   opens with them.
@@ -546,7 +571,7 @@ the provider's usage figures, and one line per tool bucket. The rows are not sto
 they are computed from its events each time, so earlier turns get theirs when **Load previous
 messages** brings them into view, and a failed turn has one too.
 
-The desktop app does not start the plugin runtime, so source plugins cannot add rows of their own yet.
+These rows do not come from the plugin runtime, so source plugins cannot add rows of their own yet.
 The host runs the Statistics projection itself through the `sessionPluginEvents.read` RPC: it reads
 the journal backwards from its end until the oldest turn shown is complete (at most 64 pages of 100
 records; a turn that begins further back gets no row) and returns at most 32 rows, newest kept.
@@ -625,11 +650,13 @@ forward slashes). The service does not create, rename or delete files, and refus
   current revision and nothing is written. With `overwrite` the revision is not compared. A
   read-only file is `read_only`; a failure while replacing the file is `write_failed`.
 
-`composerStatus.read` returns the plugin status items of a composer for a project id (or none): each
-has the plugin id, a name, a label, a text, a tone (`info`, `success`, `warning`, `error`, `muted`) and
-the Settings page it opens, which is what a plugin's session status contribution carries. The desktop
-host does not start the plugin runtime, so it asks the built-in MCP plugin for its item itself, from
-the configuration only: no server is contacted and the tools read `tools not loaded`.
+`composerStatus.read` returns the plugin status items of a composer for a project id (or none) and
+a session id (or none): each has the plugin id, a name, a label, a text, a tone (`info`, `success`,
+`warning`, `error`, `muted`) and the Settings page it opens, which is what a plugin's session status
+contribution carries. The MCP item comes from the configuration and from what the running MCP plugin
+knows of the session (the servers it activated and their tool counts); the read itself contacts no
+server. Without a running MCP plugin (explicit roots, `CODEALTA_DISABLE_PLUGINS=1`) the item describes
+the configuration alone and its tools read `tools not loaded`.
 
 `projectGit.status` returns the branch of the repository containing the project folder and how much
 its tracked files differ from the last commit. Archived projects are answered too.
@@ -1020,13 +1047,13 @@ lexical checks and the copy's `alta.lock` are not a reparse sandbox or race-free
 **This consent is broader than browsing:** lock/project/journal/cache/provider-state writes,
 configuration/instruction/skill reads and configured-provider registration are permitted.
 Registration can read declared credential environment variables and shipped defaults; later
-submissions can authenticate and use provider storage/network. Plugins and automatic provider probes remain off; explicit Models reads and Providers tests may probe.
+submissions can authenticate and use provider storage/network. In this explicit-root launch plugins and automatic provider probes remain off; explicit Models reads and Providers tests may probe.
 Use only trusted task-owned roots, never a production profile or an untrusted copied cache.
 
 Select an existing session to send text (32,768 UTF-16 units maximum). Tool permissions are automatically
 approved by default, matching TUI AutoApprove. Commands and file writes run with the host's privileges;
 project/discovery roots are not a sandbox. Explicit command-review mode below disables this default.
-User input is cancelled unless separately opted in below, and this path supplies no custom tools or plugins.
+User input is cancelled unless separately opted in below. Sessions get the `alta` tool; in the explicit-root launch no plugin adds tools.
 Receipts are observed automatically; **Abort original Send operation** targets one pending send,
 not a later run. Submitted means dispatch completed, not that the conversation/run completed.
 Send and Abort retain up to 256 local intents combined, including their original live waiters,

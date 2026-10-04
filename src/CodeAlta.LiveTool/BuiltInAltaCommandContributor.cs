@@ -3383,75 +3383,15 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         };
     }
 
-    private static async Task<AltaPluginAgentRunAugmentation> BuildPluginAgentRunAugmentationAsync(
+    // The same call as the host's own sends, so both produce equal options for a session.
+    private static async Task<PluginAugmentedRun> BuildPluginAgentRunAugmentationAsync(
         AltaCommandContext context,
         AltaSessionInfo info,
         SessionExecutionOptions executionOptions,
         AgentInput input)
-    {
-        var pluginBridge = context.Services.Get<PluginOrchestrationBridge>();
-        if (pluginBridge is null)
-        {
-            return new AltaPluginAgentRunAugmentation(executionOptions, input);
-        }
-
-        var pluginOptions = new PluginAdapterOperationOptions
-        {
-            ProjectId = info.Session.ProjectRef,
-            ProjectPath = executionOptions.WorkingDirectory,
-            SessionId = info.Session.SessionId,
-            ProviderId = executionOptions.ProviderId.Value,
-            Model = executionOptions.Model,
-            IsCodeAltaManagedProvider = IsCodeAltaManagedProvider(executionOptions.ProviderId),
-        };
-        var augmentation = await pluginBridge.BuildAgentRunAugmentationAsync(executionOptions, input, pluginOptions, context.CancellationToken).ConfigureAwait(false);
-        if (!string.IsNullOrWhiteSpace(augmentation.CancelReason))
-        {
-            return new AltaPluginAgentRunAugmentation(executionOptions, input, augmentation.CancelReason);
-        }
-
-        return new AltaPluginAgentRunAugmentation(
-            CopyExecutionOptions(executionOptions, augmentation),
-            augmentation.Input ?? input);
-    }
-
-    private static SessionExecutionOptions CopyExecutionOptions(SessionExecutionOptions source, PluginAgentRunAugmentation augmentation)
-        => new()
-        {
-            ProviderId = source.ProviderId,
-            ProviderKey = source.ProviderKey,
-            WorkingDirectory = source.WorkingDirectory,
-            ProjectRoots = source.ProjectRoots,
-            Model = source.Model,
-            ReasoningEffort = source.ReasoningEffort,
-            AgentPromptId = source.AgentPromptId,
-            Tools = augmentation.Tools ?? source.Tools,
-            AdditionalSystemMessage = AppendPromptText(source.AdditionalSystemMessage, augmentation.AdditionalSystemMessage),
-            AdditionalDeveloperInstructions = AppendPromptText(source.AdditionalDeveloperInstructions, augmentation.AdditionalDeveloperInstructions),
-            PreferredToolNames = source.PreferredToolNames.Concat(augmentation.PreferredToolNames).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
-            InstructionProcessor = augmentation.InstructionProcessor ?? source.InstructionProcessor,
-            OnPermissionRequest = source.OnPermissionRequest,
-            OnUserInputRequest = source.OnUserInputRequest,
-        };
-
-    private static string? AppendPromptText(string? existing, string? additional)
-    {
-        if (string.IsNullOrWhiteSpace(existing))
-        {
-            return string.IsNullOrWhiteSpace(additional) ? null : additional;
-        }
-
-        if (string.IsNullOrWhiteSpace(additional))
-        {
-            return existing;
-        }
-
-        return existing.TrimEnd() + "\n\n" + additional.Trim();
-    }
-
-    private static bool IsCodeAltaManagedProvider(ModelProviderId providerId)
-        => !string.Equals(providerId.Value, ModelProviderIds.Codex.Value, StringComparison.OrdinalIgnoreCase) &&
-           !string.Equals(providerId.Value, ModelProviderIds.Copilot.Value, StringComparison.OrdinalIgnoreCase);
+        => context.Services.Get<PluginOrchestrationBridge>() is { } pluginBridge
+            ? await pluginBridge.AugmentRunAsync(executionOptions, input, info.Session.ProjectRef, info.Session.SessionId, context.CancellationToken).ConfigureAwait(false)
+            : new PluginAugmentedRun(executionOptions, input);
 
     private static IReadOnlyList<AgentToolDefinition>? CreateAltaSessionTools(
         AltaCommandContext context,
@@ -5497,8 +5437,6 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
 
         public static PromptReadResult Fail(int exitCode) => new(exitCode, null);
     }
-
-    private sealed record AltaPluginAgentRunAugmentation(SessionExecutionOptions ExecutionOptions, AgentInput Input, string? CancelReason = null);
 
     private sealed record ParentSessionResolutionResult(int ExitCode, string? ParentSessionId)
     {

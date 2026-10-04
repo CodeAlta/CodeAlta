@@ -1,5 +1,6 @@
 using CodeAlta.Catalog;
 using CodeAlta.Plugin.Mcp;
+using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
 using NeoAstra.Rpc;
 
@@ -7,12 +8,14 @@ namespace CodeAlta.Desktop.Rpc;
 
 /// <summary>
 /// Status items that plugins show at the end of the composer's status line, such as the MCP plugin's count
-/// of configured servers. The terminal host gets them from the plugin runtime (the session status region);
-/// the desktop host does not start that runtime and asks the built-in plugins itself.
+/// of configured servers and of the tools a session activated, and the session status items of the other
+/// active plugins.
 /// </summary>
 /// <remarks>
 /// An item is what a plugin's <see cref="PluginStatusItem"/> carries: a label, a text and a tone. Only
-/// configuration is read: nothing here connects to an MCP server, so the item never claims a live connection.
+/// configuration and what the host's plugins already know are read: nothing here connects to an MCP server.
+/// Without a running MCP plugin (explicit roots, plugins turned off) the MCP item describes the
+/// configuration alone.
 /// </remarks>
 [NeoRpcService("composerStatus", Version = 1)]
 internal sealed class ComposerStatusService
@@ -26,9 +29,13 @@ internal sealed class ComposerStatusService
     /// <summary>Longest label or text of an item, in UTF-16 units; longer ones are cut.</summary>
     internal const int MaximumTextUnits = 160;
 
+    /// <summary>Longest session id a request may name, in UTF-16 units.</summary>
+    internal const int MaximumSessionIdUnits = 128;
+
     private readonly ProjectCatalog? _projects;
     private readonly string? _epoch;
     private readonly string? _home;
+    private readonly PluginRuntimeManager? _plugins;
     private readonly McpManagementService _mcp = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -41,18 +48,20 @@ internal sealed class ComposerStatusService
     /// <param name="projects">The host's project catalog, used to resolve a project id to its root.</param>
     /// <param name="epoch">The host epoch that requests must name.</param>
     /// <param name="home">The user home that holds the global <c>.alta</c> folder, or null for the profile.</param>
+    /// <param name="plugins">The host's plugin runtime, or null when the host runs no plugin.</param>
     /// <exception cref="ArgumentNullException"><paramref name="projects"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="epoch"/> is blank.</exception>
-    internal ComposerStatusService(ProjectCatalog projects, string epoch, string? home)
+    internal ComposerStatusService(ProjectCatalog projects, string epoch, string? home, PluginRuntimeManager? plugins = null)
     {
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
         _projects = projects;
         _epoch = epoch;
         _home = home;
+        _plugins = plugins;
     }
 
-    /// <summary>Returns the status items for a composer of the named project, or of no project.</summary>
+    /// <summary>Returns the status items for a composer of the named project, or of no project, and of its session.</summary>
     [NeoRpcMethod("read")]
     public async Task<ComposerStatusResponse> ReadAsync(ComposerStatusRequest request, CancellationToken cancellationToken)
     {
@@ -60,6 +69,7 @@ internal sealed class ComposerStatusService
         ComposerStatusResponse Failed(string status) => new(status, request.ProjectId, []);
         if (_projects is null) return Failed("unavailable");
         if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return Failed("stale_epoch");
+        if (request.SessionId is { } session && (session.Length is 0 or > MaximumSessionIdUnits || session.Any(char.IsControl))) return Failed("invalid_request");
         // An archived project still shows its sessions, and their composers show the same status.
         var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, allowArchived: true, cancellationToken).ConfigureAwait(false);
         if (project.Status != "ok") return Failed(project.Status);
@@ -68,7 +78,20 @@ internal sealed class ComposerStatusService
         {
             var items = new List<ComposerStatusItem>();
             var snapshot = _mcp.RefreshSnapshot(new McpManagementRequest { ProjectDirectory = project.Root, UserHomeDirectory = _home, ProbeWritability = false });
-            if (snapshot.Policy.Enabled && McpPlugin.CreateStatus(snapshot) is { } mcp) items.Add(Item(McpPluginId, "mcp-status", mcp, "mcp"));
+            var active = _plugins?.ActivePlugins ?? [];
+            var plugin = active.Select(static plugin => plugin.Instance).OfType<McpPlugin>().FirstOrDefault();
+            var status = plugin is null ? McpPlugin.CreateStatus(snapshot) : plugin.CreateStatus(snapshot, request.SessionId);
+            if (snapshot.Policy.Enabled && status is { } mcp) items.Add(Item(McpPluginId, "mcp-status", mcp, "mcp"));
+            if (_plugins is not null && active.Count > 0)
+            {
+                // The window is the interactive surface of these contributions.
+                var statuses = _plugins.Adapter.GetStatusItems(active, PluginUiRegion.SessionStatus, new PluginAdapterOperationOptions
+                {
+                    ProjectId = request.ProjectId, ProjectPath = project.Root, SessionId = request.SessionId, HasInteractiveUi = true,
+                });
+                for (var index = 0; index < statuses.Count; index++) items.Add(Item("plugins", "status-" + index, statuses[index], null));
+            }
+
             return new("ok", request.ProjectId, [.. items.Take(MaximumItems)]);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -104,7 +127,8 @@ internal sealed class ComposerStatusService
 /// <summary>Asks for the composer status items of a project.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>
 /// <param name="ProjectId">The composer's project, or null for a composer without one.</param>
-internal sealed record ComposerStatusRequest(string ExpectedEpoch, string? ProjectId);
+/// <param name="SessionId">The composer's session, or null for a composer that has none yet.</param>
+internal sealed record ComposerStatusRequest(string ExpectedEpoch, string? ProjectId, string? SessionId = null);
 
 /// <summary><c>ok</c> with the items in display order, or a refusal code with none.</summary>
 internal sealed record ComposerStatusResponse(string Status, string? ProjectId, ComposerStatusItem[] Items);

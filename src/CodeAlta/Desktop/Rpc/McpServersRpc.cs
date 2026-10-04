@@ -8,7 +8,7 @@ namespace CodeAlta.Desktop.Rpc;
 /// <summary>
 /// Lists and edits MCP server definitions (<c>mcp.json</c>) and their enablement policy for the desktop
 /// Settings page. Only configuration is edited: nothing here connects to a server, discovers its tools
-/// or runs OAuth, because the desktop host does not start the plugin runtime.
+/// or runs OAuth: sessions reach the servers through the MCP plugin (<c>alta mcp</c> and activated tools).
 /// </summary>
 /// <remarks>
 /// Environment and header values never leave the host. Arguments and URLs are returned with the same

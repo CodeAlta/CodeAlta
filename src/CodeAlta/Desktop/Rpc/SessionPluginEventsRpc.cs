@@ -9,8 +9,8 @@ namespace CodeAlta.Desktop.Rpc;
 
 /// <summary>
 /// Timeline cards that built-in plugins derive from the events of a session, such as the Statistics plugin's
-/// summary of each completed turn. The terminal host gets them from the plugin runtime; the desktop host does
-/// not start that runtime and runs the built-in projections itself.
+/// summary of each completed turn. The terminal host gets them from the plugin runtime as events arrive; the
+/// desktop host derives them from the journal when the page asks, with a projection of its own.
 /// </summary>
 /// <remarks>
 /// A turn can only be summarized from all of its events, so the journal is read backwards from its end until

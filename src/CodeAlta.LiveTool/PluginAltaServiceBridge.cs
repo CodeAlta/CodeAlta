@@ -1,18 +1,26 @@
-using CodeAlta.LiveTool;
 using CodeAlta.Plugins.Abstractions;
 
-namespace CodeAlta.Tui.App;
+namespace CodeAlta.LiveTool;
 
-internal sealed class PluginAltaServiceBridge : IPluginAltaRuntimeService
+/// <summary>
+/// Lets plugins invoke <c>alta</c> commands through their services. A host creates it before its plugin
+/// runtime starts and gives it the dispatcher once the <c>alta</c> services exist; an invocation made
+/// before that is answered with <see cref="AltaExitCodes.ServiceUnavailable"/>.
+/// </summary>
+public sealed class PluginAltaServiceBridge : IPluginAltaRuntimeService
 {
     private AltaCommandDispatcher? _dispatcher;
 
+    /// <summary>Sets the dispatcher that serves the invocations from now on.</summary>
+    /// <param name="dispatcher">The host's <c>alta</c> command dispatcher.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="dispatcher"/> is null.</exception>
     public void SetDispatcher(AltaCommandDispatcher dispatcher)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         _dispatcher = dispatcher;
     }
 
+    /// <inheritdoc />
     public ValueTask<PluginAltaCommandResult> InvokeAsync(
         IReadOnlyList<string> args,
         string? stdin = null,
@@ -20,6 +28,7 @@ internal sealed class PluginAltaServiceBridge : IPluginAltaRuntimeService
         CancellationToken cancellationToken = default)
         => InvokeAsync(pluginRuntimeKey: string.Empty, args, stdin, options, cancellationToken);
 
+    /// <inheritdoc />
     public async ValueTask<PluginAltaCommandResult> InvokeAsync(
         string pluginRuntimeKey,
         IReadOnlyList<string> args,
@@ -88,27 +97,4 @@ internal sealed class PluginAltaServiceBridge : IPluginAltaRuntimeService
             Error = result.Error,
         };
     }
-}
-
-internal sealed class CodeAltaPluginServices(IPluginAltaService alta, IPluginServices? inner = null) : IPluginServices
-{
-    private readonly IPluginServices _inner = inner ?? NoopPluginServices.Create();
-
-    public XenoAtom.Logging.Logger Logger => _inner.Logger;
-
-    public IPluginUiService Ui => _inner.Ui;
-
-    public IPluginStateStore State => _inner.State;
-
-    public IPluginWorkspaceService Workspace => _inner.Workspace;
-
-    public IPluginSessionService Sessions => _inner.Sessions;
-
-    public IPluginPromptService Prompts => _inner.Prompts;
-
-    public IPluginAgentService Agents => _inner.Agents;
-
-    public IPluginTaskService Tasks => _inner.Tasks;
-
-    public IPluginAltaService Alta { get; } = alta;
 }

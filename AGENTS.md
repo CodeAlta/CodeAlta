@@ -74,7 +74,7 @@ Only one CodeAlta runs on a profile, because two processes must not write the sa
 
 The desktop developer instance also has its own WebView data (`%LOCALAPPDATA%\CodeAlta\desktop-dev`: open tabs, drafts, theme), which is what lets it take its own debugging port. One developer instance runs at a time, terminal or desktop. It leaves the coordinator `~/.alta/AGENTS.md` as the normal instance wrote it, and on its first run takes over the normal instance's per-project provider/model preferences.
 
-This is how CodeAlta is developed with CodeAlta: you run in the normal instance (any released or built `alta`/`altatui`), build the repository, start `alta.exe --dev` with the debugging port, and drive that window through the `chrome-devtools` MCP server. The terminal UI is checked the same way with `altatui --dev` in a separate console.
+This is how CodeAlta is developed with CodeAlta: you run in the normal instance (desktop or terminal, any released or built `alta`/`altatui` that has this branch's MCP support), build the repository, start `alta.exe --dev` with the debugging port, and drive that window through the `chrome-devtools` MCP server. The terminal UI is checked the same way with `altatui --dev` in a separate console.
 
 ## Contribution Rules (Do/Don't)
 
