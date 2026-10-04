@@ -12,6 +12,8 @@ export function createFileEditors() {
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     snapshot: () => version,
     dirty: (key: string) => dirty.has(key),
+    /** Whether any editor holds unsaved edits. */
+    anyDirty: () => dirty.size > 0,
     setDirty(key: string, value: boolean) {
       if (dirty.has(key) === value) return;
       if (value) dirty.add(key); else dirty.delete(key);

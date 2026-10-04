@@ -104,6 +104,7 @@ import { themeIcons } from "./GeneralSettings";
 import { plainTitle } from "./sessionTitle";
 import { GeneralSettings } from "./GeneralSettings";
 import { createHostLiveness, hostPingInterval, hostPingTimeout } from "./hostLiveness";
+import { reloadsAfterClose, rpcSessionClosed, sessionRecoveryKey } from "./sessionRecovery";
 import { installKeyboardClickGuard } from "./keyboardClickGuard";
 import { closeApplicationWindow, logoUrl, useWindowTitleBar, WindowBrand, WindowControls } from "./windowChrome";
 import { createPluginEventsRead } from "./pluginEvents";
@@ -286,7 +287,16 @@ function App() {
     });
     void connect().then(connection => {
       if (lifetime.signal.aborted) return;
-      const closed = () => console.warn("[CodeAlta RPC] connection closed; inspect receipts before any explicit retry. No automatic replay.");
+      const closed = () => {
+        console.warn("[CodeAlta RPC] connection closed; inspect receipts before any explicit retry. No automatic replay.", { reason: connection.closeReason ?? null });
+        // The host closed this document's session and nothing answers any more: only a reload opens a new one.
+        if (connection.closeReason !== rpcSessionClosed) return;
+        hostLiveness.lost();
+        const read = () => { try { const value = sessionStorage.getItem(sessionRecoveryKey); return value === null ? null : Number(value); } catch { return null; } };
+        if (!reloadsAfterClose(connection.closeReason, fileEditors.anyDirty(), Date.now(), read())) return;
+        try { sessionStorage.setItem(sessionRecoveryKey, String(Date.now())); } catch { /* Without the mark a second loss reloads again. */ }
+        window.location.reload();
+      };
       if (connection.closed.aborted) closed();
       else connection.closed.addEventListener("abort", closed, { once: true, signal: lifetime.signal });
     }).catch(error => { if (!lifetime.signal.aborted) console.warn("[CodeAlta RPC] connection unavailable", { code: rpcFailureCode(error) }); });

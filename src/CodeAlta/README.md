@@ -18,7 +18,7 @@ Chrome/WebView2; there is no direct native clipboard reader. Conversion errors n
 that the selected model lacks image support. Animation is reduced to one frame and source
 metadata is not retained.
 
-`CodeAlta` is the native desktop .NET tool (`alta`), built with published NeoAstra 0.3.1,
+`CodeAlta` is the native desktop .NET tool (`alta`), built with published NeoAstra 0.3.2,
 generated RPC, React/strict TypeScript and packaged local Vite assets. Node/npm is needed
 only to build. The installed application has no UI server or external asset origin.
 
@@ -105,7 +105,7 @@ prolonged unavailability shows a small status indicator rather than raw timeline
 For a Send lockup, preserve the developer-console entries prefixed `[CodeAlta Send]` and
 `[CodeAlta RPC]`. They report composer guards, dispatch, safe framework error codes, elapsed time
 and UUID request keys, never prompt text or provider credentials. Match a dispatch key with
-`Send reached backend (<key>)` in application logs. With NeoAstra 0.3.1, `duplicate_request`
+`Send reached backend (<key>)` in application logs. With NeoAstra 0.3.2, `duplicate_request`
 means an active or retained completed request identity was reused;
 `too_many_requests` means admission/rate/channel pressure; `connection_closed` means transport
 loss. An uncancelled eight-second `operation_canceled` wait is consistent with the client timeout.
@@ -615,17 +615,21 @@ another Settings page.
 
 ### When the host stops responding
 
-The window pings the host every 10 seconds; when three pings in a row get no answer it shows
-**CodeAlta is not responding.** with a **Reload** button under the title bar. Reloading the window
-opens a new RPC session with the same host; sessions keep running and prompt drafts are restored, but
-image drafts and requests that were still waiting for an answer are lost. The message goes away by
-itself if the host answers again.
+Reloading the window opens a new RPC session with the same host; sessions keep running and prompt
+drafts are restored, but image drafts, unsaved file edits and requests that were still waiting for an
+answer are lost.
 
-The host side of an RPC session can be closed without the page being told, after which every request
-is dropped and only times out. NeoAstra 0.2.1 did this when the page closed a channel (the live view
-of a session, closed whenever its pane goes away) at the moment one of the channel's items was being
-posted; NeoAstra 0.3.1 no longer treats that canceled post as a transport failure. The notice stays
-as the way back from any other loss of the session.
+- When the host closes the RPC session of the window (NeoAstra reports the close reason
+  `rpc_session_closed`), the window reloads by itself at once. It does not while a file tab holds
+  unsaved edits, nor a second time within a minute of such a reload: it then shows **CodeAlta is not
+  responding.** with a **Reload** button under the title bar and leaves the decision to you.
+- The window also pings the host every 10 seconds; when three pings in a row get no answer it shows
+  the same notice, which goes away by itself if the host answers again.
+
+Known causes are fixed in NeoAstra: 0.3.1 no longer treats a channel closed mid-send as a transport
+failure, and 0.3.2 fixes a race in its dispatcher that closed the session under ordinary RPC traffic
+and tells the page when a session was closed. A `connection_closed` entry in **Application Logs**
+names what the host saw.
 
 ## Browse a task-owned catalog copy
 

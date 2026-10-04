@@ -11,8 +11,9 @@ const missesUntilSilent = 3;
 export function createHostLiveness(ping: () => Promise<unknown>) {
   let misses = 0;
   let checking = false;
+  let closed = false;
   const listeners = new Set<() => void>();
-  const silent = () => misses >= missesUntilSilent;
+  const silent = () => closed || misses >= missesUntilSilent;
   return {
     /** True once the host missed several pings in a row; false again as soon as it answers one. */
     getSnapshot: silent,
@@ -20,9 +21,16 @@ export function createHostLiveness(ping: () => Promise<unknown>) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
+    /** The connection reported that the host closed it: silent from now on, whatever a later ping says. */
+    lost() {
+      if (closed) return;
+      const before = silent();
+      closed = true;
+      if (!before) for (const listener of [...listeners]) listener();
+    },
     /** Pings the host once, unless the previous ping is still waiting for its answer. */
     async check() {
-      if (checking) return;
+      if (checking || closed) return;
       checking = true;
       const before = silent();
       try { await ping(); misses = 0; }
