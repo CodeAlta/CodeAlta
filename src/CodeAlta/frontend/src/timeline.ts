@@ -41,6 +41,17 @@ export type TimelineItem = Readonly<{
 
 type JsonObject = Record<string, unknown>;
 
+// A journal record always presents the same way, and a window keeps its record objects when it grows or is
+// refreshed. Remembering the item of a record keeps a long timeline cheap to rebuild and lets its rows
+// see that nothing changed.
+const presented = new WeakMap<HistoryEntry, TimelineItem>();
+const withOutput = new WeakMap<HistoryEntry, { output: HistoryEntry; item: TimelineItem }>();
+function presentedItem(entry: HistoryEntry): TimelineItem {
+  let item = presented.get(entry);
+  if (!item) presented.set(entry, item = toTimelineItem(entry, false));
+  return item;
+}
+
 export function buildTimelineItems(entries: HistoryResponse["entries"]): TimelineItem[] {
   const completed = new Set(entries
     .filter(entry => entry.eventType === "contentCompleted" && entry.contentId)
@@ -87,13 +98,16 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
       }
       continue;
     }
-    const item = toTimelineItem(entry, false);
+    const item = presentedItem(entry);
     const output = entry.eventType === "activity" ? outputs.get(activityKey(entry)) : undefined;
+    if (!output?.tool) { result.push(item); continue; }
     // A typed completed output belongs to this exact session/provider/run/activity.
     // Never count a bounded preview or aggregate retained streaming deltas as a total.
-    result.push(output?.tool ? { ...item, toolOutput: output.tool.output, toolOutputLines: output.tool.outputLines,
+    let combined = withOutput.get(entry);
+    if (combined?.output !== output) withOutput.set(entry, combined = { output, item: { ...item, toolOutput: output.tool.output, toolOutputLines: output.tool.outputLines,
       toolOutputBytes: output.tool.outputBytes,
-      toolFields: [...(item.toolFields ?? []), { path: "content", text: output.text ?? "", truncated: output.textTruncated || output.bodyOmitted }] } : item);
+      toolFields: [...(item.toolFields ?? []), { path: "content", text: output.text ?? "", truncated: output.textTruncated || output.bodyOmitted }] } });
+    result.push(combined.item);
   }
   return result.filter(item => item.category !== "reasoning" || !!item.markdown?.trim());
 }

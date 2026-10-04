@@ -170,8 +170,9 @@ chunk. Previously loaded rows survive later page errors with a partial-state not
 failures can resume the existing live-revision refresh, with at most two retries for an unchanged live
 revision. Explicitly older views and source inspection are not replaced by this recovery. The spinner
 uses independent runtime observations; if the live display channel fails, use **Reconnect live activity**
-when offered, not Send retry. A spinner alone does not prove that transcript updates are arriving. The window
-is bounded to 1,000 events, 2 Mi text units or 32 automatic pages; load older explicitly to continue.
+when offered, not Send retry. A spinner alone does not prove that transcript updates are arriving. The first
+window is bounded to 1,000 events, 2 Mi text units or 32 automatic pages; **Load previous messages** and
+**Load all previous messages** extend it (see "Persisted event history").
 Larger records produce an explicit error, not a silent skip. Visual/browser acceptance is deferred; known browser
 fixture failures are preserved, not reported as fixed. See the
 [current runnable checkpoint and verification gaps](../../doc/desktop-ide-checkpoint.md).
@@ -885,8 +886,17 @@ details are not shown yet.
 
 ### Persisted event history
 
-Selecting a session accumulates bounded pages of its persisted canonical events up to a 1,000-event
-display limit. The chronological timeline folds duplicate stream completions and tool lifecycle/output
+Selecting a session shows its latest turn: bounded pages of its persisted canonical events, up to 1,000
+events. Two buttons above the first message bring in what came before:
+
+- **Load previous messages** reads one chunk: whole turns, at least 300 records.
+- **Load all previous messages** reads back to the start of the session, page after page. The timeline
+  takes what was read in small batches while a counter shows the records loaded; **Stop** keeps what
+  was read and ends at a whole turn. A session of tens of thousands of records takes about a minute.
+
+Either way the reader stays on the messages in view, and nothing newer is dropped: the window grows (up
+to 200,000 records or 128 Mi text units, after which it slides) and later refreshes keep it. Rows away
+from the view are not laid out until they are scrolled to. The chronological timeline folds duplicate stream completions and tool lifecycle/output
 rows for presentation; this does not change persisted records. Tool cards identify the tool and primary
 command/input. Prompt, usage, model and secondary event data use compact summaries and disclosures, and
 internal raw persistence records duplicated by typed events are hidden rather than shown as empty cards.
@@ -1001,7 +1011,7 @@ unknown-kind or status cards); a live-only window does not enable these keys. `C
 to its first retained message, which may not be the journal's first message. These
 keys unfollow the timeline. They do not fetch
 older pages or infer that a running session has finished persisting events. Use
-**Load older history** to browse older pages. **Refresh newest history** and `Ctrl+F4`
+**Load previous messages** or **Load all previous messages** to bring in older history. **Refresh newest history** and `Ctrl+F4`
 explicitly read the newest persisted window (up to 1,000 events), including when
 browsing an older page; only `Ctrl+F4` opts into follow after all matching pages
 have settled. A failed or superseded read cannot claim success or move to an older

@@ -35,11 +35,14 @@ export function reconcileTimeline(entries: HistoryResponse["entries"], live: Ses
     .map(entry => toolKey(entry.providerId, entry.runId!, entry.activityId!)));
   const hidden = new Set<string>();
   const coveredText = new Set<string>();
+  // Looked up by journal offset: a long window must not be searched once per record.
+  const itemAt = new Map(historical.map(item => [item.key, item]));
+  const entryAt = new Map(entries.map(entry => [entry.offset, entry]));
   for (const entry of entries) {
     if (entry.eventType === "contentDelta" && entry.runId && entry.contentId) {
       const key = textKey(entry.runId, entry.contentId, entry.kind ?? "");
       const row = textMatches.get(key);
-      const item = historical.find(item => item.key === entry.offset);
+      const item = itemAt.get(entry.offset);
       if (row && item && !completed.has(key)) {
         const persisted = item.markdown ?? "";
         if (row.isComplete && !row.isTruncated || row.text.startsWith(persisted)) hidden.add(entry.offset);
@@ -52,7 +55,7 @@ export function reconcileTimeline(entries: HistoryResponse["entries"], live: Ses
   }
   const result: ReconciledRow[] = historical.filter(item => !hidden.has(item.key))
     .map(item => {
-      const entry = entries.find(entry => entry.offset === item.key);
+      const entry = entryAt.get(item.key);
       const text = entry?.runId && entry.contentId ? textKey(entry.runId, entry.contentId, entry.kind ?? "") : null;
       const tool = entry?.runId && entry.activityId ? toolKey(entry.providerId, entry.runId, entry.activityId) : null;
       const key = text && textMatches.has(text) && (completed.has(text) || coveredText.has(text)) ? `text:${text}`
@@ -71,8 +74,15 @@ export function reconcileTimeline(entries: HistoryResponse["entries"], live: Ses
   return orderTimelineRows(result);
 }
 
+// Parsing a timestamp is the cost of ordering a long timeline; an item or a live row keeps its own.
+const times = new WeakMap<object, number>();
 export function orderTimelineRows(result: ReconciledRow[]): ReconciledRow[] {
-  const timestamp = (row: ReconciledRow) => Date.parse(row.source === "history" ? row.item.timestamp : row.row.timestamp ?? "");
+  const timestamp = (row: ReconciledRow) => {
+    const subject = row.source === "history" ? row.item : row.row;
+    let time = times.get(subject);
+    if (time === undefined) times.set(subject, time = Date.parse(row.source === "history" ? row.item.timestamp : row.row.timestamp ?? ""));
+    return time;
+  };
   result.sort((a, b) => {
     const time = timestamp(a) - timestamp(b);
     if (Number.isFinite(time) && time !== 0) return time;

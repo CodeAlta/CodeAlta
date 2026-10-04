@@ -52,7 +52,7 @@ function entry(index: number): HistoryResponse["entries"][number] {
     tool: null, files: null, images: null, textTruncated: true, detailsTruncated: false, bodyOmitted: false };
 }
 
-test("large pages bound retained text, preserve newest, and explicitly slide older without losing cursor", () => {
+test("large pages bound the first window, preserve newest, and older history extends it without losing cursor", () => {
   let timeline: HistoryTimeline | undefined;
   for (let end = 100; end > 0 && !timeline?.limitReached; end -= 10) {
     const start = end - 10;
@@ -64,7 +64,9 @@ test("large pages bound retained text, preserve newest, and explicitly slide old
   assert.equal(timeline.entries.at(-1)?.contentId, "99");
   assert.equal(timeline.next?.offset, timeline.entries[0].offset);
   const older = mergeHistoryPage(timeline, { sessionId: "s", cursor: timeline.next }, { status: "ok", entries: [entry(1)], next: null, tailOmitted: false }, true);
-  assert.equal(older.entries[0].contentId, "1"); assert.equal(older.newerOmitted, true);
+  // The reader asked for more: the window grows past the size of a first read and keeps its newest records.
+  assert.equal(older.entries[0].contentId, "1"); assert.equal(older.entries.at(-1)?.contentId, "99");
+  assert.equal(older.newerOmitted, false); assert.equal(older.next, null);
 });
 
 test("metadata-only pages stop after a finite acquisition and later errors do not replace healthy rows", async () => {

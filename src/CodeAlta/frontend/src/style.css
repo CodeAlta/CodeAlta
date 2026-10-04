@@ -350,7 +350,12 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .empty-history { padding: 60px 20px; color: var(--muted); text-align: center; }
 /* Reserve a two-line read-notice slot; longer notices still grow and wrap. */
 .history > .error-text { min-block-size: 2lh; }
-.load-more { display: flex; align-items: center; gap: 6px; margin: 9px auto 2px; }
+.load-more { display: flex; align-items: center; gap: 6px; margin: 0; }
+.load-more:disabled { cursor: default; opacity: .6; }
+/* A long timeline lays out and paints only the rows near the view; a row keeps the height it last had. */
+.messages > .timeline-single-row, .messages > .timeline-tool-group { content-visibility: auto; contain-intrinsic-size: auto 72px; }
+.load-more-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin: 9px auto 2px; }
+.load-more-progress { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 
 .notice { margin: 4px 14px 10px; padding: 8px 10px; border-radius: 8px; background: var(--accent-soft); color: var(--muted); font-size: 11px; line-height: 1.4; }
 .error-text { color: var(--red); }

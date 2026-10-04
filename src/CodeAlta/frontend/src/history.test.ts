@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { HistoryRequest, HistoryResponse } from "#neoastra";
-import { loadHistory, historyCanRetry, historyMessage, historySettled, mergeHistoryPage, type HistoryState, type HistoryTimeline } from "./history";
+import { loadHistory, historyCanRetry, historyMessage, historySettled, maximumTimelineEntries, mergeHistoryPage, type HistoryState, type HistoryTimeline } from "./history";
 
 const page: HistoryResponse = { status: "ok", entries: [], next: null, tailOmitted: false };
 const request = { sessionId: "s", cursor: null };
@@ -79,9 +79,11 @@ test("an uneven initial page keeps the newest 1,000 and rewinds the older cursor
   const older = mergeHistoryPage(timeline, { sessionId: "s", cursor: timeline?.next ?? null },
     { ...page, entries: Array.from({ length: 100 }, (_, i) => entry(i + 105)),
       next: { version: 2, sessionId: "s", length: "300000", lastWriteUtcTicks: "7", offset: entry(105).offset } }, true);
+  // Older history extends the window: nothing newer is dropped to make room for it.
   assert.equal(older.entries[0].contentId, "105");
-  assert.equal(older.entries.at(-1)?.contentId, "1104");
-  assert.equal(older.newerOmitted, true);
+  assert.equal(older.entries.at(-1)?.contentId, "1204");
+  assert.equal(older.entries.length, 1100);
+  assert.equal(older.newerOmitted, false);
   assert.equal(mergeHistoryPage(older, { sessionId: "s", cursor: { ...older.next!, version: 1 } },
     { ...page, entries: [entry(1)] }).entries.length, 1, "forward cursors cannot merge into the reverse window");
   assert.equal(mergeHistoryPage(older, { sessionId: "other", cursor: older.next },
@@ -210,9 +212,29 @@ test("timeline paging de-duplicates offsets and remains bounded", () => {
   assert.equal(duplicate.entries.at(-1)?.offset, "1099");
   const older = mergeHistoryPage(first, { ...request, cursor }, { ...page, entries: [
     { ...entries[0], offset: "98" }, { ...entries[0], offset: "99" }] }, true);
-  assert.equal(older.entries.at(-1)?.offset, "1097");
-  assert.equal(older.newerOmitted, true);
-  assert.equal(mergeHistoryPage(older, request, { ...page, entries: [entries[999]] }).newerOmitted, false);
+  assert.equal(older.entries.length, 1002);
+  assert.equal(older.entries.at(-1)?.offset, "1099");
+  assert.equal(older.newerOmitted, false);
+});
+
+test("a window that reaches its largest size slides instead of growing", () => {
+  const entry = (index: number) => ({
+    offset: `${index + 100}`, eventType: "contentCompleted", providerId: "p", sessionId: "s", runId: null,
+    timestamp: "2026-01-01T00:00:00Z", kind: "Assistant", phase: null, contentId: `${index}`,
+    activityId: null, parentActivityId: null, interactionId: null, name: null, text: "x", details: null,
+    tool: null, files: null, images: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false,
+  });
+  const cursor = { version: 2, sessionId: "s", length: "900000", lastWriteUtcTicks: "7", offset: "100" };
+  const full: HistoryTimeline = { sessionId: "s", entries: Array.from({ length: maximumTimelineEntries }, (_, index) => entry(index)), next: cursor,
+    tailOmitted: false, limitReached: false, newerOmitted: false, pages: 1 };
+  const older = mergeHistoryPage(full, { ...request, cursor }, { ...page, entries: [{ ...entry(0), offset: "98" }, { ...entry(0), offset: "99" }],
+    next: { ...cursor, offset: "98" } }, true, undefined, { olderFrom: "100", all: true });
+  assert.equal(older.entries.length, maximumTimelineEntries);
+  assert.equal(older.entries[0].offset, "98");
+  assert.equal(older.entries.at(-1)?.offset, `${maximumTimelineEntries + 97}`);
+  assert.equal(older.newerOmitted, true, "the newest records left the window");
+  assert.equal(older.limitReached, true);
+  assert.equal(mergeHistoryPage(older, request, { ...page, entries: [entry(5)] }).newerOmitted, false);
 });
 
 test("history change resets the cursor", async () => {
@@ -301,7 +323,24 @@ test("a refresh of the newest history keeps the loaded window and appends what i
   assert.equal(mergeHistoryPage(undefined, { sessionId: "s", cursor: null }, { ...tail, next: null }, false, undefined, { known: { ...known, next: null } }).next, null);
 });
 
-test("older history is read page after page until it brings in one more whole turn", () => {
+test("a refresh keeps a window that older history made larger than a first read", () => {
+  const row = (offset: number, kind = "Assistant") => ({ offset: `${offset}`, eventType: "contentCompleted", providerId: "p", sessionId: "runtime", runId: "r",
+    timestamp: "2026-01-01T00:00:00Z", kind, phase: null, contentId: `${offset}`, activityId: null, parentActivityId: null, interactionId: null, name: null,
+    text: `${offset}`, details: null, textTruncated: false, tool: null, files: null, images: null, detailsTruncated: false, bodyOmitted: false } satisfies HistoryResponse["entries"][number]);
+  // The whole journal was loaded: 5,000 records, far more than the 1,000 a first read keeps.
+  const known: HistoryTimeline = { sessionId: "s", entries: Array.from({ length: 5000 }, (_, index) => row(index * 10, index % 10 === 0 ? "User" : "Assistant")), next: null,
+    tailOmitted: false, limitReached: false, newerOmitted: false, turnReached: false, pages: 50 };
+  const tail = { ...page, entries: [row(49_980), row(49_990), row(50_000)], next: { version: 2, sessionId: "s", length: "60000", lastWriteUtcTicks: "9", offset: "49980" } };
+  const refreshed = mergeHistoryPage(undefined, { sessionId: "s", cursor: null }, tail, false, "0", { known });
+  assert.equal(refreshed.entries.length, 5001, "the loaded history stays and the new record joins it");
+  assert.equal(refreshed.entries[0], known.entries[0], "the records of the window are the same objects, so their rows are not rebuilt");
+  assert.equal(refreshed.entries.at(-1)?.offset, "50000");
+  assert.equal(refreshed.next, null);
+  assert.equal(refreshed.newerOmitted, false);
+  assert.equal(historySettled({ kind: "ready", request: { sessionId: "s", cursor: null }, page }, refreshed), true);
+});
+
+test("older history is read in chunks of whole turns", () => {
   const row = (offset: number, kind = "Assistant") => ({ offset: `${offset}`, eventType: "contentCompleted", providerId: "p", sessionId: "runtime", runId: "r",
     timestamp: "2026-01-01T00:00:00Z", kind, phase: null, contentId: `${offset}`, activityId: null, parentActivityId: null, interactionId: null, name: null,
     text: `${offset}`, details: null, textTruncated: false, tool: null, files: null, images: null, detailsTruncated: false, bodyOmitted: false } satisfies HistoryResponse["entries"][number]);
@@ -309,21 +348,59 @@ test("older history is read page after page until it brings in one more whole tu
   const window: HistoryTimeline = { sessionId: "s", entries: [row(700, "User"), row(800)], next: cursor(700),
     tailOmitted: false, limitReached: false, newerOmitted: false, turnReached: true, pages: 31 };
   const options = { olderFrom: "700" };
-  // The first older page holds no prompt: the read is not settled and goes on.
-  const first = mergeHistoryPage(window, { sessionId: "s", cursor: window.next }, { ...page, entries: [row(500), row(600)], next: cursor(500) }, true, undefined, options);
+  // Turns of ten records: a prompt at every offset that ends in 0000.
+  const turn = (from: number, to: number) => Array.from({ length: (to - from) / 1000 }, (_, index) => {
+    const offset = from + index * 1000;
+    return row(offset, offset % 10_000 === 0 ? "User" : "Assistant");
+  });
+  const big: HistoryTimeline = { ...window, entries: [row(700_000, "User"), row(701_000)], next: cursor(700_000) };
+  const from = { olderFrom: "700000" };
+  // A page that holds whole turns but too few records: the read is not settled and goes on.
+  const first = mergeHistoryPage(big, { sessionId: "s", cursor: big.next }, { ...page, entries: turn(600_000, 700_000), next: cursor(600_000) }, true, undefined, from);
+  assert.equal(first.entries.length, 102);
   assert.equal(first.turnReached, false);
   assert.equal(first.limitReached, false, "each older read has its own page budget");
-  assert.equal(historySettled({ kind: "ready", request: { sessionId: "s", cursor: window.next }, page }, first), false);
-  // The next page holds the end of an earlier turn, a prompt and its answer: the window starts at that prompt.
-  const second = mergeHistoryPage(first, { sessionId: "s", cursor: first.next }, { ...page, entries: [row(100), row(200), row(300, "User"), row(400)], next: cursor(100) }, true, undefined, options);
-  assert.deepEqual(second.entries.map(entry => entry.offset), ["300", "400", "500", "600", "700", "800"]);
+  assert.equal(historySettled({ kind: "ready", request: { sessionId: "s", cursor: big.next }, page }, first), false);
+  // Enough records now: the window starts at the oldest turn read completely. The turn at the very start of
+  // what was read may continue in the page before it (its preparation records), so the next one is taken.
+  const second = mergeHistoryPage(first, { sessionId: "s", cursor: first.next }, { ...page, entries: turn(395_000, 600_000), next: cursor(395_000) }, true, undefined, from);
   assert.equal(second.turnReached, true);
-  assert.deepEqual(second.next, cursor(300));
+  assert.equal(second.entries[0].offset, "400000");
+  assert.equal(second.entries.length, 302);
+  assert.deepEqual(second.next, cursor(400_000));
   assert.equal(second.newerOmitted, false);
-  // The journal start ends the read even without a prompt.
+  assert.equal(historySettled({ kind: "ready", request: { sessionId: "s", cursor: first.next }, page }, second), true);
+  const exact = mergeHistoryPage(first, { sessionId: "s", cursor: first.next }, { ...page, entries: turn(400_000, 600_000), next: cursor(400_000) }, true, undefined, from);
+  assert.equal(exact.entries[0].offset, "410000", "a turn that starts with the first record read is not cut at yet");
+  // The journal start ends the read, with or without a prompt, however few records it brought.
   const start = mergeHistoryPage(window, { sessionId: "s", cursor: window.next }, { ...page, entries: [row(600)], next: null }, true, undefined, options);
   assert.equal(start.next, null);
+  assert.deepEqual(start.entries.map(entry => entry.offset), ["600", "700", "800"]);
   assert.equal(historySettled({ kind: "ready", request: { sessionId: "s", cursor: window.next }, page }, start), true);
+});
+
+test("loading all older history reads to the start of the journal without cutting at turns", () => {
+  const row = (offset: number, kind = "Assistant") => ({ offset: `${offset}`, eventType: "contentCompleted", providerId: "p", sessionId: "runtime", runId: "r",
+    timestamp: "2026-01-01T00:00:00Z", kind, phase: null, contentId: `${offset}`, activityId: null, parentActivityId: null, interactionId: null, name: null,
+    text: `${offset}`, details: null, textTruncated: false, tool: null, files: null, images: null, detailsTruncated: false, bodyOmitted: false } satisfies HistoryResponse["entries"][number]);
+  const cursor = (offset: number) => ({ version: 2, sessionId: "s", length: "900000", lastWriteUtcTicks: "9", offset: `${offset}` });
+  let timeline: HistoryTimeline = { sessionId: "s", entries: [row(500_000, "User"), row(500_001)], next: cursor(500_000),
+    tailOmitted: false, limitReached: false, newerOmitted: false, turnReached: true, pages: 1 };
+  const options = { olderFrom: "500000", all: true };
+  // Fifty pages of a hundred records, a prompt every ten: far past one chunk and its page budget.
+  for (let end = 500_000; end > 0; end -= 10_000) {
+    const start = end - 10_000;
+    const request = { sessionId: "s", cursor: timeline.next };
+    timeline = mergeHistoryPage(timeline, request, { ...page, entries: Array.from({ length: 100 }, (_, index) => row(start + index * 100, index % 10 === 0 ? "User" : "Assistant")),
+      next: start ? cursor(start) : null }, true, undefined, options);
+    assert.equal(timeline.turnReached, false);
+    assert.equal(timeline.limitReached, false);
+    assert.equal(historySettled({ kind: "ready", request, page }, timeline), start === 0);
+  }
+  assert.equal(timeline.entries.length, 5002);
+  assert.equal(timeline.entries[0].offset, "0");
+  assert.equal(timeline.next, null);
+  assert.equal(timeline.newerOmitted, false);
 });
 
 test("a window cut at a turn keeps the preparation records written before the user's message", () => {

@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { AppIcon } from "./AppIcon";
 import { MarkdownContent } from "./MarkdownContent";
 import { writeMarkdown, type TimelineItem } from "./timeline";
@@ -24,10 +24,23 @@ export function commandPreview(source: string): string {
   return line.slice(0, end) + "…";
 }
 
-export function TimelineMessage({ item, canInspect, historySource, onOpenSource, toolTile = false, imageSource }: { item: TimelineItem; canInspect?: () => boolean; toolTile?: boolean;
+type TimelineMessageProps = { item: TimelineItem; canInspect?: () => boolean; toolTile?: boolean;
   historySource?: HistorySourceTarget; onOpenSource?: (target: HistorySourceTarget) => void;
   /** Reads the images of the item, when it has some. */
-  imageSource?: TimelineImageSource }) {
+  imageSource?: TimelineImageSource };
+
+// A long timeline is rendered again on every page of history and every live update: a row whose item,
+// source range and image reader are the same has nothing to redo.
+function sameMessage(previous: TimelineMessageProps, next: TimelineMessageProps): boolean {
+  const before = previous.historySource, after = next.historySource;
+  return previous.item === next.item && previous.toolTile === next.toolTile && previous.canInspect === next.canInspect
+    && previous.onOpenSource === next.onOpenSource && previous.imageSource?.key === next.imageSource?.key
+    && (before === after || !!before && !!after && before.start === after.start && before.end === after.end
+      && before.revision.sessionId === after.revision.sessionId && before.revision.length === after.revision.length
+      && before.revision.lastWriteUtcTicks === after.revision.lastWriteUtcTicks);
+}
+
+export const TimelineMessage = memo(function TimelineMessage({ item, canInspect, historySource, onOpenSource, toolTile = false, imageSource }: TimelineMessageProps) {
   const { t, locale } = useShellLanguage();
   const timestamp = timelineTime(item.timestamp, locale);
   const toolTrigger = useRef<HTMLButtonElement>(null);
@@ -173,7 +186,7 @@ export function TimelineMessage({ item, canInspect, historySource, onOpenSource,
       {details && <TimelineDetails item={details.item} current={detailCurrent} onClose={closeDetails} />}
     </div>
   </article>;
-}
+}, sameMessage);
 
 // Never parse a cut Markdown document: React escapes this inert excerpt as plain text. Avoid splitting a surrogate pair.
 function plainTextPreview(source: string): string {
