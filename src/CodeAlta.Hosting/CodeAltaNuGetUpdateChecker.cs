@@ -1,13 +1,14 @@
 using System.IO.Compression;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using NuGet.Versioning;
 
 namespace CodeAlta.Hosting;
 
 /// <summary>What nuget.org lists for a CodeAlta package, compared with the running version.</summary>
-/// <param name="PackageId">The package that was looked up.</param>
+/// <param name="PackageId">The tool package that was asked about: the one <c>dotnet tool update</c> names.</param>
 /// <param name="CurrentVersion">The running version.</param>
-/// <param name="LatestVersion">The newest listed version of the kind asked for; null when there is none.</param>
+/// <param name="LatestVersion">The newest version of the kind asked for that can be installed on this platform; null when there is none.</param>
 /// <param name="PackageFound">Whether the package is published at all.</param>
 /// <param name="HasNewerVersion">Whether <paramref name="LatestVersion"/> is newer than the running version.</param>
 /// <param name="IncludePrerelease">Whether prerelease versions were considered.</param>
@@ -30,6 +31,11 @@ public sealed record CodeAltaNuGetUpdateCheckResult(
 /// Looks up the published versions of a CodeAlta package on nuget.org. The terminal application and the
 /// desktop share it: each checks its own package once at start and tells the user how to update.
 /// </summary>
+/// <remarks>
+/// A tool package (<c>CodeAlta</c>) is a small package that names one package per platform
+/// (<c>CodeAlta.win-x64</c>), and nuget.org can list the small one well before the others. A version is
+/// only reported once the package of this platform lists it too: until then the update would fail.
+/// </remarks>
 public static class CodeAltaNuGetUpdateChecker
 {
     /// <summary>The project's page, where each release has its notes.</summary>
@@ -48,6 +54,15 @@ public static class CodeAltaNuGetUpdateChecker
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
         return prerelease ? ["tool", "update", "-g", packageId, "--prerelease"] : ["tool", "update", "-g", packageId];
+    }
+
+    /// <summary>The package of one platform behind a tool package: <c>CodeAlta.win-x64</c> for <c>CodeAlta</c>.</summary>
+    /// <exception cref="ArgumentException">An argument is blank.</exception>
+    public static string RuntimePackageId(string packageId, string runtimeIdentifier)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(runtimeIdentifier);
+        return packageId + "." + runtimeIdentifier;
     }
 
     /// <summary>The address of a version's release notes; null without a version.</summary>
@@ -77,24 +92,52 @@ public static class CodeAltaNuGetUpdateChecker
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
     /// <exception cref="HttpRequestException">nuget.org could not be read.</exception>
     /// <exception cref="OperationCanceledException">The caller canceled, or the request timed out.</exception>
-    public static async Task<CodeAltaNuGetUpdateCheckResult> CheckNuGetOrgAsync(
+    public static Task<CodeAltaNuGetUpdateCheckResult> CheckNuGetOrgAsync(
         string packageId,
         NuGetVersion currentVersion,
         bool includePrerelease,
         HttpClient httpClient,
         CancellationToken cancellationToken = default)
+        // A tool packed per runtime runs with the runtime identifier of its own package.
+        => CheckNuGetOrgAsync(packageId, currentVersion, includePrerelease, RuntimeInformation.RuntimeIdentifier, httpClient, cancellationToken);
+
+    /// <summary>
+    /// Compares the running version with what nuget.org lists for the tool package and for its package of
+    /// <paramref name="runtimeIdentifier"/>, through a supplied client.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="packageId"/> or <paramref name="runtimeIdentifier"/> is blank.</exception>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <exception cref="HttpRequestException">nuget.org could not be read.</exception>
+    /// <exception cref="OperationCanceledException">The caller canceled, or the request timed out.</exception>
+    public static async Task<CodeAltaNuGetUpdateCheckResult> CheckNuGetOrgAsync(
+        string packageId,
+        NuGetVersion currentVersion,
+        bool includePrerelease,
+        string runtimeIdentifier,
+        HttpClient httpClient,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
         ArgumentNullException.ThrowIfNull(currentVersion);
+        ArgumentException.ThrowIfNullOrWhiteSpace(runtimeIdentifier);
         ArgumentNullException.ThrowIfNull(httpClient);
 
-        var listedVersions = await GetListedVersionsAsync(httpClient, packageId, cancellationToken).ConfigureAwait(false);
-        if (listedVersions.Length == 0)
+        var toolLookup = GetListedVersionsAsync(httpClient, packageId, cancellationToken);
+        var runtimeLookup = GetListedVersionsAsync(httpClient, RuntimePackageId(packageId, runtimeIdentifier), cancellationToken);
+        await Task.WhenAll(toolLookup, runtimeLookup).ConfigureAwait(false);
+        var toolVersions = await toolLookup.ConfigureAwait(false);
+        var runtimeVersions = await runtimeLookup.ConfigureAwait(false);
+        if (toolVersions.Length == 0)
         {
             return new CodeAltaNuGetUpdateCheckResult(packageId, currentVersion, null, PackageFound: false, HasNewerVersion: false, includePrerelease);
         }
 
-        var latestVersion = listedVersions
+        // The update installs both packages, so a version counts once both list it. A tool with no package
+        // for this platform at all is not packed per runtime, as far as nuget.org tells: its own list decides.
+        var installable = runtimeVersions.Length == 0
+            ? toolVersions
+            : toolVersions.Where(version => runtimeVersions.Contains(version, VersionComparer.VersionRelease));
+        var latestVersion = installable
             .Where(version => includePrerelease || !version.IsPrerelease)
             .OrderByDescending(static version => version, VersionComparer.VersionRelease)
             .FirstOrDefault();

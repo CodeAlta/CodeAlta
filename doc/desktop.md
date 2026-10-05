@@ -97,7 +97,10 @@ length, and exits, instead of staying on its start-up screen with half of its fi
 ### Updates
 
 Once per start the desktop asks nuget.org whether a newer `CodeAlta` package is published, as the
-terminal application does for its own package (a prerelease build also considers prereleases). A
+terminal application does for its own package (a prerelease build also considers prereleases). The
+tool package only names one package per platform (`CodeAlta.win-x64`, `CodeAlta.Tui.linux-x64`), and
+nuget.org can list it well before those: a version counts once the package of the running platform
+lists it too, so that the update command cannot fail on a package that is not there yet. A
 newer version is announced by a notice with the version, the command that installs it
 (`dotnet tool update -g CodeAlta`, with `--prerelease` for a prerelease) and a button that copies
 it, and **View release notes**, which opens the release page in the browser. The application has to
