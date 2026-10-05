@@ -21,7 +21,8 @@
 
   <PropertyGroup>
     <ApplicationIcon>..\..\img\alta.ico</ApplicationIcon>
-    <PackageTags>agentic;ai;cli</PackageTags>
+    <Description>CodeAlta TUI: a keyboard-first terminal UI for agentic AI coding on your local projects, with durable sessions, model providers, MCP servers, skills and plugins. Start it with the altatui command.</Description>
+    <PackageTags>agentic;ai;coding-agent;llm;mcp;cli;tui;terminal</PackageTags>
     <PackageReadmeFile>readme.md</PackageReadmeFile>
     <PackageIcon>CodeAlta.png</PackageIcon>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>

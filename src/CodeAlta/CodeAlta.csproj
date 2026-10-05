@@ -17,14 +17,18 @@
     <PublishSelfContained>false</PublishSelfContained>
     <PublishAot>false</PublishAot>
     <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
+    <PackageTags>agentic;ai;coding-agent;llm;mcp;desktop</PackageTags>
     <PackageReadmeFile>readme.md</PackageReadmeFile>
+    <PackageIcon>CodeAlta.png</PackageIcon>
     <PackageLicenseExpression>BSD-2-Clause</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/CodeAlta/CodeAlta</PackageProjectUrl>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <Description>CodeAlta Desktop: a desktop workspace for agentic AI coding on your local projects, with session tabs you can split, a file editor, model providers, MCP servers, skills and plugins. Start it with the alta command.</Description>
   </PropertyGroup>
   <ItemGroup>
     <!-- The package shows the repository readme, like CodeAlta.Tui; README.md in this folder is for developers. -->
     <None Include="$(MSBuildThisFileDirectory)../../readme.md" Pack="true" PackagePath="/" />
+    <None Include="$(MSBuildThisFileDirectory)../../img/CodeAlta.png" Pack="true" PackagePath="/" />
     <!-- The window's own icon (Alt+Tab, task switcher): the executable's icon resource does not reach the native window. -->
     <Content Include="../../img/alta.ico" Link="alta.ico" CopyToOutputDirectory="PreserveNewest" />
     <!-- The same icon for the other desktops: the window, tray and launcher on Linux, the menu bar item and
