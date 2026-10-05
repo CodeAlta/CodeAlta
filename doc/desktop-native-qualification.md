@@ -195,11 +195,17 @@ The preserved dependency/license review is point-in-time evidence, not a release
   uses the supported `PackAsToolShimRuntimeIdentifiers` six-RID list instead: the SDK derives its
   restore RIDs from it, and packs one framework-dependent `CodeAlta` tool with six standard shims.
   NeoAstra supplies the six native binaries. TUI's existing eight-RID packaging is unchanged.
-- After 1.0.0 the shim list is Windows and Linux only (four shims). The SDK does not sign the
-  shims it packs, and macOS on Apple Silicon kills an unsigned arm64 executable when it starts
-  (`alta` printed `killed` after `dotnet tool install -g CodeAlta` 1.0.0). With no packaged macOS
-  shim, `dotnet tool install` creates the shim from its own apphost and ad-hoc signs it. The package
-  still carries NeoAstra's six native binaries, macOS included.
+- After 1.0.0 Desktop is packed like TUI, as one tool package per runtime (`RuntimeIdentifiers`, the six
+  runtimes NeoAstra has a native library for) behind a small `CodeAlta` package that names them. The
+  single 1.0.0 package carried the native libraries of every runtime (230 MB; about 30 MB per runtime
+  now), and its prebuilt macOS shim was unsigned: macOS on Apple Silicon kills an unsigned arm64
+  executable when it starts (`alta` printed `killed`). A per-runtime package starts through its own
+  apphost, which the SDK signs.
+- The per-runtime builds of a pack run in parallel, and NeoAstra's frontend steps write shared folders.
+  Only the build without a runtime restores and builds the page; a per-runtime build takes
+  `frontend/dist` as prebuilt assets and keeps its generated contracts under `obj/neoastra/<runtime>`.
+  The symbols of third-party native libraries (100 MB on Windows) are left out of the packages.
+  `Verify-DesktopPackage.ps1` predates this layout and has to be reworked on Windows before it is run.
 - NeoAstra's consumer targets normally copy generated TypeScript as a runtime artifact. Desktop
   removes only that build-only source item after collection and excludes publish symbols; generated
   JSON manifest/schema and manifest-backed assets remain packaged. Package inspection checks both

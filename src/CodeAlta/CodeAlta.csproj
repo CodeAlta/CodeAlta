@@ -10,11 +10,10 @@
     <PackageId>CodeAlta</PackageId>
     <AssemblyName>alta</AssemblyName>
     <ToolCommandName>alta</ToolCommandName>
-    <!-- One framework-dependent tool with standard shims, not .NET 10 RID-specific package fan-out.
-         The SDK also uses this list as RuntimeIdentifiers for restore. NeoAstra supplies native assets.
-         No macOS shim: the SDK does not sign the shims it packs, and macOS kills an unsigned arm64
-         executable when it starts. Without one, dotnet tool install creates and signs the shim itself. -->
-    <PackAsToolShimRuntimeIdentifiers>win-x64;win-arm64;linux-x64;linux-arm64</PackAsToolShimRuntimeIdentifiers>
+    <!-- One framework-dependent tool package per runtime, like CodeAlta.Tui: a single package for every
+         runtime carries the native libraries of all of them (230 MB in 1.0.0). These are the runtimes
+         NeoAstra has a native library for. -->
+    <RuntimeIdentifiers>win-x64;win-arm64;osx-x64;osx-arm64;linux-x64;linux-arm64</RuntimeIdentifiers>
     <SelfContained>false</SelfContained>
     <PublishSelfContained>false</PublishSelfContained>
     <PublishAot>false</PublishAot>
@@ -32,12 +31,13 @@
     <None Include="$(MSBuildThisFileDirectory)../../readme.md" Pack="true" PackagePath="/" />
     <None Include="$(MSBuildThisFileDirectory)../../img/CodeAlta.png" Pack="true" PackagePath="/" />
     <!-- The window's own icon (Alt+Tab, task switcher): the executable's icon resource does not reach the native window. -->
-    <Content Include="../../img/alta.ico" Link="alta.ico" CopyToOutputDirectory="PreserveNewest" />
+    <!-- These are read beside the application: Pack="false" keeps the copies NuGet adds for content files out of each package. -->
+    <Content Include="../../img/alta.ico" Link="alta.ico" CopyToOutputDirectory="PreserveNewest" Pack="false" />
     <!-- The same icon for the other desktops: the window, tray and launcher on Linux, the menu bar item and
          the application bundle on macOS. img/make-icons.py derives them from CodeAlta.png. -->
-    <Content Include="../../img/alta.png" Link="alta.png" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="../../img/alta-tray.png" Link="alta-tray.png" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="../../img/alta.icns" Link="alta.icns" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../img/alta.png" Link="alta.png" CopyToOutputDirectory="PreserveNewest" Pack="false" />
+    <Content Include="../../img/alta-tray.png" Link="alta-tray.png" CopyToOutputDirectory="PreserveNewest" Pack="false" />
+    <Content Include="../../img/alta.icns" Link="alta.icns" CopyToOutputDirectory="PreserveNewest" Pack="false" />
     <!-- The page imports the logo from outside its folder: without this, changing it does not rebuild the page. -->
     <NeoAstraFrontendInput Include="../../img/CodeAlta.svg" />
     <PackageReference Include="NeoAstra" />
@@ -60,6 +60,28 @@
     <PackageReference Include="XenoAtom.Terminal.UI.Extensions.Screenshot" />
     <PackageReference Include="XenoAtom.Terminal.UI.Graphics" />
   </ItemGroup>
+  <!-- The per-runtime builds of a pack run in parallel, and the page is the same for all of them. Only the
+       build without a runtime restores and builds it: a per-runtime build takes frontend/dist as it is and
+       keeps its generated contracts in its own folder, so that the builds share no file they write. -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <NeoAstraPrebuiltAssets>true</NeoAstraPrebuiltAssets>
+    <NeoAstraPrebuiltAssetDirectory>$(MSBuildProjectDirectory)/frontend/dist</NeoAstraPrebuiltAssetDirectory>
+    <NeoAstraStageFrontendClient>false</NeoAstraStageFrontendClient>
+    <NeoRpcIntermediateOutputPath>$(MSBuildProjectExtensionsPath)neoastra/$(RuntimeIdentifier)</NeoRpcIntermediateOutputPath>
+    <NeoRpcTypeScriptOutput>$(NeoRpcIntermediateOutputPath)/neoastra.ts</NeoRpcTypeScriptOutput>
+    <NeoRpcManifestOutput>$(NeoRpcIntermediateOutputPath)/neoastra.manifest.json</NeoRpcManifestOutput>
+    <NeoRpcSchemaOutput>$(NeoRpcIntermediateOutputPath)/neoastra.schema.json</NeoRpcSchemaOutput>
+  </PropertyGroup>
+  <Target Name="CodeAltaBuildFrontendOnce" BeforeTargets="NeoAstraComputeFrontendFingerprint" Condition="'$(RuntimeIdentifier)' != ''">
+    <!-- MSBuild runs a target once for a project and its properties: the builds that ask for it wait for the first one. -->
+    <MSBuild Projects="$(MSBuildProjectFullPath)" Targets="NeoAstraPrepareFrontend" RemoveProperties="RuntimeIdentifier" />
+  </Target>
+  <Target Name="CodeAltaExcludeNativeSymbols" AfterTargets="ComputeResolvedFilesToPublishList">
+    <!-- SkiaSharp and HarfBuzzSharp ship the symbols of their Windows libraries: 100 MB the application never reads. -->
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb' and '%(ResolvedFileToPublish.AssetType)' == 'native'" />
+    </ItemGroup>
+  </Target>
   <Target Name="CodeAltaExcludeBuildOnlyContractSource" AfterTargets="NeoAstraCollectRpcArtifacts">
     <!-- Keep generated contracts for TS checking/build and runtime JSON metadata, not TS source in the tool. -->
     <ItemGroup>

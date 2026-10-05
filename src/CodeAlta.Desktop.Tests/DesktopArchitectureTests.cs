@@ -31,12 +31,13 @@ public sealed class DesktopArchitectureTests
     }
 
     [TestMethod]
-    public void DesktopToolPackage_ShipsNoPrebuiltMacOSShim()
+    public void DesktopToolPackage_IsPackedPerRuntimeWithoutPrebuiltShims()
     {
-        // The SDK does not sign the shims it packs, and macOS kills an unsigned arm64 executable when it starts.
-        // Without a packaged shim, dotnet tool install creates and signs one on the user's machine.
+        // One package for every runtime carried the native libraries of all of them (230 MB in 1.0.0). Its
+        // prebuilt macOS shim was also unsigned, and macOS kills an unsigned arm64 executable when it starts.
         var project = System.Xml.Linq.XDocument.Load(Path.Combine(SourceRoot, "CodeAlta", "CodeAlta.csproj"));
-        var shims = project.Descendants("PackAsToolShimRuntimeIdentifiers").Single().Value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        CollectionAssert.AreEquivalent(new[] { "win-x64", "win-arm64", "linux-x64", "linux-arm64" }, shims);
+        var runtimes = project.Descendants("RuntimeIdentifiers").Single().Value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        CollectionAssert.AreEquivalent(new[] { "win-x64", "win-arm64", "osx-x64", "osx-arm64", "linux-x64", "linux-arm64" }, runtimes);
+        Assert.IsFalse(project.Descendants("PackAsToolShimRuntimeIdentifiers").Any());
     }
 }

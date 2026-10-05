@@ -32,8 +32,7 @@ try {
         $native = @($zip.Entries | Where-Object FullName -Match '/native/(lib)?neoastra_native\.(dll|so|dylib)$')
         if ($native.Count -ne 6 -or ($native.FullName -match 'musl')) { throw 'Expected exactly six non-musl native binaries.' }
         $shims = @($zip.Entries | Where-Object FullName -Match '/shims/[^/]+/alta(\.exe)?$')
-        # No macOS shim: the SDK does not sign packed shims, and dotnet tool install creates a signed one instead.
-        if ($shims.Count -ne 4 -or ($shims.FullName -match 'musl|osx')) { throw 'Expected four standard SDK tool shims (Windows and Linux).' }
+        if ($shims.Count -ne 0) { throw 'A per-runtime tool package has no prebuilt shim.' }
         if ($zip.Entries.FullName -match '(node_modules|\.map$|\.(cs|tsx?|pdb)$|System.Private.CoreLib.dll|CodeAlta\.(Tui|Agent|Plugins|Catalog|Orchestration)|altatui|XenoAtom|Probe)') { throw 'Unexpected sources, fixture, terminal, host or runtime contents.' }
         if ($manifest.assets.Count -ne 3) { throw 'The development boot bundle should contain only HTML, JS and CSS.' }
         $reader = [IO.StreamReader]::new($zip.GetEntry("${prefix}alta.runtimeconfig.json").Open())
