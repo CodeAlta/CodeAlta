@@ -78,5 +78,12 @@
   <ItemGroup>
     <InternalsVisibleTo Include="CodeAlta.Tests" />
   </ItemGroup>
+
+  <Target Name="CodeAltaExcludeNativeSymbols" AfterTargets="ComputeResolvedFilesToPublishList">
+    <!-- SkiaSharp and HarfBuzzSharp ship the symbols of their Windows libraries: 100 MB the application never reads. -->
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb' and '%(ResolvedFileToPublish.AssetType)' == 'native'" />
+    </ItemGroup>
+  </Target>
 </Project>
 
