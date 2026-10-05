@@ -13,25 +13,25 @@ public sealed class PluginManagementDialogTests
     {
         var entry = new PluginManagementEntry
         {
-            Key = "github",
-            PluginId = "github",
-            DisplayName = "GitHub",
+            Key = "git",
+            PluginId = "git",
+            DisplayName = "Git",
             LoadUnitKind = PluginLoadUnitKind.BuiltIn,
             Scope = PluginScope.Global,
             State = PluginManagementState.Enabled,
             Enabled = true,
             Metadata = new Dictionary<string, string>
             {
-                ["Description"] = "Adds a GitHub issue prompt picker.",
+                ["Description"] = "Adds an issue prompt picker.",
             },
         };
 
         var selectedMarkup = BuildPluginListItemMarkup(entry, selected: true);
         var unselectedMarkup = BuildPluginListItemMarkup(entry, selected: false);
 
-        StringAssert.Contains(selectedMarkup, "built-in · enabled · Adds a GitHub issue prompt picker.");
+        StringAssert.Contains(selectedMarkup, "built-in · enabled · Adds an issue prompt picker.");
         Assert.IsFalse(selectedMarkup.Contains("[dim]built-in", StringComparison.Ordinal));
-        StringAssert.Contains(unselectedMarkup, "[dim]built-in · enabled · Adds a GitHub issue prompt picker.[/]");
+        StringAssert.Contains(unselectedMarkup, "[dim]built-in · enabled · Adds an issue prompt picker.[/]");
     }
 
     private static string BuildPluginListItemMarkup(PluginManagementEntry entry, bool selected)

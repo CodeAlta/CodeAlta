@@ -2,7 +2,7 @@ import { useRef, type ClipboardEventHandler, type ReactNode } from "react";
 import { AppWindow } from "./AppWindow";
 import { dispatchExpandedComposerKey } from "./composerKeyboard";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
-import { GitHubIssuePicker } from "./GitHubIssuePicker";
+import { IssuePicker } from "./IssuePicker";
 import { useShellLanguage } from "./shellLanguage";
 import { PromptEditor, type PromptInput } from "./PromptEditor";
 
@@ -39,7 +39,7 @@ export function ExpandedPromptEditor({ text, onChange, onClose, onPaste, attachm
         }} />
     </div>
     <ProjectReferencePicker text={text} edit={onChange} input={editor} />
-    <GitHubIssuePicker edit={onChange} input={editor} />
+    <IssuePicker edit={onChange} input={editor} />
     <p id="expanded-prompt-hint">{t("Escape / Ctrl+Enter close · Enter new line · Draft preserved; nothing is sent.")}</p>
   </AppWindow>;
 }

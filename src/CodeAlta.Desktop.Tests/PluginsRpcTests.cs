@@ -82,10 +82,10 @@ public sealed class PluginsRpcTests
 
         // An id only named in configuration, and one the desktop cannot list at all (a built-in), can be set too.
         Assert.AreEqual("ok", (await fixture.Service.SetEnabledAsync(new(Epoch, project, "Global", "mcp", true), default)).Status);
-        Assert.AreEqual("ok", (await fixture.Service.SetEnabledAsync(new(Epoch, project, "Global", "github", false), default)).Status);
+        Assert.AreEqual("ok", (await fixture.Service.SetEnabledAsync(new(Epoch, project, "Global", "git", false), default)).Status);
         var listed = await fixture.Service.ListAsync(new(Epoch, project), default);
         Assert.IsTrue(listed.Plugins.Single(plugin => plugin.Id == "mcp") is { Enabled: true, EnabledGlobal: true, State: "Configured" });
-        Assert.IsTrue(listed.Plugins.Single(plugin => plugin.Id == "github") is { Kind: "Config", Enabled: false, State: "Disabled" });
+        Assert.IsTrue(listed.Plugins.Single(plugin => plugin.Id == "git") is { Kind: "Config", Enabled: false, State: "Disabled" });
         StringAssert.Contains(File.ReadAllText(fixture.GlobalConfig), "tool_timeout_ms = 1234");
 
         Assert.AreEqual("ok", (await fixture.Service.SetEnabledAsync(new(Epoch, project, "Project", "local-plugin", false), default)).Status);

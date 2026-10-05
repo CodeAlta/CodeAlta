@@ -16,7 +16,7 @@ public sealed class DesktopPluginsTests
     public void BuiltIns_AreTheTerminalPluginsWithoutTheirTerminalPresentation()
     {
         // The ids are what [plugins.<id>] in the configuration names, in both frontends.
-        CollectionAssert.AreEqual(new[] { "github", "mcp", "statistics" }, DesktopPlugins.BuiltIns.Select(static plugin => plugin.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { "git", "mcp", "statistics" }, DesktopPlugins.BuiltIns.Select(static plugin => plugin.Id).ToArray());
         foreach (var definition in DesktopPlugins.BuiltIns)
         {
             var plugin = definition.Factory();

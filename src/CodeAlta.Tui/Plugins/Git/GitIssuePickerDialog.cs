@@ -8,9 +8,9 @@ using XenoAtom.Terminal.UI.Styling;
 using XenoAtom.Terminal.UI.Templating;
 using XenoAtom.Terminal.UI.Text;
 
-namespace CodeAlta.Plugin.GitHub;
+namespace CodeAlta.Plugin.Git;
 
-internal sealed class GitHubIssuePickerDialog
+internal sealed class GitIssuePickerDialog
 {
     private const int DialogMinWidth = 76;
     private const int DialogMaxWidth = 150;
@@ -18,29 +18,29 @@ internal sealed class GitHubIssuePickerDialog
     private const int DialogMaxHeight = 30;
     private readonly TextBox _queryBox;
     private readonly CheckBox _includeClosedCheckBox;
-    private readonly DataGridListDocument<GitHubIssueReferenceItem> _document;
+    private readonly DataGridListDocument<GitIssueReferenceItem> _document;
     private readonly DataGridControl _grid;
     private readonly TextBlock _headerTextBlock;
     private readonly TextBlock _statisticsTextBlock;
     private readonly TextBlock _statusTextBlock;
     private readonly TextBlock _hintTextBlock;
     private readonly Dialog _dialog;
-    private IReadOnlyList<GitHubIssueReferenceItem> _items = [];
+    private IReadOnlyList<GitIssueReferenceItem> _items = [];
     private int _documentRowCount;
     private bool _isOpen;
     private bool _suppressQueryDocumentChanged;
     private bool _suppressSelectionChanged;
 
-    public GitHubIssuePickerDialog(Action<string> openUrl, string hintText = "Arrows move · Enter insert link · Ctrl+I include closed · Esc close")
+    public GitIssuePickerDialog(Action<string> openUrl, string hintText = "Arrows move · Enter insert link · Ctrl+I include closed · Esc close")
     {
         ArgumentNullException.ThrowIfNull(openUrl);
-        _headerTextBlock = CreateLabel("GitHub issues");
+        _headerTextBlock = CreateLabel("Issues");
         _statisticsTextBlock = CreateLabel(string.Empty);
         _statusTextBlock = CreateLabel(string.Empty);
         _hintTextBlock = CreateLabel(hintText);
 
         _queryBox = new TextBox()
-            .Placeholder("Search GitHub issues…")
+            .Placeholder("Search issues…")
             .HorizontalAlignment(Align.Stretch);
         _queryBox.TextDocument.Changed += OnQueryDocumentChanged;
         _queryBox.KeyDown((_, e) => HandleQueryKeyDown(e));
@@ -52,15 +52,15 @@ internal sealed class GitHubIssuePickerDialog
         _includeClosedCheckBox.ValueChanged((_, e) => IncludeClosedChanged?.Invoke(this, e.NewValue));
         _includeClosedCheckBox.KeyDown((_, e) => HandleFilterKeyDown(e));
 
-        _document = new DataGridListDocument<GitHubIssueReferenceItem>();
+        _document = new DataGridListDocument<GitIssueReferenceItem>();
         using (_document.BeginUpdate())
         {
             _document
-                .AddColumn(new DataGridColumnInfo<string>("id", "🐙 Issue", true, GitHubIssueReferenceAccessors.Id))
-                .AddColumn(new DataGridColumnInfo<string>("title", "📝 Title", true, GitHubIssueReferenceAccessors.Title))
-                .AddColumn(new DataGridColumnInfo<string>("state", "🚦 State", true, GitHubIssueReferenceAccessors.State))
-                .AddColumn(new DataGridColumnInfo<string>("updated", "🕒 Updated", true, GitHubIssueReferenceAccessors.Updated))
-                .AddColumn(new DataGridColumnInfo<string>("link", "🔗 Link", true, GitHubIssueReferenceAccessors.Link));
+                .AddColumn(new DataGridColumnInfo<string>("id", "🎫 Issue", true, GitIssueReferenceAccessors.Id))
+                .AddColumn(new DataGridColumnInfo<string>("title", "📝 Title", true, GitIssueReferenceAccessors.Title))
+                .AddColumn(new DataGridColumnInfo<string>("state", "🚦 State", true, GitIssueReferenceAccessors.State))
+                .AddColumn(new DataGridColumnInfo<string>("updated", "🕒 Updated", true, GitIssueReferenceAccessors.Updated))
+                .AddColumn(new DataGridColumnInfo<string>("link", "🔗 Link", true, GitIssueReferenceAccessors.Link));
         }
 
         _grid = new DataGridControl { View = new DataGridDocumentView(_document) }
@@ -126,6 +126,9 @@ internal sealed class GitHubIssuePickerDialog
 
     public bool IncludeClosed => _includeClosedCheckBox.IsChecked;
 
+    public void SetTitle(string title)
+        => _headerTextBlock.Text = title ?? string.Empty;
+
     public void SetChrome(string statisticsText, string statusText)
     {
         _statisticsTextBlock.Text = statisticsText ?? string.Empty;
@@ -151,7 +154,7 @@ internal sealed class GitHubIssuePickerDialog
         }
     }
 
-    public void SetResults(IReadOnlyList<GitHubIssueReferenceItem> items, int selectedIndex)
+    public void SetResults(IReadOnlyList<GitIssueReferenceItem> items, int selectedIndex)
     {
         _items = items ?? [];
         _suppressSelectionChanged = true;
@@ -387,7 +390,7 @@ internal sealed class GitHubIssuePickerDialog
 
         static Visual BuildTitleCell(DataTemplateValue<string> value, in DataTemplateContext _)
         {
-            var row = (GitHubIssueReferenceItem)value.GetBinding().Owner;
+            var row = (GitIssueReferenceItem)value.GetBinding().Owner;
             return new TextBlock(value.GetValue()) { Wrap = false, IsSelectable = false }
                 .Tooltip(new TextBlock(string.IsNullOrWhiteSpace(row.Url) ? row.Title : $"{row.Title}\n{row.Url}").Wrap(true));
         }
@@ -396,7 +399,7 @@ internal sealed class GitHubIssuePickerDialog
         {
             TextBlock? state = null;
             state = new TextBlock(value.GetValue()) { Wrap = false, IsSelectable = false }
-                .Style(() => TextBlockStyle.Default with { Foreground = GetIssueStateColor(state!.GetTheme(), value.GetValue()) });
+                .Style(() => TextBlockStyle.Default with { Foreground = GetIssueStateColor(state!.GetTheme(), ((GitIssueReferenceItem)value.GetBinding().Owner).IsOpen) });
             return state;
         }
 
@@ -407,7 +410,7 @@ internal sealed class GitHubIssuePickerDialog
 
         Visual BuildLinkCell(DataTemplateValue<string> value, in DataTemplateContext _)
         {
-            var row = (GitHubIssueReferenceItem)value.GetBinding().Owner;
+            var row = (GitIssueReferenceItem)value.GetBinding().Owner;
             if (string.IsNullOrWhiteSpace(row.Url))
             {
                 return new TextBlock(string.Empty) { Wrap = false, IsSelectable = false };
@@ -421,8 +424,8 @@ internal sealed class GitHubIssuePickerDialog
         grid.Columns.Add(new DataGridColumn<string>
         {
             Key = "id",
-            Header = new TextBlock("🐙 Issue"),
-            TypedValueAccessor = GitHubIssueReferenceAccessors.Id,
+            Header = new TextBlock("🎫 Issue"),
+            TypedValueAccessor = GitIssueReferenceAccessors.Id,
             Width = GridLength.Auto,
             Sortable = true,
             CellTemplate = new DataTemplate<string>(BuildIdCell, null),
@@ -431,7 +434,7 @@ internal sealed class GitHubIssuePickerDialog
         {
             Key = "title",
             Header = new TextBlock("📝 Title"),
-            TypedValueAccessor = GitHubIssueReferenceAccessors.Title,
+            TypedValueAccessor = GitIssueReferenceAccessors.Title,
             Width = GridLength.Star(1),
             Sortable = true,
             CellTemplate = new DataTemplate<string>(BuildTitleCell, null),
@@ -440,7 +443,7 @@ internal sealed class GitHubIssuePickerDialog
         {
             Key = "state",
             Header = new TextBlock("🚦 State"),
-            TypedValueAccessor = GitHubIssueReferenceAccessors.State,
+            TypedValueAccessor = GitIssueReferenceAccessors.State,
             Width = GridLength.Auto,
             Sortable = true,
             CellTemplate = new DataTemplate<string>(BuildStateCell, null),
@@ -449,7 +452,7 @@ internal sealed class GitHubIssuePickerDialog
         {
             Key = "updated",
             Header = new TextBlock("🕒 Updated"),
-            TypedValueAccessor = GitHubIssueReferenceAccessors.Updated,
+            TypedValueAccessor = GitIssueReferenceAccessors.Updated,
             Width = GridLength.Auto,
             Sortable = true,
             CellTemplate = new DataTemplate<string>(BuildUpdatedCell, null),
@@ -458,20 +461,18 @@ internal sealed class GitHubIssuePickerDialog
         {
             Key = "link",
             Header = new TextBlock("🔗 Link"),
-            TypedValueAccessor = GitHubIssueReferenceAccessors.Link,
+            TypedValueAccessor = GitIssueReferenceAccessors.Link,
             Width = GridLength.Auto,
             Sortable = false,
             CellTemplate = new DataTemplate<string>(BuildLinkCell, null),
         });
     }
 
-    private static Color GetIssueStateColor(Theme theme, string state)
-        => state switch
-        {
-            _ when string.Equals(state, "open", StringComparison.OrdinalIgnoreCase) => theme.Scheme?.BrightGreen ?? theme.Success ?? theme.Primary ?? theme.Foreground ?? Color.Default,
-            _ when string.Equals(state, "closed", StringComparison.OrdinalIgnoreCase) => theme.Scheme?.BrightRed ?? theme.Error ?? theme.Warning ?? theme.Foreground ?? Color.Default,
-            _ => theme.Scheme?.BrightYellow ?? theme.Warning ?? theme.Foreground ?? Color.Default,
-        };
+    // Each provider names its states its own way (open, Active, To Do…): the color follows open or closed.
+    private static Color GetIssueStateColor(Theme theme, bool isOpen)
+        => isOpen
+            ? theme.Scheme?.BrightGreen ?? theme.Success ?? theme.Primary ?? theme.Foreground ?? Color.Default
+            : theme.Scheme?.BrightRed ?? theme.Error ?? theme.Warning ?? theme.Foreground ?? Color.Default;
 
     private static TextBlock CreateLabel(string text)
         => new(text)

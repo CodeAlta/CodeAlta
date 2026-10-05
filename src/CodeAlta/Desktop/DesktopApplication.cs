@@ -206,7 +206,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         SessionOperationsService? operations = null;
         SessionAsksService? asks = null;
         ReminderService? reminders = null;
-        GithubIssuesService? githubIssues = null;
+        GitIssuesService? gitIssues = null;
         AppUpdateService? appUpdate = null;
         ModelCatalogService? providers = null;
         ProviderLoginService? providerLogin = null;
@@ -261,7 +261,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             void Mark(string step) => LogManager.GetLogger("CodeAlta.Desktop").Info($"Startup: {step} at {startupClock.ElapsedMilliseconds} ms");
             var startedWindow = window;
             var catalog = new CatalogOptions { GlobalRoot = options.CatalogRoot!, StateRoot = options.StateRoot ?? options.CatalogRoot! };
-            // Plugins read the user's profile (the MCP servers and their sign-ins, the GitHub CLI): they
+            // Plugins read the user's profile (the MCP servers and their sign-ins, the provider CLIs): they
             // run in the normal launch and stay off when the roots are explicit.
             var pluginAlta = roots.Home is null ? new PluginAltaServiceBridge() : null;
             var startupStatus = new DesktopStartupStatus();
@@ -465,8 +465,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     _ = providers.StartInitialization(); // Retained and joined by providers.DrainAsync.
                     builder.AddModelCatalogService(providers);
                     builder.AddReminderService(reminders);
-                    githubIssues = new GithubIssuesService(host.ProjectCatalog, epoch);
-                    builder.AddGithubIssuesService(githubIssues);
+                    gitIssues = new GitIssuesService(host.ProjectCatalog, epoch);
+                    builder.AddGitIssuesService(gitIssues);
                     builder.AddSessionOperationsService(operations);
                     builder.AddSessionAsksService(asks);
                     builder.AddSessionNotesService(new SessionNotesService(host.WorkspaceReads, host.RuntimeService, epoch));
@@ -559,7 +559,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             GC.KeepAlive(window);
             return;
         }
-        githubIssues?.Dispose(); // Its RPC host is gone: no lookup can still use the HTTP client.
+        gitIssues?.Dispose(); // Its RPC host is gone: no lookup can still use the HTTP client.
         appUpdate?.Dispose();
         if (window is not null)
         {

@@ -28,7 +28,7 @@ public sealed record PluginPromptEditorContribution
     /// </summary>
     /// <remarks>
     /// Keep this short and phrase it as a single placeholder segment, for example
-    /// <c>[#] to reference a GitHub issue</c>.
+    /// <c>[#] to reference an issue</c>.
     /// </remarks>
     public string? PlaceholderText { get; init; }
 

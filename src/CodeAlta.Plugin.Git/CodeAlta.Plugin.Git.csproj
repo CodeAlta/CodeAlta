@@ -4,12 +4,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <Description>Built-in GitHub integration plugin for CodeAlta.</Description>
+    <Description>Built-in Git hosting integration plugin for CodeAlta (GitHub, GitLab, Azure DevOps).</Description>
     <Authors>Alexandre Mutel</Authors>
-    <PackageTags>codealta;plugin;github;issues;agentic;ai</PackageTags>
+    <PackageTags>codealta;plugin;git;github;gitlab;azure-devops;issues;agentic;ai</PackageTags>
     <PackageProjectUrl>https://github.com/xoofx/CodeAlta</PackageProjectUrl>
     <PackageLicenseExpression>BSD-2-Clause</PackageLicenseExpression>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CodeAlta.Tests" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="XenoAtom.Logging" />

@@ -1144,7 +1144,7 @@ dialog:has(> .app-window) .tool-record-copy { align-self: flex-start; }
 /* The Other sessions row has the same hover-revealed actions trigger as a project row. */
 .ide-shell .project-root-list > li > button.project-actions-trigger { flex: 0 0 24px; width: 24px; min-height: 24px; height: 24px; padding: 0; justify-content: center; }
 
-/* Prompt pickers (project files, GitHub issues): a search field over one keyboard-driven list. */
+/* Prompt pickers (project files, issues): a search field over one keyboard-driven list. */
 dialog.reference-palette:has(> .app-window) > .app-window > .app-window-body { gap: 0; padding: 0; overflow: hidden; }
 .reference-project { color: var(--muted); font-weight: 400; }
 .reference-status { display: inline-flex; align-items: center; gap: 6px; margin-inline-end: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -1213,17 +1213,17 @@ dialog.command-help-dialog:has(> .app-window) > .app-window > .app-window-body {
 .command-help-groups dd { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 10px; margin: 0; }
 .command-help-groups > p { column-span: all; padding: 28px 0; text-align: center; }
 
-/* GitHub issue picker: the file picker's window with a table of issues. */
+/* Issue picker: the file picker's window with a table of issues. */
 .issue-filter { display: flex; align-items: center; gap: 12px; margin: 10px 12px 8px; }
 .issue-filter .reference-search.bp6-input-group { flex: 1; margin: 0; }
 .issue-filter .bp6-control { flex: none; margin: 0; font-size: 12px; }
-.issue-row, .issue-head { display: grid; grid-template-columns: 20px 64px minmax(0, 1fr) 70px 96px; align-items: center; gap: 10px; padding: 3px 10px; font-size: 13px; }
+.issue-row, .issue-head { display: grid; grid-template-columns: 20px 64px minmax(0, 1fr) 84px 96px; align-items: center; gap: 10px; padding: 3px 10px; font-size: 13px; }
 .issue-head { margin: 0 6px; padding-block: 4px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
 .issue-row { min-height: 28px; border-radius: 5px; cursor: default; }
 .issue-row[aria-selected="true"] { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
 .issue-number { color: var(--accent); font-variant-numeric: tabular-nums; }
 .issue-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.issue-state { color: var(--muted); font-size: 12px; text-transform: capitalize; }
+.issue-state { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; text-transform: capitalize; white-space: nowrap; }
 .issue-updated { overflow: hidden; color: var(--muted); font-size: 12px; text-align: end; text-overflow: ellipsis; white-space: nowrap; }
 .issue-head > :last-child { text-align: end; }
 .issue-icon { display: inline-flex; }

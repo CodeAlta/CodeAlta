@@ -40,7 +40,7 @@
     <ProjectReference Include="../CodeAlta.Agent/CodeAlta.Agent.csproj" />
     <ProjectReference Include="../CodeAlta.Hosting/CodeAlta.Hosting.csproj" />
     <ProjectReference Include="../CodeAlta.Plugin.Mcp/CodeAlta.Plugin.Mcp.csproj" />
-    <ProjectReference Include="../CodeAlta.Plugin.GitHub/CodeAlta.Plugin.GitHub.csproj" />
+    <ProjectReference Include="../CodeAlta.Plugin.Git/CodeAlta.Plugin.Git.csproj" />
     <ProjectReference Include="../CodeAlta.Plugin.Statistics/CodeAlta.Plugin.Statistics.csproj" />
     <ProjectReference Include="../CodeAlta.LiveTool/CodeAlta.LiveTool.csproj" />
     <ProjectReference Include="../CodeAlta.Orchestration/CodeAlta.Orchestration.csproj" />

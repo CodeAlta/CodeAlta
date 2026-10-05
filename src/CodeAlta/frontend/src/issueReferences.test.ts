@@ -23,6 +23,12 @@ test("the chosen issue replaces the token with a Markdown link", () => {
   assert.deepEqual(insertIssueReference("fix #12 now", 4, 7, 123, "https://github.com/owner/repo/issues/123"),
     { text: "fix [#123](https://github.com/owner/repo/issues/123) now", caret: 52 });
   assert.equal(insertIssueReference("#", 0, 1, 0, "https://github.com/owner/repo/issues/0"), null);
-  assert.equal(insertIssueReference("#", 0, 1, 5, "https://example.com/owner/repo/issues/5"), null);
+  assert.deepEqual(insertIssueReference("#7", 0, 2, 7, "https://gitlab.example.com/group/sub/project/-/issues/7"),
+    { text: "[#7](https://gitlab.example.com/group/sub/project/-/issues/7)", caret: 61 });
+  assert.deepEqual(insertIssueReference("#", 0, 1, 42, "https://dev.azure.com/org/My%20Project/_workitems/edit/42"),
+    { text: "[#42](https://dev.azure.com/org/My%20Project/_workitems/edit/42)", caret: 64 });
+  assert.equal(insertIssueReference("#", 0, 1, 5, "http://github.com/owner/repo/issues/5"), null);
+  assert.equal(insertIssueReference("#", 0, 1, 5, "https://user:pass@github.com/owner/repo/issues/5"), null);
+  assert.equal(insertIssueReference("#", 0, 1, 5, "javascript:alert(1)"), null);
   assert.equal(insertIssueReference("#", 0, 1, 5, "https://github.com/owner/repo/issues/5) [x](y"), null);
 });

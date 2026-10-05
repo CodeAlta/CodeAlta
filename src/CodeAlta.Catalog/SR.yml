@@ -384,12 +384,12 @@
   fr: "Ajouts"
   ja: "追加"
   zh: "新增"
-"Adds a GitHub issue prompt picker and exposes the GitHub CLI when available.":
-  de: "Fügt eine GitHub-Issue-Prompt-Auswahl hinzu und stellt bei Verfügbarkeit die GitHub CLI bereit."
-  es: "Añade un selector de prompts de problemas de GitHub y expone la CLI de GitHub cuando esté disponible."
-  fr: "Ajoute un sélecteur de prompts d’issues GitHub et expose GitHub CLI si disponible."
-  ja: "GitHub Issue プロンプト選択を追加し、利用可能なら GitHub CLI を公開。"
-  zh: "添加 GitHub issue 提示词选择器，并在可用时开放 GitHub CLI。"
+"Adds an issue prompt picker for GitHub, GitLab and Azure DevOps repositories and exposes their CLIs (gh, glab, az) when available.":
+  de: "Fügt eine Issue-Prompt-Auswahl für GitHub-, GitLab- und Azure-DevOps-Repositories hinzu und stellt bei Verfügbarkeit deren CLIs (gh, glab, az) bereit."
+  es: "Añade un selector de incidencias para prompts en repositorios de GitHub, GitLab y Azure DevOps y expone sus CLI (gh, glab, az) cuando estén disponibles."
+  fr: "Ajoute un sélecteur de tickets pour les prompts dans les dépôts GitHub, GitLab et Azure DevOps et expose leurs CLI (gh, glab, az) si disponibles."
+  ja: "GitHub、GitLab、Azure DevOps リポジトリ用の Issue プロンプト選択を追加し、利用可能ならそれぞれの CLI（gh、glab、az）を公開。"
+  zh: "为 GitHub、GitLab 和 Azure DevOps 仓库添加 issue 提示词选择器，并在可用时开放其 CLI（gh、glab、az）。"
 "Advanced Model Providers TOML":
   de: "Erweiterte Modellanbieter-TOML"
   es: "Proveedores de modelos avanzados TOML"

@@ -26,7 +26,7 @@ only to build. The installed application has no UI server or external asset orig
 (`altatui`) for the complete agent workflow. Running `alta` with no options now matches the TUI's
 normal startup: it owns the current project and `~/.alta` runtime, so an existing session can send
 a prompt immediately. It can start configured providers and acquires the shared runtime lock, and it
-runs the built-in plugins (MCP, GitHub, Statistics) and the source plugins of `~/.alta/plugins` and of
+runs the built-in plugins (MCP, Git, Statistics) and the source plugins of `~/.alta/plugins` and of
 the launch project. Command permission review and provider input remain disabled by default. WebView-only data stays in
 the platform-local application-data directory, and existing `.alta` storage is not migrated.
 
@@ -189,10 +189,13 @@ files and folders from the same index as the TUI (`.gitignore`-aware, recently u
 as the query grows, at most 64 rows) with a colored icon per file type, the name and its folder.
 Up/Down, PageUp/PageDown and Home/End move the selection, Enter replaces the `@query` with a
 Markdown link (`[name](relative/path)`) and Escape leaves the text as typed. Typing `#` the same
-way opens **GitHub issues** for the project's `github.com` remote: issue number, title, state and
-last update, most recently updated first, 50 at most. The search field matches a number or title
-words, **Include closed** (`Ctrl+I`) filters closed issues, and Enter inserts `[#123](url)`.
-The token comes from `GITHUB_TOKEN`, `GH_TOKEN` or `gh auth token`; pull requests are not listed.
+way opens the issues of the project's hosted repository (**GitHub issues**, **GitLab issues** or
+**Azure DevOps work items**, from the project's git remote): number, title, state and last update,
+most recently updated first, 50 at most. The search field matches a number or title words,
+**Include closed** (`Ctrl+I`) filters closed issues, and Enter inserts `[#123](url)`. The credentials
+come from the provider's environment variable or CLI (`GITHUB_TOKEN`/`GH_TOKEN` or `gh auth token`;
+`GITLAB_TOKEN` or `glab config get token`; `AZURE_DEVOPS_EXT_PAT` or `az account get-access-token`);
+pull and merge requests are not listed.
 Both windows are resizable and remember their size. Catalog-only and unverified inputs have no picker.
 
 **Settings → Appearance** manages the language, the theme (Dark, Light, or System, which follows the
@@ -530,7 +533,7 @@ details beside the list: source and state, the path of its `SKILL.md`, the skill
 license, compatibility and allowed tools when declared, related files, validation diagnostics, and the
 instructions of the `SKILL.md` rendered as Markdown (the first 64 Ki characters of a file up to 256 KiB).
 The **Models** section's table fills the page height. The **Plugins** Settings
-section has a switch per plugin, including the built-in MCP, GitHub and Statistics plugins; a change
+section has a switch per plugin, including the built-in MCP, Git and Statistics plugins; a change
 applies the next time CodeAlta starts, except for the Statistics rows described below, which follow
 the switch from their next read on. With an unarchived project selected, both pages can store a
 change globally or for that project. Every Settings section has its own icon in the sidebar.
@@ -608,10 +611,11 @@ window.
 The normal launch (`alta`, `alta --dev`) starts the plugin runtime like the terminal UI, before the
 window's page loads:
 
-- The built-in plugins are the terminal's, under the same ids (`mcp`, `github`, `statistics`), so one
+- The built-in plugins are the terminal's, under the same ids (`mcp`, `git`, `statistics`), so one
   `[plugins.<id>]` configuration applies to both. They run as backends: the MCP plugin gives sessions
-  the `alta mcp` commands, its prompt guidance and the tools of activated servers; the GitHub plugin
-  gives sessions of CodeAlta-managed providers the `gh` tool, run in the session's project; the
+  the `alta mcp` commands, its prompt guidance and the tools of activated servers; the Git plugin
+  gives sessions of CodeAlta-managed providers the `gh`, `glab` and `az` tools (each when its CLI is
+  installed), run in the session's project; the
   Statistics plugin gives `alta statistics`.
 - Source plugins under `~/.alta/plugins` and the launch project's `.alta/plugins` are built and loaded
   with the neutral authoring profile: their agent tools, prompt contributions, hooks, `alta` commands,

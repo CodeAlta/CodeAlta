@@ -1,5 +1,5 @@
 using CodeAlta.Catalog;
-using CodeAlta.Plugin.GitHub;
+using CodeAlta.Plugin.Git;
 using CodeAlta.Plugin.Mcp;
 using CodeAlta.Plugin.Statistics;
 using CodeAlta.Plugins;
@@ -15,12 +15,12 @@ internal static class CodeAltaBuiltInPlugins
         var registry = new BuiltInPluginRegistry();
         registry.Add(new BuiltInPluginDefinition
         {
-            Id = "github",
-            DisplayName = "GitHub",
-            Description = SR.T("Adds a GitHub issue prompt picker and exposes the GitHub CLI when available."),
+            Id = "git",
+            DisplayName = "Git",
+            Description = SR.T("Adds an issue prompt picker for GitHub, GitLab and Azure DevOps repositories and exposes their CLIs (gh, glab, az) when available."),
             EnabledByDefault = true,
-            PluginType = typeof(GitHubPlugin),
-            Factory = static () => new GitHubPlugin(GitHubTerminalContributions.CreatePromptEditorContributions),
+            PluginType = typeof(GitPlugin),
+            Factory = static () => new GitPlugin(GitTerminalContributions.CreatePromptEditorContributions),
         });
         registry.Add(new BuiltInPluginDefinition
         {

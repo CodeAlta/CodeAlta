@@ -187,7 +187,7 @@ Use `alta mcp server add/remove/...` or **Open JSON Config** for advanced JSON s
 
 ## Plugin and prompt boundaries
 
-The MCP implementation is a built-in trusted plugin, enabled by default through the same built-in plugin infrastructure as the GitHub and statistics plugins. It contributes:
+The MCP implementation is a built-in trusted plugin, enabled by default through the same built-in plugin infrastructure as the Git and statistics plugins. It contributes:
 
 - an `alta mcp` root command with mutating command policy;
 - compact dynamic developer prompt guidance that advertises active/inactive configured MCP servers and the `alta mcp activate <id>*` path;

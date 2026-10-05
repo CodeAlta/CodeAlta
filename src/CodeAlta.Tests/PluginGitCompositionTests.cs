@@ -1,16 +1,16 @@
-using CodeAlta.Plugin.GitHub;
+using CodeAlta.Plugin.Git;
 using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Tests;
 
 /// <summary>Uninitialized backend composition only; never attaches a context or invokes a native attachment.</summary>
 [TestClass]
-public sealed class PluginGitHubCompositionTests
+public sealed class PluginGitCompositionTests
 {
     [TestMethod]
     public void PlainBackend_HasNoPromptPresentation()
     {
-        var plugin = new GitHubPlugin();
+        var plugin = new GitPlugin();
         Assert.AreEqual(0, plugin.GetPromptEditorContributions().Count());
     }
 
@@ -29,7 +29,7 @@ public sealed class PluginGitHubCompositionTests
             yield return second;
         }
 
-        var plugin = new GitHubPlugin(_ =>
+        var plugin = new GitPlugin(_ =>
         {
             calls++;
             return Sequence();
@@ -54,11 +54,11 @@ public sealed class PluginGitHubCompositionTests
     [TestMethod]
     public void InjectedFactory_ReceivesSameBackendAndPreservesSequence()
     {
-        GitHubPlugin? received = null;
+        GitPlugin? received = null;
         var calls = 0;
         var first = Literal("same-name");
         var second = Literal("same-name");
-        var plugin = new GitHubPlugin(owner =>
+        var plugin = new GitPlugin(owner =>
         {
             received = owner;
             calls++;
@@ -76,7 +76,7 @@ public sealed class PluginGitHubCompositionTests
             Assert.AreSame(first, result[2]);
             Assert.IsNull(result[3]);
         }
-        Assert.AreEqual(0, new GitHubPlugin(static _ => []).GetPromptEditorContributions().Count());
+        Assert.AreEqual(0, new GitPlugin(static _ => []).GetPromptEditorContributions().Count());
     }
 
     [TestMethod]
@@ -84,7 +84,7 @@ public sealed class PluginGitHubCompositionTests
     {
         var expected = new InvalidOperationException("literal contribution failure");
         var calls = 0;
-        var plugin = new GitHubPlugin(_ =>
+        var plugin = new GitPlugin(_ =>
         {
             calls++;
             throw expected;
@@ -100,17 +100,17 @@ public sealed class PluginGitHubCompositionTests
             yield return first;
             throw expected;
         }
-        using var sequence = new GitHubPlugin(_ => FailingSequence()).GetPromptEditorContributions().GetEnumerator();
+        using var sequence = new GitPlugin(_ => FailingSequence()).GetPromptEditorContributions().GetEnumerator();
         Assert.IsTrue(sequence.MoveNext());
         Assert.AreSame(first, sequence.Current);
         Assert.AreSame(expected, Assert.ThrowsExactly<InvalidOperationException>(() => sequence.MoveNext()));
 
         var cancellation = new OperationCanceledException("literal cancellation");
-        using var canceled = new GitHubPlugin(_ => throw cancellation).GetPromptEditorContributions().GetEnumerator();
+        using var canceled = new GitPlugin(_ => throw cancellation).GetPromptEditorContributions().GetEnumerator();
         Assert.AreSame(cancellation, Assert.ThrowsExactly<OperationCanceledException>(() => canceled.MoveNext()));
 
         // A null sequence is an invalid factory result, not an empty-presentation fallback.
-        using var missing = new GitHubPlugin(static _ => null!).GetPromptEditorContributions().GetEnumerator();
+        using var missing = new GitPlugin(static _ => null!).GetPromptEditorContributions().GetEnumerator();
         Assert.ThrowsExactly<NullReferenceException>(() => missing.MoveNext());
     }
 
@@ -118,17 +118,17 @@ public sealed class PluginGitHubCompositionTests
     public void InjectedConstructor_RejectsNull()
     {
         // Explicitly exercise the non-null delegate constructor contract.
-        var exception = Assert.ThrowsExactly<ArgumentNullException>(() => new GitHubPlugin(null!));
+        var exception = Assert.ThrowsExactly<ArgumentNullException>(() => new GitPlugin(null!));
         Assert.AreEqual("createPromptEditorContributions", exception.ParamName);
     }
 
     [TestMethod]
     public void TerminalFactory_PreservesContributionMetadataWithoutAttachment()
     {
-        var plugin = new GitHubPlugin(GitHubTerminalContributions.CreatePromptEditorContributions);
+        var plugin = new GitPlugin(GitTerminalContributions.CreatePromptEditorContributions);
         var contribution = plugin.GetPromptEditorContributions().Single();
-        Assert.AreEqual("GitHub issue prompt picker", contribution.Name);
-        Assert.AreEqual("[#] to reference a GitHub issue", contribution.PlaceholderText);
+        Assert.AreEqual("Git issue prompt picker", contribution.Name);
+        Assert.AreEqual("[#] to reference an issue", contribution.PlaceholderText);
         Assert.AreEqual(0, contribution.Order);
         Assert.IsNotNull(contribution.Attach);
     }

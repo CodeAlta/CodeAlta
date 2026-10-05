@@ -1,5 +1,5 @@
 using CodeAlta.Orchestration.Runtime.Plugins;
-using CodeAlta.Plugin.GitHub;
+using CodeAlta.Plugin.Git;
 using CodeAlta.Plugin.Mcp;
 using CodeAlta.Plugin.Statistics;
 using CodeAlta.Plugins;
@@ -24,9 +24,9 @@ internal static class DesktopPlugins
     [
         new()
         {
-            Id = "github", DisplayName = "GitHub",
-            Description = "Exposes the GitHub CLI to sessions when it is available.",
-            PluginType = typeof(GitHubPlugin), Factory = static () => new GitHubPlugin(),
+            Id = "git", DisplayName = "Git",
+            Description = "Exposes the GitHub, GitLab and Azure DevOps CLIs (gh, glab, az) to sessions when they are available.",
+            PluginType = typeof(GitPlugin), Factory = static () => new GitPlugin(),
         },
         new()
         {

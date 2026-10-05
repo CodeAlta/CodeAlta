@@ -1,17 +1,18 @@
 using System.Globalization;
 
-namespace CodeAlta.Plugin.GitHub;
+namespace CodeAlta.Plugin.Git;
 
 /// <summary>
-/// Describes a GitHub issue that can be inserted into a prompt.
+/// Describes an issue (a GitHub or GitLab issue, an Azure DevOps work item) that can be inserted into a prompt.
 /// </summary>
 /// <param name="Number">The issue number.</param>
 /// <param name="Title">The issue title.</param>
 /// <param name="Url">The issue URL.</param>
 /// <param name="UpdatedAt">The issue update timestamp.</param>
-/// <param name="State">The issue state.</param>
+/// <param name="State">The issue state, as the provider names it.</param>
+/// <param name="IsOpen">Whether the provider still counts the issue as open.</param>
 /// <param name="Repository">The repository full name.</param>
-public sealed record GitHubIssueReferenceItem(int Number, string Title, string Url, DateTimeOffset UpdatedAt, string State, string Repository)
+public sealed record GitIssueReferenceItem(int Number, string Title, string Url, DateTimeOffset UpdatedAt, string State, bool IsOpen, string Repository)
 {
     /// <summary>Gets the displayed issue id.</summary>
     public string Id => FormattableString.Invariant($"#{Number}");
@@ -21,9 +22,6 @@ public sealed record GitHubIssueReferenceItem(int Number, string Title, string U
 
     /// <summary>Gets the displayed issue state.</summary>
     public string StateText => string.IsNullOrWhiteSpace(State) ? "unknown" : State;
-
-    /// <summary>Gets a value indicating whether the issue is open.</summary>
-    public bool IsOpen => string.Equals(State, "open", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Gets link text.</summary>
     public string LinkText => string.IsNullOrWhiteSpace(Url) ? string.Empty : "Open";

@@ -46,7 +46,7 @@ for source plugins:
 {.table}
 | Plugin | What it adds |
 |---|---|
-| [GitHub](github.md) | `#` issue lookup in GitHub repositories and an optional `gh` agent tool when the GitHub CLI is installed. |
+| [Git](git.md) | `#` issue lookup in GitHub, GitLab and Azure DevOps repositories, and the `gh`, `glab` and `az` agent tools when these CLIs are installed. |
 | [MCP](mcp.md) | Model Context Protocol server configuration, `alta mcp` commands, session-activated MCP agent tools, and MCP server management. |
 | [Statistics](statistics.md) | Transient per-turn/session statistics timeline cards and a `statistics estimate` live-tool command. |
 
@@ -106,7 +106,7 @@ enabled = false
 Built-in plugin IDs are lowercase, for example:
 
 ```toml
-[plugins.github]
+[plugins.git]
 enabled = false
 
 [plugins.mcp]

@@ -1,29 +1,29 @@
 using CodeAlta.Plugins.Tui;
 
-namespace CodeAlta.Plugin.GitHub;
+namespace CodeAlta.Plugin.Git;
 
-internal sealed class GitHubIssuePromptAttachment : IAsyncDisposable
+internal sealed class GitIssuePromptAttachment : IAsyncDisposable
 {
     private const int MaximumResults = 50;
-    private readonly GitHubPlugin _plugin;
+    private readonly GitPlugin _plugin;
     private readonly IPluginTerminalPromptEditorHost _host;
-    private readonly GitHubIssuePickerDialog _dialog;
+    private readonly GitIssuePickerDialog _dialog;
     private readonly object _stateGate = new();
-    private IReadOnlyList<GitHubIssueReferenceItem> _allItems = [];
-    private IReadOnlyList<GitHubIssueReferenceItem> _items = [];
-    private GitHubIssueReferenceSpan? _activeReference;
+    private IReadOnlyList<GitIssueReferenceItem> _allItems = [];
+    private IReadOnlyList<GitIssueReferenceItem> _items = [];
+    private GitIssueReferenceSpan? _activeReference;
     private string _activeQuery = string.Empty;
     private int _selectedIndex = -1;
     private long _updateGeneration;
     private CancellationTokenSource? _queryCancellation;
 
-    public GitHubIssuePromptAttachment(GitHubPlugin plugin, IPluginTerminalPromptEditorHost host)
+    public GitIssuePromptAttachment(GitPlugin plugin, IPluginTerminalPromptEditorHost host)
     {
         ArgumentNullException.ThrowIfNull(plugin);
         ArgumentNullException.ThrowIfNull(host);
         _plugin = plugin;
         _host = host;
-        _dialog = new GitHubIssuePickerDialog(OpenUrl);
+        _dialog = new GitIssuePickerDialog(OpenUrl);
         _dialog.QueryChanged += OnDialogQueryChanged;
         _dialog.SelectionChanged += OnSelectionChanged;
         _dialog.AcceptRequested += OnAcceptRequested;
@@ -85,7 +85,7 @@ internal sealed class GitHubIssuePromptAttachment : IAsyncDisposable
             generation = Interlocked.Increment(ref _updateGeneration);
             var text = _host.Text ?? string.Empty;
             var caretIndex = _host.CaretIndex;
-            if (!GitHubIssueReferenceParser.TryGetActiveIssueReference(text, caretIndex, out var activeReference) ||
+            if (!GitIssueReferenceParser.TryGetActiveIssueReference(text, caretIndex, out var activeReference) ||
                 !await _plugin.CanResolveIssueReferencesAsync(GetPromptProjectPath(), CancellationToken.None).ConfigureAwait(false))
             {
                 CloseOnHost();
@@ -133,6 +133,7 @@ internal sealed class GitHubIssuePromptAttachment : IAsyncDisposable
             _queryCancellation?.Cancel();
             _queryCancellation?.Dispose();
             _queryCancellation = new CancellationTokenSource();
+            var repository = await _plugin.ResolveIssueRepositoryAsync(GetPromptProjectPath(), _queryCancellation.Token).ConfigureAwait(false);
             var issues = await _plugin.QueryIssueReferencesAsync(GetPromptProjectPath(), queryText, MaximumResults, _queryCancellation.Token).ConfigureAwait(false);
             TryDispatchToHost(() =>
             {
@@ -141,9 +142,11 @@ internal sealed class GitHubIssuePromptAttachment : IAsyncDisposable
                     return;
                 }
 
+                _dialog.SetTitle(BuildTitle(repository));
+
                 if (issues is null)
                 {
-                    ApplyQueryUnavailable(queryText, "GitHub issue lookup is unavailable for this prompt folder");
+                    ApplyQueryUnavailable(queryText, "Issue lookup is unavailable for this prompt folder");
                     EnsureDialogVisible(queryText);
                     return;
                 }
@@ -167,7 +170,7 @@ internal sealed class GitHubIssuePromptAttachment : IAsyncDisposable
                     return;
                 }
 
-                ApplyQueryUnavailable(queryText, "GitHub issue lookup failed");
+                ApplyQueryUnavailable(queryText, "Issue lookup failed");
                 EnsureDialogVisible(queryText);
             });
         }
@@ -187,7 +190,7 @@ internal sealed class GitHubIssuePromptAttachment : IAsyncDisposable
         _dialog.SetChrome("0 matches", statusText);
     }
 
-    private void ApplyResult(IReadOnlyList<GitHubIssueReferenceItem> issues)
+    private void ApplyResult(IReadOnlyList<GitIssueReferenceItem> issues)
     {
         var mappedItems = issues.OrderByDescending(static issue => issue.UpdatedAt).ToArray();
         lock (_stateGate)
@@ -200,8 +203,8 @@ internal sealed class GitHubIssuePromptAttachment : IAsyncDisposable
 
     private void ApplyVisibleItems()
     {
-        GitHubIssueReferenceItem? selectedItem = null;
-        IReadOnlyList<GitHubIssueReferenceItem> allItems;
+        GitIssueReferenceItem? selectedItem = null;
+        IReadOnlyList<GitIssueReferenceItem> allItems;
         lock (_stateGate)
         {
             if (_selectedIndex >= 0 && _selectedIndex < _items.Count)
@@ -213,7 +216,7 @@ internal sealed class GitHubIssuePromptAttachment : IAsyncDisposable
         }
 
         var visibleItems = _dialog.IncludeClosed
-            ? allItems as GitHubIssueReferenceItem[] ?? allItems.ToArray()
+            ? allItems as GitIssueReferenceItem[] ?? allItems.ToArray()
             : allItems.Where(static issue => issue.IsOpen).ToArray();
         var selectedIndex = 0;
         if (visibleItems.Length == 0)
@@ -249,7 +252,7 @@ internal sealed class GitHubIssuePromptAttachment : IAsyncDisposable
 
         _dialog.SetQueryText(queryText);
         _dialog.SetResults([], -1);
-        _dialog.SetChrome("Loading…", "Loading GitHub issues…");
+        _dialog.SetChrome("Loading…", "Loading issues…");
     }
 
     private void EnsureDialogVisible(string queryText)
@@ -266,7 +269,7 @@ internal sealed class GitHubIssuePromptAttachment : IAsyncDisposable
 
     private bool AcceptSelected()
     {
-        IReadOnlyList<GitHubIssueReferenceItem> items;
+        IReadOnlyList<GitIssueReferenceItem> items;
         int selectedIndex;
         lock (_stateGate)
         {
@@ -318,6 +321,12 @@ internal sealed class GitHubIssuePromptAttachment : IAsyncDisposable
     private void CloseOnHost()
         => TryDispatchToHost(Close);
 
+    // "GitLab issues · group/project", "Azure DevOps work items · organization/project/repository".
+    private static string BuildTitle(GitRepositoryReference? repository)
+        => repository is null
+            ? "Issues"
+            : FormattableString.Invariant($"{repository.Provider.GetDisplayName()} {repository.Provider.GetIssueNoun()} · {repository.FullName}");
+
     private static string BuildStatisticsText(int visibleCount, int totalCount, bool includeClosed)
         => includeClosed
             ? totalCount == 0
@@ -328,9 +337,9 @@ internal sealed class GitHubIssuePromptAttachment : IAsyncDisposable
     private static string BuildStatusText(int visibleCount, bool includeClosed, string queryText)
         => visibleCount == 0
             ? includeClosed
-                ? "No GitHub issues match the current search"
-                : "No open GitHub issues match the current search"
-            : string.IsNullOrWhiteSpace(queryText) ? "Recent GitHub issues · Enter inserts the selected issue link"
+                ? "No issues match the current search"
+                : "No open issues match the current search"
+            : string.IsNullOrWhiteSpace(queryText) ? "Recent issues · Enter inserts the selected issue link"
             : "Enter inserts the selected issue link";
 
     private static void OpenUrl(string url)

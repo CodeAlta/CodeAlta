@@ -161,6 +161,6 @@ export const reminder = Object.freeze({
   list: unavailable, detail: unavailable, create: unavailable, save: unavailable, delete: unavailable,
 });
 // The demo has no project repository: the issue picker reports that there is nothing to look up.
-export const githubIssues = Object.freeze({
-  search: async () => ({ status: "not_github", epoch: "demo", repository: null, issues: [], message: null }),
+export const gitIssues = Object.freeze({
+  search: async () => ({ status: "no_repository", epoch: "demo", provider: null, repository: null, issues: [], message: null }),
 });

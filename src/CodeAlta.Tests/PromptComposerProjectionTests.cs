@@ -91,7 +91,7 @@ public sealed class PromptComposerProjectionTests
             ProjectPath = @"C:\code\CodeAlta",
             Slug = "codealta",
         };
-        var placeholderContributions = new[] { "[#] to reference a GitHub issue" };
+        var placeholderContributions = new[] { "[#] to reference an issue" };
 
         var draftProjection = PromptComposerProjectionBuilder.Build(
             selectedSession: null,
@@ -125,10 +125,10 @@ public sealed class PromptComposerProjectionTests
             promptPlaceholderContributions: placeholderContributions);
 
         Assert.AreEqual(
-            "Start a session. [/] commands, [?] help, [@] to reference a project file, [#] to reference a GitHub issue, [ENTER] to send, [SHIFT+ENTER] for new line, [CTRL+ENTER] to steer.",
+            "Start a session. [/] commands, [?] help, [@] to reference a project file, [#] to reference an issue, [ENTER] to send, [SHIFT+ENTER] for new line, [CTRL+ENTER] to steer.",
             draftProjection.Placeholder);
         Assert.AreEqual(
-            "Continue the selected session. [/] commands, [?] help, [@] to reference a project file, [#] to reference a GitHub issue, [ENTER] to send, [SHIFT+ENTER] for new line, [CTRL+ENTER] to steer.",
+            "Continue the selected session. [/] commands, [?] help, [@] to reference a project file, [#] to reference an issue, [ENTER] to send, [SHIFT+ENTER] for new line, [CTRL+ENTER] to steer.",
             sessionProjection.Placeholder);
     }
 

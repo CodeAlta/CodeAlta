@@ -1,8 +1,8 @@
-namespace CodeAlta.Plugin.GitHub;
+namespace CodeAlta.Plugin.Git;
 
-internal static class GitHubIssueReferenceParser
+internal static class GitIssueReferenceParser
 {
-    public static bool TryGetActiveIssueReference(string text, int caretIndex, out GitHubIssueReferenceSpan reference)
+    public static bool TryGetActiveIssueReference(string text, int caretIndex, out GitIssueReferenceSpan reference)
     {
         reference = default;
         if (string.IsNullOrEmpty(text) || caretIndex <= 0 || caretIndex > text.Length)
@@ -35,9 +35,9 @@ internal static class GitHubIssueReferenceParser
             }
         }
 
-        reference = new GitHubIssueReferenceSpan(start, caretIndex - start, text.Substring(start + 1, caretIndex - start - 1));
+        reference = new GitIssueReferenceSpan(start, caretIndex - start, text.Substring(start + 1, caretIndex - start - 1));
         return true;
     }
 }
 
-internal readonly record struct GitHubIssueReferenceSpan(int StartIndex, int Length, string QueryText);
+internal readonly record struct GitIssueReferenceSpan(int StartIndex, int Length, string QueryText);

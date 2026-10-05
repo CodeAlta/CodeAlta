@@ -10,7 +10,7 @@ import type { MessageKey } from "./localization";
 // lists them only once configuration names them.
 const builtIn: readonly { id: string; name: string; description: MessageKey }[] = [
   { id: "mcp", name: "MCP", description: "Connects Model Context Protocol servers and exposes their tools." },
-  { id: "github", name: "GitHub", description: "GitHub issue picker for prompts, and the GitHub CLI when available." },
+  { id: "git", name: "Git", description: "Issue picker for GitHub, GitLab and Azure DevOps repositories, and their CLIs when available." },
   { id: "statistics", name: "Statistics", description: "Per-turn and session statistics." },
 ];
 const stateIntent: Record<string, Intent> = { Enabled: "success", Failed: "danger", Changed: "warning", Disabled: "none", Configured: "none" };

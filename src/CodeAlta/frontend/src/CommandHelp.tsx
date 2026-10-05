@@ -8,8 +8,8 @@ import type { PluginCommandView } from "./pluginUi";
 import { useShellLanguage } from "./shellLanguage";
 
 /** Extra prompt-editor keys that are not commands. */
-const editorKeys: readonly (readonly [string, "New line" | "Previous sent prompt" | "Next sent prompt" | "Reference a project file" | "Reference a GitHub issue"])[] = [
-  ["Shift+Enter", "New line"], ["Alt+Up", "Previous sent prompt"], ["Alt+Down", "Next sent prompt"], ["@", "Reference a project file"], ["#", "Reference a GitHub issue"],
+const editorKeys: readonly (readonly [string, "New line" | "Previous sent prompt" | "Next sent prompt" | "Reference a project file" | "Reference an issue"])[] = [
+  ["Shift+Enter", "New line"], ["Alt+Up", "Previous sent prompt"], ["Alt+Down", "Next sent prompt"], ["@", "Reference a project file"], ["#", "Reference an issue"],
 ];
 
 /** The help window (F1, or "?" in an empty prompt): every command with its shortcuts, grouped like the terminal UI's help. */

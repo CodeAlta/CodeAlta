@@ -10,7 +10,7 @@ import { AppIcon } from "./AppIcon";
 import { ComposerSurface } from "./ComposerSurface";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
-import { GitHubIssuePicker } from "./GitHubIssuePicker";
+import { IssuePicker } from "./IssuePicker";
 import { useShellLanguage } from "./shellLanguage";
 
 // The context meter of a session that has not started: nothing used yet out of the selected model's window.
@@ -79,7 +79,7 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
         }
       }, placeholder: t("Ask CodeAlta to work on this project…") }}>
         {localDraft && !expanded && <ProjectReferencePicker text={text} edit={edit} input={promptInput} />}
-        {localDraft && !expanded && <GitHubIssuePicker edit={edit} input={promptInput} />}
+        {localDraft && !expanded && <IssuePicker edit={edit} input={promptInput} />}
         {localDraft?.surface && <ActiveProviderStatus epoch={localDraft.surface.epoch} onOpen={localDraft.surface.onOpenProviders} />}
         {/* A session that does not exist yet has no information to show: the control is there, disabled. */}
         {infoControl ?? <Button variant="minimal" className="session-info-trigger" icon={<AppIcon name="info" size={16} />} disabled

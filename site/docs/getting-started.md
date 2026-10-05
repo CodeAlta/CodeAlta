@@ -150,7 +150,7 @@ Inspect the failing test output below and propose the smallest safe fix.
 
 Type `@` in the prompt editor to open the project file/folder picker. Accepted entries are inserted as Markdown links such as `[Program.cs](src/CodeAlta.Tui/Program.cs)` and are sent as structured attachments. Raw `@path`, quoted paths, and optional `:line` or `:start-end` suffixes are also recognized at send time.
 
-In GitHub repositories, type `#` to search recent issues. The picker accepts numbers or words, matches words case-insensitively, and inserts Markdown issue links such as `[#18](https://github.com/org/repo/issues/18)`.
+In GitHub, GitLab and Azure DevOps repositories, type `#` to search recent issues (work items on Azure DevOps). The picker accepts numbers or words, matches words case-insensitively, and inserts Markdown issue links such as `[#18](https://github.com/org/repo/issues/18)`. See the [Git plugin](plugins/git.md).
 
 {{ alta_shot "alta-desktop-file-selection.webp" "alta-file-selection.gif" "File picker opened from the prompt" "Type <code>@</code>, search for files or folders, and accept entries to add them to the prompt as structured attachments." }}
 

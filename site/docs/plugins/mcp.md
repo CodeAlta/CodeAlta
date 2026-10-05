@@ -192,7 +192,7 @@ alta      # or altatui
 
 > [!TIP]
 > For many GitHub tasks, installing and authenticating `gh` is simpler than
-> adding the GitHub MCP server. CodeAlta's GitHub plugin can expose `gh` as an
+> adding the GitHub MCP server. CodeAlta's [Git plugin](git.md) can expose `gh` as an
 > agent tool, and GitHub operations can then go through the official CLI. Use
 > the GitHub MCP server when you specifically want its MCP toolsets.
 
