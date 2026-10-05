@@ -244,7 +244,7 @@ tool_timeout_ms = 30000
 | `direct_exposure` | Per-server override for the non-progressive direct exposure mode. |
 | `direct_tools` | Explicit raw tool names for the non-progressive direct exposure allowlist/auto path. |
 
-The loader also accepts compatibility/display keys such as `connect_on_startup`, `config_scopes`, `preferred_write_scope`, and per-server `required`. Current shipped MCP behavior is finite and on-demand: configuration inspection does not connect to servers, MCP tool discovery/calls connect lazily, and agent tools are exposed through session activation.
+The loader also accepts compatibility/display keys such as `connect_on_startup`, `config_scopes`, `preferred_write_scope`, and per-server `required`. Configuration inspection does not connect to servers, MCP tool discovery connects lazily, and agent tools are exposed through session activation. Once a session calls a server's tools, that server stays connected for the session, so a tool can rely on what an earlier call did (a browser snapshot, an opened document). An unused connection is closed after fifteen minutes and opened again at the next call.
 
 ## Managing servers through prompts
 
@@ -336,7 +336,7 @@ Use **Open JSON Config**, or ask the agent to add/remove/update MCP servers, for
 
 ## Current boundaries
 
-Current MCP support focuses on tools. MCP resources, prompts, elicitation/user-interaction flows, automatic `tool-list-changed` refresh, and a long-lived process-wide MCP connection manager are not part of the shipped user workflow. Runtime connections are finite and request-scoped, with diagnostics redacted before display.
+Current MCP support focuses on tools. MCP resources, prompts, elicitation/user-interaction flows, and automatic `tool-list-changed` refresh are not part of the shipped user workflow. Diagnostics are redacted before display.
 
 ## Disable it
 

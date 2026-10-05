@@ -15,6 +15,7 @@ public sealed class McpPlugin : PluginBase
     private const int MaxWrapperSchemaDescriptionChars = 2000;
 
     private readonly McpActivationState _activationState = new();
+    private readonly McpSessionConnections _connections = new();
     private readonly McpManagementService _managementService;
     private readonly McpPluginPresentation? _presentation;
     private readonly string? _userHomeDirectory;
@@ -98,7 +99,7 @@ public sealed class McpPlugin : PluginBase
                 SupportsCatalogOnlyContext = false,
             },
             CreateCommandNode = context => McpCommandFactory.CreateCommand(
-                context, new McpCommandFactoryOptions { UserHomeDirectory = _userHomeDirectory }, _activationState),
+                context, new McpCommandFactoryOptions { UserHomeDirectory = _userHomeDirectory, Connections = _connections }, _activationState),
         };
     }
 
@@ -247,7 +248,7 @@ public sealed class McpPlugin : PluginBase
 
         return new PluginBeforeAgentRunResult
         {
-            AdditionalTools = direct.Tools.Select(tool => CreateAgentTool(tool, projectPath, _userHomeDirectory)).ToArray(),
+            AdditionalTools = direct.Tools.Select(tool => CreateAgentTool(tool, projectPath, _userHomeDirectory, _connections)).ToArray(),
             TemporaryPromptContributions = CreateDirectToolDiagnosticsPrompt(direct.Diagnostics),
         };
     }
@@ -321,7 +322,15 @@ public sealed class McpPlugin : PluginBase
     private McpManagementService CreateManagementService()
         => _userHomeDirectory is null ? new McpManagementService() : new McpManagementService(_userHomeDirectory);
 
-    internal static AgentToolDefinition CreateAgentTool(McpRuntimeTool tool, string? projectPath, string? userHomeDirectory)
+    /// <inheritdoc />
+    public override async ValueTask DisposeAsync()
+    {
+        // The servers the sessions kept connected end with the plugin, not with the process.
+        await _connections.DisposeAsync().ConfigureAwait(false);
+        await base.DisposeAsync().ConfigureAwait(false);
+    }
+
+    internal static AgentToolDefinition CreateAgentTool(McpRuntimeTool tool, string? projectPath, string? userHomeDirectory, McpSessionConnections? connections)
     {
         var description = CreateToolDescription(tool);
         var useArgumentsJsonWrapper = RequiresArgumentsJsonWrapper(tool.InputSchema);
@@ -336,6 +345,7 @@ public sealed class McpPlugin : PluginBase
                 projectPath,
                 userHomeDirectory,
                 useArgumentsJsonWrapper,
+                connections,
                 invocation,
                 cancellationToken).ConfigureAwait(false));
     }
@@ -547,6 +557,7 @@ public sealed class McpPlugin : PluginBase
         string? projectPath,
         string? userHomeDirectory,
         bool useArgumentsJsonWrapper,
+        McpSessionConnections? connections,
         AgentToolInvocation invocation,
         CancellationToken cancellationToken)
     {
@@ -555,15 +566,29 @@ public sealed class McpPlugin : PluginBase
             return new AgentToolResult(false, [new AgentToolResultItem.Text(error)], error);
         }
 
-        await using var runtime = new McpRuntimeService(userHomeDirectory);
         var diagnostics = new List<McpRuntimeDiagnostic>();
-        var result = await runtime.CallToolAsync(
-            new McpRuntimeRequest { ProjectDirectory = projectPath },
-            server,
-            tool,
-            arguments,
-            diagnostics,
-            cancellationToken).ConfigureAwait(false);
+        var request = new McpRuntimeRequest { ProjectDirectory = projectPath, UserHomeDirectory = userHomeDirectory };
+        McpRuntimeToolCallResult? result;
+        if (connections is not null && !string.IsNullOrWhiteSpace(invocation.SessionId))
+        {
+            // The session's server stays connected from one call to the next: it keeps its state, and
+            // the call does not pay for a start.
+            try
+            {
+                result = await connections.CallToolAsync(invocation.SessionId, request, server, tool, arguments, diagnostics, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                var stopped = $"MCP tool '{tool}' on server '{server}' is unavailable: the MCP plugin was stopped.";
+                return new AgentToolResult(false, [new AgentToolResultItem.Text(stopped)], stopped);
+            }
+        }
+        else
+        {
+            await using var runtime = new McpRuntimeService(userHomeDirectory);
+            result = await runtime.CallToolAsync(request, server, tool, arguments, diagnostics, cancellationToken).ConfigureAwait(false);
+        }
+
         if (result is null)
         {
             var message = diagnostics.Count == 0

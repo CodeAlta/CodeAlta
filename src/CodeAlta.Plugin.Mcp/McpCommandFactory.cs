@@ -10,6 +10,9 @@ namespace CodeAlta.Plugin.Mcp;
 internal sealed record McpCommandFactoryOptions
 {
     public string? UserHomeDirectory { get; init; }
+
+    // The plugin's connections, which the tools an activation registers in a run call through.
+    public McpSessionConnections? Connections { get; init; }
 }
 
 internal static class McpCommandFactory
@@ -98,7 +101,7 @@ internal static class McpCommandFactory
             // An agent run that called the command takes the tools at once: its next model request offers them,
             // so the model goes on in the same turn. Later runs get them from the activation, as before.
             var registered = context.RunTools?.Add(
-                direct.Tools.Select(tool => McpPlugin.CreateAgentTool(tool, projectDirectory, options.UserHomeDirectory)).ToArray()) ?? [];
+                direct.Tools.Select(tool => McpPlugin.CreateAgentTool(tool, projectDirectory, options.UserHomeDirectory, options.Connections)).ToArray()) ?? [];
             var availableNow = context.RunTools is { } runTools && direct.Tools.Count > 0 && direct.Tools.All(tool => runTools.Contains(tool.Alias));
 
             WriteRecord(context.Stdout, new

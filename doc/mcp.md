@@ -170,7 +170,9 @@ The desktop app has the same flow on the **MCP Servers** page of Settings. The f
 
 Tool-call results preserve `isError` from MCP. Text content becomes `contentText` and `content` blocks; structured content is included after redaction when it fits the output character budget. Image, audio, embedded-resource, resource-link, and unknown non-text content are summarized instead of embedding raw payloads. Output beyond `max_tool_output_chars` is truncated and marked with `truncated = true`.
 
-Servers that cannot connect or list tools are reported as unavailable for that runtime request and do not contribute enabled tools to activation-time status, activated-agent-tool enumeration, or search/describe/call results. Runtime state is explicit and finite; activated tools are eagerly enumerated when `alta mcp activate ...` runs for immediate status feedback, then refreshed again at agent-run time. `tool-list-changed` notifications and a process-wide long-lived MCP connection manager are follow-up work only if tool freshness requires them.
+Servers that cannot connect or list tools are reported as unavailable for that runtime request and do not contribute enabled tools to activation-time status, activated-agent-tool enumeration, or search/describe/call results. Runtime state is explicit and finite; activated tools are eagerly enumerated when `alta mcp activate ...` runs for immediate status feedback, then refreshed again at agent-run time. `tool-list-changed` notifications are follow-up work only if tool freshness requires them.
+
+The tools a session calls keep their server connected (`McpSessionConnections`). A server can hold state from one call to the next, such as a browser snapshot whose element ids the next call uses, and starting it for every call costs seconds. Each session has its own connections, used by one call at a time, opened at its first call. They are closed when a call could not be completed (the server did not start, the call timed out or the connection broke: the next call connects again), after fifteen minutes without a call, and when the plugin stops. `alta mcp tool ...` commands, activation and the per-run tool listing still use a connection of their own that ends with them.
 
 ## TUI dialog and status indicator
 
@@ -211,7 +213,8 @@ Progressive dynamic `AgentToolDefinition` exposure is shipped behavior:
 - the MCP `inputSchema` is passed through as the tool input schema when it can be represented by CodeAlta's strict/OpenAI-compatible tool schema subset; schemas with dynamic object maps or required names outside local `properties` are exposed through an `arguments_json` compatibility string containing the raw MCP argument JSON object;
 - direct tool handlers delegate to `McpRuntimeService.CallToolAsync(serverKey, toolName, arguments, ...)`, unwrapping `arguments_json` when needed and preserving tool timeout, redaction, `isError`, structured content, and truncation behavior;
 - startup/list-tools diagnostics are reported through per-run MCP prompt guidance without leaking headers, environment values, arguments, or tool output secrets;
-- direct tools are enumerated on activation for immediate status feedback and refreshed at agent-run enumeration time. `tool-list-changed` notifications and a long-lived MCP connection manager are optional follow-ups only if finite refresh is insufficient.
+- direct tools are enumerated on activation for immediate status feedback and refreshed at agent-run enumeration time. `tool-list-changed` notifications are an optional follow-up only if finite refresh is insufficient;
+- direct tool calls of a session share that session's connections, which stay open between calls (see above).
 
 ## Deferred/future work
 
@@ -221,4 +224,4 @@ The following remain outside direct MCP tool exposure until separately implement
 - timeline display integration beyond the existing generic direct-tool display;
 - `tool-list-changed` notifications and automatic dynamic refresh beyond agent-run/plugin-tool enumeration;
 - richer Add/Edit server dialog workflows beyond the basic JSON fields currently exposed;
-- a process-wide long-lived MCP connection manager unless direct-tool performance/freshness data justifies it.
+- a process-wide MCP connection manager shared by sessions: connections are kept per session, for its direct tool calls only.
