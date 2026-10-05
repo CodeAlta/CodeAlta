@@ -21,15 +21,18 @@ internal sealed class PluginHostBridge
     private readonly Func<ProjectDescriptor?> _getCurrentProject;
     private readonly PluginFrontendBridge _frontend;
     private readonly PluginAltaServiceBridge? _alta;
+    private readonly CodeAlta.Tui.Plugins.TerminalPluginUi? _ui;
     private readonly PluginPromptContributionScope _promptContributionScope = new();
 
-    public PluginHostBridge(PluginRuntimeManager runtime, Func<ProjectDescriptor?> getCurrentProject, PluginAltaServiceBridge? alta = null)
+    public PluginHostBridge(PluginRuntimeManager runtime, Func<ProjectDescriptor?> getCurrentProject, PluginAltaServiceBridge? alta = null,
+        CodeAlta.Tui.Plugins.TerminalPluginUi? ui = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(getCurrentProject);
         _runtime = runtime;
         _getCurrentProject = getCurrentProject;
         _alta = alta;
+        _ui = ui;
         _frontend = new PluginFrontendBridge(runtime, getCurrentProject);
     }
 
@@ -38,6 +41,9 @@ internal sealed class PluginHostBridge
     public PluginRuntimeManager Runtime => _runtime;
 
     public PluginAltaServiceBridge? Alta => _alta;
+
+    /// <summary>Gets the window service of the plugins, which the application attaches itself to.</summary>
+    public CodeAlta.Tui.Plugins.TerminalPluginUi? Ui => _ui;
 
     public IReadOnlyList<PluginResolvedResourceContribution> GetResources()
         => _frontend.GetResources();

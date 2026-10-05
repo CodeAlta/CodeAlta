@@ -10,13 +10,23 @@ internal sealed class PluginManagementService
     private readonly Func<ProjectDescriptor?> _getSelectedProject;
     private readonly PluginManagementModelBuilder _modelBuilder = new();
     private readonly SourcePluginDiscoveryService _sourceDiscovery = new();
+    private readonly Func<IReadOnlyList<PluginRuntimeDiagnostic>>? _getRuntimeDiagnostics;
 
-    public PluginManagementService(CatalogOptions catalogOptions, Func<ProjectDescriptor?> getSelectedProject)
+    /// <summary>Creates the service.</summary>
+    /// <param name="catalogOptions">The catalog whose configuration holds the plugin switches.</param>
+    /// <param name="getSelectedProject">Resolves the selected project.</param>
+    /// <param name="getRuntimeDiagnostics">
+    /// Reads what the running plugin runtime reported: a build that failed, or a plugin that was not started
+    /// because it does not support this application. Null leaves that out.
+    /// </param>
+    public PluginManagementService(CatalogOptions catalogOptions, Func<ProjectDescriptor?> getSelectedProject,
+        Func<IReadOnlyList<PluginRuntimeDiagnostic>>? getRuntimeDiagnostics = null)
     {
         ArgumentNullException.ThrowIfNull(catalogOptions);
         ArgumentNullException.ThrowIfNull(getSelectedProject);
         _catalogOptions = catalogOptions;
         _getSelectedProject = getSelectedProject;
+        _getRuntimeDiagnostics = getRuntimeDiagnostics;
     }
 
     public PluginManagementSnapshot LoadSnapshot()
@@ -34,7 +44,7 @@ internal sealed class PluginManagementService
             projectConfig,
             pendingChanges: [],
             buildResults: [],
-            diagnostics: [],
+            diagnostics: _getRuntimeDiagnostics?.Invoke() ?? [],
             contributions: [],
             safeMode);
         return new PluginManagementSnapshot(EnrichDescriptions(entries), safeMode, selectedProject?.ProjectPath);

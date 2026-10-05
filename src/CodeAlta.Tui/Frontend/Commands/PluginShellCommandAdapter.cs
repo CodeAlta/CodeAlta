@@ -131,7 +131,8 @@ internal static class PluginShellCommandAdapter
             context.Status.SetStatus(result.UserMessage);
         }
 
-        if (!string.IsNullOrWhiteSpace(result.PromptText))
+        if (!string.IsNullOrWhiteSpace(result.PromptText) &&
+            !(result.EnqueuePrompt && await context.Plugins.TryEnqueuePromptAsync(result.PromptText, cancellationToken)))
         {
             await context.PromptDispatch.SendPromptAsync(result.PromptText, steer: false, cancellationToken);
         }

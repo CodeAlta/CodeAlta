@@ -262,7 +262,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
             () => DialogBoundsResolver.ResolveAppBounds(SessionInput), () => SessionInput, () => _sessionStateCoordinator.Projects,
             OpenFolderAsync, OpenModelProvidersAsync, _providerDialogCoordinator.RefreshAsync, OpenPromptsAsync, () => new AboutDialog(() => DialogBoundsResolver.ResolveAppBounds(GetDialogAnchor()), GetDialogAnchor, _shellAnimationRuntime.WelcomePhase01, updateService).Show(), composition.ModelCatalogCoordinator.Open, _sidebarCoordinator.OpenLogs, _fileEditorWorkspaceCoordinator.ShowOpenFilePickerAsync,
             SkillsManagementCoordinatorFactory.Create(_ownedServices, _catalogOptions, GetSelectedProject, GetDialogAnchor, _fileEditorWorkspaceCoordinator.OpenDocumentAsync, _sessionCommandCoordinator.ActivateSelectedSkillAsync, SetStatus),
-            PluginManagementCoordinatorFactory.Create(_catalogOptions, GetSelectedProject, GetDialogAnchor, _fileEditorWorkspaceCoordinator.OpenFilePathAsync),
+            PluginManagementCoordinatorFactory.Create(_catalogOptions, GetSelectedProject, GetDialogAnchor, _fileEditorWorkspaceCoordinator.OpenFilePathAsync, () => _ownedServices?.PluginHostBridge?.Runtime.Diagnostics ?? []),
             _sidebarCoordinator.OpenNavigatorSettings,
             () => EnsureSessionUsagePresenter().TogglePopupFromIndicator(),
             () => { if (SessionInput is not null) EnsureSessionInfoPresenter().TogglePopup(SessionInput); },
@@ -292,6 +292,31 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
             tab => _frontendEvents.Publish(new SessionUsageChangedEvent(tab.SessionView.SessionId)),
             _sessionRuntimeEventCoordinator.ProjectLoadedHistory,
             DispatchToUiAsync);
+        // From here on plugins can show dialogs, and read and send the prompt of the selected session.
+        _ownedServices?.PluginHostBridge?.Ui?.Attach(new CodeAlta.Tui.Plugins.DelegatingTerminalPluginUiHost
+        {
+            Dispatcher = _uiDispatcher,
+            DialogBounds = () => DialogBoundsResolver.ResolveAppBounds(GetDialogAnchor()),
+            FocusTarget = GetDialogAnchor,
+            Status = (message, warning) => SetStatus(message, tone: warning ? StatusTone.Warning : StatusTone.Info),
+            SelectedSession = () => GetSelectedSession()?.SessionId,
+            SelectedSessionBusy = () => GetSelectedSession() is { } session && EnsureSessionTab(session).StatusBusy,
+            ReadPrompt = () => _promptDraftUiCoordinator!.PromptText,
+            WritePrompt = text => _promptDraftUiCoordinator!.PromptText = text,
+            SendPrompt = (text, steer) => _sessionCommandCoordinator.SendPromptAsync(text, steer),
+            Enqueue = text =>
+            {
+                if (GetSelectedSession() is not { } session) return false;
+                _sessionPromptQueueCoordinator.EnqueuePrompt(EnsureSessionTab(session), text);
+                return true;
+            },
+            Compact = async () =>
+            {
+                if (GetSelectedSession() is null) return false;
+                await _sessionCommandCoordinator.CompactSelectedSessionAsync();
+                return true;
+            },
+        });
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -302,6 +327,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
 
     async ValueTask IShellFrontendHostLifecycle.DisposeFrontendAsync()
     {
+        _ownedServices?.PluginHostBridge?.Ui?.Detach();
         await ShellFrontendHost.DisposeFrontendResourcesAsync(
             _projectionCoordinator.Dispose, _reminderUiCoordinator.Dispose,
             () => _sessionStateCoordinator.PersistViewStateAsync(reportStatus: false),

@@ -34,7 +34,33 @@ internal sealed class PluginFrontendBridge
     public IReadOnlyList<PluginPromptEditorContribution> GetPromptEditorContributions()
         => _runtime.Adapter.GetContributions<PluginPromptEditorContribution>(PluginPoint.PromptEditor, CreateOptions())
             .Select(static registration => (PluginPromptEditorContribution)registration.Contribution)
+            .Concat(CreatePromptPickerEditors())
             .ToArray();
+
+    // A prompt picker is shown by the application: here as a search dialog attached to the prompt editor.
+    // One picker per character, and none on the characters CodeAlta uses itself.
+    private IEnumerable<PluginPromptEditorContribution> CreatePromptPickerEditors()
+    {
+        var triggers = new HashSet<char>();
+        foreach (var registration in _runtime.Adapter.GetContributions<PluginPromptPickerContribution>(PluginPoint.PromptPicker, CreateOptions()))
+        {
+            var picker = (PluginPromptPickerContribution)registration.Contribution;
+            if (picker.Trigger is '@' or '#' or '/' || !triggers.Add(picker.Trigger)) continue;
+            yield return PluginTui.PromptEditor(
+                "prompt-picker:" + picker.Name,
+                host => new TerminalPromptPickerAttachment(host, picker, (query, cancellationToken) => SearchPromptPickerAsync(picker, query, cancellationToken)),
+                picker.PlaceholderText,
+                picker.Order);
+        }
+    }
+
+    private async Task<IReadOnlyList<PluginPromptPickerItem>?> SearchPromptPickerAsync(PluginPromptPickerContribution picker, string query, CancellationToken cancellationToken)
+    {
+        var (items, diagnostics) = await _runtime.Adapter.SearchPromptPickerAsync(_runtime.ActivePlugins, picker, query, CreateOptions(), cancellationToken).ConfigureAwait(false);
+        return diagnostics.Count > 0 ? null : [.. items.Where(static item => item is not null && !string.IsNullOrEmpty(item.Label) && item.InsertText is not null).Take(MaximumPromptPickerItems)];
+    }
+
+    private const int MaximumPromptPickerItems = 50;
 
     public IReadOnlyList<string> GetPromptPlaceholderContributions()
         => GetPromptEditorContributions()

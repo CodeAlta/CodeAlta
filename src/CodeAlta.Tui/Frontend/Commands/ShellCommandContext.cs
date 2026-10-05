@@ -543,6 +543,10 @@ internal interface IPluginCommandService
     IReadOnlyList<PluginCommandContribution> GetCommandContributions();
 
     Task<PluginCommandResult> ExecuteCommandAsync(PluginCommandContribution contribution, CancellationToken cancellationToken = default);
+
+    /// <summary>Queues a prompt that a plugin command asked to queue.</summary>
+    /// <returns>False when the host cannot queue it, and the caller sends it instead.</returns>
+    ValueTask<bool> TryEnqueuePromptAsync(string text, CancellationToken cancellationToken = default) => new(false);
 }
 
 internal sealed class PluginHostCommandService : IPluginCommandService
@@ -561,5 +565,12 @@ internal sealed class PluginHostCommandService : IPluginCommandService
         return _pluginHostBridge is null
             ? Task.FromResult(PluginCommandResult.NotHandled)
             : _pluginHostBridge.ExecuteCommandAsync(contribution, cancellationToken);
+    }
+
+    public async ValueTask<bool> TryEnqueuePromptAsync(string text, CancellationToken cancellationToken = default)
+    {
+        if (_pluginHostBridge?.Ui is not { HasInteractiveUi: true } ui) return false;
+        await ui.EnqueuePromptAsync(text, cancellationToken);
+        return true;
     }
 }

@@ -147,7 +147,9 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
             modelsDevCatalogService.StartBackgroundRefresh();
 
             var providerDescriptors = new List<ModelProviderDescriptor>();
-            var pluginAltaServiceBridge = new PluginAltaServiceBridge();
+            // Plugins started before the application keep the services they were started with.
+            var pluginServices = prestartedPluginRuntime?.HostServices as CodeAltaPluginServices ?? new CodeAltaPluginServices();
+            var pluginAltaServiceBridge = pluginServices.AltaBridge;
             sharedHost = await CodeAltaHost.CreateAsync(
                     new CodeAltaHostOptions
                     {
@@ -164,7 +166,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                         WaitForEnterAfterPluginLiveOutput = pluginBootstrapOptions.WaitForEnterAfterPluginLiveOutput,
                         PrestartedPluginRuntime = prestartedPluginRuntime,
                         PluginBuiltIns = CodeAltaBuiltInPlugins.All,
-                        PluginServices = new CodeAltaPluginServices(pluginAltaServiceBridge),
+                        PluginServices = pluginServices,
                         ConfigureModelProviders = RegisterFrontendModelProviders,
                         PluginAgentEventFailurePolicy = (envelope, failure) => RuntimePluginAgentEventFailurePolicy.ReportAsync(
                             envelope.SessionId, failure,
@@ -174,7 +176,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                     cancellationToken)
                 .ConfigureAwait(false);
             var pluginRuntime = sharedHost.PluginRuntime;
-            var pluginHostBridge = new PluginHostBridge(pluginRuntime, () => sharedHost.CurrentProject, pluginAltaServiceBridge);
+            var pluginHostBridge = new PluginHostBridge(pluginRuntime, () => sharedHost.CurrentProject, pluginAltaServiceBridge, pluginServices.TerminalUi);
 
             return new CodeAltaOwnedServices(
                 ownsLogging,

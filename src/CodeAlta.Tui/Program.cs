@@ -514,6 +514,8 @@ internal partial class Program
                     SafeMode = pluginBootstrapOptions.PluginSafeMode,
                     IsHeadless = false,
                     Frontend = CodeAlta.Plugins.Abstractions.PluginFrontends.Terminal,
+                    // The application binds these to itself once it runs: plugins start first.
+                    Services = new CodeAlta.Tui.App.CodeAltaPluginServices(),
                     StartupFeedback = new CodeAlta.Tui.Plugins.TerminalPluginStartupFeedback(),
                     AuthoringProfile = PluginAuthoringProfile.Terminal,
                     WaitForEnterAfterBuildLiveOutput = pluginBootstrapOptions.WaitForEnterAfterPluginLiveOutput,

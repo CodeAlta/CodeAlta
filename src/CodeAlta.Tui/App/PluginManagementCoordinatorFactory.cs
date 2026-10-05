@@ -10,14 +10,15 @@ internal static class PluginManagementCoordinatorFactory
         CatalogOptions catalogOptions,
         Func<ProjectDescriptor?> getSelectedProject,
         Func<Visual?> getDialogAnchor,
-        Func<string, CancellationToken, Task> openFileAsync)
+        Func<string, CancellationToken, Task> openFileAsync,
+        Func<IReadOnlyList<CodeAlta.Plugins.PluginRuntimeDiagnostic>>? getRuntimeDiagnostics = null)
     {
         ArgumentNullException.ThrowIfNull(catalogOptions);
         ArgumentNullException.ThrowIfNull(getSelectedProject);
         ArgumentNullException.ThrowIfNull(getDialogAnchor);
         ArgumentNullException.ThrowIfNull(openFileAsync);
         var coordinator = new PluginManagementCoordinator(
-            new PluginManagementService(catalogOptions, getSelectedProject),
+            new PluginManagementService(catalogOptions, getSelectedProject, getRuntimeDiagnostics),
             openFileAsync,
             () => DialogBoundsResolver.ResolveAppBounds(getDialogAnchor()),
             getDialogAnchor);

@@ -82,6 +82,13 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
     /// <summary>Gets the contribution registry owned by the runtime.</summary>
     public PluginContributionRegistry Registry => _registry;
 
+    /// <summary>
+    /// Gets the services the host gave its plugins when it started the runtime, or null before the start
+    /// and for a host that gave none. A host that starts its plugins before its user interface reads them
+    /// back here to attach that interface later.
+    /// </summary>
+    public IPluginServices? HostServices { get; private set; }
+
     /// <summary>Gets the adapter service used by hosts to materialize contribution points.</summary>
     public PluginContributionAdapterService Adapter { get; }
 
@@ -124,6 +131,7 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
         PluginAuthoringPolicy.Validate(options.AuthoringProfile);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        HostServices = options.Services;
         PluginRuntimeManagerStartResult? result = null;
         await RunOwnedStartAsync(async () => result = await StartOwnedCoreAsync(options, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
         return result!;
