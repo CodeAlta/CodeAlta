@@ -86,7 +86,8 @@ internal sealed class FileOpenAICodexSubscriptionCredentialStore : IOpenAICodexS
             {
                 return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             }
-            catch (IOException ex) when ((ex.HResult & 0xffff) is 11 or 32 or 33)
+            // Held by another owner: a sharing (32) or lock (33) violation on Windows, EWOULDBLOCK on Linux (11) and macOS (35).
+            catch (IOException ex) when ((ex.HResult & 0xffff) is 11 or 32 or 33 or 35)
             {
                 await Task.Delay(50, cancellationToken).ConfigureAwait(false);
             }
