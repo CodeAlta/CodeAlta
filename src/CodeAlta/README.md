@@ -10,7 +10,7 @@ in [`doc/desktop.md`](../../doc/desktop.md).
 
 ## How it is built
 
-- A native window from [NeoAstra](https://www.nuget.org/packages/NeoAstra) 0.3.3 hosts the web view
+- A native window from [NeoAstra](https://www.nuget.org/packages/NeoAstra) 0.3.4 hosts the web view
   of the operating system: WebView2 on Windows, the system web view on macOS, WebKitGTK on Linux.
 - The page is React with strict TypeScript, built by Vite from `frontend/`.
 - The page calls the .NET host through generated RPC. The services are in `Desktop/Rpc`; the build
