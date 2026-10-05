@@ -1,13 +1,8 @@
 {
   "mcpServers": {
     "chrome-devtools": {
-      "command": "fnm",
+      "command": "npx",
       "args": [
-        "exec",
-        "--using=default",
-        "cmd",
-        "/c",
-        "npx",
         "-y",
         "chrome-devtools-mcp@latest",
         "--browserUrl",
