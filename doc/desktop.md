@@ -68,10 +68,26 @@ running one shows its window and comes to the front. `alta --exit` asks the runn
 nothing. Use it before `dotnet tool update -g CodeAlta`, which cannot replace the files of a running
 application.
 
-**Exit** (the tray's, Ctrl+Q, or a closed window that cannot stay in the tray) first asks about files
-with unsaved edits, then, while sessions are running, says how many and that exiting stops them:
-**Exit CodeAlta** or **Cancel**. The end of the user's session at sign-out or shutdown exits without
-a question.
+**Exit** (the tray's, Ctrl+Q, **Quit CodeAlta** or ⌘Q on macOS, or a closed window that cannot stay
+in the tray) first asks about files with unsaved edits, then, while sessions are running, says how
+many and that exiting stops them: **Exit CodeAlta** or **Cancel**. The end of the user's session at
+sign-out or shutdown exits without a question.
+
+On macOS the application has a menu bar, because a Mac application has no shortcut that its menu bar
+does not define:
+
+- the application's menu: **Hide CodeAlta** (⌘H), **Hide Others** (⌥⌘H), **Show All** and
+  **Quit CodeAlta** (⌘Q), which is the tray's **Exit**;
+- **Edit**: **Undo** (⌘Z), **Redo** (⇧⌘Z), **Cut** (⌘X), **Copy** (⌘C), **Paste** (⌘V) and
+  **Select All** (⌘A), for the prompt editor and every other text field;
+- **Window**: **Minimize** (⌘M) and **Close** (⌘W), which closes the window as its close button does.
+
+Every item is a command with its shortcut (`DesktopApplicationMenu`), not a NeoAstra role item: a
+role item cannot carry a shortcut, and the Quit role ends the application as the end of the session
+does, without the questions above. An item other than Quit sends the standard AppKit action through
+the responder chain on the window's thread. A shortcut that the page handles itself (undo and redo in
+the prompt editor, the Ctrl chords) still reaches the page first. The developer instance's items say
+**CodeAlta (dev)**. Windows and Linux have no menu bar: the window's title bar is the application's.
 
 On Windows the page's files are read by path, and Windows refuses a path of 260 characters or more.
 When CodeAlta is installed so deep that its files reach that length (a tool path inside a long

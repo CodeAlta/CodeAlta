@@ -87,6 +87,8 @@ Tool details, file diffs, context usage, session info, the session browser and t
 
 Closing the window keeps CodeAlta running in the notification area, with its sessions. Use the tray icon to open the window again or to exit. Turn this off with **Settings > Appearance > Keep running when the window is closed**. Exiting while sessions are running asks for confirmation first.
 
+On macOS the menu bar has the standard items and shortcuts: **Quit CodeAlta** (⌘Q), **Hide** (⌘H), **Minimize** (⌘M), **Close** (⌘W), and **Undo**, **Redo**, **Cut**, **Copy**, **Paste** and **Select All** in the **Edit** menu. ⌘W closes the window as its close button does, so CodeAlta keeps running in the menu bar unless that setting is off; ⌘Q exits.
+
 ### Updates from the app
 
 When a new version is available, the desktop app shows a notice with **Update and restart**. The TUI shows the `dotnet tool update` command to run.

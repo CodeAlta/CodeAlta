@@ -31,13 +31,13 @@ internal sealed record DesktopShellEvent(string Kind, int RunningSessions);
 
 /// <summary>
 /// How the application lives beyond its window: an icon in the notification area (the menu bar on macOS, the
-/// status area on Linux) with <c>Open</c> and <c>Exit</c>, a window that can be closed without exiting, and a
-/// question before an exit that would stop running sessions.
+/// status area on Linux) with <c>Open</c> and <c>Exit</c>, the application's menu bar on macOS, a window that
+/// can be closed without exiting, and a question before an exit that would stop running sessions.
 /// </summary>
 internal sealed class DesktopShell
 {
-    private const string OpenCommand = "codealta.shell.open";
-    private const string ExitCommand = "codealta.shell.exit";
+    internal const string OpenCommand = "codealta.shell.open";
+    internal const string ExitCommand = "codealta.shell.exit";
 
     private readonly NeoWindow _window;
     private readonly NeoDispatcher _dispatcher;
@@ -47,6 +47,7 @@ internal sealed class DesktopShell
     private readonly List<Action<DesktopShellEvent>> _watchers = [];
     private DesktopPreferences _preferences;
     private bool _tray;
+    private bool _commands;
     private bool _exiting;
     private bool _entryAdded;
 
@@ -126,10 +127,9 @@ internal sealed class DesktopShell
         try
         {
             if (services.Tray.Support.SupportLevel is NeoSupportLevel.None or NeoSupportLevel.Emulated) return;
-            services.Menus.Commands.Register(OpenCommand, _ => { Show(); return ValueTask.CompletedTask; });
-            services.Menus.Commands.Register(ExitCommand, _ => { RequestUserExit(); return ValueTask.CompletedTask; });
+            RegisterCommands(services);
             services.Tray.Activated += (_, activation) => { if (!activation.Secondary) Show(); };
-            var name = developer ? "CodeAlta (dev)" : "CodeAlta";
+            var name = DisplayName(developer);
             // Windows takes an .ico; macOS an image at the menu bar's size; Linux the application's icon.
             var icon = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "alta.ico" : OperatingSystem.IsMacOS() ? "alta-tray.png" : "alta.png");
             await services.Tray.SetAsync(new NeoTrayItemOptions
@@ -150,6 +150,42 @@ internal sealed class DesktopShell
             LogManager.GetLogger("CodeAlta.Desktop").Warn($"The notification area icon is unavailable: {exception.Message}");
         }
     }
+
+    /// <summary>
+    /// Gives the application its menu bar on macOS, with the standard shortcuts; elsewhere the window has no
+    /// menu. Quit is the tray's Exit, so the page's questions come first.
+    /// </summary>
+    internal async ValueTask StartApplicationMenuAsync(NeoDesktopServices services, bool developer)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        if (!OperatingSystem.IsMacOS()) return;
+        try
+        {
+            RegisterCommands(services);
+            // A command can be activated off the window's thread, and AppKit is called only on it.
+            DesktopApplicationMenu.Register(services.Menus.Commands, selector => OnWindowThread(() => { if (OperatingSystem.IsMacOS()) DesktopApplicationMenu.SendAction(selector); }));
+            await services.Menus.SetMenuAsync(DesktopApplicationMenu.Target, DesktopApplicationMenu.Build(DisplayName(developer), ExitCommand)).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            LogManager.GetLogger("CodeAlta.Desktop").Warn($"The application menu is unavailable: {exception.Message}");
+        }
+    }
+
+    // The tray's menu and the application's menu share Open and Exit; a command is registered once.
+    private void RegisterCommands(NeoDesktopServices services)
+    {
+        lock (_gate)
+        {
+            if (_commands) return;
+            _commands = true;
+        }
+
+        services.Menus.Commands.Register(OpenCommand, _ => { Show(); return ValueTask.CompletedTask; });
+        services.Menus.Commands.Register(ExitCommand, _ => { RequestUserExit(); return ValueTask.CompletedTask; });
+    }
+
+    private static string DisplayName(bool developer) => developer ? "CodeAlta (dev)" : "CodeAlta";
 
     /// <summary>Answers a request to close the window; anything but an exit has canceled it.</summary>
     internal void Close(NeoWindowCloseRequest request)

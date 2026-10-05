@@ -325,6 +325,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             chromeLifetime = chrome;
             await chrome.ApplyWindowIconAsync(window);
             await shell.StartTrayAsync(chrome.Services, options.Developer);
+            await shell.StartApplicationMenuAsync(chrome.Services, options.Developer);
             instanceLifetime = await AcquireInstanceAsync(application, options);
             var creatingView = environment.CreateWebViewAsync(NeoAstraHost.FillWindow(window), DesktopWindowChrome.ViewOptions());
             var view = await creatingView;
