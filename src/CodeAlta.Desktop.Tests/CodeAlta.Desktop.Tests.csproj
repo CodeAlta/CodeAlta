@@ -11,4 +11,8 @@
     <ProjectReference Include="../CodeAlta/CodeAlta.csproj" />
     <ProjectReference Include="../CodeAlta.Plugin.Mcp/CodeAlta.Plugin.Mcp.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Resolves the temporary directory of the test process, which macOS places below a symbolic link. -->
+    <Compile Include="../CodeAlta.Tests/LinkFreeTempDirectory.cs" Link="LinkFreeTempDirectory.cs" />
+  </ItemGroup>
 </Project>

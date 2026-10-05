@@ -122,6 +122,9 @@ public sealed class RawSkillCandidateReaderTests
         Assert.IsTrue(chars.CandidatePaths.Sum(path => path.Length) <= RawSkillCandidateReader.MaximumTotalCandidateCharacters);
         Assert.IsTrue(chars.CandidatePaths.Count < RawSkillCandidateReader.MaximumCandidates);
 
+        // macOS cannot create a path beyond its own 1024-byte limit, which is that bound.
+        if (OperatingSystem.IsMacOS()) return;
+
         // All individually constructed paths are bounded even if an existing child exceeds that bound.
         var longChild = Directory.CreateDirectory(Path.Combine(deepRoot, "long-" + new string('c', 240)));
         var oversized = Directory.CreateDirectory(Path.Combine(longChild.FullName, "deeper-" + new string('d', 240)));

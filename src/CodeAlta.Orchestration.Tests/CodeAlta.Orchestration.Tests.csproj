@@ -22,5 +22,9 @@
 
   <ItemGroup>
     <Compile Remove="McpToolBridgeTests.cs" />  </ItemGroup>
+  <ItemGroup>
+    <!-- Resolves the temporary directory of the test process, which macOS places below a symbolic link. -->
+    <Compile Include="..\CodeAlta.Tests\LinkFreeTempDirectory.cs" Link="LinkFreeTempDirectory.cs" />
+  </ItemGroup>
 </Project>
 
