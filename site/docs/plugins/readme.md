@@ -18,10 +18,8 @@ the CodeAlta process.
 > practical risk profile as running local code.
 
 > [!IMPORTANT]
-> Plugin APIs are preview surface area before CodeAlta `1.0`. Interfaces,
-> contribution points, service exposure, and behavior can change between `0.x`
-> releases; some CodeAlta capabilities may not be exposed yet, and some exposed
-> capabilities may still be incomplete or incorrectly shaped.
+> The plugin API can change between CodeAlta releases, and some CodeAlta
+> capabilities are not exposed to plugins yet.
 
 ## Extensibility layers
 

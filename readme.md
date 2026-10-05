@@ -6,8 +6,6 @@ CodeAlta is a workspace for agentic coding on your local projects, in a desktop 
   <img src="site/img/alta-desktop-split-three.webp" alt="CodeAlta Desktop with a parent session and its two child sessions in three panes" width="920">
 </p>
 
-> CodeAlta is distributed as preview `0.x` releases. Configuration and extension APIs may change before `1.0`.
-
 ## 🚀 Install
 
 Install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0), then install one of the two apps, or both:

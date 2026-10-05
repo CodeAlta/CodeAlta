@@ -2,8 +2,6 @@
 
 An agentic AI coding assistant developed in .NET.
 
-Pre-release project. Remove this line at stable release.
-
 Paths/commands below are relative to this directory.
 
 ## Orientation
@@ -104,7 +102,7 @@ This is how CodeAlta is developed with CodeAlta: you run in the normal instance 
 
 - Follow .NET guidelines; keep APIs small and hard to misuse.
 - Prefer overloads over optional parameters (binary compatibility); consider `Try*` methods alongside throwing versions.
-- Mark APIs `[Obsolete("message", error: false)]` before removal once stable (can be skipped while pre-release).
+- Mark APIs `[Obsolete("message", error: false)]` before removal.
 
 ## Git / Pre-Submit
 

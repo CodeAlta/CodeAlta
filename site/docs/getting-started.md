@@ -13,9 +13,6 @@ CodeAlta comes as two .NET global tools. They run the same agents on the same `~
 | **CodeAlta Desktop** | [`CodeAlta`](https://www.nuget.org/packages/CodeAlta/) | `alta` |
 | **CodeAlta TUI** | [`CodeAlta.Tui`](https://www.nuget.org/packages/CodeAlta.Tui/) | `altatui` |
 
-> [!IMPORTANT]
-> CodeAlta is currently distributed as preview `0.x` releases before the final `1.0`. Expect behavior, configuration shape, screenshots, and extension APIs to evolve between preview versions; review release notes before upgrading a workflow you depend on.
-
 Install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0) first, then install the desktop app and launch it from a project folder:
 
 ```sh

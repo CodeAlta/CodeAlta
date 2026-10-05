@@ -10,7 +10,7 @@ A source plugin is one C# file that CodeAlta builds and loads when it starts. Th
 > Build and load only plugins you trust. Building runs the .NET SDK, NuGet and MSBuild; loading runs the plugin's code inside CodeAlta.
 
 > [!IMPORTANT]
-> The plugin API is a preview before CodeAlta `1.0` and can change between `0.x` releases.
+> The plugin API can change between CodeAlta releases.
 
 CodeAlta ships a `codealta-plugin-runtime` skill with this guidance and with sample plugins. Ask an agent to "write a CodeAlta plugin that…" and it uses the skill.
 
