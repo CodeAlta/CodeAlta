@@ -698,6 +698,14 @@ surface explicit limitations instead of unbounded reads. A malformed final recor
 omitted with a notice; interior corruption is an error. Existing complete-history readers
 are unchanged.
 
+A failed history, tail, timeline or source read answers only a stable status code, never
+exception text. The host logs the exception it omitted as a `CodeAlta.Desktop.History`
+warning naming the route, the session and the code (plus the reader's own code when it was
+mapped to `read_failed`); `history_changed` is routine during a live turn and is not logged.
+A request that never reached the host or never answered logs only its RPC failure code to the
+WebView console (`[CodeAlta History]`). Over-long provider item identities are compacted, not
+rejected (see "Committed live display window" in `runtime.md`).
+
 Cursors belong to one session and journal length/time stamp. A detected change requires
 restarting history from the beginning; it does not refresh the shared session catalog.
 Length/time detects ordinary changes, not same-stamp rewrites or every external-writer

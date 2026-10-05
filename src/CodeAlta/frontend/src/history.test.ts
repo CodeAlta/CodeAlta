@@ -7,6 +7,16 @@ const page: HistoryResponse = { status: "ok", entries: [], next: null, tailOmitt
 const request = { sessionId: "s", cursor: null };
 const signal = { aborted: false } as AbortSignal;
 
+test("failed history page request is reported to the console by code only", async t => {
+  const warn = t.mock.method(console, "warn", () => {});
+  const states: HistoryState[] = [];
+  await loadHistory(async () => { throw Object.assign(new Error("private transport failure"), { code: "timeout" }); }, request, signal, state => states.push(state));
+  assert.deepEqual(states.at(-1), { kind: "error", request, code: "read_failed" });
+  assert.equal(warn.mock.callCount(), 1);
+  assert.deepEqual(warn.mock.calls[0].arguments, ["[CodeAlta History] page request failed", { code: "timeout" }]);
+  assert.equal(JSON.stringify(warn.mock.calls[0].arguments).includes("private"), false);
+});
+
 test("transient history read failure remains eligible for bounded live-refresh recovery", async () => {
   const states: HistoryState[] = [];
   await loadHistory(async () => { throw new Error("private transport failure"); }, request, signal, state => states.push(state));

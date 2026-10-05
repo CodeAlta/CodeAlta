@@ -17,7 +17,7 @@ internal sealed partial class WorkspaceService
         Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>>? read, CancellationToken token)
     {
         AgentSessionHistoryPage? actual = null;
-        var page = await ReadHistoryCoreAsync(request, read is null ? null : async (id, cursor, cancellation) =>
+        var page = await ReadHistoryCoreAsync("historyTimeline", request, read is null ? null : async (id, cursor, cancellation) =>
         {
             actual = await read(id, cursor, cancellation).ConfigureAwait(false);
             return actual;
@@ -63,12 +63,18 @@ internal sealed partial class WorkspaceService
         catch (OperationCanceledException) { throw; }
         catch (AgentSessionHistoryException error)
         {
-            return new(error.Code is "history_changed" or "invalid_cursor" or "unsupported_format" or "missing_session" or "outside_root"
-                ? error.Code : "read_failed", null, null);
+            return SourceFailure(request, error.Code is "history_changed" or "invalid_cursor" or "unsupported_format" or "missing_session" or "outside_root"
+                ? error.Code : "read_failed", error);
         }
         catch (Exception error) when (error is FormatException or OverflowException or InvalidDataException or ArgumentException)
-        { return new("invalid_cursor", null, null); }
-        catch (Exception) { return new("read_failed", null, null); }
+        { return SourceFailure(request, "invalid_cursor", error); }
+        catch (Exception error) { return SourceFailure(request, "read_failed", error); }
+    }
+
+    private static HistorySourceResponse SourceFailure(HistorySourceRequest? request, string code, Exception exception)
+    {
+        LogHistoryFailure("historySource", request?.Revision?.SessionId ?? "(none)", code, exception);
+        return new(code, null, null);
     }
 
     private static string Number(long value) => value.ToString(CultureInfo.InvariantCulture);

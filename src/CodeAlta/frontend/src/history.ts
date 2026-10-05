@@ -1,4 +1,5 @@
 import type { HistoryRequest, HistoryResponse, HistoryRevision, HistorySourceRange } from "#neoastra";
+import { rpcFailureCode } from "./rpcDiagnostics";
 
 export type TimelinePage = HistoryResponse & { revision?: HistoryRevision | null; sources?: readonly HistorySourceRange[] };
 
@@ -243,8 +244,10 @@ export async function loadHistory(
     const page = await invoke(request, { signal, timeoutMilliseconds: 30_000 });
     if (signal.aborted) return;
     publish(page.status === "ok" ? { kind: "ready", request, page } : { kind: "error", request, code: page.status });
-  } catch {
+  } catch (error) {
     if (signal.aborted) return;
+    // The host logs its own read failures; this one never reached it or never answered.
+    console.warn("[CodeAlta History] page request failed", { code: rpcFailureCode(error) });
     publish({ kind: "error", request, code: "read_failed" });
   }
 }

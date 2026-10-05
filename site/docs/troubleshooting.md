@@ -16,6 +16,10 @@ The desktop app writes them under `CodeAlta/desktop/logs` in the local applicati
 
 Logs are the first place to check for provider startup, credential, plugin build, and runtime errors.
 
+## A session's history cannot be read
+
+When the desktop app shows that a history page could not be read, the session file itself is left untouched. The desktop [logs](#open-logs) contain a `CodeAlta.Desktop.History` warning with the session id and the underlying error; include it when you report the problem.
+
 ## Glyphs or tree icons look wrong
 
 This applies to the TUI only. CodeAlta's terminal UI uses Nerd Fonts icons for tree expanders, status indicators, and other compact symbols. If these appear as empty boxes, question marks, unrelated icons, or misaligned glyphs, the terminal is usually not using a current Nerd Font-compatible font.

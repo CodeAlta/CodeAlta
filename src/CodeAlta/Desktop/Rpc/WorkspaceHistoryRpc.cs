@@ -5,6 +5,7 @@ using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Desktop.Rpc;
 
@@ -24,14 +25,14 @@ internal sealed partial class WorkspaceService
     // Version 2 cursors are exclusive reverse boundaries; version 1 remains forward-only.
     internal static Task<HistoryResponse> ReadHistoryTailAsync(HistoryRequest request,
         Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>>? read,
-        CancellationToken cancellationToken) => ReadHistoryCoreAsync(request, read, 2, cancellationToken);
+        CancellationToken cancellationToken) => ReadHistoryCoreAsync("historyTail", request, read, 2, cancellationToken);
 
     // Actual RPC route. Tests supply literal callbacks, never instantiate a catalog/service.
     internal static Task<HistoryResponse> ReadHistoryAsync(HistoryRequest request,
         Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>>? read,
-        CancellationToken cancellationToken) => ReadHistoryCoreAsync(request, read, 1, cancellationToken);
+        CancellationToken cancellationToken) => ReadHistoryCoreAsync("history", request, read, 1, cancellationToken);
 
-    private static async Task<HistoryResponse> ReadHistoryCoreAsync(HistoryRequest request,
+    private static async Task<HistoryResponse> ReadHistoryCoreAsync(string route, HistoryRequest request,
         Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>>? read, int version,
         CancellationToken cancellationToken, int sourceReserve = 0)
     {
@@ -57,12 +58,31 @@ internal sealed partial class WorkspaceService
         catch (OperationCanceledException) { throw; }
         catch (AgentSessionHistoryException exception)
         {
-            return Failure(exception.Code is "missing_session" or "invalid_cursor" or "outside_root" or "history_changed"
-                or "unsupported_format" or "record_too_large" or "corrupt_record" ? exception.Code : "read_failed");
+            return Failure(route, request.SessionId, exception.Code is "missing_session" or "invalid_cursor" or "outside_root" or "history_changed"
+                or "unsupported_format" or "record_too_large" or "corrupt_record" ? exception.Code : "read_failed", exception);
         }
-        catch (FileNotFoundException) { return Failure("missing_session"); }
-        catch (DirectoryNotFoundException) { return Failure("missing_session"); }
-        catch (Exception) { return Failure("read_failed"); } // Never serialize cache/provider/infrastructure exception details.
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return Failure(route, request.SessionId, "missing_session", exception);
+        }
+        // Never serialize cache/provider/infrastructure exception details: the response has only the code.
+        catch (Exception exception) { return Failure(route, request.SessionId, "read_failed", exception); }
+    }
+
+    // The local log keeps the exception the response omits, so a "could not be read" report can be diagnosed.
+    // A journal that grows while it is read is routine during a live turn and is not logged.
+    internal static void LogHistoryFailure(string route, string sessionId, string code, Exception exception)
+    {
+        if (code == "history_changed" || !LogManager.IsInitialized) return;
+        // The history exception message is generic; its code names the actual limitation.
+        var cause = exception is AgentSessionHistoryException { Code: var actual } && actual != code ? $" (history code {actual})" : "";
+        LogManager.GetLogger("CodeAlta.Desktop.History").Warn(exception, $"Desktop {route} for session {sessionId} failed with {code}{cause}");
+    }
+
+    private static HistoryResponse Failure(string route, string sessionId, string code, Exception exception)
+    {
+        LogHistoryFailure(route, sessionId, code, exception);
+        return Failure(code);
     }
 
     private static AgentSessionHistoryCursor? ParseCursor(HistoryRequest request, int version)
