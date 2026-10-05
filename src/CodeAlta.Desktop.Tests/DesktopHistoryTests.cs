@@ -2,6 +2,7 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Desktop.Rpc;
+using CodeAlta.Orchestration.Runtime;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -247,6 +248,38 @@ public sealed class DesktopHistoryTests
             Assert.ThrowsExactly<InvalidDataException>(() => WorkspaceService.ProjectHistory(
                 new AgentSessionHistoryPage([new AgentSessionHistoryEntry(0, value)], null, false)));
         }
+    }
+
+    [TestMethod]
+    public void Projection_CompactsLongProviderItemIdentitiesLikeTheLiveDisplay()
+    {
+        // Copilot Responses item identities are opaque strings of more than 400 characters.
+        var item = string.Concat(Enumerable.Repeat("NuHTmBgxX3nr1Gz6Ku93OtX7zZl7o0Bq/6z6+", 12));
+        var run = new AgentRunId("run");
+        var page = new AgentSessionHistoryPage([
+            new(0, new AgentContentCompletedEvent(new("copilot"), "session", DateTimeOffset.UnixEpoch, run,
+                AgentContentKind.Reasoning, item, null, "thinking")),
+            new(10, new AgentActivityEvent(new("copilot"), "session", DateTimeOffset.UnixEpoch, run,
+                AgentActivityKind.ToolCall, AgentActivityPhase.Started, item, item, "alta", null)),
+        ], null, false);
+
+        var response = WorkspaceService.ProjectHistory(page, 2);
+
+        Assert.AreEqual("ok", response.Status);
+        var compact = RuntimeDisplayProjection.CompactIdentifier(item);
+        Assert.IsTrue(compact.Length <= RuntimeDisplayProjection.MaxIdentifierCharacters);
+        Assert.AreEqual(compact, response.Entries[0].ContentId);
+        Assert.AreEqual(compact, response.Entries[1].ActivityId);
+        Assert.AreEqual(compact, response.Entries[1].ParentActivityId);
+        var display = new RuntimeDisplayProjection();
+        display.Commit(new SessionAgentEvent("session", page.Entries[0].Event));
+        display.Commit(new SessionAgentEvent("session", page.Entries[1].Event));
+        var live = display.GetSnapshot().Sessions.Single();
+        Assert.AreEqual(compact, live.Text.Single().ContentId);
+        Assert.AreEqual(compact, live.ToolActivities.Single().ActivityId);
+        Assert.ThrowsExactly<InvalidDataException>(() => WorkspaceService.ProjectHistory(new([
+            new(0, new AgentContentCompletedEvent(new("copilot"), "session", DateTimeOffset.UnixEpoch, run,
+                AgentContentKind.Assistant, item + "\ud800", null, "text"))], null, false)));
     }
 
     [TestMethod]

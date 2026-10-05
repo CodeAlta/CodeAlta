@@ -71,7 +71,8 @@ public sealed class RuntimeDisplayToolActivityTests
             Activity() with { RunId = default(AgentRunId) } };
         foreach (var value in new[] { "", " \t", new string('x', 257), "\ud800", "\udc00", "x\ud800x", "\ud800\ud800", "\udc00\ud800" })
         {
-            invalid.Add(Activity() with { ActivityId = value });
+            // An oversized well-formed activity identity is compacted rather than omitted.
+            if (value.Length <= RuntimeDisplayProjection.MaxIdentifierCharacters) invalid.Add(Activity() with { ActivityId = value });
             invalid.Add(Activity() with { RunId = new AgentRunId(value) });
             if (!string.IsNullOrWhiteSpace(value)) invalid.Add(Activity() with { ProviderId = new ModelProviderId(value) });
         }

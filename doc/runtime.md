@@ -202,7 +202,8 @@ Reported ToolCall rows use exact `(provider.Value, nullable run ID, activity ID)
 existing session container. Requested/Started/Progressed/Completed/Failed/Canceled are the only
 supported phases. Matching updates move to newest; a third identity evicts the oldest and increments
 `EvictedToolActivities`. Latest published phase wins even if it regresses; this is not lifecycle
-reconstruction. Identities are untruncated, well-formed and at most 256 units; an absent run stays null,
+reconstruction. Identities are untruncated, well-formed and at most 256 units; a longer well-formed activity
+identity is compacted to `~sha256:` and the hex SHA-256 of its UTF-8 bytes. An absent run stays null,
 while a supplied empty/default run is invalid. A name is optional and retained as a surrogate-safe
 128-unit prefix with its own truncation flag. An unpaired surrogate anywhere in the name rejects
 the report, including beyond the prefix. Invalid reports increment unsupported accounting without
@@ -217,8 +218,11 @@ Missing/evicted activities remain unknown. Display values confer no command or p
 Fixed bounds (UTF-16 code units, not UTF-8 bytes): **128 session windows**, **8 text items per
 session**, **4,096 units per text prefix**, **256 per stable identity**, **512 per metadata
 label**, **2 ToolCall rows per session** with **128-unit name prefixes**, and **32 live observers**. New sessions/text evict the least recently published/updated
-window/item; eviction counters expose loss. Oversized/missing session or text identities are
-omitted and counted rather than truncated into colliding keys. Text/metadata truncation is
+window/item; eviction counters expose loss. Oversized/missing session identities and missing text
+identities are omitted and counted rather than truncated into colliding keys. Providers can report
+opaque item identities longer than 256 units (Copilot Responses items exceed 400), so an oversized
+well-formed text identity is compacted with `RuntimeDisplayProjection.CompactIdentifier`, the same
+mapping the desktop history projection applies to persisted content and activity identities. Text/metadata truncation is
 explicit; prefix cutting avoids splitting a well-formed surrogate pair. Session eviction may
 remove even a running session and all its last-known status; reappearance starts a fresh window.
 No claim of complete active-session discovery should be made from this bounded display API.

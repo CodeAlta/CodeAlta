@@ -1,5 +1,8 @@
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Channels;
 using CodeAlta.Agent;
 
@@ -22,7 +25,10 @@ public sealed class RuntimeDisplayProjection
     public const int MaxToolNameCharacters = 128;
     /// <summary>Maximum UTF-16 code units per text item.</summary>
     public const int MaxTextCharacters = 4096;
-    /// <summary>Maximum UTF-16 code units per identity; oversized text/session identities are omitted, never aliased by truncation.</summary>
+    /// <summary>
+    /// Maximum UTF-16 code units per identity; oversized session identities are omitted, never aliased by truncation.
+    /// Oversized text and tool identities are compacted with <see cref="CompactIdentifier" />.
+    /// </summary>
     public const int MaxIdentifierCharacters = 256;
     /// <summary>Maximum UTF-16 code units per status/configuration/lifecycle label.</summary>
     public const int MaxMetadataCharacters = 512;
@@ -208,10 +214,11 @@ public sealed class RuntimeDisplayProjection
     private static RuntimeDisplaySession ProjectToolActivity(RuntimeDisplaySession session, AgentActivityEvent activity)
     {
         // Only these scalar fields are inspected. In particular, never touch Details, Message or parent/provider graphs.
+        var activityId = activity.ActivityId is null ? null : CompactIdentifier(activity.ActivityId);
         if (activity.Kind != AgentActivityKind.ToolCall ||
             activity.Phase is not (AgentActivityPhase.Requested or AgentActivityPhase.Started or AgentActivityPhase.Progressed or
                 AgentActivityPhase.Completed or AgentActivityPhase.Failed or AgentActivityPhase.Canceled) ||
-            !ValidToolIdentity(activity.ProviderId.Value) || !ValidToolIdentity(activity.ActivityId) ||
+            !ValidToolIdentity(activity.ProviderId.Value) || !ValidToolIdentity(activityId) ||
             (activity.RunId is { } suppliedRun && !ValidToolIdentity(suppliedRun.Value)) ||
             (activity.Name is { } name && !WellFormedToolString(name)))
             return session with { UnsupportedEvents = session.UnsupportedEvents + 1 };
@@ -220,9 +227,9 @@ public sealed class RuntimeDisplayProjection
         var items = session.ToolActivities;
         var index = -1;
         for (var i = 0; i < items.Length; i++)
-            if (items[i].ProviderId == activity.ProviderId.Value && items[i].RunId == runId && items[i].ActivityId == activity.ActivityId)
+            if (items[i].ProviderId == activity.ProviderId.Value && items[i].RunId == runId && items[i].ActivityId == activityId)
             { index = i; break; }
-        var value = new RuntimeDisplayToolActivity(activity.ProviderId.Value, runId, activity.ActivityId, activity.Phase,
+        var value = new RuntimeDisplayToolActivity(activity.ProviderId.Value, runId, activityId, activity.Phase,
             activity.Name is null ? null : Prefix(activity.Name, MaxToolNameCharacters), activity.Name?.Length > MaxToolNameCharacters)
         {
             Timestamp = index >= 0 ? items[index].Timestamp : activity.Timestamp,
@@ -237,7 +244,24 @@ public sealed class RuntimeDisplayProjection
         return session with { ToolActivities = items.Add(value) };
     }
 
-    private static bool ValidToolIdentity(string? value)
+    /// <summary>
+    /// Maps a provider-opaque content or activity identity longer than <see cref="MaxIdentifierCharacters" /> to a
+    /// stable, collision-resistant SHA-256 form, so live and persisted displays correlate the same item.
+    /// </summary>
+    /// <param name="value">The identity reported by the provider, such as a Responses API item identity.</param>
+    /// <returns>
+    /// <paramref name="value" /> unchanged when it fits or contains an unpaired surrogate (left for validation to reject);
+    /// otherwise <c>~sha256:</c> followed by the lowercase hexadecimal hash of its UTF-8 bytes.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="value" /> is null.</exception>
+    public static string CompactIdentifier(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        if (value.Length <= MaxIdentifierCharacters || !WellFormedToolString(value)) return value;
+        return "~sha256:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+    }
+
+    private static bool ValidToolIdentity([NotNullWhen(true)] string? value)
         => value is { Length: > 0 and <= MaxIdentifierCharacters } && !string.IsNullOrWhiteSpace(value) && WellFormedToolString(value);
 
     private static bool WellFormedToolString(string value)
@@ -256,6 +280,7 @@ public sealed class RuntimeDisplayProjection
         AgentContentKind kind, string? text, DateTimeOffset timestamp, bool complete)
     {
         // Do not retain tools, arbitrary Details, provider objects or invalid/aliased stable identities.
+        if (contentId is not null) contentId = CompactIdentifier(contentId);
         if (text is null || !ValidIdentity(contentId) || (runId is not null && !ValidIdentity(runId)) ||
             kind is not (AgentContentKind.User or AgentContentKind.Assistant or AgentContentKind.Reasoning or AgentContentKind.ReasoningSummary or AgentContentKind.Plan or AgentContentKind.Notice))
             return session with { UnsupportedEvents = session.UnsupportedEvents + 1 };
@@ -288,7 +313,7 @@ public sealed class RuntimeDisplayProjection
         return session with { Text = items.Add(value) };
     }
 
-    private static bool ValidIdentity(string? value)
+    private static bool ValidIdentity([NotNullWhen(true)] string? value)
     {
         if (value is null || value.Length > MaxIdentifierCharacters || string.IsNullOrWhiteSpace(value)) return false;
         // JSON replacement of unpaired surrogates can alias distinct stable identities at a renderer boundary.

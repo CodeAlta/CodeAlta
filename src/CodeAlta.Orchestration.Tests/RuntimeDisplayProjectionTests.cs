@@ -154,7 +154,13 @@ public sealed class RuntimeDisplayProjectionTests
         Assert.AreEqual(1L, session.EvictedTextItems);
         Assert.AreEqual(RuntimeDisplayProjection.MaxTextItemsPerSession, session.Text.Length);
         Assert.IsTrue(session.Text.All(item => item.IsTruncated && item.Text.Length == RuntimeDisplayProjection.MaxTextCharacters));
-        publisher.TryPublish(Text("not retained", contentId: new string('i', RuntimeDisplayProjection.MaxIdentifierCharacters + 1)));
+        // An oversized provider item identity is compacted, not omitted, so history can correlate the same item.
+        var longContentId = new string('i', RuntimeDisplayProjection.MaxIdentifierCharacters + 1);
+        publisher.TryPublish(Text("compacted", contentId: longContentId));
+        var compacted = publisher.Display.GetSnapshot().Sessions.Single();
+        Assert.AreEqual(RuntimeDisplayProjection.CompactIdentifier(longContentId), compacted.Text[^1].ContentId);
+        Assert.AreEqual(0L, compacted.UnsupportedEvents);
+        publisher.TryPublish(Text("not retained", contentId: longContentId + "\ud800"));
         Assert.AreEqual(1L, publisher.Display.GetSnapshot().Sessions.Single().UnsupportedEvents);
         publisher.TryPublish(Text("not retained", session: new string('s', RuntimeDisplayProjection.MaxIdentifierCharacters + 1)));
         Assert.AreEqual(1L, publisher.Display.GetSnapshot().OmittedSessionEvents);

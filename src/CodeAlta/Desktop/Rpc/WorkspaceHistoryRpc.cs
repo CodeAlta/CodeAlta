@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
 
 namespace CodeAlta.Desktop.Rpc;
@@ -168,6 +169,9 @@ internal sealed partial class WorkspaceService
             }
             var provider = value.ProviderId.Value;
             var run = value.RunId?.Value;
+            // Providers can report opaque item identities longer than the wire limit (Copilot Responses items exceed
+            // 400 characters); compact them exactly like the live display so both still correlate the same item.
+            contentId = Compact(contentId); activityId = Compact(activityId); parentId = Compact(parentId);
             ValidateIdentity(provider, 256, required: true);
             ValidateIdentity(value.SessionId, 256, required: true);
             var identityCost = 0;
@@ -221,6 +225,8 @@ internal sealed partial class WorkspaceService
         if (limit == 0) return string.Empty;
         return value[..(char.IsHighSurrogate(value[limit - 1]) ? limit - 1 : limit)];
     }
+
+    private static string? Compact(string? value) => value is null ? null : RuntimeDisplayProjection.CompactIdentifier(value);
 
     private static string? Json(JsonElement? value) => value?.GetRawText();
 
