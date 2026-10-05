@@ -23,6 +23,20 @@ public sealed class DesktopStartupTests
     }
 
     [TestMethod]
+    public void Help_DescribesTheDesktopAndItsOptions()
+    {
+        using var output = new StringWriter();
+
+        var exit = DesktopCommandLine.Run(["--help"], output, TextWriter.Null, _ => throw new AssertFailedException("Native startup was entered."));
+
+        Assert.AreEqual(0, exit);
+        var help = output.ToString();
+        StringAssert.StartsWith(help, "CodeAlta Desktop");
+        foreach (var option in new[] { "--dev", "--exit", "--version", "--help", "--data-root", "--catalog-root", "--allow-owned-host" })
+            StringAssert.Contains(help, option);
+    }
+
+    [TestMethod]
     public void NoArguments_UsesStableLocalDesktopDataAndAnInteractiveOwnedHost()
     {
         var calls = 0;

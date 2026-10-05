@@ -28,6 +28,43 @@ internal static class DesktopCommandLine
     /// <summary>Asks the running instance to exit instead of starting one.</summary>
     internal const string ExitOption = "--exit";
 
+    private const string HelpText = """
+        CodeAlta Desktop
+
+        Usage:
+          alta                Start CodeAlta Desktop for the current folder.
+          alta --dev          Start the developer instance beside the normal one.
+          alta --exit         Ask the running CodeAlta Desktop to exit.
+          alta --version      Print the version.
+          alta --help, -h     Print this help.
+
+        alta opens the current folder as a project and uses the ~/.alta profile, which it shares
+        with CodeAlta TUI (altatui). It runs the built-in plugins (MCP, Git, Statistics) and the
+        source plugins of ~/.alta/plugins and of the current project. Set CODEALTA_DISABLE_PLUGINS=1
+        to start without plugins. When CodeAlta Desktop is already running, alta shows its window.
+
+        --dev runs a second instance on the same profile. It shares configuration, providers,
+        credentials, prompts, skills and projects, and keeps its own sessions under ~/.alta/dev.
+
+        --exit asks first when files have unsaved edits or sessions are running. Use
+        alta --dev --exit for the developer instance. Exit before updating with
+        dotnet tool update -g CodeAlta.
+
+        Isolated roots, for tests and development. The ~/.alta profile is not used, and every
+        directory is an absolute path outside .alta:
+          alta --data-root <new directory> --catalog-root <catalog copy> --allow-catalog-cache
+              Browse a copy of a catalog. The cache of that copy can be written.
+          ... --allow-owned-host --project-root <directory> --discovery-home <directory>
+              --instruction-root <project ancestor> --builtin-skill-root <directory>
+              Also run sessions on that copy. Plugins are not started.
+          ... --review-owned-command-permissions
+              Review each command request (Allow once / Deny / Cancel).
+          ... --enable-owned-user-input
+              Answer provider input forms. Do not enter secrets in them.
+
+        Documentation: https://codealta.github.io
+        """;
+
     internal static string Version => typeof(DesktopCommandLine).Assembly
         .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "development";
 
@@ -35,12 +72,7 @@ internal static class DesktopCommandLine
     {
         if (args is ["--help"] or ["-h"])
         {
-            output.WriteLine("alta\nalta --data-root <new absolute directory> [--catalog-root <existing absolute trusted task-owned COPY> --allow-catalog-cache]\nCodeAlta desktop is in development; use altatui for the complete terminal experience.\nWith no options, the desktop starts the normal interactive host for the current directory and ~/.alta catalog, matching the TUI default. It acquires the runtime lock and may update project catalog, journal, cache, provider state, and configured provider authentication/storage when a prompt is submitted. It runs the built-in plugins (MCP, Git, Statistics) and the source plugins of ~/.alta/plugins and the current project; CODEALTA_DISABLE_PLUGINS=1 starts without them. WebView data remains under the platform-local application-data directory.\nThe explicit-root form remains available for isolated catalog-only browsing. Browser and catalog roots must be separate and outside .alta.\n--help / --version must be used alone and do not initialize native services or storage.");
-            output.WriteLine("alta --dev\nStarts the developer instance for the current directory. It runs beside the normal instance on the same ~/.alta profile: configuration, providers, credentials, prompts, skills and the project catalog are shared, while sessions, the session cache and the runtime lock live under ~/.alta/dev and WebView data under its own application-data directory. Use it to work on CodeAlta with CodeAlta. --dev must be used alone.");
-            output.WriteLine("alta --exit\nAsks the CodeAlta already running with this profile to exit, as Exit in its notification-area menu does: it may be running with its window closed. It asks first when files are unsaved or sessions are running. Nothing is started when none is running. Combine with --dev for the developer instance.");
-            output.WriteLine("Explicit scoped owned mode requires --allow-owned-host --project-root <existing absolute directory> --discovery-home <existing absolute directory> --instruction-root <existing absolute project ancestor> --builtin-skill-root <existing absolute directory>. This consents to lock/project-catalog/journal/cache/provider-state writes, configured-provider registration (including declared credential environment names and shipped defaults), and provider authentication/storage/network on submission. Plugins and automatic probes stay disabled; explicit Models reads and Providers tests may probe; tools auto-approved and user input cancelled by default. No default-profile/HOME substitution; discovery roots do not sandbox providers, copied-cache external journal paths or reparse points. Only task-owned roots are admitted; this is not production/shared-profile qualification.");
-            output.WriteLine("Owned mode automatically approves tool permissions by default, like TUI AutoApprove. Commands and file writes run with the host's privileges; roots are not a sandbox. --review-owned-command-permissions instead enables manual review of supported plain command requests (Allow once / Deny / Cancel), denying unsupported permissions. User input remains separately controlled. Closing a review or losing an RPC response does not revoke an accepted decision.");
-            output.WriteLine("Owned mode only: --enable-owned-user-input independently enables manual nonsecret provider forms. Not credential entry or command approval; answers may persist in provider tool results/history. Default remains cancelled. Refresh manually; lost decisions cannot be recovered or replayed safely.");
+            output.WriteLine(HelpText);
             return 0;
         }
 
@@ -76,7 +108,7 @@ internal static class DesktopCommandLine
         ArgumentNullException.ThrowIfNull(directoryExists);
         ArgumentNullException.ThrowIfNull(fileExists);
         options = null;
-        error = "Unknown or invalid options. Run alta with no arguments for the interactive current-project host, or use --help for isolated-root options.";
+        error = "Unknown or invalid options. Run alta without options to start CodeAlta Desktop, or alta --help to list the options.";
         if (args.Length == 0 || args is [CodeAltaInstanceProfile.DeveloperOption])
         {
             options = CreateDefaultOptions(developer: args.Length == 1);
