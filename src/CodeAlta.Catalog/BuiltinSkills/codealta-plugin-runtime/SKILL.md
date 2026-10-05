@@ -3,84 +3,250 @@ name: codealta-plugin-runtime
 description: Use this skill when authoring, testing, enabling, disabling, or troubleshooting CodeAlta source plugins.
 ---
 
-# CodeAlta plugin runtime
+# CodeAlta plugins
 
-CodeAlta source plugins live under either the user root `~/.alta/plugins/<package-id>/plugin.cs` or a project root `<project>/.alta/plugins/<package-id>/plugin.cs`. Source plugins are trusted code: discovered plugins are enabled by default, so copying one into a plugin root allows .NET SDK, NuGet/MSBuild, and plugin initialization logic to run in the CodeAlta process unless disabled by configuration.
+A source plugin is one C# file that CodeAlta builds and loads when it starts. The same plugin runs in CodeAlta Desktop (`alta`) and in CodeAlta TUI (`altatui`).
 
-Generated root files are CodeAlta-owned and marker-protected: `Directory.Build.props`, `Directory.Build.targets`, `Directory.Packages.props`, and `global.json`. They select the .NET 10 SDK for native file-based builds, set file-based plugins up as `net10.0` libraries with `EnableDynamicLoading=true`, reference host CodeAlta assemblies from the running executable folder with `Private=false`, pin shared authoring package versions directly on generated shared `PackageReference` items while excluding runtime/native assets, disable central package management so `#:package Package@Version` directives work, and expose a deterministic `CodeAltaPluginTargetPath=` message for runtime output discovery.
+Plugins are trusted code. Building one runs the .NET SDK, NuGet and MSBuild; loading one runs its code inside CodeAlta. Do not copy a plugin into a plugin root only to read it.
 
-The runtime builds enabled source packages by running `dotnet build plugin.cs` from each plugin package directory. CodeAlta does not pass forwarded MSBuild switches such as `/logger:` or `/nr:false` because current .NET 10 file-based builds treat those as project-build mode and try to parse `plugin.cs` as XML. CodeAlta lets the .NET SDK choose the file-based build output/cache location; its own manifests live under CodeAlta-owned cache state (`~/.alta/cache/plugins/build/`) and record generated-file hashes, source inputs, CodeAlta build identity, SDK selection, output assembly, target framework, and diagnostic summaries so up-to-date plugins can load with only a concise startup summary. CodeAlta does not generate replacement `.csproj` fallback projects for source plugins.
+## Create a plugin
 
-Dynamic plugins load in a collectible `AssemblyLoadContext`. CodeAlta public assemblies and shared authoring dependencies resolve from the default ALC; plugin-private managed and unmanaged dependencies resolve from the plugin output folder through `AssemblyDependencyResolver`. Unload is cooperative: the runtime removes contributions, cancels plugin lifetime work, disposes the plugin, calls `Unload()`, and reports diagnostics if references or background tasks keep the ALC alive.
+1. Pick a package id: letters, digits, `.`, `_`, `-`, starting with a letter or digit.
+2. Create the file in one of the two roots:
 
-Use `/plugins`, `/plugin`, or the command palette to inspect descriptors, source paths, README files, state, diagnostics, contribution summaries, source-change notifications, and enable/disable/rebuild/reload/clean actions. Interactive startup shows source-plugin build/activation progress in a transient `Terminal.Live` region using the built-in `Spinner` control while work is running and colored state icons per package; `--plugins-wait-for-enter` pauses the live region after source plugin startup finishes, shows the concise build/activation timing summary there, and continues after Enter before discarding the region. Failed source-plugin builds are still printed with source paths and full per-plugin diagnostics plus captured stdout/stderr tails are written to `~/.alta/logs/codealta.log`. Use `--no-plugins`, `--plugin-safe-mode`, or `CODEALTA_DISABLE_PLUGINS=1` when a source plugin breaks startup. Use `--plugins-status` for a headless config/discovery summary.
+   | Scope | File |
+   |---|---|
+   | All projects | `~/.alta/plugins/<package-id>/plugin.cs` |
+   | One project | `<project>/.alta/plugins/<package-id>/plugin.cs` |
 
-## Region content and terminal authoring
+3. Write a public class that inherits `PluginBase` and has a public parameterless constructor.
+4. Restart CodeAlta. It builds the plugin and loads it.
+5. Check the result: see [When a plugin does not start](#when-a-plugin-does-not-start).
 
-Use `PluginContentContribution` / `PluginUi.Content` with a required `CreateContent` callback returning portable `PluginRenderResult` Markdown or text for the existing three UI regions. Native visual authoring now lives in the optional `CodeAlta.Plugins.Tui` assembly/namespace: migrate `PluginUi.Visual` to `PluginTui.Visual` and supply a portable callback alongside the native visual/factory. Native renderer contributions use `PluginTerminalRendererContribution` / `PluginTui.Renderer` with both portable and terminal callbacks; shared `PluginRenderResult.Visual` / `FromVisual` are removed. Agent-tool renderer callbacks remain portable.
+```csharp
+using CodeAlta.Plugins.Abstractions;
 
-The TUI explicitly enables call-scoped `SupportsTerminalVisuals`; other callers default to portable selection, and headless/noninteractive UI bypasses remain. This capability is not a security permission or dialog/prompt-editor capability. Direct visuals precede factories. Selected native null results mean absence, and native errors never cause fallback. Portable callbacks must be nonnull; they may return null for intentional absence. Explain terminal-only actions in fallback text rather than imply an unsupported action succeeded.
+[Plugin("hello", DisplayName = "Hello", Description = "Adds a /hello command.")]
+public sealed class HelloPlugin : PluginBase
+{
+    public override IEnumerable<PluginCommandContribution> GetCommands()
+    {
+        yield return Command.Shell("hello", "Says hello.", static async (context, cancellationToken) =>
+        {
+            await context.Ui.NotifyAsync("Hello from a plugin.", cancellationToken);
+            return PluginCommandResult.Handled;
+        });
+    }
+}
+```
 
-Do not add a TUI executable reference or modify generated root files. Abstractions no longer exposes terminal types or references terminal packages, but builtin implementations still combine backend and terminal code. This does not establish backend-only builtin loading or desktop parity. Source samples remain trusted executable code; do not copy them into a live plugin root merely to inspect them.
+Rules for the package folder:
 
-## Source-plugin authoring profiles
+- CodeAlta writes `Directory.Build.props`, `Directory.Build.targets`, `Directory.Packages.props` and `global.json` in the plugin root. Do not create or edit them.
+- No project file is needed. CodeAlta runs `dotnet build plugin.cs` with the .NET 10 SDK.
+- Add NuGet packages with `#:package Name@Version` at the top of `plugin.cs`, and more source files with `#:include`.
+- `CodeAlta.Plugins.Abstractions`, `CodeAlta.Plugins.Tui` and the `XenoAtom.Terminal.UI` packages are already referenced, in both applications.
+- An optional `README.md` beside `plugin.cs` describes the plugin in the plugin list.
+- One file can declare several plugin classes.
 
-Reusable APIs default to `PluginAuthoringProfile.Neutral`. Rich source-plugin hosts must explicitly choose Terminal using `PluginRuntimeManagerOptions.AuthoringProfile` or `CodeAltaHostOptions.PluginAuthoringProfile`; direct generation uses `PluginRootBuildFileOptions.AuthoringProfile`, and loaders/contexts expose explicit-profile overloads. Keep generation and loading profiles consistent. Both TUI startup paths select Terminal even for CLI/noninteractive usage. Interactivity and stale DLL presence do not select a profile; borrowed prestarted runtimes are not reprofiled.
+## One plugin, two applications
 
-Neutral omits host-injected terminal packages and optional Plugins.Tui. Terminal includes the existing five terminal authoring packages and optional assembly with `Private=false`. Generation-option reference lists are now nullable/additive, and loader shared-name lists are additive: mandatory profile identities cannot be removed, and Neutral rejects explicit terminal entries. Legacy `DefaultSharedPackageNames`/`DefaultHostSharedAssemblyNames` remain Terminal compatibility catalogs, not effective Neutral defaults.
+By default a plugin starts in both applications. Limit it with the attribute:
 
-Generated profile/policy/API stamps participate in the existing manifest hashes. Failed-generation roots are excluded from build scheduling and cached loading while successful roots continue. The normal loader checks reserved main identity before loading; Neutral also traverses reachable managed metadata, refusing terminal names or uninspectable nonplatform dependencies instead of invoking executable resolver callbacks. Terminal identities remain host-shared, never private fallback. This is compatibility admission, not a sandbox or a guarantee that arbitrary trusted source cannot request terminal packages during restore. Real metadata/CLR loading, rich source compilation, packaged contents and builtin separation require separate qualification; no desktop plugin startup or sidecar discovery is implied.
+```csharp
+[Plugin("notes", Frontends = PluginFrontends.Desktop)]   // or Terminal; the default is All
+```
 
-## Built-in GitHub composition
+An application does not start a plugin that does not support it, and says so in its plugin list.
 
-`CodeAlta.Plugin.GitHub` contains the backend; its parameterless constructor supplies no prompt UI. TUI composition injects the existing neutral prompt contribution into that same instance and owns the picker/attachment/parser/binding-accessor code. A custom head may supply `Func<GitHubPlugin, IEnumerable<PluginPromptEditorContribution>>`; enumeration invokes it with the backend, while attachment construction remains deferred. Do not duplicate backend initialization/authentication, transfer backend disposal to attachments, or infer desktop picker support from this extraction.
+Most of the API is portable: write it once and each application shows it its own way. Where the look matters, give two forms. `Context.Host.Frontend` tells which application is running.
 
-Registered built-in factories now create the actual activated instance. Supply a matching concrete plugin type and explicit `PluginType` where known; legacy metadata resolution may otherwise invoke the factory separately. Supplied activation factories do not retry or fall back after null/throw/cancellation. Direct factory exceptions are not wrapped like reflection constructor failures; existing runtime failure/cancellation/cleanup policy remains. Source-plugin reflection activation is unchanged. Real activation/native qualification remains separate work.
+| What | Portable | Desktop form | Terminal form |
+|---|---|---|---|
+| Notification, confirm, input, selection, text editor | `context.Ui.NotifyAsync`, `ConfirmAsync`, `InputAsync`, `SelectAsync`, `EditTextAsync` | — | — |
+| Dialog with your own content | — | `PluginUi.HtmlDialog(title, html, buttons)` | `PluginTui.CustomDialog(title, visual)` |
+| Content around the prompt | `PluginUi.Content(region, _ => new PluginRenderResult { Markdown = … })` | `PluginRenderResult.FromHtml(html, text)` | `PluginTui.Visual(region, visualFactory, portableContent)` |
+| Status item | `PluginStatusContribution` | `Command` makes it clickable | — |
+| Prompt picker | `PluginUi.PromptPicker(name, trigger, title, search)` | — | — |
+| Timeline card | `PluginDerivedSessionEvent.Markdown` | `Html` | `PluginTerminalDerivedSessionEvent.VisualFactory` |
 
-The parameterless Statistics backend emits neutral Markdown projections and the existing payload without terminal UI dependencies. Internal TUI composition decorates existing cache candidates with deferred card/detail factories over the same already-built turn; ANSI styling and controls belong to TUI. Portable formatting/calculations/cache keys remain backend-owned. Sequential cache reuse retains the decorated event, but concurrent candidates may each decorate. This is neither a public statistics-model API nor desktop card/real loading/native qualification.
+The desktop application ignores terminal controls. The terminal application ignores HTML. So a result that has both forms works in both.
 
-## Built-in MCP composition
+## Contribution points
 
-The parameterless `McpPlugin` supplies backend contributions and portable status without native revision state or an interactive management command. TUI composition borrows its existing management/activation owners for the command, status button, dialog, bindable rows and icons; do not create another backend or duplicate initialization. This uses an internal neutral presentation carrier and assembly-wide friendship to `altatui`, not a supported public activation-state API or a reverse project reference.
+Override only what the plugin needs.
 
-Keep contribution enumeration and native decoration free of content/configuration evaluation. Decoration retains the exact portable callback and metadata. Initial native status resolution and later independent markup/tone reads remain deferred; revision state and its existing subscription move together without a new disposal/unsubscription policy. Backend command/prompt/runtime work is unchanged. Do not infer desktop MCP management, real activation/loading, authentication or native qualification from the extraction.
+| Method | Adds |
+|---|---|
+| `GetCommands()` | Commands for the palette, the `/` menu and shortcuts |
+| `GetUiContributions()` | Status items and content around the prompt |
+| `GetPromptPickers()` | A picker opened by a character typed in the prompt |
+| `GetSessionEventProjections()` | Cards in the session timeline |
+| `GetAgentTools()` | Tools the model can call |
+| `GetAltaCommands()` | Commands under the in-session `alta` tool |
+| `GetSystemPromptContributions()` | Text added to the system or developer prompt |
+| `GetPromptProcessors()`, `GetInstructionProcessors()` | Changes to the user prompt or to the final instructions |
+| `GetCompactionContributions()` | Hooks for session compaction |
+| `GetResources()` | Skill, prompt and template folders of the package |
+| `GetStartupContributions()`, `GetCommandLineContributions()` | Early startup hooks and command-line commands |
+| `OnBeforeAgentRunAsync`, `OnToolCallAsync`, `OnToolResultAsync`, `OnAgentEventAsync` | Observation and changes while a session runs |
 
-## Dialogs and prompt-editor anchors
+The factories `Command`, `PluginUi`, `PluginTui`, `Prompt`, `AgentTool`, `Resources` and `Startup` build the common contributions.
 
-Native custom requests use `PluginTui.CustomDialog` / `PluginTerminalDialogRequest.Content`, replacing `PluginUi.CustomDialog` / the removed neutral request `Content`. `PluginDialogLayout` also moved to `CodeAlta.Plugins.Tui`. Neutral requests retain text, buttons, selection and metadata. Generic dialog operations currently have only no-op services: `HasInteractiveUi` is false, non-result completion does not prove presentation, and result operations return null when unsupported. Do not invent a generic dialog backend; MCP/GitHub still use their native paths.
+## Commands
 
-`IPluginPromptEditorHost` is neutral; its old `Visual` property moved to optional `IPluginTerminalPromptEditorHost`. Use `PluginTui.PromptEditor(name, attach, placeholderText, order)` to defer a terminal callback until the host implements that interface. Unsupported hosts receive null without invoking the callback; terminal null/exception does not trigger fallback. Returned attachments remain host-owned, not factory-owned. No desktop picker or lifetime guarantee is added. Do not advertise a picker from metadata alone after attachment is declined.
+```csharp
+yield return Command.Shell("note-add", "Adds a note.", AddNoteAsync) with
+{
+    Label = "Notes: add",
+    KeyBinding = new PluginKeyBinding(new PluginKeyGesture(PluginKey.F9)),
+};
+```
 
-## Typed command shortcuts
+- `Command.Shell` is always available. `Command.Session` needs a selected session. `Command.Prompt` belongs to the prompt editor.
+- The name is what the user types after `/`: letters, digits, `.`, `_`, `-`.
+- A command takes no arguments. Ask with `context.Ui`.
+- Return `PluginCommandResult.Handled`, `Cancelled`, or `Message("…")` to show a message. Set `PromptText` to send a prompt, with `EnqueuePrompt = true` to queue it.
+- `context.Sessions` and `context.Prompts` give the session and the prompt draft the command was started from: `SelectedSessionId`, `DraftText`, `SetDraftTextAsync`, `SendPromptAsync`, `EnqueuePromptAsync`, `TrySteerAsync`, `RequestCompactionAsync`.
+- A key binding is one stroke, or `Ctrl+G` followed by a second stroke. A key CodeAlta already uses keeps its meaning. On the desktop a single letter needs `Ctrl` or `Alt`.
 
-Author `PluginCommandContribution.KeyBinding` with `new PluginKeyBinding(...)` containing one to four neutral `PluginKeyGesture` strokes. A stroke is a `PluginKey` named key or a character/`System.Text.Rune`, with explicit `PluginKeyModifiers` flags. For Ctrl+G then Ctrl+Y, use `new PluginKeyBinding(new PluginKeyGesture('G', PluginKeyModifiers.Ctrl), new PluginKeyGesture('Y', PluginKeyModifiers.Ctrl))`. Do not use the removed `DisplayText`/terminal `Gesture`/terminal `Sequence` initializer API or raw control-character constants. Unbound commands use null. Definitions validate keys/modifiers/scalars/length, reject default strokes, normalize only letters invariantly and copy their inputs.
+## Dialogs
 
-The TUI's optional mapper preserves modifier bits and maps Ctrl letters to terminal encoding. Unsupported scalars leave the entire binding unbound without removing the command or changing its visibility. Structural conflict keys use stroke kinds/identities/modifiers/order rather than display text, and warnings do not resolve collisions. Native dispatch/timing remains unchanged; Meta is retained for matching but omitted by the existing native hint formatter. Do not claim desktop shortcut routing, IME/physical-key semantics, or cross-terminal delivery from this contract migration.
+The portable dialogs need no extra code:
 
-## Session-event presentation
+```csharp
+if (!await context.Ui.ConfirmAsync("Notes", "Delete all notes?", cancellationToken)) return PluginCommandResult.Cancelled;
+var title = await context.Ui.InputAsync("Title", "Untitled", cancellationToken);            // null when cancelled
+var kind = await context.Ui.SelectAsync("Kind", items, cancellationToken);                  // items: PluginSelectItem<T>
+var text = await context.Ui.EditTextAsync("Note", "First line", cancellationToken);
+```
 
-Keep canonical projection calculations in one `GetSessionEventProjections()` handler.
-Neutral `PluginDerivedSessionEvent`, `PluginDerivedSessionEventDetailSection` and
-`PluginDynamicDerivedSessionEventContent` carry Markdown/details/data/notifications, not
-terminal factories. Native event/detail/dynamic variants are
-`PluginTerminalDerivedSessionEvent`, `PluginTerminalDerivedSessionEventDetailSection` and
-`PluginTerminalDynamicDerivedSessionEventContent` in optional `CodeAlta.Plugins.Tui`.
-`PluginSessionEventVisualFactory` and `PluginSessionEventVisualContext` moved there too.
-Migrate old native initializers/overrides and retain useful Markdown/header fallbacks.
+For a dialog with its own content, build the request for the running application:
 
-Native factories are borrowed and invoked later; failure does not invoke a second fallback.
-Initial upsert selects dynamic native content before static; dynamic refresh uses only the
-dynamic factory, so null clears a previous native factory. Payload remains opaque in-process
-data, not an RPC schema. Do not claim desktop transient projections, backend-only builtin
-loading or unload/resource-lifetime safety from this contract extraction.
+```csharp
+var request = Context.Host.Frontend == PluginFrontends.Desktop
+    ? PluginUi.HtmlDialog("Notes", html, closeButton) with { OnAction = HandleActionAsync }
+    : PluginTui.CustomDialog("Notes", visual) with { Buttons = [closeButton] };
+var response = await context.Ui.ShowDialogForResultAsync(request, cancellationToken);
+```
 
-## Samples
+`response.ButtonName` is the button that closed the dialog and `response.Values` holds the named fields of an HTML dialog. In the terminal, read your own controls. A request that has only HTML shows its `Message` in the terminal, and nothing when it has none.
 
-Copy one of the `samples/*` folders to `~/.alta/plugins/<sample-name>/` or `<project>/.alta/plugins/<sample-name>/`; it will be discovered, built, and loaded on the next startup unless disabled in TOML:
+## HTML fragments on the desktop
+
+A fragment is plain HTML. CodeAlta sanitizes it, gives buttons, fields and tables the look of the application, and inserts it in the window. Nothing in a fragment runs: no script, no style, no event handler, no image, no form. Links are shown and not followed.
+
+The window acts on these attributes:
+
+| Attribute | Effect |
+|---|---|
+| `data-alta-command="name"` | A click runs the command `name` of the plugin. Works everywhere a fragment is shown. |
+| `data-alta-action="name"` | In a dialog, a click (or Enter in a field, or a change of a select) calls `OnAction` with the action name. |
+| `data-alta-value="…"` | The value passed with the action. |
+| `name="…"` on `input`, `select`, `textarea` | The field is returned in `Values`: text, `true`/`false` for a checkbox, the chosen radio value. |
+
+`OnAction` returns what the dialog does next:
+
+```csharp
+OnAction = (action, cancellationToken) =>
+{
+    if (action.Name == "remove") notes.RemoveAt(int.Parse(action.Value!));
+    return ValueTask.FromResult(PluginDialogActionResult.Update(BuildHtml()));   // or KeepOpen, or CloseDialog("button")
+},
+```
+
+Classes you can use: `alta-row` and `alta-column` for layout, `alta-primary`, `alta-success`, `alta-warning`, `alta-danger` and `alta-muted` for tone, `alta-tag` for a small label, `alta-callout` for a highlighted block. Other classes and `id` values that do not start with `alta-` are removed.
+
+Allowed elements: text and structure (`p`, `div`, `span`, headings, lists, `table`, `pre`, `code`, `details`, `a`, `b`, `i`, …) and fields (`button`, `input`, `select`, `textarea`, `label`, `fieldset`, `progress`, `meter`).
+
+Write text with `PluginHtml.Encode(text)`. `PluginHtml.CommandButton(command, label)` and `PluginHtml.ActionButton(action, label)` write the two kinds of buttons.
+
+## Status items and content around the prompt
+
+```csharp
+yield return new PluginStatusContribution
+{
+    Region = PluginUiRegion.SessionStatus,
+    Name = "notes-count",
+    GetStatus = _ => new PluginStatusItem { Label = "Notes", Text = "3", Tone = PluginStatusTone.Info, Command = "notes" },
+};
+
+yield return PluginTui.Visual(PluginUiRegion.SessionFooter,
+    _ => new Markup("[dim]3 notes[/]"),                                        // terminal
+    _ => PluginRenderResult.FromHtml("<span class=\"alta-tag\">3 notes</span>", "3 notes"),   // desktop, then plain text
+    "notes-footer");
+```
+
+Regions: `SessionFooter` is above the prompt, `CommandBar` and `SessionStatus` are in the status line. A `PluginRenderResult` is shown in its richest form: `Html` (desktop), then `Markdown`, then `Text`. Return null to show nothing. These callbacks run often: keep them fast and do no I/O in them.
+
+## Prompt pickers
+
+```csharp
+public override IEnumerable<PluginPromptPickerContribution> GetPromptPickers()
+{
+    yield return PluginUi.PromptPicker("notes", '!', "Notes", async (context, cancellationToken) =>
+        [.. (await FindAsync(context.Query, cancellationToken)).Select(note => new PluginPromptPickerItem { Label = note.Title, Description = note.Date, InsertText = note.Title + " " })],
+        "[!] to insert a note");
+}
+```
+
+Typing the character at the start of a word opens the picker. The chosen item replaces the token with `InsertText`. The trigger is a punctuation character other than `@`, `#` and `/`. The last argument is a hint shown in the empty prompt of the terminal application.
+
+## Timeline cards
+
+`GetSessionEventProjections()` returns cards computed from the events of a session. They are shown in the timeline and not written to the conversation.
+
+```csharp
+new PluginDerivedSessionEvent
+{
+    EventId = $"notes:{context.SessionId}",
+    Markdown = "**Notes** · 3 added",                       // the bold start is the card title
+    Html = "<span class=\"alta-tag\">3 added</span>",          // desktop: shown after the title
+    DetailSections = [new PluginDerivedSessionEventDetailSection { Header = "Added", Markdown = "- one\n- two", Html = "<ul><li>one</li><li>two</li></ul>" }],
+}
+```
+
+Keep the `EventId` stable for the same turn so the card is updated, not duplicated. For native terminal cards use `PluginTerminalDerivedSessionEvent` with a `VisualFactory`.
+
+## Background work and state
+
+- Start background work with `Tasks.Run(...)` so CodeAlta can cancel it when the plugin unloads. Do not use an untracked `Task.Run`.
+- `Services.State` stores plugin data. Do not put secrets in plugin source.
+- `Services.Alta.InvokeAsync([...])` runs an `alta` command and returns its JSONL output.
+- `Logger` writes to the CodeAlta log.
+
+## When a plugin does not start
+
+| | Desktop | Terminal |
+|---|---|---|
+| While it builds | The start-up screen shows the plugin being built | The console shows the build before the interface |
+| Build or load failure | A notice at start, and the error under the plugin in Settings > Plugins | The error in the console and in `/plugins` |
+| Not supported in this application | Marked in Settings > Plugins | Listed in `/plugins` |
+| Full log | Application Logs | `~/.alta/logs/codealta.log` |
+
+Disable one plugin in Settings > Plugins, in `/plugins`, or in the configuration:
 
 ```toml
-[plugins.hello-command]
+[plugins.hello]
 enabled = false
 ```
 
-The sample folders are intentionally small and are used by integration tests as real plugin inputs rather than unverified snippets.
+Start without any plugin with `CODEALTA_DISABLE_PLUGINS=1`. The terminal application also accepts `--no-plugins` and `--plugin-safe-mode`.
+
+A changed `plugin.cs` is rebuilt at the next start.
+
+## Samples
+
+Each folder under `samples/` is a complete plugin that CodeAlta's tests build and load. Copy one to a plugin root to try it.
+
+| Sample | Shows |
+|---|---|
+| `hello-command` | A command |
+| `desktop-and-terminal` | One plugin for both applications: portable dialogs, an HTML dialog with actions, a status item, content above the prompt, a prompt picker |
+| `ui-status`, `ui-all-regions` | Status items and content in every region |
+| `prompt-guidance` | Text added to the prompt |
+| `instruction-path-normalizer` | A change to the final instructions |
+| `background-task` | Tracked background work |
+| `package-reference` | A NuGet package |
+| `skill-root` | A skill shipped by a plugin |
+| `multi-plugin-assembly` | Several plugins in one file |

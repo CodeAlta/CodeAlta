@@ -56,7 +56,7 @@ Open plugin management with `Ctrl+G Ctrl+N`, `/plugins`, or `/plugin`.
 
 {{ alta_shot "alta-desktop-plugins.webp" "alta-plugins.png" "Plugin management with the list of plugins" "Plugin management lists the plugins of the global and project scopes and lets you enable or disable them." }}
 
-The desktop **Plugins** page of Settings lists the plugins with a switch to enable or disable each one. A change applies at the next start.
+The desktop **Plugins** page of Settings lists the plugins with a switch to enable or disable each one. A change applies at the next start. A plugin that failed to build shows its error there, and a plugin made for the TUI only is marked as not supported.
 
 The TUI dialog shows:
 
@@ -73,18 +73,13 @@ You can also use a headless status summary:
 altatui --plugins-status
 ```
 
-## Plugins in the desktop app
+## Plugins in both apps
 
-The desktop app loads the same built-in and source plugins as the TUI. Agent tools, agent instructions, `alta` live-tool commands, prompt input processing, session status items and the Statistics timeline cards work in both apps.
+CodeAlta Desktop and CodeAlta TUI load the same built-in and source plugins. Agent tools, instructions for agents, `alta` commands, prompt processing, commands, keyboard shortcuts, status items, dialogs, prompt pickers and timeline cards work in both.
 
-A plugin can also contribute user interface to the TUI. These contributions are not shown in the desktop app yet:
+Each app shows plugin user interface its own way: the desktop app with its own components and HTML fragments from the plugin, the TUI with terminal controls. A plugin can also be made for one app only; the other app then does not start it.
 
-- dialogs and other custom visuals;
-- commands and keyboard shortcuts;
-- prompt editor attachments;
-- timeline cards from source plugins.
-
-Plugin build problems at startup are reported in **Settings > Application Logs**.
+A source plugin is built when CodeAlta starts. The desktop start-up screen names the plugin being built, and the TUI shows the build in the console before its interface. When a build fails, the desktop app shows a notice and the error in **Settings > Plugins**; the TUI prints it and lists it in `/plugins`.
 
 ## Source plugins
 

@@ -129,7 +129,7 @@ altatui</code></pre>
         <li>Runs in your terminal, keyboard-first</li>
         <li>Tabs, timeline, prompt and dialogs in one screen</li>
         <li>Terminal color themes</li>
-        <li>Plugin dialogs, commands and shortcuts</li>
+        <li>Plugin dialogs drawn with terminal controls</li>
         <li>Permission prompts when auto-approve is off</li>
         <li>Screenshot of the UI with <code>Ctrl+F12</code></li>
       </ul>

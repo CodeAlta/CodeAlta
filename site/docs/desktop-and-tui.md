@@ -104,21 +104,18 @@ When a new version is available, the desktop app shows a notice with **Update an
 | Pasted images | Thumbnails above the prompt | Preview dialog, in terminals with image support |
 | Queue a prompt | **Enqueue until idle** in the Send options | **AlwaysQueue** checkbox |
 | Tool permissions | Always approved automatically | Approved automatically by default; can be reviewed |
-| Plugins | Tools, instructions, commands for agents, status items | Also plugin dialogs, shortcuts and custom timeline cards |
+| Plugin dialogs and content | The app's own components, with HTML fragments from the plugin | Terminal controls |
 | Updates | **Update and restart** | Shows the command to run |
 | Font | No requirement | Nerd Font required |
 | Copy the UI as an image | Not available | `Ctrl+F12` |
 
 ## Current desktop limitations
 
-The desktop app runs the same plugins as the TUI: the built-in MCP, GitHub and Statistics plugins, and your source plugins. Plugin tools, instructions for agents, `alta` commands and session status items work. The following parts of the plugin model are not available on the desktop yet:
-
-- dialogs, commands and keyboard shortcuts contributed by a plugin;
-- custom timeline cards from source plugins (the Statistics cards are shown);
-- prompt editor attachments contributed by a plugin (the `@` file picker and the `#` GitHub issue picker are built in);
-- the `--no-plugins` and `--plugin-safe-mode` options. Set `CODEALTA_DISABLE_PLUGINS=1` to start without plugins.
-
 Tool permission requests are always approved automatically on the desktop. To review each request, use the TUI and turn off **Auto approve commands** in Workspace Settings.
+
+The `--no-plugins` and `--plugin-safe-mode` options belong to the TUI. Set `CODEALTA_DISABLE_PLUGINS=1` to start the desktop app without plugins.
+
+A plugin written with terminal controls only shows its plain text or Markdown form on the desktop. See [Plugin development](plugins/developers.md#one-plugin-two-apps).
 
 ## Which one to use
 
