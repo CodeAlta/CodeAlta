@@ -104,7 +104,7 @@ When a new version is available, the desktop app shows a notice with **Update an
 | Appearance | Light, dark or system theme, 13 color schemes | Terminal themes |
 | Session notes | Movable Notes window over the timeline | Notes panel in the sidebar |
 | Pasted images | Thumbnails above the prompt | Preview dialog, in terminals with image support |
-| Queue a prompt | **Enqueue until idle** in the Send options | **AlwaysQueue** checkbox |
+| Queue every prompt, also when idle | **Enqueue until idle** in the Send options | **AlwaysQueue** checkbox |
 | Tool permissions | Always approved automatically | Approved automatically by default; can be reviewed |
 | Plugin dialogs and content | The app's own components, with HTML fragments from the plugin | Terminal controls |
 | Updates | **Update and restart** | Shows the command to run |

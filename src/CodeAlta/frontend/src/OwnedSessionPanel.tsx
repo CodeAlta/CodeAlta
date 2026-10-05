@@ -1,6 +1,5 @@
 import { Button, HTMLSelect } from "@blueprintjs/core";
 import { ActivitySpinner } from "./ActivitySpinner";
-import { showToast } from "./appToaster";
 import { createPortal } from "react-dom";
 import { PromptImageAttachments } from "./PromptImageAttachments";
 import { formatThinkingElapsed, useThinkingElapsed } from "./thinkingElapsed";
@@ -12,7 +11,7 @@ import { PluginPromptPickers } from "./PluginPromptPicker";
 import { pluginComposerEvent, type PluginComposerRequest } from "./pluginUi";
 import { modelCatalog, sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
 import { activateSessionModels } from "./activateSessionModels";
-import { captureSubmission, captureSubmissionAbort, createMutationCapability, refreshSubmissions, type createOwnedSubmissions } from "./sessionOperations";
+import { captureSubmission, captureSubmissionAbort, createMutationCapability, outgoingKey, refreshSubmissions, type SubmissionResult, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
 import { captureCompaction, type createCompactionSubmissions } from "./sessionCompaction";
 import { captureAbortRun, type createAbortRunSubmissions } from "./sessionAbortRun";
@@ -22,7 +21,6 @@ import type { createPermissionReviewer } from "./sessionPermissions";
 import { CommandPermissionPanel } from "./CommandPermissionPanel";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { AppIcon } from "./AppIcon";
-import { showContextAction } from "./workspacePresentation";
 import type { PromptInput } from "./PromptEditor";
 import { createPromptHistory, noPromptRecall, recallPrompt } from "./promptHistory";
 import { changeSelection, validSelection } from "./sessionSelection";
@@ -35,14 +33,13 @@ import type { createReminderActions } from "./reminderActions";
 import { validReminderList } from "./reminderListObservation";
 import { SessionUsageInspector } from "./SessionUsageInspector";
 import { ComposerQueueStrip } from "./ComposerQueueStrip";
-import type { ComposerQueueItem } from "./composerQueue";
+import { queuePreview, type ComposerQueueItem } from "./composerQueue";
 import { ActiveProviderStatus } from "./ActiveProviderStatus";
 import { ObservationStatus } from "./ObservationStatus";
 import type { UsageTarget } from "./sessionUsage";
 import { imagePasteFailure, readPastedImage } from "./promptImages";
 import { useShellLanguage } from "./shellLanguage";
 import type { ClipboardEvent } from "react";
-import type { SessionSteerRequest } from "#neoastra";
 import { sendDiagnostics } from "./sendDiagnostics";
 
 // Sent prompts of this window, for Alt+Up / Alt+Down in the prompt editor.
@@ -53,7 +50,6 @@ export function sendFailureMessage(status: string, reason?: string): string {
   switch (status) {
     case "uncertain": return reason === "admission_failed" ? "The send could not start (Settings → Application Logs has the reason). Check the timeline before sending it again."
       : `CodeAlta did not confirm this send${reason ? ` (${reason})` : ""}. Check the timeline before sending it again.`;
-    case "busy": return "The session is busy. Wait for the current turn, or queue the prompt.";
     case "invalid_request": return "The prompt or the selected model was not accepted.";
     case "conflict": return "This prompt was already sent with different content.";
     case "capacity": return "Too many requests are pending. Wait for one to finish.";
@@ -110,6 +106,7 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
   const restoredText = useRef(text);
   useLayoutEffect(() => { draftIndicators.clear(sessionId); }, [draftIndicators, sessionId, epoch]);
   function editText(value: string) {
+    setSendFailure("");
     recall.current = noPromptRecall;
     inputRevision.current++;
     latestText.current = value;
@@ -138,6 +135,15 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
   const [providerBusy, setProviderBusy] = useState(false);
   const [receiptUnavailable, setReceiptUnavailable] = useState(false);
   const stagedRevision = useSyncExternalStore(queue.composer.subscribe, queue.composer.getSnapshot);
+  const staged = queue.composer.list(epoch, sessionId);
+  // A session with prompts waiting is followed even while its tab is hidden: they leave when it is idle.
+  const watching = observing || staged.length > 0;
+  // What a Send that was not taken says, in the status line: a prompt is never answered with a toast.
+  const [sendFailure, setSendFailure] = useState("");
+  const [retryTick, setRetryTick] = useState(0);
+  const holdUntil = useRef(0);
+  // The user messages on screen when a steering prompt left: a later one with its text is the agent taking it up.
+  const steerBaseline = useRef(new Map<string, Set<string>>());
   const queueRevision = useSyncExternalStore(queue.subscribe, queue.getSnapshot);
   const steeringRevision = useSyncExternalStore(steering.subscribe, steering.getSnapshot);
   const [choices, setChoices] = useState<SessionChoicesResponse>();
@@ -262,7 +268,7 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
   useEffect(() => {
     const controller = new AbortController();
     scope.current = controller;
-    const restored = submissions.pending(sessionId)?.request.text ?? restoreDraft(key => localStorage.getItem(key), sessionId);
+    const restored = ownPending()?.request.text ?? restoreDraft(key => localStorage.getItem(key), sessionId);
     restoredText.current = restored;
     latestText.current = restored;
     setDraft({ text: restored, editGeneration: null });
@@ -290,7 +296,7 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
 
   useEffect(() => {
     setRuntimeState(undefined);
-    if (!observing) return;
+    if (!watching) return;
     const controller = new AbortController();
     const runtime = runtimeReader.forSelection({ expectedHostEpoch: epoch, sessionId }, controller.signal, setRuntimeState, capability.observe);
     runtimeScope.current = runtime;
@@ -302,10 +308,10 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
     };
     void observe();
     return () => { clearTimeout(timer); controller.abort(); if (runtimeScope.current === runtime) runtimeScope.current = null; };
-  }, [epoch, sessionId, capability, runtimeReader, observing]);
+  }, [epoch, sessionId, capability, runtimeReader, watching]);
 
   useEffect(() => {
-    if (!observing) return;
+    if (!watching) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const read = async () => {
@@ -315,7 +321,7 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
     };
     void read();
     return () => { stopped = true; clearTimeout(timer); };
-  }, [epoch, sessionId, capability, observing]);
+  }, [epoch, sessionId, capability, watching]);
 
   useEffect(() => {
     if (!submissions.pending(sessionId)) draftIndicators.persisted(sessionId, draft.editGeneration,
@@ -323,7 +329,13 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
     else draftIndicators.clear(sessionId);
   }, [sessionId, draft, submissions, draftIndicators]);
 
-  const pending = submissions.pending(sessionId);
+  // A queued prompt on its way is not the composer's own request: the editor stays the user's.
+  function ownPending() {
+    const retained = submissions.pending(sessionId);
+    return retained && queue.composer.list(epoch, sessionId).some(item => item.request?.clientRequestId === retained.request.clientRequestId) ? undefined : retained;
+  }
+  const retainedSend = submissions.pending(sessionId);
+  const pending = ownPending();
   useEffect(() => {
     if (active) sendDiagnostics.info("composer availability", { invalidEpoch,
       capabilityValid: capability.canMutate(), retainedRequest: !!pending, inFlight: pending?.inFlight ?? false });
@@ -354,78 +366,130 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
     if (runId && !submittedThinking.runId) setSubmittedThinking({ ...submittedThinking, runId });
     else if (!runId && submittedThinking.runId) setSubmittedThinking(null);
   }, [page, runtimeState, invalidEpoch, sessionId, submittedThinking]);
-  const composerBusy = !invalidEpoch && (!!pending?.inFlight || !!submittedThinking || runActive);
+  const composerBusy = !invalidEpoch && (!!retainedSend?.inFlight || !!submittedThinking || runActive);
   const thinkingSeconds = useThinkingElapsed(composerBusy);
   const runActivity = useRef(onRunActivity); runActivity.current = onRunActivity;
   useEffect(() => {
-    if (!observing) return;
+    if (!watching) return;
     runActivity.current?.(composerBusy);
     return () => runActivity.current?.(null);
-  }, [composerBusy, observing, sessionId]);
+  }, [composerBusy, watching, sessionId]);
   const mcpPlugin = configuration?.plugins.find(plugin => `${plugin.id} ${plugin.name}`.toLowerCase().includes("mcp"));
-  const canCaptureSteer = captureSteering(epoch, sessionId, observedTarget, steerText, "availability") !== null;
-  const availableComposerSteer = captureSteering(epoch, sessionId, observedTarget, text, "availability");
-  const observedSteerRun = captureSteering(epoch, sessionId, observedTarget, "x", "availability");
   const availableCompact = captureCompaction(epoch, sessionId, observedTarget, "availability");
   const availableAbortRun = captureAbortRun(epoch, sessionId, observedTarget, "availability");
-  const canCaptureQueue = captureQueue(epoch, sessionId, observedTarget, queueText, "availability") !== null;
-  const availableComposerQueue = captureQueue(epoch, sessionId, observedTarget, text, "availability");
-  const observedQueueAttachment = captureQueue(epoch, sessionId, observedTarget, "x", "availability");
-  const showSteering = showContextAction(captureSteering(epoch, sessionId, observedTarget, "x", "availability") !== null,
-    !!pendingSteer || steerMessage !== "Refresh runtime state explicitly before targeting a run.");
-  const showQueue = showContextAction(observedQueueAttachment !== null,
-    !!pendingQueue || pendingQueueCancellations.length > 0 || queueMessage !== "Refresh runtime state explicitly before queueing text in this host.");
-  function stagePrompt(kind: "Queue" | "Steer", value = text) {
-    if (images.length || pending || invalidEpoch || !(inputLifetime?.current() ?? true)) return false;
-    const request = kind === "Queue" ? captureQueue(epoch, sessionId, observedTarget, value, crypto.randomUUID())
-      : captureSteering(epoch, sessionId, observedTarget, value, crypto.randomUUID());
-    if (!request || !capability.canSubmit(request) || !queue.composer.add(kind, request)) return false;
-    if (value === latestText.current) { inputRevision.current++; clearText(); }
-    setMessage("Ready to send to this owned session.");
+  // Above the composer and never refused: a queued prompt waits for the session to be idle, a steering prompt
+  // for the running turn. Only the composer's own text takes its images along.
+  function stagePrompt(kind: "Queue" | "Steer", value = text, attached = value === latestText.current ? images : []) {
+    if (pending || invalidEpoch) return false;
+    if (!queue.composer.add(kind, epoch, sessionId, value, attached.length ? attached : null)) return false;
+    if (value === latestText.current) {
+      inputRevision.current++; clearText();
+      if (attached.length) imageOwner.replace(imageKey, attached, []);
+    }
+    setSendFailure("");
     return true;
   }
-  function dispatchStaged(item: ComposerQueueItem, retry = false) {
-    const signal = scope.current?.signal;
-    if (!signal || signal.aborted || invalidEpoch || !capability.canSubmit(item.request)) return;
-    const publish = (result: Parameters<typeof queue.composer.outcome>[1]) => {
-      observeEpoch(result); queue.composer.outcome(item.id, result);
+  function retryLater() {
+    holdUntil.current = Date.now() + 1200;
+    window.setTimeout(() => setRetryTick(value => value + 1), 1300);
+  }
+  // The outcome of a queued prompt's Send. Its request does not belong to this panel: the row is settled even
+  // when the tab was closed meanwhile.
+  function settleQueued(id: string, key: string) {
+    return (result: SubmissionResult) => {
+      observeEpoch(result);
+      const accepted = result.status === "accepted" || result.status === "replay";
+      if (!accepted || result.receipt?.state === "terminal") setSubmittedThinking(current => current?.key === key ? null : current);
+      if (accepted) { queue.composer.sent(id); void runtimeScope.current?.refresh(true); }
+      else if (result.status === "uncertain") queue.composer.uncertain(id, "reason" in result && result.reason ? result.reason : "uncertain");
+      // The session was working after all: the prompt keeps its place and leaves at the next idle moment.
+      else if (result.status === "busy" || result.status === "capacity") { queue.composer.release(id); retryLater(); }
+      else queue.composer.fail(id, result.status);
     };
-    if (item.kind === "Steer") {
-      const original = steering.pending(sessionId);
-      if (retry && original?.request.clientRequestId !== item.request.clientRequestId) return;
-      const request = retry ? original?.request : item.request;
-      if (!request || !("expectedRunId" in request) || typeof request.expectedRunId !== "string" || original?.inFlight) return;
-      void steering.submit(request as SessionSteerRequest, signal, capability, publish);
+  }
+  function settleSteering(id: string) {
+    return (result: SubmissionResult) => {
+      observeEpoch(result);
+      if (result.status === "accepted" || result.status === "replay") queue.composer.sent(id);
+      else if (result.status === "uncertain") queue.composer.uncertain(id, "uncertain");
+      else if (result.status === "busy") { queue.composer.release(id); retryLater(); }
+      else if (result.status === "closed" || result.status === "stale_epoch") queue.composer.fail(id, result.status);
+      // The turn cannot be steered: the prompt is sent as the next one instead.
+      else queue.composer.requeue(id);
+    };
+  }
+  function retryStaged(item: ComposerQueueItem) {
+    if (invalidEpoch) return;
+    if (item.state === "failed") { queue.composer.release(item.id); return; }
+    if (item.state !== "uncertain" || !item.request) return;
+    // Only the retained request itself is sent again: the same key, so the host cannot run it twice.
+    if (item.kind === "Queue") {
+      const retained = submissions.pending(sessionId);
+      if (retained?.request.clientRequestId !== item.request.clientRequestId) queue.composer.sent(item.id);
+      else if (!retained.inFlight && capability.canSubmit(retained.request))
+        void submissions.submit(retained.request, queue.composer.signal, capability, settleQueued(item.id, retained.request.clientRequestId), "whenAccepted");
     } else {
-      const original = queue.pending(sessionId);
-      if (retry && original?.request.clientRequestId !== item.request.clientRequestId) return;
-      const request = retry ? original?.request : item.request;
-      if (!request || original?.inFlight) return;
-      void queue.submit(request, signal, capability, publish, "composer");
+      const retained = steering.pending(sessionId);
+      if (retained?.request.clientRequestId !== item.request.clientRequestId) queue.composer.sent(item.id);
+      else if (!retained.inFlight && capability.canSubmit(retained.request))
+        void steering.submit(retained.request, queue.composer.signal, capability, settleSteering(item.id));
     }
   }
+  const liveTexts = liveConnected ? currentLive.snapshot?.session?.text : undefined;
   useEffect(() => {
-    const items = queue.composer.list(epoch, sessionId);
-    for (const item of items) {
-      const original = item.kind === "Steer" ? steering.pending(sessionId) : queue.pending(sessionId);
-      if (item.state === "sending" && original && !original.inFlight)
-        queue.composer.outcome(item.id, { status: "uncertain", epoch, receipt: null });
-    }
-    if (invalidEpoch || pending || !(inputLifetime?.current() ?? true) || runtimeState?.kind !== "ready") return;
-    const item = items.find(item => item.kind === "Steer" && item.state === "waiting")
-      ?? items.find(item => item.kind === "Queue" && item.state === "waiting");
-    if (!item) return;
+    if (invalidEpoch || runtimeState?.kind !== "ready") return;
     const target = runtimeState.snapshot;
-    if (target.runtimeInstanceId !== item.request.expectedRuntimeInstanceId || target.entry?.attachmentGeneration !== item.request.expectedAttachmentGeneration
-      || item.kind === "Steer" && target.entry?.activeRunId !== (item.request as { expectedRunId: string }).expectedRunId) {
-      queue.composer.fail(item, "target_changed"); return;
+    if (target.status !== "ok" || target.hostEpoch !== epoch) return;
+    const entry = target.entry;
+    const runId = entry?.activeRunId ?? null;
+    const userRows = (liveTexts ?? []).filter(row => row.kind.toLowerCase() === "user");
+    // A steering prompt leaves the list when its message shows in the timeline, or with the turn it was for.
+    for (const item of staged) {
+      if (item.kind !== "Steer" || item.state !== "delivering") continue;
+      const baseline = steerBaseline.current.get(item.id);
+      const taken = userRows.some(row => !baseline?.has(row.contentId) && queuePreview(row.text) === queuePreview(item.text));
+      if (taken || runId !== (item.request as { expectedRunId?: string } | undefined)?.expectedRunId) {
+        steerBaseline.current.delete(item.id);
+        queue.composer.delivered(item.id);
+      }
     }
-    if (target.coordinatorTransitionInProgress || target.entry?.isRetiring || target.entry?.isTerminated || target.entry?.pendingAgentPromptId) return;
-    if (item.kind === "Queue" && (target.entry?.activeRunId || target.entry?.queueDrainInProgress || pendingQueue
-      || items.some(other => other.kind === "Queue" && ["sending", "submitted", "uncertain"].includes(other.state)))) return;
-    if (item.kind === "Steer" && pendingSteer) return;
-    if (queue.composer.claim(item)) dispatchStaged(item);
-  }, [stagedRevision, queueRevision, steeringRevision, runtimeState, invalidEpoch, pending, epoch, sessionId]);
+    const idle = !composerBusy && !retainedSend && !runId && (!entry || target.coordinatorTransitionInProgress === false
+      && !entry.queueDrainInProgress && !entry.isRetiring && !entry.pendingAgentPromptId);
+    if (Date.now() < holdUntil.current) return;
+    const steerItem = staged.find(item => item.kind === "Steer" && item.state === "waiting");
+    if (steerItem && !steering.pending(sessionId) && !staged.some(item => item.kind === "Steer" && (item.state === "sending" || item.state === "uncertain"))) {
+      const request = captureSteering(epoch, sessionId, target, steerItem.text, crypto.randomUUID());
+      if (request && capability.canSubmit(request)) {
+        const claimed = queue.composer.claim(steerItem, request);
+        if (claimed) {
+          steerBaseline.current.set(claimed.id, new Set(userRows.map(row => row.contentId)));
+          void steering.submit(request, queue.composer.signal, capability, settleSteering(claimed.id));
+        }
+      // Nothing runs any more: the prompt is the next one sent.
+      } else if (idle) queue.composer.requeue(steerItem.id);
+      return;
+    }
+    const next = staged.find(item => item.kind === "Queue" && item.state === "waiting");
+    if (!next || !idle || loadingChoices || queue.composer.isHeld(next)
+      || staged.some(item => item.kind === "Queue" && (item.state === "sending" || item.state === "uncertain"))) return;
+    // The prompt leaves as a Send of this moment: the selection, the project references and the images of one.
+    const chosen = selections.current(epoch, sessionId) ?? selection;
+    const usable = chosen && activeChoices && validSelection(activeChoices, chosen) ? chosen : null;
+    const sendSelection = usable ?? (next.images ? activeChoices?.current ?? null : null);
+    if (next.images && (!sendSelection || activeChoices?.models.find(model => model.id === sendSelection.modelId)?.imageInput !== true)) {
+      queue.composer.fail(next.id, "image_unsupported"); return;
+    }
+    const references = referenceScope?.expectedEpoch === epoch && referenceScope.sessionId === sessionId
+      ? { projectId: referenceScope.projectId, projectPath: referenceScope.projectPath } : null;
+    const request = captureSubmission(epoch, sessionId, next.text, crypto.randomUUID(), sendSelection, references, next.images);
+    if (!request) { queue.composer.fail(next.id, "invalid_request"); return; }
+    if (!capability.canSubmit(request)) return;
+    const claimed = queue.composer.claim(next, request);
+    if (!claimed) return;
+    promptHistory.add(sessionId, request.text);
+    setSubmittedThinking({ key: request.clientRequestId, runId: null });
+    void submissions.submit(request, queue.composer.signal, capability, settleQueued(claimed.id, request.clientRequestId), "whenAccepted");
+  }, [stagedRevision, steeringRevision, runtimeState, invalidEpoch, !!retainedSend, composerBusy, epoch, sessionId, liveTexts, loadingChoices, retryTick, selection, choices]);
   function observeEpoch(result: { status: string; epoch: string | null }) {
     if (!capability.observe(result)) setInvalidEpoch(true);
   }
@@ -433,10 +497,12 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
     const signal = scope.current?.signal;
     sendDiagnostics.info("composer action", { mounted: !!signal, aborted: signal?.aborted ?? false,
       capabilityValid: capability.canMutate(), pending: !!submissions.pending(sessionId),
-      inFlight: submissions.pending(sessionId)?.inFlight ?? false, enqueue, hasImages: images.length > 0 });
+      inFlight: submissions.pending(sessionId)?.inFlight ?? false, enqueue, busy: composerBusy, hasImages: images.length > 0 });
     if (!signal || signal.aborted || !capability.canMutate()) return;
-    const retained = submissions.pending(sessionId);
-    if (!retained && enqueue && images.length === 0) { stagePrompt("Queue"); return; }
+    const retained = ownPending();
+    // While the session works, or behind prompts that already wait, the prompt joins the queue: it is never refused.
+    if (!retained && (enqueue || composerBusy || !!submissions.pending(sessionId)
+      || staged.some(item => item.kind === "Queue" && item.state !== "failed"))) { stagePrompt("Queue"); return; }
     if (retained?.inFlight) return;
     const latest = selections.current(epoch, sessionId);
     if (!retained && (latest || selection) && (!choices || choices.status !== "ok" || choices.epoch !== epoch || choices.sessionId !== sessionId
@@ -462,13 +528,22 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
     promptHistory.add(sessionId, request.text);
     setSubmittedThinking({ key: request.clientRequestId, runId: null });
     setMessage("Ready to send to this owned session.");
+    setSendFailure("");
     void submissions.submit(request, signal, capability, result => {
       observeEpoch(result);
       if (!["accepted", "replay"].includes(result.status) || result.receipt?.state === "terminal") setSubmittedThinking(null);
+      const unchanged = (inputRevision.current === revision || latestText.current === request.text) && imageOwner.get(imageKey) === capturedImages;
+      // The session started working between the keystroke and the host: the prompt joins the queue instead,
+      // without a failed message in the timeline.
+      if (result.status === "busy" && !retained && queue.composer.add("Queue", epoch, sessionId, request.text, request.images?.length ? request.images : null)) {
+        submissions.acknowledgeOutgoing([outgoingKey(request)]);
+        if (!signal.aborted && unchanged) { clearText(); imageOwner.replace(imageKey, capturedImages, []); }
+        return;
+      }
       const failure = result.status === "accepted" || result.status === "replay" ? null : sendFailureMessage(result.status, "reason" in result ? result.reason : undefined);
       setMessage(failure ?? "Ready to send to this owned session.");
-      // A send that was not accepted is told in a toast: nothing is written above the prompt.
-      if (failure) showToast({ message: failure, intent: "danger", icon: "error", timeout: 8000 });
+      // The prompt stays in the composer and the status line says why: a prompt is never answered with a toast.
+      setSendFailure(failure ?? "");
       if (result.status === "accepted" || result.status === "replay") void runtimeScope.current?.refresh(true);
       if ((!retained || !request.images?.length) && (result.status === "accepted" || result.status === "replay") && !signal.aborted
         // The composer still holds exactly what was sent (a choices refresh alone also bumps the revision).
@@ -484,7 +559,7 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
       if (invalidEpoch) return;
       if (command === "send") submit();
       else if (command === "abort") { if (composerBusy || availableAbortRun || pendingAbortRun) abortRun(); }
-      else if (command === "clearQueue") { for (const item of queue.composer.list(epoch, sessionId)) queue.composer.remove(item); }
+      else if (command === "clearQueue") queue.composer.clear(epoch, sessionId);
       else if (command === "nextPrompt") {
         const prompts = activeChoices?.prompts ?? [];
         if (prompts.length > 1 && selected && !selectionDisabled)
@@ -505,10 +580,11 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
       if (invalidEpoch || pending) return;
       const value = request.text ?? "";
       if (request.kind === "draft") { editText(value); request.result = true; }
-      else if (request.kind === "enqueue") request.result = stagePrompt("Queue", value);
-      else if (request.kind === "steer") request.result = composerBusy && stagePrompt("Steer", value);
+      else if (request.kind === "enqueue") request.result = stagePrompt("Queue", value, []);
+      else if (request.kind === "steer" && composerBusy) request.result = stagePrompt("Steer", value, []);
       else if (request.kind === "compact") { if (!composerBusy && capability.canMutate()) { compact(); request.result = true; } }
-      else if (request.kind === "send" && value.trim() && capability.canMutate()) {
+      // Steering an idle session is a Send, as it is from the keyboard.
+      else if ((request.kind === "send" || request.kind === "steer") && value.trim() && capability.canMutate()) {
         // The prompt goes through this composer's own Send, once the editor holds it.
         editText(value); setPluginSend(value); request.result = true;
       }
@@ -570,8 +646,20 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
       }
     }, capability);
   }
+  // Ctrl+Enter. With a turn running the prompt steers it; without one there is nothing to steer and it is sent.
+  // An empty prompt steers with the first prompt of the queue, as the terminal UI does.
+  function steerFromComposer() {
+    if (pending || invalidEpoch) return;
+    if (!latestText.current.trim() && !images.length) {
+      const next = staged.find(item => item.kind === "Queue" && item.state === "waiting" && !queue.composer.isHeld(item));
+      if (next && composerBusy) queue.composer.steerNow(next);
+      return;
+    }
+    if (!composerBusy) { submit(); return; }
+    // Steering carries text only: a prompt with images waits for the next turn.
+    stagePrompt(images.length ? "Queue" : "Steer");
+  }
   function steer(fromComposer = false) {
-    if (fromComposer) { stagePrompt("Steer"); return; }
     if (images.length || pending?.request.images?.length) { setImageNotice("Steer refuses image attachments. Use normal Send or remove attachments first."); return; }
     const signal = scope.current?.signal;
     if (!signal || signal.aborted || !capability.canMutate()) return;
@@ -633,7 +721,6 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
     });
   }
   function queueTextInHost(fromComposer: boolean) {
-    if (fromComposer) { stagePrompt("Queue"); return; }
     if (images.length || pending?.request.images?.length) { setImageNotice("Queue refuses image attachments. Use normal Send or remove attachments first."); return; }
     const signal = scope.current?.signal;
     if (!signal || signal.aborted || !capability.canMutate()) return;
@@ -741,22 +828,18 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
       if (canEditImages() && imageOwner.replace(imageKey, images, images.filter((_, i) => i !== index))) setImageNotice("");
     }} />;
   return <>
-    <ComposerQueueStrip owner={queue.composer} epoch={epoch} sessionId={sessionId} disabled={invalidEpoch}
-      retry={item => dispatchStaged(item, true)} cancel={item => {
-        const row = page?.rows.find(row => row.clientRequestId === item.request.clientRequestId && row.sessionId === sessionId);
-        if (row) cancelQueued(row);
-      }} steer={item => { if (stagePrompt("Steer", item.request.text)) queue.composer.remove(item); }} />
-    {pendingSteer && !queue.composer.list(epoch, sessionId).some(item => item.request.clientRequestId === pendingSteer.request.clientRequestId) &&
+    <ComposerQueueStrip owner={queue.composer} epoch={epoch} sessionId={sessionId} disabled={invalidEpoch} running={composerBusy} retry={retryStaged} />
+    {pendingSteer && !staged.some(item => item.request?.clientRequestId === pendingSteer.request.clientRequestId) &&
       <div className="composer-queue-row"><AppIcon name="steer" size={15} /><span className="composer-queue-preview">{pendingSteer.request.text}</span>
         <Button icon={<AppIcon name="refresh" size={14} />} aria-label={t("Retry exact request")} disabled={invalidEpoch || pendingSteer.inFlight} onClick={() => steer()} /></div>}
-    {pendingQueue && !queue.composer.list(epoch, sessionId).some(item => item.request.clientRequestId === pendingQueue.request.clientRequestId) &&
+    {pendingQueue &&
       <div className="composer-queue-row"><AppIcon name="queue" size={15} /><span className="composer-queue-preview">{pendingQueue.request.text}</span>
         <Button icon={<AppIcon name="refresh" size={14} />} aria-label={t("Retry exact request")} disabled={invalidEpoch || pendingQueue.inFlight} onClick={() => queueTextInHost(false)} /></div>}
     {!expanded && attachmentStrip}
     <ComposerSurface busy={composerBusy} status={<>
-      {composerBusy ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch ? "error" : "prompt"} size={14} />}
+      {composerBusy ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure ? "error" : "prompt"} size={14} />}
       {composerBusy ? thinkingSeconds > 0 ? t("Thinking for {elapsed}...", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
-        : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : "Prompt ready")}</>}
+        : !invalidEpoch && sendFailure ? sendFailure : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : "Prompt ready")}</>}
     expandedEditor={expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
     editor={{ id: active ? "session-prompt" : `session-prompt-${sessionId}`, ref: promptInput, onPaste: pasteImages, label: t("Message"), value: pending?.request.text ?? text, disabled: !!pending || invalidEpoch || expanded,
       onChange: editText, onCompositionStart: () => { inputRevision.current++; }, placeholder: t("Ask CodeAlta to work on this project…"), onKeyDown: event => {
@@ -773,7 +856,7 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
         if (dispatchComposerKey({ key: event.key, ctrlKey: event.ctrlKey,
           shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey,
           isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode,
-           repeat: event.repeat, defaultPrevented: event.defaultPrevented }, submit, () => steer(true))) { event.preventDefault(); event.stopPropagation(); }
+           repeat: event.repeat, defaultPrevented: event.defaultPrevented }, submit, steerFromComposer)) { event.preventDefault(); event.stopPropagation(); }
       } }}
     options={<ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog} locked={providerBusy}
       summary={{ agent: activeChoices?.prompts.find(p => p.id === selected?.agentPromptId)?.name ?? selected?.agentPromptId ?? "…",
@@ -824,15 +907,15 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
         disabled={invalidEpoch} aria-label={reminderLabel} title={`${reminderLabel} (Ctrl+G, Ctrl+D)`}
         onClick={onOpenReminders}><span className="reminder-count" aria-hidden="true">{observedReminderCount ?? "?"}</span></Button>}
       <Button id={active ? "expand-session-prompt" : `expand-session-prompt-${sessionId}`} variant="minimal" icon={<AppIcon name="expand" size={16} />} disabled={!!pending || invalidEpoch} aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => { inputRevision.current++; setExpanded(true); }} />
-      {observedSteerRun && <Button variant="minimal" onClick={() => steer(true)}
-        disabled={invalidEpoch || !!pending || !!pendingSteer || !availableComposerSteer || !capability.canSubmit(availableComposerSteer)}
-        aria-label={t("Steer current composer to observed run")}
+      {composerBusy && <Button variant="minimal" onClick={steerFromComposer}
+        disabled={invalidEpoch || !!pending || !text.trim() && !staged.some(item => item.kind === "Queue" && item.state === "waiting")}
+        aria-label={t("Steer the running turn")}
         title={t("Steer the running turn with this prompt (Ctrl+Enter)")}>
         <AppIcon name="steer" size={16} /></Button>}
-      {observedQueueAttachment && <Button variant="minimal" onClick={() => queueTextInHost(true)}
-        disabled={invalidEpoch || !!pending || !!pendingQueue || !availableComposerQueue || !capability.canSubmit(availableComposerQueue)}
-        aria-label={t("Queue current composer in this host")}
-        title={t("Queue this prompt to run after the current turn")}>
+      {composerBusy && <Button variant="minimal" onClick={() => stagePrompt("Queue")}
+        disabled={invalidEpoch || !!pending || !text.trim() && images.length === 0}
+        aria-label={t("Enqueue for the next turn")}
+        title={t("Enqueue this prompt for the next turn (Enter)")}>
         <AppIcon name="queue" size={16} /></Button>}
       <Button ref={compactTrigger} variant="minimal" onClick={compact}
         data-epoch={epoch} data-session-id={sessionId} data-project-id={projectId ?? ""}
@@ -842,14 +925,14 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
         title={pendingCompact ? `${t("Manual retry of exact compaction:")} ${t("epoch")} ${pendingCompact.request.expectedEpoch}, ${t("session")} ${pendingCompact.request.sessionId}, ${t("runtime")} ${pendingCompact.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingCompact.request.expectedAttachmentGeneration}, ${t("request")} ${pendingCompact.request.clientRequestId}`
           : t("Compact the conversation (Ctrl+F11)")}>
         <AppIcon name="compact" size={16} /></Button>
-      <SendSplitButton enqueue={enqueue && images.length === 0} onEnqueueChange={setEnqueue} enqueueDisabled={images.length > 0} optionsDisabled={invalidEpoch || !!pending}>
+      <SendSplitButton enqueue={enqueue} onEnqueueChange={setEnqueue} optionsDisabled={invalidEpoch || !!pending}>
       {(composerBusy || availableAbortRun || pendingAbortRun) ? <Button intent="danger" icon={<AppIcon name="stop" size={16} fill="currentColor" />} onClick={abortRun}
         disabled={invalidEpoch || !!pendingAbortRun?.inFlight || (pendingAbortRun
           ? !capability.canSubmit(pendingAbortRun.request) : !availableAbortRun || !capability.canSubmit(availableAbortRun))}
         aria-label={pendingAbortRun ? t("Retry exact cancellation request for observed run {run}", { run: pendingAbortRun.request.expectedRunId }) : t("Cancel observed run")}
         title={pendingAbortRun ? `${t("Manual retry of exact cancellation:")} ${t("epoch")} ${pendingAbortRun.request.expectedEpoch}, ${t("session")} ${pendingAbortRun.request.sessionId}, ${t("runtime")} ${pendingAbortRun.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingAbortRun.request.expectedAttachmentGeneration}, ${t("run")} ${pendingAbortRun.request.expectedRunId}, ${t("request")} ${pendingAbortRun.request.clientRequestId}`
           : t("Stop the running turn")} />
-      : <Button aria-label={t(pending ? "Retry exact request" : enqueue && images.length === 0 ? "Enqueue" : "Send")} title={t(pending ? "Retry exact request" : enqueue && images.length === 0 ? "Enqueue until idle" : "Send")} intent="primary" icon={<AppIcon name={pending ? "refresh" : enqueue && images.length === 0 ? "queue" : "send"} size={16} />} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || captureSubmission(epoch, sessionId, text, "availability", images.length ? selected : null, null, images) === null)} onClick={submit} />}
+      : <Button aria-label={t(pending ? "Retry exact request" : enqueue ? "Enqueue" : "Send")} title={t(pending ? "Retry exact request" : enqueue ? "Enqueue until idle" : "Send")} intent="primary" icon={<AppIcon name={pending ? "refresh" : enqueue ? "queue" : "send"} size={16} />} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || captureSubmission(epoch, sessionId, text, "availability", images.length ? selected : null, null, images) === null)} onClick={submit} />}
       </SendSplitButton>
     </ComposerSurface>
     {timelineNotices && createPortal(<>

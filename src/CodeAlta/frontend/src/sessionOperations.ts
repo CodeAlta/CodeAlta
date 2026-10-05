@@ -67,6 +67,10 @@ function validSend(request: SessionSendRequest): boolean {
       && (request.selection.modelId === null || identity(request.selection.modelId, 256))
       && (request.selection.reasoningEffort === null || identity(request.selection.reasoningEffort, 32)));
 }
+/** The key of the timeline echo a Send shows while the host has not reported its message yet. */
+export function outgoingKey(request: Pick<SessionSendRequest, "expectedEpoch" | "sessionId" | "clientRequestId">): string {
+  return JSON.stringify([request.expectedEpoch, request.sessionId, request.clientRequestId]);
+}
 export function captureSubmission(epoch: string, sessionId: string, text: string, key: string, selection: SessionSelection | null = null,
   references: SessionReferenceScope | null = null, images: SessionSendRequest["images"] = null): Readonly<SessionSendRequest> | null {
   if (!validSend({ expectedEpoch: epoch, clientRequestId: key, sessionId, text, selection, references, images })) return null;
@@ -191,7 +195,10 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
       if (recovered.sendRecovered || recovered.abortsRecovered) change.changed();
       return recovered;
     },
-    async submit(request: SessionSendRequest, signal: AbortSignal, capability: Capability, publish: (result: SubmissionResult) => void): Promise<void> {
+    // `whenAccepted` is for a prompt leaving the queue: its echo appears once the host took it, so that a
+    // refusal (the session was busy after all) shows nothing and the prompt simply stays queued.
+    async submit(request: SessionSendRequest, signal: AbortSignal, capability: Capability, publish: (result: SubmissionResult) => void,
+      echo: "always" | "whenAccepted" = "always"): Promise<void> {
       if (!validSend(request) || signal.aborted || !capability.canSubmit(request)) return;
       const key = sessionKey(request.sessionId); let entry = sends.get(key);
       if (entry && (entry.inFlight || entry.request !== request)) return;
@@ -202,19 +209,22 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
         sends.set(key, entry);
       }
       entry.inFlight = true; // Synchronous ownership precedes transport, not a React render-time guard.
-      const echoKey = JSON.stringify([request.expectedEpoch, request.sessionId, request.clientRequestId]);
-      const previousEcho = outgoing.get(echoKey);
-      if (!previousEcho && outgoing.size >= 256) outgoing.delete(outgoing.keys().next().value!);
-      outgoing.set(echoKey, Object.freeze({ key: echoKey, epoch: request.expectedEpoch, sessionId: request.sessionId,
-        text: request.text, imageCount: request.images?.length ?? 0, timestamp: previousEcho?.timestamp ?? new Date().toISOString(), runId: previousEcho?.runId ?? null, state: "sending",
-        images: previousEcho?.images ?? Object.freeze((entry.request.images ?? []).map(image =>
-          Object.freeze({ title: image.title, mediaType: image.mediaType, url: `data:${image.mediaType};base64,${image.base64}` }))) }));
-      // Only the newest eight echoes keep their images: a card that stays failed or pending does not hold them forever.
-      let withImages = 0;
-      for (const [key, row] of [...outgoing].reverse())
-        if (row.images?.length && ++withImages > 8) outgoing.set(key, Object.freeze({ ...row, images: undefined }));
-      change.changed();
+      const echoKey = outgoingKey(request);
       const captured = entry.request;
+      const showEcho = (state: OutgoingMessage["state"]) => {
+        const previousEcho = outgoing.get(echoKey);
+        if (!previousEcho && outgoing.size >= 256) outgoing.delete(outgoing.keys().next().value!);
+        outgoing.set(echoKey, Object.freeze({ key: echoKey, epoch: request.expectedEpoch, sessionId: request.sessionId,
+          text: request.text, imageCount: request.images?.length ?? 0, timestamp: previousEcho?.timestamp ?? new Date().toISOString(), runId: previousEcho?.runId ?? null, state,
+          images: previousEcho?.images ?? Object.freeze((captured.images ?? []).map(image =>
+            Object.freeze({ title: image.title, mediaType: image.mediaType, url: `data:${image.mediaType};base64,${image.base64}` }))) }));
+        // Only the newest eight echoes keep their images: a card that stays failed or pending does not hold them forever.
+        let withImages = 0;
+        for (const [key, row] of [...outgoing].reverse())
+          if (row.images?.length && ++withImages > 8) outgoing.set(key, Object.freeze({ ...row, images: undefined }));
+      };
+      if (echo === "always" || outgoing.has(echoKey)) showEcho("sending");
+      change.changed();
       const started = Date.now();
       const diagnosticId = diagnosticRequestId(captured.clientRequestId);
       let result: SubmissionResult = { status: "uncertain", epoch: captured.expectedEpoch, receipt: null };
@@ -237,9 +247,11 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
       finally {
         sendDiagnostics.info("settled", { requestId: diagnosticId, uncertain: result.status === "uncertain", elapsedMs: Date.now() - started });
         entry.inFlight = false; entry.waiter = undefined;
-        const echo = outgoing.get(echoKey);
-        if (echo) outgoing.set(echoKey, Object.freeze({ ...echo, runId: result.receipt?.runId ?? echo.runId,
-          state: result.status === "accepted" || result.status === "replay" ? "accepted" : result.status === "uncertain" ? "uncertain" : "failed" }));
+        const accepted = result.status === "accepted" || result.status === "replay";
+        if (accepted && !outgoing.has(echoKey)) showEcho("accepted");
+        const shown = outgoing.get(echoKey);
+        if (shown) outgoing.set(echoKey, Object.freeze({ ...shown, runId: result.receipt?.runId ?? shown.runId,
+          state: accepted ? "accepted" : result.status === "uncertain" ? "uncertain" : "failed" }));
         change.changed();
       }
       if (!signal.aborted) publish(result);

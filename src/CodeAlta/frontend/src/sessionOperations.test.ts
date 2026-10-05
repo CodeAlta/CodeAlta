@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { captureSubmission, captureSubmissionAbort, createMutationCapability, createOwnedSubmissions, refreshSubmissions } from "./sessionOperations";
+import { captureSubmission, captureSubmissionAbort, createMutationCapability, createOwnedSubmissions, outgoingKey, refreshSubmissions } from "./sessionOperations";
 import type { SessionAdmission, SessionAbortRequest, SessionReceiptPage, SessionReceiptView, SessionSendRequest } from "#neoastra";
 
 const operation = "abcdefab-1234-5678-9abc-abcdefabcdef";
@@ -37,6 +37,28 @@ test("an outgoing echo carries the images of its prompt, and only the newest eig
   // The oldest echo is still shown, with the count of its images only.
   assert.equal(store.outgoing("epoch", "session-0")[0].images, undefined);
   assert.equal(store.outgoing("epoch", "session-0")[0].imageCount, 1);
+});
+test("a prompt leaving the queue shows its echo only once the host took it", async () => {
+  const capability = createMutationCapability("epoch");
+  let answer: SessionAdmission = { status: "busy", epoch: "epoch", receipt: null };
+  const store = createOwnedSubmissions(async () => answer, async () => { throw new Error("unused"); });
+  const send = (key: string): SessionSendRequest => ({ expectedEpoch: "epoch", clientRequestId: key, sessionId: "session", text: "queued",
+    selection: null, references: null, images: null });
+  const results: string[] = [];
+  // The session was busy after all: nothing is shown, and nothing is retained that would block the next try.
+  await store.submit(send("first"), new AbortController().signal, capability, result => results.push(result.status), "whenAccepted");
+  assert.deepEqual([results, store.outgoing("epoch", "session").length, store.pending("session")], [["busy"], 0, undefined]);
+  answer = { status: "accepted", epoch: "epoch", receipt: { clientRequestId: "second", sessionId: "session", operationId: operation,
+    targetOperationId: null, kind: "Send", state: "pending", outcome: null, code: null, runId: null, queueInsertion: null } };
+  await store.submit(send("second"), new AbortController().signal, capability, result => results.push(result.status), "whenAccepted");
+  assert.deepEqual(store.outgoing("epoch", "session").map(echo => [echo.text, echo.state]), [["queued", "accepted"]]);
+  assert.equal(store.outgoing("epoch", "session")[0].key, outgoingKey(send("second")));
+  // A Send from the composer keeps its echo when it is refused: that prompt stays the user's to see.
+  answer = { status: "invalid_request", epoch: "epoch", receipt: null };
+  await store.submit(send("third"), new AbortController().signal, capability, () => {});
+  assert.deepEqual(store.outgoing("epoch", "session").map(echo => echo.state), ["accepted", "failed"]);
+  store.acknowledgeOutgoing([outgoingKey(send("third"))]);
+  assert.equal(store.outgoing("epoch", "session").length, 1);
 });
 const control = "abcdefab-1234-5678-9abc-abcdefabcdee";
 function row(): SessionReceiptView {

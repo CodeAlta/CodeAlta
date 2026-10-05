@@ -354,12 +354,24 @@ teardown waits only a bounded time, so cache work can outlive bridge teardown.
 
 ## Composer
 
-Queued text and steering use compact rows outside and above the prompt card. The Send button is a
-split button: its caret chooses the default action, **Send now** or **Enqueue until idle**, which
-stages text for the next idle observation; queued rows expose repeat count, editing, steering
-and deletion. Claimed requests retain their exact targets and keys; uncertain outcomes require
-explicit retry, and receipt-confirmed consumption removes the row. Staged rows are app-memory
-only, not durable across reloads. Image prompts still use immediate Send. The bottom bar shows the
+A prompt sent while the session works is never refused. `Enter` during a running turn, or behind
+prompts that already wait, adds the prompt to the queue; `Ctrl+Enter` sends it to the running turn as
+steering, and sends it normally when no turn runs. Both wait in compact rows above the prompt card:
+steering first, then the queue in the order it is sent. A queued row has a repeat count (stepper or
+typed number), copy, edit, **Steer now** and delete; **Clear queue** or `F10` removes the prompts
+that have not left, and `Ctrl+Enter` with an empty prompt steers with the first queued prompt.
+
+When the session is idle the first queued prompt leaves as a normal Send, with the selection, the
+project references and the images of that moment, also while its tab is hidden. A Send the host
+refuses because the session started working puts the prompt in the queue instead of failing. A
+steering row reads **Steer pending** until its message appears in the timeline or its turn ends;
+deleting it then only removes the row, since the agent may already hold it. Steering that cannot
+reach the turn becomes the first queued prompt, and a prompt with images is queued rather than
+steered. The Send button is a split button: its caret chooses **Send now** or **Enqueue until
+idle**, which queues every prompt. A request the host did not confirm keeps its key and offers
+**Try again**; nothing is sent twice or retried by itself. The rows are app memory only, not kept
+across reloads. A Send that is not accepted for another reason leaves the prompt in the composer
+and says why in the status line: a prompt is never answered with a toast. The bottom bar shows the
 next-Send agent prompt, provider, model and reasoning effort as one clickable summary; it opens a
 popover to change them (reasoning is a stepped slider over the model's supported efforts) and to
 browse the agent-prompt and model catalogs. Enabled-provider readiness appears in the same bar.
@@ -1169,7 +1181,7 @@ shortcuts**, a filterable window listing the same commands by category.
 | `Ctrl+E`, `Ctrl+S` in a file tab | Open a project file in an editor tab (`/edit`), save the file |
 | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+PageUp` / `Ctrl+PageDown`) | Previous / next tab |
 | `Ctrl+W`, `Ctrl+Shift+T` | Close tab, reopen the last closed tab |
-| `Enter`, `Ctrl+Enter`, `Shift+Enter` | Send, steer the running turn, new line |
+| `Enter`, `Ctrl+Enter`, `Shift+Enter` | Send (queued while a turn runs), steer the running turn, new line |
 | `Alt+Up` / `Alt+Down` in the prompt | Previous / next prompt sent from this window |
 | `F6`, `Ctrl+T` | Full prompt editor, next agent prompt |
 | `F8`, `F10`, `Ctrl+F11` | Abort the running turn, clear the queue, compact |
@@ -1408,10 +1420,10 @@ After **Refresh runtime state**, **Steer observed run** submits text to that exa
 attachment and recorded non-null run. It never creates or replaces a runtime, falls back to a
 send/queue, or silently targets a later run. The host rechecks ownership and target identity;
 stale, retiring, transitioning, terminated or unsupported targets fail rather than retarget.
-When an eligible run is observed, the compact composer also offers a labelled **Steer current composer**
-icon beside Send; it uses the same current-draft action as `Ctrl+Enter` and is disabled for empty text,
-retained steering or unavailable mutation authority. It does not retry a retained request; use the
-separate steering controls for explicit exact-target recovery. A pending Send is not an editable steering draft.
+While a turn runs, the compact composer offers a **Steer the running turn** icon beside Send; it is
+the same action as `Ctrl+Enter` (see Composer) and is disabled for empty text with nothing queued.
+The composer captures the run to steer when the prompt leaves, not when the key is pressed. A pending
+Send is not an editable steering draft.
 Steering preserves the existing run's permission authority and cannot reopen a closed review
 window. Text is limited to 32,768 UTF-16 units. Success means input submitted, not run completed.
 An uncertain steering request retains its immutable target, key and text across selection changes.
@@ -1441,13 +1453,9 @@ and joins accepted compaction and cancellation work.
 **Queue text — this host only** uses an explicitly refreshed runtime/attachment observation, including
 busy/draining attachments. `sessions.queue` reserves exact text for that attachment only; the receipt
 separately reports reservation, host-only insertion and execution/cleanup. `queue_accepted` is not
-durable or executed, and `queue_dispatched` is not proof of run completion. When the attachment is
-eligible, the compact composer also offers **Queue current composer in this host**. It captures
-the current editable draft for that observed attachment (idle or active, never a run target) using
-the same queue owner as the separate editor. A pending Send or retained queue request disables it;
-only the separate controls can manually retry the original queue key, attachment and text. The
-composer draft stays editable and is **not cleared by owner reservation**, because that reservation
-does not establish insertion, durability or execution; even newer draft edits are preserved. The
+durable or executed, and `queue_dispatched` is not proof of run completion. The composer does not
+use this operation: its queue is kept in the window and each prompt leaves as a normal Send, which
+resolves project references and applies the selection (see Composer). The
 secondary queue editor keeps its own volatile draft per host epoch/session across panel selection
 changes. While a queue request is retained, that disabled editor shows the exact request text;
 after manual retry or receipt reconciliation of a composer-originated request, its separate draft
