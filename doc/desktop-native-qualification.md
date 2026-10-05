@@ -8,7 +8,7 @@ owned host for the current directory and `~/.alta`, matching the TUI default; na
 and the owned-host integration below are still undergoing qualification.
 
 The later workspace browser adds explicit catalog-copy/cache-write opt-in; see its
-[operator constraints](../src/CodeAlta/README.md#browse-a-task-owned-catalog-copy). This has
+[operator constraints](desktop.md#browse-a-task-owned-catalog-copy). This has
 not been native-qualified by the historical boot/fixture runs below. Its managed/source
 checks do not qualify real cache access, shared ownership, current run state or shutdown
 joining; the new browser root and catalog copy remain separate from the active profile.

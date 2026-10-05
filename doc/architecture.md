@@ -1,6 +1,6 @@
 # Architecture overview
 
-CodeAlta's terminal frontend is `CodeAlta.Tui` (`altatui`), on top of reusable runtime libraries. The desktop head remains in development; the composition below describes the TUI. Read the code from process composition downward: owned process services, shared host composition, frontend composition, orchestration runtime, session catalog, model providers, and extension points.
+CodeAlta's terminal frontend is `CodeAlta.Tui` (`altatui`), on top of reusable runtime libraries. The desktop frontend is `CodeAlta` (`alta`), described in [CodeAlta Desktop](desktop.md); the composition below describes the TUI. Read the code from process composition downward: owned process services, shared host composition, frontend composition, orchestration runtime, session catalog, model providers, and extension points.
 
 ## Startup and composition
 

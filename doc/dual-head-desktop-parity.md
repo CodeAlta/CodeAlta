@@ -2296,7 +2296,7 @@ Implemented separately consented existing-session text submission, submission-sp
 bounded receipt recovery and direct cached workspace/history reads. Browser/catalog-only modes
 remain unchanged. `CodeAltaHost` owns both commands and reads; Desktop borrows them rather than
 creating another application owner. The full CLI/root/consent and shutdown limitations are in
-[`src/CodeAlta/README.md`](../src/CodeAlta/README.md#explicit-owned-text-submission) and
+[`doc/desktop.md`](desktop.md#explicit-owned-text-submission) and
 [`runtime.md`](runtime.md#explicit-desktop-submissions-and-owned-reads).
 
 Read admission retains eight actual uncancelled operations, rejects excess and joins both

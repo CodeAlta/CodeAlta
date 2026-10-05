@@ -446,7 +446,7 @@ For a deliberate native launch on Windows, the built entry is
 `src/CodeAlta/bin/Release/net10.0/alta.exe`. Run it from the intended project directory.
 **No-argument native startup owns the current project and shared `~/.alta` runtime, acquires
 the runtime lock and may start configured providers.** It is not an isolated preview. See the
-[desktop safety/isolated-root instructions](../src/CodeAlta/README.md) before launching.
+[desktop safety/isolated-root instructions](desktop.md#isolated-root-launches) before launching.
 Neither native nor demo launch was performed during this checkpoint verification.
 
 ## Verification and known gaps

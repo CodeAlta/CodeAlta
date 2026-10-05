@@ -8,7 +8,7 @@ See [new-session provider choice](new-session-provider.md) for cached descriptor
 selection, exact enabled-host admission, original uncertainty retention and fresh
 catalog confirmation. Existing-session provider switching remains separate.
 
-See [commands, help and keyboard shortcuts](../src/CodeAlta/README.md#commands-help-and-keyboard-shortcuts)
+See [commands, help and keyboard shortcuts](desktop.md#commands-help-and-keyboard-shortcuts)
 for the Desktop command palette, help and key map, which follow the TUI's.
 
 Provider/timeline localization and its scroll correction are independently accepted;
@@ -44,8 +44,9 @@ Read the documents in this order when onboarding or reviewing architecture-sensi
 | 8 | [Plugins](plugins.md) | Trusted source plugins, public authoring API, runtime build/load flow, contributions, safe mode, and built-in plugins. |
 | 9 | [Skills](skills.md) | Filesystem `SKILL.md` discovery, validation, precedence, UI/live-tool activation, and runtime injection. |
 | 10 | [Orchestration actor model](orchestration-actor-model.md) | Internal mailbox/actor ownership rules for runtime mutation and event backpressure. |
-| 11 | [Development guide](development-guide.md) | Repository-wide rules that contributors and automation should follow. |
-| 12 | [Specs index](specs/readme.md) | Current policy for adding focused implementation specs. |
+| 11 | [CodeAlta Desktop](desktop.md) | Desktop window, workspace, composer, timeline, Settings pages, host RPC services, and isolated-root launches. |
+| 12 | [Development guide](development-guide.md) | Repository-wide rules that contributors and automation should follow. |
+| 13 | [Specs index](specs/readme.md) | Current policy for adding focused implementation specs. |
 
 ## System map
 
@@ -88,12 +89,13 @@ flowchart TD
     Agent --> State
 ```
 
-The `altatui` executable is the interactive terminal host, packaged as `CodeAlta.Tui`. The in-process agent tool remains `alta`; the desktop head is still in development. Reusable session orchestration lives in runtime libraries, not in terminal controls. `CodeAltaHost.CreateAsync` is the shared composition entry point: it creates the catalog, plugin runtime, skill catalog, model-provider registry/initialization service, session catalog, `AgentHub`, `SessionRuntimeService`, and project-file search service. The TUI then composes views and frontend coordinators around those services.
+The `altatui` executable is the interactive terminal host, packaged as `CodeAlta.Tui`. The `alta` executable is the desktop host, packaged as `CodeAlta` and described in [CodeAlta Desktop](desktop.md); the in-process agent tool is also named `alta`. Reusable session orchestration lives in runtime libraries, not in terminal controls. `CodeAltaHost.CreateAsync` is the shared composition entry point: it creates the catalog, plugin runtime, skill catalog, model-provider registry/initialization service, session catalog, `AgentHub`, `SessionRuntimeService`, and project-file search service. The TUI then composes views and frontend coordinators around those services.
 
 ## Current source roles
 
 | Source root | Role |
 | --- | --- |
+| `src/CodeAlta` | `alta` executable: the desktop window, its React frontend, and the RPC services between them. |
 | `src/CodeAlta.Tui` | `altatui` executable, terminal UI composition, shell controller, dialogs, view models, provider-management UI, and owned process services. |
 | `src/CodeAlta.Orchestration` | Headless runtime composition and session orchestration. It references `CodeAlta.Agent`, `CodeAlta.Catalog`, and `CodeAlta.Plugins`, not the TUI. |
 | `src/CodeAlta.Agent` | Session catalog/store contracts, normalized session/event contracts, model-provider runtime contracts, local raw-API session runtime, tools, journals, prompt instruction composition, and compaction. |
