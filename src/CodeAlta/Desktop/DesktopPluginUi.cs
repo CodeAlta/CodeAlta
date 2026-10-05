@@ -155,8 +155,8 @@ internal sealed class DesktopPluginUi : IPluginUiService, IPluginSessionService,
         ArgumentNullException.ThrowIfNull(message);
         var answer = await AskAsync(new PluginUiEvent("ask")
         {
+            // Without buttons the page shows its own Yes and No, in the language of the window.
             Dialog = "confirm", Title = Cut(title, MaximumTitleUnits), Message = Cut(message, MaximumMessageUnits),
-            Buttons = [new("yes", "Yes", true, false), new("no", "No", false, true)],
         }, null, cancellationToken).ConfigureAwait(false);
         return answer is { Cancelled: false, Button: "yes" };
     }

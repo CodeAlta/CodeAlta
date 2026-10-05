@@ -1443,7 +1443,6 @@ dialog.session-browser .session-batch-delete summary { cursor: pointer; color: v
 .plugin-picker-label, .plugin-picker-description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-picker-description { color: var(--muted); font-size: 12px; text-align: right; }
 .plugin-settings .settings-editor-name .plugin-failure { color: var(--red); white-space: normal; overflow-wrap: anywhere; }
-.plugin-detail > h3 { margin: 4px 0 6px; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 .plugin-detail + .plugin-detail { margin-top: 12px; }
 
 /* Providers: default markers on blank fields and the account sign-in block. */

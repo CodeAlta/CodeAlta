@@ -79,6 +79,7 @@ function PluginDialog({ ask, api, onFinish, onClosed }: {
   const editing = kind === "input" || kind === "edit";
   const buttons = ask.buttons?.length ? ask.buttons
     : kind === "message" || kind === "html" ? [{ name: "close", label: t("Close"), isDefault: true, isCancel: true }]
+    : kind === "confirm" ? [{ name: "yes", label: t("Yes"), isDefault: true, isCancel: false }, { name: "no", label: t("No"), isDefault: false, isCancel: true }]
     : [{ name: "ok", label: t("OK"), isDefault: true, isCancel: false }, { name: "cancel", label: t("Cancel"), isDefault: false, isCancel: true }];
   const values = () => kind === "html" && content.current ? collectPluginFields(content.current) : null;
   const cancel = () => onFinish({ button: null, cancelled: true, text: null, selectedIndex: null, values: values() });
