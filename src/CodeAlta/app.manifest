@@ -7,6 +7,14 @@
       <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
     </application>
   </compatibility>
+  <!-- Without this Windows renders the window at 96 DPI and stretches the picture: blurred above 100% scaling.
+       NeoAstra sizes its frame and caption buttons for the monitor of the window, and WebView2 follows it. -->
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor</dpiAwareness>
+    </windowsSettings>
+  </application>
   <dependency>
     <dependentAssembly>
       <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0"

@@ -40,4 +40,12 @@ public sealed class DesktopArchitectureTests
         CollectionAssert.AreEquivalent(new[] { "win-x64", "win-arm64", "osx-x64", "osx-arm64", "linux-x64", "linux-arm64" }, runtimes);
         Assert.IsFalse(project.Descendants("PackAsToolShimRuntimeIdentifiers").Any());
     }
+
+    [TestMethod]
+    public void DesktopManifest_DeclaresPerMonitorDpiAwareness()
+    {
+        // Without it Windows renders the window at 96 DPI and stretches the picture: blurred above 100% scaling.
+        var manifest = File.ReadAllText(Path.Combine(SourceRoot, "CodeAlta", "app.manifest"));
+        StringAssert.Contains(manifest, "<dpiAwareness xmlns=\"http://schemas.microsoft.com/SMI/2016/WindowsSettings\">PerMonitorV2, PerMonitor</dpiAwareness>");
+    }
 }
