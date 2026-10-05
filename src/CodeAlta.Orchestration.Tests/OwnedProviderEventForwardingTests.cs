@@ -24,6 +24,29 @@ public sealed class OwnedProviderEventForwardingTests
     });
 
     [TestMethod]
+    public Task Callbacks_StartInArrivalOrderBeforeForwardReturns() => Exercise(f =>
+    {
+        // A provider raises events back to back (the last ones of a turn, then Idle). Each must be handed
+        // over before the next one arrives: started on the thread pool, a later event could overtake.
+        var attachment = f.Attach();
+        var started = new List<int>();
+        for (var index = 0; index < 64; index++)
+        {
+            var arrival = index;
+            _ = f.Owner.Forward(attachment, use =>
+            {
+                lock (started) started.Add(arrival);
+                use.Dispose();
+                return Task.CompletedTask;
+            });
+            lock (started) Assert.AreEqual(arrival + 1, started.Count, "The callback starts before Forward returns.");
+        }
+
+        lock (started) CollectionAssert.AreEqual(Enumerable.Range(0, 64).ToArray(), started);
+        return Task.CompletedTask;
+    });
+
+    [TestMethod]
     public Task SubscriptionCallback_BeforePublicationUsesCapturedAttachment() => Exercise(async f =>
     {
         var original = f.Attach(completeSetup: false);

@@ -835,6 +835,19 @@ public sealed class RuntimePluginLiveEventTests
     }
 
     [TestMethod]
+    public async Task Publication_StartsBeforeCompleteAsyncReturns()
+    {
+        // A provider event is posted to the session mailbox by its publication. Started later, on the thread
+        // pool, an event could be posted after the one that followed it.
+        var receipt = new SessionRuntimeService.LiveEventPublication(new object());
+        var published = false;
+        var completion = receipt.CompleteAsync(_ => { published = true; return Task.CompletedTask; },
+            () => { }, _ => Task.CompletedTask, () => Task.CompletedTask, (_, _) => { });
+        Assert.IsTrue(published);
+        await completion.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
     public async Task Correction_RetentionControlInvocationFailureKeepsGraphAndNoOriginal(bool pluginMarker)

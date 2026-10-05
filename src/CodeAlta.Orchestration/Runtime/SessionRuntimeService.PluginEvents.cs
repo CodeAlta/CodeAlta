@@ -277,7 +277,9 @@ public sealed partial class SessionRuntimeService
     // It owns actual returned originals separately from outcomes; marking is not plugin execution.
     internal sealed class LiveEventPublication(object dependencies)
     {
-        private readonly TaskCompletionSource _launch = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Continuations run inline: publication starts before CompleteAsync returns, so that a provider
+        // event is posted to the session mailbox in the order it arrived.
+        private readonly TaskCompletionSource _launch = new();
         private int _started;
         private readonly List<(Task? Original, Exception AwaitedFailure, AggregateException? OriginalFaults)> _outcomes = [];
         private readonly List<Exception> _retentionFailures = [];

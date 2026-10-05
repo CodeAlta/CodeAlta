@@ -5,7 +5,8 @@ using CodeAlta.Plugins;
 namespace CodeAlta.Orchestration.Runtime;
 
 // Runtime-specific ownership, not a provider scheduler or another hosting lifetime.
-// The gate protects records only. All executable work waits on a retained asynchronous launch.
+// The gate protects records only. All executable work waits on a retained launch: asynchronous, except
+// for a forwarded provider callback, which starts on the provider's thread to keep callbacks in order.
 internal sealed class OwnedProviderEventForwarding
 {
     private readonly object _gate = new();
@@ -138,7 +139,10 @@ internal sealed class OwnedProviderEventForwarding
 
     internal Task Forward(Attachment attachment, Func<Use, Task> body)
     {
-        var launch = NewCompletion();
+        // Not NewCompletion: the body starts inline, before Forward returns. A provider raises its events one
+        // after the other, and each must reach the session mailbox before the next one does. Started on the
+        // thread pool instead, two events raised back to back could be processed in either order.
+        var launch = new TaskCompletionSource();
         Task work;
         lock (_gate)
         {
