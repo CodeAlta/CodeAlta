@@ -26,6 +26,8 @@ public enum PluginPoint
     InstructionProcessor,
     /// <summary>Prompt editor attachment.</summary>
     PromptEditor,
+    /// <summary>Prompt picker opened by a trigger character.</summary>
+    PromptPicker,
     /// <summary>Before-agent-run hook.</summary>
     BeforeAgentRun,
     /// <summary>Tool-call hook.</summary>

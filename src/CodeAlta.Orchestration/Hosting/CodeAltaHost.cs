@@ -246,6 +246,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                             },
                             SafeMode = options.PluginSafeMode,
                             IsHeadless = options.IsHeadless,
+                            Frontend = options.PluginFrontend,
                             StartupFeedback = options.PluginStartupFeedback,
                             AuthoringProfile = options.PluginAuthoringProfile,
                             WaitForEnterAfterBuildLiveOutput = options.WaitForEnterAfterPluginLiveOutput,

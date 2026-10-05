@@ -247,6 +247,42 @@ public static class PluginUi
         return Dialog(PluginDialogKind.TextEditor, title, null) with { InitialText = text };
     }
 
+    /// <summary>Creates a custom dialog whose content is an HTML fragment for the desktop application.</summary>
+    /// <param name="title">The dialog title.</param>
+    /// <param name="html">The HTML fragment; see <see cref="PluginHtml"/>.</param>
+    /// <param name="buttons">The buttons that close the dialog; none shows a single Close button.</param>
+    /// <returns>The dialog request.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="title"/> or <paramref name="html"/> is null, empty or whitespace.</exception>
+    public static PluginDialogRequest HtmlDialog(string title, string html, params PluginDialogButton[] buttons)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(html);
+        ArgumentNullException.ThrowIfNull(buttons);
+        return Dialog(PluginDialogKind.Custom, title, null) with { Html = html, Buttons = buttons };
+    }
+
+    /// <summary>Creates a prompt picker opened by a trigger character.</summary>
+    /// <param name="name">The contribution name.</param>
+    /// <param name="trigger">The character that opens the picker.</param>
+    /// <param name="title">The picker title.</param>
+    /// <param name="search">The search handler.</param>
+    /// <param name="placeholderText">Optional ready-prompt placeholder guidance.</param>
+    /// <param name="order">The ordering hint.</param>
+    /// <returns>The prompt picker contribution.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="name"/> or <paramref name="title"/> is null, empty or whitespace, or <paramref name="trigger"/> is a letter, a digit or white space.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="search"/> is null.</exception>
+    public static PluginPromptPickerContribution PromptPicker(string name, char trigger, string title, PluginPromptPickerSearchHandler search, string? placeholderText = null, int order = 0)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        ArgumentNullException.ThrowIfNull(search);
+        if (char.IsLetterOrDigit(trigger) || char.IsWhiteSpace(trigger) || char.IsControl(trigger) || char.IsSurrogate(trigger))
+        {
+            throw new ArgumentException("The trigger must be a punctuation or symbol character.", nameof(trigger));
+        }
+
+        return new PluginPromptPickerContribution { Name = name, Trigger = trigger, Title = title, SearchAsync = search, PlaceholderText = placeholderText, Order = order };
+    }
+
     /// <summary>Creates a selection dialog request.</summary>
     public static PluginDialogRequest SelectionDialog(string title, IReadOnlyList<string> items)
     {

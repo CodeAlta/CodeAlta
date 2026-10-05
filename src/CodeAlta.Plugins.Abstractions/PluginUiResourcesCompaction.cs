@@ -52,6 +52,12 @@ public sealed record PluginStatusItem
 
     /// <summary>Gets the status tone.</summary>
     public PluginStatusTone Tone { get; init; } = PluginStatusTone.Info;
+
+    /// <summary>
+    /// Gets the name of a command of the same plugin that the item runs when the user activates it, or
+    /// <see langword="null"/> for an item that only informs.
+    /// </summary>
+    public string? Command { get; init; }
 }
 
 /// <summary>Identifies status tone.</summary>
@@ -80,6 +86,11 @@ public record PluginRendererContribution : PluginUiContribution
 }
 
 /// <summary>Represents a renderer result.</summary>
+/// <remarks>
+/// A result can carry several forms of the same content. The desktop application shows <see cref="Html"/>
+/// when it is set, then <see cref="Markdown"/>, then <see cref="Text"/>. The terminal application never
+/// shows HTML: it uses its native visual when the contribution has one, then Markdown, then text.
+/// </remarks>
 public sealed record PluginRenderResult
 {
     /// <summary>Gets optional markdown content.</summary>
@@ -87,6 +98,26 @@ public sealed record PluginRenderResult
 
     /// <summary>Gets optional plain text fallback content.</summary>
     public string? Text { get; init; }
+
+    /// <summary>
+    /// Gets an optional HTML fragment for the desktop application.
+    /// </summary>
+    /// <remarks>
+    /// The fragment is sanitized before it is shown: scripts, styles and event handler attributes are
+    /// removed. See <see cref="PluginHtml"/> for the attributes that make an element run a command.
+    /// </remarks>
+    public string? Html { get; init; }
+
+    /// <summary>Creates an HTML render result with the text shown where HTML is not.</summary>
+    /// <param name="html">The HTML fragment for the desktop application.</param>
+    /// <param name="text">The plain text shown by a frontend that does not show HTML.</param>
+    /// <returns>The render result.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="html"/> is null, empty or whitespace.</exception>
+    public static PluginRenderResult FromHtml(string html, string? text = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(html);
+        return new PluginRenderResult { Html = html, Text = text };
+    }
 
     /// <summary>Creates a markdown render result.</summary>
     /// <param name="markdown">The markdown content.</param>

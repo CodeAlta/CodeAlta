@@ -513,6 +513,7 @@ internal partial class Program
                     },
                     SafeMode = pluginBootstrapOptions.PluginSafeMode,
                     IsHeadless = false,
+                    Frontend = CodeAlta.Plugins.Abstractions.PluginFrontends.Terminal,
                     StartupFeedback = new CodeAlta.Tui.Plugins.TerminalPluginStartupFeedback(),
                     AuthoringProfile = PluginAuthoringProfile.Terminal,
                     WaitForEnterAfterBuildLiveOutput = pluginBootstrapOptions.WaitForEnterAfterPluginLiveOutput,

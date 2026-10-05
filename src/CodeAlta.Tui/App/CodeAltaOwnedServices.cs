@@ -155,6 +155,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                         StateRoot = instance.StateRoot,
                         CurrentProjectPath = Environment.CurrentDirectory,
                         IsHeadless = false,
+                        PluginFrontend = CodeAlta.Plugins.Abstractions.PluginFrontends.Terminal,
                         PluginStartupFeedback = new CodeAlta.Tui.Plugins.TerminalPluginStartupFeedback(),
                         PluginAuthoringProfile = PluginAuthoringProfile.Terminal,
                         HasInteractiveUi = true,

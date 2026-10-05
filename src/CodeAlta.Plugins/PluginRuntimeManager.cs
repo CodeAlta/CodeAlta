@@ -25,6 +25,13 @@ public sealed record PluginRuntimeManagerOptions
     /// <summary>Gets a value indicating whether the host is running without an interactive UI.</summary>
     public bool IsHeadless { get; init; }
 
+    /// <summary>
+    /// Gets the CodeAlta application of the host; the default is <see cref="PluginFrontends.None"/>, a host
+    /// without a user interface.
+    /// </summary>
+    /// <remarks>A plugin that does not support the application of the host is discovered but not started.</remarks>
+    public PluginFrontends Frontend { get; init; }
+
     /// <summary>Gets the raw process arguments visible to startup contributions.</summary>
     public IReadOnlyList<string> RawArguments { get; init; } = [];
 
@@ -169,6 +176,12 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
                 Type = builtIn.ResolvePluginType(),
                 Descriptor = builtIn.CreateDescriptor(),
             };
+            if (CreateUnsupportedFrontendDiagnostic(discovered.Descriptor, options.Frontend, builtIn.Id, null) is { } unsupportedBuiltIn)
+            {
+                diagnostics.Add(unsupportedBuiltIn);
+                continue;
+            }
+
             var activation = await activator.ActivateAsync(
                     discovered,
                     sourcePackage: null,
@@ -291,6 +304,12 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
                 diagnostics.AddRange(discovery.Diagnostics);
                 foreach (var discovered in discovery.Plugins)
                 {
+                    if (CreateUnsupportedFrontendDiagnostic(discovered.Descriptor, options.Frontend, buildResult.Package.PackageId, buildResult.Package.PackageDirectory) is { } unsupported)
+                    {
+                        diagnostics.Add(unsupported);
+                        continue;
+                    }
+
                     var activation = await activator.ActivateAsync(
                             discovered,
                             buildResult.Package,
@@ -366,7 +385,27 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
             HostApiVersion = PluginAuthoringPolicy.HostApiVersion,
             UserDataDirectory = options.GlobalRoot,
             IsHeadless = options.IsHeadless,
+            HasInteractiveUi = !options.IsHeadless,
+            Frontend = options.Frontend,
         };
+
+    /// <summary>The metadata key of the diagnostic for a plugin that does not support the application of the host.</summary>
+    public const string UnsupportedFrontendMetadataKey = "UnsupportedFrontend";
+
+    // A plugin that does not support this application is not an error: it is simply not started here.
+    internal static PluginRuntimeDiagnostic? CreateUnsupportedFrontendDiagnostic(PluginDescriptor descriptor, PluginFrontends host, string? packageId, string? path)
+    {
+        if (descriptor.Frontends.Supports(host)) return null;
+        return PluginRuntimeDiagnostic.Info(
+            PluginRuntimeDiagnosticSource.Activation,
+            $"Plugin '{descriptor.DisplayName ?? descriptor.RuntimeKey}' was not started: it does not support the {host.ToDisplayName()}.",
+            packageId,
+            path) with
+        {
+            RuntimeKey = descriptor.RuntimeKey,
+            Metadata = new Dictionary<string, string> { [UnsupportedFrontendMetadataKey] = host.ToString() },
+        };
+    }
 
     private static string ResolveCodeAltaBuildIdentity()
         => typeof(PluginRuntimeManager).Assembly.GetName().Version?.ToString() ?? "0.0.0";
@@ -399,7 +438,30 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
             return PluginPackageVersionProvider.ExtractPluginPackageVersionsFromFile(path);
         }
 
-        return [];
+        return ResolveInstalledPackageVersions(AppContext.BaseDirectory);
+    }
+
+    /// <summary>
+    /// Reads the versions of the shared authoring packages from the assemblies installed beside the host, so
+    /// that a source plugin of an installed application compiles against the versions it will run with.
+    /// </summary>
+    /// <param name="hostFolder">The folder that contains the host assemblies.</param>
+    /// <returns>One version per shared package whose assembly is present and carries a product version.</returns>
+    internal static IReadOnlyList<PluginPackageVersion> ResolveInstalledPackageVersions(string hostFolder)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(hostFolder);
+        var versions = new List<PluginPackageVersion>();
+        foreach (var package in PluginRootBuildFileGenerator.DefaultSharedPackageNames)
+        {
+            var path = Path.Combine(hostFolder, package + ".dll");
+            if (!File.Exists(path)) continue;
+            // "3.10.0+0123abc": the package version, then the build metadata.
+            var product = System.Diagnostics.FileVersionInfo.GetVersionInfo(path).ProductVersion;
+            var version = product?.Split('+', 2)[0].Trim();
+            if (!string.IsNullOrEmpty(version) && char.IsAsciiDigit(version[0])) versions.Add(new PluginPackageVersion { Include = package, Version = version });
+        }
+
+        return versions;
     }
 
     private static IEnumerable<string> EnumerateAncestorFiles(string startDirectory, string fileName)

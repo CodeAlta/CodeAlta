@@ -81,6 +81,12 @@ public sealed class PluginAttribute : Attribute
     /// Gets or sets the maximum supported CodeAlta version hint.
     /// </summary>
     public string? MaxCodeAltaVersion { get; init; }
+
+    /// <summary>
+    /// Gets or sets the CodeAlta applications the plugin supports. The default is both.
+    /// </summary>
+    /// <remarks>A host does not start a plugin that does not support its application.</remarks>
+    public PluginFrontends Frontends { get; init; } = PluginFrontends.All;
 }
 
 /// <summary>
@@ -221,6 +227,11 @@ public sealed record PluginDescriptor
     /// Gets the maximum supported CodeAlta version hint.
     /// </summary>
     public string? MaxCodeAltaVersion { get; init; }
+
+    /// <summary>
+    /// Gets the CodeAlta applications the plugin supports.
+    /// </summary>
+    public PluginFrontends Frontends { get; init; } = PluginFrontends.All;
 }
 
 /// <summary>
@@ -277,6 +288,7 @@ public static class PluginDescriptorFactory
             Dependencies = dependencies,
             MinCodeAltaVersion = attribute?.MinCodeAltaVersion,
             MaxCodeAltaVersion = attribute?.MaxCodeAltaVersion,
+            Frontends = attribute?.Frontends ?? PluginFrontends.All,
             Metadata = string.IsNullOrWhiteSpace(packageDirectory)
                 ? new Dictionary<string, string>()
                 : new Dictionary<string, string> { ["PackageDirectory"] = packageDirectory! },

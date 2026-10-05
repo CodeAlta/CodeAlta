@@ -39,6 +39,60 @@ public sealed record PluginPromptEditorContribution
     public required PluginPromptEditorAttachHandler Attach { get; init; }
 }
 
+/// <summary>Searches the items of a prompt picker.</summary>
+/// <param name="context">The search context.</param>
+/// <param name="cancellationToken">A token cancelled when the query changes or the picker closes.</param>
+/// <returns>The matching items, best first.</returns>
+public delegate ValueTask<IReadOnlyList<PluginPromptPickerItem>> PluginPromptPickerSearchHandler(PluginPromptPickerContext context, CancellationToken cancellationToken);
+
+/// <summary>
+/// Describes a picker that opens when the user types a trigger character in the prompt, and inserts the
+/// text of the chosen item. The frontend supplies the picker; the plugin supplies the items.
+/// </summary>
+public sealed record PluginPromptPickerContribution
+{
+    /// <summary>Gets the contribution name.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>Gets the character that opens the picker when typed at the start of a word, such as <c>!</c>.</summary>
+    /// <remarks><c>@</c>, <c>#</c> and <c>/</c> are used by CodeAlta.</remarks>
+    public required char Trigger { get; init; }
+
+    /// <summary>Gets the picker title.</summary>
+    public required string Title { get; init; }
+
+    /// <summary>
+    /// Gets optional ready-prompt placeholder guidance, for example <c>[!] to reference a ticket</c>.
+    /// </summary>
+    public string? PlaceholderText { get; init; }
+
+    /// <summary>Gets the ordering hint.</summary>
+    public int Order { get; init; }
+
+    /// <summary>Gets the search handler.</summary>
+    public required PluginPromptPickerSearchHandler SearchAsync { get; init; }
+}
+
+/// <summary>Context for a prompt picker search.</summary>
+public sealed class PluginPromptPickerContext : PluginOperationContext
+{
+    /// <summary>Gets the text typed after the trigger character; empty when the picker has just opened.</summary>
+    public required string Query { get; init; }
+}
+
+/// <summary>Describes an item of a prompt picker.</summary>
+public sealed record PluginPromptPickerItem
+{
+    /// <summary>Gets the item label.</summary>
+    public required string Label { get; init; }
+
+    /// <summary>Gets an optional second column, such as a state or a path.</summary>
+    public string? Description { get; init; }
+
+    /// <summary>Gets the text inserted in the prompt in place of the trigger and the query.</summary>
+    public required string InsertText { get; init; }
+}
+
 /// <summary>Minimal host surface exposed to plugin-owned prompt editor attachments.</summary>
 public interface IPluginPromptEditorHost
 {

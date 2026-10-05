@@ -74,6 +74,12 @@ public record PluginDerivedSessionEvent
     /// <summary>Gets markdown text for default frontend rendering, when available.</summary>
     public string? Markdown { get; init; }
 
+    /// <summary>
+    /// Gets an HTML fragment that the desktop application shows instead of <see cref="Markdown"/>, when available.
+    /// </summary>
+    /// <remarks>Keep <see cref="Markdown"/>: it is what the terminal application shows and what Copy uses.</remarks>
+    public string? Html { get; init; }
+
     /// <summary>Gets the timestamp to show for the transient event, when available.</summary>
     public DateTimeOffset? Timestamp { get; init; }
 
@@ -110,6 +116,9 @@ public abstract class PluginDynamicDerivedSessionEventContent
     /// <summary>Gets the current Markdown text.</summary>
     public abstract string Markdown { get; }
 
+    /// <summary>Gets the current HTML fragment for the desktop application, or <see langword="null"/> to show <see cref="Markdown"/>.</summary>
+    public virtual string? Html => null;
+
     /// <summary>Gets the current detail sections.</summary>
     public virtual IReadOnlyList<PluginDerivedSessionEventDetailSection> DetailSections => [];
 
@@ -127,4 +136,7 @@ public record PluginDerivedSessionEventDetailSection
 
     /// <summary>Gets the section Markdown.</summary>
     public required string Markdown { get; init; }
+
+    /// <summary>Gets an HTML fragment that the desktop application shows instead of <see cref="Markdown"/>, when available.</summary>
+    public string? Html { get; init; }
 }

@@ -159,6 +159,12 @@ public abstract class PluginBase : IAsyncDisposable
     public virtual IEnumerable<PluginPromptEditorContribution> GetPromptEditorContributions() => [];
 
     /// <summary>
+    /// Gets prompt pickers: lists opened by a trigger character typed in the prompt.
+    /// </summary>
+    /// <returns>Prompt picker contributions.</returns>
+    public virtual IEnumerable<PluginPromptPickerContribution> GetPromptPickers() => [];
+
+    /// <summary>
     /// Gets compaction contributions.
     /// </summary>
     /// <returns>Compaction contributions.</returns>

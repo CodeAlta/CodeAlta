@@ -303,7 +303,8 @@ public sealed class PluginBuildService : IPluginBuildService
             {
                 Severity = exitCode == 0 ? PluginDiagnosticSeverity.Info : PluginDiagnosticSeverity.Error,
                 Source = PluginRuntimeDiagnosticSource.Build,
-                Message = exitCode == 0 ? "Plugin build finished." : "Plugin build failed.",
+                Message = exitCode == 0 ? "Plugin build finished."
+                    : FindFirstBuildError(outputBuilder.ToString()) is { } firstError ? $"Plugin build failed: {firstError}" : "Plugin build failed.",
                 PackageId = package.PackageId,
                 Path = package.EntryFilePath,
             });
@@ -424,6 +425,29 @@ public sealed class PluginBuildService : IPluginBuildService
         catch (InvalidOperationException)
         {
         }
+    }
+
+    /// <summary>
+    /// Finds the first compiler or MSBuild error in build output, as <c>plugin.cs(6,27): error CS0103: …</c>:
+    /// the file without its folder, and without the project that MSBuild appends.
+    /// </summary>
+    /// <param name="output">The standard output of the build.</param>
+    /// <returns>The error line, or null when the output has none.</returns>
+    internal static string? FindFirstBuildError(string output)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        foreach (var raw in output.Split('\n'))
+        {
+            var line = raw.Trim();
+            var at = line.IndexOf(": error ", StringComparison.Ordinal);
+            if (at <= 0) continue;
+            if (line.EndsWith(']') && line.LastIndexOf(" [", StringComparison.Ordinal) is var project && project > at) line = line[..project];
+            var location = line[..at];
+            var separator = location.LastIndexOfAny(['\\', '/']);
+            return string.Concat(location.AsSpan(separator + 1), line.AsSpan(at));
+        }
+
+        return null;
     }
 
     private static bool LooksLikeFileBasedBuildIsUnsupported(string standardOutput, string standardError)

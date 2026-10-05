@@ -31,6 +31,9 @@ public sealed record BuiltInPluginDefinition
     /// <summary>Gets the concrete plugin type, when known without invoking the factory.</summary>
     public Type? PluginType { get; init; }
 
+    /// <summary>Gets the CodeAlta applications the built-in plugin supports. The default is both.</summary>
+    public PluginFrontends Frontends { get; init; } = PluginFrontends.All;
+
     /// <summary>Gets the built-in plugin descriptor.</summary>
     public PluginDescriptor CreateDescriptor()
     {
@@ -42,6 +45,7 @@ public sealed record BuiltInPluginDefinition
             AssemblyName = pluginType.Assembly.GetName().Name ?? "CodeAlta",
             DisplayName = DisplayName,
             Description = Description,
+            Frontends = Frontends,
             Metadata = new Dictionary<string, string>
             {
                 ["PluginKind"] = PluginLoadUnitKind.BuiltIn.ToString(),

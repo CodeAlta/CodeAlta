@@ -105,6 +105,12 @@ public sealed class CodeAltaHostOptions
     public PluginAuthoringProfile PluginAuthoringProfile { get; init; } = PluginAuthoringProfile.Neutral;
 
     /// <summary>
+    /// Gets the CodeAlta application of this host, used to leave out plugins that do not support it; the
+    /// default is <see cref="PluginFrontends.None"/>, a host without a user interface.
+    /// </summary>
+    public PluginFrontends PluginFrontend { get; init; }
+
+    /// <summary>
     /// Gets built-in plugins to activate as part of shared host composition.
     /// </summary>
     public IReadOnlyList<BuiltInPluginDefinition> PluginBuiltIns { get; init; } = Array.Empty<BuiltInPluginDefinition>();

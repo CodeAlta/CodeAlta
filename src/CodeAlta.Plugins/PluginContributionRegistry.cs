@@ -308,6 +308,10 @@ public sealed class PluginContributionRegistry
             case PluginPromptEditorContribution promptEditor:
                 yield return new ContributionConflictKey("prompt-editor", $"prompt-editor:{promptEditor.Name}", promptEditor.Name);
                 yield break;
+            case PluginPromptPickerContribution picker:
+                // Two pickers cannot open on the same character.
+                yield return new ContributionConflictKey("prompt-picker", $"prompt-picker:{picker.Trigger}", picker.Trigger.ToString());
+                yield break;
             case PluginResourceContribution resource:
                 yield return new ContributionConflictKey("resource", $"resource:{resource.Kind}:{resource.Path}", $"{resource.Kind}:{resource.Path}");
                 yield break;
@@ -365,6 +369,7 @@ public sealed class PluginContributionRegistry
             PluginPromptProcessorContribution processor => processor.Order,
             PluginInstructionProcessorContribution processor => processor.Order,
             PluginPromptEditorContribution promptEditor => promptEditor.Order,
+            PluginPromptPickerContribution picker => picker.Order,
             PluginUiContribution ui => ui.Order,
             PluginResourceContribution resource => resource.Precedence,
             PluginAltaCommandContribution alta => alta.Order,
@@ -383,6 +388,7 @@ public sealed class PluginContributionRegistry
             PluginPromptProcessorContribution _ => null,
             PluginInstructionProcessorContribution processor => processor.Name,
             PluginPromptEditorContribution promptEditor => promptEditor.Name,
+            PluginPromptPickerContribution picker => picker.Name,
             PluginUiContribution ui => ui.Name,
             PluginResourceContribution resource => resource.Path,
             PluginCompactionContribution _ => null,

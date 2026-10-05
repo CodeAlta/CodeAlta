@@ -51,6 +51,16 @@ public sealed record PluginAdapterOperationOptions
     public IReadOnlyDictionary<string, string?> Environment { get; init; } = new Dictionary<string, string?>();
 }
 
+/// <summary>A status item and the contribution it comes from.</summary>
+/// <param name="Registration">The status contribution.</param>
+/// <param name="Item">The status item.</param>
+public sealed record PluginStatusEntry(PluginContributionRegistration Registration, PluginStatusItem Item);
+
+/// <summary>The content of a UI region and the contribution it comes from.</summary>
+/// <param name="Registration">The content contribution.</param>
+/// <param name="Content">The content.</param>
+public sealed record PluginContentEntry(PluginContributionRegistration Registration, PluginRenderResult Content);
+
 /// <summary>
 /// Describes prompt processing output from plugin adapters.
 /// </summary>
@@ -752,6 +762,15 @@ public sealed class PluginContributionAdapterService
 
     /// <summary>Gets status items from applicable UI status contributions for a region.</summary>
     public IReadOnlyList<PluginStatusItem> GetStatusItems(IReadOnlyList<ActivePluginInstance> activePlugins, PluginUiRegion? region, PluginAdapterOperationOptions? options = null)
+        => GetStatusEntries(activePlugins, region, options).Select(static entry => entry.Item).ToArray();
+
+    /// <summary>Gets status items with the contribution each one comes from.</summary>
+    /// <param name="activePlugins">Active plugins used to build operation contexts.</param>
+    /// <param name="region">The region to read, or <see langword="null"/> for every region.</param>
+    /// <param name="options">Operation options.</param>
+    /// <returns>The status items in contribution order.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="activePlugins"/> is null.</exception>
+    public IReadOnlyList<PluginStatusEntry> GetStatusEntries(IReadOnlyList<ActivePluginInstance> activePlugins, PluginUiRegion? region, PluginAdapterOperationOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(activePlugins);
         if (IsHeadlessOrNonInteractive(options))
@@ -759,7 +778,7 @@ public sealed class PluginContributionAdapterService
             return [];
         }
 
-        var items = new List<PluginStatusItem>();
+        var items = new List<PluginStatusEntry>();
         foreach (var registration in GetRegistrations(PluginPoint.Ui, options))
         {
             if (registration.Contribution is not PluginStatusContribution status ||
@@ -772,11 +791,85 @@ public sealed class PluginContributionAdapterService
             var item = status.GetStatus(CreateStatusContext(active, options, default));
             if (item is not null)
             {
-                items.Add(item);
+                items.Add(new PluginStatusEntry(registration, item));
             }
         }
 
         return items;
+    }
+
+    /// <summary>Creates the content of a UI region with the contribution each one comes from.</summary>
+    /// <param name="activePlugins">Active plugins used to build operation contexts.</param>
+    /// <param name="region">The region to read.</param>
+    /// <param name="options">Operation options.</param>
+    /// <returns>The content in contribution order; a contribution that returns no content is left out.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="activePlugins"/> is null.</exception>
+    public IReadOnlyList<PluginContentEntry> CreateContentEntries(IReadOnlyList<ActivePluginInstance> activePlugins, PluginUiRegion region, PluginAdapterOperationOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(activePlugins);
+        if (IsHeadlessOrNonInteractive(options)) return [];
+        return PluginUiContentRouting.CreateContent<ActivePluginInstance, PluginContentEntry>(GetRegistrations(PluginPoint.Ui, options), region, options,
+            registration => TryGetActivePlugin(activePlugins, registration, out var active) ? active : null,
+            (registration, content, active) => content.CreateContent(CreateVisualContext(active, options, region, default)) is { } result
+                ? new PluginContentEntry(registration, result) : null);
+    }
+
+    /// <summary>Searches the items of a prompt picker.</summary>
+    /// <param name="activePlugins">Active plugins used to build operation contexts.</param>
+    /// <param name="contribution">The prompt picker contribution.</param>
+    /// <param name="query">The text typed after the trigger character.</param>
+    /// <param name="options">Operation options.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The items and diagnostics; no item when the contribution is not registered or its plugin is not active.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when a required argument is null.</exception>
+    public async ValueTask<(IReadOnlyList<PluginPromptPickerItem> Items, IReadOnlyList<PluginRuntimeDiagnostic> Diagnostics)> SearchPromptPickerAsync(
+        IReadOnlyList<ActivePluginInstance> activePlugins,
+        PluginPromptPickerContribution contribution,
+        string query,
+        PluginAdapterOperationOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(activePlugins);
+        ArgumentNullException.ThrowIfNull(contribution);
+        ArgumentNullException.ThrowIfNull(query);
+        var diagnostics = new List<PluginRuntimeDiagnostic>();
+        foreach (var registration in GetRegistrations(PluginPoint.PromptPicker, options))
+        {
+            if (!ReferenceEquals(registration.Contribution, contribution) || !TryGetActivePlugin(activePlugins, registration, out var active))
+            {
+                continue;
+            }
+
+            try
+            {
+                var context = new PluginPromptPickerContext
+                {
+                    Plugin = active.Descriptor,
+                    Services = active.RuntimeContext.Services,
+                    Scope = active.RuntimeContext.Scope,
+                    ScopeProjectId = active.RuntimeContext.ScopeProjectId,
+                    ScopeProjectPath = active.RuntimeContext.ScopeProjectPath,
+                    ProjectId = options?.ProjectId,
+                    ProjectPath = options?.ProjectPath,
+                    SessionId = options?.SessionId,
+                    ProviderId = options?.ProviderId,
+                    Model = options?.Model,
+                    CancellationToken = cancellationToken,
+                    Query = query,
+                };
+                var items = await contribution.SearchAsync(context, cancellationToken).ConfigureAwait(false);
+                context.Invalidate();
+                return (items ?? [], diagnostics);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogCallbackFailure(active, "Prompt picker contribution failed.", ex);
+                diagnostics.Add(AddDiagnostic(CreateCallbackDiagnostic(registration, "Prompt picker contribution failed.", ex)));
+                return ([], diagnostics);
+            }
+        }
+
+        return ([], diagnostics);
     }
 
     /// <summary>Creates portable content from applicable UI-region contributions.</summary>

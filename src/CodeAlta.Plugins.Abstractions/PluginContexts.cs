@@ -52,6 +52,12 @@ public sealed record PluginHostInfo
 
     /// <summary>Gets a value indicating whether plugins are in the bootstrap phase.</summary>
     public bool IsBootstrapPhase { get; init; }
+
+    /// <summary>
+    /// Gets the CodeAlta application that hosts the plugin, or <see cref="PluginFrontends.None"/> for a host
+    /// without a user interface.
+    /// </summary>
+    public PluginFrontends Frontend { get; init; }
 }
 
 /// <summary>

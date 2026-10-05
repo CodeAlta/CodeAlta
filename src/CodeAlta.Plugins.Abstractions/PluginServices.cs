@@ -397,6 +397,76 @@ public record PluginDialogRequest
 
     /// <summary>Gets custom metadata for runtime-specific dialogs.</summary>
     public IReadOnlyDictionary<string, string> Metadata { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>
+    /// Gets the HTML fragment shown as the content of a custom dialog in the desktop application.
+    /// </summary>
+    /// <remarks>
+    /// Fields that have a <c>name</c> attribute are returned in <see cref="PluginDialogResponse.Values"/>.
+    /// See <see cref="PluginHtml"/> for what a fragment can contain.
+    /// </remarks>
+    public string? Html { get; init; }
+
+    /// <summary>
+    /// Gets the handler called when an element with <c>data-alta-action</c> is activated in <see cref="Html"/>.
+    /// The dialog stays open while the handler runs; its result updates the content or closes the dialog.
+    /// </summary>
+    public PluginDialogActionHandler? OnAction { get; init; }
+}
+
+/// <summary>Handles an action raised by the HTML content of an open dialog.</summary>
+/// <param name="action">The action and the current values of the fields of the dialog.</param>
+/// <param name="cancellationToken">A token cancelled when the dialog is closed.</param>
+/// <returns>What the dialog does next.</returns>
+public delegate ValueTask<PluginDialogActionResult> PluginDialogActionHandler(PluginDialogAction action, CancellationToken cancellationToken);
+
+/// <summary>
+/// Describes an action raised by the HTML content of an open dialog.
+/// </summary>
+public sealed record PluginDialogAction
+{
+    /// <summary>Gets the action name: the value of the <c>data-alta-action</c> attribute of the element.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>Gets the value of the <c>data-alta-value</c> attribute of the element, when it has one.</summary>
+    public string? Value { get; init; }
+
+    /// <summary>Gets the current values of the named fields of the dialog.</summary>
+    public IReadOnlyDictionary<string, string> Values { get; init; } = new Dictionary<string, string>();
+}
+
+/// <summary>
+/// Describes what an open dialog does after an action.
+/// </summary>
+public sealed record PluginDialogActionResult
+{
+    /// <summary>Gets a result that leaves the dialog as it is.</summary>
+    public static PluginDialogActionResult KeepOpen { get; } = new();
+
+    /// <summary>Gets the HTML fragment that replaces the dialog content, or <see langword="null"/> to keep it.</summary>
+    public string? Html { get; init; }
+
+    /// <summary>Gets a value indicating whether the dialog closes.</summary>
+    public bool Close { get; init; }
+
+    /// <summary>Gets the button name reported by <see cref="PluginDialogResponse.ButtonName"/> when the dialog closes.</summary>
+    public string? ButtonName { get; init; }
+
+    /// <summary>Creates a result that replaces the dialog content.</summary>
+    /// <param name="html">The new HTML fragment.</param>
+    /// <returns>The result.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="html"/> is null.</exception>
+    public static PluginDialogActionResult Update(string html)
+    {
+        ArgumentNullException.ThrowIfNull(html);
+        return new PluginDialogActionResult { Html = html };
+    }
+
+    /// <summary>Creates a result that closes the dialog.</summary>
+    /// <param name="buttonName">The name reported as the activated button, when any.</param>
+    /// <returns>The result.</returns>
+    public static PluginDialogActionResult CloseDialog(string? buttonName = null)
+        => new() { Close = true, ButtonName = buttonName };
 }
 
 /// <summary>
@@ -436,6 +506,9 @@ public sealed record PluginDialogResponse
 
     /// <summary>Gets response metadata supplied by the host.</summary>
     public IReadOnlyDictionary<string, string> Metadata { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>Gets the values of the named fields of an HTML dialog when it was closed.</summary>
+    public IReadOnlyDictionary<string, string> Values { get; init; } = new Dictionary<string, string>();
 }
 
 /// <summary>
