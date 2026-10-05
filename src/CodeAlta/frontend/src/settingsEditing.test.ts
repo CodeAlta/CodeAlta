@@ -5,7 +5,7 @@ import { mcpServerEdit, mcpServerForm, mcpServerFormDirty, scopedKey, settingsFa
 
 const entry: McpServerEntry = { key: "files", scope: "Project", transport: "Stdio", enabled: true, command: "npx", arguments: ["-y", "server", "[redacted]"],
   argumentsRedacted: true, workingDirectory: null, url: null, urlRedacted: false, disabledTools: [], overridesGlobal: false, shadowed: false,
-  environment: [{ name: "TOKEN", hasValue: true }, { name: "EMPTY", hasValue: false }], headers: [] };
+  environment: [{ name: "TOKEN", hasValue: true }, { name: "EMPTY", hasValue: false }], headers: [], authorized: false, authorizationExpiresAt: null };
 
 test("a failed settings call explains itself, success is silent", () => {
   assert.equal(settingsFailure("ok"), null);

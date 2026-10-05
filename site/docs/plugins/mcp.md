@@ -131,7 +131,7 @@ Remote server:
 
 ### Remote OAuth/Authv2 browser login
 
-For HTTP/SSE MCP servers that follow the MCP authorization flow, prefer CodeAlta-managed browser login over committing bearer tokens to JSON. Configure the server with an OAuth auth block, then use the MCP Servers dialog **Authorize/Login** action or ask the agent to run `alta mcp auth login <server>`:
+For HTTP/SSE MCP servers that follow the MCP authorization flow, prefer CodeAlta-managed browser login over committing bearer tokens to JSON. Configure the server with an OAuth auth block, then use the MCP Servers dialog **Authorize/Login** action (**Authorize** on the MCP Servers page of the desktop app) or ask the agent to run `alta mcp auth login <server>`:
 
 ```json
 {
@@ -148,7 +148,7 @@ For HTTP/SSE MCP servers that follow the MCP authorization flow, prefer CodeAlta
 }
 ```
 
-CodeAlta stores OAuth access/refresh tokens in local user state under `~/.alta/auth/mcp/`; it does not write tokens, authorization codes, or refresh tokens to `.alta/mcp.json` or TOML policy. Browser login uses a loopback callback with a per-login state value and an ephemeral port by default; set `redirectUri` only when an authorization server requires a pre-registered fixed callback. The MCP Servers dialog opens a small modal login dialog for **Authorize/Login**, shows/copies the login URL when available, and supports **Cancel Login** (`Esc` or `Ctrl+G Ctrl+C`) for stuck browser flows. Dialogs and `alta mcp auth status` show only cache status and expiry. Non-interactive agent runs and ordinary MCP tool commands use cached/refreshable tokens only and will not open a browser unexpectedly. Use **Logout** in the dialog or `alta mcp auth logout <server>` to delete cached tokens.
+CodeAlta stores OAuth access/refresh tokens in local user state under `~/.alta/auth/mcp/`; it does not write tokens, authorization codes, or refresh tokens to `.alta/mcp.json` or TOML policy. Browser login uses a loopback callback with a per-login state value and an ephemeral port by default; set `redirectUri` only when an authorization server requires a pre-registered fixed callback. The MCP Servers dialog opens a small modal login dialog for **Authorize/Login**, shows/copies the login URL when available, and supports **Cancel Login** (`Esc` or `Ctrl+G Ctrl+C`) for stuck browser flows. In the desktop app, the form of a saved HTTP server has an **Authorization** block: **Authorize** opens the browser and shows the address to copy, **Cancel** stops a login that is stuck, and **Sign out** removes the stored tokens. Save the server and enable it first. Dialogs and `alta mcp auth status` show only cache status and expiry. Non-interactive agent runs and ordinary MCP tool commands use cached/refreshable tokens only and will not open a browser unexpectedly. Use **Logout** in the dialog or `alta mcp auth logout <server>` to delete cached tokens.
 
 ### GitHub MCP server example
 
@@ -334,7 +334,7 @@ If a server cannot start, connect, authenticate, or list tools, it contributes d
 
 ## MCP Servers dialog
 
-Open it from `/mcp`, the command palette entry **MCP Servers**, or the MCP status indicator of the prompt bar. In the desktop app it is the **MCP Servers** page of Settings (`Ctrl+G Ctrl+Y`), where you add, edit, enable and remove servers of the global or project scope. The TUI dialog can:
+Open it from `/mcp`, the command palette entry **MCP Servers**, or the MCP status indicator of the prompt bar. In the desktop app it is the **MCP Servers** page of Settings (`Ctrl+G Ctrl+Y`), where you add, edit, enable and remove servers of the global or project scope, and authorize or sign out of an HTTP server. The TUI dialog can:
 
 - show global and project MCP definitions, including project definitions that shadow global ones;
 - add, edit, save, and remove server JSON definitions;

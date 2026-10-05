@@ -137,6 +137,8 @@ export const mcpServers = Object.freeze({
   save: async () => ({ status: "unavailable", message: null }),
   remove: async () => ({ status: "unavailable", message: null }),
   setEnabled: async () => ({ status: "unavailable", message: null }),
+  login: unavailable,
+  logout: async () => ({ status: "unavailable", removed: false }),
 });
 export const agentPrompts = Object.freeze({
   list: async () => ({ status: "unavailable", projectId: null, prompts: [], omitted: 0 }),

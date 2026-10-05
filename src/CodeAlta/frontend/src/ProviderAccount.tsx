@@ -9,8 +9,8 @@ import type { MessageKey } from "./localization";
 
 type Api = Pick<typeof ProviderLoginClient, "status" | "login" | "logout">;
 
-// A value with a button that copies it; the button shows the outcome for a moment.
-function Copyable({ value, label, code = false }: { value: string; label: string; code?: boolean }) {
+/** A value with a button that copies it; the button shows the outcome for a moment. */
+export function Copyable({ value, label, code = false }: { value: string; label: string; code?: boolean }) {
   const { t } = useShellLanguage();
   const [copied, setCopied] = useState(false);
   const reset = useRef<number | undefined>(undefined);

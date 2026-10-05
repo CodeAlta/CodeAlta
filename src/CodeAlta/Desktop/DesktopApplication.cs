@@ -210,6 +210,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         AppUpdateService? appUpdate = null;
         ModelCatalogService? providers = null;
         ProviderLoginService? providerLogin = null;
+        McpServersService? mcpServers = null;
         PluginUiService? pluginCommands = null;
         WorkspaceService? workspace = null;
         NeoWindow? window = null;
@@ -305,6 +306,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 if (reminders is not null) await reminders.DisposeAsync();
                 if (providers is not null) await providers.DrainAsync();
                 if (providerLogin is not null) await providerLogin.CloseAsync(); // A running sign-in is canceled and joined.
+                if (mcpServers is not null) await mcpServers.CloseAsync(); // So is a running MCP authorization.
                 if (pluginCommands is not null) await pluginCommands.CloseAsync(); // Plugin commands still waiting in a dialog end.
             });
             }
@@ -454,7 +456,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddGlobalConfigService(globalConfig);
                     providerLogin = new ProviderLoginService(configStore, globalConfig, options.CatalogRoot!, epoch);
                     builder.AddProviderLoginService(providerLogin);
-                    builder.AddMcpServersService(new McpServersService(host.ProjectCatalog, epoch, roots.Home));
+                    mcpServers = new McpServersService(host.ProjectCatalog, epoch, roots.Home);
+                    builder.AddMcpServersService(mcpServers);
                     builder.AddAgentPromptsService(new AgentPromptsService(host.ProjectCatalog, epoch));
                     // The standard launch has no explicit discovery home: common skills come from the profile, like the TUI.
                     builder.AddSkillsService(new SkillsService(host.ProjectCatalog, host.SkillCatalog,

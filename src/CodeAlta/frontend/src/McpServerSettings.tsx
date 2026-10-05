@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Button, Card, CardList, FormGroup, InputGroup, PopoverNext, Section, SectionCard, SegmentedControl, Switch, Tag, TextArea } from "@blueprintjs/core";
 import { mcpServers, type McpServerEntry } from "#neoastra";
 import { AppIcon } from "./AppIcon";
+import { McpServerAuthorization } from "./McpServerAuthorization";
+import { authorizationBlocked } from "./mcpAuthorization";
 import { ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
 import { mcpServerEdit, mcpServerForm, mcpServerFormDirty, scopedKey, validateMcpServerForm, type McpServerForm, type NameValueRow } from "./settingsEditing";
 import { useShellLanguage } from "./shellLanguage";
@@ -113,6 +115,10 @@ export function McpServerSettings({ epoch, project, api = mcpServers }: {
                 <InputGroup id="mcp-url" value={form.url} disabled={busy} spellCheck={false} placeholder="https://" onChange={event => edit({ url: event.target.value })} /></FormGroup>
               <FormGroup label={t("HTTP headers")} className="settings-editor-wide">
                 <NameValueRows rows={form.headers} disabled={busy} addLabel="Add header" namePlaceholder="Authorization" onChange={headers => edit({ headers })} /></FormGroup>
+              {original?.transport === "Http" && <FormGroup label={t("Authorization")} className="settings-editor-wide mcp-authorization-group"
+                helperText={t("Sign in to this server in your browser. The tokens stay on this computer, outside the server definition.")}>
+                <McpServerAuthorization key={scopedKey(original.scope, original.key)} epoch={epoch} projectId={projectId} server={original} api={api}
+                  blocked={authorizationBlocked(original, dirty)} onChanged={reload} /></FormGroup>}
             </>}
           </SectionCard>
           <SectionCard className="settings-editor-footer">

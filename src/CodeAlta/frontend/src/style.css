@@ -1450,6 +1450,8 @@ dialog.session-browser .session-batch-delete summary { cursor: pointer; color: v
 .provider-account { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); }
 .provider-account-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; }
 .provider-account-running p { margin: 0 0 6px; }
+/* In the MCP server form the block is a grid item: without this a long address widens the whole form. */
+.mcp-authorization-group, .mcp-authorization-group .provider-account > * { min-width: 0; }
 .provider-account-copy { display: flex; align-items: center; gap: 6px; min-width: 0; margin-bottom: 6px; }
 .provider-account-copy > code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .provider-account-code > code { padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 18px; font-weight: 700; letter-spacing: .12em; background: var(--panel); }

@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="CodeAlta.Tests" />
+    <InternalsVisibleTo Include="CodeAlta.Desktop.Tests" />
     <InternalsVisibleTo Include="altatui" />
   </ItemGroup>
 </Project>

@@ -2,6 +2,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using CodeAlta.Catalog;
 using CodeAlta.Desktop.Rpc;
+using CodeAlta.Plugin.Mcp;
+using ModelContextProtocol.Authentication;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -253,6 +255,207 @@ public sealed class McpServersRpcTests
         Assert.IsFalse(File.Exists(fixture.ProjectJson));
     }
 
+    [TestMethod]
+    public async Task WithoutAnOwnedHost_AuthorizationIsUnavailable_AndBadRequestsAreRefusedByCode()
+    {
+        var unavailable = new McpServersService();
+        AssertFailed("unavailable", (await Events(unavailable, new(Epoch, null, "Global", "remote"))).Single());
+        Assert.AreEqual(new McpServerLogoutResponse("unavailable", false), await unavailable.LogoutAsync(new(Epoch, null, "Global", "remote"), default));
+        await unavailable.CloseAsync();
+
+        using var fixture = await Fixture.CreateAsync();
+        File.WriteAllText(fixture.GlobalJson, RemoteAndLocal);
+        var service = fixture.WithLogin(static (_, _, _, _) => throw new AssertFailedException("No authorization is expected."));
+        AssertFailed("stale_epoch", (await Events(service, new("another", null, "Global", "remote"))).Single());
+        AssertFailed("invalid", (await Events(service, null)).Single());
+        AssertFailed("invalid", (await Events(service, new(Epoch, null, "Elsewhere", "remote"))).Single());
+        AssertFailed("invalid", (await Events(service, new(Epoch, null, "Global", "https://example.invalid/"))).Single());
+        AssertFailed("invalid", (await Events(service, new(Epoch, null, "Project", "remote"))).Single()); // The project scope needs a project.
+        AssertFailed("unknown_project", (await Events(service, new(Epoch, "missing", "Global", "remote"))).Single());
+        AssertFailed("not_found", (await Events(service, new(Epoch, null, "Global", "absent"))).Single());
+        AssertFailed("unsupported", (await Events(service, new(Epoch, null, "Global", "local"))).Single()); // Only an HTTP server is authorized in the browser.
+        Assert.AreEqual("stale_epoch", (await service.LogoutAsync(new(null, null, "Global", "remote"), default)).Status);
+        Assert.AreEqual("unsupported", (await service.LogoutAsync(new(Epoch, null, "Global", "local"), default)).Status);
+        Assert.AreEqual("not_found", (await service.LogoutAsync(new(Epoch, null, "Global", "absent"), default)).Status);
+
+        File.WriteAllText(fixture.GlobalJson, "{ not json");
+        AssertFailed("config_invalid", (await Events(service, new(Epoch, null, "Global", "remote"))).Single());
+        Assert.AreEqual("config_invalid", (await service.LogoutAsync(new(Epoch, null, "Global", "remote"), default)).Status);
+    }
+
+    [TestMethod]
+    public async Task List_SaysWhetherAnHttpServerIsAuthorized_AndLogoutRemovesItsTokens()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        File.WriteAllText(fixture.GlobalJson, RemoteAndLocal);
+        var service = fixture.Service;
+
+        var before = (await service.ListAsync(new(Epoch, null), default)).Servers.Single(static server => server.Key == "remote");
+        Assert.IsFalse(before.Authorized);
+        Assert.IsNull(before.AuthorizationExpiresAt);
+
+        var obtained = new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero);
+        await new McpOAuthTokenCache(McpOAuthTokenCache.GetTokenPath(fixture.Home, "remote", RemoteUrl)).StoreTokensAsync(
+            new TokenContainer { TokenType = "Bearer", AccessToken = "ACCESS_SECRET", RefreshToken = "REFRESH_SECRET", ExpiresIn = 3600, ObtainedAt = obtained }, default);
+
+        var listing = await service.ListAsync(new(Epoch, null), default);
+        var after = listing.Servers.Single(static server => server.Key == "remote");
+        Assert.IsTrue(after.Authorized);
+        Assert.AreEqual(obtained.AddHours(1), after.AuthorizationExpiresAt);
+        Assert.IsFalse(listing.Servers.Single(static server => server.Key == "local").Authorized);
+        Assert.IsFalse(JsonSerializer.Serialize(listing).Contains("_SECRET", StringComparison.Ordinal), "A token never reaches the page.");
+
+        Assert.AreEqual(new McpServerLogoutResponse("ok", true), await service.LogoutAsync(new(Epoch, null, "Global", "remote"), default));
+        Assert.IsFalse((await service.ListAsync(new(Epoch, null), default)).Servers.Single(static server => server.Key == "remote").Authorized);
+        Assert.AreEqual(new McpServerLogoutResponse("ok", false), await service.LogoutAsync(new(Epoch, null, "Global", "remote"), default));
+    }
+
+    [TestMethod]
+    public async Task Login_AuthorizesTheDefinitionInEffect_EmittingTheAddressThenTheOutcome()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        File.WriteAllText(fixture.GlobalJson, RemoteAndLocal);
+        File.WriteAllText(fixture.ProjectJson, """{"mcpServers":{"remote":{"type":"http","url":"https://project.example.invalid/mcp"}}}""");
+        var requests = new List<(string Key, string? Project, string? Home)>();
+        var service = fixture.WithLogin((key, paths, report, _) =>
+        {
+            requests.Add((key, paths.ProjectDirectory, paths.UserHomeDirectory));
+            report("Open MCP authorization in your browser: " + Authorize);
+            return Task.FromResult(new McpManagementServerTestResult
+            {
+                Server = key, Status = McpManagementTestStatus.Succeeded,
+                Tools = [Tool("search"), Tool("fetch")],
+            });
+        });
+
+        var events = await Events(service, new(Epoch, fixture.Project.Id, "Project", "remote"));
+
+        Assert.AreEqual(2, events.Count);
+        Assert.AreEqual(new McpServerLoginEvent("prompt", Authorize, 0, null, null), events[0]);
+        Assert.AreEqual(new McpServerLoginEvent("completed", null, 2, null, null), events[1]);
+        Assert.AreEqual(("remote", fixture.ProjectPath, fixture.Home), requests.Single());
+
+        // The global definition is overridden in this project: authorizing it would authorize the project's one.
+        AssertFailed("shadowed", (await Events(service, new(Epoch, fixture.Project.Id, "Global", "remote"))).Single());
+        Assert.AreEqual("shadowed", (await service.LogoutAsync(new(Epoch, fixture.Project.Id, "Global", "remote"), default)).Status);
+        Assert.AreEqual("completed", (await Events(service, new(Epoch, null, "Global", "remote")))[^1].Kind, "Without the project it is the one in effect.");
+        Assert.AreEqual(2, requests.Count);
+        Assert.IsNull(requests[1].Project);
+    }
+
+    [TestMethod]
+    public async Task Login_ReportsFailuresByCodeWithThePluginsRedactedTextOrAnExceptionTypeOnly()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        File.WriteAllText(fixture.GlobalJson, RemoteAndLocal);
+        McpManagementServerTestResult Result(McpManagementTestStatus status, params string[] diagnostics)
+            => new() { Server = "remote", Status = status, Diagnostics = diagnostics };
+        async Task<McpServerLoginEvent> Outcome(McpServerLogin login)
+            => (await Events(fixture.WithLogin(login), new(Epoch, null, "Global", "remote")))[^1];
+
+        AssertFailed("login_failed", await Outcome((_, _, _, _) => Task.FromResult(Result(McpManagementTestStatus.Failed, "rejected with HTTP 401", "second"))), "rejected with HTTP 401");
+        AssertFailed("timeout", await Outcome((_, _, _, _) => Task.FromResult(Result(McpManagementTestStatus.TimedOut, "did not finish within 30000 ms"))), "did not finish within 30000 ms");
+        AssertFailed("unsupported", await Outcome((_, _, _, _) => Task.FromResult(Result(McpManagementTestStatus.Unsupported))));
+        AssertFailed("canceled", await Outcome((_, _, _, _) => Task.FromResult(Result(McpManagementTestStatus.Canceled, "was canceled"))));
+        AssertFailed("canceled", await Outcome(static (_, _, _, _) => throw new OperationCanceledException()));
+
+        // What the browser answered is more precise than the connection's diagnostic.
+        AssertFailed("login_failed", await Outcome((_, _, report, _) =>
+        {
+            report("MCP authorization failed: access_denied");
+            return Task.FromResult(Result(McpManagementTestStatus.Failed, "unavailable"));
+        }), "MCP authorization failed: access_denied");
+
+        var thrown = await Outcome(static (_, _, _, _) => throw new InvalidOperationException("token=secret-value"));
+        AssertFailed("login_failed", thrown, nameof(InvalidOperationException));
+        Assert.IsFalse(thrown.ToString().Contains("secret-value", StringComparison.Ordinal));
+
+        var bounded = await Outcome((_, _, _, _) => Task.FromResult(Result(McpManagementTestStatus.Failed, "line one\r\n" + new string('x', 2000))));
+        Assert.AreEqual(512, bounded.Detail!.Length);
+        Assert.IsFalse(bounded.Detail.Any(char.IsControl));
+    }
+
+    [TestMethod]
+    public async Task Login_ForwardsOnlyBoundedAddresses()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        File.WriteAllText(fixture.GlobalJson, RemoteAndLocal);
+        var service = fixture.WithLogin(static (key, _, report, _) =>
+        {
+            report("Open MCP authorization in your browser: http://127.0.0.1:8123/authorize");
+            report("Open MCP authorization in your browser: https://auth.example.test/" + new string('a', McpServersService.MaximumUrlLength));
+            report("Open MCP authorization in your browser: file:///etc/passwd");
+            report("  ");
+            for (var index = 0; index < McpServersService.MaximumPrompts; index++) report("Open MCP authorization in your browser: " + Authorize);
+            return Task.FromResult(new McpManagementServerTestResult { Server = key, Status = McpManagementTestStatus.Succeeded });
+        });
+
+        var events = await Events(service, new(Epoch, null, "Global", "remote"));
+
+        Assert.AreEqual(McpServersService.MaximumPrompts + 1, events.Count, "Addresses beyond the limit are dropped; other messages are not prompts.");
+        Assert.AreEqual("http://127.0.0.1:8123/authorize", events[0].Url, "A local authorization server may use http.");
+        Assert.IsNull(events[1].Url, "An address beyond the limit is not sent.");
+        Assert.IsTrue(events.Skip(2).Take(McpServersService.MaximumPrompts - 2).All(static item => item.Url == Authorize));
+        Assert.AreEqual(new McpServerLoginEvent("completed", null, 0, null, null), events[^1]);
+    }
+
+    [TestMethod]
+    public async Task Login_RunsOneAtATime_AndIsCanceledByClosingItsChannelOrTheService()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        File.WriteAllText(fixture.GlobalJson, RemoteAndLocal);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var canceled = 0;
+        var service = fixture.WithLogin(async (key, _, report, token) =>
+        {
+            report("Open MCP authorization in your browser: " + Authorize);
+            started.TrySetResult();
+            try { await Task.Delay(Timeout.Infinite, token); }
+            catch (OperationCanceledException) { Interlocked.Increment(ref canceled); throw; }
+            return new McpManagementServerTestResult { Server = key, Status = McpManagementTestStatus.Succeeded };
+        });
+
+        var first = service.LoginAsync(new(Epoch, null, "Global", "remote"), default).GetAsyncEnumerator();
+        Assert.IsTrue(await first.MoveNextAsync());
+        Assert.AreEqual("prompt", first.Current.Kind);
+        await started.Task;
+        AssertFailed("busy", (await Events(service, new(Epoch, null, "Global", "remote"))).Single());
+        Assert.AreEqual("busy", (await service.LogoutAsync(new(Epoch, null, "Global", "remote"), default)).Status, "An authorization writes the tokens a sign-out removes.");
+
+        await first.DisposeAsync(); // The page closed the channel.
+        Assert.AreEqual(1, canceled);
+
+        started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var second = service.LoginAsync(new(Epoch, null, "Global", "remote"), default).GetAsyncEnumerator();
+        Assert.IsTrue(await second.MoveNextAsync(), "The canceled authorization was joined: the next one starts.");
+        await started.Task;
+        var closing = service.CloseAsync();
+        Assert.IsTrue(await second.MoveNextAsync());
+        AssertFailed("canceled", second.Current);
+        Assert.IsFalse(await second.MoveNextAsync());
+        await second.DisposeAsync();
+        await closing;
+        Assert.AreEqual(2, canceled);
+        AssertFailed("unavailable", (await Events(service, new(Epoch, null, "Global", "remote"))).Single());
+        await service.CloseAsync();
+    }
+
+    private const string RemoteUrl = "https://example.invalid/mcp";
+    private const string Authorize = "https://auth.example.test/authorize?state=1";
+    private const string RemoteAndLocal = """{"mcpServers":{"remote":{"type":"http","url":"https://example.invalid/mcp"},"local":{"command":"npx"}}}""";
+
+    private static McpManagementToolSnapshot Tool(string name) => new() { Name = name, Alias = "remote_" + name, Availability = "available" };
+
+    private static void AssertFailed(string code, McpServerLoginEvent item, string? detail = null)
+        => Assert.AreEqual(new McpServerLoginEvent("failed", null, 0, detail, code), item);
+
+    private static async Task<List<McpServerLoginEvent>> Events(McpServersService service, McpServerLoginRequest? request)
+    {
+        var events = new List<McpServerLoginEvent>();
+        await foreach (var item in service.LoginAsync(request, default)) events.Add(item);
+        return events;
+    }
+
     private static McpServerEdit Stdio(string key) => new(key, "Stdio", "npx", [], null, null, [], null, true);
 
     private static JsonObject Servers(string path) => JsonNode.Parse(File.ReadAllText(path))!["mcpServers"]!.AsObject();
@@ -283,6 +486,7 @@ public sealed class McpServersRpcTests
         public ProjectCatalog Projects { get; }
         public ProjectDescriptor Project { get; }
         public McpServersService Service { get; }
+        public McpServersService WithLogin(McpServerLogin login) => new(Projects, Epoch, Home, login);
         public string Home => Path.Combine(_root, "home");
         public string ProjectPath => Project.ProjectPath;
         public string GlobalJson => Path.Combine(Home, ".alta", "mcp.json");
