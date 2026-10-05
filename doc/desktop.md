@@ -93,9 +93,10 @@ For a tool installed with `dotnet tool install -g`, the notice and the About pag
 and restart**. It hands the update to a small script in the application data directory (`update/`),
 then exits as **Exit** does, with its questions; the script waits for the application to end, runs
 the same `dotnet tool update` command with the .NET installation the application runs on, records
-the outcome and starts CodeAlta again, which says whether it was updated. Canceling the exit calls
-the update off, and the script gives up after fifteen minutes. `update/update.log` keeps the
-command's output. A build output and the developer instance have no such button.
+the outcome and starts CodeAlta again through the tool's launcher, which says whether it was
+updated. Canceling the exit calls the update off, and the script gives up after fifteen minutes.
+`update/update.log` keeps the command's output. A build output and the developer instance have no
+such button.
 
 ### Desktop entry of the installed tool
 
@@ -105,7 +106,11 @@ or the launcher's path changes. The first time, a notice in the window says wher
 
 - **Windows:** a **CodeAlta** shortcut in the Start Menu, with the application's icon. The process
   has its own application identity, so the taskbar groups the window with that shortcut and a pin
-  keeps the name and icon.
+  keeps the name and icon. The shortcut starts the executable of the installed version, not the
+  tool's launcher: for a tool packed per runtime the launcher is a script (`alta.cmd`), and a
+  shortcut to it would keep a console window open. The executable's path holds the version, so the
+  first start of each version writes the shortcut again, together with the copy that a pin on the
+  taskbar starts.
 - **macOS:** `~/Applications/CodeAlta.app`, a bundle whose executable is a shell script that becomes
   the installed tool (`exec`). It starts the tool through the user's login shell so that it gets the
   PATH of a terminal (git, node, the .NET runtime), which an application started from the Finder
@@ -113,9 +118,12 @@ or the launcher's path changes. The first time, a notice in the window says wher
   quarantined. If the tool is uninstalled, the bundle says so when opened.
 - **Linux:** `codealta.desktop` in `~/.local/share/applications` (or `$XDG_DATA_HOME`).
 
-Each entry starts the tool's launcher (`alta` in the .NET tools folder), so a tool update needs no
-change. The developer instance, an instance on explicit roots, a build output and a local tool add
-nothing. Uninstalling the tool leaves the entry behind; delete it by hand.
+On macOS and Linux the entry starts the tool's launcher (`alta` in the .NET tools folder), so a tool
+update needs no change. On Windows, after `dotnet tool update -g CodeAlta` run by hand, start `alta`
+once from a terminal: until then the shortcut still names the version that was removed. **Update and
+restart** needs nothing, since it starts CodeAlta again through the launcher. The developer instance,
+an instance on explicit roots, a build output and a local tool add nothing. Uninstalling the tool
+leaves the entry behind; delete it by hand.
 
 The view is an application shell rather than a browser page: the browser's own find, print, reload
 and zoom shortcuts, its context menu and its status bubble are turned off, so those keys reach

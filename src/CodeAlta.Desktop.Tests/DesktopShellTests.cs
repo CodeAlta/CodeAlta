@@ -97,10 +97,11 @@ public sealed class DesktopShellTests
     [TestMethod]
     public void OnlyAGloballyInstalledTool_HasALauncher()
     {
-        Assert.AreEqual(@"C:\Users\me\.dotnet\tools\alta.exe",
-            DesktopIntegration.InstalledLauncher(@"C:\Users\me\.dotnet\tools\.store\codealta\1.2.3\codealta\1.2.3\tools\net10.0\any\", windows: true));
+        // The SDK installs a tool packed per runtime as a script on Windows and as a link elsewhere.
+        Assert.AreEqual(@"C:\Users\me\.dotnet\tools\alta.cmd",
+            DesktopIntegration.InstalledLauncher(@"C:\Users\me\.dotnet\tools\.store\codealta\1.2.3\codealta.win-x64\1.2.3\tools\net10.0\win-x64\", windows: true));
         Assert.AreEqual("/Users/me/.dotnet/tools/alta",
-            DesktopIntegration.InstalledLauncher("/Users/me/.dotnet/tools/.store/codealta/1.2.3/codealta/1.2.3/tools/net10.0/any/", windows: false));
+            DesktopIntegration.InstalledLauncher("/Users/me/.dotnet/tools/.store/codealta/1.2.3/codealta.osx-arm64/1.2.3/tools/net10.0/osx-arm64/", windows: false));
         // A build output, a local tool manifest's cache: nothing to add to the desktop.
         Assert.IsNull(DesktopIntegration.InstalledLauncher(@"C:\code\CodeAlta\src\CodeAlta\bin\Debug\net10.0\", windows: true));
         Assert.IsNull(DesktopIntegration.InstalledLauncher("/home/me/code/CodeAlta/src/CodeAlta/bin/Release/net10.0/", windows: false));
@@ -166,6 +167,20 @@ public sealed class DesktopShellTests
         StringAssert.Contains(problem, "260 characters");
         StringAssert.Contains(problem, "shorter path");
         Assert.AreEqual(string.Empty, DesktopAssetPaths.Longest(root, []));
+    }
+
+    [TestMethod]
+    public void WindowsEntry_StartsTheExecutableAndTheOthersTheLauncher()
+    {
+        // The launcher of Windows is a script: a shortcut to it would keep a console window open.
+        Assert.AreEqual(@"C:\Users\me\.dotnet\tools\.store\codealta\1.2.3\codealta.win-x64\1.2.3\tools\net10.0\win-x64\alta.exe",
+            DesktopIntegration.EntryStart(@"C:\Users\me\.dotnet\tools\alta.cmd",
+                @"C:\Users\me\.dotnet\tools\.store\codealta\1.2.3\codealta.win-x64\1.2.3\tools\net10.0\win-x64\", windows: true));
+        Assert.AreEqual("/Users/me/.dotnet/tools/alta",
+            DesktopIntegration.EntryStart("/Users/me/.dotnet/tools/alta", "/Users/me/.dotnet/tools/.store/codealta/1.2.3/codealta.osx-arm64/1.2.3/tools/net10.0/osx-arm64/", windows: false));
+        // A pin on the taskbar is a copy of the shortcut, which is refreshed with it.
+        Assert.AreEqual(@"C:\Users\me\AppData\Roaming\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\CodeAlta.lnk",
+            DesktopIntegration.WindowsTaskbarPin(@"C:\Users\me\AppData\Roaming"));
     }
 
     [TestMethod]

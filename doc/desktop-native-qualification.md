@@ -206,6 +206,10 @@ The preserved dependency/license review is point-in-time evidence, not a release
   `frontend/dist` as prebuilt assets and keeps its generated contracts under `obj/neoastra/<runtime>`.
   The symbols of third-party native libraries (100 MB on Windows) are left out of the packages.
   `Verify-DesktopPackage.ps1` predates this layout and has to be reworked on Windows before it is run.
+- For a tool packed per runtime the SDK installs a script on Windows (`alta.cmd` in the tools folder)
+  instead of an executable, and a link on macOS and Linux. Started from a terminal, the script holds
+  the terminal until CodeAlta ends. The Start Menu shortcut therefore starts the executable in the
+  store, and the update helper becomes the script in its own windowless console.
 - NeoAstra's consumer targets normally copy generated TypeScript as a runtime artifact. Desktop
   removes only that build-only source item after collection and excludes publish symbols; generated
   JSON manifest/schema and manifest-backed assets remain packaged. Package inspection checks both

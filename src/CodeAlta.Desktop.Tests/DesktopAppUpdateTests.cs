@@ -116,7 +116,7 @@ public sealed class DesktopAppUpdateTests
     {
         string[] arguments = ["tool", "update", "-g", "CodeAlta", "--prerelease"];
         var windows = CodeAlta.Desktop.DesktopUpdateInstaller.WindowsScript(4242, @"C:\Program Files\dotnet\dotnet.exe", arguments,
-            @"C:\Users\a 100%\update.log", @"C:\data\result.txt", @"C:\data\cancel", @"C:\Users\me\.dotnet\tools\alta.exe");
+            @"C:\Users\a 100%\update.log", @"C:\data\result.txt", @"C:\data\cancel", @"C:\Users\me\.dotnet\tools\alta.cmd");
         var lines = windows.Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
         // It waits while the process exists, stops when the update was called off, and gives up in the end.
         CollectionAssert.Contains(lines, "tasklist /FI \"PID eq 4242\" /NH 2>nul | find \" 4242 \" >nul");
@@ -125,7 +125,8 @@ public sealed class DesktopAppUpdateTests
         // Then the SDK's own update, its outcome on record, and the application again. A percent sign in a path is kept.
         CollectionAssert.Contains(lines, "\"C:\\Program Files\\dotnet\\dotnet.exe\" tool update -g CodeAlta --prerelease > \"C:\\Users\\a 100%%\\update.log\" 2>&1");
         CollectionAssert.Contains(lines, "> \"C:\\data\\result.txt\" echo %errorlevel%");
-        Assert.AreEqual("start \"\" \"C:\\Users\\me\\.dotnet\\tools\\alta.exe\"", lines[^1]);
+        // The launcher is the SDK's script: the helper becomes it, in its own console that has no window.
+        Assert.AreEqual("\"C:\\Users\\me\\.dotnet\\tools\\alta.cmd\"", lines[^1]);
         Assert.IsTrue(Array.IndexOf(lines, ":update") < Array.FindIndex(lines, line => line.Contains("tool update", StringComparison.Ordinal)));
 
         var unix = CodeAlta.Desktop.DesktopUpdateInstaller.UnixScript(4242, "/usr/local/share/dotnet/dotnet", arguments,

@@ -50,7 +50,9 @@ internal static class DesktopUpdateInstaller
         foreach (var argument in arguments) script.Append(' ').Append(argument);
         script.Append(" > ").Append(BatchQuote(log)).Append(" 2>&1\r\n");
         script.Append("> ").Append(BatchQuote(result)).Append(" echo %errorlevel%\r\n");
-        script.Append("start \"\" ").Append(BatchQuote(launcher)).Append("\r\n");
+        // The launcher is the SDK's script for the installed version. The helper becomes it (no call, so
+        // nothing returns here): it runs in this console, which has no window, until the application ends.
+        script.Append(BatchQuote(launcher)).Append("\r\n");
         return script.ToString();
     }
 

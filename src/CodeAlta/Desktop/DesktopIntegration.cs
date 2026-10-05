@@ -9,8 +9,11 @@ namespace CodeAlta.Desktop;
 /// <summary>
 /// Makes the installed tool an application of the desktop it runs on, so it is started like any other:
 /// a Start Menu shortcut on Windows, <c>CodeAlta.app</c> in the user's Applications folder on macOS, and a
-/// desktop entry on Linux. Each starts the tool's launcher (<c>alta</c> in the .NET tools folder), so an
-/// update of the tool needs nothing here. Everything is written in the user's own folders: no elevation.
+/// desktop entry on Linux. On macOS and Linux each starts the tool's launcher (<c>alta</c> in the .NET tools
+/// folder), so an update of the tool needs nothing here. On Windows that launcher is a script, which would
+/// keep a console window open: the shortcut starts the executable of the installed version instead, and is
+/// written again by the first start of each version. Everything is written in the user's own folders: no
+/// elevation.
 /// </summary>
 /// <remarks>
 /// Only a tool installed with <c>dotnet tool install -g</c> is integrated; a build output or a local tool
@@ -28,7 +31,8 @@ internal static class DesktopIntegration
 
     /// <summary>
     /// The launcher of a globally installed tool: <c>alta</c> beside the <c>.store</c> folder this process
-    /// runs from. Null for anything else (a build output, a local tool run through <c>dotnet</c>).
+    /// runs from. Null for anything else (a build output, a local tool run through <c>dotnet</c>). For a tool
+    /// packed per runtime the SDK writes a script on Windows (<c>alta.cmd</c>) and a link elsewhere.
     /// </summary>
     internal static string? InstalledLauncher(string baseDirectory, bool windows)
     {
@@ -36,7 +40,27 @@ internal static class DesktopIntegration
         var separator = windows ? '\\' : '/';
         var normalized = windows ? baseDirectory.Replace('/', '\\') : baseDirectory;
         var index = normalized.IndexOf(separator + ".store" + separator, windows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
-        return index <= 0 ? null : normalized[..index] + separator + (windows ? "alta.exe" : "alta");
+        return index <= 0 ? null : normalized[..index] + separator + (windows ? "alta.cmd" : "alta");
+    }
+
+    /// <summary>
+    /// What the desktop's entry starts: the launcher, except on Windows, where it is the executable beside the
+    /// application (a shortcut to the launcher's script would keep a console window open while CodeAlta runs).
+    /// </summary>
+    internal static string EntryStart(string launcher, string baseDirectory, bool windows)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(launcher);
+        ArgumentNullException.ThrowIfNull(baseDirectory);
+        if (!windows) return launcher;
+        var folder = baseDirectory.Replace('/', '\\');
+        return (folder.EndsWith('\\') ? folder : folder + '\\') + "alta.exe";
+    }
+
+    /// <summary>Where Windows keeps the copy of the shortcut that a pin on the taskbar starts.</summary>
+    internal static string WindowsTaskbarPin(string applicationData)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(applicationData);
+        return applicationData.TrimEnd('\\') + @"\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\CodeAlta.lnk";
     }
 
     /// <summary>
@@ -63,15 +87,24 @@ internal static class DesktopIntegration
         {
             var launcher = InstalledLauncher(AppContext.BaseDirectory, OperatingSystem.IsWindows());
             if (launcher is null || !File.Exists(launcher)) return false;
+            var start = EntryStart(launcher, AppContext.BaseDirectory, OperatingSystem.IsWindows());
+            if (!File.Exists(start)) return false;
             var folder = Path.Combine(dataRoot, "integration");
             var stamp = Path.Combine(folder, "installed.txt");
-            var current = version + "\n" + launcher;
+            var current = version + "\n" + start;
             var target = EntryPath();
             if (target is null) return false;
             var existed = File.Exists(target) || Directory.Exists(target);
             if (existed && File.Exists(stamp) && File.ReadAllText(stamp) == current) return false;
             Directory.CreateDirectory(folder);
-            if (OperatingSystem.IsWindows()) WriteWindowsShortcut(target, launcher, CopyIcon(folder, "alta.ico"));
+            if (OperatingSystem.IsWindows())
+            {
+                var icon = CopyIcon(folder, "alta.ico");
+                WriteWindowsShortcut(target, start, icon);
+                // The executable's path holds the version: a pin made from the previous one would start nothing.
+                var pin = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData) is { Length: > 0 } data ? WindowsTaskbarPin(data) : null;
+                if (pin is not null && File.Exists(pin)) WriteWindowsShortcut(pin, start, icon);
+            }
             else if (OperatingSystem.IsMacOS()) WriteMacBundle(target, launcher, version, Path.Combine(AppContext.BaseDirectory, "alta.icns"));
             else WriteLinuxEntry(target, launcher, CopyIcon(folder, "alta.png"));
             File.WriteAllText(stamp, current);
