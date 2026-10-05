@@ -1,180 +1,101 @@
-# CodeAlta [![ci](https://github.com/CodeAlta/CodeAlta/actions/workflows/ci.yml/badge.svg)](https://github.com/CodeAlta/CodeAlta/actions/workflows/ci.yml) [![NuGet](https://img.shields.io/nuget/v/CodeAlta.Tui.svg)](https://www.nuget.org/packages/CodeAlta.Tui/)
+# CodeAlta [![ci](https://github.com/CodeAlta/CodeAlta/actions/workflows/ci.yml/badge.svg)](https://github.com/CodeAlta/CodeAlta/actions/workflows/ci.yml) [![NuGet](https://img.shields.io/nuget/v/CodeAlta.svg?label=CodeAlta)](https://www.nuget.org/packages/CodeAlta/) [![NuGet](https://img.shields.io/nuget/v/CodeAlta.Tui.svg?label=CodeAlta.Tui)](https://www.nuget.org/packages/CodeAlta.Tui/)
 
-CodeAlta is a terminal workspace for agentic coding. It brings model-provider setup, project navigation, prompt attachments, durable sessions, delegated work, and trusted local plugins behind the `altatui` command.
-
-The desktop WebView supports local shell language selection in Settings → Appearance
-for English, Spanish, French, German, Japanese and Simplified Chinese. This is a
-bounded navigation/Settings/shortcut Help, composer, action-palette, session-tab
-and saved-session browsing/inspection translation, plus batch-deletion, Reminder, caller-ask, Settings inventory and static project/session workflow controls—not full UI localization;
-see [scope and limitations](doc/webview-localization.md).
-Static About/log/reference translation and its reference-preview lifetime publication
-correction have scoped independent acceptance; the separate split-layout cleanup
-failure remains open. Static advanced-session and archived recovery presentation is
-independently accepted within its bounded scope; raw diagnostics remain literal.
-Provider/timeline translation and its scroll correction are independently accepted.
-The bounded Settings inventory translation awaits independent acceptance.
-Short desktop windows use a [scrollable selected-content pane](doc/responsive-composer.md)
-to keep the regular composer and its actions reachable.
-
-> CodeAlta is pre-release software. Configuration, screenshots, and extension APIs may change before `1.0`.
-
-The development desktop has a [runnable IDE presentation checkpoint](doc/desktop-ide-checkpoint.md)
-with a stacked Explorer, compact composer, Reminders and reference-popup candidates, and real
-FlexLayout session tabs. Functional checks and builds are recorded there; mounted popup/tab-lifetime and visual
-acceptance remain unqualified, and the full redesign is unfinished.
-
-The desktop timeline now reads journal records up to 8 MiB with bounded previews and explicit
-16 KiB raw-source chunks. Later page errors preserve already loaded rows with a partial-history
-notice. Temporary history-read failures remain eligible for bounded live-revision refresh without
-replacing explicitly older views. The running spinner is independent of transcript delivery; a stalled
-timeline is not permission to retry Send. Records above the ceiling remain explicit errors; journals are never rewritten.
-
-The desktop uses Monaco Markdown editors for inline and expanded prompts (the expanded
-editor has no preview). The running-agent stop control is icon-only, with an accessible label
-and tooltip. `?` opens help only in an empty prompt; elsewhere in the editor it is ordinary text.
-Choosing an `@` file suggestion inserts a basename-labeled project-relative Markdown link,
-matching the TUI. Both editors have padded, rounded surfaces. Pasted images appear as
-compact thumbnails above the prompt status; click a thumbnail to preview and rename or
-remove it, or use its small remove button directly. Its timeline opens at the latest user prompt, with older messages
-available above it, and automatically observes active runs and pending asks without refresh
-buttons. Tool rows open details with independently scrollable content and no diagnostic footer.
-The desktop composer immediately echoes submitted text in the timeline. Live and saved
-activity share message rendering, source timestamps and role colors; journal refreshes
-fill in retained live previews automatically. Model choices load when the composer opens,
-and selector labels stay inline on desktop widths. New-session drafts use the same composer
-and selector surface, with scoped Agent and provider-model choices available before creation.
-Hidden session panes pause background observations while retaining drafts and exact-request
-recovery; visible split panes continue observing. The session-tab menu uses themed Blueprint
-controls, and Enqueue sits beside the primary prompt action. Sending/uncertain/failed echoes are
-presentation only, not proof of provider execution.
-
-> On this development branch, the terminal package is renamed to `CodeAlta.Tui` / `altatui`. Installation commands below describe that package once released. Existing releases used `CodeAlta` / `alta`; the replacement desktop head is still in development. Shared `~/.alta` state and the in-session `alta` tool keep their identities.
-
-The development desktop includes an opt-in [workspace snapshot browser](src/CodeAlta/README.md#browse-a-task-owned-catalog-copy), bounded persisted-event history, and separately consented [existing-session text submission](src/CodeAlta/README.md#explicit-owned-text-submission) with a selected-session live status/text window and two recently reported plain tool activities for trusted task-owned roots. The live window is partial, not a complete transcript; tool reports and submission receipts do not establish permission approval or live-run completion. Full agent workflows and native qualification remain incomplete. This is not shared-profile startup. Continue using `altatui` for normal agent workflows.
-
-Desktop [project-row actions](doc/project-row-actions.md) offer keyboard/pointer Open and read-only Details, plus selected-only entry to existing Rename and Archive/Unarchive confirmation workflows. Opening the menu does not navigate or issue requests.
-
-Shared-runtime [provider-event forwarding ownership](doc/runtime-provider-event-forwarding.md) now retains admitted callback work through queue/parent bookkeeping and shutdown joins. It remains separate from the partial Desktop display window and does not guarantee event replay or shutdown of noncooperative providers.
-
-Owned Desktop new-session and local text-draft creation offer a [bounded cached provider choice](doc/new-session-provider.md). No choice uses the enabled default or first enabled provider; explicit choice never falls back. Selecting is read-only, while deliberate Create remains effectful. This does not switch an existing session or change global defaults.
-
-Owned Desktop Send supports [pasted image attachments](doc/prompt-images.md) with previews, editable local display titles, removal and explicitly observed model capability, without the former tiny byte, count and dimension caps. Browser-exposed PNG, JPEG, WebP, GIF and BMP clipboard files are decoded and normalized to PNG; source metadata and animation are not retained. The owned RPC transport allows 128 MiB frames including base64/JSON overhead; browser and provider constraints still apply. Image-only normal Send accepts exactly empty text with retained attachments; whitespace-only and empty text-only Send remain refused. The explicit owned new-session draft can retain and safely copy images into a confirmed empty new session draft, never auto-Send; images remain window-memory only and storage failure retains the source with an uncertainty notice. Normalized bytes travel as typed images, not Markdown; Queue/Steer and archived/catalog-only composers refuse attachments. This path does not add native clipboard qualification or URL/path access.
-
-Desktop **Settings → Skills**, **Agent prompts**, **MCP Servers** and **Plugins** are editable pages; see the [desktop notes](src/CodeAlta/README.md).
-
-Owned Desktop mode automatically approves tool permissions by default, matching TUI AutoApprove: commands and file writes run with the host's privileges, not in a root sandbox. Explicit `--review-owned-command-permissions` instead enables plain-command review with **Allow once / Deny / Cancel** and denies unsupported permissions. **Observe retained decision** checks the original response locally across selection changes, without resending it; renderer reload loses that record. See the [owned-mode safety and usage notes](src/CodeAlta/README.md#explicit-owned-text-submission).
-
-Owned Desktop submissions also support restricted caller-session `alta ask --stdin` questions. **Refresh asks**, answer the original ask through a new text submission, or cancel an unclaimed ask without stopping its run. **Observe original action** reads retained backend evidence without resending; uncertainty blocks competing actions. There are no attached-file reviews, general LiveTool commands, provider-input activation or restart recovery in this workflow.
-Unsubmitted ask text/choices now survive explicit same-head refreshes while that panel stays mounted. If identity or question shape changes, or the read fails, the old draft is read-only local recovery with confirmed local discard; it never retargets or submits from stale evidence. Drafts are bounded and lost on panel unmount (including navigation/archival), unlike retained admitted actions.
-Validated multi-question asks have local Previous/Next controls with current position/title; answers persist across question changes and only the existing explicit Answer submits every question. Navigation does not submit, advance automatically, or add global shortcuts.
-Captured pending/uncertain ask answers remain separately inspectable from the immutable action owner (literal text, indexes and original target/action identity) across reads and same-host panel remounts. The panel does not infer missing question wording or call a failed read pending; local draft discard cannot acknowledge owner evidence.
-
-Owned Desktop mode opens one temporary **New session** tab when selecting a project and reuses it on further project selections. Selecting an existing session removes that temporary tab; it never replaces an existing session pane. The welcome view reuses the TUI's ASCII logo and identifies the project folder, with the same composer surface, editor and resizable divider as existing sessions. Session tabs are workspace-wide: tabs from different projects remain open when switching projects. Drag a tab along the strip to reorder, to a pane edge for a horizontal/vertical split, or to its center to merge; the highlighted target previews the drop and Escape cancels. The tab menu also offers **Split session right/below**. Each session owns a small, collapsible **Alta notes** overlay at the top right of its timeline, without a nested dock or notes divider. It opens when content arrives and keeps its collapsed state on subsequent reads. Durable notes refresh automatically without starting a provider and render as sanitized Markdown up to 16,384 UTF-16 units; oversized notes are refused rather than truncated, and read failure is not reported as empty notes. Sidebar running indicators are bounded observations, not mutation authority. This follow-up is build-verified only; native drag acceptance remains pending. See the [desktop diagnostics and limitations](src/CodeAlta/README.md) if Send stops responding.
-
-Live-display reconnect waits for the previous observation's successful cleanup; cleanup failure blocks reopening in that view. Runtime refreshes retain only one frontend waiter and the latest explicit pending refresh. Valid late host/runtime changes disable shared mutation controls, but observation refresh/reload does not prove backend termination or recover missing history and effects.
-
-Live file-change notifications now invalidate the shared file-search cache without requiring an open terminal frontend. History replay does not repeat this invalidation; it remains best effort, not confirmation that a file write succeeded.
-
-Plugin agent-event observation now admits at most 64 outstanding callbacks per activation, without queued waiters. Events rejected at capacity or during closing are not delivered to that plugin. Shutdown retains admitted callbacks and their dependencies until the required drain succeeds; a timeout does not make release safe. This is a lifetime prerequisite, not complete Desktop plugin parity or history recovery.
-
-Separately add `--enable-owned-user-input` to the complete owned-mode command to review supported **nonsecret provider input**. Use **Refresh input** to list pending forms, then submit literal answers or cancel only that attempt. This does not approve commands or files. Never enter credentials: answers may enter provider tool results and history. Original actions survive panel remounts; after observing and acknowledging a terminal result, refresh explicitly for a new page. Lost outcomes and host restart cannot be recovered from list absence.
-
-For providers supporting run-bound review, cancellation of that run invalidates its pending reviews, including requests without a run ID. Already accepted decisions cannot be revoked. In experimental owned mode, **Signal cancellation for observed run** targets only the explicitly refreshed runtime, attachment and run. Success means cancellation signalled, not run completion; stale or unsupported targets fail without fallback. Uncertain requests keep their original target and key for manual reconciliation or exact retry.
-
-Owned mode also supports text steering of an explicitly refreshed runtime/run target. Uncertain requests retain their exact key and target for manual receipt reconciliation or deliberate retry; they are never automatically retried or redirected to a later run. This remains experimental, not complete session-command parity.
-
-The same experimental mode can compact an explicitly observed attachment only if the supported provider admits it while idle, without waiting or replacing the target. Compaction uses context current at admission; inspect its receipt for success or busy/unsupported/failure outcomes.
-
-The same experimental mode offers **Queue text — this host only** after manual runtime refresh, including while the observed attachment is busy. Reservation, host-only insertion and execution/cleanup are separate; queued text is not durable. Cancellation targets the original queued operation, not a later run. Uncertain requests retain their exact text/key/target for manual reconciliation or deliberate retry while the document remains open; reload does not reconstruct lost local intent. Existing terminal queue behavior is unchanged.
-
-Experimental Send/Abort also retains exact local intent and live-waiter exclusion across selection changes. Manual receipt refresh cannot release an in-flight request; Abort-only recovery preserves unrelated composer text. Late epoch changes disable mutations, and reload does not reconstruct lost text or retry keys. Abort control settlement is not rollback or run termination.
-
-In the owned Desktop composer, the Reminders icon or Ctrl+G, Ctrl+D (from the workspace or prompt) opens reminders for the verified selected session; it does not schedule anything or poll in the background. Create accepts whole seconds (1–86400) or invariant `HH:mm:ss` / `d.HH:mm:ss` with whole seconds only (`1.00:00:00` is the 24-hour maximum); total attempts remain 1–20. A list count is only as of its explicit refresh. Host changes or uncertain reminder admissions require inspection, not automatic retries. Catalog-only and unverified sessions cannot use the composer shortcut.
-On the Reminders page, Ctrl+Enter invokes the existing Create button only when focus is on the current Create message, delay, repeat or Create button and no modal/confirmation or reminder admission blocks it. Enter in the message remains a newline; Ctrl+Enter in the Save editor, list, deletion confirmation, recovery or another pane does not create. Ctrl+S remains the scoped Save-message shortcut. This is not full TUI keyboard parity.
-
-In the Desktop regular composer (owned or catalog/archived draft-only), typing `?` into an **exactly empty** prompt opens keyboard help; typing `/` opens the existing implemented-actions palette. These are transient keyboard shortcuts, not slash-command execution. Pasted text, composition, selection replacement and nonempty drafts remain literal; the expanded editor and other search/input fields do not use these shortcuts. Draft-only scopes can navigate/help but cannot gain mutation permissions from the palette.
-
-The Desktop palette (`Ctrl+P`) and help (`F1`) list every command with its shortcut, following the TUI key map.
-See [commands, help and keyboard shortcuts](src/CodeAlta/README.md#commands-help-and-keyboard-shortcuts).
-
-The Desktop timeline/composer divider can be dragged to reserve more room for the regular composer. Focus the divider and use **Arrow Up** to enlarge the composer, **Arrow Down** to shrink it, or **Home** (or **Auto size**) to restore compact automatic sizing. A bounded in-memory preference is kept separately per host/project/session during this window's lifetime; it does not alter drafts, Send/Steer authority or profile settings. A shorter window temporarily clamps the visible size without changing the preference. The composer and timeline stay mounted during resizing, and long controls/recovery details remain scrollable.
-
-The adjacent **Session info** icon opens saved catalog metadata for the selected session in owned, catalog-only, and archived draft-only regular composers. It does not read live runtime/model/prompt/usage data or grant mutation rights. Ctrl+G, Ctrl+T and the implemented-actions palette retain their exact unique selected-session eligibility; ambiguous identity still displays unverified scope through the icon but disables Copy ID. Closing info restores focus only while its original composer control remains current and no newer focus or modal owns it.
+CodeAlta is a workspace for agentic coding on your local projects. It brings model providers, durable sessions, agent prompts, MCP tools, skills, plugins, and delegated agents together, in a desktop app or a terminal UI.
 
 <p align="center">
-  <img src="site/img/alta-theme-default.png" alt="CodeAlta terminal workspace using the default dark theme" width="920">
+  <img src="site/img/alta-desktop-split-three.webp" alt="CodeAlta Desktop with a parent session and its two child sessions in three panes" width="920">
 </p>
+
+> CodeAlta is distributed as preview `0.x` releases. Configuration, screenshots, and extension APIs may change before `1.0`.
+
+## 🖥️ Two apps
+
+| App | NuGet package | Command |
+| --- | --- | --- |
+| **CodeAlta Desktop** | [`CodeAlta`](https://www.nuget.org/packages/CodeAlta/) | `alta` |
+| **CodeAlta TUI** | [`CodeAlta.Tui`](https://www.nuget.org/packages/CodeAlta.Tui/) | `altatui` |
+
+- **CodeAlta Desktop** is a desktop application with session tabs you can drag and split, a file editor, and every setting in one window. It is the most complete way to use CodeAlta.
+- **CodeAlta TUI** is a keyboard-first terminal UI with the same sessions, providers, and tools.
+
+Both apps run the same agents on the same `~/.alta` profile. A session started in one app can be continued in the other. See [Desktop and TUI](https://codealta.github.io/docs/desktop-and-tui/) for what each app offers.
 
 ## 🚀 Install
 
-Install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0), then install the CodeAlta terminal global tool:
+Install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0), then install the desktop app and launch it from a project folder:
+
+```sh
+dotnet tool install -g CodeAlta
+alta
+```
+
+Or install the terminal UI:
 
 ```sh
 dotnet tool install -g CodeAlta.Tui
 altatui
 ```
 
-Update an existing installation with:
+You can install both. Only one CodeAlta runs on a profile at a time, so close one app before starting the other.
 
-```sh
-dotnet tool update -g CodeAlta.Tui
-```
+Update with `dotnet tool update -g CodeAlta` or `dotnet tool update -g CodeAlta.Tui`. The desktop app can also update itself with **Update and restart**.
 
-On first launch, CodeAlta creates `~/.alta/config.toml`. Existing config files are left untouched on later launches so you can remove, rename, or customize bundled entries. If no provider is enabled yet, the Model Providers dialog opens so you can configure Codex, Copilot, xAI Grok, OpenAI/Azure OpenAI/Alibaba APIs, Anthropic, Gemini/Vertex, or custom endpoints.
+Requirements:
 
-For ChatGPT subscription access, select a Codex provider and **Continue with ChatGPT**. CodeAlta uses OpenAI's public token-sharing flow: registration happens during sign-in, with no client ID to provision beforehand. Previous Codex credentials must be replaced by signing in again; see the [provider migration notes](https://codealta.github.io/docs/model-providers/#chatgpt-sign-in-and-migration).
+- **CodeAlta Desktop** uses the web view of the operating system: WebView2 on Windows, macOS 11 or later, or WebKitGTK 6.0 with GTK 4 on Linux.
+- **CodeAlta TUI** needs a current [Nerd Fonts](https://www.nerdfonts.com/) patched font, such as `CaskaydiaCove Nerd Font`, selected in your terminal profile.
 
-The TUI (`altatui`) and owned desktop share this provider implementation and global credential store. Complete sign-in in the TUI's Model Providers dialog, then use the configured provider in the desktop. Desktop provider Settings remain read-only; no separate desktop sign-in flow is introduced.
+On first launch, CodeAlta creates `~/.alta/config.toml` and opens the provider setup. Sign in with a ChatGPT or GitHub Copilot subscription, or add an API key for OpenAI, Anthropic, Google, Mistral, xAI, Azure OpenAI, or an OpenAI-compatible server. Then open a project and send a prompt.
 
-If the first ChatGPT code exchange fails with `invalid_grant`, choose **Continue with ChatGPT** again; CodeAlta retains the issued registration for retry without enabling inference until identity validation succeeds.
-
-CodeAlta also expects a current [Nerd Fonts](https://www.nerdfonts.com/) patched font in your terminal profile. If icons or tree glyphs look wrong, update to the latest Nerd Fonts release, remove stale older font copies, and select the refreshed Nerd Font family, such as `CaskaydiaCove Nerd Font`.
+See [Getting Started](https://codealta.github.io/docs/getting-started/) for the full walkthrough.
 
 ## ✨ What it gives you
 
-- **Keyboard-first terminal workspace**: tabs, prompt editor, project sidebar, command discovery, model selectors, context status, and inspectable timeline cards stay in one TUI.
-- **Conflict-aware file editing**: file tabs and attached ask-file reviews preserve supported Unicode encodings and line endings, retaining unsaved edits when disk content has changed.
-- **Structured asks**: retain queued questions and choices in per-session order without requiring an open tab. Response attempts reject duplicate/stale submit and cancel callbacks; only positive runtime admission evidence consumes the ask. Uncertain responses block resubmission and local cancellation, with no recovery action yet. Pending asks are in-memory, not restart-persistent.
-- **Multilingual UI**: choose Auto, English, Spanish, French, German, Japanese, or Simplified Chinese from Workspace Settings.
-- **Provider-neutral model setup**: configure hosted APIs, subscription-backed Codex/Copilot/xAI Grok, cloud providers, and compatible endpoints with the same provider workflow. Codex supports opt-in, provider-wide fast routing with `service_tier = "priority"` when advertised by the model; it may increase subscription usage or cost. See [model providers](https://codealta.github.io/docs/model-providers/) for eligibility caveats and standard-routing opt-out.
-- **Context-aware prompts**: select reusable agent prompt profiles, edit global/project prompt and system-prompt replacements or append-only extensions, attach files and folders with `@`, search issues with `#` in GitHub, GitLab and Azure DevOps repositories, paste images when the selected model supports them, and inspect what context was sent.
-- **Durable agent sessions**: keep project-scoped history in CodeAlta-owned journals, reopen sessions independently of provider startup, queue prompts on busy sessions, steer running work where supported, and compact long agent-runtime conversations.
-- **Session notes**: keep sticky Markdown in the session journal, use `alta notes` even when the caller's tab is closed, and restore the latest notes when reopening it.
-- **Actionable operations**: model/provider tests, startup config recovery, usage details, logs, modified-file summaries, and tool input/output dialogs are built into the workspace.
-- **Bounded file-change inspection**: built-in mutation tools cap captured text and generated diffs, retaining explicit omission notices for large files or directory operations without restricting the operation itself. Use an external diff for complete inspection when details are omitted.
-- **Trusted local extension points**: source plugins, Agent Skills-compatible skill folders, and the in-session `alta` live tool let you automate local workflows while keeping provenance visible.
+- **Sessions on your projects**: sessions are saved on disk per project. Reopen them later, queue prompts on a busy session, steer a running turn, and compact a long conversation.
+- **Several agents at once**: a session can start child sessions for bounded tasks and collect their reports. On the desktop, put them side by side in split panes.
+- **The models you already have**: choose the provider, model, and reasoning effort per session. See [model providers](https://codealta.github.io/docs/model-providers/).
+- **Everything the agent did**: tool calls, file diffs, context usage, and turn statistics are in the timeline, and each one opens with its details.
+- **Context-aware prompts**: attach files and folders with `@`, reference GitHub, GitLab and Azure DevOps issues with `#`, paste images, and switch between agent prompts such as Default and Plan.
+- **A file editor**: open a project file with `Ctrl+E`. On the desktop, the editor tab can sit beside the session that works on the file.
+- **Extensions**: MCP servers, Agent Skills-compatible skill folders, trusted local .NET plugins, and the in-session `alta` tool for notes, reminders, asks, and session control.
+- **Your language and colors**: English, Spanish, French, German, Japanese, or Simplified Chinese, with light and dark themes on the desktop and terminal themes in the TUI.
+
+<p align="center">
+  <img src="site/img/alta-desktop-code-editor.webp" alt="CodeAlta Desktop with a session on the left and a C# file in an editor tab on the right" width="920">
+</p>
+
+<p align="center">
+  <img src="site/img/alta-home.png" alt="CodeAlta TUI with the projects sidebar, a session timeline, and the prompt editor" width="920">
+</p>
 
 ## ⌨️ Common shortcuts
 
-| Action | Shortcut / command |
+Both apps use the same shortcuts and slash commands.
+
+| Action | Shortcut or command |
 | --- | --- |
 | Help and command discovery | `F1`, `/help`, or `?` |
+| Command palette | `Ctrl+P` or `/` |
 | Open project | `Ctrl+O` or `/open` |
+| Open file editor | `Ctrl+E` or `/edit` |
 | Attach project files | type `@` in the prompt |
-| Manage prompts | `Ctrl+G Ctrl+H` or `/prompt` |
 | Switch to next agent prompt | `Ctrl+T` or `/next_prompt` |
 | Open model providers | `Ctrl+G Ctrl+R` or `/model_providers` |
-| Refresh model providers | `/model_providers_refresh` |
 | Browse models | `Ctrl+G Ctrl+O` or `/models` |
-| Open logs | `Ctrl+G Ctrl+L` or `/logs` |
-| Toggle navigator | `Ctrl+G Ctrl+G` |
+| Open settings | `Ctrl+G Ctrl+W` or `/settings` |
+| Steer a running session | `Ctrl+Enter` |
+| Abort the running turn | `F8` or `/abort` |
 | Switch tabs | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` |
-| Focus sidebar / prompt | `Ctrl+G Ctrl+S` / `Ctrl+G Ctrl+P` |
 
 ## 📖 Documentation
 
-`altatui --dev` (or `alta --dev`) starts a developer instance beside the normal one: same `~/.alta` configuration and providers, its own sessions under `~/.alta/dev/`.
-
-`altatui --help` (or `-h`) and `altatui --version`, each used alone, print built-in information without initializing application state or plugins. Other command paths, including `--plugins-status` and plugin commands, acquire the shared `~/.alta/alta.lock` before mutable startup and retain it through cleanup. Plugin-specific or combined help invocations follow that guarded path. If inspecting the recorded owner fails, startup conservatively refuses to reclaim its lock.
-
-The prompt manager preserves unsaved edits on external-file conflicts and requires confirmation before retrying; built-ins stay read-only and same-scope creation never overwrites an existing prompt.
-
 - User guide and screenshots: <https://codealta.github.io/>
 - Getting started: <https://codealta.github.io/docs/getting-started/>
+- Desktop and TUI: <https://codealta.github.io/docs/desktop-and-tui/>
 - Model provider configuration: <https://codealta.github.io/docs/model-providers/>
 - Prompts and instructions: <https://codealta.github.io/docs/prompts/>
-- In-session `alta` live tool: [doc/live-tool.md](doc/live-tool.md)
-- Skills: [doc/skills.md](doc/skills.md)
+- Sessions and delegation: <https://codealta.github.io/docs/sessions/>
+- Plugins and MCP servers: <https://codealta.github.io/docs/plugins/>
 - Maintainer notes: [doc/readme.md](doc/readme.md)
 
 ## 🪪 License
