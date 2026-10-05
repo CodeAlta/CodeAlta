@@ -8,6 +8,8 @@ import type { DisplayState } from "./sessionDisplay";
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from "react";
 import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectReferencePicker";
 import { GitHubIssuePicker } from "./GitHubIssuePicker";
+import { PluginPromptPickers } from "./PluginPromptPicker";
+import { pluginComposerEvent, type PluginComposerRequest } from "./pluginUi";
 import { modelCatalog, sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
 import { activateSessionModels } from "./activateSessionModels";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, refreshSubmissions, type createOwnedSubmissions } from "./sessionOperations";
@@ -492,6 +494,35 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
     window.addEventListener("codealta:composer", run);
     return () => window.removeEventListener("codealta:composer", run);
   });
+  // What a plugin asks of this composer: the shell names the session, or none for the focused pane.
+  const [pluginSend, setPluginSend] = useState<string | null>(null);
+  useEffect(() => {
+    const run = (event: Event) => {
+      const request = (event as CustomEvent<PluginComposerRequest>).detail;
+      if (request.handled || (request.sessionId ? request.sessionId !== sessionId : !active)) return;
+      request.handled = true;
+      if (request.kind === "state") { request.state = { sessionId, draftText: latestText.current, busy: composerBusy }; request.result = true; return; }
+      if (invalidEpoch || pending) return;
+      const value = request.text ?? "";
+      if (request.kind === "draft") { editText(value); request.result = true; }
+      else if (request.kind === "enqueue") request.result = stagePrompt("Queue", value);
+      else if (request.kind === "steer") request.result = composerBusy && stagePrompt("Steer", value);
+      else if (request.kind === "compact") { if (!composerBusy && capability.canMutate()) { compact(); request.result = true; } }
+      else if (request.kind === "send" && value.trim() && capability.canMutate()) {
+        // The prompt goes through this composer's own Send, once the editor holds it.
+        editText(value); setPluginSend(value); request.result = true;
+      }
+    };
+    window.addEventListener(pluginComposerEvent, run);
+    return () => window.removeEventListener(pluginComposerEvent, run);
+  });
+  useEffect(() => {
+    if (pluginSend === null) return;
+    if (text !== pluginSend) { setPluginSend(null); return; } // The user changed the text: it is theirs to send.
+    if (pending || invalidEpoch || !scope.current || scope.current.signal.aborted) return;
+    setPluginSend(null);
+    submit();
+  }, [pluginSend, text, pending, invalidEpoch]);
   // One shot per mounted composer: the parent's marker is a ref, so this prop outlives its consumption.
   const autoSent = useRef(false);
   useEffect(() => {
@@ -779,6 +810,7 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
         onChange={value => select("reasoningEffort", value)} />} />}>
       {!pending && !expanded && !invalidEpoch && <ProjectReferencePicker text={text} edit={editText} input={promptInput} />}
       {!pending && !expanded && !invalidEpoch && <GitHubIssuePicker edit={editText} input={promptInput} />}
+      {!pending && !expanded && !invalidEpoch && <PluginPromptPickers edit={editText} input={promptInput} sessionId={sessionId} />}
       <ActiveProviderStatus epoch={epoch} onOpen={() => onOpenCatalog?.("providers")} />
       {(!activeChoices?.models.length || choicesNotice.includes("could not")) && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />}
         disabled={invalidEpoch || !!pending || loadingChoices} aria-label={t("Refresh composer choices")} title={t("Refresh composer choices")} onClick={loadModelChoices} />}

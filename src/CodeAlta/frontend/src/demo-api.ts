@@ -115,6 +115,7 @@ export const projectFiles = Object.freeze({ read: unavailable, write: unavailabl
 export const projectGit = Object.freeze({ status: unavailable });
 export const promptImages = Object.freeze({ read: unavailable });
 export const composerStatus = Object.freeze({ read: unavailable });
+export const pluginUi = Object.freeze({ contributions: unavailable, regions: unavailable, invokeCommand: unavailable, searchPicker: unavailable, watch: unavailable, respond: unavailable, dialogAction: unavailable });
 export const sessionUserInput = Object.freeze({ cancel: unavailable, list: emptyPage, resolve: unavailable });
 
 // The demo has no host configuration file: the editor reports itself unavailable.

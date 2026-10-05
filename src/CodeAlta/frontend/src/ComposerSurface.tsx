@@ -14,6 +14,7 @@ export function ComposerSurface({ status, busy = false, children, className, edi
   const { t } = useShellLanguage();
   const chrome = useContext(ComposerChrome);
   return <section className={`owned-session${className ? ` ${className}` : ""}`} aria-label={t("Message composer")}>
+    {chrome.footer}
     <div className="composer-status-line" role="status" data-busy={busy}><span>{status}</span>{chrome.status && <span className="composer-status-end">{chrome.status}</span>}</div>
     {expandedEditor}
     {notice}

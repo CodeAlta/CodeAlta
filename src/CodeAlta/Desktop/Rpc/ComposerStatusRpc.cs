@@ -85,11 +85,21 @@ internal sealed class ComposerStatusService
             if (_plugins is not null && active.Count > 0)
             {
                 // The window is the interactive surface of these contributions.
-                var statuses = _plugins.Adapter.GetStatusItems(active, PluginUiRegion.SessionStatus, new PluginAdapterOperationOptions
+                var options = new PluginAdapterOperationOptions
                 {
                     ProjectId = request.ProjectId, ProjectPath = project.Root, SessionId = request.SessionId, HasInteractiveUi = true,
-                });
-                for (var index = 0; index < statuses.Count; index++) items.Add(Item("plugins", "status-" + index, statuses[index], null));
+                };
+                var statuses = _plugins.Adapter.GetStatusEntries(active, PluginUiRegion.SessionStatus, options);
+                var commands = _plugins.Adapter.GetContributions<PluginCommandContribution>(PluginPoint.Command, options);
+                for (var index = 0; index < statuses.Count; index++)
+                {
+                    // An item can run a command of its own plugin.
+                    var (registration, item) = (statuses[index].Registration, statuses[index].Item);
+                    var command = item.Command is null ? null : commands.FirstOrDefault(candidate =>
+                        string.Equals(candidate.Handle.PluginRuntimeKey, registration.Handle.PluginRuntimeKey, StringComparison.Ordinal)
+                        && string.Equals(((PluginCommandContribution)candidate.Contribution).Name, item.Command, StringComparison.OrdinalIgnoreCase));
+                    items.Add(Item("plugins", "status-" + index, item, null) with { CommandId = command?.Handle.RuntimeContributionKey });
+                }
             }
 
             return new("ok", request.ProjectId, [.. items.Take(MaximumItems)]);
@@ -140,4 +150,5 @@ internal sealed record ComposerStatusResponse(string Status, string? ProjectId, 
 /// <param name="Text">The status text after the label.</param>
 /// <param name="Tone"><c>info</c>, <c>success</c>, <c>warning</c>, <c>error</c> or <c>muted</c>.</param>
 /// <param name="SettingsPage">The Settings page the item opens (<c>mcp</c>), or null when it opens nothing.</param>
-internal sealed record ComposerStatusItem(string PluginId, string Name, string Label, string Text, string Tone, string? SettingsPage);
+/// <param name="CommandId">The plugin command the item runs, as listed by <c>pluginUi.contributions</c>, or null.</param>
+internal sealed record ComposerStatusItem(string PluginId, string Name, string Label, string Text, string Tone, string? SettingsPage, string? CommandId = null);

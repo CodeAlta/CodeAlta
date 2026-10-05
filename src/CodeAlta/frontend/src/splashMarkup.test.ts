@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { defaultSplashColors, parseSplashAppearance, splashColorNames, splashDocument, splashMarkup, splashScript, splashStorageKey } from "./splashMarkup";
+import { defaultSplashColors, parseSplashAppearance, splashColorNames, splashDocument, splashMarkup, splashScript, splashStatusDocument, splashStorageKey } from "./splashMarkup";
 
 const logo = `<?xml version="1.0" encoding="UTF-8"?>\n<svg viewBox="0 0 512 512"><path d="M0 0"/></svg>`;
 const light = { theme: "light", background: "#f6f7f9", surface: "#ffffff", text: "#1c2127", accent: "#2d72d2", line: "#d3d5d7" };
@@ -48,4 +48,26 @@ test("the script gives the document the stored colors and ignores anything else"
   assert.deepEqual([...partial.properties], [["--splash-accent", "#2d72d2"]]);
   assert.equal(run("not json").properties.size, 0);
   assert.equal(run(null).properties.size, 0);
+});
+
+test("the start-up document shows what the host reports and the application document does not ask", async () => {
+  const run = async (reply: unknown, application = false) => {
+    const line = { textContent: "" };
+    const asked: string[] = [];
+    const timers: Array<() => void> = [];
+    const document = { documentElement: { dataset: {}, style: { setProperty: () => { } } }, readyState: "complete", addEventListener: () => { },
+      getElementById: (id: string) => id === "splash-status" ? line : id === "root" && application ? {} : null };
+    const fetch = async (url: string) => { asked.push(url); return { ok: reply !== undefined, json: async () => reply }; };
+    new Function("localStorage", "document", "fetch", "setTimeout", splashScript)({ getItem: () => null }, document, fetch, (callback: () => void) => { timers.push(callback); });
+    for (let turn = 0; turn < 8; turn++) await Promise.resolve();
+    return { text: line.textContent, asked, timers };
+  };
+  const built = await run({ text: "Building plugin Sample (1 of 2)…" });
+  assert.equal(built.text, "Building plugin Sample (1 of 2)…");
+  assert.deepEqual(built.asked, [splashStatusDocument]);
+  assert.equal(built.timers.length, 1, "it asks again");
+  assert.equal((await run({ text: "x".repeat(400) })).text.length, 160);
+  assert.equal((await run({ text: 12 })).text, "");
+  assert.equal((await run(undefined)).text, "");
+  assert.deepEqual((await run({ text: "ignored" }, true)).asked, []);
 });

@@ -5,6 +5,8 @@ using CodeAlta.Hosting;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Plugins;
+using CodeAlta.Plugins.Abstractions;
 using NeoAstra;
 using NeoAstra.Rpc;
 using XenoAtom.Logging;
@@ -208,6 +210,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         AppUpdateService? appUpdate = null;
         ModelCatalogService? providers = null;
         ProviderLoginService? providerLogin = null;
+        PluginUiService? pluginCommands = null;
         WorkspaceService? workspace = null;
         NeoWindow? window = null;
         IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null, chromeLifetime = null, instanceLifetime = null;
@@ -261,6 +264,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // Plugins read the user's profile (the MCP servers and their sign-ins, the GitHub CLI): they
             // run in the normal launch and stay off when the roots are explicit.
             var pluginAlta = roots.Home is null ? new PluginAltaServiceBridge() : null;
+            var startupStatus = new DesktopStartupStatus();
+            var pluginUi = new DesktopPluginUi();
             // A configuration file that cannot be loaded is repaired in the window before anything reads it: the
             // host would fail on it. A missing file is created with the defaults.
             var configRecovery = new ConfigRecoveryService(options.CatalogRoot!, new TextFileCodec());
@@ -281,10 +286,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 AutoApproveOwnedPermissions = !options.ReviewOwnedCommandPermissions,
                 EnableOwnedAsks = true,
                 EnableOwnedUserInput = options.EnableOwnedUserInput,
-                // Headless: plugins get no terminal, and source plugins build without startup feedback.
-                StartPlugins = pluginAlta is not null, OwnsLogging = false, IsHeadless = true,
+                // Source plugins are the same build as in the terminal application; the start-up screen
+                // names the ones being built.
+                StartPlugins = pluginAlta is not null, OwnsLogging = false, IsHeadless = false, HasInteractiveUi = true,
+                PluginFrontend = PluginFrontends.Desktop, PluginAuthoringProfile = PluginAuthoringProfile.Terminal,
+                PluginStartupFeedback = new DesktopPluginStartupFeedback(startupStatus),
                 PluginBuiltIns = DesktopPlugins.BuiltIns, PluginSafeMode = DesktopPlugins.SafeMode,
-                PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta),
+                PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi),
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!),
             }, CancellationToken.None));
@@ -297,6 +305,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 if (reminders is not null) await reminders.DisposeAsync();
                 if (providers is not null) await providers.DrainAsync();
                 if (providerLogin is not null) await providerLogin.CloseAsync(); // A running sign-in is canceled and joined.
+                if (pluginCommands is not null) await pluginCommands.CloseAsync(); // Plugin commands still waiting in a dialog end.
             });
             }
             if (configRecovery.IsReady) StartHost();
@@ -305,7 +314,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var creatingEnvironment = application.CreateEnvironmentAsync(new NeoEnvironmentOptions
             {
                 UserDataRoot = Path.Combine(options.DataRoot, "webview"),
-                CustomSchemes = [NeoCustomScheme.Application("app", new NeoManifestResourceProvider(assets, manifest))],
+                CustomSchemes = [NeoCustomScheme.Application("app", new DesktopStartupResources(new NeoManifestResourceProvider(assets, manifest), startupStatus))],
             });
             var environment = await creatingEnvironment;
             Mark("environment created");
@@ -384,6 +393,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var host = await _hostCreation;
             Mark("host created");
             DesktopPlugins.LogStartupDiagnostics(host.PluginRuntime);
+            if (DesktopPlugins.DescribeStartupFailures(host.PluginRuntime.Diagnostics) is { } pluginFailures) pluginUi.NotifyProblem(pluginFailures);
             shell.RunningSessions = host.RuntimeService.CountActiveRuns;
             shell.HasWorkspace = true;
             if (!closeRequested.Task.IsCompleted)
@@ -449,7 +459,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     // The standard launch has no explicit discovery home: common skills come from the profile, like the TUI.
                     builder.AddSkillsService(new SkillsService(host.ProjectCatalog, host.SkillCatalog,
                         roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), epoch));
-                    builder.AddPluginsService(new PluginsService(host.ProjectCatalog, epoch));
+                    builder.AddPluginsService(new PluginsService(host.ProjectCatalog, epoch, host.PluginRuntime));
                     builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
                     providers = new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch);
                     _ = providers.StartInitialization(); // Retained and joined by providers.DrainAsync.
@@ -460,11 +470,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionOperationsService(operations);
                     builder.AddSessionAsksService(asks);
                     builder.AddSessionNotesService(new SessionNotesService(host.WorkspaceReads, host.RuntimeService, epoch));
-                    builder.AddSessionPluginEventsService(new SessionPluginEventsService(host.WorkspaceReads, host.ProjectCatalog, epoch));
+                    builder.AddSessionPluginEventsService(new SessionPluginEventsService(host.WorkspaceReads, host.ProjectCatalog, epoch, host.PluginRuntime));
                     builder.AddProjectFilesService(new ProjectFilesService(host.ProjectCatalog, epoch, host.ProjectFileSearchService));
                     builder.AddProjectGitService(new ProjectGitService(host.ProjectCatalog, epoch));
                     builder.AddPromptImagesService(new PromptImagesService(host.WorkspaceReads, epoch));
                     builder.AddComposerStatusService(new ComposerStatusService(host.ProjectCatalog, epoch, roots.Home, host.PluginRuntime));
+                    pluginCommands = pluginAlta is null ? new PluginUiService() : new PluginUiService(host.ProjectCatalog, host.PluginRuntime, pluginUi, epoch);
+                    builder.AddPluginUiService(pluginCommands);
                     builder.AddSessionUserInputService(new SessionUserInputService(host.RuntimeService.Permissions, epoch, options.EnableOwnedUserInput));
                     builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));
                     builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(host.RuntimeService, epoch));
@@ -604,6 +616,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddSkillsService(new SkillsService());
             builder.AddPluginsService(new PluginsService());
             builder.AddSessionPluginEventsService(new SessionPluginEventsService());
+            builder.AddPluginUiService(new PluginUiService());
             builder.AddProjectFilesService(new ProjectFilesService());
             builder.AddProjectGitService(new ProjectGitService());
             builder.AddPromptImagesService(new PromptImagesService());

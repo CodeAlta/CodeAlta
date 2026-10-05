@@ -9,7 +9,7 @@ const entry = (offset: string, patch: Partial<Entry>): Entry => ({ offset, event
   interactionId: null, name: null, text: "text", details: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, files: null, tool: null, images: null, ...patch });
 const idle = (offset: string) => entry(offset, { eventType: "sessionUpdate", kind: "Idle", text: null });
 const card = (patch: Partial<SessionPluginEvent> = {}): SessionPluginEvent => ({ eventId: "statistics:session:run-1", pluginId: "statistics", timestamp: "2026-01-01T10:00:09Z",
-  markdown: "**Turn statistics** · 4.0s · tools 2 calls / 1.5s", details: [{ header: "Detailed statistics", markdown: "| Metric | Value |\n| --- | ---: |" }], ...patch });
+  markdown: "**Turn statistics** · 4.0s · tools 2 calls / 1.5s", details: [{ header: "Detailed statistics", markdown: "| Metric | Value |\n| --- | ---: |", html: null }], html: null, ...patch });
 
 test("cards are read again when a turn ends or older history is loaded, not while a turn streams", () => {
   assert.equal(pluginEventsWindow([]), null);
@@ -42,8 +42,18 @@ test("a card is a compact row titled by its leading bold phrase, with its sectio
   assert.equal(plain.summary, "Something happened");
   assert.equal(plain.detailMarkdown, null);
 
-  const sections = pluginEventItem(card({ details: [{ header: "One", markdown: "a" }, { header: "Two", markdown: "b" }] }));
+  const sections = pluginEventItem(card({ details: [{ header: "One", markdown: "a", html: null }, { header: "Two", markdown: "b", html: null }] }));
   assert.equal(sections.detailMarkdown, "### One\n\na\n\n### Two\n\nb");
+
+  // A card or a section with an HTML fragment is shown as HTML; Copy still takes the Markdown.
+  const rich = pluginEventItem(card({ pluginId: "source:Sample", html: "<b>4.0s</b>",
+    details: [{ header: "One", markdown: "a", html: "<i>a</i>" }, { header: "Two", markdown: "b", html: null }] }));
+  assert.equal(rich.html, "<b>4.0s</b>");
+  assert.equal(rich.pluginKey, "source:Sample");
+  assert.deepEqual(rich.detailSections, [{ header: "One", html: "<i>a</i>", markdown: null }, { header: "Two", html: null, markdown: "b" }]);
+  assert.equal(rich.detailMarkdown, null);
+  assert.equal(sections.detailSections, undefined);
+  assert.ok(rich.copyMarkdown?.endsWith("### One\n\na\n\n### Two\n\nb"));
 });
 
 test("only cards of turns inside the loaded window are shown", () => {

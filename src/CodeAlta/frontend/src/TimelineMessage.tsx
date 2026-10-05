@@ -1,6 +1,7 @@
 import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { AppIcon } from "./AppIcon";
 import { MarkdownContent } from "./MarkdownContent";
+import { PluginHtml } from "./PluginHtml";
 import { writeMarkdown, type TimelineItem } from "./timeline";
 import { useShellLanguage } from "./shellLanguage";
 import { timelineTime } from "./sessionTime";
@@ -117,7 +118,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
       setCopyState("idle");
     }, 1600);
   }
-  const hasDetails = !!(body || item.detailMarkdown || item.details || item.metadata.length);
+  const hasDetails = !!(body || item.detailMarkdown || item.details || item.metadata.length || item.detailSections?.length);
   const compact = ["status", "reasoning", "tool", "file", "prompt", "plugin"].includes(item.category);
   const excerpt = (item.summary || body || item.detailMarkdown || "").split(/\r?\n\s*\r?\n/)[0];
   const codePreview = item.category === "tool" && item.summaryIsCode
@@ -147,7 +148,8 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
           onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
           onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}><span className="tool-state-dot" aria-hidden="true">●</span> <strong>{title}</strong></button>
           : item.category !== "reasoning" && <strong>{title}</strong>}{!toolTile && item.subtitle && <small>{item.subtitle === "Sending…" || item.subtitle === "Pending" || item.subtitle === "Failed" || item.subtitle === "Streaming" ? t(item.subtitle) : item.subtitle}</small>}</span>
-        {compact && excerpt && !toolTile && item.category !== "file" && <div className="timeline-inline-preview">{codePreview !== null ? <code>{codePreview}</code>
+        {compact && item.html ? <div className="timeline-inline-preview timeline-plugin-html"><PluginHtml html={item.html} pluginKey={item.pluginKey} /></div>
+          : compact && excerpt && !toolTile && item.category !== "file" && <div className="timeline-inline-preview">{codePreview !== null ? <code>{codePreview}</code>
           : item.summary ? excerpt : <MarkdownContent source={excerpt} />}</div>}
         <span className="message-actions">
           {item.toolRecord && <ToolRecordInspection key={item.toolRecord.source} record={item.toolRecord} canInspect={canInspect} />}

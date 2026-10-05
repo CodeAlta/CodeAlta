@@ -44,6 +44,14 @@
     <ProjectReference Include="../CodeAlta.Plugin.Statistics/CodeAlta.Plugin.Statistics.csproj" />
     <ProjectReference Include="../CodeAlta.LiveTool/CodeAlta.LiveTool.csproj" />
     <ProjectReference Include="../CodeAlta.Orchestration/CodeAlta.Orchestration.csproj" />
+    <!-- A source plugin is compiled once for both applications and can reference the terminal UI. Its
+         assemblies are here so that such a plugin loads; the desktop never shows a terminal visual. -->
+    <ProjectReference Include="../CodeAlta.Plugins.Tui/CodeAlta.Plugins.Tui.csproj" />
+    <PackageReference Include="XenoAtom.Terminal.UI" />
+    <PackageReference Include="XenoAtom.Terminal.UI.Extensions.CodeEditor.TextMateSharp" />
+    <PackageReference Include="XenoAtom.Terminal.UI.Extensions.Markdown" />
+    <PackageReference Include="XenoAtom.Terminal.UI.Extensions.Screenshot" />
+    <PackageReference Include="XenoAtom.Terminal.UI.Graphics" />
   </ItemGroup>
   <Target Name="CodeAltaExcludeBuildOnlyContractSource" AfterTargets="NeoAstraCollectRpcArtifacts">
     <!-- Keep generated contracts for TS checking/build and runtime JSON metadata, not TS source in the tool. -->

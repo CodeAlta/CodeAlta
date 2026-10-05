@@ -6,9 +6,12 @@ const mcp = { pluginId: "mcp", name: "mcp-status", label: "MCP", text: "2/3 · 1
 
 test("composer status accepts the items of the asked project", () => {
   assert.deepEqual(composerStatusItems({ status: "ok", projectId: "p1", items: [mcp] }, "p1"), [
-    { key: "mcp/mcp-status", pluginId: "mcp", label: "MCP", text: "2/3 · 1 unavailable · tools not loaded", tone: "warning", settingsPage: "mcp" }]);
+    { key: "mcp/mcp-status", pluginId: "mcp", label: "MCP", text: "2/3 · 1 unavailable · tools not loaded", tone: "warning", settingsPage: "mcp", commandId: null }]);
   assert.deepEqual(composerStatusItems({ status: "ok", projectId: null, items: [] }, null), []);
   assert.deepEqual(composerStatusItems({ status: "ok", items: [] }, null), []);
+  // An item can name a plugin command that it runs when clicked.
+  assert.equal(composerStatusItems({ status: "ok", projectId: null, items: [{ ...mcp, commandId: "source:Sample/command:hello" }] }, null)?.[0].commandId, "source:Sample/command:hello");
+  assert.equal(composerStatusItems({ status: "ok", projectId: null, items: [{ ...mcp, commandId: "x".repeat(513) }] }, null)?.[0].commandId, null);
 });
 
 test("composer status refuses another project's answer, refusals and malformed answers", () => {

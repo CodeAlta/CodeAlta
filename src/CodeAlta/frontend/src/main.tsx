@@ -1,7 +1,7 @@
 import { Button, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext } from "@blueprintjs/core";
 import { connect, onDiagnostic } from "@neoastra/client";
 import { rpcFailureCode } from "./rpcDiagnostics";
-import { StrictMode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
+import { StrictMode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { ComposerStatus } from "./ComposerStatus";
@@ -15,7 +15,7 @@ import { showToast } from "./appToaster";
 import { availableUpdate, installedNotice, UpdateNotice } from "./UpdateNotice";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
-  sessionAsks, sessionNotes, sessionPluginEvents, projectGit, promptImages, composerStatus, sessionUserInput, type BootStatus,
+  sessionAsks, sessionNotes, sessionPluginEvents, projectGit, promptImages, composerStatus, pluginUi, sessionUserInput, type BootStatus,
   type ReminderListRequest,
   type ReminderListResponse,
   type ReminderDetailRequest,
@@ -129,6 +129,10 @@ import { createApplicationLogClearActions } from "./applicationLogClear";
 import { SessionInfoDialog, type SessionInfoLifetime } from "./SessionInfoDialog";
 import { selectedSessionInfoAvailable, selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
 import { CommandPalette } from "./CommandPalette";
+import { PluginUiHost } from "./PluginUiHost";
+import { PluginRegionSlot } from "./PluginRegions";
+import { askPluginComposer, noPluginContributions, pluginCommandAvailable, pluginContributions, pluginKeymap, PluginUiContext, resolvePluginKey,
+  findPluginCommand, type PluginComposerRequest, type PluginContributionsView, type PluginPane, type PluginUiValue } from "./pluginUi";
 import { CommandHelp } from "./CommandHelp";
 import { resolveCommandKey, type CommandId } from "./commandRegistry";
 import { createPaletteFocusRestoration } from "./paletteActions";
@@ -309,6 +313,7 @@ function App() {
   function setPaletteOpen(value: boolean) { invalidateCreation(true); writePaletteOpen(value); }
   const paletteOrigin = useRef<HTMLElement | null>(null);
   const palettePending = useRef<CommandId | null>(null);
+  const [pluginContributed, setPluginContributed] = useState<PluginContributionsView>(noPluginContributions);
   // True after Ctrl+G, until the second stroke of the chord.
   const commandChord = useRef(false);
   const [configurationState, setConfigurationState] = useState<{ snapshot?: ConfigurationSnapshot; error?: string }>({});
@@ -1006,6 +1011,45 @@ function App() {
     runCommand(command);
   });
 
+  // What plugins contribute for the selected project: their commands and shortcuts, and their prompt pickers.
+  const pluginEpoch = owned ? status?.hostEpoch ?? null : null;
+  const pluginProjectId = projectId ?? null;
+  useEffect(() => {
+    if (!pluginEpoch) { setPluginContributed(noPluginContributions); return; }
+    const abort = new AbortController();
+    void pluginUi.contributions({ expectedEpoch: pluginEpoch, projectId: pluginProjectId, sessionId: null }, { signal: abort.signal, timeoutMilliseconds: 8000 })
+      .then(reply => { if (!abort.signal.aborted) setPluginContributed(pluginContributions(reply, pluginProjectId) ?? noPluginContributions); },
+        () => { if (!abort.signal.aborted) setPluginContributed(noPluginContributions); });
+    return () => abort.abort();
+  }, [pluginEpoch, pluginProjectId]);
+  // A plugin command runs for a pane: the one named, or the focused one. Its composer says what it holds.
+  function runPluginCommand(commandId: string, pane?: Partial<PluginPane>) {
+    const command = pluginContributed.commands.find(value => value.id === commandId);
+    if (!command || !pluginEpoch) return;
+    const composer = askPluginComposer("state", pane?.sessionId ?? null).state;
+    const target: PluginPane = {
+      projectId: pane?.projectId !== undefined ? pane.projectId : pluginProjectId,
+      sessionId: pane?.sessionId ?? composer?.sessionId ?? null,
+      busy: pane?.busy ?? composer?.busy ?? false, draftText: pane?.draftText ?? composer?.draftText ?? null,
+    };
+    const unavailable = () => showToast({ message: t("The command /{name} is not available here.", { name: command.name }), intent: "warning", icon: "warning-sign", timeout: 6000 });
+    if (!pluginCommandAvailable(command, target)) { unavailable(); return; }
+    void pluginUi.invokeCommand({ expectedEpoch: pluginEpoch, commandId, projectId: target.projectId, sessionId: target.sessionId,
+      sessionBusy: target.busy, draftText: target.draftText }, { timeoutMilliseconds: 8000 })
+      .then(reply => { if (reply.status !== "started") unavailable(); }, unavailable);
+  }
+  const pluginKeys = useMemo(() => pluginKeymap(pluginContributed.commands), [pluginContributed]);
+  const pluginShortcuts = useRef({ keys: pluginKeys, run: runPluginCommand });
+  pluginShortcuts.current = { keys: pluginKeys, run: runPluginCommand };
+  const pluginUiValue = useMemo<PluginUiValue>(() => ({
+    epoch: pluginEpoch, projectId: pluginProjectId, contributions: pluginContributed,
+    run: (commandId, pane) => pluginShortcuts.current.run(commandId, pane),
+    runNamed: (name, pluginKey, pane) => {
+      const command = findPluginCommand(pluginContributed.commands, name, pluginKey);
+      if (command) pluginShortcuts.current.run(command.id, pane);
+    },
+  }), [pluginEpoch, pluginProjectId, pluginContributed]);
+
   // Session-scoped commands need an open session that is not behind a file tab; everything else is always offered.
   function commandAvailable(command: CommandId): boolean {
     const session = view === "workspace" && !!selectedSession && !fileTabs.active;
@@ -1081,7 +1125,11 @@ function App() {
       const resolved = focus === "none" && !commandChord.current && event.key === "?" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.repeat
         ? { command: "help" as CommandId, chord: false, handled: true }
         : resolveCommandKey(event, commandChord.current, focus);
+      const chorded = commandChord.current;
       commandChord.current = resolved.chord;
+      // A key that no command of the window takes can be the shortcut of a plugin command.
+      const plugin = resolved.command || resolved.chord ? null : resolvePluginKey(event, chorded, focus, pluginShortcuts.current.keys);
+      if (plugin) { event.preventDefault(); event.stopPropagation(); pluginShortcuts.current.run(plugin.id); return; }
       if (!resolved.handled) return;
       event.preventDefault(); event.stopPropagation();
       if (resolved.command) runCommand(resolved.command);
@@ -1688,7 +1736,7 @@ function App() {
   const newPromptDisabled = creatingBusy || creationLocked || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !snapshot
     || !!selectedProject?.archived || projectId !== null && !selectedProject || (!localDraft.text.trim() && !localImages.images.length)
     || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim());
-  return <ShellLanguageContext.Provider value={language}><div className="app-shell ide-shell">
+  return <ShellLanguageContext.Provider value={language}><PluginUiContext.Provider value={pluginUiValue}><div className="app-shell ide-shell">
     {(hostSilent || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {hostSilent && <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
         <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button></div>}
@@ -2022,7 +2070,7 @@ function App() {
         navigate("workspace");
         return true;
       }} onClose={() => setDialog(null)} />}
-    {dialog === "help" && <CommandHelp onClose={closeHelp} />}
+    {dialog === "help" && <CommandHelp onClose={closeHelp} pluginCommands={pluginContributed.commands} />}
     {dialog === "file" && filePickerProject && <OpenFileDialog epoch={status!.hostEpoch!} project={filePickerProject}
       observe={value => mutation?.capability.observe(value)} onClose={() => setDialog(null)}
       onOpen={path => { setDialog(null); openFile({ projectId: filePickerProject.id, projectPath: filePickerProject.path, path }); }} />}
@@ -2055,8 +2103,18 @@ function App() {
         if (creationAlive.current && currentHostEpoch.current === epoch && mutation.capability.canMutate() && version === browserRevision.current && fresh.configured)
           publishWorkspaceState({ kind: "ready", snapshot: fresh });
       }} />
-    {paletteOpen && <CommandPalette available={commandAvailable} onChoose={choosePalette} onClose={dismissPalette} />}
-  </div></ShellLanguageContext.Provider>;
+    {paletteOpen && <CommandPalette available={commandAvailable} onChoose={choosePalette} onClose={dismissPalette}
+      pluginCommands={pluginContributed.commands} onChoosePlugin={command => {
+        focusRestoration.cancel();
+        setPaletteOpen(false);
+        // After the palette is gone and the focus is back where it was opened from.
+        requestAnimationFrame(() => { if (paletteOrigin.current?.isConnected) paletteOrigin.current.focus(); pluginShortcuts.current.run(command); });
+      }} />}
+    <PluginUiHost epoch={pluginEpoch}
+      onPrompt={request => ["send", "enqueue", "steer", "compact"].includes(request.mode ?? "")
+        && askPluginComposer(request.mode as PluginComposerRequest["kind"], request.sessionId ?? null, request.text ?? null).result}
+      onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
+  </div></PluginUiContext.Provider></ShellLanguageContext.Provider>;
 }
 
 // Native modal matches the other shell dialogs: showModal supplies inert background,
@@ -2120,10 +2178,14 @@ function visibleAsk(selector: string): HTMLElement | null {
 
 function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["projects"][number] | undefined, sessionId: string | null = null): ComposerChromeValue {
   const id = project?.id, name = project?.name, path = project?.path;
+  // The regions are read only when a plugin has content for them.
+  const regions = useContext(PluginUiContext).contributions.regions;
   return useMemo(() => ({ context: id !== undefined && name !== undefined && path !== undefined
     ? <ProjectContext epoch={epoch} project={{ id, name, path }} read={projectGit.status} /> : undefined,
-  status: epoch ? <ComposerStatus epoch={epoch} projectId={id ?? null} sessionId={sessionId} read={composerStatus.read} /> : undefined }),
-  [epoch, id, name, path, sessionId]);
+  status: epoch ? <>{regions && <PluginRegionSlot epoch={epoch} projectId={id ?? null} sessionId={sessionId} region="inline" read={pluginUi.regions} />}
+    <ComposerStatus epoch={epoch} projectId={id ?? null} sessionId={sessionId} read={composerStatus.read} /></> : undefined,
+  footer: epoch && regions ? <PluginRegionSlot epoch={epoch} projectId={id ?? null} sessionId={sessionId} region="footer" read={pluginUi.regions} /> : undefined }),
+  [epoch, id, name, path, sessionId, regions]);
 }
 
 function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, timelineImages, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity }: {

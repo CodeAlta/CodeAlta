@@ -10,6 +10,9 @@
 /** Where the application keeps the colors of its theme for the next start. */
 export const splashStorageKey = "codealta.desktop.splash.v1";
 
+/** The document the host answers with what it is doing while it starts: `{ "text": string }`. */
+export const splashStatusDocument = "./startup-status.json";
+
 /** The colors the start-up screen takes from the last theme; each is `#rrggbb`. */
 export const splashColorNames = ["background", "surface", "text", "accent", "line"] as const;
 export type SplashColors = Readonly<Record<typeof splashColorNames[number], string>>;
@@ -54,6 +57,23 @@ export const splashScript = `(function () {
     });
   } catch (error) { /* The default colors stay. */ }
 })();
+(function () {
+  // While the host starts, the start-up document shows what the host reports: a plugin being built.
+  // The application document has its own bridge and does not ask.
+  function poll() {
+    var line = document.getElementById("splash-status");
+    if (!line || document.getElementById("root")) return;
+    fetch(${JSON.stringify(splashStatusDocument)}, { cache: "no-store" })
+      .then(function (response) { return response.ok ? response.json() : null; })
+      .then(function (status) { if (status && typeof status.text === "string") line.textContent = status.text.slice(0, 160); })
+      .catch(function () { /* The line stays as it is. */ })
+      .then(function () { setTimeout(poll, 300); });
+  }
+  try {
+    if (typeof document.addEventListener !== "function" || typeof fetch !== "function") return;
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", poll); else poll();
+  } catch (error) { /* No status line. */ }
+})();
 `;
 
 const color = (name: keyof SplashColors) => `var(--splash-${name}, ${defaultSplashColors[name]})`;
@@ -74,12 +94,13 @@ html { background: ${color("background")}; }
 #splash .splash-progress { position: relative; width: 168px; height: 3px; overflow: hidden; border-radius: 2px; background: ${color("line")}; }
 #splash .splash-progress::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 40%; border-radius: 2px; background: ${color("accent")};
   animation: splash-progress 1.15s cubic-bezier(.45, .05, .55, .95) infinite; }
+#splash .splash-status { min-height: 17px; margin-top: -10px; max-width: 80vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; opacity: .72; }
 @keyframes splash-progress { from { transform: translateX(-110%); } to { transform: translateX(270%); } }
 @media (prefers-reduced-motion: reduce) { #splash .splash-progress::after { animation: none; width: 100%; opacity: .55; } }
 </style>
 <div id="splash" role="status" aria-label="CodeAlta">
   <div class="splash-titlebar" data-neoastra-drag-region>${mark}<span>CodeAlta</span></div>
-  <div class="splash-body">${mark}<div class="splash-progress"></div></div>
+  <div class="splash-body">${mark}<div class="splash-progress"></div><div class="splash-status" id="splash-status"></div></div>
 </div>`;
 }
 

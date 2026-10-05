@@ -40,7 +40,7 @@ public sealed class DesktopPluginsTests
             {
                 GlobalRoot = global, CurrentProjectPath = project, IsHeadless = true,
                 PluginBuiltIns = [new BuiltInPluginDefinition { Id = "fixture", DisplayName = "Fixture", PluginType = typeof(FixturePlugin), Factory = static () => new FixturePlugin() }],
-                PluginServices = new DesktopPluginServices(pluginAlta),
+                PluginServices = new DesktopPluginServices(pluginAlta, new DesktopPluginUi()),
             }, CancellationToken.None);
             var before = await pluginAlta.InvokeAsync(["fixture-echo"]);
 
@@ -67,7 +67,7 @@ public sealed class DesktopPluginsTests
     [TestMethod]
     public void PluginWorkspace_NamesNoProjectOutsideAToolCall()
     {
-        var workspace = new DesktopPluginServices(new PluginAltaServiceBridge()).Workspace;
+        var workspace = new DesktopPluginServices(new PluginAltaServiceBridge(), new DesktopPluginUi()).Workspace;
 
         Assert.IsNull(workspace.SelectedProjectId);
         Assert.IsNull(workspace.SelectedProjectPath);

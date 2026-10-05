@@ -4,6 +4,7 @@ import { AppIcon } from "./AppIcon";
 import { AppWindow } from "./AppWindow";
 import { KeyGesture } from "./CommandPalette";
 import { commandCategories, commandDefinitions, commandKeys } from "./commandRegistry";
+import type { PluginCommandView } from "./pluginUi";
 import { useShellLanguage } from "./shellLanguage";
 
 /** Extra prompt-editor keys that are not commands. */
@@ -12,7 +13,7 @@ const editorKeys: readonly (readonly [string, "New line" | "Previous sent prompt
 ];
 
 /** The help window (F1, or "?" in an empty prompt): every command with its shortcuts, grouped like the terminal UI's help. */
-export function CommandHelp({ onClose }: { onClose: () => void }) {
+export function CommandHelp({ onClose, pluginCommands = [] }: { onClose: () => void; pluginCommands?: readonly PluginCommandView[] }) {
   const { t } = useShellLanguage();
   const [filter, setFilter] = useState("");
   const filterInput = useRef<HTMLInputElement>(null);
@@ -23,6 +24,9 @@ export function CommandHelp({ onClose }: { onClose: () => void }) {
       && shown(`${command.name} ${t(command.label)} ${t(command.description)} ${commandKeys(command).join(" ")}`))
       .sort((left, right) => t(left.label).localeCompare(t(right.label))) })).filter(group => group.rows.length > 0);
   const editor = editorKeys.filter(([keys, label]) => shown(`${keys} ${t(label)}`));
+  // Plugin commands are listed with their slash name: they run from the palette even without a shortcut.
+  const plugins = pluginCommands.filter(command => command.help && shown(`${command.name} ${command.label} ${command.description} ${command.plugin} ${command.keys ?? ""}`))
+    .sort((left, right) => left.label.localeCompare(right.label));
   return <AppWindow storageKey="codealta.desktop.window.help.v1" className="command-help-dialog" titleId="shortcut-title" title={t("Commands and shortcuts")}
     preferredSize={viewport => ({ width: Math.min(980, viewport.width - 40), height: Math.min(720, viewport.height - 40) })} minimumSize={{ width: 420, height: 320 }}
     onClose={onClose} closeLabel={t("Close")} onOpened={() => filterInput.current?.focus()} onCancel={event => { event.preventDefault(); onClose(); }}
@@ -43,7 +47,14 @@ export function CommandHelp({ onClose }: { onClose: () => void }) {
           <h3>{t("Prompt editor")}</h3>
           <dl>{editor.map(([keys, label]) => <div key={keys}><dt><strong>{t(label)}</strong></dt><dd><KeyGesture gesture={keys} /></dd></div>)}</dl>
         </section>}
-        {groups.length === 0 && editor.length === 0 && <p className="bp6-text-muted">{t("No command matches.")}</p>}
+        {plugins.length > 0 && <section aria-label={t("Plugins")}>
+          <h3>{t("Plugins")}</h3>
+          <dl>{plugins.map(command => <div key={command.id}>
+            <dt><strong>{command.label}</strong><span>{command.description}</span></dt>
+            <dd>{command.keys ? <KeyGesture gesture={command.keys} /> : <code>/{command.name}</code>}</dd>
+          </div>)}</dl>
+        </section>}
+        {groups.length === 0 && editor.length === 0 && plugins.length === 0 && <p className="bp6-text-muted">{t("No command matches.")}</p>}
       </div>
     </div>
   </AppWindow>;

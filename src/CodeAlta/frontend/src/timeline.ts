@@ -26,6 +26,12 @@ export type TimelineItem = Readonly<{
   truncated: boolean;
   bodyOmitted: boolean;
   copyMarkdown: string | null;
+  /** An HTML fragment a plugin gave for its card: shown instead of the summary, after sanitizing. */
+  html?: string | null;
+  /** The detail sections of a card that has an HTML section, in order: each is an HTML fragment or Markdown. */
+  detailSections?: ReadonlyArray<Readonly<{ header: string; html: string | null; markdown: string | null }>>;
+  /** The plugin a card comes from, for the commands its fragments name. */
+  pluginKey?: string;
   fileChanges?: FileChanges;
   /** The images attached to a user message; their content is read by index. */
   images?: ReadonlyArray<TimelineImage>;

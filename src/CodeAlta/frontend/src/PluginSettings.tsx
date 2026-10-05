@@ -14,6 +14,12 @@ const builtIn: readonly { id: string; name: string; description: MessageKey }[] 
   { id: "statistics", name: "Statistics", description: "Per-turn and session statistics." },
 ];
 const stateIntent: Record<string, Intent> = { Enabled: "success", Failed: "danger", Changed: "warning", Disabled: "none", Configured: "none" };
+// What the running application did with an enabled plugin, when that is not simply "running".
+const runtimeTag: Record<string, { label: MessageKey; intent: Intent }> = {
+  unsupported: { label: "Not supported in the desktop application", intent: "none" },
+  failed: { label: "Failed", intent: "danger" },
+  stopped: { label: "Not started", intent: "warning" },
+};
 
 /** Settings page for plugins: one list with an enable switch per plugin. */
 export function PluginSettings({ epoch, project, api = plugins }: { epoch: string | null; project: SettingsProject; api?: typeof plugins }) {
@@ -39,10 +45,13 @@ export function PluginSettings({ epoch, project, api = plugins }: { epoch: strin
       {project && <div className="settings-editor-toolbar"><ScopeChoice value={scope} project={project} disabled={busy} onChange={setScope} /></div>}
       <CardList compact className="settings-editor-rows" aria-label={t("Plugins")}>
         {rows.map(row => <Card key={row.id}>
-          <span className="settings-editor-name"><strong>{row.name}</strong><small>{row.description || row.id}</small></span>
+          <span className="settings-editor-name"><strong>{row.name}</strong><small>{row.description || row.id}</small>
+            {row.entry?.runtime === "failed" && row.entry.runtimeMessage && <small className="plugin-failure">{row.entry.runtimeMessage}</small>}</span>
           <span className="settings-editor-tags"><Tag minimal round>{t(row.builtIn ? "Built-in" : row.entry?.scope === "Project" ? "Project" : "User")}</Tag>
             {row.entry && row.entry.kind === "Source" && row.entry.state !== "Enabled" && row.entry.state !== "Disabled"
               && <Tag minimal round intent={stateIntent[row.entry.state] ?? "none"}>{row.entry.state}</Tag>}
+            {row.entry?.runtime && runtimeTag[row.entry.runtime] && !(row.entry.runtime === "failed" && row.entry.state === "Failed")
+              && <Tag minimal round intent={runtimeTag[row.entry.runtime].intent}>{t(runtimeTag[row.entry.runtime].label)}</Tag>}
             <Switch checked={row.enabled} disabled={busy} aria-label={t("Enable {name}", { name: row.name })} onChange={event => toggle(row.id, event.currentTarget.checked)} /></span>
         </Card>)}
       </CardList>

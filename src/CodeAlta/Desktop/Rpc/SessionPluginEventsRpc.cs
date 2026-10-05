@@ -4,13 +4,15 @@ using CodeAlta.Catalog;
 using CodeAlta.Plugin.Statistics;
 using CodeAlta.Plugins.Abstractions;
 using NeoAstra.Rpc;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Desktop.Rpc;
 
 /// <summary>
-/// Timeline cards that built-in plugins derive from the events of a session, such as the Statistics plugin's
-/// summary of each completed turn. The terminal host gets them from the plugin runtime as events arrive; the
-/// desktop host derives them from the journal when the page asks, with a projection of its own.
+/// Timeline cards that plugins derive from the events of a session, such as the Statistics plugin's summary
+/// of each completed turn. The terminal host gets them from the plugin runtime as events arrive; the desktop
+/// host derives them from the journal when the page asks: the Statistics cards with a projection of its own,
+/// the cards of the other plugins with the projections the plugin runtime holds.
 /// </summary>
 /// <remarks>
 /// A turn can only be summarized from all of its events, so the journal is read backwards from its end until
@@ -32,6 +34,7 @@ internal sealed class SessionPluginEventsService
     internal const int MaximumMarkdownUnits = 4096;
     internal const int MaximumDetailUnits = 16 * 1024;
     internal const int MaximumDetailSections = 4;
+    internal const int MaximumHtmlUnits = 16 * 1024;
     private const int MaximumHeaderUnits = 128;
     private const int MaximumResponseUnits = 96 * 1024;
 
@@ -47,6 +50,8 @@ internal sealed class SessionPluginEventsService
     private readonly Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>>? _read;
     private readonly Func<string?, CancellationToken, Task<bool>>? _statisticsEnabled;
     private readonly string? _epoch;
+    private readonly ProjectCatalog? _projects;
+    private readonly CodeAlta.Plugins.PluginRuntimeManager? _plugins;
     // One instance for the host: it keeps the summary of each completed turn it has already built.
     private readonly PluginSessionEventProjectionContribution[] _statistics = [.. new StatisticsPlugin().GetSessionEventProjections()];
 
@@ -59,11 +64,14 @@ internal sealed class SessionPluginEventsService
     /// <param name="read">Reads one reverse journal page of a session; a null cursor means its end.</param>
     /// <param name="statisticsEnabled">Whether the Statistics plugin is enabled for a project id (null for global sessions).</param>
     /// <param name="epoch">The host epoch that requests must name.</param>
+    /// <param name="projects">The project catalog that resolves the project of a request for the other plugins, or null.</param>
+    /// <param name="plugins">The plugin runtime whose other projections are run, or null.</param>
     /// <exception cref="ArgumentNullException">A callback is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="epoch"/> is blank.</exception>
     internal SessionPluginEventsService(
         Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>> read,
-        Func<string?, CancellationToken, Task<bool>> statisticsEnabled, string epoch)
+        Func<string?, CancellationToken, Task<bool>> statisticsEnabled, string epoch,
+        ProjectCatalog? projects = null, CodeAlta.Plugins.PluginRuntimeManager? plugins = null)
     {
         ArgumentNullException.ThrowIfNull(read);
         ArgumentNullException.ThrowIfNull(statisticsEnabled);
@@ -71,14 +79,18 @@ internal sealed class SessionPluginEventsService
         _read = read;
         _statisticsEnabled = statisticsEnabled;
         _epoch = epoch;
+        _projects = projects;
+        _plugins = plugins;
     }
 
     /// <summary>Creates the service for an owned host.</summary>
     /// <param name="reads">The host's admitted session reads.</param>
     /// <param name="projects">The host's project catalog; its global root holds the configuration.</param>
     /// <param name="epoch">The host epoch that requests must name.</param>
-    internal SessionPluginEventsService(CodeAlta.Orchestration.Runtime.OwnedSessionWorkspace reads, ProjectCatalog projects, string epoch)
-        : this((reads ?? throw new ArgumentNullException(nameof(reads))).ReadTimelinePageAsync, StatisticsEnablement(projects), epoch)
+    /// <param name="plugins">The host's plugin runtime, or null when the host runs no plugin.</param>
+    internal SessionPluginEventsService(CodeAlta.Orchestration.Runtime.OwnedSessionWorkspace reads, ProjectCatalog projects, string epoch,
+        CodeAlta.Plugins.PluginRuntimeManager? plugins = null)
+        : this((reads ?? throw new ArgumentNullException(nameof(reads))).ReadTimelinePageAsync, StatisticsEnablement(projects), epoch, projects, plugins)
     {
     }
 
@@ -94,24 +106,47 @@ internal sealed class SessionPluginEventsService
         cancellationToken.ThrowIfCancellationRequested();
         try
         {
-            if (!await _statisticsEnabled(request.ProjectId, cancellationToken).ConfigureAwait(false)) return new("ok", sessionId, []);
+            var statistics = await _statisticsEnabled(request.ProjectId, cancellationToken).ConfigureAwait(false);
+            var others = await OtherProjectionsAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
+            if (!statistics && others.Count == 0) return new("ok", sessionId, []);
             var events = await ReadTurnsAsync(_read, sessionId, request.NotBefore, cancellationToken).ConfigureAwait(false);
             if (events.Count == 0) return new("ok", sessionId, []);
             var cards = new List<SessionPluginEvent>();
-            foreach (var contribution in _statistics)
+            PluginSessionEventProjectionContext Context(PluginContributionHandle handle, string? projectPath) => new()
             {
-                var derived = await contribution.ProjectAsync(new PluginSessionEventProjectionContext
+                Handle = handle,
+                SessionId = sessionId,
+                ProjectId = request.ProjectId,
+                ProjectPath = projectPath,
+                RuntimeSessionId = events[^1].SessionId,
+                RunId = events.LastOrDefault(static item => item.RunId is not null)?.RunId?.Value,
+                Events = events,
+                IsReplay = true,
+                IsCompleteBatch = true,
+            };
+            if (statistics)
+            {
+                foreach (var contribution in _statistics)
                 {
-                    Handle = StatisticsHandle,
-                    SessionId = sessionId,
-                    ProjectId = request.ProjectId,
-                    RuntimeSessionId = events[^1].SessionId,
-                    RunId = events.LastOrDefault(static item => item.RunId is not null)?.RunId?.Value,
-                    Events = events,
-                    IsReplay = true,
-                    IsCompleteBatch = true,
-                }, cancellationToken).ConfigureAwait(false);
-                cards.AddRange(derived.Where(static item => !item.Remove).Select(item => Project(item, events[^1].Timestamp)));
+                    var derived = await contribution.ProjectAsync(Context(StatisticsHandle, null), cancellationToken).ConfigureAwait(false);
+                    cards.AddRange(derived.Where(static item => !item.Remove).Select(item => Project(item, StatisticsPluginId, events[^1].Timestamp)));
+                }
+            }
+
+            foreach (var (registration, projectPath) in others)
+            {
+                try
+                {
+                    var contribution = (PluginSessionEventProjectionContribution)registration.Contribution;
+                    var derived = await contribution.ProjectAsync(Context(registration.Handle, projectPath), cancellationToken).ConfigureAwait(false);
+                    cards.AddRange(derived.Where(static item => item is not null && !item.Remove)
+                        .Select(item => Project(item, registration.Handle.PluginRuntimeKey, events[^1].Timestamp)));
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    // One plugin failing leaves the cards of the others.
+                    LogManager.GetLogger("CodeAlta.Desktop.Plugins").Error(exception, $"Session event projection of '{registration.Handle.PluginRuntimeKey}' failed");
+                }
             }
 
             // The newest turns matter most: keep them when the response would be too large.
@@ -119,7 +154,8 @@ internal sealed class SessionPluginEventsService
             var budget = MaximumResponseUnits;
             foreach (var card in cards.Where(card => card.Timestamp >= request.NotBefore).OrderByDescending(static card => card.Timestamp))
             {
-                var cost = 256 + card.EventId.Length + card.Markdown.Length + card.Details.Sum(static detail => detail.Header.Length + detail.Markdown.Length);
+                var cost = 256 + card.EventId.Length + card.Markdown.Length + (card.Html?.Length ?? 0)
+                    + card.Details.Sum(static detail => detail.Header.Length + detail.Markdown.Length + (detail.Html?.Length ?? 0));
                 if (kept.Count == MaximumEvents || cost > budget) break;
                 budget -= cost;
                 kept.Add(card);
@@ -176,13 +212,32 @@ internal sealed class SessionPluginEventsService
         return ordered;
     }
 
-    private static SessionPluginEvent Project(PluginDerivedSessionEvent derived, DateTimeOffset fallback)
+    /// <summary>
+    /// The projections of the active plugins that apply to the project, the Statistics plugin left out: its
+    /// cards come from this service's own instance, with its switch read from the configuration at each call.
+    /// </summary>
+    private async ValueTask<IReadOnlyList<(CodeAlta.Plugins.PluginContributionRegistration Registration, string? ProjectPath)>> OtherProjectionsAsync(
+        string? projectId, CancellationToken cancellationToken)
+    {
+        if (_plugins is null || _projects is null) return [];
+        var project = await SettingsProjectScope.ResolveAsync(_projects, projectId, allowArchived: true, cancellationToken).ConfigureAwait(false);
+        if (project.Status != "ok") return [];
+        var options = new CodeAlta.Plugins.PluginAdapterOperationOptions { ProjectId = projectId, ProjectPath = project.Root, HasInteractiveUi = true };
+        return [.. _plugins.Adapter.GetContributions<PluginSessionEventProjectionContribution>(PluginPoint.SessionEventProjection, options)
+            .Where(static registration => !string.Equals(registration.Handle.PluginRuntimeKey, StatisticsHandle.PluginRuntimeKey, StringComparison.Ordinal))
+            .Select(registration => (registration, project.Root))];
+    }
+
+    private static SessionPluginEvent Project(PluginDerivedSessionEvent derived, string pluginId, DateTimeOffset fallback)
     {
         var sections = derived.DynamicContent?.DetailSections is { Count: > 0 } dynamic ? dynamic : derived.DetailSections;
-        return new(Cut(derived.EventId, 512), StatisticsPluginId, derived.Timestamp ?? fallback,
+        var html = derived.DynamicContent?.Html ?? derived.Html;
+        return new(Cut(derived.EventId, 512), Cut(pluginId, 512), derived.Timestamp ?? fallback,
             Cut(derived.DynamicContent?.Markdown ?? derived.Markdown ?? string.Empty, MaximumMarkdownUnits),
             [.. sections.Take(MaximumDetailSections).Select(static section =>
-                new SessionPluginEventDetail(Cut(section.Header, MaximumHeaderUnits), Cut(section.Markdown, MaximumDetailUnits)))]);
+                new SessionPluginEventDetail(Cut(section.Header, MaximumHeaderUnits), Cut(section.Markdown, MaximumDetailUnits),
+                    section.Html is null ? null : Cut(section.Html, MaximumHtmlUnits)))],
+            html is null ? null : Cut(html, MaximumHtmlUnits));
     }
 
     // Cuts between characters, never inside a surrogate pair.
@@ -222,8 +277,12 @@ internal sealed record SessionPluginEventsRequest(string ExpectedHostEpoch, stri
 /// <summary><c>ok</c> with the cards oldest first, or a refusal code with none.</summary>
 internal sealed record SessionPluginEventsResponse(string Status, string? SessionId, SessionPluginEvent[] Events);
 
-/// <summary>One plugin-derived timeline card: a one-paragraph Markdown summary and collapsed Markdown details.</summary>
-internal sealed record SessionPluginEvent(string EventId, string PluginId, DateTimeOffset Timestamp, string Markdown, SessionPluginEventDetail[] Details);
+/// <summary>
+/// One plugin-derived timeline card: a one-paragraph Markdown summary and collapsed Markdown details. When
+/// the plugin gives an HTML fragment, the page shows it instead of the Markdown, which stays what Copy uses.
+/// </summary>
+internal sealed record SessionPluginEvent(string EventId, string PluginId, DateTimeOffset Timestamp, string Markdown, SessionPluginEventDetail[] Details,
+    string? Html = null);
 
-/// <summary>A titled Markdown detail section of a card.</summary>
-internal sealed record SessionPluginEventDetail(string Header, string Markdown);
+/// <summary>A titled detail section of a card: Markdown, and an HTML fragment shown instead when there is one.</summary>
+internal sealed record SessionPluginEventDetail(string Header, string Markdown, string? Html = null);

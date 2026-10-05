@@ -2,6 +2,7 @@ import { AppWindowSurface } from "./AppWindow";
 import { useLayoutEffect, useRef } from "react";
 import type { TimelineItem } from "./timeline";
 import { MarkdownContent } from "./MarkdownContent";
+import { PluginHtml } from "./PluginHtml";
 import { AppIcon } from "./AppIcon";
 import { useShellLanguage } from "./shellLanguage";
 import { CodePreview } from "./CodePreview";
@@ -31,9 +32,12 @@ export function TimelineDetails({ item, current, onClose }: { item: TimelineItem
     <AppWindowSurface storageKey="codealta.desktop.window.timeline-details.v1" title={item.title} preferredSize={viewport => ({ width: Math.min(900, viewport.width - 40), height: Math.min(640, viewport.height - 40) })}
       onClose={onClose} closeLabel={t("Close")} closeRef={close}>
     <div className="dialog-panes">
-    {item.summary && <section className="detail-pane"><CodePreview text={item.summary} /></section>}
+    {item.html && <section className="detail-pane"><PluginHtml html={item.html} pluginKey={item.pluginKey} /></section>}
+    {item.summary && !item.html && <section className="detail-pane"><CodePreview text={item.summary} /></section>}
     {item.markdown && item.category !== "file" && <section className="detail-pane"><MarkdownContent source={item.markdown} timelineCodeBlocks /></section>}
     {item.detailMarkdown && item.category !== "file" && item.detailMarkdown !== item.markdown && <section className="detail-pane"><MarkdownContent source={item.detailMarkdown} timelineCodeBlocks /></section>}
+    {item.detailSections?.map((detail, index) => <section className="detail-pane plugin-detail" key={index}><h3>{detail.header}</h3>
+      {detail.html ? <PluginHtml html={detail.html} pluginKey={item.pluginKey} /> : <MarkdownContent source={detail.markdown ?? ""} timelineCodeBlocks />}</section>)}
     {(item.toolFields?.length ? item.toolFields : item.toolRecord?.fields)?.map(field => <section className="detail-pane" key={field.path}><h3>{field.path}</h3><CodePreview text={field.text} field={field.path} /></section>)}
     {item.toolOutput && ![...(item.toolFields ?? []), ...(item.toolRecord?.fields ?? [])].some(field => field.text.includes(item.toolOutput!)) && <section className="detail-pane"><CodePreview text={item.toolOutput} /></section>}
     {item.details && !["tool", "file"].includes(item.category) && <section className="detail-pane"><pre>{item.details}</pre></section>}

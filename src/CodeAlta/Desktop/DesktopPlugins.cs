@@ -66,32 +66,56 @@ internal static class DesktopPlugins
             else if (diagnostic.Severity == PluginDiagnosticSeverity.Warning) logger.Warn($"Plugin {diagnostic.Source}: {text}");
         }
     }
+
+    /// <summary>
+    /// The notice the window shows when plugins failed to build or start: it names them and says where the
+    /// reason is. Null when none failed.
+    /// </summary>
+    /// <param name="diagnostics">The diagnostics of the plugin runtime after it started.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="diagnostics"/> is null.</exception>
+    internal static string? DescribeStartupFailures(IReadOnlyList<PluginRuntimeDiagnostic> diagnostics)
+    {
+        ArgumentNullException.ThrowIfNull(diagnostics);
+        var failed = diagnostics.Where(static diagnostic => diagnostic.Severity >= PluginDiagnosticSeverity.Error)
+            .Select(static diagnostic => diagnostic.PackageId ?? diagnostic.RuntimeKey)
+            .Where(static name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        return failed.Length switch
+        {
+            0 => null,
+            1 => $"The plugin {failed[0]} could not be started. Settings > Plugins shows why.",
+            <= 3 => $"The plugins {string.Join(", ", failed)} could not be started. Settings > Plugins shows why.",
+            _ => $"{failed.Length} plugins could not be started. Settings > Plugins shows why.",
+        };
+    }
 }
 
 /// <summary>
-/// The services the desktop host gives its plugins: the <c>alta</c> commands, and a workspace whose
-/// "selected project" is the project of the session whose tool call is running.
+/// The services the desktop host gives its plugins: the <c>alta</c> commands, the window (dialogs,
+/// notifications, the prompt and the session of the pane a command was started from), and a workspace whose
+/// "selected project" is the project of the running operation.
 /// </summary>
 /// <remarks>
-/// The window shows several sessions at once and runs them concurrently, so no project is selected for the
-/// host as a whole. Outside a tool call the workspace names no project, and a plugin uses the project its
+/// The window shows several sessions at once and runs them concurrently, so no project or session is
+/// selected for the host as a whole. They are those of the session whose tool call is running, or of the
+/// pane where a plugin command was started; outside both there is none, and a plugin uses the project its
 /// operation context carries.
 /// </remarks>
-internal sealed class DesktopPluginServices(IPluginAltaService alta) : IPluginServices
+internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPluginUi ui) : IPluginServices
 {
     private readonly NoopPluginServices _inner = NoopPluginServices.Create();
+    private readonly DesktopPluginUi _ui = ui ?? throw new ArgumentNullException(nameof(ui));
 
     public Logger Logger => _inner.Logger;
 
-    public IPluginUiService Ui => _inner.Ui;
+    public IPluginUiService Ui => _ui;
 
     public IPluginStateStore State => _inner.State;
 
-    public IPluginWorkspaceService Workspace { get; } = new RunWorkspace();
+    public IPluginWorkspaceService Workspace { get; } = new RunWorkspace(ui);
 
-    public IPluginSessionService Sessions => _inner.Sessions;
+    public IPluginSessionService Sessions => _ui;
 
-    public IPluginPromptService Prompts => _inner.Prompts;
+    public IPluginPromptService Prompts => _ui;
 
     public IPluginAgentService Agents => _inner.Agents;
 
@@ -99,11 +123,11 @@ internal sealed class DesktopPluginServices(IPluginAltaService alta) : IPluginSe
 
     public IPluginAltaService Alta { get; } = alta;
 
-    private sealed class RunWorkspace : IPluginWorkspaceService
+    private sealed class RunWorkspace(DesktopPluginUi ui) : IPluginWorkspaceService
     {
-        public string? SelectedProjectId => PluginOrchestrationBridge.CurrentToolOperation?.ProjectId;
+        public string? SelectedProjectId => PluginOrchestrationBridge.CurrentToolOperation?.ProjectId ?? ui.Scope?.ProjectId;
 
-        public string? SelectedProjectPath => PluginOrchestrationBridge.CurrentToolOperation?.ProjectPath;
+        public string? SelectedProjectPath => PluginOrchestrationBridge.CurrentToolOperation?.ProjectPath ?? ui.Scope?.ProjectPath;
 
         public IReadOnlyList<string> ProjectPaths => SelectedProjectPath is { } path ? [path] : [];
 

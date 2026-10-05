@@ -1399,6 +1399,53 @@ dialog.session-browser .session-batch-delete summary { cursor: pointer; color: v
 .composer-plugin-status-item[data-tone="warning"], .composer-plugin-status-item[data-tone="warning"] :is(strong, .bp6-button-text) { color: var(--yellow); }
 .composer-plugin-status-item[data-tone="error"], .composer-plugin-status-item[data-tone="error"] :is(strong, .bp6-button-text) { color: var(--red); }
 
+/* Plugins: the HTML fragments they give, the content they add around the prompt, their dialogs and pickers. */
+.plugin-html { min-width: 0; color: var(--text); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.plugin-html > :first-child { margin-top: 0; }
+.plugin-html > :last-child { margin-bottom: 0; }
+.plugin-html :is(p, ul, ol, dl, table, pre, blockquote, fieldset) { margin: 0 0 8px; }
+.plugin-html :is(h1, h2, h3, h4, h5, h6) { margin: 10px 0 6px; font-size: 13px; font-weight: 600; }
+.plugin-html :is(h1, h2) { font-size: 15px; }
+.plugin-html label { display: inline-flex; align-items: center; gap: 6px; }
+.plugin-html select { min-height: 24px; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); color: var(--text); font: inherit; }
+.plugin-html textarea.bp6-input { width: 100%; min-height: 72px; resize: vertical; font-family: var(--mono, ui-monospace, Consolas, monospace); }
+.plugin-html fieldset { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
+.plugin-html legend { padding: 0 4px; color: var(--muted); font-size: 12px; }
+.plugin-html code { padding: 1px 4px; border-radius: 3px; background: var(--panel-2); font-size: 12px; }
+.plugin-html a { color: var(--accent); cursor: default; text-decoration: none; }
+.plugin-html [data-alta-command], .plugin-html [data-alta-action] { cursor: pointer; }
+.plugin-html .alta-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.plugin-html .alta-column { display: flex; flex-direction: column; gap: 8px; }
+.plugin-html .alta-muted { color: var(--muted); }
+.plugin-html .alta-success:not(.bp6-button, .bp6-tag, .bp6-callout) { color: var(--green); }
+.plugin-html .alta-warning:not(.bp6-button, .bp6-tag, .bp6-callout) { color: var(--yellow); }
+.plugin-html .alta-danger:not(.bp6-button, .bp6-tag, .bp6-callout) { color: var(--red); }
+.composer-plugin-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-bottom: 6px; }
+.plugin-region { display: inline-flex; align-items: center; min-width: 0; color: var(--muted); font-size: 11px; }
+.plugin-region-footer { font-size: 12px; }
+.plugin-region .plugin-html, .plugin-region .markdown-content { color: inherit; font-size: inherit; }
+.plugin-region .markdown-content > * { display: inline; margin: 0; font-size: inherit; }
+.plugin-region .bp6-button.bp6-small { min-height: 20px; padding: 0 7px; font-size: 11px; }
+.ide-shell .timeline-plugin-html .plugin-html { overflow: hidden; color: inherit; font-size: inherit; text-overflow: ellipsis; white-space: nowrap; }
+.ide-shell .timeline-plugin-html .plugin-html > * { display: inline; margin: 0; }
+.plugin-dialog .app-window-body { display: flex; flex-direction: column; min-height: 0; }
+.plugin-dialog-body { display: flex; flex: 1 1 0; flex-direction: column; gap: 10px; min-height: 0; padding: 12px 14px; overflow: auto; }
+.plugin-dialog-body[aria-busy="true"] { opacity: .7; }
+.plugin-dialog-message { margin: 0; white-space: pre-wrap; }
+.plugin-dialog-editor.bp6-input { flex: 1 1 0; min-height: 120px; resize: none; font-family: var(--mono, ui-monospace, Consolas, monospace); font-size: 12px; }
+.plugin-dialog-list { flex: 1 1 0; min-height: 0; overflow-y: auto; outline: none; }
+.plugin-dialog-option { display: flex; align-items: baseline; gap: 10px; min-height: 28px; padding: 4px 10px; border-radius: 5px; cursor: default; }
+.plugin-dialog-option small { color: var(--muted); }
+.plugin-dialog-option[aria-selected="true"] { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+.plugin-dialog-buttons { display: flex; flex: none; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
+.plugin-picker-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 40%); align-items: center; gap: 12px; min-height: 28px; padding: 3px 10px; border-radius: 5px; cursor: default; font-size: 13px; }
+.plugin-picker-row[aria-selected="true"] { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+.plugin-picker-label, .plugin-picker-description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-picker-description { color: var(--muted); font-size: 12px; text-align: right; }
+.plugin-settings .settings-editor-name .plugin-failure { color: var(--red); white-space: normal; overflow-wrap: anywhere; }
+.plugin-detail > h3 { margin: 4px 0 6px; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.plugin-detail + .plugin-detail { margin-top: 12px; }
+
 /* Providers: default markers on blank fields and the account sign-in block. */
 .provider-default-tag.bp6-tag { margin: 5px 6px 0 0; color: var(--muted); }
 .provider-account { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); }
