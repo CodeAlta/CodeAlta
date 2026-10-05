@@ -108,8 +108,7 @@ from the previously documented, still-open 15px scroll observation.
 Session Info Copy remains canonical: English labels plus literal recorded/observed
 data, exact ID Copy, unchanged 32,768-code-unit refusal limit and generation fences.
 Only the button/help/feedback translate. The canonical serializer is independent
-of translated DOM text and browser tests compare it with the previous English
-Copy payload. Language changes never refresh observations or restore permission.
+of translated DOM text. Language changes never refresh observations or restore permission.
 
 Management evidence is under `tmp/management-localization-20260927/`: 137 bounded
 tests pass with zero skips, plus strict TypeScript and production build. Real

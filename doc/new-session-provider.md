@@ -64,10 +64,7 @@ transaction or reload-durable image promise. No automatic Send is added.
 
 Disposable fake-provider owned-host tests exercise the actual non-default runtime
 creation path, exact/disabled/missing/malformed IDs, default behavior, canceled
-waits, held originals, archive exclusion and shutdown drain. Complete actual-App
-browser tests cover descriptor-only choice, six-language canonical IDs, pending and
-uncertain retention, mismatched reply/catalog provider, input/provider/modal ABA,
-draft preservation and narrow light/dark keyboard/focus/synthetic IME behavior.
+waits, held originals, archive exclusion and shutdown drain.
 
 Evidence and exact commands: `tmp/new-session-provider-20260927/REPORT.md` (ignored).
 Native WebView2, real providers/authentication and concurrent external registry/config

@@ -1,0 +1,33 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createApplicationLogClearActions } from "./applicationLogClear";
+import type { ApplicationLogsClearResponse } from "#neoastra";
+
+test("clear owner retains uncertain original request and never retries or unlocks from refresh", async () => {
+  const target = { captureId: "11111111-1111-4111-8111-111111111111", boundary: "42", grant: "22222222-2222-4222-8222-222222222222", rows: 1, captureOmitted: "0", readOmitted: 0 };
+  const next = { ...target, boundary: "43", grant: "33333333-3333-4333-8333-333333333333" };
+  let reject!: (error: Error) => void;
+  let calls = 0;
+  const actions = createApplicationLogClearActions(() => { calls++; return new Promise<ApplicationLogsClearResponse>((_, fail) => { reject = fail; }); });
+  actions.subscribe(() => { throw new Error("broken observer"); });
+  assert.equal(actions.submit(target, "CLEAR CAPTURED LOGS"), true);
+  assert.equal(actions.submit(target, "CLEAR CAPTURED LOGS"), false);
+  reject(new Error("network error containing sensitive details"));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(actions.snapshot().target, target);
+  assert.equal(actions.snapshot().kind, "uncertain");
+  assert.equal(actions.submit(next, "CLEAR CAPTURED LOGS"), false);
+  assert.equal(calls, 1);
+  assert.equal(JSON.stringify(actions.snapshot()).includes("sensitive details"), false);
+  const mismatch = createApplicationLogClearActions(async () => ({ status: "cleared", captureId: target.captureId, boundary: "43", clearedRows: 0, coveredOmitted: "0" }));
+  assert.equal(mismatch.submit(target, "CLEAR CAPTURED LOGS"), true);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(mismatch.snapshot().kind, "uncertain");
+  assert.deepEqual(mismatch.snapshot().target, target);
+  assert.equal(mismatch.submit(next, "CLEAR CAPTURED LOGS"), false);
+  const accepted = createApplicationLogClearActions(async () => ({ status: "cleared", captureId: target.captureId, boundary: target.boundary, clearedRows: 0, coveredOmitted: "0" }));
+  assert.equal(accepted.submit(target, "CLEAR CAPTURED LOGS"), true);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(accepted.snapshot().kind, "confirmed");
+  assert.equal(accepted.submit(next, "CLEAR CAPTURED LOGS"), true);
+});
