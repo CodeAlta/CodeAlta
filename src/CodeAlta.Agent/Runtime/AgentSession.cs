@@ -185,12 +185,14 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             // The forwarding callback only signals the one retained worker. It never synchronously
             // traverses provider callbacks, and its own disposal is joined before source release.
             callerRegistration = cancellationToken.UnsafeRegister(static state => ((ActiveRun)state!).SignalCancellation(), run);
+            options.Continuation?.Bind(run.Cancellation.Token);
             run.Body = ExecuteRunAsync(options, run.Id, run.Cancellation, run);
             return await run.Body.ConfigureAwait(false);
         }
         catch (Exception ex) { failure = ex; throw; }
         finally
         {
+            options.Continuation?.Close();
             run.Finish = FinishRunAsync(run, admitted, options.RunLifecycle, callerRegistration, failure);
             try { await run.Finish.ConfigureAwait(false); }
             catch (Exception cleanup)
@@ -396,7 +398,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                                         {
                                             progressGate.Release();
                                         }
-                                    }),
+                                    }) { Continuation = options.Continuation },
                                 linkedCts.Token)
                             .ConfigureAwait(false);
                     }

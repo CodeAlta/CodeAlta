@@ -12,7 +12,7 @@ using XenoAtom.CommandLine;
 namespace CodeAlta.Tests;
 
 [TestClass]
-public sealed class McpRuntimeServiceTests
+public sealed partial class McpRuntimeServiceTests
 {
     // Global MCP configuration, policy and OAuth tokens resolve under this home, never the developer's real ~/.alta.
     private readonly TempDirectory _home = TempDirectory.Create();
@@ -189,7 +189,7 @@ public sealed class McpRuntimeServiceTests
             Assert.AreEqual(1, activateRecord.RootElement.GetProperty("activeToolCount").GetInt32());
             Assert.AreEqual(0, activateRecord.RootElement.GetProperty("diagnosticCount").GetInt32());
             Assert.IsTrue(activateRecord.RootElement.GetProperty("nextTurnRequired").GetBoolean());
-            StringAssert.Contains(activateRecord.RootElement.GetProperty("note").GetString()!, "next user prompt/turn");
+            StringAssert.Contains(activateRecord.RootElement.GetProperty("note").GetString()!, "next agent run");
         }
 
         var context = new PluginBeforeAgentRunContext
@@ -224,7 +224,7 @@ public sealed class McpRuntimeServiceTests
         Assert.IsNotNull(prompt);
         StringAssert.Contains(prompt, "- Active: `tiny`");
         StringAssert.Contains(prompt, "- Inactive (`alta mcp activate <id>*`): (none)");
-        StringAssert.Contains(prompt, "- Activation adds tools on next user turn.");
+        StringAssert.Contains(prompt, "- Activation adds tools on the next agent run, including an automatically queued continuation.");
     }
 
     [TestMethod]
@@ -424,7 +424,7 @@ public sealed class McpRuntimeServiceTests
         Assert.IsNotNull(prompt);
         StringAssert.Contains(prompt, "- Active: `tiny`");
         StringAssert.Contains(prompt, "- Inactive (`alta mcp activate <id>*`): (none)");
-        StringAssert.Contains(prompt, "- Activation adds tools on next user turn.");
+        StringAssert.Contains(prompt, "- Activation adds tools on the next agent run, including an automatically queued continuation.");
     }
 
     [TestMethod]

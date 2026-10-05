@@ -293,7 +293,8 @@ public sealed class McpPlugin : PluginBase
         builder.Append("- Inactive (`alta mcp activate <id>*`): ");
         AppendServerList(builder, inactiveServers, maxServers);
         builder.AppendLine();
-        builder.Append("- Activation adds tools on next user turn.");
+        builder.AppendLine("- Activation adds tools on the next agent run, including an automatically queued continuation.");
+        builder.Append("- To activate and continue automatically: `alta mcp activate <id>* --continue --stdin` with a short continuation prompt. If continuationQueued=true, end this turn immediately; do not poll or send another prompt. Plain activation starts no follow-up. One automatic continuation per original Send; Stop/cancellation takes precedence.");
 
         return new ValueTask<string?>(builder.ToString().TrimEnd());
     }

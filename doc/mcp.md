@@ -108,6 +108,7 @@ Mutation commands:
 
 ```text
 alta mcp activate <server> [<server>...]
+alta mcp activate <server> [<server>...] --continue --stdin
 alta mcp server add <server> --command <command> --arg <arg> --env KEY=VALUE --cwd <dir> --scope project
 alta mcp server add <server> --url https://example.test/mcp --header Authorization=Bearer... --scope global
 alta mcp server remove <server> --scope project
@@ -200,7 +201,15 @@ Reusable MCP configuration, policy, runtime, and management code lives in `src/C
 
 ## Progressive MCP agent-tool behavior
 
-Progressive dynamic `AgentToolDefinition` exposure is shipped behavior:
+Progressive dynamic `AgentToolDefinition` exposure is shipped behavior.
+
+For host-owned Sends (including Desktop), `alta mcp activate <server>... --continue --stdin` reads a nonblank continuation prompt of at most 8192 characters. After bounded discovery succeeds, it requests one fresh run for the actual calling session, never the selected UI session. The activation record includes `discoverySucceeded`, `continuationQueued`, `continuationError`, `sessionId`, `shouldYield`, and `shouldPoll`. On `continuationQueued: true`, the agent must end its turn immediately without polling or self-queueing. Yield is explicit guidance, not an abort or forced interruption: the host waits for the complete successful send and its cleanup before preparing the follow-up.
+
+The follow-up reruns normal plugin input, prompt and tool preparation. It retains the original Send's cancellation/Stop ownership, but binds new per-run permission and ask lifetimes. Identical requests within the current run coalesce; a different pending prompt is refused, and the follow-up has no capability to chain further automatic runs. Plain activation starts no automatic/billable follow-up. Failed discovery leaves activation state visible but queues nothing; admission rejection is reported separately from discovery failure. Cancellation, send/cleanup failure, unavailable preparation, or competing queued work can suppress an accepted continuation. Existing queues retain their order and exact-attachment contract; continuation preparation refuses to replace an attachment with queued work.
+
+Legacy/TUI sends, exact-attachment queued sends, non-agent commands and automatic follow-ups do not supply this capability and reject `--continue` explicitly. Use plain activation and a subsequent prompt there, or `alta mcp tool call` for an immediate explicit call. This feature does not refresh tools inside an existing agent run or introduce long-lived MCP connections.
+
+Tool exposure details:
 
 - the MCP plugin prompt contribution reads configured MCP servers without connecting and emits a compact active/inactive server inventory, for example: `MCP servers: Active memory; Inactive docs`;
 - `alta mcp activate <server> [<server>...]` marks configured servers active for the current session (falling back to project scope when no session is available) and immediately lists tools for active servers to update activation status;

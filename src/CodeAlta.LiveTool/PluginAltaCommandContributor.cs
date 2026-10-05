@@ -111,6 +111,7 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
             SourceSessionId = invocation.Caller.SourceSessionId,
             SourceProjectId = invocation.Caller.SourceProjectId,
             SourceAgentId = invocation.Caller.SourceAgentId,
+            Continuation = invocation.Caller.Kind == "agent" ? invocation.Caller.Continuation : null,
             Stdin = invocation.Stdin,
             Stdout = invocation.Stdout,
             Stderr = invocation.Stderr,

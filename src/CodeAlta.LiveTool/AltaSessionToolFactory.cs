@@ -128,10 +128,12 @@ public static class AltaSessionToolFactory
         var caller = new AltaCallerIdentity
         {
             Kind = "agent",
-            SourceSessionId = options.SourceSessionIdProvider?.Invoke() ?? options.SourceSessionId,
+            SourceSessionId = invocation.Continuation is not null ? invocation.SessionId
+                : options.SourceSessionIdProvider?.Invoke() ?? options.SourceSessionId,
             SourceAgentId = options.SourceAgentId,
             SourceProjectId = options.SourceProjectIdProvider?.Invoke() ?? options.SourceProjectId,
             PluginRuntimeKey = options.PluginRuntimeKey,
+            Continuation = invocation.Continuation,
         };
         var result = await dispatcher.InvokeAsync(
                 args,

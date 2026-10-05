@@ -43,6 +43,7 @@ internal static class McpCommandFactory
             command,
             "Configuration commands read fixed CodeAlta MCP config paths: project .alta/mcp.json and global ~/.alta/mcp.json.",
             "Tool commands lazily connect to configured stdio and HTTP/SSE MCP servers with bounded startup and tool-call timeouts.",
+            "`mcp activate <id> --continue --stdin` requests one fresh agent run for the calling session. After acceptance, end this turn immediately; do not poll. Plain activation starts no follow-up work.",
             "Examples: `alta mcp list`; `alta mcp auth login docs`; `alta mcp tool search`; `alta mcp tool describe --server memory --tool read_graph`; `alta mcp tool call --server memory --tool echo --arguments {\"text\":\"hi\"}`.");
         return command;
     }
@@ -50,7 +51,11 @@ internal static class McpCommandFactory
     private static Command CreateActivateCommand(PluginAltaCommandContext context, McpCommandFactoryOptions options, McpActivationState activationState)
     {
         var serverKeys = new List<string>();
+        var continueRun = false;
+        var readStdin = false;
         var command = Leaf("activate", "Activate configured MCP servers for the current session so their tools are registered on agent runs.");
+        command.Add("continue", "Request one automatic continuation with refreshed tools (may incur model charges).", value => continueRun = value is not null);
+        command.Add("stdin", "Read the continuation prompt from standard input; requires --continue.", value => readStdin = value is not null);
         command.Add("<id>*", "MCP server ids to activate.", value =>
         {
             if (!string.IsNullOrWhiteSpace(value))
@@ -63,6 +68,19 @@ internal static class McpCommandFactory
             if (serverKeys.Count == 0)
             {
                 return WriteError(context, "missing_server", "Specify at least one MCP server id to activate.");
+            }
+            if (readStdin != continueRun)
+                return WriteError(context, "invalid_continuation", "Use --continue and --stdin together with a short continuation prompt.");
+            string? continuationText = null;
+            if (continueRun)
+            {
+                if (context.Continuation is null || string.IsNullOrWhiteSpace(context.SourceSessionId))
+                    return WriteError(context, "continuation_unavailable", "This run has no continuation capability (unsupported host, queued send, or already a continuation). Plain activation remains available.");
+                var buffer = new char[8193];
+                var length = await context.Stdin.ReadBlockAsync(buffer.AsMemory(), context.CancellationToken).ConfigureAwait(false);
+                continuationText = new string(buffer, 0, length).Trim();
+                if (length > 8192 || string.IsNullOrWhiteSpace(continuationText))
+                    return WriteError(context, "invalid_continuation", "Provide a nonblank continuation prompt of at most 8192 characters.");
             }
 
             var snapshot = Discover(context, options);
@@ -94,6 +112,12 @@ internal static class McpCommandFactory
                 WriteRecord(context.Stdout, CreateDiagnosticRecord(context, diagnostic));
             }
 
+            var discoverySucceeded = !direct.Diagnostics.Any(diagnostic => diagnostic.Server is null || serverKeys.Contains(diagnostic.Server, StringComparer.Ordinal));
+            context.CancellationToken.ThrowIfCancellationRequested();
+            var continuationQueued = continueRun && discoverySucceeded && context.Continuation!.TryRequest(continuationText!);
+            var continuationError = !continueRun ? null : !discoverySucceeded ? "activation_discovery_failed"
+                : !continuationQueued ? "continuation_rejected" : null;
+
             WriteRecord(context.Stdout, new
             {
                 type = "alta.mcp.activate",
@@ -104,11 +128,21 @@ internal static class McpCommandFactory
                 activeToolCount = direct.Tools.Count,
                 diagnosticCount = direct.Diagnostics.Count,
                 nextTurnRequired = true,
-                note = "Activated for future runs; tools are available after the next user prompt/turn as mcp__<server>__<tool>.",
+                discoverySucceeded,
+                continuationQueued,
+                continuationError,
+                sessionId = context.SourceSessionId,
+                shouldYield = continuationQueued,
+                shouldPoll = false,
+                note = continuationQueued
+                    ? "End this turn immediately. Do not poll or queue another send. After this run finishes successfully, the host prepares one new run with refreshed tools. Stop/cancellation, failure, or competing queued work suppresses the continuation."
+                    : "Activated for future runs; direct tools are available on the next agent run, including an automatically queued continuation. Plain activation starts no follow-up run.",
             });
-            return 0;
+            return continuationError is null ? 0 : 1;
         });
-        AddHelpText(command, "Examples: `alta mcp activate memory`; `alta mcp activate github docs`.");
+        AddHelpText(command, "Examples: `alta mcp activate memory`; `alta mcp activate github docs --continue --stdin`.",
+            "--continue requires a supported agent-owned Send, targets the calling session (never UI selection), and may incur model charges.",
+            "Identical requests coalesce; only one follow-up per original Send is allowed. On continuationQueued=true, end this turn immediately and do not poll. Stop/cancellation or queued work takes precedence.");
         return command;
     }
 

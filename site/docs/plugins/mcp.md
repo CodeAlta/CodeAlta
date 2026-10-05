@@ -37,13 +37,12 @@ The `alta mcp ...` surface is an in-session live tool for the agent/LLM. Users c
    Activate the memory and docs MCP servers.
    ```
 
-   Activation changes future tool availability. After activation succeeds, send another prompt such as "Now use the memory MCP tools to ..." because the current turn started before those tools existed.
+   In Desktop, ask the agent to activate and continue with a task, for example: "Activate memory, then use its tools to summarize the graph." The agent can start a fresh run automatically, without another message from you.
 
 > [!NOTE]
-> Activation is a two-turn workflow. The agent can activate an MCP server in
-> response to your prompt, but the newly activated MCP tools are only attached
-> to the next agent run. After activation succeeds, send a follow-up prompt that
-> asks the agent to use those tools.
+> New tools become available on the next agent run, not in the run that activated
+> them. Desktop can continue automatically. In TUI, or after plain activation,
+> send a follow-up prompt asking the agent to use the tools.
 
 ## Configuration paths and overlay
 
@@ -312,9 +311,9 @@ Activate the memory MCP server.
 Activate the memory and docs MCP servers.
 ```
 
-When the agent activates a server, it is only changing the activation state for future runs. The current agent turn started before those tools existed, so it cannot call the newly activated MCP tools until your next prompt. Send a follow-up such as "Now use the memory MCP tools to ..." after activation succeeds.
+New tools are attached to the next agent run. In Desktop, the agent can use `alta mcp activate memory --continue --stdin`, supplying a short continuation prompt. It then ends its current turn, and CodeAlta starts one fresh run with the new tools. The continuation uses the same session even if you switch tabs. It may incur model charges; Stop cancels it.
 
-Custom [agent prompts](../prompts.md) can include MCP activation or discovery habits for workflows that use the same servers repeatedly, but the two-turn activation rule still applies.
+Plain activation starts no follow-up run. In TUI, or if automatic continuation is unavailable, send a prompt such as "Now use the memory MCP tools to summarize the graph." Custom [agent prompts](../prompts.md) can include activation or discovery habits for workflows that use the same servers repeatedly.
 
 > [!TIP]
 > If the agent says it activated a server but cannot call its tools yet, send one

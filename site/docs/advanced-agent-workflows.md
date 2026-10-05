@@ -171,7 +171,7 @@ Activate the memory and docs MCP servers for this session.
 ```
 
 > [!NOTE]
-> MCP activation is a two-turn workflow. The agent can activate a server in response to your prompt, but newly activated MCP tools are attached to the next agent run. After activation succeeds, send a follow-up prompt such as “Now use the memory MCP tools to summarize the graph.”
+> New MCP tools are attached to the next agent run. In Desktop, ask the agent to activate and continue with your task; it can start that fresh run automatically without another human message. Plain activation starts no follow-up work. In TUI, send a follow-up prompt such as “Now use the memory MCP tools to summarize the graph.”
 
 For setup, policy, server formats, and diagnostics, see [MCP plugin](plugins/mcp.md).
 

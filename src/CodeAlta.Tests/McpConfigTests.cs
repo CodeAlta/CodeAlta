@@ -828,7 +828,7 @@ public sealed class McpConfigTests
         StringAssert.Contains(content, "MCP servers:");
         StringAssert.Contains(content, "docs");
         StringAssert.Contains(content, "Inactive (`alta mcp activate <id>*`): `docs`");
-        StringAssert.Contains(content, "Activation adds tools on next user turn.");
+        StringAssert.Contains(content, "Activation adds tools on the next agent run, including an automatically queued continuation.");
         Assert.IsFalse(content.Contains("http/sse", StringComparison.Ordinal));
         Assert.IsFalse(content.Contains("alta mcp tool search", StringComparison.Ordinal));
         Assert.IsFalse(content.Contains("runtime deferred", StringComparison.OrdinalIgnoreCase));

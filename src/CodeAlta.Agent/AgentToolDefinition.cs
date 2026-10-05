@@ -111,7 +111,12 @@ public sealed record AgentToolInvocation(
     string ToolCallId,
     string ToolName,
     JsonElement Arguments,
-    AgentToolProgressHandler? Progress = null);
+    AgentToolProgressHandler? Progress = null)
+{
+    /// <summary>Gets the capability to request a freshly prepared run after this run finishes.</summary>
+    [JsonIgnore]
+    public AgentRunContinuation? Continuation { get; init; }
+}
 
 /// <summary>
 /// Represents a streaming tool-progress update.

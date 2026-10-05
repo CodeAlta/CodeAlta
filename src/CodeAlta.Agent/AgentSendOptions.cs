@@ -51,4 +51,8 @@ public sealed class AgentSendOptions
     /// Session tools are not replaced. Other session implementations must explicitly support this
     /// option. Tool handlers must enforce their own lifetime; this option confers no authority.</remarks>
     public IReadOnlyList<AgentToolDefinition>? AdditionalTools { get; init; }
+
+    /// <summary>Gets the host-owned next-run continuation capability, when supported by this send's owner.</summary>
+    /// <remarks>Only the in-process runtime binds it. A request does not force a yield or start another run.</remarks>
+    public AgentRunContinuation? Continuation { get; init; }
 }

@@ -698,76 +698,16 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     private async Task RunSendAsync(SendOperation operation)
     {
         await operation.Launch.Task.ConfigureAwait(false);
-        OwnedSessionCommandResult result;
-        try
+        var continuation = new AgentRunContinuation();
+        var result = await RunSendStepAsync(operation, operation.Initial, operation.Request, continuation).ConfigureAwait(false);
+        if (result.Outcome == OwnedSessionCommandOutcome.Completed && continuation.Take() is { } text)
         {
-            operation.PreparationInvocation.Launch(() => operation.Preparation = PrepareAsync(operation));
-            if (await operation.PreparationInvocation.Outcome.ConfigureAwait(false) is { } preparationFailure) ExceptionDispatchInfo.Throw(preparationFailure);
-            var prepared = await operation.Preparation!.ConfigureAwait(false);
-            operation.Attachment.TrySetResult(prepared);
-            if (prepared is null)
-            {
-                result = new(OwnedSessionCommandOutcome.Failed, Code: "preparation_failed");
-            }
-            else
-            {
-                bool cancelled;
-                lock (_gate) cancelled = operation.CancelRequested;
-                if (cancelled)
-                {
-                    result = new(OwnedSessionCommandOutcome.Cancelled);
-                }
-                else
-                {
-                    if (_reviewPermissions || _enableUserInput)
-                        operation.PermissionExecution = await _runtime.Permissions.CreateOwnedExecutionAsync(
-                            operation.Receipt.OperationId, prepared.Session.SessionId, operation.Execution.Token, _reviewPermissions, _enableUserInput).ConfigureAwait(false);
-                    if ((_reviewPermissions || _enableUserInput) && operation.PermissionExecution is null)
-                    {
-                        result = new(OwnedSessionCommandOutcome.Failed, Code: "permission_unavailable");
-                    }
-                    else
-                    {
-                        if (Asks.Enabled) operation.AskExecution = Asks.CreateExecution(operation.Receipt.OperationId, prepared.Session.SessionId, operation.Execution.Token);
-                        var sendOptions = new AgentSendOptions { Input = prepared.Input, AskId = operation.AskSubmission?.AskId };
-                        operation.SendInvocation.Launch(() => operation.Send = _runtime.SendOwnedCommandAsync(prepared.Session, prepared.Options, sendOptions,
-                            operation.PermissionExecution, operation.Execution.Token, operation.AskExecution, operation.AskSubmission));
-                        if (await operation.SendInvocation.Outcome.ConfigureAwait(false) is { } sendFailure) ExceptionDispatchInfo.Throw(sendFailure);
-                        var runId = await operation.Send!.ConfigureAwait(false);
-                        result = new(OwnedSessionCommandOutcome.Completed, runId);
-                    }
-                }
-            }
-        }
-        catch (OperationCanceledException ex) when (operation.Execution.IsCancellationRequested)
-        {
-            RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
-            result = new(OwnedSessionCommandOutcome.Cancelled);
-        }
-        catch (Exception ex)
-        {
-            RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
-            result = new(OwnedSessionCommandOutcome.Failed, Code: "send_failed");
-        }
-        // Also covers runtime admission failure before its body acquires a handle use.
-        try { operation.AskExecution?.Close(); }
-        catch (Exception ex)
-        {
-            RecordFailure(ex, cleanup: true, operation.ReleaseDecision);
-            result = new(OwnedSessionCommandOutcome.Failed, Code: "ask_close_failed");
-        }
-        if (operation.PermissionExecution is { } permission)
-        {
-            try
-            {
-                operation.PermissionCloseInvocation.Launch(() => _runtime.Permissions.CloseOwnedExecutionAsync(permission));
-                if (await operation.PermissionCloseInvocation.Outcome.ConfigureAwait(false) is { } failure) ExceptionDispatchInfo.Throw(failure);
-            }
-            catch (Exception ex)
-            {
-                RecordFailure(ex, cleanup: true, operation.ReleaseDecision);
-                result = new(OwnedSessionCommandOutcome.Failed, Code: "permission_close_failed");
-            }
+            // The original owns both sends, their cancellation source and every retained invocation.
+            // No authority is transported through the exact-attachment queue. The follow-up cannot
+            // request another follow-up, bounding automatic work to one freshly prepared run.
+            var request = operation.Request with { Text = text, References = null, Images = null, Selection = null };
+            operation.FollowUp = new SendStep();
+            result = await RunSendStepAsync(operation, operation.FollowUp, request, continuation: null).ConfigureAwait(false);
         }
         // Also releases a control waiter if setup failed before publishing preparation.
         operation.Attachment.TrySetResult(null);
@@ -787,7 +727,86 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         lock (_gate) Release(operation, result);
     }
 
-    private async Task<Prepared?> PrepareAsync(SendOperation operation)
+    private async Task<OwnedSessionCommandResult> RunSendStepAsync(SendOperation operation, SendStep step,
+        OwnedTextSendRequest request, AgentRunContinuation? continuation)
+    {
+        OwnedSessionCommandResult result;
+        try
+        {
+            operation.Execution.Token.ThrowIfCancellationRequested();
+            step.PreparationInvocation.Launch(() => step.Preparation = PrepareAsync(operation, request, continuation is null));
+            if (await step.PreparationInvocation.Outcome.ConfigureAwait(false) is { } preparationFailure) ExceptionDispatchInfo.Throw(preparationFailure);
+            var prepared = await step.Preparation!.ConfigureAwait(false);
+            operation.Attachment.TrySetResult(prepared);
+            if (prepared is null)
+            {
+                result = new(OwnedSessionCommandOutcome.Failed, Code: "preparation_failed");
+            }
+            else
+            {
+                bool cancelled;
+                lock (_gate) cancelled = operation.CancelRequested;
+                if (cancelled)
+                {
+                    result = new(OwnedSessionCommandOutcome.Cancelled);
+                }
+                else
+                {
+                    if (_reviewPermissions || _enableUserInput)
+                        step.PermissionExecution = await _runtime.Permissions.CreateOwnedExecutionAsync(
+                            operation.Receipt.OperationId, prepared.Session.SessionId, operation.Execution.Token, _reviewPermissions, _enableUserInput).ConfigureAwait(false);
+                    if ((_reviewPermissions || _enableUserInput) && step.PermissionExecution is null)
+                    {
+                        result = new(OwnedSessionCommandOutcome.Failed, Code: "permission_unavailable");
+                    }
+                    else
+                    {
+                        if (Asks.Enabled) step.AskExecution = Asks.CreateExecution(operation.Receipt.OperationId, prepared.Session.SessionId, operation.Execution.Token);
+                        var submission = continuation is null ? null : operation.AskSubmission;
+                        var sendOptions = new AgentSendOptions { Input = prepared.Input, AskId = submission?.AskId, Continuation = continuation };
+                        step.SendInvocation.Launch(() => step.Send = _runtime.SendOwnedCommandAsync(prepared.Session, prepared.Options, sendOptions,
+                            step.PermissionExecution, operation.Execution.Token, step.AskExecution, submission));
+                        if (await step.SendInvocation.Outcome.ConfigureAwait(false) is { } sendFailure) ExceptionDispatchInfo.Throw(sendFailure);
+                        var runId = await step.Send!.ConfigureAwait(false);
+                        result = new(OwnedSessionCommandOutcome.Completed, runId);
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException ex) when (operation.Execution.IsCancellationRequested)
+        {
+            RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
+            result = new(OwnedSessionCommandOutcome.Cancelled);
+        }
+        catch (Exception ex)
+        {
+            RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
+            result = new(OwnedSessionCommandOutcome.Failed, Code: "send_failed");
+        }
+        // Also covers runtime admission failure before its body acquires a handle use.
+        try { step.AskExecution?.Close(); }
+        catch (Exception ex)
+        {
+            RecordFailure(ex, cleanup: true, operation.ReleaseDecision);
+            result = new(OwnedSessionCommandOutcome.Failed, Code: "ask_close_failed");
+        }
+        if (step.PermissionExecution is { } permission)
+        {
+            try
+            {
+                step.PermissionCloseInvocation.Launch(() => _runtime.Permissions.CloseOwnedExecutionAsync(permission));
+                if (await step.PermissionCloseInvocation.Outcome.ConfigureAwait(false) is { } failure) ExceptionDispatchInfo.Throw(failure);
+            }
+            catch (Exception ex)
+            {
+                RecordFailure(ex, cleanup: true, operation.ReleaseDecision);
+                result = new(OwnedSessionCommandOutcome.Failed, Code: "permission_close_failed");
+            }
+        }
+        return result;
+    }
+
+    private async Task<Prepared?> PrepareAsync(SendOperation operation, OwnedTextSendRequest request, bool isContinuation)
     {
         try
         {
@@ -795,34 +814,34 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             if (session is null || !string.Equals(session.SessionId, operation.SessionId, StringComparison.OrdinalIgnoreCase)) return null;
             var project = string.IsNullOrWhiteSpace(session.ProjectRef) ? null
                 : await _projects.GetByIdAsync(session.ProjectRef, CancellationToken.None).ConfigureAwait(false);
-            var input = AgentInput.Text(operation.Request.Text);
-            if (operation.Request.References is { } referenceScope)
+            var input = AgentInput.Text(request.Text);
+            if (request.References is { } referenceScope)
             {
                 project = await ResolveReferenceProjectAsync(referenceScope, operation.Execution.Token).ConfigureAwait(false);
                 if (!ReferenceScopeMatches(referenceScope, project) || session.ProjectRef != referenceScope.ProjectId
                     || session.WorkingDirectory != project!.ProjectPath || session.SessionId != operation.SessionId) return null;
                 // Once per admitted original, before any provider creation. Replays retain the
                 // original receipt/work and never resolve mutable filesystem metadata again.
-                input = _references.Resolve(operation.Request.Text, project.ProjectPath, operation.Execution.Token);
+                input = _references.Resolve(request.Text, project.ProjectPath, operation.Execution.Token);
             }
             // Preserve exact empty request identity without inventing a textual provider prompt.
-            if (operation.Request.Text.Length == 0) input = new AgentInput([]);
-            var selection = operation.Request.Selection;
+            if (request.Text.Length == 0) input = new AgentInput([]);
+            var selection = request.Selection;
             if (selection is not null)
             {
                 var choices = await GetSelectionChoicesCoreAsync(operation.SessionId, CancellationToken.None,
-                    observedOnly: operation.Request.Images is { Count: > 0 }).ConfigureAwait(false);
+                    observedOnly: request.Images is { Count: > 0 }).ConfigureAwait(false);
                 if (choices is null || !IsValidSelection(choices, selection))
                     throw new ArgumentException("The selected session configuration is no longer available.");
             }
-            if (operation.Request.Images is { Count: > 0 } images)
+            if (request.Images is { Count: > 0 } images)
             {
                 var model = ObservedImageModels?.Invoke(new ModelProviderId(session.ResolvedProviderKey))
                     .SingleOrDefault(model => model.Id == selection!.ModelId);
                 if (selection?.ProviderKey != session.ResolvedProviderKey || AgentImageInputCapability.Read(model) != true)
                     throw new ArgumentException("Image input capability is unknown, unsupported, or no longer available.");
                 if (project is { Archived: true } || (!string.IsNullOrWhiteSpace(session.ProjectRef)
-                    && (project is null || operation.Request.References is null)))
+                    && (project is null || request.References is null)))
                     throw new ArgumentException("Image Send requires the exact current project scope.");
                 operation.Execution.Token.ThrowIfCancellationRequested();
                 var attachments = images.Select((image, index) => new PromptImageAttachment(
@@ -850,14 +869,16 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 if (augmented.CancelReason is not null) throw new InvalidOperationException("A plugin cancelled the run: " + augmented.CancelReason);
                 (options, input) = (augmented.ExecutionOptions, augmented.Input);
             }
-            if (selection is null)
+            operation.Execution.Token.ThrowIfCancellationRequested();
+            if (isContinuation)
+                await _runtime.EnsureOwnedContinuationSessionAsync(session, options).ConfigureAwait(false);
+            else if (selection is null)
                 await _runtime.EnsureOwnedCoordinatorSessionAsync(session, options).ConfigureAwait(false);
             else
                 await _runtime.EnsureOwnedCoordinatorSessionAsync(session, options, useExplicitPrompt: true).ConfigureAwait(false);
             return new Prepared(session, options, input);
         }
-        catch (OperationCanceledException) when ((operation.Request.References is not null || operation.Request.Images is { Count: > 0 } || Plugins is not null)
-            && operation.Execution.IsCancellationRequested) { throw; }
+        catch (OperationCanceledException) when (operation.Execution.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
@@ -1238,9 +1259,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     private sealed class SendOperation(OwnedTextSendRequest request, OwnedSessionCommandReceipt receipt)
     {
         internal DependencyReleaseDecision ReleaseDecision { get; } = new();
-        internal OriginalInvocation PreparationInvocation { get; } = new();
-        internal OriginalInvocation SendInvocation { get; } = new();
-        internal OriginalInvocation PermissionCloseInvocation { get; } = new();
+        internal SendStep Initial { get; } = new();
+        internal SendStep? FollowUp { get; set; }
         internal OriginalInvocation PermissionInvalidationInvocation { get; } = new();
         internal OriginalInvocation AbortInvocation { get; } = new();
         internal OriginalInvocation CancellationInvocation { get; } = new();
@@ -1253,10 +1273,6 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         internal TaskCompletionSource CancellationStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource<Prepared?> Attachment { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal Task Work { get; set; } = Task.CompletedTask;
-        internal Task<Prepared?>? Preparation { get; set; }
-        internal Task<AgentRunId>? Send { get; set; }
-        internal SessionPermissionService.OwnedPermissionExecution? PermissionExecution { get; set; }
-        internal OwnedSessionAskExecution? AskExecution { get; set; }
         internal OwnedAskSubmission? AskSubmission { get; init; }
         internal Task? Control { get; set; }
         internal Task? Cancellation { get; set; }
@@ -1266,5 +1282,16 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         internal bool Released { get; set; }
         internal List<OwnedSessionCommandReceipt> AbortReceipts { get; } = [];
         internal OwnedSessionCommandResult? ControlResult { get; set; }
+    }
+
+    private sealed class SendStep
+    {
+        internal OriginalInvocation PreparationInvocation { get; } = new();
+        internal OriginalInvocation SendInvocation { get; } = new();
+        internal OriginalInvocation PermissionCloseInvocation { get; } = new();
+        internal Task<Prepared?>? Preparation { get; set; }
+        internal Task<AgentRunId>? Send { get; set; }
+        internal SessionPermissionService.OwnedPermissionExecution? PermissionExecution { get; set; }
+        internal OwnedSessionAskExecution? AskExecution { get; set; }
     }
 }
