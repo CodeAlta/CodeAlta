@@ -841,8 +841,8 @@ function App() {
       else applyTabState({ ...valid, active: null });
     }
   }
-  // After a tab was created, switched to or closed, typing goes to the prompt of the session now shown. The
-  // frames let the newly active pane render its prompt; a file tab focuses its own editor.
+  // After opening a project or creating, switching or closing a tab, typing goes to the prompt now shown.
+  // Two frames let the newly active pane render its prompt; a file tab focuses its own editor.
   function focusPromptSoon() {
     requestAnimationFrame(() => requestAnimationFrame(() => {
       if (currentView.current !== "workspace" || settingsVisible.current
@@ -2049,7 +2049,7 @@ function App() {
       completeDirectory={workspace.completeDirectory}
       onOpen={shown => {
         if (projectOpening.getSnapshot() || currentSnapshot.current !== snapshot || !savedProjectSelection(shown, currentSnapshot.current)) return false;
-        selectProject(shown.id); setDialog(null); return true;
+        selectProject(shown.id); setDialog(null); focusPromptSoon(); return true;
       }} onRefresh={refreshProjects}
       onImported={async (id, path, signal) => {
         const original = projectOpening.getSnapshot();
@@ -2068,6 +2068,7 @@ function App() {
         selectedSessionId.current = nextSession;
         setSessionId(nextSession);
         navigate("workspace");
+        focusPromptSoon();
         return true;
       }} onClose={() => setDialog(null)} />}
     {dialog === "help" && <CommandHelp onClose={closeHelp} pluginCommands={pluginContributed.commands} />}

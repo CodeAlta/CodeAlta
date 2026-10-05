@@ -279,6 +279,8 @@ folders below it are suggested as you type (at most 16, never at a filesystem ro
 opens the selected project, Tab or Enter on a suggested folder completes it into the field, and Enter
 on the typed folder itself checks it and offers **Trust and open folder**, which adds it as a project.
 Escape closes the window. Saved projects use deterministic name order, **not** last-active or recent order.
+Opening a project or trusting a folder focuses its prompt; canceling restores focus to the control
+that opened the window.
 Navigation requires the row's unique, unchanged ID/path/name/archive state in the current bounded
 snapshot. It selects existing sessions without importing, creating a runtime, or discarding their
 drafts. Archived projects are labeled and their sessions open read-only; a catalog-only launch

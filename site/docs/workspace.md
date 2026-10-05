@@ -111,6 +111,7 @@ Each session has sticky Markdown notes that agents keep up to date with a checkl
 ## Open Project dialog
 
 Open it with `Ctrl+O`, `/open`, or the `+` action of the Projects sidebar.
+Opening a project puts the cursor in its prompt, so you can start typing.
 
 The dialog supports project-name and directory completion. Rooted paths such as `/`, `C:`, `D:`, and `~` open folders. In the TUI, the **Include hidden** toggle includes archived/hidden projects in completion.
 

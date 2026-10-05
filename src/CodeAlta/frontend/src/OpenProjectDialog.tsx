@@ -64,8 +64,9 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, getCurr
   });
   const close = () => {
     alive.current = false; followUp.current.abort(); suggestWork.current?.abort(); suggestWork.current = null; onClose();
-    restoreFocus();
   };
+  // Cancellation returns to the opener; successful navigation focuses the new workspace instead.
+  const dismiss = () => { close(); restoreFocus(); };
   // A trailing separator names the same folder: "C:\code\App\" still matches the project at "C:\code\App".
   const normalized = filter.trim().toLowerCase().replace(/[\\/]$/u, "");
   const matches = (snapshot?.projects ?? []).filter(project => !normalized || project.name.toLowerCase().includes(normalized)
@@ -184,8 +185,7 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, getCurr
       setMessage({ key: "The saved project is no longer verified in this list. Refresh and select its current entry." });
       return;
     }
-    if (onOpen(project)) restoreFocus();
-    else setMessage({ key: "The saved project changed before navigation. Refresh and select its current entry." });
+    if (!onOpen(project)) setMessage({ key: "The saved project changed before navigation. Refresh and select its current entry." });
   }
   // Opens what the field names: the selected saved project, the selected folder (completed into the field
   // unless it is the typed path itself), or the typed path as a folder to add.
@@ -270,9 +270,9 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, getCurr
   return <AppWindow storageKey="codealta.desktop.window.open-project.v1" className="open-project-dialog" titleId="open-project-title"
     title={<><AppIcon name="open" size={14} /> {t("Open project")}</>}
     preferredSize={viewport => ({ width: Math.min(780, viewport.width - 40), height: Math.min(620, viewport.height - 40) })} minimumSize={{ width: 440, height: 340 }}
-    onClose={close} closeLabel={t("Close")} onCancel={event => { event.preventDefault(); close(); }}
+    onClose={dismiss} closeLabel={t("Close")} onCancel={event => { event.preventDefault(); dismiss(); }}
     // Escape closes the window even from the search field, where it would otherwise only clear the text.
-    onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape" && !event.nativeEvent.isComposing) { event.preventDefault(); close(); } }}
+    onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape" && !event.nativeEvent.isComposing) { event.preventDefault(); dismiss(); } }}
     onOpened={() => document.getElementById("saved-project-filter")?.focus()}
     headerActions={<><span className="reference-status" role="status">{(busy || suggestBusy) && <ActivitySpinner size={12} />}{matches.length === 1 ? t("1 project") : t("{count} projects", { count: matches.length })}</span>
       <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={14} />} disabled={busy} aria-label={t("Refresh projects")} title={t("Refresh projects")} onClick={() => void refreshList()} /></>}>
