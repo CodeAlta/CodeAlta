@@ -11,8 +11,10 @@
     <AssemblyName>alta</AssemblyName>
     <ToolCommandName>alta</ToolCommandName>
     <!-- One framework-dependent tool with standard shims, not .NET 10 RID-specific package fan-out.
-         The SDK also uses this list as RuntimeIdentifiers for restore. NeoAstra supplies native assets. -->
-    <PackAsToolShimRuntimeIdentifiers>win-x64;win-arm64;osx-x64;osx-arm64;linux-x64;linux-arm64</PackAsToolShimRuntimeIdentifiers>
+         The SDK also uses this list as RuntimeIdentifiers for restore. NeoAstra supplies native assets.
+         No macOS shim: the SDK does not sign the shims it packs, and macOS kills an unsigned arm64
+         executable when it starts. Without one, dotnet tool install creates and signs the shim itself. -->
+    <PackAsToolShimRuntimeIdentifiers>win-x64;win-arm64;linux-x64;linux-arm64</PackAsToolShimRuntimeIdentifiers>
     <SelfContained>false</SelfContained>
     <PublishSelfContained>false</PublishSelfContained>
     <PublishAot>false</PublishAot>

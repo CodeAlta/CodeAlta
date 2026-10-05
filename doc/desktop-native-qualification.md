@@ -195,6 +195,11 @@ The preserved dependency/license review is point-in-time evidence, not a release
   uses the supported `PackAsToolShimRuntimeIdentifiers` six-RID list instead: the SDK derives its
   restore RIDs from it, and packs one framework-dependent `CodeAlta` tool with six standard shims.
   NeoAstra supplies the six native binaries. TUI's existing eight-RID packaging is unchanged.
+- After 1.0.0 the shim list is Windows and Linux only (four shims). The SDK does not sign the
+  shims it packs, and macOS on Apple Silicon kills an unsigned arm64 executable when it starts
+  (`alta` printed `killed` after `dotnet tool install -g CodeAlta` 1.0.0). With no packaged macOS
+  shim, `dotnet tool install` creates the shim from its own apphost and ad-hoc signs it. The package
+  still carries NeoAstra's six native binaries, macOS included.
 - NeoAstra's consumer targets normally copy generated TypeScript as a runtime artifact. Desktop
   removes only that build-only source item after collection and excludes publish symbols; generated
   JSON manifest/schema and manifest-backed assets remain packaged. Package inspection checks both

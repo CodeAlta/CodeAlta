@@ -29,4 +29,14 @@ public sealed class DesktopArchitectureTests
             Assert.AreNotEqual("altatui", reference.Name);
         }
     }
+
+    [TestMethod]
+    public void DesktopToolPackage_ShipsNoPrebuiltMacOSShim()
+    {
+        // The SDK does not sign the shims it packs, and macOS kills an unsigned arm64 executable when it starts.
+        // Without a packaged shim, dotnet tool install creates and signs one on the user's machine.
+        var project = System.Xml.Linq.XDocument.Load(Path.Combine(SourceRoot, "CodeAlta", "CodeAlta.csproj"));
+        var shims = project.Descendants("PackAsToolShimRuntimeIdentifiers").Single().Value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        CollectionAssert.AreEquivalent(new[] { "win-x64", "win-arm64", "linux-x64", "linux-arm64" }, shims);
+    }
 }
