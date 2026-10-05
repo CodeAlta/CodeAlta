@@ -117,7 +117,7 @@ public sealed class TerminalPluginUiTests
     }
 
     [TestMethod]
-    public async Task Questions_AreAnsweredFromTheKeyboard()
+    public void Questions_AreAnsweredFromTheKeyboard()
     {
         using var terminal = new TerminalFixture();
         var host = new Host(terminal.Root);
@@ -125,36 +125,44 @@ public sealed class TerminalPluginUiTests
         ui.Attach(host);
         Assert.IsTrue(ui.HasInteractiveUi);
 
+        // The terminal belongs to this thread: the test waits for each answer without leaving it.
+        static T Answer<T>(Task<T> task)
+        {
+            Assert.IsTrue(task.Wait(TimeSpan.FromSeconds(30)), "the question was not answered");
+            return task.Result;
+        }
+
         var refused = ui.ConfirmAsync("Title", "Continue?").AsTask();
         terminal.Press(TerminalKey.Escape);
-        Assert.IsFalse(await refused.WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.IsFalse(Answer(refused));
 
         var accepted = ui.ConfirmAsync("Title", "Continue?").AsTask();
         terminal.Press(TerminalKey.Enter);
-        Assert.IsTrue(await accepted.WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.IsTrue(Answer(accepted));
 
         var name = ui.InputAsync("Name", "Ada").AsTask();
         terminal.Press(TerminalKey.Enter);
-        Assert.AreEqual("Ada", await name.WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.AreEqual("Ada", Answer(name));
 
         var items = new[] { new PluginSelectItem<int> { Label = "one", Value = 1 }, new PluginSelectItem<int> { Label = "two", Value = 2, IsSelected = true } };
         var picked = ui.SelectAsync("Pick", items).AsTask();
         terminal.Press(TerminalKey.Enter);
-        Assert.AreEqual(2, await picked.WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.AreEqual(2, Answer(picked));
 
         var dismissed = ui.SelectAsync("Pick", items).AsTask();
         terminal.Press(TerminalKey.Escape);
-        Assert.AreEqual(0, await dismissed.WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.AreEqual(0, Answer(dismissed));
 
         using var cancellation = new CancellationTokenSource();
         var withdrawn = ui.EditTextAsync("Note", "text", cancellation.Token).AsTask();
         terminal.Tick();
         cancellation.Cancel();
-        await Assert.ThrowsExactlyAsync<TaskCanceledException>(() => withdrawn.WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.IsTrue(SpinWait.SpinUntil(() => withdrawn.IsCompleted, TimeSpan.FromSeconds(30)));
+        Assert.IsTrue(withdrawn.IsCanceled);
 
         ui.Detach();
         Assert.IsFalse(ui.HasInteractiveUi);
-        Assert.IsFalse(await ui.ConfirmAsync("Title", "Continue?"));
+        Assert.IsFalse(Answer(ui.ConfirmAsync("Title", "Continue?").AsTask()));
     }
 
     [TestMethod]
