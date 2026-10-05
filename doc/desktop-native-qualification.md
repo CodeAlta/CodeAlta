@@ -205,7 +205,9 @@ The preserved dependency/license review is point-in-time evidence, not a release
   Only the build without a runtime restores and builds the page; a per-runtime build takes
   `frontend/dist` as prebuilt assets and keeps its generated contracts under `obj/neoastra/<runtime>`.
   The symbols of third-party native libraries (100 MB on Windows) are left out of the packages.
-  `Verify-DesktopPackage.ps1` predates this layout and has to be reworked on Windows before it is run.
+  `Verify-DesktopPackage.ps1`, its `Verify-DesktopNative.ps1` helper and the opt-in `DesktopNative`
+  test that ran them predated this layout and were removed; the results they produced below are
+  historical.
 - For a tool packed per runtime the SDK installs a script on Windows (`alta.cmd` in the tools folder)
   instead of an executable, and a link on macOS and Linux. Started from a terminal, the script holds
   the terminal until CodeAlta ends. The Start Menu shortcut therefore starts the executable in the

@@ -19,24 +19,11 @@ npm --prefix src/CodeAlta/frontend test
 dotnet test src/CodeAlta.Tests/CodeAlta.Tests.csproj -c Release --filter "FullyQualifiedName~ArchitectureGuardrailTests|FullyQualifiedName~TuiIdentityTests"
 ```
 
-The `DesktopNative` category is **opt-in**. Without the opt-in flag, or without supported graphical
-infrastructure, it reports inconclusive/skipped with the reason, not a fake native pass. The automated
-driver currently requires interactive Windows x64 + installed WebView2, SDK 10 and build-time npm/Node.
-A requested run with broken native initialization/build/assertions fails; it is not converted to a skip.
-
-```powershell
-$env:CODEALTA_DESKTOP_NATIVE_TESTS = '1'
-dotnet test src/CodeAlta.Desktop.Tests/CodeAlta.Desktop.Tests.csproj -c Release --filter TestCategory=DesktopNative
-# Equivalent directly invoked driver:
-./src/CodeAlta.Desktop.Tests/Verify-DesktopPackage.ps1
-```
-
-`Verify-DesktopPackage.ps1` qualifies the actual packaged desktop boot/CLI/close, then builds/runs
-the isolated [M0 native smoke fixture](NativeSmoke/README.md), preserving generated RPC/channel
-cancellation, lazy local assets/CM/Radix/Mermaid, dialogs and canceled/approved native close checks.
-The fixture is outside the release solution; its source/assets cannot enter the production package.
-The pinned npm graph is preserved for both consumers; the production entry imports React and
-its boot/workspace/history contracts, not the smoke-only visual libraries.
+The packaged desktop is not qualified by a test here. The former opt-in `DesktopNative` test and its
+`Verify-DesktopPackage.ps1` driver expected the single-package layout of 1.0.0 and were removed when
+the tool moved to one package per runtime. The isolated [M0 native smoke fixture](NativeSmoke/README.md)
+keeps its own scripts; it is outside the release solution, so its source and assets cannot enter the
+production package.
 
 The bounded-history slice was verified with 19 individually audited C# methods (10 inert
 stream/containment, five RPC projection/callback, four named-source checks), four existing
