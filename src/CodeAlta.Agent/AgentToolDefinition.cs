@@ -113,9 +113,12 @@ public sealed record AgentToolInvocation(
     JsonElement Arguments,
     AgentToolProgressHandler? Progress = null)
 {
-    /// <summary>Gets the capability to request a freshly prepared run after this run finishes.</summary>
+    /// <summary>
+    /// Gets the tools of the run this call belongs to: tools the handler adds there are offered to the model
+    /// from its next request of the same run. Null when the caller is not a run that can take them.
+    /// </summary>
     [JsonIgnore]
-    public AgentRunContinuation? Continuation { get; init; }
+    public AgentRunTools? RunTools { get; init; }
 }
 
 /// <summary>

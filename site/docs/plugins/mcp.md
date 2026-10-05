@@ -31,18 +31,13 @@ The `alta mcp ...` surface is an in-session live tool for the agent/LLM. Users c
    Search the memory MCP server for graph tools.
    ```
 
-4. Ask the agent to activate servers for the current session so their enabled tools are registered on the **next** agent turn:
+4. Ask the agent to activate servers for the current session and to use them, in one prompt:
 
    ```text
-   Activate the memory and docs MCP servers.
+   Activate the memory MCP server and summarize the graph.
    ```
 
-   In Desktop, ask the agent to activate and continue with a task, for example: "Activate memory, then use its tools to summarize the graph." The agent can start a fresh run automatically, without another message from you.
-
-> [!NOTE]
-> New tools become available on the next agent run, not in the run that activated
-> them. Desktop can continue automatically. In TUI, or after plain activation,
-> send a follow-up prompt asking the agent to use the tools.
+   The tools of an activated server are available at once: the agent calls them in the same turn. The server stays active for the session.
 
 ## Configuration paths and overlay
 
@@ -311,17 +306,11 @@ Activate the memory MCP server.
 Activate the memory and docs MCP servers.
 ```
 
-New tools are attached to the next agent run. In Desktop, the agent can use `alta mcp activate memory --continue --stdin`, supplying a short continuation prompt. It then ends its current turn, and CodeAlta starts one fresh run with the new tools. The continuation uses the same session even if you switch tabs. It may incur model charges; Stop cancels it.
+When the agent activates a server, its tools join the running turn: the agent calls them in its next step, and you do not need to send another prompt. You can ask for the activation and the work in one message, such as "Activate the memory MCP server and summarize the graph."
 
-Plain activation starts no follow-up run. In TUI, or if automatic continuation is unavailable, send a prompt such as "Now use the memory MCP tools to summarize the graph." Custom [agent prompts](../prompts.md) can include activation or discovery habits for workflows that use the same servers repeatedly.
+Custom [agent prompts](../prompts.md) can include MCP activation or discovery habits for workflows that use the same servers repeatedly.
 
-> [!TIP]
-> If the agent says it activated a server but cannot call its tools yet, send one
-> more prompt. The MCP prompt guidance on the next turn lists active and
-> inactive configured servers, and activated servers can contribute tools for
-> that turn.
-
-Activation records the server keys for the session and immediately tries to list their tools so the UI can report whether activation worked. On the next agent run, CodeAlta refreshes tools from active servers and registers enabled tools as deterministic aliases:
+Activation records the server keys for the session and lists their tools. The server stays active for that session: each later turn starts with its tools. CodeAlta registers enabled tools as deterministic aliases:
 
 ```text
 mcp__<server>__<tool>

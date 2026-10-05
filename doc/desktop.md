@@ -976,11 +976,8 @@ sent to the page; leaving a value blank keeps the stored one. Connection tests, 
 switches are done in the TUI. Enabling or disabling rewrites `config.toml` without its comments.
 
 A session uses MCP servers as in the terminal: the model activates one with `alta mcp activate <id>`,
-and from the next agent run the server's tools (`mcp__<server>__<tool>`) are part of the session.
-With `--continue --stdin` and a short follow-up prompt, the host automatically prepares that next
-run after the agent yields; another human message is unnecessary. Plain activation starts no
-follow-up. Stop cancels the original send and its continuation. A server stays active for that
-session while the app runs.
+and the server's tools (`mcp__<server>__<tool>`) are part of the session from the model's next step
+of the same turn. A server stays active for that session while the app runs.
 
 The end of the status line above every prompt shows the status items of plugins. The MCP plugin shows
 `MCP {enabled}/{configured}`, `· {n} unavailable` in the warning colour when servers are disabled or

@@ -20,9 +20,9 @@ public sealed record AltaCallerIdentity
     /// <summary>Gets the runtime key of the invoking plugin, when applicable.</summary>
     public string? PluginRuntimeKey { get; init; }
 
-    /// <summary>Gets the actual calling run's host-owned continuation capability; never supplied by CLI arguments.</summary>
+    /// <summary>Gets the tools of the calling run, where a command can register tools for the rest of that run; never supplied by CLI arguments.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
-    public CodeAlta.Agent.AgentRunContinuation? Continuation { get; init; }
+    public CodeAlta.Agent.AgentRunTools? RunTools { get; init; }
 
     /// <summary>Gets a command-line caller identity.</summary>
     public static AltaCallerIdentity Cli { get; } = new() { Kind = "cli" };

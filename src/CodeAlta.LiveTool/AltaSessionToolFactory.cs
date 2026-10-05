@@ -128,12 +128,13 @@ public static class AltaSessionToolFactory
         var caller = new AltaCallerIdentity
         {
             Kind = "agent",
-            SourceSessionId = invocation.Continuation is not null ? invocation.SessionId
+            // A run names its own session: the session the user looks at may be another one.
+            SourceSessionId = invocation.RunTools is not null ? invocation.SessionId
                 : options.SourceSessionIdProvider?.Invoke() ?? options.SourceSessionId,
             SourceAgentId = options.SourceAgentId,
             SourceProjectId = options.SourceProjectIdProvider?.Invoke() ?? options.SourceProjectId,
             PluginRuntimeKey = options.PluginRuntimeKey,
-            Continuation = invocation.Continuation,
+            RunTools = invocation.RunTools,
         };
         var result = await dispatcher.InvokeAsync(
                 args,

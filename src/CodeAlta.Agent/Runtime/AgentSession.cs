@@ -185,14 +185,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             // The forwarding callback only signals the one retained worker. It never synchronously
             // traverses provider callbacks, and its own disposal is joined before source release.
             callerRegistration = cancellationToken.UnsafeRegister(static state => ((ActiveRun)state!).SignalCancellation(), run);
-            options.Continuation?.Bind(run.Cancellation.Token);
             run.Body = ExecuteRunAsync(options, run.Id, run.Cancellation, run);
             return await run.Body.ConfigureAwait(false);
         }
         catch (Exception ex) { failure = ex; throw; }
         finally
         {
-            options.Continuation?.Close();
             run.Finish = FinishRunAsync(run, admitted, options.RunLifecycle, callerRegistration, failure);
             try { await run.Finish.ConfigureAwait(false); }
             catch (Exception cleanup)
@@ -238,9 +236,18 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 options.OnUserInputRequest ?? _options.OnUserInputRequest, options.EnableUserInputTool), options.AdditionalTools);
             var modelInfo = await ResolveModelInfoAsync(linkedCts.Token).ConfigureAwait(false);
             var toolMap = AgentToolBridge.CreateDefinitionMap(allTools);
+            var runTools = new AgentRunTools(toolMap.Keys);
 
             while (true)
             {
+                // A tool call of the previous step may have registered tools (an MCP server it activated):
+                // this request offers them, so the model goes on in the same turn.
+                if (runTools.Take() is { Count: > 0 } addedTools)
+                {
+                    allTools = [.. allTools, .. addedTools];
+                    toolMap = AgentToolBridge.CreateDefinitionMap(allTools);
+                }
+
                 _ = await AppendPendingSteerInputsAsync(runId, linkedCts.Token).ConfigureAwait(false);
                 await RefreshEstimatedUsageAsync(
                         runId,
@@ -398,7 +405,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                                         {
                                             progressGate.Release();
                                         }
-                                    }) { Continuation = options.Continuation },
+                                    }) { RunTools = runTools },
                                 linkedCts.Token)
                             .ConfigureAwait(false);
                     }

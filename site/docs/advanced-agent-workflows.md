@@ -20,7 +20,7 @@ Use advanced workflows when a task needs coordination rather than only one answe
 - split read-only research into child sessions while a parent synthesizes results;
 - keep a visible Markdown checklist in the sidebar;
 - schedule a later check on delegated work;
-- configure or activate MCP tools for a future turn;
+- configure or activate MCP tools;
 - create a project-specific prompt that repeats your preferred process.
 
 For simple edits, the built-in [Default agent prompt](prompts.md#built-in-modes) is usually enough.
@@ -65,7 +65,7 @@ The exact command set depends on the host, active plugins, and session context. 
 | `model` | List, show, and resolve provider model references. | “Pick two available high-reasoning model refs for a comparison run and explain the tradeoff.” | Read-only selection metadata. |
 | `skill` (`skills`, `skills_activate`) | List, show, and activate CodeAlta-managed skills. | “If an IL decompile skill is available, activate it for this session before inspecting the assembly.” | Activation injects skill context into a session; aliases exist for compatibility, but new prompts should prefer `skill`. |
 | `plugin` | Inspect loaded/discovered plugin runtime state. | “Check plugin diagnostics before troubleshooting MCP.” | Read-only inspection; plugin enable/disable is configured elsewhere. |
-| `mcp` | Inspect, configure, activate, search, describe, or call configured MCP server tools. | “Activate the memory MCP server, then I will send a follow-up prompt to use its tools.” | Plugin-contributed. Server add/remove changes JSON config; enable/disable changes TOML policy; activation affects future agent turns. |
+| `mcp` | Inspect, configure, activate, search, describe, or call configured MCP server tools. | “Activate the memory MCP server and summarize the graph.” | Plugin-contributed. Server add/remove changes JSON config; enable/disable changes TOML policy; an activated server's tools are usable in the same turn and stay for the session. |
 | `statistics` | Estimate text size/tokens through the statistics plugin. | “Estimate the prompt size of this release checklist before I attach it.” | Plugin-contributed and read-only. |
 
 > [!NOTE]
@@ -158,7 +158,7 @@ Switch this session to the triage prompt for the next turn.
 
 Use [Agent Prompts](prompts.md) for file layout, frontmatter, override rules, and authoring guidance.
 
-### Activate MCP tools for a future turn
+### Activate MCP tools
 
 MCP servers can be configured globally or per project, then activated for a session.
 
@@ -167,11 +167,10 @@ Check which MCP servers are configured and show me the config sources.
 ```
 
 ```text
-Activate the memory and docs MCP servers for this session.
+Activate the memory MCP server and summarize the graph.
 ```
 
-> [!NOTE]
-> New MCP tools are attached to the next agent run. In Desktop, ask the agent to activate and continue with your task; it can start that fresh run automatically without another human message. Plain activation starts no follow-up work. In TUI, send a follow-up prompt such as “Now use the memory MCP tools to summarize the graph.”
+The tools of an activated server are available at once, so the agent uses them in the same turn. The server stays active for the session.
 
 For setup, policy, server formats, and diagnostics, see [MCP plugin](plugins/mcp.md).
 

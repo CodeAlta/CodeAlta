@@ -83,8 +83,11 @@ public sealed record PluginAltaCommandContext
     /// <summary>Gets the source agent id associated with the command caller, when known.</summary>
     public string? SourceAgentId { get; init; }
 
-    /// <summary>Gets the actual agent caller's one-run continuation capability, if its host supports it.</summary>
-    public CodeAlta.Agent.AgentRunContinuation? Continuation { get; init; }
+    /// <summary>
+    /// Gets the tools of the agent run that called the command, when it is one: tools the command adds there
+    /// are offered to the model from its next request of the same run. Null for any other caller.
+    /// </summary>
+    public CodeAlta.Agent.AgentRunTools? RunTools { get; init; }
 
     /// <summary>Gets the command standard input reader.</summary>
     public required TextReader Stdin { get; init; }

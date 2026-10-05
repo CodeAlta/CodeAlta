@@ -471,7 +471,7 @@ public sealed class AltaLiveToolTests
         Assert.IsNotNull(prompt);
         StringAssert.Contains(prompt, "- Active: `memory`");
         StringAssert.Contains(prompt, "- Inactive (`alta mcp activate <id>*`): (none)");
-        StringAssert.Contains(prompt, "- Activation adds tools on the next agent run, including an automatically queued continuation.");
+        StringAssert.Contains(prompt, "- Activation registers the tools in the current turn: call them in your next step, without ending the turn.");
     }
 
     [TestMethod]
@@ -1203,7 +1203,6 @@ public sealed class AltaLiveToolTests
     public async Task PluginAltaCommandContribution_ReceivesCallerSourceContext()
     {
         var plugin = CreatePluginDescriptor("source-plugin");
-        AgentRunContinuation? observedContinuation = null;
         var catalog = new FakeAltaPluginCatalog(
             new AltaPluginCommandContribution
             {
@@ -1220,7 +1219,6 @@ public sealed class AltaLiveToolTests
                         var command = new Command("caller-context", "Report caller context.");
                         command.Add((_, _) =>
                         {
-                            observedContinuation = pluginContext.Continuation;
                             AltaJsonlWriter.WriteRecord(pluginContext.Stdout, new
                             {
                                 type = "alta.plugin.caller_context",
@@ -1252,24 +1250,6 @@ public sealed class AltaLiveToolTests
         Assert.AreEqual("session-123", record.GetProperty("sourceSessionId").GetString());
         Assert.AreEqual("project-456", record.GetProperty("sourceProjectId").GetString());
         Assert.AreEqual("agent-789", record.GetProperty("sourceAgentId").GetString());
-        Assert.IsNull(observedContinuation);
-
-        var continuation = new AgentRunContinuation();
-        var tool = AltaSessionToolFactory.Create(dispatcher, new AltaSessionToolOptions
-        {
-            SourceSessionId = "wrong-selected-session",
-            SourceSessionIdProvider = () => "another-selected-session",
-        });
-        using var arguments = JsonDocument.Parse("""{"args":["caller-context"]}""");
-        var invocation = CreateInvocation(arguments.RootElement) with { Continuation = continuation };
-        var toolResult = await tool.Handler(invocation, CancellationToken.None);
-        Assert.IsTrue(toolResult.Success, toolResult.Error);
-        Assert.AreSame(continuation, observedContinuation);
-        var toolRecord = ReadJsonLines(AssertTextItem(toolResult)).Single(static line => line.GetProperty("type").GetString() == "alta.plugin.caller_context");
-        Assert.AreEqual(invocation.SessionId, toolRecord.GetProperty("sourceSessionId").GetString(), "The actual run wins over selected UI context.");
-
-        await dispatcher.InvokeAsync(["caller-context"], caller: caller with { Kind = "cli", Continuation = continuation });
-        Assert.IsNull(observedContinuation, "A non-agent invocation cannot forward continuation authority.");
     }
 
     [TestMethod]

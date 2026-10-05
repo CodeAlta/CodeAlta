@@ -293,8 +293,7 @@ public sealed class McpPlugin : PluginBase
         builder.Append("- Inactive (`alta mcp activate <id>*`): ");
         AppendServerList(builder, inactiveServers, maxServers);
         builder.AppendLine();
-        builder.AppendLine("- Activation adds tools on the next agent run, including an automatically queued continuation.");
-        builder.Append("- To activate and continue automatically: `alta mcp activate <id>* --continue --stdin` with a short continuation prompt. If continuationQueued=true, end this turn immediately; do not poll or send another prompt. Plain activation starts no follow-up. One automatic continuation per original Send; Stop/cancellation takes precedence.");
+        builder.Append("- Activation registers the tools in the current turn: call them in your next step, without ending the turn.");
 
         return new ValueTask<string?>(builder.ToString().TrimEnd());
     }
@@ -322,7 +321,7 @@ public sealed class McpPlugin : PluginBase
     private McpManagementService CreateManagementService()
         => _userHomeDirectory is null ? new McpManagementService() : new McpManagementService(_userHomeDirectory);
 
-    private static AgentToolDefinition CreateAgentTool(McpRuntimeTool tool, string? projectPath, string? userHomeDirectory)
+    internal static AgentToolDefinition CreateAgentTool(McpRuntimeTool tool, string? projectPath, string? userHomeDirectory)
     {
         var description = CreateToolDescription(tool);
         var useArgumentsJsonWrapper = RequiresArgumentsJsonWrapper(tool.InputSchema);

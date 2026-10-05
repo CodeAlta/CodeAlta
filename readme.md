@@ -34,8 +34,6 @@ See [Getting Started](https://codealta.github.io/docs/getting-started/) for requ
 - **Everything the agent did**: tool calls, file diffs, and context usage are in the timeline and open with their details.
 - **Extensions**: agent prompts, MCP servers, skills, and trusted local .NET plugins.
 
-In Desktop, an agent can activate an MCP server and continue automatically with its newly available tools—no extra human prompt is needed. Plain activation remains available without starting a follow-up run. See [MCP activation](https://codealta.github.io/docs/plugins/mcp/#activating-tools-for-agents).
-
 <p align="center">
   <img src="site/img/alta-home.png" alt="CodeAlta TUI with the projects sidebar, a session timeline, and the prompt editor" width="920">
 </p>

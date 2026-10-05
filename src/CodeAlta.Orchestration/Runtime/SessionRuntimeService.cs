@@ -940,10 +940,6 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             return entry.SessionHandleId;
         }, CancellationToken.None);
 
-    internal Task<AgentSessionHandleId> EnsureOwnedContinuationSessionAsync(SessionViewDescriptor session, SessionExecutionOptions options)
-        => AdmitAsync(async () => (await ResolveCoordinatorEntryAsync(session, options, ownedCommand: true,
-            continuation: true).ConfigureAwait(false)).SessionHandleId, CancellationToken.None);
-
     private void ReserveSessionIdentity(SessionViewDescriptor session)
     {
         ArgumentNullException.ThrowIfNull(session);
@@ -955,7 +951,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
     }
 
-    private async Task<RuntimeSessionEntry> ResolveCoordinatorEntryAsync(SessionViewDescriptor session, SessionExecutionOptions options, bool history = false, bool ownedCommand = false, RuntimeFailureCapture? failureCapture = null, bool useExplicitPrompt = false, bool continuation = false)
+    private async Task<RuntimeSessionEntry> ResolveCoordinatorEntryAsync(SessionViewDescriptor session, SessionExecutionOptions options, bool history = false, bool ownedCommand = false, RuntimeFailureCapture? failureCapture = null, bool useExplicitPrompt = false)
     {
         ReserveSessionIdentity(session);
         ArgumentNullException.ThrowIfNull(options);
@@ -967,7 +963,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             var prepared = await actor.QueryAsync(
                 actorCancellationToken => history && _entries.TryGetValue(session.SessionId, out var active) && !active.IsTerminated && !active.Attachment.IsRetiring
                     ? ValueTask.FromResult(new CoordinatorPreparation(active, null))
-                    : EnsureCoordinatorSessionCoreAsync(session, options, actorCancellationToken, ownedCommand, failureCapture, useExplicitPrompt, preparedPrompt, continuation),
+                    : EnsureCoordinatorSessionCoreAsync(session, options, actorCancellationToken, ownedCommand, failureCapture, useExplicitPrompt, preparedPrompt),
                 CancellationToken.None).ConfigureAwait(false);
             if (prepared.Entry is not null) return prepared.Entry;
             // Keep the pending prompt consumed by this request across its transition join.
@@ -979,23 +975,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
     // Actor prepare only: callers join the returned ticket outside the mailbox.
     private async ValueTask<CoordinatorPreparation> EnsureCoordinatorSessionCoreAsync(
-        SessionViewDescriptor session, SessionExecutionOptions options, CancellationToken actorCancellationToken, bool ownedCommand = false, RuntimeFailureCapture? failureCapture = null, bool useExplicitPrompt = false, string? preparedPrompt = null, bool continuation = false)
+        SessionViewDescriptor session, SessionExecutionOptions options, CancellationToken actorCancellationToken, bool ownedCommand = false, RuntimeFailureCapture? failureCapture = null, bool useExplicitPrompt = false, string? preparedPrompt = null)
     {
         actorCancellationToken.ThrowIfCancellationRequested();
         ObjectDisposedException.ThrowIf(_forwarding.IsClosed, this);
         if (_transitions.TryGetValue(session.SessionId, out var transition))
             return new CoordinatorPreparation(null, transition);
         _entries.TryGetValue(session.SessionId, out var existing);
-        if (continuation)
-        {
-            // Never retire an attachment under an already admitted queue item or jump its order.
-            // Arbitration is in the same mailbox as queue insertion/claim and attachment retirement.
-            if (existing is null || existing.HasActiveRun || existing.QueueDrainInProgress || existing.OwnedQueue is not null)
-                throw new InvalidOperationException("Continuation target is busy or no longer attached.");
-            var state = await ReadLatestLocalStateAsync(session.SessionId, existing.CreatedAt, actorCancellationToken).ConfigureAwait(false);
-            if (state is null || state.QueuedPrompts.Any(static prompt => IsPendingQueuedPromptState(prompt.State)))
-                throw new InvalidOperationException("Continuation cannot overtake queued prompts.");
-        }
         var prompt = (useExplicitPrompt ? null : NormalizeOptionalText(existing?.PendingAgentPromptId))
             ?? preparedPrompt ?? NormalizeOptionalText(options.AgentPromptId) ?? NormalizeOptionalText(session.AgentPromptId);
         if (ownedCommand && existing is not null && !existing.Matches(options, prompt)
@@ -1403,7 +1389,6 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                         Input = sendOptions.Input,
                         AskId = sendOptions.AskId,
                         AdditionalTools = sendOptions.AdditionalTools,
-                        Continuation = sendOptions.Continuation,
                         OnPermissionRequest = Permissions.CreateOwnedCommandHandler(permissionExecution),
                         OnUserInputRequest = Permissions.CreateOwnedUserInputHandler(permissionExecution),
                         EnableUserInputTool = permissionExecution.EnableUserInput,

@@ -188,6 +188,9 @@ public sealed partial class McpRuntimeServiceTests
             Assert.AreEqual("alta.mcp.activate", activateRecord.RootElement.GetProperty("type").GetString());
             Assert.AreEqual(1, activateRecord.RootElement.GetProperty("activeToolCount").GetInt32());
             Assert.AreEqual(0, activateRecord.RootElement.GetProperty("diagnosticCount").GetInt32());
+            // From a terminal there is no running turn to take the tools: they come with the next agent run.
+            Assert.AreEqual("next_run", activateRecord.RootElement.GetProperty("toolsAvailable").GetString());
+            Assert.AreEqual(0, activateRecord.RootElement.GetProperty("registeredToolCount").GetInt32());
             Assert.IsTrue(activateRecord.RootElement.GetProperty("nextTurnRequired").GetBoolean());
             StringAssert.Contains(activateRecord.RootElement.GetProperty("note").GetString()!, "next agent run");
         }
@@ -224,7 +227,7 @@ public sealed partial class McpRuntimeServiceTests
         Assert.IsNotNull(prompt);
         StringAssert.Contains(prompt, "- Active: `tiny`");
         StringAssert.Contains(prompt, "- Inactive (`alta mcp activate <id>*`): (none)");
-        StringAssert.Contains(prompt, "- Activation adds tools on the next agent run, including an automatically queued continuation.");
+        StringAssert.Contains(prompt, "- Activation registers the tools in the current turn: call them in your next step, without ending the turn.");
     }
 
     [TestMethod]
@@ -424,7 +427,7 @@ public sealed partial class McpRuntimeServiceTests
         Assert.IsNotNull(prompt);
         StringAssert.Contains(prompt, "- Active: `tiny`");
         StringAssert.Contains(prompt, "- Inactive (`alta mcp activate <id>*`): (none)");
-        StringAssert.Contains(prompt, "- Activation adds tools on the next agent run, including an automatically queued continuation.");
+        StringAssert.Contains(prompt, "- Activation registers the tools in the current turn: call them in your next step, without ending the turn.");
     }
 
     [TestMethod]
