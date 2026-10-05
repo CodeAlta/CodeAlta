@@ -140,7 +140,9 @@ public sealed class SkillManagementServiceTests
             Assert.AreEqual(0, Directory.GetFileSystemEntries(target).Length);
         }
 
-        Directory.Delete(link);
+        // On Unix a link whose target is missing is not a directory: Directory.Delete does not find it.
+        if (dangling && !OperatingSystem.IsWindows()) File.Delete(link);
+        else Directory.Delete(link);
     }
 
     [TestMethod]

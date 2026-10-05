@@ -43,8 +43,10 @@ public sealed class SessionRuntimeServiceTests
         await journal.AppendStateAsync(descriptor, new() { ProviderKey = "original", AgentPromptId = "default" });
         var path = Directory.EnumerateFiles(temp.Path, "*.jsonl", SearchOption.AllDirectories).Single();
         var bytes = await File.ReadAllBytesAsync(path);
-        using (var readLock = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+        // Only Windows refuses to replace a file that is open elsewhere; other systems replace it.
+        if (OperatingSystem.IsWindows())
         {
+            using var readLock = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
             Exception? failure = null;
             try { await runtime.SelectOwnedProviderAsync(before, "target"); }
             catch (Exception exception) { failure = exception; }
