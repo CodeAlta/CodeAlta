@@ -33,8 +33,9 @@
     <!-- The window's own icon (Alt+Tab, task switcher): the executable's icon resource does not reach the native window. -->
     <!-- These are read beside the application: Pack="false" keeps the copies NuGet adds for content files out of each package. -->
     <Content Include="../../img/alta.ico" Link="alta.ico" CopyToOutputDirectory="PreserveNewest" Pack="false" />
-    <!-- The same icon for the other desktops: the window, tray and launcher on Linux, the menu bar item and
-         the application bundle on macOS. img/make-icons.py derives them from CodeAlta.png. -->
+    <!-- The same icon for the other desktops: the window, tray and launcher on Linux, the menu bar item, the
+         Dock and the application bundle on macOS, where the icon family keeps the margin of the system's
+         icon grid. img/make-icons.py derives them from CodeAlta.png. -->
     <Content Include="../../img/alta.png" Link="alta.png" CopyToOutputDirectory="PreserveNewest" Pack="false" />
     <Content Include="../../img/alta-tray.png" Link="alta-tray.png" CopyToOutputDirectory="PreserveNewest" Pack="false" />
     <Content Include="../../img/alta.icns" Link="alta.icns" CopyToOutputDirectory="PreserveNewest" Pack="false" />

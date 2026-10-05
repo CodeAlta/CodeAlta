@@ -20,6 +20,15 @@ public sealed class DesktopWindowChromeTests
     }
 
     [TestMethod]
+    public void WindowIcon_IsThePaddedIconFamilyOnMacOS()
+    {
+        // The Dock draws an icon as large as its canvas: the full-bleed tile of the other desktops looks oversized there.
+        Assert.AreEqual("alta.icns", DesktopWindowChrome.WindowIconFile(windows: false, macOS: true));
+        Assert.AreEqual("alta.ico", DesktopWindowChrome.WindowIconFile(windows: true, macOS: false));
+        Assert.AreEqual("alta.png", DesktopWindowChrome.WindowIconFile(windows: false, macOS: false));
+    }
+
+    [TestMethod]
     public void ViewOptions_ShowTheMainViewAsAnApplicationShell()
     {
         var options = DesktopWindowChrome.ViewOptions();

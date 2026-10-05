@@ -116,14 +116,21 @@ internal sealed class DesktopWindowChrome : IAsyncDisposable
         });
 
     /// <summary>
-    /// Gives the window the application's icon, which the task switcher (Alt+Tab) shows. A native window
-    /// does not take the icon of its executable by itself. A missing icon file or an unsupported platform
-    /// leaves the default icon.
+    /// The icon file beside the application for a platform. On macOS it is the icon family, whose tile keeps
+    /// the margin of the system's icon grid: the Dock draws an icon as large as its canvas, so the full-bleed
+    /// tile of the other desktops would look bigger than its neighbours.
+    /// </summary>
+    internal static string WindowIconFile(bool windows, bool macOS) => windows ? "alta.ico" : macOS ? "alta.icns" : "alta.png";
+
+    /// <summary>
+    /// Gives the window the application's icon, which the task switcher (Alt+Tab) and the Dock show. A native
+    /// window does not take the icon of its executable by itself. A missing icon file or an unsupported
+    /// platform leaves the default icon.
     /// </summary>
     internal async ValueTask ApplyWindowIconAsync(NeoWindow window)
     {
         ArgumentNullException.ThrowIfNull(window);
-        var icon = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "alta.ico" : "alta.png");
+        var icon = Path.Combine(AppContext.BaseDirectory, WindowIconFile(OperatingSystem.IsWindows(), OperatingSystem.IsMacOS()));
         if (!File.Exists(icon)) return;
         try { await _services.WindowPolish.SetIconAsync(window, icon).ConfigureAwait(true); }
         catch (Exception exception) when (exception is not OperationCanceledException) { /* The default icon stays. */ }
