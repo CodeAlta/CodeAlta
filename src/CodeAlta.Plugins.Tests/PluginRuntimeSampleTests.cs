@@ -14,6 +14,7 @@ public sealed class PluginRuntimeSampleTests
         "background-task",
         "instruction-path-normalizer",
         "multi-plugin-assembly",
+        "desktop-and-terminal",
     ];
 
     [TestMethod]
