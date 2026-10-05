@@ -1,4 +1,6 @@
-// Only explicit test-owned choices and receipt reads are reachable in this browser fixture.
+// Only explicit test-owned choices and receipt reads are reachable in this browser fixture;
+// every other service is the inert one of the browser demo.
+export * from "./demo-api";
 export const sessionOperations = { choices: async ({ expectedEpoch, sessionId }: { expectedEpoch: string; sessionId: string }) => {
   const fixture = window as Window & { fixtureChoiceReads?: number };
   fixture.fixtureChoiceReads = (fixture.fixtureChoiceReads ?? 0) + 1;
@@ -13,5 +15,3 @@ export const sessionOperations = { choices: async ({ expectedEpoch, sessionId }:
   fixture.fixtureReceiptReads = (fixture.fixtureReceiptReads ?? 0) + 1;
   return { status: "ok", epoch: expectedEpoch, rows: fixture.fixtureReceiptRows ?? [], next: null };
 } };
-export const sessionUsage = { read: async () => { throw new Error("Usage is not available in this isolated fixture."); } };
-export const sessionRuntimeState = { observe: async () => { throw new Error("Runtime observation is not available in this isolated fixture."); } };

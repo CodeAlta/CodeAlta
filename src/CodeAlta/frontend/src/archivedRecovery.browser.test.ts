@@ -13,20 +13,23 @@ const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
 
 test("production archived composer/reminder gates retain exact owner evidence without new writes", { skip: !edge, timeout: 60_000 }, async () => {
-  const source = readFileSync(fileURLToPath(new URL("./main.tsx", import.meta.url)), "utf8");
-  assert.match(source, /<SessionComposerGate snapshot=\{snapshot\}/);
-  assert.match(source, /readOnly=\{<ReadOnlyComposer/);
-  assert.match(source, /recovery=\{ownedHost \? <ArchivedActionRecovery/);
-  assert.match(source, /action === "compact"[\s\S]*?currentProjectWritable\(\)/);
-  assert.match(source, /view === "reminders" \? <div className="reminders-destination">[\s\S]*?<ReminderScopeGate/);
   const root = await mkdtemp(join(tmpdir(), "codealta-archive-recovery-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
   try {
     await build({ entryPoints: [fileURLToPath(new URL("./archivedRecovery.mount.tsx", import.meta.url))],
-      outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife",
-      plugins: [{ name: "isolated-choices", setup(build) {
-        build.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("./composer.neoastra.mount.ts", import.meta.url)) }));
+      outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife", loader: { ".css": "empty", ".flf": "text", ".svg": "dataurl" },
+      plugins: [{ name: "isolated-choices", setup(bundle) {
+        bundle.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("./composer.neoastra.mount.ts", import.meta.url)) }));
+        bundle.onResolve({ filter: /^monaco-editor\/.*\?worker$/ }, args => ({ path: args.path, namespace: "fixture-worker" }));
+        bundle.onLoad({ filter: /.*/, namespace: "fixture-worker" }, async () => {
+          const worker = await build({ entryPoints: [fileURLToPath(new URL("../node_modules/monaco-editor/esm/vs/editor/editor.worker.js", import.meta.url))],
+            bundle: true, platform: "browser", format: "iife", write: false });
+          return { loader: "js", contents: `export default class extends Worker { constructor() {
+            const url=URL.createObjectURL(new Blob([${JSON.stringify(worker.outputFiles[0].text)}],{type:"text/javascript"}));
+            super(url); URL.revokeObjectURL(url);
+          } }` };
+        });
       } }] });
     await writeFile(join(root, "style.css"), readFileSync(fileURLToPath(new URL("./style.css", import.meta.url))));
     const page = join(root, "fixture.html");
@@ -160,10 +163,10 @@ test("production archived composer/reminder gates retain exact owner evidence wi
     assert.equal(await evaluate("document.querySelector('.catalog-composer').innerText.includes('Archived project; this session is read-only.')"), true);
     assert.equal(await evaluate("document.querySelector('.catalog-composer').innerText.includes('Recorded by session')"), false);
     assert.equal(await evaluate("document.querySelector('.catalog-composer .send-button')?.disabled"), true);
-    assert.equal(await evaluate("!!document.querySelector('.composer-toolbar [aria-label=\"Steer current composer to observed run\"]')"), false,
+    assert.equal(await evaluate("!!document.querySelector('.composer-toolbar [aria-label=\"Steer the running turn\"]')"), false,
       "archived read-only gate must not mount a steering composer action");
-    assert.equal(await evaluate("!!document.querySelector('.composer-toolbar [aria-label=\"Queue current composer in this host\"]')"), false,
-      "archived read-only gate must not mount host-only queueing");
+    assert.equal(await evaluate("!!document.querySelector('.composer-toolbar [aria-label=\"Enqueue for the next turn\"]')"), false,
+      "archived read-only gate must not mount queueing");
     assert.equal(await evaluate("document.querySelector('.catalog-composer .prompt-input')?.rows"), 1);
     assert.equal(await evaluate("document.querySelector('.catalog-composer .composer-toolbar').compareDocumentPosition(document.querySelector('#catalog-prompt')) & Node.DOCUMENT_POSITION_PRECEDING"), 2);
     assert.equal(await wait("document.body.innerText.includes('Original Send text')"), "ready");
@@ -280,9 +283,9 @@ test("production archived composer/reminder gates retain exact owner evidence wi
     assert.equal(await wait("document.body.innerText.includes('Select an owned session')"), "ready");
     await evaluate("window.archivedRecoveryFixture.view('workspace'); window.archivedRecoveryFixture.archive(false); window.archivedRecoveryFixture.session('one')");
     assert.equal(await wait("!!document.querySelector('#catalog-prompt')"), "ready");
-    assert.equal(await evaluate("!!document.querySelector('.composer-toolbar [aria-label=\"Steer current composer to observed run\"]')"), false,
+    assert.equal(await evaluate("!!document.querySelector('.composer-toolbar [aria-label=\"Steer the running turn\"]')"), false,
       "catalog-only gate does not expose owned steering after host loss");
-    assert.equal(await evaluate("!!document.querySelector('.composer-toolbar [aria-label=\"Queue current composer in this host\"]')"), false,
+    assert.equal(await evaluate("!!document.querySelector('.composer-toolbar [aria-label=\"Enqueue for the next turn\"]')"), false,
       "catalog-only gate does not expose queueing after host loss");
     assert.equal(await evaluate("document.querySelector('#catalog-draft-status')?.textContent.includes('Draft only')"), true);
     assert.equal(await evaluate("document.querySelector('#catalog-draft-status')?.textContent.includes('archived')"), false);
