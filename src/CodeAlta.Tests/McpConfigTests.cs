@@ -13,6 +13,12 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class McpConfigTests
 {
+    // Global MCP configuration, policy and OAuth tokens resolve under this home, never the developer's real ~/.alta.
+    private readonly TempDirectory _home = TempDirectory.Create();
+
+    [TestCleanup]
+    public void DisposeHome() => _home.Dispose();
+
     [TestMethod]
     public void Discovery_ParsesSupportedFormatsAndAppliesProjectOverlay()
     {
@@ -442,7 +448,7 @@ public sealed class McpConfigTests
             """
             { "mcpServers": { "memory": { "command": "npx" } } }
             """);
-        var plugin = new McpPlugin();
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
         var contribution = plugin.GetAltaCommands().Single();
         var stdout = new StringWriter(CultureInfo.InvariantCulture);
         var stderr = new StringWriter(CultureInfo.InvariantCulture);
@@ -459,7 +465,7 @@ public sealed class McpConfigTests
     [TestMethod]
     public async Task PluginCommand_HelpShowsServerCommandGroup()
     {
-        var plugin = new McpPlugin();
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
         var contribution = plugin.GetAltaCommands().Single();
         var stdout = new StringWriter(CultureInfo.InvariantCulture);
         var stderr = new StringWriter(CultureInfo.InvariantCulture);
@@ -566,7 +572,7 @@ public sealed class McpConfigTests
     public async Task PluginCommand_ServerAddDefaultsToProjectAndCreatesMissingStdioConfig()
     {
         using var project = TempDirectory.Create();
-        var plugin = new McpPlugin();
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
         var contribution = plugin.GetAltaCommands().Single();
         var stdout = new StringWriter(CultureInfo.InvariantCulture);
         var stderr = new StringWriter(CultureInfo.InvariantCulture);
@@ -596,7 +602,7 @@ public sealed class McpConfigTests
         var path = McpConfigDiscovery.GetProjectConfigPath(project.Path);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, "{ \"servers\": { \"old\": { \"type\": \"stdio\", \"command\": \"node\" } } }");
-        var plugin = new McpPlugin();
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
         var contribution = plugin.GetAltaCommands().Single();
         var stdout = new StringWriter(CultureInfo.InvariantCulture);
         var stderr = new StringWriter(CultureInfo.InvariantCulture);
@@ -692,7 +698,7 @@ public sealed class McpConfigTests
             """
             { "mcpServers": { "globalish": { "command": "keep" }, "overlay": { "command": "remove-me" } } }
             """);
-        var plugin = new McpPlugin();
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
         var contribution = plugin.GetAltaCommands().Single();
         var stdout = new StringWriter(CultureInfo.InvariantCulture);
         var stderr = new StringWriter(CultureInfo.InvariantCulture);
@@ -716,7 +722,7 @@ public sealed class McpConfigTests
         Directory.CreateDirectory(Path.GetDirectoryName(mcpPath)!);
         File.WriteAllText(mcpPath, "{ \"mcpServers\": { \"docs\": { \"url\": \"https://example.test/mcp\" } } }");
         var originalMcpJson = File.ReadAllText(mcpPath);
-        var plugin = new McpPlugin();
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
         var contribution = plugin.GetAltaCommands().Single();
         var stdout = new StringWriter(CultureInfo.InvariantCulture);
         var stderr = new StringWriter(CultureInfo.InvariantCulture);
@@ -760,7 +766,7 @@ public sealed class McpConfigTests
               }
             }
             """);
-        var plugin = new McpPlugin();
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
         var contribution = plugin.GetAltaCommands().Single();
         var stdout = new StringWriter(CultureInfo.InvariantCulture);
         var stderr = new StringWriter(CultureInfo.InvariantCulture);
@@ -779,10 +785,32 @@ public sealed class McpConfigTests
     }
 
     [TestMethod]
+    public async Task PluginAndServices_ReadGlobalConfigurationFromTheirHomeDirectory()
+    {
+        Directory.CreateDirectory(Path.Combine(_home.Path, ".alta"));
+        File.WriteAllText(
+            Path.Combine(_home.Path, ".alta", "mcp.json"),
+            """
+            { "mcpServers": { "home-only": { "url": "https://example.test/mcp" } } }
+            """);
+        using var project = TempDirectory.Create();
+
+        var snapshot = new McpManagementService(_home.Path).RefreshSnapshot(new McpManagementRequest { ProjectDirectory = project.Path });
+        var content = await new McpPlugin(createPresentation: null, _home.Path).GetSystemPromptContributions().Single()
+            .Content(CreatePromptContext(project.Path), CancellationToken.None);
+
+        CollectionAssert.AreEqual(
+            new[] { "home-only" },
+            snapshot.Servers.Where(static server => server.State == McpManagementServerState.Configured).Select(static server => server.Key).ToArray());
+        Assert.IsNotNull(content);
+        StringAssert.Contains(content, "home-only");
+    }
+
+    [TestMethod]
     public async Task PromptContribution_IsNullWhenMissingAndMentionsConfiguredProjectServer()
     {
         using var emptyProject = TempDirectory.Create();
-        var contribution = new McpPlugin().GetSystemPromptContributions().Single();
+        var contribution = new McpPlugin(createPresentation: null, _home.Path).GetSystemPromptContributions().Single();
         var emptyContent = await contribution.Content(CreatePromptContext(emptyProject.Path), CancellationToken.None);
         Assert.IsNull(emptyContent);
 
@@ -816,7 +844,7 @@ public sealed class McpConfigTests
             """
             { "mcpServers": { "docs": { "command": "__missing_codealta_mcp_test_server__" } } }
             """);
-        var snapshot = new McpManagementService().RefreshSnapshot(new McpManagementRequest { ProjectDirectory = project.Path });
+        var snapshot = new McpManagementService(_home.Path).RefreshSnapshot(new McpManagementRequest { ProjectDirectory = project.Path });
 
         var label = McpPlugin.CreateStatusLabel(snapshot, new Dictionary<string, int>(StringComparer.Ordinal) { ["docs"] = 7 }, ["docs"]);
 
@@ -833,7 +861,7 @@ public sealed class McpConfigTests
             """
             { "mcpServers": { "docs": { "url": "https://example.test/mcp" } } }
             """);
-        var snapshot = new McpManagementService().RefreshSnapshot(new McpManagementRequest { ProjectDirectory = project.Path });
+        var snapshot = new McpManagementService(_home.Path).RefreshSnapshot(new McpManagementRequest { ProjectDirectory = project.Path });
 
         var label = McpPlugin.CreateStatusLabel(snapshot, new Dictionary<string, int>(StringComparer.Ordinal), ["docs"]);
 
@@ -850,7 +878,7 @@ public sealed class McpConfigTests
             """
             { "mcpServers": { "docs": { "url": "https://example.test/mcp" } } }
             """);
-        var plugin = new McpPlugin(McpTerminalContributions.CreatePresentation);
+        var plugin = new McpPlugin(McpTerminalContributions.CreatePresentation, _home.Path);
         var statusContribution = plugin.GetUiContributions().OfType<PluginVisualContribution>().Single();
         var visual = statusContribution.CreateVisual!(CreateVisualContext(project.Path, "session-a"));
         Assert.IsNotNull(visual);
@@ -908,7 +936,7 @@ public sealed class McpConfigTests
         activationState.Changed += _ => statusRevision.Value++;
         var visual = McpTerminalContributions.CreateStatusIndicator(
             CreateVisualContext(project.Path, "session-a"),
-            new McpManagementService(),
+            new McpManagementService(_home.Path),
             activationState,
             statusRevision);
         Assert.IsNotNull(visual);
@@ -918,7 +946,7 @@ public sealed class McpConfigTests
         var scopeKey = McpActivationState.ResolveScopeKey("session-a", project.Path);
         activationState.ActivateServers(scopeKey, ["docs"]);
         Assert.AreEqual(1, statusRevision.Value);
-        var pendingVisual = McpTerminalContributions.CreateStatusIndicator(CreateVisualContext(project.Path, "session-a"), new McpManagementService(), activationState, statusRevision)!;
+        var pendingVisual = McpTerminalContributions.CreateStatusIndicator(CreateVisualContext(project.Path, "session-a"), new McpManagementService(_home.Path), activationState, statusRevision)!;
         Assert.AreEqual(
             "MCP 1/1 · tools pending",
             ReadStatusPlainText(pendingVisual));
@@ -926,7 +954,7 @@ public sealed class McpConfigTests
 
         activationState.UpdateToolCounts(scopeKey, new Dictionary<string, int>(StringComparer.Ordinal) { ["docs"] = 7 });
         Assert.AreEqual(2, statusRevision.Value);
-        var activeVisual = McpTerminalContributions.CreateStatusIndicator(CreateVisualContext(project.Path, "session-a"), new McpManagementService(), activationState, statusRevision)!;
+        var activeVisual = McpTerminalContributions.CreateStatusIndicator(CreateVisualContext(project.Path, "session-a"), new McpManagementService(_home.Path), activationState, statusRevision)!;
         Assert.AreEqual(
             "MCP 1/1 · active tools 7",
             ReadStatusPlainText(activeVisual));

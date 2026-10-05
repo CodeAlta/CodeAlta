@@ -194,7 +194,8 @@ public sealed class TextFileCodecTests
         {
             File.CreateSymbolicLink(link, temp.Path);
         }
-        catch (UnauthorizedAccessException)
+        // ERROR_PRIVILEGE_NOT_HELD: Windows without Developer Mode or elevation cannot create symbolic links.
+        catch (Exception ex) when (ex is UnauthorizedAccessException || ex.HResult == unchecked((int)0x80070522))
         {
             Assert.Inconclusive("Creating a temporary symbolic link requires platform permission.");
         }

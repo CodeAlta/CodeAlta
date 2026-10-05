@@ -15,20 +15,32 @@ public sealed class McpPlugin : PluginBase
     private const int MaxWrapperSchemaDescriptionChars = 2000;
 
     private readonly McpActivationState _activationState = new();
-    private readonly McpManagementService _managementService = new();
+    private readonly McpManagementService _managementService;
     private readonly McpPluginPresentation? _presentation;
+    private readonly string? _userHomeDirectory;
 
     /// <summary>Initializes an MCP backend without terminal presentation.</summary>
     public McpPlugin()
+        : this(createPresentation: null, userHomeDirectory: null)
     {
     }
 
     // The terminal host borrows these exact owners; presentation construction precedes contribution enumeration.
     internal McpPlugin(Func<McpManagementService, McpActivationState, McpPluginPresentation> createPresentation)
+        : this(createPresentation ?? throw new ArgumentNullException(nameof(createPresentation)), userHomeDirectory: null)
     {
-        ArgumentNullException.ThrowIfNull(createPresentation);
-        _presentation = createPresentation(_managementService, _activationState)
-            ?? throw new InvalidOperationException("The MCP presentation factory returned null.");
+    }
+
+    // A non-null home directory replaces the current user's for global MCP configuration, policy and OAuth tokens.
+    internal McpPlugin(Func<McpManagementService, McpActivationState, McpPluginPresentation>? createPresentation, string? userHomeDirectory)
+    {
+        _userHomeDirectory = userHomeDirectory;
+        _managementService = CreateManagementService();
+        if (createPresentation is not null)
+        {
+            _presentation = createPresentation(_managementService, _activationState)
+                ?? throw new InvalidOperationException("The MCP presentation factory returned null.");
+        }
     }
 
     /// <inheritdoc />
@@ -85,7 +97,8 @@ public sealed class McpPlugin : PluginBase
                 IsMutating = true,
                 SupportsCatalogOnlyContext = false,
             },
-            CreateCommandNode = context => McpCommandFactory.CreateCommand(context, _activationState),
+            CreateCommandNode = context => McpCommandFactory.CreateCommand(
+                context, new McpCommandFactoryOptions { UserHomeDirectory = _userHomeDirectory }, _activationState),
         };
     }
 
@@ -220,7 +233,7 @@ public sealed class McpPlugin : PluginBase
             return null;
         }
 
-        await using var runtime = new McpRuntimeService();
+        await using var runtime = new McpRuntimeService(_userHomeDirectory);
         var direct = await runtime.ListToolsForServersAsync(new McpRuntimeRequest { ProjectDirectory = projectPath }, activeServers, cancellationToken).ConfigureAwait(false);
         _activationState.UpdateToolCounts(
             activationScope,
@@ -234,7 +247,7 @@ public sealed class McpPlugin : PluginBase
 
         return new PluginBeforeAgentRunResult
         {
-            AdditionalTools = direct.Tools.Select(tool => CreateAgentTool(tool, projectPath)).ToArray(),
+            AdditionalTools = direct.Tools.Select(tool => CreateAgentTool(tool, projectPath, _userHomeDirectory)).ToArray(),
             TemporaryPromptContributions = CreateDirectToolDiagnosticsPrompt(direct.Diagnostics),
         };
     }
@@ -244,7 +257,7 @@ public sealed class McpPlugin : PluginBase
         ArgumentNullException.ThrowIfNull(context);
         cancellationToken.ThrowIfCancellationRequested();
         var projectPath = ResolveProjectPath(context.ProjectPath, context.Services.Workspace.SelectedProjectPath, null);
-        var snapshot = new McpManagementService().RefreshSnapshot(new McpManagementRequest { ProjectDirectory = projectPath });
+        var snapshot = CreateManagementService().RefreshSnapshot(new McpManagementRequest { ProjectDirectory = projectPath });
         if (!snapshot.Policy.DiscoverInPrompt || snapshot.Summary.ConfiguredServerCount == 0)
         {
             return new ValueTask<string?>((string?)null);
@@ -305,7 +318,10 @@ public sealed class McpPlugin : PluginBase
         return string.IsNullOrWhiteSpace(fallback) ? null : fallback;
     }
 
-    private static AgentToolDefinition CreateAgentTool(McpRuntimeTool tool, string? projectPath)
+    private McpManagementService CreateManagementService()
+        => _userHomeDirectory is null ? new McpManagementService() : new McpManagementService(_userHomeDirectory);
+
+    private static AgentToolDefinition CreateAgentTool(McpRuntimeTool tool, string? projectPath, string? userHomeDirectory)
     {
         var description = CreateToolDescription(tool);
         var useArgumentsJsonWrapper = RequiresArgumentsJsonWrapper(tool.InputSchema);
@@ -318,6 +334,7 @@ public sealed class McpPlugin : PluginBase
                 tool.Server,
                 tool.Name,
                 projectPath,
+                userHomeDirectory,
                 useArgumentsJsonWrapper,
                 invocation,
                 cancellationToken).ConfigureAwait(false));
@@ -528,6 +545,7 @@ public sealed class McpPlugin : PluginBase
         string server,
         string tool,
         string? projectPath,
+        string? userHomeDirectory,
         bool useArgumentsJsonWrapper,
         AgentToolInvocation invocation,
         CancellationToken cancellationToken)
@@ -537,7 +555,7 @@ public sealed class McpPlugin : PluginBase
             return new AgentToolResult(false, [new AgentToolResultItem.Text(error)], error);
         }
 
-        await using var runtime = new McpRuntimeService();
+        await using var runtime = new McpRuntimeService(userHomeDirectory);
         var diagnostics = new List<McpRuntimeDiagnostic>();
         var result = await runtime.CallToolAsync(
             new McpRuntimeRequest { ProjectDirectory = projectPath },

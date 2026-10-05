@@ -16,6 +16,12 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class McpManagementServiceTests
 {
+    // Global MCP configuration, policy and OAuth tokens resolve under this home, never the developer's real ~/.alta.
+    private readonly TempDirectory _home = TempDirectory.Create();
+
+    [TestCleanup]
+    public void DisposeHome() => _home.Dispose();
+
     [TestMethod]
     public void RefreshSnapshot_ReportsConfiguredDisabledInvalidMissingAndShadowedStates()
     {
@@ -54,7 +60,7 @@ public sealed class McpManagementServiceTests
         Directory.CreateDirectory(Path.Combine(invalidProject.Path, ".alta"));
         File.WriteAllText(Path.Combine(invalidProject.Path, ".alta", "mcp.json"), "{ invalid json");
 
-        var service = new McpManagementService();
+        var service = new McpManagementService(_home.Path);
         var snapshot = service.RefreshSnapshot(new McpManagementRequest
         {
             UserHomeDirectory = home.Path,
@@ -110,7 +116,7 @@ public sealed class McpManagementServiceTests
             {"access_token":"secret-token","token_type":"Bearer","scope":"read","expires_in":3600,"obtained_at":"{{DateTimeOffset.UtcNow:O}}"}
             """);
         var beforeConfig = File.ReadAllText(mcpPath);
-        var service = new McpManagementService();
+        var service = new McpManagementService(_home.Path);
         var request = new McpManagementRequest { ProjectDirectory = project.Path, UserHomeDirectory = home.Path };
 
         var snapshot = service.RefreshSnapshot(request);
@@ -153,7 +159,7 @@ public sealed class McpManagementServiceTests
             """
             { "mcpServers": { "memory": { "command": "npx" } } }
             """);
-        var service = new McpManagementService();
+        var service = new McpManagementService(_home.Path);
         var request = new McpManagementRequest { ProjectDirectory = project.Path };
 
         var result = await service.SetServerEnabledAsync("memory", enabled: false, McpManagementScope.Project, request, CancellationToken.None);
@@ -169,7 +175,7 @@ public sealed class McpManagementServiceTests
     public async Task AddOrUpdateServerAsync_WritesJsonConfigAndRefreshesSnapshot()
     {
         using var project = TempDirectory.Create();
-        var service = new McpManagementService();
+        var service = new McpManagementService(_home.Path);
         var request = new McpManagementRequest { ProjectDirectory = project.Path };
 
         var result = await service.AddOrUpdateServerAsync(
@@ -233,7 +239,7 @@ public sealed class McpManagementServiceTests
     {
         using var project = TempDirectory.Create();
         WriteTinyServerConfig(project.Path, "tiny", extraEnv: null);
-        var service = new McpManagementService();
+        var service = new McpManagementService(_home.Path);
         var request = new McpManagementRequest { ProjectDirectory = project.Path };
         service.RefreshSnapshot(request);
 
@@ -364,7 +370,7 @@ public sealed class McpManagementServiceTests
             [plugins.mcp.servers.tiny]
             disabled_tools = ["disabled"]
             """);
-        var service = new McpManagementService();
+        var service = new McpManagementService(_home.Path);
         var request = new McpManagementRequest { ProjectDirectory = project.Path };
 
         var result = await service.TestServerAsync("tiny", request, CancellationToken.None);
@@ -388,7 +394,7 @@ public sealed class McpManagementServiceTests
     {
         using var project = TempDirectory.Create();
         WriteTinyServerConfig(project.Path, "tiny", new Dictionary<string, string> { ["MCP_TEST_EXTRA_TOOLS"] = "a-b|a_b" });
-        var service = new McpManagementService();
+        var service = new McpManagementService(_home.Path);
 
         var result = await service.TestServerAsync("tiny", new McpManagementRequest { ProjectDirectory = project.Path }, CancellationToken.None);
 
@@ -424,7 +430,7 @@ public sealed class McpManagementServiceTests
                     },
                 },
             }));
-        var service = new McpManagementService();
+        var service = new McpManagementService(_home.Path);
 
         var result = await service.TestServerAsync("remote", new McpManagementRequest { ProjectDirectory = project.Path }, CancellationToken.None);
 
@@ -445,12 +451,12 @@ public sealed class McpManagementServiceTests
         WriteTinyServerConfig(project.Path, "tiny", extraEnv: null);
         var jsonPath = McpConfigDiscovery.GetProjectConfigPath(project.Path);
         var originalJson = File.ReadAllText(jsonPath);
-        var service = new McpManagementService();
+        var service = new McpManagementService(_home.Path);
         var request = new McpManagementRequest { ProjectDirectory = project.Path };
         await service.TestServerAsync("tiny", request, CancellationToken.None);
 
         var disabledResult = await service.SetToolEnabledAsync("tiny", "echo", enabled: false, McpManagementScope.Project, request, CancellationToken.None);
-        await using var disabledRuntime = new McpRuntimeService();
+        await using var disabledRuntime = new McpRuntimeService(_home.Path);
         var disabledSearch = await disabledRuntime.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, "tiny", null, CancellationToken.None);
         var disabledDescribeDiagnostics = new List<McpRuntimeDiagnostic>();
         var disabledDescribe = await disabledRuntime.DescribeToolAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, "tiny", "echo", disabledDescribeDiagnostics, CancellationToken.None);
@@ -483,7 +489,7 @@ public sealed class McpManagementServiceTests
         Assert.AreEqual("tool_disabled", disabledCallDiagnostics.Single().Code);
 
         var enabledResult = await service.SetToolEnabledAsync("tiny", "echo", enabled: true, McpManagementScope.Project, request, CancellationToken.None);
-        await using var enabledRuntime = new McpRuntimeService();
+        await using var enabledRuntime = new McpRuntimeService(_home.Path);
         var enabledSearch = await enabledRuntime.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, "tiny", null, CancellationToken.None);
 
         Assert.IsTrue(enabledResult.Changed);
@@ -508,7 +514,7 @@ public sealed class McpManagementServiceTests
             """
             { "mcpServers": { "remote": { "url": "ftp://example.invalid/mcp?token=secret-value" } } }
             """);
-        var service = new McpManagementService();
+        var service = new McpManagementService(_home.Path);
 
         var result = await service.TestServerAsync("remote", new McpManagementRequest { ProjectDirectory = project.Path }, CancellationToken.None);
 
@@ -532,7 +538,7 @@ public sealed class McpManagementServiceTests
             [plugins.mcp]
             startup_timeout_ms = 100
             """);
-        var service = new McpManagementService();
+        var service = new McpManagementService(_home.Path);
 
         var result = await service.TestServerAsync("slow", new McpManagementRequest { ProjectDirectory = project.Path }, CancellationToken.None);
 
@@ -548,7 +554,7 @@ public sealed class McpManagementServiceTests
     {
         using var project = TempDirectory.Create();
         WriteTinyServerConfig(project.Path, "tiny", extraEnv: null);
-        var service = new McpManagementService();
+        var service = new McpManagementService(_home.Path);
         using var cancellation = new CancellationTokenSource();
         await cancellation.CancelAsync();
 
@@ -574,7 +580,7 @@ public sealed class McpManagementServiceTests
             """
             { "mcpServers": { "remote": { "url": "ftp://example.invalid/mcp" } } }
             """);
-        var service = new McpManagementService();
+        var service = new McpManagementService(_home.Path);
         var dialog = new McpServersDialog(
             service,
             () => new McpManagementRequest { ProjectDirectory = project.Path, UserHomeDirectory = home.Path },
@@ -638,7 +644,7 @@ public sealed class McpManagementServiceTests
             [plugins.mcp]
             startup_timeout_ms = 10000
             """);
-        var service = new McpManagementService();
+        var service = new McpManagementService(_home.Path);
         var dialog = new McpServersDialog(
             service,
             () => new McpManagementRequest { ProjectDirectory = project.Path },
@@ -685,7 +691,7 @@ public sealed class McpManagementServiceTests
             [plugins.mcp]
             startup_timeout_ms = 10000
             """);
-        var service = new McpManagementService();
+        var service = new McpManagementService(_home.Path);
         var dialog = new McpServersDialog(
             service,
             () => new McpManagementRequest { ProjectDirectory = project.Path },
@@ -732,7 +738,7 @@ public sealed class McpManagementServiceTests
         using var home = TempDirectory.Create();
         using var project = TempDirectory.Create();
         WriteTinyServerConfig(project.Path, "tiny", extraEnv: null);
-        var service = new McpManagementService();
+        var service = new McpManagementService(_home.Path);
         var dialog = new McpServersDialog(
             service,
             () => new McpManagementRequest { ProjectDirectory = project.Path, UserHomeDirectory = home.Path },

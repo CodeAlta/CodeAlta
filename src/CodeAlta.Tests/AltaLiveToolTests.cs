@@ -18,6 +18,12 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class AltaLiveToolTests
 {
+    // Global MCP configuration, policy and OAuth tokens resolve under this home, never the developer's real ~/.alta.
+    private readonly TempDirectory _home = TempDirectory.Create();
+
+    [TestCleanup]
+    public void DisposeHome() => _home.Dispose();
+
     [TestMethod]
     [DataRow("max", AgentReasoningEffort.Max)]
     public void ModelRef_RoundTripsMaxReasoningEffort(string wireName, AgentReasoningEffort expected)
@@ -388,7 +394,7 @@ public sealed class AltaLiveToolTests
             """
             { "mcpServers": { "memory": { "command": "npx" } } }
             """);
-        var plugin = new McpPlugin();
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
         var catalog = new FakeAltaPluginCatalog(new AltaPluginCommandContribution
         {
             Plugin = CreatePluginDescriptor("mcp"),
@@ -434,7 +440,7 @@ public sealed class AltaLiveToolTests
             """
             { "mcpServers": { "memory": { "command": "npx" } } }
             """);
-        var plugin = new McpPlugin();
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
         var catalog = new FakeAltaPluginCatalog(new AltaPluginCommandContribution
         {
             Plugin = CreatePluginDescriptor("mcp"),

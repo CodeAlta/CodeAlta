@@ -66,7 +66,10 @@ public sealed class BoundedPromptCreationTests
         var link = Path.Combine(root, "global");
         try
         {
-            Directory.CreateSymbolicLink(link, outside);
+            // ERROR_PRIVILEGE_NOT_HELD: Windows without Developer Mode or elevation cannot create symbolic links.
+            try { Directory.CreateSymbolicLink(link, outside); }
+            catch (Exception ex) when (ex is UnauthorizedAccessException || ex.HResult == unchecked((int)0x80070522))
+            { Assert.Inconclusive("Creating a disposable symbolic link requires platform permission."); }
             var store = new PromptResourceStore(Path.Combine(root, "built"), link, null, new TextFileCodec());
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() => store.TryCreateAsync(new(PromptResourceScope.Global, PromptResourceKind.Agent, "example"), new("Name", null, null, "Body", false), default));
             Assert.AreEqual(0, Directory.EnumerateFileSystemEntries(outside).Count());

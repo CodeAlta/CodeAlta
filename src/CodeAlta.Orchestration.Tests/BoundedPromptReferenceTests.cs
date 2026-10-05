@@ -48,7 +48,10 @@ public sealed class BoundedPromptReferenceTests
         try
         {
             File.WriteAllText(Path.Combine(outside, "outside-secret.txt"), "disposable sentinel");
-            Directory.CreateSymbolicLink(link, outside);
+            // ERROR_PRIVILEGE_NOT_HELD: Windows without Developer Mode or elevation cannot create symbolic links.
+            try { Directory.CreateSymbolicLink(link, outside); }
+            catch (Exception ex) when (ex is UnauthorizedAccessException || ex.HResult == unchecked((int)0x80070522))
+            { Assert.Inconclusive("Creating a disposable symbolic link requires platform permission."); }
             var service = new BoundedPromptReferences();
             var result = service.Search(root, "outside-secret", CancellationToken.None);
             Assert.AreEqual(0, result.Items.Count);

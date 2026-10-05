@@ -540,8 +540,22 @@ public sealed class McpManagementService
     private readonly McpConfigWriter _configWriter = new();
     private readonly McpPolicyLoader _policyLoader = new();
     private readonly McpPolicyWriter _policyWriter = new();
+    private readonly string? _userHomeDirectory;
     private McpManagementSnapshot? _cachedSnapshot;
     private McpManagementRequest _lastRequest = new();
+
+    /// <summary>Initializes a management service that reads the current user's global MCP configuration.</summary>
+    public McpManagementService()
+    {
+    }
+
+    // Requests without their own home directory read global configuration, policy and OAuth tokens under this one.
+    internal McpManagementService(string userHomeDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userHomeDirectory);
+        _userHomeDirectory = userHomeDirectory;
+        _lastRequest = new McpManagementRequest { UserHomeDirectory = userHomeDirectory };
+    }
 
     /// <summary>Gets the last refreshed snapshot, or <see langword="null" /> when none has been loaded.</summary>
     public McpManagementSnapshot? CachedSnapshot
@@ -563,6 +577,7 @@ public sealed class McpManagementService
     public McpManagementSnapshot RefreshSnapshot(McpManagementRequest? request = null)
     {
         request ??= new McpManagementRequest();
+        request = WithDefaultHome(request);
         var projectDirectory = NormalizeProjectDirectory(request.ProjectDirectory);
         var configSnapshot = _discovery.Discover(new McpConfigPathOptions
         {
@@ -619,6 +634,7 @@ public sealed class McpManagementService
     {
         ArgumentNullException.ThrowIfNull(definition);
         request ??= CachedSnapshot is null ? _lastRequest : _lastRequest with { ProjectDirectory = CachedSnapshot.ProjectDirectory };
+        request = WithDefaultHome(request);
         var projectDirectory = NormalizeProjectDirectory(request.ProjectDirectory);
         var targetScope = ResolveWriteScope(scope, projectDirectory, nameof(scope));
         var targetPath = GetJsonConfigPath(targetScope, projectDirectory, request.UserHomeDirectory);
@@ -664,6 +680,7 @@ public sealed class McpManagementService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverKey);
         request ??= CachedSnapshot is null ? _lastRequest : _lastRequest with { ProjectDirectory = CachedSnapshot.ProjectDirectory };
+        request = WithDefaultHome(request);
         var projectDirectory = NormalizeProjectDirectory(request.ProjectDirectory);
         var targetScope = ResolveWriteScope(scope, projectDirectory, nameof(scope));
         var targetPath = GetJsonConfigPath(targetScope, projectDirectory, request.UserHomeDirectory);
@@ -704,6 +721,7 @@ public sealed class McpManagementService
         {
             ProjectDirectory = CachedSnapshot.ProjectDirectory,
         };
+        request = WithDefaultHome(request);
         var projectDirectory = NormalizeProjectDirectory(request.ProjectDirectory);
         var targetScope = scope ?? (projectDirectory is null ? McpManagementScope.Global : McpManagementScope.Project);
         if (targetScope == McpManagementScope.Project && projectDirectory is null)
@@ -754,6 +772,7 @@ public sealed class McpManagementService
         {
             ProjectDirectory = CachedSnapshot.ProjectDirectory,
         };
+        request = WithDefaultHome(request);
         var projectDirectory = NormalizeProjectDirectory(request.ProjectDirectory);
         var targetScope = scope ?? (projectDirectory is null ? McpManagementScope.Global : McpManagementScope.Project);
         if (targetScope == McpManagementScope.Project && projectDirectory is null)
@@ -802,6 +821,7 @@ public sealed class McpManagementService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverKey);
         request ??= _lastRequest;
+        request = WithDefaultHome(request);
         var projectDirectory = NormalizeProjectDirectory(request.ProjectDirectory);
         var normalizedRequest = request with { ProjectDirectory = projectDirectory };
         var snapshot = CachedSnapshot;
@@ -813,7 +833,7 @@ public sealed class McpManagementService
         McpManagementServerTestResult result;
         try
         {
-            await using var runtime = new McpRuntimeService();
+            await using var runtime = new McpRuntimeService(_userHomeDirectory);
             var runtimeResult = await runtime.TestServerAsync(
                 new McpRuntimeRequest
                 {
@@ -854,6 +874,7 @@ public sealed class McpManagementService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverKey);
         request ??= _lastRequest;
+        request = WithDefaultHome(request);
         var effective = ResolveEffectiveServer(serverKey.Trim(), request);
         if (effective is null)
         {
@@ -880,6 +901,7 @@ public sealed class McpManagementService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverKey);
         request ??= _lastRequest;
+        request = WithDefaultHome(request);
         var projectDirectory = NormalizeProjectDirectory(request.ProjectDirectory);
         var effective = ResolveEffectiveServer(serverKey.Trim(), request with { ProjectDirectory = projectDirectory });
         if (effective is null)
@@ -902,7 +924,7 @@ public sealed class McpManagementService
             };
         }
 
-        await using var runtime = new McpRuntimeService();
+        await using var runtime = new McpRuntimeService(_userHomeDirectory);
         var runtimeResult = await runtime.TestServerAsync(
             new McpRuntimeRequest
             {
@@ -932,6 +954,7 @@ public sealed class McpManagementService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverKey);
         request ??= _lastRequest;
+        request = WithDefaultHome(request);
         var effective = ResolveEffectiveServer(serverKey.Trim(), request);
         if (effective is null)
         {
@@ -944,6 +967,11 @@ public sealed class McpManagementService
         RefreshSnapshot(request);
         return existed;
     }
+
+    private McpManagementRequest WithDefaultHome(McpManagementRequest request)
+        => request.UserHomeDirectory is null && _userHomeDirectory is not null
+            ? request with { UserHomeDirectory = _userHomeDirectory }
+            : request;
 
     private static string? NormalizeProjectDirectory(string? projectDirectory)
         => string.IsNullOrWhiteSpace(projectDirectory) ? null : Path.GetFullPath(projectDirectory);

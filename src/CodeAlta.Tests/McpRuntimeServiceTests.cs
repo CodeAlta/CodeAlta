@@ -14,6 +14,12 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class McpRuntimeServiceTests
 {
+    // Global MCP configuration, policy and OAuth tokens resolve under this home, never the developer's real ~/.alta.
+    private readonly TempDirectory _home = TempDirectory.Create();
+
+    [TestCleanup]
+    public void DisposeHome() => _home.Dispose();
+
     [TestMethod]
     public async Task SearchDescribeAndCall_UseStdioAndApplyToolPolicy()
     {
@@ -28,7 +34,7 @@ public sealed class McpRuntimeServiceTests
             [plugins.mcp.servers.tiny]
             disabled_tools = ["disabled"]
             """);
-        await using var service = new McpRuntimeService();
+        await using var service = new McpRuntimeService(_home.Path);
         var request = new McpRuntimeRequest { ProjectDirectory = project.Path };
 
         var search = await service.SearchToolsAsync(request, serverFilter: null, query: null, CancellationToken.None);
@@ -71,7 +77,7 @@ public sealed class McpRuntimeServiceTests
             [plugins.mcp.servers.tiny]
             allowed_tools = ["echo"]
             """);
-        await using var service = new McpRuntimeService();
+        await using var service = new McpRuntimeService(_home.Path);
         var request = new McpRuntimeRequest { ProjectDirectory = project.Path };
 
         var search = await service.SearchToolsAsync(request, serverFilter: "tiny", query: null, CancellationToken.None);
@@ -115,7 +121,7 @@ public sealed class McpRuntimeServiceTests
             direct_tools = ["echo"]
             disabled_tools = ["secret"]
             """);
-        await using var service = new McpRuntimeService();
+        await using var service = new McpRuntimeService(_home.Path);
 
         var direct = await service.ListDirectToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, CancellationToken.None);
 
@@ -138,7 +144,7 @@ public sealed class McpRuntimeServiceTests
             [plugins.mcp.servers.tiny]
             direct_tools = ["echo"]
             """);
-        await using var service = new McpRuntimeService();
+        await using var service = new McpRuntimeService(_home.Path);
 
         var direct = await service.ListDirectToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, CancellationToken.None);
 
@@ -161,7 +167,7 @@ public sealed class McpRuntimeServiceTests
             direct_tools = ["echo"]
             allowed_tools = ["echo"]
             """);
-        var plugin = new McpPlugin();
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
         var inactiveContext = new PluginBeforeAgentRunContext
         {
             Plugin = CreatePluginDescriptor(),
@@ -236,8 +242,8 @@ public sealed class McpRuntimeServiceTests
             direct_tools = ["echo"]
             allowed_tools = ["echo"]
             """);
-        var plugin = new McpPlugin();
-        McpManagementSnapshot Snapshot() => new McpManagementService().RefreshSnapshot(new McpManagementRequest { ProjectDirectory = project.Path, ProbeWritability = false });
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
+        McpManagementSnapshot Snapshot() => new McpManagementService(_home.Path).RefreshSnapshot(new McpManagementRequest { ProjectDirectory = project.Path, ProbeWritability = false });
         var before = plugin.CreateStatus(Snapshot(), "session-a");
 
         var stdout = new StringWriter(CultureInfo.InvariantCulture);
@@ -280,7 +286,7 @@ public sealed class McpRuntimeServiceTests
             direct_tools = ["editJiraIssue"]
             allowed_tools = ["editJiraIssue"]
             """);
-        var plugin = new McpPlugin();
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
         var contribution = plugin.GetAltaCommands().Single();
         var stdout = new StringWriter(CultureInfo.InvariantCulture);
         var stderr = new StringWriter(CultureInfo.InvariantCulture);
@@ -374,7 +380,7 @@ public sealed class McpRuntimeServiceTests
     {
         using var project = TempDirectory.Create();
         WriteTinyServerConfig(project.Path, "tiny", logPath: null);
-        var plugin = new McpPlugin();
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
         var contribution = plugin.GetAltaCommands().Single();
         var stdout = new StringWriter(CultureInfo.InvariantCulture);
         var stderr = new StringWriter(CultureInfo.InvariantCulture);
@@ -430,7 +436,7 @@ public sealed class McpRuntimeServiceTests
         var projectLog = Path.Combine(project.Path, "project.log");
         WriteTinyServerConfig(home.Path, "shared", globalLog, global: true);
         WriteTinyServerConfig(project.Path, "shared", projectLog);
-        await using var service = new McpRuntimeService();
+        await using var service = new McpRuntimeService(_home.Path);
 
         var search = await service.SearchToolsAsync(new McpRuntimeRequest { UserHomeDirectory = home.Path, ProjectDirectory = project.Path }, null, null, CancellationToken.None);
 
@@ -461,7 +467,7 @@ public sealed class McpRuntimeServiceTests
             [plugins.mcp]
             startup_timeout_ms = 1000
             """);
-        await using var service = new McpRuntimeService();
+        await using var service = new McpRuntimeService(_home.Path);
 
         var search = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, serverFilter: null, query: null, CancellationToken.None);
 
@@ -495,7 +501,7 @@ public sealed class McpRuntimeServiceTests
             [plugins.mcp.servers.tiny]
             startup_timeout_ms = 5000
             """);
-        await using var service = new McpRuntimeService();
+        await using var service = new McpRuntimeService(_home.Path);
 
         var search = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, serverFilter: null, query: null, CancellationToken.None);
 
@@ -508,7 +514,7 @@ public sealed class McpRuntimeServiceTests
     public async Task Search_RefreshesCacheWhenEffectiveServerEnvironmentChanges()
     {
         using var project = TempDirectory.Create();
-        await using var service = new McpRuntimeService();
+        await using var service = new McpRuntimeService(_home.Path);
         var request = new McpRuntimeRequest { ProjectDirectory = project.Path };
         WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: new Dictionary<string, string> { ["MCP_TEST_EXTRA_TOOL"] = "first" });
 
@@ -532,7 +538,7 @@ public sealed class McpRuntimeServiceTests
         {
             Environment.SetEnvironmentVariable(variableName, "from_env");
             WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: new Dictionary<string, string> { ["MCP_TEST_EXTRA_TOOL"] = "${" + variableName + "}" });
-            await using var service = new McpRuntimeService();
+            await using var service = new McpRuntimeService(_home.Path);
 
             var search = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, serverFilter: "tiny", query: null, CancellationToken.None);
 
@@ -553,7 +559,7 @@ public sealed class McpRuntimeServiceTests
         var variableName = "CODEALTA_TEST_MCP_MISSING_" + Guid.NewGuid().ToString("N");
         Environment.SetEnvironmentVariable(variableName, null);
         WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: new Dictionary<string, string> { ["MCP_TEST_EXTRA_TOOL"] = "${" + variableName + "}" });
-        await using var service = new McpRuntimeService();
+        await using var service = new McpRuntimeService(_home.Path);
 
         var search = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, serverFilter: "tiny", query: null, CancellationToken.None);
 
@@ -574,7 +580,7 @@ public sealed class McpRuntimeServiceTests
             [plugins.mcp]
             startup_timeout_ms = 100
             """);
-        await using var service = new McpRuntimeService();
+        await using var service = new McpRuntimeService(_home.Path);
 
         var search = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, "slow", null, CancellationToken.None);
 
@@ -594,7 +600,7 @@ public sealed class McpRuntimeServiceTests
             [plugins.mcp.servers.disabled-server]
             enabled = false
             """);
-        await using var service = new McpRuntimeService();
+        await using var service = new McpRuntimeService(_home.Path);
 
         var search = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, "disabled-server", null, CancellationToken.None);
 
@@ -620,8 +626,8 @@ public sealed class McpRuntimeServiceTests
                 },
             }));
         var request = new McpRuntimeRequest { ProjectDirectory = project.Path };
-        await using var firstService = new McpRuntimeService();
-        await using var secondService = new McpRuntimeService();
+        await using var firstService = new McpRuntimeService(_home.Path);
+        await using var secondService = new McpRuntimeService(_home.Path);
 
         var first = await firstService.SearchToolsAsync(request, serverFilter: null, query: null, CancellationToken.None);
         var second = await secondService.SearchToolsAsync(request, serverFilter: null, query: null, CancellationToken.None);
@@ -668,7 +674,7 @@ public sealed class McpRuntimeServiceTests
             max_tool_output_chars = 1000
             """);
         var request = new McpRuntimeRequest { ProjectDirectory = project.Path };
-        await using var service = new McpRuntimeService();
+        await using var service = new McpRuntimeService(_home.Path);
 
         var richDiagnostics = new List<McpRuntimeDiagnostic>();
         var rich = await service.CallToolAsync(request, "tiny", "rich", new Dictionary<string, object?>(), richDiagnostics, CancellationToken.None);
@@ -697,7 +703,7 @@ public sealed class McpRuntimeServiceTests
             [plugins.mcp]
             max_tool_output_chars = 8
             """);
-        await using var truncatingService = new McpRuntimeService();
+        await using var truncatingService = new McpRuntimeService(_home.Path);
         var truncationDiagnostics = new List<McpRuntimeDiagnostic>();
         var truncated = await truncatingService.CallToolAsync(request, "tiny", "long", new Dictionary<string, object?>(), truncationDiagnostics, CancellationToken.None);
 
@@ -713,7 +719,7 @@ public sealed class McpRuntimeServiceTests
     {
         using var project = TempDirectory.Create();
         WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: new Dictionary<string, string> { ["MCP_TEST_STDERR"] = "diagnostic stderr from test server" });
-        await using var service = new McpRuntimeService();
+        await using var service = new McpRuntimeService(_home.Path);
 
         var search = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, "tiny", null, CancellationToken.None);
 
@@ -726,7 +732,7 @@ public sealed class McpRuntimeServiceTests
     {
         using var project = TempDirectory.Create();
         WriteTinyServerConfig(project.Path, "tiny", logPath: null);
-        var plugin = new McpPlugin();
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
         var contribution = plugin.GetAltaCommands().Single();
         var stdout = new StringWriter(CultureInfo.InvariantCulture);
         var stderr = new StringWriter(CultureInfo.InvariantCulture);
@@ -763,7 +769,7 @@ public sealed class McpRuntimeServiceTests
                     },
                 },
             }));
-        await using var service = new McpRuntimeService();
+        await using var service = new McpRuntimeService(_home.Path);
         var request = new McpRuntimeRequest { ProjectDirectory = project.Path };
 
         var search = await service.SearchToolsAsync(request, "remote", null, CancellationToken.None);
@@ -777,7 +783,7 @@ public sealed class McpRuntimeServiceTests
             new Dictionary<string, object?> { ["text"] = JsonDocument.Parse("\"hi\"").RootElement.Clone() },
             callDiagnostics,
             CancellationToken.None);
-        var plugin = new McpPlugin();
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
         var contribution = plugin.GetAltaCommands().Single();
         var stdout = new StringWriter(CultureInfo.InvariantCulture);
         var stderr = new StringWriter(CultureInfo.InvariantCulture);
@@ -824,7 +830,7 @@ public sealed class McpRuntimeServiceTests
                         },
                     },
                 }));
-            await using var service = new McpRuntimeService();
+            await using var service = new McpRuntimeService(_home.Path);
 
             var search = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, "remote", null, CancellationToken.None);
 
@@ -865,7 +871,7 @@ public sealed class McpRuntimeServiceTests
             $$"""
             {"access_token":"expected-token","token_type":"Bearer","expires_in":3600,"obtained_at":"{{DateTimeOffset.UtcNow:O}}"}
             """);
-        await using var service = new McpRuntimeService();
+        await using var service = new McpRuntimeService(_home.Path);
 
         var search = await service.SearchToolsAsync(
             new McpRuntimeRequest
@@ -941,7 +947,7 @@ public sealed class McpRuntimeServiceTests
         McpRuntimeServerTestResult result;
         try
         {
-            await using (var service = new McpRuntimeService())
+            await using (var service = new McpRuntimeService(_home.Path))
             {
                 result = await service.TestServerAsync(
                     new McpRuntimeRequest
@@ -989,7 +995,7 @@ public sealed class McpRuntimeServiceTests
             """
             { "mcpServers": { "remote": { "url": "ftp://example.test/mcp?token=secret-value", "headers": { "Authorization": "Bearer secret-token-value" } } } }
             """);
-        await using var service = new McpRuntimeService();
+        await using var service = new McpRuntimeService(_home.Path);
 
         var invalid = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, "remote", null, CancellationToken.None);
 
@@ -1023,7 +1029,7 @@ public sealed class McpRuntimeServiceTests
         McpRuntimeToolSearchResult unauthorized;
         try
         {
-            await using (var authService = new McpRuntimeService())
+            await using (var authService = new McpRuntimeService(_home.Path))
             {
                 unauthorized = await authService.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, "remote", null, CancellationToken.None);
             }

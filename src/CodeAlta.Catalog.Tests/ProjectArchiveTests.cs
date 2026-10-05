@@ -69,7 +69,8 @@ public sealed class ProjectArchiveTests
         var target = Path.Combine(fixture.Root, "target.md");
         File.Move(e.SourcePath, target);
         try { File.CreateSymbolicLink(e.SourcePath, target); }
-        catch (UnauthorizedAccessException) { Assert.Inconclusive("Disposable symlink creation requires platform permission."); }
+        catch (Exception ex) when (ex is UnauthorizedAccessException || ex.HResult == unchecked((int)0x80070522)) // ERROR_PRIVILEGE_NOT_HELD: Windows without Developer Mode or elevation cannot create symbolic links.
+        { Assert.Inconclusive("Disposable symlink creation requires platform permission."); }
         var bytes = await File.ReadAllBytesAsync(target);
         Assert.IsNull(await fixture.Catalog.ReadArchiveAsync(p.Id, fixture.Root));
         Assert.AreEqual(ProjectDisplayNameRenameStatus.Unsupported, await fixture.Catalog.SetArchivedAsync(p.Id, fixture.Root, e.SourcePath, e.Revision, false, true));

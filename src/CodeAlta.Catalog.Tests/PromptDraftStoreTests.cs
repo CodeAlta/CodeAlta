@@ -24,7 +24,8 @@ public sealed class PromptDraftStoreTests
         {
             File.CreateSymbolicLink(link, target);
         }
-        catch (UnauthorizedAccessException)
+        // ERROR_PRIVILEGE_NOT_HELD: Windows without Developer Mode or elevation cannot create symbolic links.
+        catch (Exception ex) when (ex is UnauthorizedAccessException || ex.HResult == unchecked((int)0x80070522))
         {
             Assert.Inconclusive("Creating a task-owned symbolic link requires platform permission.");
         }

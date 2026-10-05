@@ -117,6 +117,10 @@ internal sealed class McpRuntimeService : IAsyncDisposable
     private readonly McpConfigDiscovery _discovery = new();
     private readonly McpPolicyLoader _policyLoader = new();
     private readonly Dictionary<string, ServerRuntimeState> _servers = new(StringComparer.Ordinal);
+    private readonly string? _userHomeDirectory;
+
+    // Requests without their own home directory read global configuration, policy and OAuth tokens under this one.
+    public McpRuntimeService(string? userHomeDirectory = null) => _userHomeDirectory = userHomeDirectory;
 
     public async ValueTask DisposeAsync()
     {
@@ -403,6 +407,11 @@ internal sealed class McpRuntimeService : IAsyncDisposable
 
     private RuntimeContext LoadContext(McpRuntimeRequest request)
     {
+        if (request.UserHomeDirectory is null && _userHomeDirectory is not null)
+        {
+            request = request with { UserHomeDirectory = _userHomeDirectory };
+        }
+
         var projectDirectory = string.IsNullOrWhiteSpace(request.ProjectDirectory) ? null : Path.GetFullPath(request.ProjectDirectory);
         var config = _discovery.Discover(new McpConfigPathOptions
         {

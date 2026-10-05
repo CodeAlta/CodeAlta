@@ -23,7 +23,7 @@ internal static class McpCommandFactory
     internal static Command CreateCommand(PluginAltaCommandContext context, McpCommandFactoryOptions options)
         => CreateCommand(context, options, activationState: null);
 
-    private static Command CreateCommand(PluginAltaCommandContext context, McpCommandFactoryOptions options, McpActivationState? activationState)
+    internal static Command CreateCommand(PluginAltaCommandContext context, McpCommandFactoryOptions options, McpActivationState? activationState)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(options);
@@ -78,7 +78,7 @@ internal static class McpCommandFactory
             var projectDirectory = ResolveProjectDirectory(context);
             var scopeKey = ResolveActivationScopeKey(context, projectDirectory);
             var activated = activationState.ActivateServers(scopeKey, serverKeys);
-            await using var runtime = new McpRuntimeService();
+            await using var runtime = new McpRuntimeService(options.UserHomeDirectory);
             var direct = await runtime.ListToolsForServersAsync(
                     CreateRuntimeRequest(context, options),
                     activated,
@@ -188,7 +188,7 @@ internal static class McpCommandFactory
                 return WriteError(context, "unsupported_transport", $"MCP server '{serverKey}' does not use HTTP/SSE transport; browser OAuth is only available for remote HTTP MCP servers.");
             }
 
-            await using var runtime = new McpRuntimeService();
+            await using var runtime = new McpRuntimeService(options.UserHomeDirectory);
             var result = await runtime.TestServerAsync(
                 CreateRuntimeRequest(context, options) with
                 {
@@ -273,7 +273,7 @@ internal static class McpCommandFactory
         command.Add("query=", "Case-insensitive text to match server, tool name, title, or description.", value => query = value);
         command.Add(async (_, _) =>
         {
-            await using var runtime = new McpRuntimeService();
+            await using var runtime = new McpRuntimeService(options.UserHomeDirectory);
             var result = await runtime.SearchToolsAsync(CreateRuntimeRequest(context, options), server, query, context.CancellationToken).ConfigureAwait(false);
             foreach (var diagnostic in result.Diagnostics)
             {
@@ -313,7 +313,7 @@ internal static class McpCommandFactory
             var serverKey = RequireServerKey(server);
             var toolName = RequireToolName(tool);
             var diagnostics = new List<McpRuntimeDiagnostic>();
-            await using var runtime = new McpRuntimeService();
+            await using var runtime = new McpRuntimeService(options.UserHomeDirectory);
             var result = await runtime.DescribeToolAsync(CreateRuntimeRequest(context, options), serverKey, toolName, diagnostics, context.CancellationToken).ConfigureAwait(false);
             foreach (var diagnostic in diagnostics)
             {
@@ -351,7 +351,7 @@ internal static class McpCommandFactory
             }
 
             var diagnostics = new List<McpRuntimeDiagnostic>();
-            await using var runtime = new McpRuntimeService();
+            await using var runtime = new McpRuntimeService(options.UserHomeDirectory);
             var result = await runtime.CallToolAsync(CreateRuntimeRequest(context, options), serverKey, toolName, arguments, diagnostics, context.CancellationToken).ConfigureAwait(false);
             foreach (var diagnostic in diagnostics)
             {
