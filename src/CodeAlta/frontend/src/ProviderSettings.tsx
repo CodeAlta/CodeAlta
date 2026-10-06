@@ -16,13 +16,14 @@ type CallOptions = { signal: AbortSignal; timeoutMilliseconds: number };
 const newProvider = "\u0000new";
 
 // A text field that can be left to its default: blank shows the default as its placeholder with a "Default"
-// tag, and an overridden value has a button that goes back to it.
-function DefaultedInput({ id, value, fallback, disabled, onChange }: {
-  id: string; value: string; fallback: string | null; disabled: boolean; onChange: (value: string) => void;
+// tag, and an overridden value has a button that goes back to it. `unset` says what a blank field without a
+// default stands for.
+function DefaultedInput({ id, value, fallback, unset, disabled, onChange }: {
+  id: string; value: string; fallback: string | null; unset?: string; disabled: boolean; onChange: (value: string) => void;
 }) {
   const { t } = useShellLanguage();
   return <InputGroup id={id} value={value} disabled={disabled} spellCheck={false} onChange={event => onChange(event.target.value)}
-    placeholder={fallback ?? t("Provider default")}
+    placeholder={fallback ?? unset ?? t("Provider default")}
     rightElement={value ? <Button variant="minimal" size="small" disabled={disabled} icon={<AppIcon name="reset" size={13} />}
       aria-label={t("Use the default")} title={fallback ? t("Use the default: {value}", { value: fallback }) : t("Use the default")} onClick={() => onChange("")} />
       : <Tag minimal className="provider-default-tag">{t("Default")}</Tag>} />;
@@ -200,10 +201,10 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
             <FormGroup label={t("Display name")} labelFor="provider-name">
               <DefaultedInput id="provider-name" value={form.displayName} fallback={fallback("displayName") ?? (form.key.trim() || null)} disabled={busy} onChange={displayName => edit({ displayName })} /></FormGroup>
             <FormGroup label={t("Default model")} labelFor="provider-model">
-              <DefaultedInput id="provider-model" value={form.model} fallback={fallback("model")} disabled={busy} onChange={model => edit({ model })} /></FormGroup>
+              <DefaultedInput id="provider-model" value={form.model} fallback={fallback("model")} unset={t("First model listed")} disabled={busy} onChange={model => edit({ model })} /></FormGroup>
             <FormGroup label={t("Reasoning")} labelFor="provider-reasoning">
               <HTMLSelect id="provider-reasoning" fill value={form.reasoningEffort} disabled={busy} onChange={event => edit({ reasoningEffort: event.target.value })}>
-                <option value="">{fallback("reasoningEffort") ? t("Default ({value})", { value: fallback("reasoningEffort")! }) : t("Model default")}</option>
+                <option value="">{fallback("reasoningEffort") ? t("Default ({value})", { value: fallback("reasoningEffort")! }) : t("High when supported")}</option>
                 {[...new Set([...(form.reasoningEffort ? [form.reasoningEffort] : []), ...listing.reasoningEfforts])].map(effort => <option key={effort} value={effort}>{effort}</option>)}
               </HTMLSelect></FormGroup>
             <FormGroup label={t("API URL")} labelFor="provider-url">

@@ -351,13 +351,22 @@ internal sealed class GlobalConfigService
         /// The defaults of one configured provider: the built-in template entry with its key (when it has the same
         /// adapter type), then the type's own defaults; a blank display name finally shows the provider key.
         /// </summary>
+        /// <remarks>
+        /// The model and the reasoning effort of the template are what a new configuration starts with, not what a
+        /// blank field falls back to: a provider without a model starts its sessions with the first model it lists.
+        /// </remarks>
         public GlobalConfigProviderDefaults For(CodeAltaProviderDocument effective)
         {
             var type = _types.GetValueOrDefault(effective.ProviderType ?? string.Empty);
             var template = _template.TryGetValue(effective.ProviderKey, out var entry) &&
                 string.Equals(entry.ProviderType, effective.ProviderType, StringComparison.OrdinalIgnoreCase) ? entry : null;
             var defaults = template is null ? type ?? new(null, null, null, null, null) : Project(template, type);
-            return defaults with { DisplayName = defaults.DisplayName ?? Bound(effective.ProviderKey) };
+            return defaults with
+            {
+                DisplayName = defaults.DisplayName ?? Bound(effective.ProviderKey),
+                Model = type?.Model,
+                ReasoningEffort = type?.ReasoningEffort,
+            };
         }
 
         private static GlobalConfigProviderDefaults Project(CodeAltaProviderDocument definition, GlobalConfigProviderDefaults? fallback)

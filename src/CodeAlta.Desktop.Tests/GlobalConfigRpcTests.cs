@@ -153,10 +153,11 @@ public sealed class GlobalConfigRpcTests
         Assert.AreEqual("ok", listed.Status);
         GlobalConfigProviderDefaults Defaults(string key) => listed.Providers.Single(provider => provider.Key == key).Defaults;
 
-        // The built-in template entry with the same key and adapter type.
-        Assert.AreEqual(new GlobalConfigProviderDefaults("Anthropic", "claude-sonnet-4-6", null, null, "CODEALTA_ANTHROPIC_API_KEY"), Defaults("anthropic"));
+        // The built-in template entry with the same key and adapter type. Its model and reasoning effort are not
+        // defaults: a provider left without a model starts with the first one it lists.
+        Assert.AreEqual(new GlobalConfigProviderDefaults("Anthropic", null, null, null, "CODEALTA_ANTHROPIC_API_KEY"), Defaults("anthropic"));
         // The template, completed by what the type fills in; a written value does not change its default.
-        Assert.AreEqual(new GlobalConfigProviderDefaults("Codex", "gpt-5.5", "high", "https://api.openai.com/v1", null), Defaults("codex"));
+        Assert.AreEqual(new GlobalConfigProviderDefaults("Codex", null, null, "https://api.openai.com/v1", null), Defaults("codex"));
         Assert.AreEqual("gpt-custom", listed.Providers.Single(static provider => provider.Key == "codex").Model);
         // A template entry of another adapter type describes a different provider: only the key remains as the name.
         Assert.AreEqual(new GlobalConfigProviderDefaults("openai", null, null, null, null), Defaults("openai"));

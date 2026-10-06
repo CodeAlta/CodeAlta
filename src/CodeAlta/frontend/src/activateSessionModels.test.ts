@@ -10,7 +10,7 @@ const catalog: ModelCatalogModelsResponse = { status: "ok", epoch: "epoch", prov
 
 test("explicit load initializes only the session provider and re-reads authoritative choices", async () => {
   const calls: string[] = [];
-  const populated = { ...choices, models: [{ id: "model", name: "Real catalog model", efforts: [], imageInput: null }] };
+  const populated = { ...choices, models: [{ id: "model", name: "Real catalog model", efforts: [], imageInput: null, startEffort: null }] };
   const result = await activateSessionModels("epoch", "session", async () => {
     calls.push("choices"); return calls.length === 1 ? choices : populated;
   }, async provider => { calls.push(provider); return catalog; }, () => true);

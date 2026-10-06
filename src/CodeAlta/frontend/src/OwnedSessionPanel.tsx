@@ -781,7 +781,7 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
     setSelection(next);
     setChoicesNotice("");
   }
-  const efforts = activeChoices?.models.find(m => m.id === selected?.modelId)?.efforts ?? [];
+  const efforts = activeChoices?.models.find(m => m.id === selected?.modelId)?.efforts ?? null;
   const imageCapability = activeChoices?.models.find(m => m.id === selected?.modelId)?.imageInput;
   async function pasteImages(event: ClipboardEvent<HTMLElement>) {
     if (!event.clipboardData.files.length) return;
@@ -861,8 +861,8 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
     options={<ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog} locked={providerBusy}
       summary={{ agent: activeChoices?.prompts.find(p => p.id === selected?.agentPromptId)?.name ?? selected?.agentPromptId ?? "…",
         provider: selected?.providerKey ?? t("session provider"),
-        model: selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "Provider default"),
-        reasoning: selected?.reasoningEffort ?? t("Default") }}
+        model: selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "No model"),
+        reasoning: selected?.reasoningEffort ?? (loadingChoices ? t("Loading…") : null) }}
       agent={<HTMLSelect fill id={`composer-agent-${sessionId}`} aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
         {!activeChoices?.prompts.some(p => p.id === selected?.agentPromptId) && <option value={selected?.agentPromptId ?? ""}>{selected?.agentPromptId ?? t("Loading…")}</option>}
         {activeChoices?.prompts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -885,7 +885,7 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
         }} />}
       model={<HTMLSelect fill id={`composer-model-${sessionId}`} data-model-selector aria-label={t("Model")} value={selected?.modelId ?? ""} disabled={invalidEpoch || !!pending || loadingChoices}
         onChange={event => select("modelId", event.target.value)} title={selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) ? t("Saved selection; not verified by this host's observed model catalog.") : t("Model for the next Send · {provider}", { provider: selected?.providerKey ?? t("session provider") })}>
-        <option value="">{t(loadingChoices ? "Loading…" : "Provider default")}</option>
+        {!selected?.modelId && <option value="">{t(loadingChoices ? "Loading…" : "No model")}</option>}
         {selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) && <option value={selected.modelId}>{loadingChoices ? t("Loading…") : `${selected.modelId} · ${t("Unverified")}`}</option>}
         {activeChoices?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
       </HTMLSelect>}

@@ -7,21 +7,22 @@ import { captureSubmission, createMutationCapability, createOwnedSubmissions } f
 const current: SessionSelection = { providerKey: "alpha", agentPromptId: "plan", modelId: "old", reasoningEffort: "High" };
 const choices: SessionChoicesResponse = { status: "ok", epoch: "epoch", sessionId: "one", current,
   prompts: [{ id: "plan", name: "Plan" }, { id: "default", name: "Default" }],
-  models: [{ id: "old", name: "Old", efforts: ["High"], imageInput: null }, { id: "new", name: "New", efforts: ["Low"], imageInput: null }] };
+  models: [{ id: "old", name: "Old", efforts: ["High"], imageInput: null, startEffort: "High" },
+    { id: "new", name: "New", efforts: ["Low", "Medium"], imageInput: null, startEffort: "Low" }] };
 const target = { epoch: "epoch", sessionId: "one", providerKey: "alpha", modelId: "new", reasoningEffort: null };
 
-test("catalog model handoff preserves session prompt, resets unsupported effort and freezes the next Send", async () => {
+test("catalog model handoff preserves session prompt, starts the model with its effort and freezes the next Send", async () => {
   const storage = new Map<string, string>();
   const store = createNextSendSelectionStore(key => storage.get(key) ?? null, (key, value) => { storage.set(key, value); });
   let selected = "one";
   const admission = () => ({ epoch: "epoch", sessionId: selected, active: true, canMutate: true, pending: false });
   assert.equal(await applyCatalogNextSend(target, admission, async () => choices, store), "applied");
-  assert.deepEqual(store.get("epoch", "one", choices), { ...current, modelId: "new", reasoningEffort: null });
+  assert.deepEqual(store.get("epoch", "one", choices), { ...current, modelId: "new", reasoningEffort: "Low" });
   const send = captureSubmission("epoch", "one", "literal text", "literal-key", store.get("epoch", "one", choices))!;
-  assert.deepEqual(send.selection, { ...current, modelId: "new", reasoningEffort: null });
-  assert.equal(await applyCatalogNextSend({ ...target, reasoningEffort: "Low" }, admission, async () => choices, store), "applied");
-  assert.equal(send.selection?.reasoningEffort, null, "a captured Send is immutable");
-  assert.equal(store.get("epoch", "one", choices)?.reasoningEffort, "Low");
+  assert.deepEqual(send.selection, { ...current, modelId: "new", reasoningEffort: "Low" });
+  assert.equal(await applyCatalogNextSend({ ...target, reasoningEffort: "Medium" }, admission, async () => choices, store), "applied");
+  assert.equal(send.selection?.reasoningEffort, "Low", "a captured Send is immutable");
+  assert.equal(store.get("epoch", "one", choices)?.reasoningEffort, "Medium");
   const second = { ...choices, sessionId: "two" };
   assert.equal(store.get("epoch", "two", second), null);
   selected = "two";
@@ -65,11 +66,21 @@ test("a fresh owned read gates provider, model, effort, epoch, selected session 
 
 test("instance-owned selection survives a denied storage write but never revives against changed choices", () => {
   const store = createNextSendSelectionStore(() => { throw Error("storage blocked"); }, () => { throw Error("storage blocked"); });
-  const next = { ...current, modelId: "new", reasoningEffort: null };
+  const next = { ...current, modelId: "new", reasoningEffort: "Low" };
   assert.equal(store.set("epoch", "one", choices, next), true);
   assert.deepEqual(store.get("epoch", "one", choices), next);
   assert.equal(store.get("epoch", "one", { ...choices, models: [choices.models[0]] }), null);
   assert.equal(store.get("new-epoch", "one", { ...choices, epoch: "new-epoch" }), null);
+  assert.equal(store.set("epoch", "one", choices, { ...current, modelId: null, reasoningEffort: null }), false, "a listed model is named");
+});
+
+test("a selection kept while the provider listed no model names the session's model once it does", () => {
+  const store = createNextSendSelectionStore(() => null, () => {});
+  const unlisted = { ...choices, current: { ...current, modelId: null, reasoningEffort: null }, models: [] };
+  const kept = { ...unlisted.current, agentPromptId: "default" };
+  assert.equal(store.set("epoch", "one", unlisted, kept), true);
+  assert.deepEqual(store.get("epoch", "one", choices), { ...current, agentPromptId: "default" });
+  assert.deepEqual(store.current("epoch", "one"), { ...current, agentPromptId: "default" });
 });
 
 test("mounted selection notifications isolate throwing listeners and refuse a changed catalog after restore", async () => {

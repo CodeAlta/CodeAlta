@@ -204,6 +204,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     }
 
     internal Func<ModelProviderId, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>>? SelectionModels { get; init; }
+    internal Func<ModelProviderId, ModelProviderDescriptor?>? SelectionProvider { get; init; }
     internal Func<ModelProviderId, IReadOnlyList<AgentModelInfo>>? ObservedImageModels { get; init; }
 
     internal static bool SameAskContext(OwnedAskSubmission? first, OwnedAskSubmission? second) => ReferenceEquals(first, second);
@@ -830,14 +831,16 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 var saved = await new PromptImageAttachmentStore(_catalog).SaveAsync(session, attachments, operation.Execution.Token).ConfigureAwait(false);
                 input = new AgentInput(input.Items.Concat(saved.Select(image => new AgentInputItem.LocalImage(image.Path, image.Title, image.MediaType))).ToArray());
             }
-            // A selection without a model means "the provider's default": for the session's own provider that
-            // is the model the session already runs with, never an empty model name.
+            // A selection without a model keeps the model the session already runs with. A send never leaves
+            // without a model while its provider lists one: a session that has none starts with the provider's.
             var keepsSessionModel = selection is { ModelId: null }
                 && string.Equals(selection.ProviderKey, session.ResolvedProviderKey, StringComparison.Ordinal);
-            var policy = SessionExecutionPolicy.CaptureSession(
-                session, project, _catalog.GlobalRoot, default,
+            var (modelId, effort) = await CompleteModelAsync(session.ResolvedProviderKey,
                 selection is null || keepsSessionModel ? session.ModelId : selection.ModelId,
                 selection is null || keepsSessionModel ? session.ReasoningEffort : selection.ReasoningEffort,
+                observedOnly: operation.Request.Images is { Count: > 0 }).ConfigureAwait(false);
+            var policy = SessionExecutionPolicy.CaptureSession(
+                session, project, _catalog.GlobalRoot, default, modelId, effort,
                 selection?.AgentPromptId ?? session.AgentPromptId);
             var options = SessionExecutionPolicy.BuildOptions(
                 policy, ToolsFor(session.SessionId, project?.Id, project?.ProjectPath ?? _catalog.GlobalRoot, session.ResolvedProviderKey),

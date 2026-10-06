@@ -8,7 +8,7 @@ export const sessionOperations = { choices: async ({ expectedEpoch, sessionId }:
   ...((window as Window & { fixtureChoicesFail?: boolean }).fixtureChoicesFail
     ? { status: "read_failed", current: null, prompts: [], models: [] }
     : { status: "ok", current: { providerKey: "fixture-provider", agentPromptId: "default", modelId: "fixture-model", reasoningEffort: "medium" },
-      prompts: [{ id: "default", name: "Default agent" }], models: [{ id: "fixture-model", name: "Fixture model", efforts: ["low", "medium", "high"] }] }),
+      prompts: [{ id: "default", name: "Default agent" }], models: [{ id: "fixture-model", name: "Fixture model", efforts: ["low", "medium", "high"], imageInput: null, startEffort: "high" }] }),
   epoch: expectedEpoch, sessionId,
 }; }, receipts: async ({ expectedEpoch }: { expectedEpoch: string }) => {
   const fixture = window as Window & { fixtureReceiptRows?: unknown[]; fixtureReceiptReads?: number };

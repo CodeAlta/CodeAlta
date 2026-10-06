@@ -93,7 +93,7 @@ public sealed class OwnedSessionCommandServiceTests
         f.Provider.ExposeSelectionModels = true;
         var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
         Assert.IsNotNull(choices);
-        // What the desktop sends for "Provider default": a prompt choice with no model and no effort.
+        // A prompt choice that names no model and no effort.
         var selection = new OwnedSessionSelection(choices.Current.ProviderKey, "plan", null, null);
         var admission = f.AdmitSend(new OwnedTextSendRequest("default-model-send", f.SessionId, "input") { Selection = selection });
         Assert.IsNotNull(admission.Receipt);
@@ -103,6 +103,68 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.AreEqual("plan", runtime.Entry!.AgentPromptId);
         f.Provider.ReleaseSend.TrySetResult();
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(admission.Receipt.Completion)).Outcome);
+    });
+
+    [TestMethod]
+    public Task SessionWithoutModel_StartsWithAModelOfItsProvider() => Fixture.RunAsync(async f =>
+    {
+        // The provider is configured with a model that is not the first one it lists, and with an effort that model lacks.
+        var configured = f.Provider.Descriptor with { DefaultModelId = "selected-model", DefaultReasoningEffort = AgentReasoningEffort.Low };
+        f.Host.ModelProviderRegistry.RegisterOrReplace(configured, f.Provider.CreateRuntime);
+        f.Provider.ExposeSelectionModels = true;
+        var project = await f.Observe(f.Host.ProjectCatalog.GetByPathAsync(f.ProjectRoot));
+        var created = await f.Observe(f.Host.Commands.CreateDraftSessionAsync(project,
+            configured with { DefaultModelId = null, DefaultReasoningEffort = null }, "No model"));
+        Assert.IsNull(created.ModelId);
+
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(created.SessionId));
+        Assert.IsNotNull(choices);
+        Assert.AreEqual("selected-model", choices.Current.ModelId);
+        Assert.AreEqual(AgentReasoningEffort.High, choices.Current.ReasoningEffort);
+        Assert.IsTrue(OwnedSessionCommandService.IsValidSelection(choices, choices.Current));
+        Assert.AreEqual(AgentReasoningEffort.High, choices.Models.Single(model => model.Id == "selected-model").StartEffort);
+        Assert.IsNull(choices.Models.Single(model => model.Id == "fixture-model").StartEffort);
+
+        // A send that selects nothing reaches the provider with what the session was shown to start with. The
+        // session is attached again with that model, which ends the attachment its creation made.
+        f.Provider.ReleaseAbort.TrySetResult();
+        var admission = f.AdmitSend(new OwnedTextSendRequest("no-model-send", created.SessionId, "input"));
+        Assert.IsNotNull(admission.Receipt);
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, admission.Receipt, "send without a model");
+        Assert.AreEqual("selected-model", f.Provider.Options!.Model);
+        Assert.AreEqual(AgentReasoningEffort.High, f.Provider.Options.ReasoningEffort);
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(admission.Receipt.Completion)).Outcome);
+    });
+
+    [TestMethod]
+    public Task SessionWithoutModel_TakesTheFirstListedModelWhenTheConfiguredOneIsNotListed() => Fixture.RunAsync(async f =>
+    {
+        var configured = f.Provider.Descriptor with { DefaultModelId = "retired-model" };
+        f.Host.ModelProviderRegistry.RegisterOrReplace(configured, f.Provider.CreateRuntime);
+        f.Provider.ExposeSelectionModels = true;
+        var project = await f.Observe(f.Host.ProjectCatalog.GetByPathAsync(f.ProjectRoot));
+        var created = await f.Observe(f.Host.Commands.CreateDraftSessionAsync(project, configured with { DefaultModelId = null }, "No model"));
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(created.SessionId));
+        Assert.IsNotNull(choices);
+        Assert.AreEqual(choices.Models[0].Id, choices.Current.ModelId);
+        Assert.IsNull(choices.Current.ReasoningEffort, "The first model reports no effort.");
+    });
+
+    [TestMethod]
+    public Task SessionChoices_KeepASavedModelTheProviderDoesNotList() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        var project = await f.Observe(f.Host.ProjectCatalog.GetByPathAsync(f.ProjectRoot));
+        var created = await f.Observe(f.Host.Commands.CreateDraftSessionAsync(project,
+            f.Provider.Descriptor with { DefaultModelId = "retired-model", DefaultReasoningEffort = AgentReasoningEffort.Medium }, "Retired"));
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(created.SessionId));
+        Assert.IsNotNull(choices);
+        // Shown as it is saved, and not a selection the provider offers.
+        Assert.AreEqual("retired-model", choices.Current.ModelId);
+        Assert.AreEqual(AgentReasoningEffort.Medium, choices.Current.ReasoningEffort);
+        Assert.IsFalse(choices.Models.Any(model => model.Id == "retired-model"));
+        Assert.IsFalse(OwnedSessionCommandService.IsValidSelection(choices, choices.Current));
     });
 
     [TestMethod]

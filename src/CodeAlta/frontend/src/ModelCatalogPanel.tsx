@@ -188,11 +188,11 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
                   {activeChoices && <>
                     <p>{t("Session-recorded model: {model} · provider: {provider}.", { model: activeChoices.current?.modelId ?? t("Unknown"), provider: activeChoices.current?.providerKey ?? t("Unknown") })}</p>
                     <p>{t("Next Send:")} {pendingSend ? t("Retained exact request ({selection})", { selection: pendingSelection?.modelId ?? t("host-selected model") })
-                      : t("{model} · effort {effort} · prompt {prompt}", { model: nextSend?.modelId ?? t("provider default"), effort: nextSend?.reasoningEffort ?? t("model default"), prompt: nextSend?.agentPromptId ?? t("Unknown") })}.</p>
+                      : t("{model} · effort {effort} · prompt {prompt}", { model: nextSend?.modelId ?? t("Unknown"), effort: nextSend?.reasoningEffort ?? t("None"), prompt: nextSend?.agentPromptId ?? t("Unknown") })}.</p>
                     {!sameProvider && <p role="status">{t("This provider is not the selected session's provider. Changing provider is not supported here.")}</p>}
                     {sameProvider && !modelChoice && <p role="status">{t("This model is unavailable for this session's next Send.")}</p>}
-                    {modelChoice && <label>{t("Reasoning effort for next Send")}<HTMLSelect value={effort} onChange={event => setEffort(event.target.value)}>
-                      <option value="">{t("Model default")}</option>{modelChoice.efforts.map(value => <option key={value} value={value}>{value}</option>)}
+                    {modelChoice && modelChoice.efforts.length > 0 && <label>{t("Reasoning effort for next Send")}<HTMLSelect value={effort || modelChoice.startEffort || ""} onChange={event => setEffort(event.target.value)}>
+                      {modelChoice.efforts.map(value => <option key={value} value={value}>{value}</option>)}
                     </HTMLSelect></label>}
                     {pendingSend && <p role="status">{t("Finish or reconcile the exact pending Send before changing its next selection.")}</p>}
                     <button type="button" disabled={!sameProvider || !modelChoice || pendingSend || applying || !nextSend}

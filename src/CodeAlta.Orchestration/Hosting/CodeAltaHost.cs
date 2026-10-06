@@ -61,6 +61,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity, reviewOwnedCommandPermissions, enableOwnedAsks, enableOwnedUserInput)
         {
             SelectionModels = modelProviderInitializationService.GetModelsAsync,
+            SelectionProvider = provider => modelProviderRegistry.TryGetProvider(provider, out var descriptor) ? descriptor : null,
             ProjectFileSearch = projectFileSearchService,
             Plugins = new PluginOrchestrationBridge(pluginRuntime.Adapter, () => pluginRuntime.ActivePlugins),
             ObservedImageModels = provider => modelProviderInitializationService.CurrentStates

@@ -161,7 +161,7 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
         <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={15} />} disabled={pending} aria-label={t("Refresh usage")} title={t("Refresh usage")} onClick={read} /></>}>
       <div className="context-usage-details">
         <header className="context-usage-subject">
-          <div><strong>{provider ?? t("session provider")}</strong><span>{modelName ?? t("Provider default")}</span></div>
+          <div><strong>{provider ?? t("session provider")}</strong>{modelName && <span>{modelName}</span>}</div>
           <div>{fromHistory && <Tag minimal round>{t("From saved history")}</Tag>}
             {updatedTime && <span className="bp6-text-muted">{t("updated {time}", { time: updatedTime })}</span>}
             <span role="status" className="bp6-text-muted">{copied === true ? t("Usage copied.") : copied === false ? t("Clipboard unavailable; nothing copied.") : ""}</span></div>

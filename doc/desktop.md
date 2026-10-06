@@ -490,6 +490,16 @@ popover to change them (reasoning is a stepped slider over the model's supported
 browse the agent-prompt and model catalogs. Enabled-provider readiness appears in the same bar.
 The expanded prompt editor retains file insertion without reference-inspection diagnostics.
 
+The model list holds the models the provider reports and the slider the efforts of the selected
+model: neither has a "default" entry, and a model without reasoning shows **None**. A draft or a
+session that has no model yet starts as in the TUI: with the provider's configured model when the
+provider lists it, otherwise with the first model listed, and with the provider's configured effort
+when the model supports it, otherwise High, the model's own default or its first effort. The host
+applies the same rule (`AgentModelDefaults`) to what it reports for a session and to a Send that
+selects nothing, so a Send never reaches a provider without a model while the provider lists one.
+Choosing another model starts it with its own effort. A saved model the provider does not list is
+kept and shown as **Unverified**; settings change again once a listed model is chosen.
+
 The provider indicator is a compact active-provider count, green when ready and orange when
 providers fail or are unsupported. Owned startup initializes the configured providers, as in
 the TUI; inventory reads themselves do not probe. Compaction has a persistent icon, disabled
@@ -1117,7 +1127,10 @@ so on) are preserved, but this structured save rewrites the file without its com
 lines, exactly like the TUI's provider dialog; use **Configuration file** to keep hand formatting.
 A field left blank uses its default: the field shows that default as its placeholder with a
 **Default** tag (the provider's built-in value, otherwise the one of its adapter type), and a field
-with a value has a button that returns it to the default. Codex, Copilot and xAI sign in with their
+with a value has a button that returns it to the default. A blank model reads **First model
+listed** and a blank reasoning effort **High when supported**, which is what a session of the
+provider then starts with: the model and the effort of the built-in template are not applied to a
+provider that leaves them out. Codex, Copilot and xAI sign in with their
 account from the form's **Account** block: it shows whether the stored sign-in is valid and for which
 account, a button per sign-in method (**Sign in with the browser**, **Sign in with a device code**)
 and **Sign out**. A sign-in opens the provider's page in the system browser and shows the address,
@@ -1130,7 +1143,8 @@ default, so it is not used for that.
 `defaults` (`displayName`, `model`, `reasoningEffort`, `apiUrl`, `apiKeyEnv`; null when nothing is
 known): the built-in template entry with the same key and adapter type, then what the adapter type
 fills in (the Codex, Copilot and xAI display names, the Codex API URL), and finally the provider key
-as the display name. `typeDefaults` lists the same record per offered adapter type, in the order of
+as the display name. `model` and `reasoningEffort` only hold what the adapter type fills in, which is
+nothing today. `typeDefaults` lists the same record per offered adapter type, in the order of
 `providerTypes`, for a provider that has no definition yet.
 
 **The `providerLogin` RPC.** The owned host's `providerLogin` service signs the Codex, Copilot and xAI providers in to their

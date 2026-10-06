@@ -24,8 +24,8 @@ export function ComposerSurface({ status, busy = false, children, className, edi
   </section>;
 }
 
-/** Display names of the current next-Send selection, shown on the collapsed chip. */
-export type ComposerSelectionSummary = Readonly<{ agent: string; provider: string; model: string; reasoning: string }>;
+/** Display names of the current next-Send selection, shown on the collapsed chip. A model without reasoning has none. */
+export type ComposerSelectionSummary = Readonly<{ agent: string; provider: string; model: string; reasoning: string | null }>;
 
 // Both draft and owned composers present their selection as one chip that opens this form.
 // Supplied controls retain their own catalog/selection authority; `locked` keeps the form
@@ -54,24 +54,26 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
       <span className="composer-selection-part"><AppIcon name="assistant" size={14} /><span>{summary.agent}</span></span>
       <span className="composer-selection-part"><AppIcon name="model" size={14} /><span>{summary.provider}</span>
         <span className="composer-selection-separator" aria-hidden="true">/</span><span>{summary.model}</span></span>
-      <span className="composer-selection-part"><AppIcon name="brain" size={14} /><span>{summary.reasoning}</span></span>
+      {summary.reasoning && <span className="composer-selection-part"><AppIcon name="brain" size={14} /><span>{summary.reasoning}</span></span>}
     </Button>
   </PopoverNext>;
 }
 
-/** Stepped reasoning-effort slider: the first stop is the model default, then the model's supported efforts. */
+/** Stepped reasoning-effort slider over the efforts the selected model supports; null when the model is not a listed one. */
 export function ReasoningSlider({ value, efforts, disabled = false, onChange }: {
-  value: string | null; efforts: readonly string[]; disabled?: boolean; onChange: (value: string) => void;
+  value: string | null; efforts: readonly string[] | null; disabled?: boolean; onChange: (value: string) => void;
 }) {
   const { t } = useShellLanguage();
+  const listed = efforts ?? [];
   // A saved effort the selected model does not report stays visible as its own stop.
-  const stops = ["", ...efforts, ...(value && !efforts.includes(value) ? [value] : [])];
-  if (stops.length === 1) return <span className="composer-reasoning-static">{t("Model default")}</span>;
+  const stops = [...listed, ...(value && !listed.includes(value) ? [value] : [])];
+  const label = (stop: string) => listed.includes(stop) ? stop : `${stop} · ${t("Unverified")}`;
+  // Nothing to choose: a model without reasoning, a single effort, or no listed model yet.
+  if (stops.length < 2) return <span className="composer-reasoning-static">{stops.length ? label(stops[0]) : efforts ? t("None") : "—"}</span>;
   const index = Math.max(0, stops.indexOf(value ?? ""));
   return <div className="composer-reasoning-slider" data-stops={stops.length}>
     <Slider min={0} max={stops.length - 1} stepSize={1} labelStepSize={1} value={index} disabled={disabled}
-      handleHtmlProps={{ "aria-label": t("Reasoning") }}
-      labelRenderer={stop => stops[stop] === "" ? t("Default") : efforts.includes(stops[stop]) ? stops[stop] : `${stops[stop]} · ${t("Unverified")}`}
+      handleHtmlProps={{ "aria-label": t("Reasoning") }} labelRenderer={stop => label(stops[stop])}
       onChange={next => { if (next !== index) onChange(stops[next]); }} />
   </div>;
 }

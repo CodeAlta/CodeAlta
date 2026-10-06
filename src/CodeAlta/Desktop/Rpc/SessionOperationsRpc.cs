@@ -179,7 +179,8 @@ internal sealed class SessionOperationsService
             return new("ok", _epoch, request.SessionId,
                 new(choices.Current.ProviderKey, choices.Current.AgentPromptId, choices.Current.ModelId, choices.Current.ReasoningEffort?.ToString()),
                 choices.Prompts.Select(p => new SessionPromptChoice(p.Id, p.Name)).ToArray(),
-                choices.Models.Select(m => new SessionModelChoice(m.Id, m.Name, m.Efforts.Select(e => e.ToString()).ToArray()) { ImageInput = m.ImageInput }).ToArray());
+                choices.Models.Select(m => new SessionModelChoice(m.Id, m.Name, m.Efforts.Select(e => e.ToString()).ToArray())
+                    { ImageInput = m.ImageInput, StartEffort = m.StartEffort?.ToString() }).ToArray());
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception) { return new("unavailable", _epoch, request.SessionId, null, [], []); }
@@ -472,6 +473,8 @@ internal sealed record SessionPromptImage(string Title, string MediaType, string
 internal sealed record SessionModelChoice(string Id, string Name, IReadOnlyList<string> Efforts)
 {
     public bool? ImageInput { get; init; }
+    // The effort a session starts this model with: one of Efforts, null when the model reports none.
+    public string? StartEffort { get; init; }
 }
 internal sealed record SessionChoicesResponse(string Status, string? Epoch, string SessionId, SessionSelection? Current,
     IReadOnlyList<SessionPromptChoice> Prompts, IReadOnlyList<SessionModelChoice> Models);

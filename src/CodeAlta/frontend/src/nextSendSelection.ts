@@ -1,5 +1,5 @@
 import type { SessionChoicesResponse, SessionSelection } from "#neoastra";
-import { changeSelection, restoreSelection, validSelection } from "./sessionSelection";
+import { changeSelection, completeSelection, restoreSelection, validSelection } from "./sessionSelection";
 
 export type CatalogNextSendTarget = Readonly<{ epoch: string; sessionId: string; providerKey: string; modelId: string; reasoningEffort: string | null }>;
 export type NextSendAdmission = Readonly<{ epoch: string | null; sessionId: string | null; active: boolean; canMutate: boolean; pending: boolean }>;
@@ -22,7 +22,13 @@ export function createNextSendSelectionStore(load: (key: string) => string | nul
     get(epoch: string, sessionId: string, choices: SessionChoicesResponse): SessionSelection | null {
       if (choices.status !== "ok" || choices.epoch !== epoch || choices.sessionId !== sessionId || !choices.current) return null;
       const entry = entries.get(sessionId);
-      if (entry?.epoch === epoch) return validSelection(choices, entry.selection) ? entry.selection : null;
+      if (entry?.epoch === epoch) {
+        // Kept while the provider listed no model: it names one as soon as the provider does.
+        const kept = completeSelection(choices, entry.selection);
+        if (!validSelection(choices, kept)) return null;
+        if (kept !== entry.selection) entries.set(sessionId, { epoch, selection: kept });
+        return kept;
+      }
       const restored = restoreSelection(() => load(key(sessionId)), choices);
       if (restored) {
         if (entries.size >= 128 && !entries.has(sessionId)) entries.delete(entries.keys().next().value!);

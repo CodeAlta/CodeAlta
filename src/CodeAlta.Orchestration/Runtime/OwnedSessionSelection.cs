@@ -15,6 +15,9 @@ public sealed record OwnedModelChoice(string Id, string Name, IReadOnlyList<Agen
 {
     /// <summary>Gets observed image capability: true available, false unsupported, null unknown.</summary>
     public bool? ImageInput { get; init; }
+
+    /// <summary>Gets the effort a session starts this model with, one of <see cref="Efforts"/>; null when the model reports none.</summary>
+    public AgentReasoningEffort? StartEffort { get; init; }
 }
 
 /// <summary>Session-scoped next-send choices; does not confer authority to mutate a running turn.</summary>
@@ -66,21 +69,53 @@ public sealed partial class OwnedSessionCommandService
             .Where(p => p.PromptName.Length <= 256).Take(64)
             .Select(p => new OwnedPromptChoice(p.PromptName, Bound(p.DisplayName))).ToArray();
         var provider = session.ResolvedProviderKey;
-        var models = observedOnly ? ObservedImageModels?.Invoke(new ModelProviderId(provider)) ?? [] : SelectionModels is null ? []
-            : await SelectionModels(new ModelProviderId(provider), cancellationToken).ConfigureAwait(false);
-        return new(new(provider, session.AgentPromptId ?? "default", session.ModelId, session.ReasoningEffort), prompts,
-            models.Where(m => m.Id.Length <= 256).Take(128)
-                .Select(m => new OwnedModelChoice(m.Id, Bound(m.DisplayName ?? m.Id), m.SupportedReasoningEfforts?.ToArray() ?? [])
-                { ImageInput = AgentImageInputCapability.Read(m) }).ToArray());
+        var models = (observedOnly ? ObservedImageModels?.Invoke(new ModelProviderId(provider)) ?? [] : SelectionModels is null ? []
+            : await SelectionModels(new ModelProviderId(provider), cancellationToken).ConfigureAwait(false))
+            .Where(m => m.Id.Length <= 256).Take(128).ToArray();
+        // What the session runs with, never "a default": a session without a model shows the one it starts with.
+        var (modelId, effort) = StartingModel(provider, session.ModelId, session.ReasoningEffort, models);
+        return new(new(provider, session.AgentPromptId ?? "default", modelId, effort), prompts,
+            models.Select(m => new OwnedModelChoice(m.Id, Bound(m.DisplayName ?? m.Id), m.SupportedReasoningEfforts?.ToArray() ?? [])
+                { ImageInput = AgentImageInputCapability.Read(m), StartEffort = StartingModel(provider, m.Id, null, models).Effort }).ToArray());
     }
 
     internal static bool IsValidSelection(OwnedSelectionChoices choices, OwnedSessionSelection selection)
     {
         if (!string.Equals(choices.Current.ProviderKey, selection.ProviderKey, StringComparison.Ordinal)
             || !choices.Prompts.Any(p => p.Id == selection.AgentPromptId)) return false;
+        // No model keeps the session's own, which the send completes with a model of the provider.
         if (selection.ModelId is null) return selection.ReasoningEffort is null;
         var model = choices.Models.FirstOrDefault(m => m.Id == selection.ModelId);
         return model is not null && (selection.ReasoningEffort is null || model.Efforts.Contains(selection.ReasoningEffort.Value));
+    }
+
+    // Completes what a session runs with among what its provider reports, as the terminal does. A session without a
+    // model takes the provider's configured model when it is listed, else the first one listed. A model that reports
+    // its efforts takes the session's effort when it supports it, else the provider's configured effort, High, its own
+    // default or its first effort. A model the provider does not list is kept as it is saved.
+    private (string? ModelId, AgentReasoningEffort? Effort) StartingModel(string provider, string? modelId,
+        AgentReasoningEffort? effort, IReadOnlyList<AgentModelInfo> models)
+    {
+        var configured = SelectionProvider?.Invoke(new ModelProviderId(provider));
+        var resolved = string.IsNullOrWhiteSpace(modelId) ? AgentModelDefaults.ResolveModelId(models, configured?.DefaultModelId) : modelId;
+        var model = models.FirstOrDefault(m => string.Equals(m.Id, resolved, StringComparison.Ordinal));
+        if (model?.SupportedReasoningEfforts is not { Count: > 0 } supported) return (resolved, effort);
+        return (resolved, AgentModelDefaults.ResolveReasoningEffort(model,
+            effort is { } saved && supported.Contains(saved) ? saved : configured?.DefaultReasoningEffort));
+    }
+
+    // Before a send. Only a missing model is worth waiting for the provider's catalog, since a send without one fails
+    // at the provider; a missing effort is completed from what the provider already reported.
+    private async Task<(string? ModelId, AgentReasoningEffort? Effort)> CompleteModelAsync(string provider, string? modelId,
+        AgentReasoningEffort? effort, bool observedOnly)
+    {
+        var missing = string.IsNullOrWhiteSpace(modelId);
+        if (!missing && effort is not null) return (modelId, effort);
+        var id = new ModelProviderId(provider);
+        var models = missing && !observedOnly && SelectionModels is not null
+            ? await SelectionModels(id, CancellationToken.None).ConfigureAwait(false)
+            : ObservedImageModels?.Invoke(id) ?? [];
+        return StartingModel(provider, modelId, effort, models);
     }
 
     private static string Bound(string value) => value.Length <= 256 ? value : value[..256];

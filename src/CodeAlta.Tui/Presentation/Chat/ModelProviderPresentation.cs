@@ -203,53 +203,12 @@ internal static class ModelProviderPresentation
     public static string? ResolvePreferredModelId(
         IReadOnlyList<AgentModelInfo> models,
         string? preferredModelId)
-    {
-        ArgumentNullException.ThrowIfNull(models);
-
-        if (models.Count == 0)
-        {
-            return null;
-        }
-
-        if (!string.IsNullOrWhiteSpace(preferredModelId) &&
-            models.Any(model => string.Equals(model.Id, preferredModelId, StringComparison.Ordinal)))
-        {
-            return preferredModelId;
-        }
-
-        return models[0].Id;
-    }
+        => AgentModelDefaults.ResolveModelId(models, preferredModelId);
 
     public static AgentReasoningEffort? ResolvePreferredReasoningEffort(
         AgentModelInfo? model,
         AgentReasoningEffort? preferredReasoningEffort)
-    {
-        var supportedReasoningEfforts = model?.SupportedReasoningEfforts?
-            .Distinct()
-            .ToArray();
-        if (preferredReasoningEffort is { } requestedEffort &&
-            (supportedReasoningEfforts is null || supportedReasoningEfforts.Contains(requestedEffort)))
-        {
-            return requestedEffort;
-        }
-
-        if (supportedReasoningEfforts is { Length: > 0 })
-        {
-            if (supportedReasoningEfforts.Contains(AgentReasoningEffort.High))
-            {
-                return AgentReasoningEffort.High;
-            }
-
-            if (model?.DefaultReasoningEffort is { } defaultEffort && supportedReasoningEfforts.Contains(defaultEffort))
-            {
-                return defaultEffort;
-            }
-
-            return supportedReasoningEfforts[0];
-        }
-
-        return model?.DefaultReasoningEffort;
-    }
+        => AgentModelDefaults.ResolveReasoningEffort(model, preferredReasoningEffort);
 
     public static string BuildReadyStatusMessage(ModelProviderState providerState)
     {

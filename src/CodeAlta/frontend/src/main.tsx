@@ -1743,15 +1743,15 @@ function App() {
     if (compact) {
       const locked = creatingBusy || creationLocked || !owned;
       const value = draftChoices.value;
-      const efforts = draftChoices.models.find(model => model.id === value.modelId)?.efforts ?? [];
+      const efforts = draftChoices.models.find(model => model.id === value.modelId)?.efforts ?? null;
       const change = (field: "agentPromptId" | "modelId" | "reasoningEffort", next: string) => {
         invalidateCreation(); draftChoices.change(field, next);
       };
       return <ComposerSelectionFields sessionId="new" onOpenCatalog={navigate}
         summary={{ agent: draftChoices.prompts.find(prompt => prompt.id === value.agentPromptId)?.name ?? t(draftChoices.loadingPrompts ? "Loading…" : "Host default"),
           provider: usedProvider || t("No provider"),
-          model: value.modelId ? draftChoices.models.find(model => model.id === value.modelId)?.name ?? value.modelId : t(draftChoices.loadingModels ? "Loading…" : "Provider default"),
-          reasoning: value.reasoningEffort ?? t(draftChoices.loadingModels ? "Loading…" : "Model default") }}
+          model: value.modelId ? draftChoices.models.find(model => model.id === value.modelId)?.name ?? value.modelId : t(draftChoices.loadingModels ? "Loading…" : "No model"),
+          reasoning: value.reasoningEffort ?? (draftChoices.loadingModels ? t("Loading…") : null) }}
         agent={<HTMLSelect fill id="composer-agent-new" aria-label={t("Agent prompt")} value={value.agentPromptId}
           disabled={locked || draftChoices.loadingPrompts || !draftChoices.prompts.length} onChange={event => change("agentPromptId", event.target.value)}>
           {!draftChoices.prompts.some(prompt => prompt.id === value.agentPromptId) && <option value={value.agentPromptId}>{t(draftChoices.loadingPrompts ? "Loading…" : "Host default")}</option>}
@@ -1759,7 +1759,7 @@ function App() {
         </HTMLSelect>} provider={select}
         model={<HTMLSelect fill id="composer-model-new" data-model-selector aria-label={t("Model")} value={value.modelId ?? ""}
           disabled={locked || draftChoices.loadingModels} onChange={event => change("modelId", event.target.value)}>
-          {!value.modelId && <option value="">{t(draftChoices.loadingModels ? "Loading…" : "Provider default")}</option>}
+          {!value.modelId && <option value="">{t(draftChoices.loadingModels ? "Loading…" : "No model")}</option>}
           {value.modelId && !draftChoices.models.some(model => model.id === value.modelId) && <option value={value.modelId}>{value.modelId} · {t("Unverified")}</option>}
           {draftChoices.models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
         </HTMLSelect>}
