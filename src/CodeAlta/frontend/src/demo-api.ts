@@ -116,6 +116,11 @@ export const projectFiles = Object.freeze({ read: unavailable, write: unavailabl
   delete: unavailable, image: unavailable, reveal: unavailable, search: unavailable, watch: unavailable });
 export const projectGit = Object.freeze({ status: unavailable, changes: unavailable, commits: unavailable, file: unavailable, watch: unavailable });
 export const promptImages = Object.freeze({ read: unavailable });
+// The demo has no host process to log anything.
+export const applicationLogs = Object.freeze({
+  read: async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }),
+  clear: async () => ({ status: "unavailable", captureId: null, clearedRows: 0, coveredOmitted: "0", boundary: "0" }),
+});
 export const composerStatus = Object.freeze({ read: unavailable });
 export const pluginUi = Object.freeze({ contributions: unavailable, regions: unavailable, invokeCommand: unavailable, searchPicker: unavailable, watch: unavailable, respond: unavailable, dialogAction: unavailable });
 export const sessionUserInput = Object.freeze({ cancel: unavailable, list: emptyPage, resolve: unavailable });
