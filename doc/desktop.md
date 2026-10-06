@@ -902,6 +902,7 @@ desktop project-rail collapse. The button before the window controls at the top 
 three themes. The rail's Sort projects selector and
 Show/Hide projects button use the same live preferences; changes apply immediately and are
 saved only to this WebView's local storage (theme, darker, colorScheme, projectSort, projectRail and projectTree v1 keys).
+The user's own color schemes are files of the profile (see below).
 
 **Darker dark theme** deepens the dark theme of every scheme, wherever the dark theme is shown (Dark, or
 Auto on a dark system). It is not a dimmer: `darkerPalette` in `frontend/src/colorPalette.ts` lowers only
@@ -942,8 +943,77 @@ diagrams, which draw with the window's colors outside CSS, follow `data-theme` a
   which a palette with other surfaces would leave where it was. `style.css` binds it to the palette's own
   inset step (black in the dark themes, white in the light one).
 - The app's own colors (`--bg`, `--panel`, `--text`, `--accent`, … in `style.css`) are defined from the
-  palette variables and follow the scheme. Monaco takes its surface colors from them while a scheme is
-  selected and keeps its own with Blueprint.
+  palette variables and follow the scheme. Monaco takes its surface colors from them while a palette is
+  set (`data-palette`: any scheme but Blueprint's, the darker theme, a custom scheme) and keeps its own
+  with Blueprint's palette.
+
+#### Custom color schemes
+
+**Customize**, beside the dropdown, makes a scheme of the user's own from the selected one; **Edit** opens
+one of the user's. A custom scheme is a built-in scheme (its *base*) with some colors chosen, for each of
+the three themes:
+
+| Color | What follows it |
+| --- | --- |
+| Background | The window background. The other surfaces (panels, what is raised, the inset of cards and inputs) keep their distance from it and take its tint; a background with a clear tint also turns the grays and the text to its hue. |
+| Text | The text, and the steps of gray near it. |
+| Muted text | Muted text; icons and borders (the mid grays) follow it. |
+| Accent | Buttons, links, selections: the blue and indigo families. |
+| Success, Warning, Danger | The green, the orange and gold, and the red families. |
+
+The editor is a panel of the Appearance page: a name, the theme whose colors are edited (Light, Dark or
+Darker, which the window then shows), and for each color a well that opens the color picker of the system,
+the color as `#rrggbb` text, and a reset button once the color is chosen. The window shows the scheme while
+it is edited (`ShellAppearance` listens to an `AppearancePreviewStore`, so that a color being dragged
+repaints the palette and not the whole application) and nothing is written before **Save**; **Cancel**,
+leaving the page or closing Settings gives the window its own appearance back. A saved scheme can be
+duplicated, shown in the file manager and removed; removing the selected one selects its base.
+
+A color that is not chosen follows the base. The darker theme follows the scheme's own dark theme (made
+darker as for any scheme) and then takes the colors chosen for it, so an accent chosen for Dark is the
+accent of Darker too. The page makes the palette (`adjustPalette` in `frontend/src/colorPalette.ts`): every
+chosen color is shown exactly as given, and the steps around it keep their structure. Dark surfaces move
+with the background in display-encoded lightness, where a black background still leaves the panels above
+it visible (`#080808` gives panels at `#111111` and `#1b1b1b`). Where a chosen accent would leave the
+white text of a filled button unreadable, the page sets Blueprint's `--bp-intent-*-foreground` to the
+palette's black.
+
+The schemes are files, one per scheme, in `~/.alta/color-schemes/` (the developer instance shares them).
+The file name without `.json` is the scheme's id; the file holds only what the scheme chooses:
+
+```json
+{
+  "name": "Deep Sea",
+  "base": "plum",
+  "dark": {
+    "background": "#0b1d2a",
+    "accent": "#33ccff"
+  },
+  "darker": {
+    "background": "#05101a"
+  }
+}
+```
+
+`base` is the id of a built-in scheme (`blueprint` when absent; one that this version does not have starts
+from Blueprint's); `light`, `dark` and `darker` hold `background`, `text`, `muted`, `accent`, `success`,
+`warning` and `danger` as `#rgb` or `#rrggbb`. A file can be written by hand: comments and trailing commas
+are accepted, unknown values are ignored, and a file that is not a scheme is listed under the dropdown
+with the reason instead of being dropped silently. The page reads the folder when it starts, when the
+Appearance page or the dropdown opens and when the window comes back to the front, so a file edited in
+another application shows on return.
+
+The `colorSchemes` RPC service (`ColorSchemesService`) only reads, checks, writes and removes these files
+(`list`, `save`, `delete`) and shows one in the file manager (`reveal`). It needs no host, so it also
+answers while a configuration file is repaired; a window that browses a copy of a catalog has none
+(`unavailable`). It lists at most 64 schemes of at most 16 KB each, writes a scheme through a staged file,
+names a new file after the scheme's name (`deep-sea.json`, then `deep-sea-2.json`), and refuses ids that
+are not plain file names. The selection stays in the WebView's local storage (`custom:<id>` for a custom
+scheme), together with a copy of the selected custom scheme, so that the next start shows it before the
+host has answered and the configuration repair screen shows it without a host. The copy follows the file.
+While the file of the selected scheme is missing or is not a scheme (a syntax error while it is edited by
+hand), the window keeps showing the copy and the selection is not rewritten; saving the scheme from its
+editor writes the file again.
 If storage is invalid or unavailable, the screen reports the fallback; if a write fails,
 the change applies in this window but is **not** reported as saved. Recent visible updates
 uses only verified saved session timestamps in the visible snapshot, **not** the TUI's

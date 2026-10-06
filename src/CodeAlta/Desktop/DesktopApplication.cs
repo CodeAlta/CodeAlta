@@ -380,6 +380,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     Continue = () => repaired.TrySetResult(), Exit = () => shell.RequestExit(confirmed: true),
                 });
                 recoveryBuilder.AddDesktopShellService(new DesktopShellService(shell));
+                recoveryBuilder.AddColorSchemesService(new ColorSchemesService(options.CatalogRoot!));
                 await using (var recoveryRpc = recoveryBuilder.Build())
                 {
                     await using (NeoRpcViewBinding.Bind(recoveryRpc, view))
@@ -439,6 +440,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         RememberAppearance = RememberAppearance, ProviderSetup = NeedsProviderSetup(configStore),
                     });
                     builder.AddDesktopShellService(new DesktopShellService(shell));
+                    builder.AddColorSchemesService(new ColorSchemesService(options.CatalogRoot!));
                     // As the terminal application does: one look at nuget.org for a newer version. An instance on
                     // explicit roots is automation and stays off the network.
                     // Only an installed tool can replace itself: a helper waits for this process to end, runs
@@ -620,6 +622,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var builder = new NeoRpcBuilder(chrome.Authorize(new NeoRpcOptions { ContractHash = NeoRpcGeneratedContract.Hash, Release = true }));
             chrome.AddHandlers(builder);
             builder.AddBootService(new BootService());
+            // A copy of a catalog is browsed, not written: the schemes it holds are not offered.
+            builder.AddColorSchemesService(new ColorSchemesService());
             builder.AddWorkspaceService(new WorkspaceService(options.CatalogRoot));
             builder.AddConfigurationService(new ConfigurationService(options.CatalogRoot!));
             builder.AddGlobalConfigService(new GlobalConfigService());

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyPalette, colorSchemeIds, colorSchemeOf, colorSchemes, defaultColorScheme, paletteVariables, schemePalette, schemeSwatch, showAppearance, type ColorVariant } from "./colorSchemes";
+import { darkerPalette } from "./colorPalette";
+import { applyPalette, colorSchemeIds, colorSchemeOf, colorSchemes, colorVariants, customSchemeIdOf, customSchemeSelection, defaultColorScheme, paletteVariables, parseCustomScheme,
+  schemePalette, schemeSwatch, showAppearance, type ColorVariant, type CustomColorScheme } from "./colorSchemes";
 import { blueprintPalette } from "./colorSchemes.gen";
 
 // The part of the document root that showing an appearance touches.
@@ -94,4 +96,60 @@ test("showing an appearance sets the theme, the scheme and its palette on the ro
   assert.equal(root.dataset.colorScheme, undefined);
   assert.equal(classes.has("dark-class"), false);
   assert.equal(properties.has("--bp-palette-gray-1"), false);
+});
+
+test("a custom scheme is read from untrusted data, and what is not a color is left out", () => {
+  assert.deepEqual(parseCustomScheme({ id: "deep-sea", name: "  Deep Sea ", base: "plum", dark: { background: "#0B1D2A", accent: "#3cf", text: "blue", extra: "#000000" }, darker: null }),
+    { id: "deep-sea", name: "Deep Sea", base: "plum", light: {}, dark: { background: "#0b1d2a", accent: "#33ccff" }, darker: {} });
+  // A file without a name is named after itself, and without a base starts from Blueprint.
+  assert.deepEqual(parseCustomScheme({ id: "Solar.v2", light: { text: "#333" } }), { id: "Solar.v2", name: "Solar.v2", base: "blueprint", light: { text: "#333333" }, dark: {}, darker: {} });
+  assert.equal(parseCustomScheme({ id: "x", name: "n".repeat(200) })!.name.length, 64);
+  for (const value of [null, "scheme", 5, [], {}, { id: "" }, { id: "../up" }, { id: "a b" }, { id: ".hidden" }, { id: "x".repeat(65) }, { id: 12 }]) assert.equal(parseCustomScheme(value), null);
+});
+
+test("a custom scheme is selected under its own prefix", () => {
+  assert.equal(customSchemeSelection("cherry"), "custom:cherry");
+  assert.equal(customSchemeIdOf("custom:cherry"), "cherry");
+  assert.equal(customSchemeIdOf("custom:My_Scheme.2"), "My_Scheme.2");
+  for (const selection of ["cherry", "custom:", "custom:../up", "custom:a b", "Custom:x", ""]) assert.equal(customSchemeIdOf(selection), null);
+});
+
+test("a custom scheme shows its base with the colors it chose, and its darker theme follows its dark one", () => {
+  const custom: CustomColorScheme = { id: "night", name: "Night", base: "cherry", light: { accent: "#d6336c" }, dark: { background: "#101418", accent: "#ff8800" }, darker: {} };
+  const cherry = colorSchemeOf("cherry");
+  const light = schemePalette(custom, "light"), dark = schemePalette(custom, "dark"), darker = schemePalette(custom, "darker");
+  assert.equal(light["blue-3"], "#d6336c");
+  assert.equal(light["light-gray-5"], cherry.light["light-gray-5"]);
+  assert.equal(dark["dark-gray-1"], "#101418");
+  assert.equal(dark["blue-4"], "#ff8800");
+  assert.equal(dark["green-4"], cherry.dark["green-4"]);
+  // Darker: the accent chosen for the dark theme, and its background made darker.
+  assert.equal(darker["blue-4"], "#ff8800");
+  assert.notEqual(darker["dark-gray-1"], "#101418");
+  assert.deepEqual(darker, darkerPalette(dark));
+  // What the scheme chooses for the darker theme comes on top.
+  const chosen = schemePalette({ ...custom, darker: { background: "#000000", accent: "#00d084" } }, "darker");
+  assert.equal(chosen["dark-gray-1"], "#000000");
+  assert.equal(chosen["blue-4"], "#00d084");
+  // A scheme without a choice is its base, and a base that no longer exists is Blueprint's.
+  assert.deepEqual(schemePalette({ ...custom, light: {}, dark: {} }, "dark"), cherry.dark);
+  assert.deepEqual(schemePalette({ ...custom, base: "gone", light: {}, dark: {} }, "light"), blueprintPalette);
+});
+
+test("the text of a filled button changes only where a chosen accent would make it unreadable", () => {
+  // Never for a built-in scheme: its buttons are as Blueprint draws them.
+  for (const scheme of colorSchemes) for (const variant of colorVariants)
+    assert.deepEqual(Object.keys(paletteVariables(schemePalette(scheme, variant))).filter(name => !name.startsWith("--bp-palette-")), [], `${scheme.id} ${variant}`);
+  const yellow = paletteVariables(schemePalette({ id: "y", name: "Y", base: "blueprint", light: {}, dark: { accent: "#ffe45c" }, darker: {} }, "dark"));
+  assert.equal(yellow["--bp-intent-primary-foreground"], "var(--bp-palette-black)");
+  assert.equal(yellow["--bp-intent-danger-foreground"], undefined);
+  const orange = paletteVariables(schemePalette({ id: "o", name: "O", base: "blueprint", light: {}, dark: { accent: "#ff8800" }, darker: {} }, "dark"));
+  assert.equal(orange["--bp-intent-primary-foreground"], undefined);
+
+  // Another palette removes it again.
+  const { root, properties } = fakeRoot();
+  applyPalette(root, schemePalette({ id: "y", name: "Y", base: "blueprint", light: {}, dark: { accent: "#ffe45c" }, darker: {} }, "dark"));
+  assert.equal(properties.get("--bp-intent-primary-foreground"), "var(--bp-palette-black)");
+  applyPalette(root, blueprintPalette);
+  assert.deepEqual([...properties.keys()], ["--splash-background"]);
 });

@@ -72,7 +72,7 @@ Only one CodeAlta runs on a profile, because two processes must not write the sa
 
 | Shared with the normal instance | Its own, under `~/.alta/dev/` |
 | --- | --- |
-| `config.toml`, providers and their credentials (`auth/`), `mcp.json`, prompts, skills, plugins, the project catalog (`projects/`) | `sessions/` (journals, pasted images), `cache/cache.sqlite3`, `ui-state.yaml`, `saved_prompts/`, `logs/`, `alta.lock` |
+| `config.toml`, providers and their credentials (`auth/`), `mcp.json`, prompts, skills, plugins, color schemes (`color-schemes/`), the project catalog (`projects/`) | `sessions/` (journals, pasted images), `cache/cache.sqlite3`, `ui-state.yaml`, `saved_prompts/`, `logs/`, `alta.lock` |
 
 The desktop developer instance also has its own WebView data (`%LOCALAPPDATA%\CodeAlta\desktop-dev`: open tabs, drafts, theme), which is what lets it take its own debugging port. One developer instance runs at a time, terminal or desktop. It leaves the coordinator `~/.alta/AGENTS.md` as the normal instance wrote it, and on its first run takes over the normal instance's per-project provider/model preferences.
 

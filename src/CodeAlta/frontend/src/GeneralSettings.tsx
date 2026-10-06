@@ -1,9 +1,9 @@
-import type { ReactNode } from "react";
+import type { ComponentProps } from "react";
 import { Button, ButtonGroup, Card, HTMLSelect, Switch } from "@blueprintjs/core";
 import { AppIcon, type IconName } from "./AppIcon";
-import { ColorSchemeSelect } from "./ColorSchemeSelect";
+import { ColorSchemeSettings } from "./ColorSchemeSettings";
 import type { ProjectSort } from "./explorer/projectRail";
-import type { ColorVariant } from "./colorSchemes";
+import { SettingsField as Field } from "./SettingsField";
 import { themeLabel, themes, type Theme, type PreferenceNotices } from "./windowPreferences";
 import { useShellLanguage } from "./shellLanguage";
 import { locales, languageNames, preferenceNotice } from "./localization";
@@ -12,25 +12,14 @@ import { closeBehavior, closeBehaviorLabel, closeBehaviors, keepRunningPlace, ty
 /** The icon of each theme choice, shared with the title-bar switch. */
 export const themeIcons: Readonly<Record<Theme, IconName>> = { dark: "themeDark", light: "themeLight", system: "themeSystem" };
 
-// One preference per row: its name on the left, its control on the right, and any storage notice below.
-function Field({ label, htmlFor, notice, children }: { label: string; htmlFor?: string; notice?: ReactNode; children: ReactNode }) {
-  return <div className="settings-field">
-    {htmlFor ? <label htmlFor={htmlFor}>{label}</label> : <span className="settings-field-label">{label}</span>}
-    <div className="settings-field-control">{children}</div>
-    {notice}
-  </div>;
-}
-
-export function GeneralSettings({ theme, setTheme, darker, setDarker, variant, colorScheme, setColorScheme, sort, setSort, desktopCollapsed, setDesktopCollapsed, notices, recentSessionCount, setRecentSessionCount, closing }: {
+export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, sort, setSort, desktopCollapsed, setDesktopCollapsed, notices, recentSessionCount, setRecentSessionCount, closing }: {
   theme: Theme;
   setTheme: (value: Theme) => void;
   /** Whether the dark theme is the darker one. */
   darker: boolean;
   setDarker: (value: boolean) => void;
-  /** The theme on screen, which decides the variant of each scheme that is shown in the list. */
-  variant: ColorVariant;
-  colorScheme: string;
-  setColorScheme: (value: string) => void;
+  /** The color scheme: the selection, the user's own schemes and what edits them. */
+  schemes: Omit<ComponentProps<typeof ColorSchemeSettings>, "notice">;
   sort: ProjectSort;
   setSort: (value: ProjectSort) => void;
   desktopCollapsed: boolean;
@@ -60,10 +49,8 @@ export function GeneralSettings({ theme, setTheme, darker, setDarker, variant, c
     <Field label={t("Darker dark theme")} htmlFor="settings-darker">
       <Switch id="settings-darker" className="settings-checkbox" checked={darker} disabled={theme === "light"} onChange={event => setDarker(event.currentTarget.checked)} />
     </Field>
-    <Field label={t("Color scheme")} htmlFor="settings-color-scheme"
-      notice={notices.scheme && <p role="status" className="notice" data-diagnostic={notices.scheme}>{preferenceNotice(locale, "Color scheme", "Blueprint", notices.scheme)}</p>}>
-      <ColorSchemeSelect id="settings-color-scheme" value={colorScheme} variant={variant} onChange={setColorScheme} />
-    </Field>
+    <ColorSchemeSettings {...schemes}
+      notice={notices.scheme && <p role="status" className="notice" data-diagnostic={notices.scheme}>{preferenceNotice(locale, "Color scheme", "Blueprint", notices.scheme)}</p>} />
     <Field label={t("Sort projects")} htmlFor="settings-project-sort"
       notice={notices.sort && <p role="status" className="notice" data-diagnostic={notices.sort}>{preferenceNotice(locale, "Project sort", locale === "en" ? "name" : t("Name"), notices.sort)}</p>}>
       <HTMLSelect id="settings-project-sort" value={sort} onChange={event => setSort(event.target.value as ProjectSort)}>

@@ -839,12 +839,45 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .settings-field-control .bp6-html-select { min-width: 220px; }
 .settings-field-control .bp6-control { margin: 0; }
 /* The scheme dropdown is as wide as the selects around it; its list scrolls when the schemes do not fit. */
-.color-scheme-select.bp6-button { min-width: 220px; }
+.color-scheme-target { flex: 0 1 220px; min-width: 0; }
+.color-scheme-select.bp6-button { width: 100%; }
+/* In a narrow window the button goes below the dropdown rather than being squeezed beside it. */
+.scheme-customize.bp6-button { flex: none; }
 .color-scheme-select .bp6-button-text { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .color-scheme-menu.bp6-menu { max-height: min(60vh, 420px); overflow-y: auto; }
 .color-scheme-swatch { display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 3px; width: 40px; height: 18px; border: 1px solid; border-radius: 4px; }
 .color-scheme-swatch > i { width: 7px; height: 7px; border-radius: 50%; }
 .settings-field > .notice { grid-column: 1 / -1; margin: 0; color: var(--muted); line-height: 1.5; }
+/* What a preference carries below its control, over the whole width of the row. */
+.settings-field > .settings-field-wide { grid-column: 1 / -1; min-width: 0; }
+.settings-field-control { flex-wrap: wrap; gap: 8px; }
+.scheme-problems ul { margin: 4px 0 0; padding-left: 18px; }
+.scheme-problems code { margin-right: 4px; font-size: 12px; overflow-wrap: anywhere; }
+/* The editor of a color scheme: a panel of the appearance card, drawn with the colors it edits. */
+.scheme-editor { display: grid; gap: 12px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: color-mix(in srgb, var(--text) 4%, transparent); }
+.scheme-editor-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; }
+.scheme-editor-heading span, .scheme-editor-help { color: var(--muted); font-size: 12px; }
+.scheme-editor-help { margin: 0; }
+/* A label and its control; in a narrow window the control goes below its label instead of being squeezed. */
+.scheme-editor-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.scheme-editor-row > :first-child { flex: 0 0 120px; }
+.scheme-editor-name { flex: 1 1 200px; max-width: 320px; }
+.scheme-editor-row > .bp6-segmented-control { flex: none; }
+.scheme-editor .bp6-segmented-control .bp6-button { white-space: nowrap; overflow-wrap: normal; }
+.scheme-editor-colors { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px 28px; }
+.scheme-color { display: grid; grid-template-columns: minmax(0, 1fr) 34px 86px 24px; align-items: center; gap: 8px; }
+.scheme-color > label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The color itself, as a button that opens the color picker of the system. */
+input.scheme-color-well { appearance: none; -webkit-appearance: none; width: 34px; height: 26px; padding: 0; border: 1px solid var(--line-strong); border-radius: 5px; background: none; cursor: pointer; }
+input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
+.scheme-color-well::-webkit-color-swatch-wrapper { padding: 0; }
+.scheme-color-well::-webkit-color-swatch { border: 0; border-radius: 4px; }
+.scheme-color-well::-moz-color-swatch { border: 0; border-radius: 4px; }
+.scheme-color-text .bp6-input { padding-inline: 8px; font-family: var(--bp-typography-family-mono); font-size: 12px; }
+/* A color the scheme did not choose shows what it follows, quieter; only a chosen one can be reset. */
+.scheme-color:not([data-chosen]) .scheme-color-text .bp6-input { color: var(--muted); }
+.scheme-color-reset.bp6-button:disabled { visibility: hidden; }
+.scheme-editor-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .ide-shell .current-provider { display: inline-block; max-width: 20ch; }
 .provider-chooser { display: inline-flex; align-items: center; flex-wrap: wrap; min-width: 0; max-width: 100%; gap: 5px; }
 .provider-chooser [role="alert"] { color: var(--red); font-size: 11px; }

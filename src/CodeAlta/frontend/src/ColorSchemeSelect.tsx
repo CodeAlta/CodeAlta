@@ -1,7 +1,7 @@
-import type { KeyboardEvent } from "react";
-import { Button, Menu, MenuItem, PopoverNext } from "@blueprintjs/core";
+import { useMemo, type KeyboardEvent } from "react";
+import { Button, Menu, MenuDivider, MenuItem, PopoverNext } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
-import { colorSchemeOf, colorSchemes, schemePalette, schemeSwatch, type ColorVariant } from "./colorSchemes";
+import { colorSchemes, customSchemeSelection, schemePalette, schemeSwatch, type ColorScheme, type ColorVariant, type CustomColorScheme } from "./colorSchemes";
 import type { Palette } from "./colorSchemes.gen";
 import { useShellLanguage } from "./shellLanguage";
 
@@ -29,22 +29,37 @@ function moveFocus(event: KeyboardEvent<HTMLUListElement>) {
 }
 
 /**
- * The color scheme as a dropdown: every scheme with its swatch for the theme on screen. Choosing one applies
- * it at once and leaves the list open, so that several can be tried in a row.
+ * The color scheme as a dropdown: every scheme with its swatch for the theme on screen, the built-in ones
+ * first, then the user's. Choosing one applies it at once and leaves the list open, so that several can be
+ * tried in a row.
  */
-export function ColorSchemeSelect({ id, value, variant, onChange }: {
-  id?: string; value: string; variant: ColorVariant; onChange: (scheme: string) => void;
+export function ColorSchemeSelect({ id, value, shown, custom, variant, disabled, onChange, onOpening }: {
+  id?: string;
+  /** The selection, and the scheme it stands for. */
+  value: string; shown: ColorScheme | CustomColorScheme;
+  /** The user's schemes. */
+  custom: readonly CustomColorScheme[];
+  variant: ColorVariant; disabled?: boolean; onChange: (selection: string) => void;
+  /** Called when the list opens: the moment to read the user's schemes again. */
+  onOpening?: () => void;
 }) {
-  const { t } = useShellLanguage();
-  const current = colorSchemeOf(value);
-  const menu = <Menu className="color-scheme-menu" role="listbox" aria-label={t("Color scheme")} onKeyDown={moveFocus}>
-    {colorSchemes.map(scheme => <MenuItem key={scheme.id} roleStructure="listoption" selected={scheme.id === current.id} shouldDismissPopover={false}
-      icon={<ColorSchemeSwatch palette={schemePalette(scheme, variant)} variant={variant} />} text={scheme.name} onClick={() => onChange(scheme.id)} />)}
-  </Menu>;
-  return <PopoverNext placement="bottom-end" matchTargetWidth content={menu}
+  const { t, locale } = useShellLanguage();
+  // A palette for every scheme: made again when the schemes, the theme or the language change, not each time
+  // the row renders (it does for every move of a color while a scheme is edited).
+  const menu = useMemo(() => {
+    const option = (selection: string, scheme: ColorScheme | CustomColorScheme) => <MenuItem key={selection} roleStructure="listoption" selected={selection === value}
+      shouldDismissPopover={false} icon={<ColorSchemeSwatch palette={schemePalette(scheme, variant)} variant={variant} />} text={scheme.name} onClick={() => onChange(selection)} />;
+    return <Menu className="color-scheme-menu" role="listbox" aria-label={t("Color scheme")} onKeyDown={moveFocus}>
+      {colorSchemes.map(scheme => option(scheme.id, scheme))}
+      {custom.length > 0 && <MenuDivider title={t("Your color schemes")} />}
+      {custom.map(scheme => option(customSchemeSelection(scheme.id), scheme))}
+    </Menu>;
+  }, [value, custom, variant, onChange, locale]);
+  const swatch = useMemo(() => <ColorSchemeSwatch palette={schemePalette(shown, variant)} variant={variant} />, [shown, variant]);
+  return <PopoverNext className="color-scheme-target" placement="bottom-end" matchTargetWidth content={menu} disabled={disabled} onOpening={onOpening}
     // The list opens on the scheme in use, not on its first one.
     onOpened={popover => popover.querySelector<HTMLElement>("[role=option][aria-selected=true] > .bp6-menu-item")?.focus()}>
-    <Button id={id} className="color-scheme-select" alignText="start" aria-haspopup="listbox"
-      icon={<ColorSchemeSwatch palette={schemePalette(current, variant)} variant={variant} />} endIcon={<AppIcon name="chevronDown" size={14} />}>{current.name}</Button>
+    <Button id={id} className="color-scheme-select" alignText="start" aria-haspopup="listbox" disabled={disabled}
+      icon={swatch} endIcon={<AppIcon name="chevronDown" size={14} />}>{shown.name}</Button>
   </PopoverNext>;
 }

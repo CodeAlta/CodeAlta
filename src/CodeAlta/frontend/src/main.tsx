@@ -6,9 +6,11 @@ import { createRoot } from "react-dom/client";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { ComposerStatus } from "./ComposerStatus";
 import { settingsNavigation } from "./settingsNavigation";
-import { showAppearance } from "./colorSchemes";
-import { dismissStartupScreen, rememberAppearance } from "./startupScreen";
+import { dismissStartupScreen } from "./startupScreen";
 import { ConfigRecoveryScreen } from "./ConfigRecoveryScreen";
+import { createAppearancePreview } from "./appearancePreview";
+import { useColorSchemeLibrary } from "./colorSchemeLibrary";
+import { ShellAppearance } from "./ShellAppearance";
 import { RunningExitDialog } from "./RunningExitDialog";
 import { CloseWindowDialog } from "./CloseWindowDialog";
 import { closeBehavior, entryAddedNotice, type CloseBehavior } from "./desktopShell";
@@ -320,7 +322,10 @@ function App() {
   const [search, writeSearch] = useState("");
   function setSearch(value: string) { invalidateCreation(); writeSearch(value); }
   const [projectFilter, setProjectFilter] = useState("");
-  const { projectSort, setProjectSort, theme, variant, appearance, setTheme, darker, setDarker, colorScheme, setColorScheme, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount } = useWindowPreferences();
+  const { projectSort, setProjectSort, theme, variant, appearance, setTheme, darker, setDarker, colorScheme, shownScheme, setColorScheme, customSchemes, setCustomSchemes, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount } = useWindowPreferences();
+  // The user's own color schemes, and what the editor of one shows while it edits.
+  const schemeLibrary = useColorSchemeLibrary(setCustomSchemes);
+  const [appearancePreview] = useState(createAppearancePreview);
   // What the Explorer remembers between starts: the scopes left open and the favorite projects.
   const [storedProjectTree] = useState(() => restoreProjectTree(() => localStorage.getItem(projectTreeKey)));
   const [projectTree, setProjectTree] = useState<ProjectTree>(storedProjectTree ?? emptyProjectTree);
@@ -521,12 +526,6 @@ function App() {
     ? collapsedSessionWidth(paneLayout, workspaceWidth) : visiblePaneLayout.sessions;
   const [clock, setClock] = useState(Date.now);
 
-  useLayoutEffect(() => {
-    showAppearance(document.documentElement, Classes.DARK, appearance);
-    // The next start shows these colors before the application has loaded.
-    rememberAppearance(appearance.theme, remembered => void boot.appearance({ theme: remembered.theme, background: remembered.background },
-      { timeoutMilliseconds: 8_000 }).catch(() => { /* The window keeps the colors it started with. */ }));
-  }, [appearance]);
   // The start-up screen stays until the window has something to show in its place: the host's answer and the
   // workspace, or the reason there is none. It never stays longer than a few seconds.
   useEffect(() => {
@@ -1951,7 +1950,7 @@ function App() {
   const newPromptDisabled = creatingBusy || creationLocked || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !snapshot
     || !!selectedProject?.archived || projectId !== null && !selectedProject || (!localDraft.text.trim() && !localImages.images.length)
     || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim());
-  return <ShellLanguageContext.Provider value={language}><PluginUiContext.Provider value={pluginUiValue}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><div className="app-shell ide-shell">
+  return <ShellLanguageContext.Provider value={language}><PluginUiContext.Provider value={pluginUiValue}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
     {(hostSilent || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {hostSilent && <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
         <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button></div>}
@@ -2227,7 +2226,8 @@ function App() {
           </div></SessionTabStrip></main></ProjectReferenceContext.Provider>} />
       </div>
     {settingsOpen && <SettingsOverlay section={settingsSection} onSection={navigate} onClose={closeSettings}>
-      {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, darker, setDarker, variant, colorScheme, setColorScheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); },
+      {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, darker, setDarker,
+        schemes: { colorScheme, setColorScheme, shownScheme, variant, customSchemes, library: schemeLibrary, preview: appearancePreview, platform: demoMode ? null : shellPreferences?.platform ?? null }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); },
         closing: shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, set: setOnClose } : null }} />
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}
         update={owned ? appUpdateResult : undefined} onOpenReleaseNotes={openReleaseNotes} onInstallUpdate={installUpdate} />

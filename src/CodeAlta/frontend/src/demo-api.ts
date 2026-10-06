@@ -1,6 +1,9 @@
 /* Local Vite-only demo backend. The packaged desktop always resolves #neoastra to the generated bridge. */
 import type {
   BootStatus,
+  ColorSchemeColors,
+  ColorSchemeDocument,
+  ColorSchemeSaveRequest,
   ConfigurationSnapshot,
   HistoryRequest,
   HistoryResponse,
@@ -116,6 +119,37 @@ export const projectFiles = Object.freeze({ read: unavailable, write: unavailabl
   delete: unavailable, image: unavailable, reveal: unavailable, search: unavailable, watch: unavailable });
 export const projectGit = Object.freeze({ status: unavailable, changes: unavailable, commits: unavailable, file: unavailable, watch: unavailable });
 export const promptImages = Object.freeze({ read: unavailable });
+// The demo keeps the user's color schemes in the browser, where the desktop keeps a file for each.
+const demoSchemesKey = "codealta.demo.colorSchemes.v1";
+const noColors: ColorSchemeColors = { background: null, text: null, muted: null, accent: null, success: null, warning: null, danger: null };
+function demoSchemes(): ColorSchemeDocument[] {
+  try { const value: unknown = JSON.parse(localStorage.getItem(demoSchemesKey) ?? "[]"); return Array.isArray(value) ? value : []; } catch { return []; }
+}
+function keepDemoSchemes(schemes: readonly ColorSchemeDocument[]): boolean {
+  try { localStorage.setItem(demoSchemesKey, JSON.stringify(schemes)); return true; } catch { return false; }
+}
+export const colorSchemes = Object.freeze({
+  list: async () => ({ status: "ok", directory: null, schemes: demoSchemes(), problems: [] }),
+  save: async (request: ColorSchemeSaveRequest) => {
+    const schemes = demoSchemes(), name = (request.name ?? "").trim();
+    if (name === "") return { status: "invalid", id: null, message: "A color scheme needs a name." };
+    let id = request.id;
+    if (!id) {
+      const stem = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "scheme";
+      id = stem;
+      for (let number = 2; schemes.some(scheme => scheme.id === id); number++) id = `${stem}-${number}`;
+    }
+    const scheme = { id, name, base: request.base ?? "blueprint", light: request.light ?? noColors, dark: request.dark ?? noColors, darker: request.darker ?? noColors };
+    return keepDemoSchemes([...schemes.filter(other => other.id !== id), scheme].sort((left, right) => left.id.localeCompare(right.id)))
+      ? { status: "ok", id, message: null } : { status: "write_failed", id: null, message: null };
+  },
+  delete: async (request: { id: string | null }) => {
+    const schemes = demoSchemes();
+    if (!schemes.some(scheme => scheme.id === request.id)) return { status: "not_found", message: null };
+    return { status: keepDemoSchemes(schemes.filter(scheme => scheme.id !== request.id)) ? "ok" : "write_failed", message: null };
+  },
+  reveal: async () => ({ status: "unavailable", message: null }),
+});
 // The demo has no host process to log anything.
 export const applicationLogs = Object.freeze({
   read: async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }),

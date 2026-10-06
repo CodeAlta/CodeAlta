@@ -294,7 +294,7 @@ The **Appearance** page sets:
 - the UI language: **Auto**, English, Spanish, French, German, Japanese, or Simplified Chinese;
 - the theme: **Dark**, **Light**, or **Auto**, which follows the operating system;
 - **Darker dark theme**, for deeper backgrounds in the dark theme with the same text and accents;
-- one of 13 color schemes, each with a dark, a darker and a light variant;
+- one of 13 color schemes, each with a dark, a darker and a light variant, or a color scheme of your own;
 - how projects are sorted and how many recent sessions are listed per project;
 - what closing the window does: ask, keep CodeAlta running in the notification area, or exit.
 
@@ -317,6 +317,47 @@ The **Appearance** page sets:
   <img src="{{site.basepath}}/img/alta-desktop-themes.webp" alt="CodeAlta Desktop in six color schemes, dark and light" loading="lazy">
   <figcaption class="small text-secondary mt-2">Blueprint, Cherry, Kiwi, Plum and Orange in dark mode, and Blueberry in light mode.</figcaption>
 </figure>
+
+#### Your own color scheme
+
+**Customize**, beside the color scheme, makes a scheme of your own from the selected one. Give it a name,
+pick the theme to edit (**Light**, **Dark** or **Darker**) and choose the colors you want to change:
+
+| Color | What it changes |
+| --- | --- |
+| **Background** | The window background. Panels and raised surfaces follow it and take its tint. |
+| **Text** | The text. |
+| **Muted text** | Secondary text, icons and borders. |
+| **Accent** | Buttons, links and selections. |
+| **Success**, **Warning**, **Danger** | The colors of what succeeded, needs attention or failed. |
+
+Click a color to open the color picker of your system, or type it as `#rrggbb`. The window shows the scheme
+while you edit it, and nothing is kept until you choose **Save**. Every color you leave alone keeps
+following the scheme you started from, and the darker theme follows your dark theme unless you choose a
+color for it. **Edit** opens a scheme of yours again, to change, duplicate or remove it.
+
+For example, for a dark theme with a window at `#080808` and panels just above it, customize **Blueprint**,
+edit **Dark** and set **Background** to `#080808`.
+
+Your schemes are files in `~/.alta/color-schemes/`, one per scheme, that you can copy to another machine,
+share, or write by hand:
+
+```json
+{
+  "name": "Deep Sea",
+  "base": "plum",
+  "dark": {
+    "background": "#0b1d2a",
+    "accent": "#33ccff"
+  }
+}
+```
+
+`base` is the scheme it starts from (`blueprint`, `cherry`, `tomato`, `orange`, `pineapple`, `apple`,
+`kiwi`, `kale`, `blueberry`, `plum`, `elderberry`, `blackberry` or `raspberry`), and `light`, `dark` and
+`darker` hold the colors it changes: `background`, `text`, `muted`, `accent`, `success`, `warning` and
+`danger`. A file you change appears in CodeAlta when you come back to its window; one that cannot be used
+is listed on the Appearance page with the reason.
 
 ### TUI
 

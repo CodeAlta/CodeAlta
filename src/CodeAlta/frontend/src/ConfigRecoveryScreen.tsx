@@ -1,14 +1,14 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Alert, Button, Callout, Classes, NonIdealState } from "@blueprintjs/core";
-import { boot, startupConfig, type StartupConfigDocument, type StartupConfigValidation } from "#neoastra";
+import { useEffect, useRef, useState } from "react";
+import { Alert, Button, Callout, NonIdealState } from "@blueprintjs/core";
+import { startupConfig, type StartupConfigDocument, type StartupConfigValidation } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import { CodeEditor, type CodeEditorHandle } from "./monaco/CodeEditor";
-import { showAppearance } from "./colorSchemes";
 import { canSaveRecovery, recoveryStatus } from "./configRecovery";
 import { maximumConfigLength } from "./configEditor";
+import { ShellAppearance } from "./ShellAppearance";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
-import { dismissStartupScreen, rememberAppearance } from "./startupScreen";
+import { dismissStartupScreen } from "./startupScreen";
 import { useWindowTitleBar, WindowBrand, WindowControls } from "./windowChrome";
 import { useWindowPreferences } from "./windowPreferences";
 
@@ -23,12 +23,7 @@ export function ConfigRecoveryScreen({ developer = false, api = startupConfig }:
   const { appearance } = useWindowPreferences();
   const titleBar = useWindowTitleBar();
   // The same theme as the workspace: this screen stands where it would.
-  useLayoutEffect(() => {
-    showAppearance(document.documentElement, Classes.DARK, appearance);
-    rememberAppearance(appearance.theme, remembered => void boot.appearance({ theme: remembered.theme, background: remembered.background },
-      { timeoutMilliseconds: 8_000 }).catch(() => { /* The window keeps the colors it started with. */ }));
-  }, [appearance]);
-  return <ShellLanguageContext.Provider value={language}><div className="config-recovery-shell">
+  return <ShellLanguageContext.Provider value={language}><ShellAppearance appearance={appearance} /><div className="config-recovery-shell">
     <header className="config-recovery-titlebar" data-neoastra-drag-region><WindowBrand developer={developer} /><WindowControls snapshot={titleBar} /></header>
     <ConfigRecovery api={api} />
   </div></ShellLanguageContext.Provider>;
