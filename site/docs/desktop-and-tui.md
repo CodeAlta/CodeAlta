@@ -70,6 +70,15 @@ Session tabs can be dragged along the tab strip to reorder them, to the edge of 
   <figcaption class="small text-secondary mt-2">A session and a file of the project, side by side.</figcaption>
 </figure>
 
+### Review changes
+
+Click the `+` / `−` numbers in the prompt bar to open the Changes tab of the project. It lists the changed files and recent commits and shows a syntax-highlighted diff of the selected file. See [Changes](workspace.md#changes-desktop).
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-changes.webp" alt="CodeAlta Desktop with the Changes tab of a project and a side-by-side diff" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The changes of a project, with the diff of the selected file.</figcaption>
+</figure>
+
 ### One Settings window
 
 The TUI opens a dialog for each area. The desktop app groups them as pages of one window: **Appearance**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**.
@@ -100,6 +109,7 @@ When a new version is available, the desktop app shows a notice with **Update an
 | Command | `alta` | `altatui` |
 | Session tabs | Drag to reorder, split and merge panes | One visible tab at a time |
 | File editor | Editor tabs that can sit beside a session | Editor tab |
+| Git changes | Changes tab with the changed files, recent commits and a diff | Not available |
 | Settings | One window with a page per area | One dialog per area |
 | Appearance | Light, dark or system theme, 13 color schemes | Terminal themes |
 | Session notes | Movable Notes window over the timeline | Notes panel in the sidebar |

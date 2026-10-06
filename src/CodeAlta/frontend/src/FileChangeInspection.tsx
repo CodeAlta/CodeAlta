@@ -4,6 +4,7 @@ import type { FileChanges } from "./fileChanges";
 import { useShellLanguage } from "./shellLanguage";
 import { AppIcon } from "./AppIcon";
 import { isDialogBackdrop } from "./dialogBackdrop";
+import { DiffPreview } from "./DiffPreview";
 
 // Read-only disclosure: paths never become links, filesystem targets or RPC inputs.
 // The parent keys this subtree by the exact supplied record, not just byte offset.
@@ -55,9 +56,7 @@ export function FileChangeInspection({ changes, canInspect }: { changes: FileCha
           <AppWindowSurface storageKey="codealta.desktop.window.file-change.v1" title={row.path} titleId={`${id}-title`} preferredSize={viewport => ({ width: Math.min(980, viewport.width - 40), height: Math.min(700, viewport.height - 40) })}
             onClose={close} closeLabel={t("Close")}>
           <div className="file-dialog-summary"><span>{row.kind}</span>{row.counts && <span className="file-counts"><b>+{row.counts.added}</b> <em>-{row.counts.removed}</em></span>}</div>
-          {row.diff !== null ? <pre data-file-diff>{row.diff.split("\n").filter(line => !/^(?:@@|diff --git |index |--- |\+\+\+ )/.test(line)).map((line, index, lines) => <span key={index}
-            className={line.startsWith("+") ? "diff-added" : line.startsWith("-") ? "diff-removed" : line.startsWith("@@") ? "diff-hunk" : undefined}>
-            {line}{index < lines.length - 1 ? "\n" : ""}</span>)}</pre> : <p>{t("No supported per-file diff supplied; original record details remain available.")}</p>}
+          {row.diff !== null ? <DiffPreview text={row.diff} /> : <p>{t("No supported per-file diff supplied; original record details remain available.")}</p>}
         </AppWindowSurface></dialog>}
       </li>;
     })}</ul>

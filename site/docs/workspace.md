@@ -69,7 +69,7 @@ Timeline entries are grouped so the important parts stay visible:
 
 - assistant messages render as Markdown;
 - reasoning and status messages explain what the agent is doing;
-- tool calls appear as compact tiles with expandable details;
+- tool calls appear as compact tiles with expandable details; a call that edited files shows the lines it added and removed, and its details start with the diff;
 - tool results can be collapsed to avoid flooding the transcript;
 - the modified-files card summarizes per-file `+/-` diff totals and can show diff details;
 - statistics cards summarize timing, tools, usage, and other plugin-projected details.
@@ -86,7 +86,7 @@ Press `Enter` to send and `Shift+Enter` for a new line. If the selected session 
 
 The agent prompt selector chooses the agent prompt profile for the current draft/session. Built-in prompts appear first, followed by global `~/.alta/prompts/agents` prompts and project `.alta/prompts/agents` prompts. Global/project prompts with the same file id override lower-precedence prompts; see [Agent Prompts]({{site.basepath}}/docs/prompts/).
 
-In the desktop app, the agent prompt, provider, model and reasoning effort are in one picker at the left of the prompt bar. The prompt bar also shows the project folder, the git branch and the number of changed files.
+In the desktop app, the agent prompt, provider, model and reasoning effort are in one picker at the left of the prompt bar. The prompt bar also shows the project folder, the git branch and the lines added and removed since the last commit. These numbers follow the changes made outside CodeAlta too. Click them to open the [changes of the project](#changes-desktop).
 
 <figure class="alta-figure my-4" style="max-width: 38rem;">
   <img src="{{site.basepath}}/img/alta-desktop-session-config.webp" alt="CodeAlta Desktop picker for agent prompt, provider, model and reasoning effort" loading="lazy">
@@ -152,6 +152,24 @@ Use `Ctrl+E` or `/edit` to open the same picker in editor mode.
 {{ alta_shot "alta-desktop-code-editor.webp" "alta-code-editor.png" "Editor tab with syntax-highlighted source code" "Editor tabs sit beside session tabs for quick inspection and focused edits without leaving CodeAlta." }}
 
 Editor tabs support syntax highlighting, line/column status, dirty markers, `Ctrl+S` save, reload prompts for on-disk changes, and close confirmation for unsaved edits. In the desktop app an editor tab can be placed in its own pane, beside the session that works on the file.
+
+## Changes (desktop)
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-changes.webp" alt="CodeAlta Desktop with the Changes tab of a project: the tree of changed files, the history and a side-by-side diff" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The changed files of a project, its recent commits, and the diff of the selected file.</figcaption>
+</figure>
+
+The Changes tab shows what changed in the git repository of a project. Open it by clicking the `+` / `−` numbers in the prompt bar. It opens beside the current tab, and you can move, split or close it like any other tab. Each project has its own Changes tab, so several can be open.
+
+- **Files**: the changed files as a tree or a flat list, with the lines added and removed in each file. Type in the filter to narrow the list.
+- **History**: under the files. Choose **Uncommitted changes**, all the changes of the branch since its base branch, or one of the recent commits. **Load more** shows older commits.
+- **Diff**: the selected file with syntax highlighting, side by side or inline. Unchanged regions are folded, and you can expand them. `Alt+Down` and `Alt+Up` jump to the next and previous change.
+- **Refresh**: the tab refreshes every five seconds while **Auto-refresh** is on. The refresh button reads the changes right away.
+
+The `…` menu of the diff has **Hide unchanged lines**, **Ignore whitespace changes**, **Wrap lines** and **Copy path**. **Open file** opens the file in an editor tab.
+
+An agent can open this tab for you with `alta diff show`, for example when it has finished a change and wants you to review it.
 
 ## Model Providers
 

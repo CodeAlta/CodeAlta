@@ -741,9 +741,6 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 [data-tool-phase="failed"] .tool-state-dot { color: var(--red); }
 [data-tool-phase="started"] .tool-state-dot { color: var(--accent); }
 .tool-result-preview { color: var(--muted); font: 12px/1.5 var(--mono, monospace); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-[data-file-diff] .diff-added { color: var(--green); background: var(--bp-surface-layer-color-success); }
-[data-file-diff] .diff-removed { color: var(--red); background: var(--bp-surface-layer-color-danger); }
-[data-file-diff] .diff-hunk { color: var(--accent); }
 .ide-shell .timeline-compact .message-heading { margin: 0; }
 .ide-shell .timeline-inline-preview { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 12px; }
 .ide-shell .message-body { min-width: 0; flex: 1; }
@@ -1108,7 +1105,6 @@ dialog:has(> .app-window) .dialog-panes .detail-pane { max-height: none; overflo
 dialog:has(> .app-window) .dialog-panes .detail-pane > h3 { margin: 0 0 6px; text-transform: none; letter-spacing: 0; font-size: 12px; }
 dialog:has(> .app-window) .dialog-panes .detail-pane:only-child { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 dialog:has(> .app-window) .dialog-panes .detail-pane:only-child > :is(pre, .code-preview) { flex: 1 1 auto; min-height: 0; overflow: auto; }
-dialog:has(> .app-window) [data-file-diff] { padding: 10px 12px; font-size: 12px; line-height: 1.55; tab-size: 4; }
 dialog:has(> .app-window) .file-dialog-summary { gap: 8px; }
 dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--text); text-transform: capitalize; }
 dialog.tool-record-dialog:has(> .app-window) .app-window-body > p:first-child code { padding: 2px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); font-size: 12.5px; }
@@ -1413,6 +1409,9 @@ dialog.session-browser .session-batch-delete summary { cursor: pointer; color: v
 .project-context-branch { flex: none; }
 .project-context-branch > span { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
 .project-context-changes { flex: none; font-variant-numeric: tabular-nums; }
+/* The counts are the way to the changes tab: a quiet pill that shows it can be pressed. */
+button.project-context-changes { display: inline-flex; align-items: center; gap: 5px; margin: -2px -4px; padding: 1px 7px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+button.project-context-changes:hover, button.project-context-changes:focus-visible { border-color: var(--line-strong); background: var(--panel-2); color: var(--text); outline: none; }
 .project-context-changes [data-change="added"] { color: var(--green); }
 .project-context-changes [data-change="removed"] { color: var(--red); }
 .composer-status-end { margin-left: auto; flex: none; }
@@ -1707,3 +1706,123 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .update-notice-actions .update-notice-notes { margin-left: 0; }
 .bp6-toast .update-notice-actions .bp6-button.bp6-intent-primary { background: var(--bp-palette-white, #fff); color: var(--bp-palette-blue-2, #215db0); box-shadow: none; }
 .bp6-toast .update-notice-actions .bp6-button.bp6-intent-primary:hover { background: color-mix(in srgb, #fff 90%, transparent); }
+
+/* The changes tab: the changed files of a project's repository and the diff of the selected one. */
+.session-tab-project { color: var(--muted); }
+.changes-panel { container-type: inline-size; display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; background: var(--bg); }
+.changes-header { flex: none; display: flex; align-items: center; gap: 6px 12px; min-height: 40px; padding: 5px 8px 5px 10px; border-bottom: 1px solid var(--line); background: var(--panel); font-size: 12px; white-space: nowrap; }
+.changes-project { display: inline-flex; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 0; }
+.changes-project-icon { display: grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 7px; color: #f0883e; background: color-mix(in srgb, #f0883e 15%, transparent); }
+.changes-project strong { flex: none; font-size: 13px; font-weight: 600; }
+.changes-project-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.changes-branch { display: inline-flex; align-items: center; gap: 5px; flex: none; padding: 2px 9px 2px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--text); }
+.changes-branch > span { max-width: 24ch; overflow: hidden; text-overflow: ellipsis; }
+.changes-scope { display: inline-flex; align-items: baseline; gap: 7px; flex: 0 1 auto; min-width: 0; padding: 2px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--text); overflow: hidden; }
+.changes-scope code { flex: none; color: var(--accent); font-size: 11.5px; }
+.changes-scope > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.changes-spacer { flex: 1 1 0; min-width: 0; }
+.changes-totals { display: inline-flex; align-items: center; gap: 10px; flex: none; color: var(--muted); }
+.changes-counts { display: inline-flex; gap: 6px; flex: none; font: 11.5px/1 "Cascadia Code", "SFMono-Regular", Consolas, monospace; font-variant-numeric: tabular-nums; }
+.changes-counts b { color: var(--green); font-weight: 500; }
+.changes-counts em { color: var(--red); font-style: normal; }
+.changes-header .bp6-control.changes-auto { flex: none; margin: 0; color: var(--muted); font-size: 12px; }
+.changes-body { flex: 1 1 auto; display: flex; min-height: 0; }
+.changes-files { flex: none; display: flex; flex-direction: column; min-width: 0; background: var(--panel); }
+.changes-files-toolbar { flex: none; display: flex; align-items: center; gap: 4px; padding: 7px 6px 6px 8px; }
+.changes-filter.bp6-input-group { flex: 1 1 auto; min-width: 0; }
+.changes-rows { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 5px 8px; outline: none; }
+.changes-row { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 26px; padding: 2px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font-size: 12.5px; text-align: start; cursor: pointer; }
+.changes-row:hover { background: color-mix(in srgb, var(--panel-2) 75%, transparent); }
+.changes-file[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
+.changes-rows:focus-visible .changes-file[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 32%, transparent); }
+.changes-row-name { flex: 1 1 auto; display: flex; align-items: baseline; gap: 8px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.changes-row-name strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.changes-row-name small { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 11px; }
+.changes-row-name > span { overflow: hidden; text-overflow: ellipsis; }
+.changes-folder { color: var(--muted); }
+.changes-folder > svg { flex: none; }
+.changes-folder-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--panel-2); font-size: 10.5px; line-height: 16px; text-align: center; }
+.changes-file[data-status="deleted"] .changes-row-name strong { color: var(--muted); text-decoration: line-through; }
+.changes-status { flex: none; width: 14px; font: 600 11px/1 "Cascadia Code", "SFMono-Regular", Consolas, monospace; text-align: center; color: var(--yellow); }
+[data-status="added"] .changes-status, .changes-status[data-status="added"], [data-status="untracked"] .changes-status, .changes-status[data-status="untracked"] { color: var(--green); }
+[data-status="deleted"] .changes-status, .changes-status[data-status="deleted"] { color: var(--red); }
+[data-status="renamed"] .changes-status, .changes-status[data-status="renamed"], [data-status="copied"] .changes-status, .changes-status[data-status="copied"] { color: var(--accent); }
+[data-status="conflicted"] .changes-status, .changes-status[data-status="conflicted"] { color: #f0883e; }
+.changes-no-match { margin: 10px 8px; color: var(--muted); font-size: 12px; }
+/* The history under the files: what is compared, newest first, along a line that joins the commits. */
+.changes-history-splitter { flex: none; height: 7px; margin-block: -3px; border-block: 3px solid transparent; background: var(--line); background-clip: padding-box; cursor: row-resize; z-index: 2; touch-action: none; }
+.changes-history-splitter:hover, .changes-history-splitter:active { background: var(--accent); background-clip: padding-box; }
+.changes-history { flex: none; display: flex; flex-direction: column; min-height: 0; max-height: 70%; }
+.changes-history > h3 { flex: none; margin: 0; padding: 8px 12px 4px; color: var(--muted); font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.changes-history-rows { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 5px 8px; }
+.changes-history-row { position: relative; display: flex; align-items: flex-start; gap: 9px; width: 100%; padding: 4px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font-size: 12.5px; text-align: start; cursor: pointer; }
+.changes-history-row:hover { background: color-mix(in srgb, var(--panel-2) 75%, transparent); }
+.changes-history-row[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
+.changes-history-mark { position: relative; flex: none; width: 9px; height: 9px; margin-top: 4px; border: 2px solid var(--muted); border-radius: 50%; background: var(--panel); z-index: 1; }
+.changes-history-row[data-scope="head"] .changes-history-mark { border-color: var(--yellow); border-style: dashed; }
+.changes-history-row[data-scope="branch"] .changes-history-mark { border-color: var(--accent); border-radius: 2px; }
+.changes-history-row[aria-selected="true"] .changes-history-mark { border-color: var(--accent); background: var(--accent); }
+.changes-history-row:not(:last-of-type)::before { content: ""; position: absolute; left: 12px; top: 15px; bottom: -8px; width: 1px; background: var(--line-strong); }
+.changes-history-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1 1 auto; }
+.changes-history-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.changes-history-text small { display: flex; gap: 8px; min-width: 0; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.changes-history-text small code { flex: none; font-size: 10.5px; }
+.changes-history-text small span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.changes-history-text small time { flex: none; margin-left: auto; }
+.changes-history-more { display: block; width: calc(100% - 16px); margin: 6px 8px 0; padding: 4px; border: 1px dashed var(--line-strong); border-radius: 5px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+.changes-history-more:hover { border-color: var(--accent); color: var(--text); }
+.changes-splitter { flex: none; width: 7px; margin-inline: -3px; border-inline: 3px solid transparent; background: var(--line); background-clip: padding-box; cursor: col-resize; z-index: 2; touch-action: none; }
+.changes-splitter:hover, .changes-splitter:active { background: var(--accent); background-clip: padding-box; }
+.changes-diff { flex: 1 1 0; display: flex; flex-direction: column; min-width: 0; }
+.changes-diff-header { flex: none; display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 3px 6px 3px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; white-space: nowrap; overflow: hidden; }
+.changes-diff-header .changes-status { width: 20px; height: 20px; border-radius: 5px; background: color-mix(in srgb, currentColor 14%, transparent); line-height: 20px; }
+.changes-diff-path { display: inline-flex; align-items: baseline; gap: 8px; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.changes-diff-path strong { flex: none; font-weight: 600; }
+.changes-diff-path small { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 11.5px; }
+.changes-bar { display: inline-flex; gap: 2px; flex: none; }
+.changes-bar i { width: 7px; height: 7px; border-radius: 2px; background: var(--line-strong); }
+.changes-bar i[data-change="added"] { background: var(--green); }
+.changes-bar i[data-change="removed"] { background: var(--red); }
+.changes-navigation { display: inline-flex; align-items: center; gap: 2px; flex: none; color: var(--muted); font-size: 11.5px; }
+.changes-position { margin-right: 4px; font-variant-numeric: tabular-nums; }
+.changes-diff-header .bp6-button-group, .changes-diff-header > .bp6-button { flex: none; }
+.changes-diff-surface { position: relative; flex: 1 1 auto; min-height: 0; }
+.changes-diff-editor, .diff-editor { height: 100%; }
+.changes-diff-editor[data-pending="true"] { opacity: .5; transition: opacity 120ms 150ms; }
+.changes-one-sided { position: relative; --changes-side: var(--green); }
+.changes-one-sided[data-side="removed"] { --changes-side: var(--red); }
+.changes-one-sided .code-editor { height: 100%; }
+.changes-one-sided::after { content: ""; position: absolute; inset: 0; border-left: 3px solid var(--changes-side); background: color-mix(in srgb, var(--changes-side) 7%, transparent); pointer-events: none; }
+.changes-empty.bp6-non-ideal-state { height: 100%; min-height: 0; overflow: auto; }
+/* In half a window (the tab opens beside a session) the files go above the diff. */
+@container (max-width: 760px) {
+  .changes-body { flex-direction: column; }
+  .changes-files { flex-direction: row; width: auto !important; height: 38%; border-bottom: 1px solid var(--line); }
+  .changes-files-toolbar { display: none; }
+  .changes-rows { flex: 0 0 55%; min-width: 0; padding-top: 6px; }
+  .changes-history { flex: 1 1 0; min-width: 0; height: auto !important; max-height: none; border-left: 1px solid var(--line); }
+  .changes-history-splitter { display: none; }
+  .changes-splitter, .changes-project-path, .changes-bar, .changes-diff-path small { display: none; }
+  .changes-header { flex-wrap: wrap; }
+}
+@container (max-width: 520px) {
+  .changes-position, .changes-totals > span:first-child { display: none; }
+}
+
+/* A unified diff in a window of the timeline: an edit of a tool call, a file of a turn. */
+.diff-preview { min-width: 0; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font: 12px/1.6 "Cascadia Code", "SFMono-Regular", Consolas, monospace; tab-size: 4; }
+.diff-preview-file { display: flex; align-items: center; gap: 7px; padding: 5px 10px; border-bottom: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-family: var(--bp-typography-family-default); font-weight: 600; }
+.diff-preview-file:not(:first-child) { border-top: 1px solid var(--line); }
+.diff-preview-hunk { padding: 1px 10px; background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--muted); font-size: 11px; }
+.diff-preview-line { display: grid; grid-template-columns: 5ch 5ch 2ch minmax(0, 1fr); min-width: max-content; white-space: pre; }
+.diff-preview-number { padding-right: 1ch; color: var(--muted); text-align: right; opacity: .75; user-select: none; }
+.diff-preview-sign { text-align: center; user-select: none; }
+.diff-preview-line[data-kind="added"] { background: color-mix(in srgb, var(--green) 15%, transparent); }
+.diff-preview-line[data-kind="added"] .diff-preview-sign { color: var(--green); }
+.diff-preview-line[data-kind="removed"] { background: color-mix(in srgb, var(--red) 15%, transparent); }
+.diff-preview-line[data-kind="removed"] .diff-preview-sign { color: var(--red); }
+.diff-preview-line[data-kind="note"] { color: var(--muted); font-style: italic; }
+.dialog-panes .detail-pane.detail-pane-diff { max-height: 60dvh; }
+.detail-pane-diff > h3 { display: flex; align-items: baseline; gap: 10px; }
+.ide-shell .tool-changes { font: var(--bp-typography-size-code-small)/var(--bp-typography-line-height-large) var(--bp-typography-family-mono); }
+.ide-shell .message-heading > .tool-changes { margin-inline: 2px 4px; }

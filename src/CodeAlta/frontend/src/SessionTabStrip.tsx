@@ -8,7 +8,7 @@ import type { WorkspaceSnapshot } from "#neoastra";
 import { resolveSessionTab, type SessionTab, type SessionTabs as Tabs } from "./sessionTabs";
 import { SessionTabActivity, type RuntimeObservationControls } from "./RuntimeObservation";
 import { createSessionTabModel, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction } from "./sessionTabLayout";
-import { emptyFileTabs, fileNodeId, fileTabName, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
+import { emptyFileTabs, fileNodeId, fileTabName, isChangesTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
 import { fileAppearance } from "./fileAppearance";
 import { useSessionTabDrag } from "./useSessionTabDrag";
 import { plainTitle } from "./sessionTitle";
@@ -19,9 +19,14 @@ export function SessionTabLabel({ label, path, dirty }: { label: string; path: s
     {dirty && <span className="session-tab-dirty" role="img" title={t("Draft edited in this window")} aria-label={t("Draft edited in this window")} />}</span>;
 }
 
-/** A file tab's header text: the file name (the project-relative path and its project as tooltip) and the unsaved mark. */
+/**
+ * A file tab's header text: the file name (the project-relative path and its project as tooltip) and the unsaved
+ * mark. A changes tab is named after its project.
+ */
 export function FileTabLabel({ tab, project, dirty }: { tab: FileTab; project: string; dirty: boolean }) {
   const { t } = useShellLanguage();
+  if (isChangesTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={`${t("Changes")} · ${project}\n${tab.projectPath}`}>
+    {t("Changes")} <span className="session-tab-project">{project}</span></span></span>;
   return <span className="session-tab-title"><span className="session-tab-label" title={`${tab.path}\n${project}`}>{fileTabName(tab)}</span>
     {dirty && <span className="session-tab-dirty" role="img" title={t("Unsaved changes")} aria-label={t("Unsaved changes")} />}</span>;
 }
@@ -77,7 +82,9 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
   }, []);
   const label = (tab: SessionTab | null) => tab ? `${plainTitle(snapshot && resolveSessionTab(snapshot, tab)?.title || t("Unavailable session"))} - ${
     tab.projectId === null ? t("Global") : snapshot?.projects.find(project => project.id === tab.projectId)?.name ?? t("Unavailable project")}` : newSessionLabel ?? t("New session");
-  useLayoutEffect(() => { reconcileSessionTabModel(model, state, label, files); });
+  const projectName = (file: FileTab) => snapshot?.projects.find(project => project.id === file.projectId)?.name ?? t("Unavailable project");
+  const fileLabel = (file: FileTab) => isChangesTab(file) ? `${t("Changes")} · ${projectName(file)}` : fileTabName(file);
+  useLayoutEffect(() => { reconcileSessionTabModel(model, state, label, files, fileLabel); });
   useLayoutEffect(() => { if (menu && !menu.current()) setMenu(null); });
   function guard() {
     const current = capture();
@@ -180,10 +187,9 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
         if (node.getId() === sessionDraftNodeId) { values.content = <span data-session-node={node.getId()}>{label(null)}</span>; return; }
         const file = files.open.find(value => fileNodeId(value) === node.getId());
         if (file) {
-          const look = fileAppearance(file.path, false);
+          const look = isChangesTab(file) ? { icon: "changes" as const, tone: "orange" } : fileAppearance(file.path, false);
           values.leading = <span className="file-tab-icon" data-file-tone={look.tone}><AppIcon name={look.icon} size={14} /></span>;
-          values.content = <span data-session-node={node.getId()}><FileTabLabel tab={file} dirty={!!fileDirty?.(file)}
-            project={snapshot?.projects.find(project => project.id === file.projectId)?.name ?? t("Unavailable project")} /></span>;
+          values.content = <span data-session-node={node.getId()}><FileTabLabel tab={file} dirty={!!fileDirty?.(file)} project={projectName(file)} /></span>;
           return;
         }
         const tab = state.open.find(value => sessionNodeId(value) === node.getId());

@@ -80,7 +80,7 @@ internal static class HistoryFileProjection
         && value.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.String ? property.GetString() : null;
 
     // Match the TUI's supplied-diff statistics, independently of the preview budget.
-    private static (int? Added, int? Removed) CountLines(string? diff)
+    internal static (int? Added, int? Removed) CountLines(string? diff)
     {
         if (string.IsNullOrWhiteSpace(diff)) return (null, null);
         var added = 0;

@@ -113,7 +113,7 @@ export const desktopShell = Object.freeze({
 });
 export const providerLogin = Object.freeze({ status: unavailable, login: unavailable, logout: unavailable });
 export const projectFiles = Object.freeze({ read: unavailable, write: unavailable });
-export const projectGit = Object.freeze({ status: unavailable });
+export const projectGit = Object.freeze({ status: unavailable, changes: unavailable, commits: unavailable, file: unavailable, watch: unavailable });
 export const promptImages = Object.freeze({ read: unavailable });
 export const composerStatus = Object.freeze({ read: unavailable });
 export const pluginUi = Object.freeze({ contributions: unavailable, regions: unavailable, invokeCommand: unavailable, searchPicker: unavailable, watch: unavailable, respond: unavailable, dialogAction: unavailable });

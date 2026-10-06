@@ -6,6 +6,8 @@ import "monaco-editor/features/linesOperations/register.js";
 import "monaco-editor/features/find/register.js";
 import "monaco-editor/features/contextmenu/register.js";
 import "monaco-editor/features/tokenization/register.js";
+// The icon font of the editor's own widgets: the marks of a diff, the arrows of the find box.
+import "monaco-editor/features/codicon/register.js";
 import EditorWorker from "monaco-editor/editor/editor.worker.js?worker";
 import { shellColor } from "./shellColors";
 
@@ -18,8 +20,17 @@ const themes = { dark: { base: "vs-dark", inline: "e76a6e", inserted: "72ca9b", 
 // Added and removed lines of a diff are green and red; the base themes have no rule for them.
 const rules = (mode: keyof typeof themes, inline: string) => [{ token: "variable.md", foreground: inline },
   { token: "inserted", foreground: themes[mode].inserted }, { token: "deleted", foreground: themes[mode].deleted }];
-monaco.editor.defineTheme("codealta-dark", { base: themes.dark.base, inherit: true, colors: {}, rules: rules("dark", themes.dark.inline) });
-monaco.editor.defineTheme("codealta-light", { base: themes.light.base, inherit: true, colors: {}, rules: rules("light", themes.light.inline) });
+// A diff tints a changed line lightly and the changed words in it more, in the green and red of the shell.
+const diffColors = (mode: keyof typeof themes): Record<string, string> => {
+  const [added, removed] = mode === "dark" ? ["#2ea043", "#f85149"] : ["#1f883d", "#cf222e"];
+  return { "diffEditor.insertedLineBackground": `${added}26`, "diffEditor.insertedTextBackground": `${added}59`,
+    "diffEditor.removedLineBackground": `${removed}24`, "diffEditor.removedTextBackground": `${removed}59`,
+    "diffEditorGutter.insertedLineBackground": `${added}33`, "diffEditorGutter.removedLineBackground": `${removed}33`,
+    "diffEditorOverview.insertedForeground": `${added}99`, "diffEditorOverview.removedForeground": `${removed}99`,
+    "diffEditor.diagonalFill": mode === "dark" ? "#ffffff14" : "#00000014" };
+};
+monaco.editor.defineTheme("codealta-dark", { base: themes.dark.base, inherit: true, colors: diffColors("dark"), rules: rules("dark", themes.dark.inline) });
+monaco.editor.defineTheme("codealta-light", { base: themes.light.base, inherit: true, colors: diffColors("light"), rules: rules("light", themes.light.inline) });
 
 // A color scheme tints the editor like the panels around it; Blueprint's own palette keeps Monaco's surfaces.
 function applyShellTheme() {
@@ -28,7 +39,7 @@ function applyShellTheme() {
   if (!root.dataset.colorScheme) { monaco.editor.setTheme(`codealta-${mode}`); return; }
   const probe = root.appendChild(document.createElement("span"));
   const color = (property: string) => shellColor(probe, property);
-  const colors: Record<string, string> = {};
+  const colors: Record<string, string> = diffColors(mode);
   const set = (key: string, value: string | undefined, alpha = "") => { if (value) colors[key] = value + alpha; };
   set("editor.background", color("--panel"));
   set("editor.foreground", color("--text"));
@@ -40,6 +51,8 @@ function applyShellTheme() {
   set("editor.lineHighlightBackground", color("--text"), "0d");
   set("editor.lineHighlightBorder", color("--text"), "00");
   set("editorIndentGuide.background1", color("--text"), "1a");
+  set("diffEditor.unchangedRegionBackground", color("--panel"));
+  set("diffEditor.unchangedCodeBackground", color("--text"), "0a");
   set("editorWidget.background", color("--panel-2"));
   set("editorWidget.border", color("--text"), "33");
   set("input.background", color("--bg"));

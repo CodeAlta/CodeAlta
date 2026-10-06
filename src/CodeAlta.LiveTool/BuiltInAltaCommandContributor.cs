@@ -95,6 +95,9 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         Read("plugin status"),
     ];
 
+    // It changes nothing but what the window shows.
+    private static readonly AltaCommandPolicy DiffShowPolicy = Read("diff show");
+
     public IEnumerable<CommandNode> CreateCommandLineNodes(AltaCommandContributionContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -113,13 +116,21 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         yield return CreateModelCommand(context.Invocation);
         yield return CreatePromptCommand(context.Invocation);
         yield return CreatePluginCommand(context.Invocation);
+        // Only a host with a view for changed files (the desktop window) has the command.
+        if (context.Invocation.Services.Get<IAltaChangesView>() is not null)
+        {
+            yield return CreateDiffCommand(context.Invocation);
+        }
     }
 
     public IEnumerable<AltaCommandPolicy> GetCommandPolicies(AltaCommandContributionContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return Policies;
+        return PoliciesFor(context.Invocation);
     }
+
+    private static IReadOnlyList<AltaCommandPolicy> PoliciesFor(AltaCommandContext context)
+        => context.Services.Get<IAltaChangesView>() is null ? Policies : [.. Policies, DiffShowPolicy];
 
     private static IReadOnlyList<AltaCommandPolicy> GetEffectivePolicies(AltaCommandContext context)
     {
@@ -130,12 +141,12 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
 
         if (context.Services.Get<IAltaPluginCatalog>() is { } catalog)
         {
-            return Policies.Concat(catalog.ListCommandPolicies())
+            return PoliciesFor(context).Concat(catalog.ListCommandPolicies())
                 .OrderBy(static policy => policy.Path, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
         }
 
-        return Policies;
+        return PoliciesFor(context);
     }
 
     private static AltaCommandPolicy Read(string path, bool requiresRuntime = true, bool supportsCatalogOnlyContext = false)
@@ -215,6 +226,75 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             group,
             "Examples: `alta project current`; `alta project list`; `alta project show CodeAlta`; `alta project resolve --path C:/code/CodeAlta`.");
         return group;
+    }
+
+    private static Command CreateDiffCommand(AltaCommandContext context)
+    {
+        var group = Group("diff", "Show the changed files of a project to the user.");
+        string? projectRef = null;
+        string? file = null;
+        var show = Leaf("show", "Open the changes view of a project in the CodeAlta window: its changed files and their diff.");
+        show.Add("project=", "Project id, slug or path. Defaults to the project of the calling session, then to the cwd.", value => projectRef = value);
+        show.Add("file=", "Changed file to select, relative to the repository root.", value => file = value);
+        show.Add(async (_, _) => await HandleDiffShowAsync(context, projectRef, file).ConfigureAwait(false));
+        AddHelpText(
+            show,
+            "The view lists what the work tree changed since the last commit, untracked files included.",
+            "It only shows the changes to the user: to read a diff yourself, run git.",
+            "Examples: `alta diff show`; `alta diff show --file src/app.ts`; `alta diff show --project CodeAlta`.");
+        group.Add(show);
+        AddHelpText(group, "Example: `alta diff show` opens the changed files of the current project for the user.");
+        return group;
+    }
+
+    private static async ValueTask<int> HandleDiffShowAsync(AltaCommandContext context, string? projectRef, string? file)
+    {
+        if (context.Services.Get<IAltaChangesView>() is not { } view)
+        {
+            AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "service.unavailable", AltaExitCodes.ServiceUnavailable,
+                "Required in-process service 'IAltaChangesView' is unavailable.");
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        if (!context.TryGetRequired<ProjectCatalog>(nameof(ProjectCatalog), out var catalog))
+        {
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        var reference = NormalizeOptionalText(projectRef) ?? NormalizeOptionalText(context.Caller.SourceProjectId);
+        var project = reference is not null
+            ? await ResolveProjectAsync(catalog, reference, context, includeArchived: false).ConfigureAwait(false)
+            : await catalog.GetByPathAsync(ResolvePath(context, context.Cwd ?? Environment.CurrentDirectory), context.CancellationToken).ConfigureAwait(false);
+        if (project is null || project.Archived)
+        {
+            return NotFound(context, "project.notFound", reference is null ? "No catalog project matches the current directory." : $"Project '{reference}' was not found.");
+        }
+
+        // Only the name of a file inside the repository: the window selects it when it is one of the changed files.
+        var path = NormalizeOptionalText(file)?.Replace('\\', '/');
+        if (path is not null && (path.Length > 1024 || Path.IsPathRooted(path) || path.Split('/').Any(static segment => segment is "" or "." or "..")))
+        {
+            return UsageError(context, "usage.invalidFile", "The file must be a path relative to the repository root.", "alta diff show");
+        }
+
+        if (!view.Show(project.Id, path))
+        {
+            AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "view.unavailable", AltaExitCodes.ServiceUnavailable,
+                "No CodeAlta window is open to show the changes.");
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        AltaJsonlWriter.WriteRecord(context.Stdout, new
+        {
+            type = "alta.diff.shown",
+            version = 1,
+            correlationId = context.CorrelationId,
+            projectId = project.Id,
+            project.Slug,
+            projectPath = project.ProjectPath,
+            file = path,
+        });
+        return AltaExitCodes.Success;
     }
 
     private static Command CreateNotesCommand(AltaCommandContext context, string name)

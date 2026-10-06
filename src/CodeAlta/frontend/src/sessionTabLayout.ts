@@ -1,7 +1,7 @@
 import { Actions, DockLocation, Model, RowNode, TabNode, TabSetNode, type Action } from "flexlayout-react";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { openSessionTab, reconcileSessionTabs, resolveSessionTab, selectedTab, sessionTabLimit, tabKey, type SessionTab, type SessionTabs } from "./sessionTabs";
-import { emptyFileTabs, fileNodeId, fileTabLimit, fileTabName, type FileTab, type FileTabs } from "./fileTabs";
+import { emptyFileTabs, fileNodeId, fileTabLimit, fileTabName, isChangesTab, type FileTab, type FileTabs } from "./fileTabs";
 
 const panelId = "session-tabs-panel";
 // Presentation only: never persisted in the session list, recent history or draft owners.
@@ -39,7 +39,10 @@ const noFiles = emptyFileTabs();
 
 // Only public actions; retained nodes (and their factory roots) are never rebuilt.
 // File tabs share the strip: an active file is the selected tab, over the session selection.
-export function reconcileSessionTabModel(model: Model, state: SessionTabs, label: (tab: SessionTab | null) => string, files: FileTabs = noFiles) {
+// A changes tab opens beside the tab it was asked from: in the pane that already holds one, or in a new pane on
+// the right. From there it is a tab like any other and can be moved or closed.
+export function reconcileSessionTabModel(model: Model, state: SessionTabs, label: (tab: SessionTab | null) => string, files: FileTabs = noFiles,
+  fileLabel: (file: FileTab) => string = fileTabName) {
   const open = state.open.slice(0, sessionTabLimit);
   const openFiles = files.open.slice(0, fileTabLimit);
   const ids = new Set([...open.map(sessionNodeId), ...openFiles.map(fileNodeId)]);
@@ -53,10 +56,17 @@ export function reconcileSessionTabModel(model: Model, state: SessionTabs, label
     if (!node) model.doAction(Actions.addTab({ type: "tab", id, name, component: "session" }, model.getActiveTabset()?.getId() ?? panelId, DockLocation.CENTER, -1, false));
     else if (node instanceof TabNode && node.getName() !== name) model.doAction(Actions.renameTab(id, name));
   }
+  const changeIds = new Set(openFiles.filter(isChangesTab).map(fileNodeId));
   for (const file of openFiles) {
     const id = fileNodeId(file);
-    if (!model.getNodeById(id)) model.doAction(Actions.addTab({ type: "tab", id, name: fileTabName(file), component: "file" },
-      model.getActiveTabset()?.getId() ?? panelId, DockLocation.CENTER, -1, false));
+    const name = fileLabel(file);
+    const node = model.getNodeById(id);
+    if (node instanceof TabNode) { if (node.getName() !== name) model.doAction(Actions.renameTab(id, name)); continue; }
+    const target = model.getActiveTabset()?.getId() ?? panelId;
+    if (!isChangesTab(file)) { model.doAction(Actions.addTab({ type: "tab", id, name, component: "file" }, target, DockLocation.CENTER, -1, false)); continue; }
+    let beside: string | undefined;
+    model.visitNodes(other => { if (other instanceof TabNode && other.getId() !== id && changeIds.has(other.getId())) beside ??= other.getParent()?.getId(); });
+    model.doAction(Actions.addTab({ type: "tab", id, name, component: "changes" }, beside ?? target, beside ? DockLocation.CENTER : DockLocation.RIGHT, -1, false));
   }
   if (!state.active) {
     const name = label(null);

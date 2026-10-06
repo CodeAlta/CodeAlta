@@ -206,6 +206,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         SessionOperationsService? operations = null;
         SessionAsksService? asks = null;
         ReminderService? reminders = null;
+        DesktopChangesView? changesView = null;
         GitIssuesService? gitIssues = null;
         AppUpdateService? appUpdate = null;
         ModelCatalogService? providers = null;
@@ -407,7 +408,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 operations = new SessionOperationsService(host.Commands, epoch);
                 asks = new SessionAsksService(host.Commands.Asks, epoch);
                 reminders = new ReminderService(host.WorkspaceReads, host.Commands, epoch);
-                DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta);
+                changesView = new DesktopChangesView();
+                DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView);
                 workspacePrepared.TrySetResult();
                 {
                     // Leave room for ordinary pasted images and their base64/JSON overhead.
@@ -477,7 +479,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionNotesService(new SessionNotesService(host.WorkspaceReads, host.RuntimeService, epoch));
                     builder.AddSessionPluginEventsService(new SessionPluginEventsService(host.WorkspaceReads, host.ProjectCatalog, epoch, host.PluginRuntime));
                     builder.AddProjectFilesService(new ProjectFilesService(host.ProjectCatalog, epoch, host.ProjectFileSearchService));
-                    builder.AddProjectGitService(new ProjectGitService(host.ProjectCatalog, epoch));
+                    builder.AddProjectGitService(new ProjectGitService(host.ProjectCatalog, epoch, changesView));
                     builder.AddPromptImagesService(new PromptImagesService(host.WorkspaceReads, epoch));
                     builder.AddComposerStatusService(new ComposerStatusService(host.ProjectCatalog, epoch, roots.Home, host.PluginRuntime));
                     pluginCommands = pluginAlta is null ? new PluginUiService() : new PluginUiService(host.ProjectCatalog, host.PluginRuntime, pluginUi, epoch);

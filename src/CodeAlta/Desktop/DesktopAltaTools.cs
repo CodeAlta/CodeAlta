@@ -13,6 +13,9 @@ namespace CodeAlta.Desktop;
 /// </summary>
 /// <remarks>
 /// <para>
+/// <c>alta diff show</c> exists only here: it opens the changes tab of a project in the window.
+/// </para>
+/// <para>
 /// Three things are specific to the desktop. <c>alta ask</c> goes to the window's ask panel through the run
 /// that asks, so only a run started from the window can ask, once. Sessions that alta commands create or
 /// drive use the host's own permission defaults, which lets the window keep sending to them. Reminders are
@@ -29,18 +32,19 @@ internal static class DesktopAltaTools
     /// <param name="host">The running host.</param>
     /// <param name="reminders">The reminder service the window lists and delivers from.</param>
     /// <param name="pluginAlta">The bridge through which the host's plugins invoke alta commands, if they can.</param>
+    /// <param name="changes">Where <c>alta diff show</c> asks the window to show changed files; without it the command does not exist.</param>
     /// <exception cref="ArgumentNullException">The host or the reminders are null.</exception>
-    internal static void Attach(CodeAltaHost host, AltaReminderService reminders, PluginAltaServiceBridge? pluginAlta = null)
+    internal static void Attach(CodeAltaHost host, AltaReminderService reminders, PluginAltaServiceBridge? pluginAlta = null, IAltaChangesView? changes = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(reminders);
-        var dispatcher = Compose(host, reminders);
+        var dispatcher = Compose(host, reminders, changes);
         pluginAlta?.SetDispatcher(dispatcher);
         host.Commands.SessionTools = CreateSessionTools(dispatcher);
     }
 
     /// <summary>Builds the dispatcher of the alta commands over a host's services.</summary>
-    internal static AltaCommandDispatcher Compose(CodeAltaHost host, AltaReminderService reminders)
+    internal static AltaCommandDispatcher Compose(CodeAltaHost host, AltaReminderService reminders, IAltaChangesView? changes = null)
     {
         var permissions = host.RuntimeService.Permissions;
         var services = new AltaServiceCollection()
@@ -64,6 +68,7 @@ internal static class DesktopAltaTools
             // The plugins as they are when a command runs; without an active plugin both add nothing.
             .Add<IAltaPluginCatalog>(new RuntimeAltaPluginCatalog(host.PluginRuntime))
             .AddPluginRuntimeHooks(host.PluginRuntime);
+        if (changes is not null) services.Add(changes);
         var registry = new AltaCommandRegistry();
         var dispatcher = new AltaCommandDispatcher(registry, services);
         services.Add(registry).Add(dispatcher);

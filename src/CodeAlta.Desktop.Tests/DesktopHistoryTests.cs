@@ -58,6 +58,33 @@ public sealed class DesktopHistoryTests
     }
 
     [TestMethod]
+    public void ToolProjection_CountsTheLinesOfAnEdit_AndGivesItsDiffFirst()
+    {
+        const string diff = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,2 +1,3 @@\n one\n-two\n+TWO\n+three\n";
+        var details = JsonSerializer.SerializeToElement(new { toolName = "apply_patch", arguments = new { input = "*** Begin Patch" }, diff, result = new { content = "Patch applied:" } });
+        var activity = new AgentActivityEvent(new("provider"), "session", DateTimeOffset.UnixEpoch, new("run"),
+            AgentActivityKind.ToolCall, AgentActivityPhase.Completed, "activity", null, "apply_patch", null, details);
+
+        var projected = HistoryToolProjection.Project(activity);
+
+        Assert.AreEqual((2, 1), (projected.Added, projected.Removed));
+        Assert.AreEqual(new HistoryToolField("diff", diff, false), projected.Fields[0]);
+        CollectionAssert.AreEqual(new[] { "diff", "arguments", "result.content" }, projected.Fields.Select(static field => field.Path).ToArray());
+
+        // A long diff is counted whole and shown up to the end of a line.
+        var lines = string.Concat(Enumerable.Range(0, 4000).Select(static index => $"+line {index}\n"));
+        var large = HistoryToolProjection.Project(activity with { Details = JsonSerializer.SerializeToElement(new { diff = "@@ -0,0 +1,4000 @@\n" + lines }) });
+        Assert.AreEqual((4000, 0), (large.Added, large.Removed));
+        Assert.IsTrue(large.Fields[0].Truncated);
+        Assert.IsTrue(large.Fields[0].Text.Length <= HistoryToolProjection.MaximumDiffLength && large.Fields[0].Text.EndsWith('\n'));
+
+        // A call without a diff, or with one that changes no line, has no counts and no diff field.
+        var read = HistoryToolProjection.Project(activity with { Details = JsonSerializer.SerializeToElement(new { arguments = new { path = "a.txt" }, diff = "" }) });
+        Assert.AreEqual((null, null), (read.Added, read.Removed));
+        Assert.IsFalse(read.Fields.Any(static field => field.Path == "diff"));
+    }
+
+    [TestMethod]
     public void ToolProjection_ReadsJsonEncodedArgumentsAndLiteralOutput()
     {
         var details = JsonSerializer.SerializeToElement(new { arguments = "{\"command\":\"dotnet test -c Release\"}", result = "first\nsecond" });

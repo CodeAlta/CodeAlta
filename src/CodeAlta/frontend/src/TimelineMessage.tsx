@@ -151,6 +151,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
         {compact && item.html ? <div className="timeline-inline-preview timeline-plugin-html"><PluginHtml html={item.html} pluginKey={item.pluginKey} /></div>
           : compact && excerpt && !toolTile && item.category !== "file" && <div className="timeline-inline-preview">{codePreview !== null ? <code>{codePreview}</code>
           : item.summary ? excerpt : <MarkdownContent source={excerpt} />}</div>}
+        {!toolTile && item.toolChanges && <span className="file-counts tool-changes" title={t("Lines added and removed by this call")}><b>+{item.toolChanges.added}</b> <em>−{item.toolChanges.removed}</em></span>}
         <span className="message-actions">
           {item.toolRecord && <ToolRecordInspection key={item.toolRecord.source} record={item.toolRecord} canInspect={canInspect} />}
           {hasDetails && <button type="button" className="timeline-detail-trigger" aria-label={t("Details")} title={t("Details")} aria-haspopup="dialog"
@@ -164,6 +165,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
       {toolTile && codePreview && <code className="tool-command-preview">{codePreview}</code>}
       {toolTile && <div className="tool-result-summary">
         {outcome && <span className="tool-outcome">{t(outcome)}</span>}
+        {item.toolChanges && <span className="file-counts tool-changes" title={t("Lines added and removed by this call")}><b>+{item.toolChanges.added}</b> <em>−{item.toolChanges.removed}</em></span>}
         {item.toolOutputBytes != null && item.toolOutputLines != null && <span className="tool-output-stats">{item.toolOutputLines}L · {(item.toolOutputBytes / 1024).toFixed(1)} KB</span>}
         {toolOutput && <span className="tool-result-preview" title={toolOutput.slice(0, 512)}>{commandPreview(toolOutput)}</span>}
       </div>}

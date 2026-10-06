@@ -1,7 +1,7 @@
 import { Button, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext } from "@blueprintjs/core";
 import { connect, onDiagnostic } from "@neoastra/client";
 import { rpcFailureCode } from "./rpcDiagnostics";
-import { StrictMode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
+import { StrictMode, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { ComposerStatus } from "./ComposerStatus";
@@ -36,10 +36,11 @@ import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./
 import { createProjectArchive } from "./projectArchive";
 import { browserActivation } from "./sessionBrowser";
 import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, closeFileTab, cycleTab, emptyFileTabs, fileTabKey, fileTabName, fileTabsKey, openFileTab, persistFileTabs, reconcileFileTabs, reopenTabKind, restoreFileTabs, sameFileTab, type FileTab, type TabKind, type TabPosition } from "./fileTabs";
+import { activateFileTab, changesTab, closeFileTab, cycleTab, emptyFileTabs, fileTabKey, isChangesTab, fileTabName, fileTabsKey, openFileTab, persistFileTabs, reconcileFileTabs, reopenTabKind, restoreFileTabs, sameFileTab, type FileTab, type TabKind, type TabPosition } from "./fileTabs";
 import { createFileEditors } from "./fileEditors";
 import { OpenFileDialog } from "./OpenFileDialog";
 import { ProjectFileEditor, UnsavedExitDialog, UnsavedFileDialog } from "./ProjectFileEditor";
+import { ProjectChangesPanel } from "./ProjectChangesPanel";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { ReadOnlyComposer } from "./ReadOnlyComposer";
 import { useLocalDraftImages } from "./useLocalDraftImages";
@@ -232,6 +233,8 @@ function App() {
   const [fileEditors] = useState(createFileEditors);
   useSyncExternalStore(fileEditors.subscribe, fileEditors.snapshot);
   const [fileClosing, setFileClosing] = useState<{ tab: FileTab; busy: boolean } | null>(null);
+  // The file an `alta diff show` asked a changes tab to select, by project.
+  const [changeRequests, setChangeRequests] = useState<ReadonlyMap<string, Readonly<{ path: string | null }>>>(() => new Map());
   // The kinds of tab closed, oldest first: Reopen restores the most recent one.
   const closedTabKinds = useRef<TabKind[]>([]);
   // Scope-local text is App-owned even when storage is denied or workspace DOM is unmounted.
@@ -644,6 +647,29 @@ function App() {
     // At the tab limit a file with unsaved edits is never the one that makes room.
     setFileTabs(state => openFileTab(state, tab, value => fileEditors.dirty(fileTabKey(value))));
   }
+  // Opens the changes of a project's repository in their tab, beside the tab that is shown.
+  function showChanges(project: Readonly<{ id: string; path: string }>, path: string | null = null) {
+    if (path !== null) setChangeRequests(current => new Map(current).set(project.id, { path }));
+    openFile(changesTab(project));
+  }
+  const showChangesLatest = useRef(showChanges); showChangesLatest.current = showChanges;
+  const [showProjectChanges] = useState(() => (project: Readonly<{ id: string; path: string }>) => showChangesLatest.current(project));
+  // An agent asks for the changes of a project with `alta diff show`.
+  useEffect(() => {
+    const epoch = status?.hostEpoch;
+    if (!epoch) return;
+    const abort = new AbortController();
+    void (async () => {
+      try {
+        for await (const request of await projectGit.watch({ expectedEpoch: epoch }, { signal: abort.signal })) {
+          if (abort.signal.aborted) return;
+          const project = currentSnapshot.current?.projects.find(value => value.id === request.projectId && !value.archived);
+          if (project) showChangesLatest.current(project, request.path);
+        }
+      } catch { /* The bridge is gone: the changes still open from the composer. */ }
+    })();
+    return () => abort.abort();
+  }, [status?.hostEpoch]);
   function closeFile(tab: FileTab, discard = false) {
     if (!discard && fileEditors.dirty(fileTabKey(tab))) { activateFile(tab); setFileClosing({ tab, busy: false }); return; }
     setFileClosing(null);
@@ -954,7 +980,7 @@ function App() {
     setProviderGuide(true);
     navigate("providers");
   }, [owned, status]);
-  const draftChrome = useComposerChrome(owned ? status?.hostEpoch ?? null : null, selectedProject);
+  const draftChrome = useComposerChrome(owned ? status?.hostEpoch ?? null : null, selectedProject, null, owned ? showProjectChanges : null);
   // Explorer markers for sessions with active reminders: read when the host is ready, after every reminder
   // change made here, and on a slow interval because reminders also fire and complete on their own.
   const [activeReminders, setActiveReminders] = useState<ActiveReminders | null>(null);
@@ -1765,7 +1791,7 @@ function App() {
   const newPromptDisabled = creatingBusy || creationLocked || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !snapshot
     || !!selectedProject?.archived || projectId !== null && !selectedProject || (!localDraft.text.trim() && !localImages.images.length)
     || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim());
-  return <ShellLanguageContext.Provider value={language}><PluginUiContext.Provider value={pluginUiValue}><div className="app-shell ide-shell">
+  return <ShellLanguageContext.Provider value={language}><PluginUiContext.Provider value={pluginUiValue}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><div className="app-shell ide-shell">
     {(hostSilent || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {hostSilent && <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
         <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button></div>}
@@ -1993,7 +2019,12 @@ function App() {
               if (tabs.active && tabKey(tabs.active) === tabKey(tab)) { applyTabState(next); if (file) activateFile(file); } else setTabs(next);
             }} reopen={() => tabCommand("reopenTab")}
             files={fileTabs} fileDirty={tab => fileEditors.dirty(fileTabKey(tab))} selectFile={activateFile} closeFile={tab => closeFile(tab)}
-            renderFile={(tab, visible) => <ProjectFileEditor key={fileTabKey(tab)} tab={tab} editors={fileEditors}
+            renderFile={(tab, visible) => isChangesTab(tab)
+              ? <ProjectChangesPanel key={fileTabKey(tab)} tab={tab} epoch={!status ? undefined : owned ? status.hostEpoch : null}
+                projectName={snapshot?.projects.find(project => project.id === tab.projectId)?.name} request={changeRequests.get(tab.projectId)}
+                visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)}
+                onOpenFile={path => openFile({ projectId: tab.projectId, projectPath: tab.projectPath, path })} />
+              : <ProjectFileEditor key={fileTabKey(tab)} tab={tab} editors={fileEditors}
               epoch={!status ? undefined : owned ? status.hostEpoch : null}
               visible={visible} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)} />}>
           <div id="active-session-content" className="active-session-content">
@@ -2145,7 +2176,7 @@ function App() {
       onPrompt={request => ["send", "enqueue", "steer", "compact"].includes(request.mode ?? "")
         && askPluginComposer(request.mode as PluginComposerRequest["kind"], request.sessionId ?? null, request.text ?? null).result}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></PluginUiContext.Provider></ShellLanguageContext.Provider>;
+  </div></ShowChangesContext.Provider></PluginUiContext.Provider></ShellLanguageContext.Provider>;
 }
 
 // Native modal matches the other shell dialogs: showModal supplies inert background,
@@ -2207,16 +2238,23 @@ function visibleAsk(selector: string): HTMLElement | null {
   return Array.from(document.querySelectorAll<HTMLElement>(selector)).find(element => element.offsetParent !== null) ?? null;
 }
 
-function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["projects"][number] | undefined, sessionId: string | null = null): ComposerChromeValue {
-  const id = project?.id, name = project?.name, path = project?.path;
+/** Opens the changes tab of a project; null where the window has no host to read them from. */
+const ShowChangesContext = createContext<((project: Readonly<{ id: string; path: string }>) => void) | null>(null);
+
+function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["projects"][number] | undefined, sessionId: string | null = null,
+  /** The way to the changes tab for a composer the application builds itself, above the context. */
+  show: ((project: Readonly<{ id: string; path: string }>) => void) | null = null): ComposerChromeValue {
+  const id = project?.id, name = project?.name, path = project?.path, archived = project?.archived;
   // The regions are read only when a plugin has content for them.
   const regions = useContext(PluginUiContext).contributions.regions;
+  const showChanges = useContext(ShowChangesContext) ?? show;
   return useMemo(() => ({ context: id !== undefined && name !== undefined && path !== undefined
-    ? <ProjectContext epoch={epoch} project={{ id, name, path }} read={projectGit.status} /> : undefined,
+    ? <ProjectContext epoch={epoch} project={{ id, name, path }} read={projectGit.status}
+      onShowChanges={showChanges && !archived ? () => showChanges({ id, path }) : undefined} /> : undefined,
   status: epoch ? <>{regions && <PluginRegionSlot epoch={epoch} projectId={id ?? null} sessionId={sessionId} region="inline" read={pluginUi.regions} />}
     <ComposerStatus epoch={epoch} projectId={id ?? null} sessionId={sessionId} read={composerStatus.read} /></> : undefined,
   footer: epoch && regions ? <PluginRegionSlot epoch={epoch} projectId={id ?? null} sessionId={sessionId} region="footer" read={pluginUi.regions} /> : undefined }),
-  [epoch, id, name, path, sessionId, regions]);
+  [epoch, id, name, path, archived, sessionId, regions, showChanges]);
 }
 
 function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, timelineImages, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity }: {

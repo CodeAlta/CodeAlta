@@ -1,13 +1,19 @@
 import type { WorkspaceSnapshot } from "#neoastra";
 
-/** One project file open in an editor tab: the project (id and folder as captured) and the project-relative path. */
-export type FileTab = Readonly<{ projectId: string; projectPath: string; path: string }>;
+/**
+ * One tab of a project beside the sessions: a project file open in an editor (the project-relative path), or,
+ * with `view: "changes"` and no path, the changed files of the project's repository.
+ */
+export type FileTab = Readonly<{ projectId: string; projectPath: string; path: string; view?: "changes" }>;
 export type FileTabs = Readonly<{ open: readonly FileTab[]; active: FileTab | null; closed: readonly FileTab[] }>;
 export const fileTabsKey = "codealta.desktop.fileTabs.v1";
 export const fileTabLimit = 32;
 export const emptyFileTabs = (): FileTabs => ({ open: [], active: null, closed: [] });
-// One tab per file of a project; the path is compared as the host returned it.
-export const fileTabKey = (tab: FileTab) => JSON.stringify([tab.projectId, tab.path]);
+// One tab per file of a project, and one for its changes; the path is compared as the host returned it.
+export const fileTabKey = (tab: FileTab) => JSON.stringify(tab.view ? [tab.projectId, tab.path, tab.view] : [tab.projectId, tab.path]);
+export const isChangesTab = (tab: FileTab) => tab.view === "changes";
+/** The tab of a project's changes. */
+export const changesTab = (project: Readonly<{ id: string; path: string }>): FileTab => ({ projectId: project.id, projectPath: project.path, path: "", view: "changes" });
 export const fileNodeId = (tab: FileTab) => `file:${fileTabKey(tab)}`;
 export const sameFileTab = (a: FileTab | null, b: FileTab | null) => a === b || !!a && !!b && fileTabKey(a) === fileTabKey(b);
 export const fileTabName = (tab: FileTab) => tab.path.slice(tab.path.lastIndexOf("/") + 1);
@@ -81,9 +87,11 @@ export function restoreFileTabs(read: () => string | null): FileTabs | null {
     if (data.version !== 1 || !Array.isArray(data.open) || data.open.length > fileTabLimit) return null;
     const text = (field: unknown, limit: number) => typeof field === "string" && field.length > 0 && field.length <= limit;
     const valid = (tab: unknown): tab is FileTab => !!tab && typeof tab === "object" && text((tab as FileTab).projectId, 256)
-      && text((tab as FileTab).projectPath, 4096) && text((tab as FileTab).path, 1024);
+      && text((tab as FileTab).projectPath, 4096) && ((tab as FileTab).view === undefined ? text((tab as FileTab).path, 1024)
+        : (tab as FileTab).view === "changes" && (tab as FileTab).path === "");
     if (!data.open.every(valid) || data.active !== null && !valid(data.active)) return null;
-    const open = data.open.map(tab => ({ projectId: tab.projectId, projectPath: tab.projectPath, path: tab.path }));
+    const open = data.open.map((tab): FileTab => tab.view ? changesTab({ id: tab.projectId, path: tab.projectPath })
+      : { projectId: tab.projectId, projectPath: tab.projectPath, path: tab.path });
     if (new Set(open.map(fileTabKey)).size !== open.length) return null;
     const active = data.active === null ? null : open.find(tab => sameFileTab(tab, data.active as FileTab));
     if (active === undefined) return null;

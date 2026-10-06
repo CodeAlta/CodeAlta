@@ -92,6 +92,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | `model` | List, show, and resolve model refs. |
 | `prompt` | List, inspect, create, edit, and select file-backed agent or system prompts. |
 | `plugin` | Inspect active plugin runtime state. |
+| `diff` | Show the changed files of a project to the user. Only in CodeAlta Desktop. |
 
 `note` is a compatibility alias for `notes`. Prefer the plural `notes` group because it names the sidebar panel and the single sticky notes document. `skills activate` and `skills_activate` are compatibility aliases for `skill activate`. Prefer the singular `skill` group in new prompts and docs.
 
@@ -291,6 +292,26 @@ alta model resolve --model-ref <provider-key>:<model-id>@high
 ```
 
 `model show` and `model resolve` validate exact refs when model metadata is available and report requested/effective reasoning so callers can see whether reasoning was applied, defaulted, or unsupported.
+
+## Diff command
+
+`alta diff show` opens the Changes tab of a project in the CodeAlta Desktop window: the files its work
+tree changed since the last commit (untracked files included) and their diff. It shows the changes to
+the user and returns no diff: an agent that wants to read one runs git.
+
+```text
+alta diff show
+alta diff show --file src/app.ts
+alta diff show --project <project-id-or-slug-or-path>
+```
+
+The project defaults to the one of the calling session, then to the catalog project of the cwd; an
+archived project is not shown. `--file` is a path relative to the repository root, selected when it is
+one of the changed files. The command emits `alta.diff.shown` with the project and the file, or
+`view.unavailable` when no window is open.
+
+The group exists only where a host registers `IAltaChangesView`, which the desktop host does: in the
+terminal UI and the standalone tool it is not among the commands, their help or `alta tool list`.
 
 ## Skill commands
 

@@ -26,6 +26,23 @@ internal static class HistoryToolProjection
         cost = 512 + 6 * ((primary?.Length ?? 0) + (preview?.Length ?? 0));
         if (cost > budget) { cost = 0; return null; }
         var fields = new List<HistoryToolField>();
+        // The diff an edit left behind (write_file, apply_patch, ...): its size is counted whole, like the TUI does,
+        // and its text is shown first, within a budget of its own.
+        var diff = Text(details, "diff") ?? Text(details, "result", "diff") ?? Text(details, "output", "diff");
+        var (added, removed) = HistoryFileProjection.CountLines(diff);
+        if (diff is not null && added is not null)
+        {
+            var limit = Math.Max(0, Math.Min(MaximumDiffLength, (budget - cost - 256) / 6));
+            var length = Math.Min(limit, diff.Length);
+            // Cut at the end of a line, so that no half line is colored as an addition or a removal.
+            if (length < diff.Length) length = diff.LastIndexOf('\n', Math.Max(0, length - 1)) + 1;
+            if (length > 0)
+            {
+                fields.Add(new("diff", diff[..length], length < diff.Length));
+                cost += 256 + 6 * length;
+            }
+        }
+
         var characters = 8192;
         foreach (var path in new[] { "arguments", "input", "command", "aggregatedOutput", "result.content", "result.detailedContent", "output.body", "error.message", "output", "result" })
         {
@@ -42,8 +59,11 @@ internal static class HistoryToolProjection
             characters -= length;
             cost += 256 + 6 * length;
         }
-        return new(primary, command is not null, preview, lines, fields.ToArray(), bytes);
+        return new(primary, command is not null, preview, lines, fields.ToArray(), bytes, added, removed);
     }
+
+    /// <summary>Longest part of an edit's diff sent with its tool call, in UTF-16 units.</summary>
+    internal const int MaximumDiffLength = 16 * 1024;
 
     internal static HistoryToolSummary? ProjectOutput(string output, int budget, out int cost)
     {
@@ -97,5 +117,8 @@ internal static class HistoryToolProjection
     }
 }
 
-internal sealed record HistoryToolSummary(string? Primary, bool IsCommand, string? Output, int OutputLines, HistoryToolField[] Fields, int? OutputBytes);
+/// <param name="Added">Lines the call added to files, when its record has a diff.</param>
+/// <param name="Removed">Lines the call removed from files, when its record has a diff.</param>
+internal sealed record HistoryToolSummary(string? Primary, bool IsCommand, string? Output, int OutputLines, HistoryToolField[] Fields, int? OutputBytes,
+    int? Added = null, int? Removed = null);
 internal sealed record HistoryToolField(string Path, string Text, bool Truncated);

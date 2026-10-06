@@ -5,7 +5,7 @@ import { sessionTabDrop } from "./sessionTabDrag";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { closeSessionTab, emptySessionTabs, openSessionTab, sessionTabLimit, type SessionTab } from "./sessionTabs";
 import { createSessionTabModel, fileTabAction, ownsSessionTabContent, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation } from "./sessionTabLayout";
-import { activateFileTab, closeFileTab, emptyFileTabs, fileNodeId, openFileTab, type FileTab } from "./fileTabs";
+import { activateFileTab, changesTab, closeFileTab, emptyFileTabs, fileNodeId, openFileTab, type FileTab } from "./fileTabs";
 
 const tab = (id: string) => ({ projectId: "p", sessionId: id, path: "/p" });
 const snapshot: WorkspaceSnapshot = { configured: true, projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false,
@@ -371,4 +371,41 @@ test("file tabs select, move and split like session tabs; closing is an App inte
   reconcileSessionTabModel(model, state, label, activateFileTab(files, null));
   assert.equal(model.getActiveTabset(), one.getParent());
   assert.equal(a.isSelected(), true);
+});
+
+test("a changes tab opens in a pane on the right; the next one joins it and both are tabs like any other", () => {
+  const model = createSessionTabModel(), state = both();
+  const first = changesTab({ id: "p", path: "/p" }), second = changesTab({ id: "q", path: "/q" });
+  const named = (file: FileTab) => file.view ? `Changes · ${file.projectId}` : file.path;
+  reconcileSessionTabModel(model, state, label, emptyFileTabs(), named);
+  const sessions = model.getActiveTabset()!;
+  let files = openFileTab(emptyFileTabs(), first);
+  reconcileSessionTabModel(model, state, label, files, named);
+  const node = model.getNodeById(fileNodeId(first)) as TabNode;
+  assert.equal(node.getName(), "Changes · p");
+  assert.equal(node.getComponent(), "changes");
+  const pane = node.getParent() as TabSetNode;
+  assert.notEqual(pane, sessions, "Its own pane.");
+  const row = pane.getParent()!.getChildren();
+  assert.equal(pane.getParent(), sessions.getParent());
+  assert.ok(row.indexOf(pane) > row.indexOf(sessions), "On the right.");
+  assert.equal(model.getActiveTabset(), pane);
+  assert.equal(sessions.getTabNodes().length, 2, "The sessions stay where they were.");
+  // The changes of another project open beside the first; a file opens where the keyboard is.
+  files = openFileTab(files, second);
+  reconcileSessionTabModel(model, state, label, files, named);
+  assert.equal((model.getNodeById(fileNodeId(second)) as TabNode).getParent(), pane);
+  assert.equal(pane.getSelectedNode()?.getId(), fileNodeId(second));
+  // It moves like any tab, and a new name follows its project.
+  const move = Actions.moveNode(node.getId(), sessions.getId(), DockLocation.CENTER, -1, true);
+  assert.equal(sessionLayoutActionAllowed(model, move, state, snapshot, () => true, files), true);
+  model.doAction(move);
+  reconcileSessionTabModel(model, state, label, files, file => file.view ? `Changes · renamed ${file.projectId}` : file.path);
+  assert.equal(node.getName(), "Changes · renamed p");
+  assert.equal(node.getParent(), sessions);
+  // Closed, its node goes and the pane with its last tab.
+  files = closeFileTab(closeFileTab(files, first), second);
+  reconcileSessionTabModel(model, state, label, files, named);
+  assert.equal(model.getNodeById(fileNodeId(first)), undefined);
+  assert.equal(model.getNodeById(pane.getId()), undefined);
 });

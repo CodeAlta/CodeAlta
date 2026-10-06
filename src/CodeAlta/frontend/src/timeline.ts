@@ -41,6 +41,8 @@ export type TimelineItem = Readonly<{
   toolOutputLines?: number;
   toolOutputBytes?: number | null;
   toolFields?: NonNullable<HistoryEntry["tool"]>["fields"];
+  /** The lines an edit added to and removed from files, when the record of the call has its diff. */
+  toolChanges?: Readonly<{ added: number; removed: number }>;
   /** True for a prompt another agent session delivered, shown without its routing envelope. */
   delegated?: boolean;
 }>;
@@ -273,6 +275,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     toolOutputLines: entry.tool?.outputLines,
     toolOutputBytes: entry.tool?.outputBytes,
     toolFields: entry.tool?.fields,
+    toolChanges: entry.tool?.added != null && entry.tool.removed != null ? { added: entry.tool.added, removed: entry.tool.removed } : undefined,
     delegated: delegated ? true : undefined,
   };
 }

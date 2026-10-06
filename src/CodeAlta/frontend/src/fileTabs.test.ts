@@ -3,7 +3,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { WorkspaceSnapshot } from "#neoastra";
-import { activateFileTab, closeFileTab, cycleTab, emptyFileTabs, fileNodeId, fileTabKey, fileTabLimit, fileTabName, openFileTab, persistFileTabs,
+import { activateFileTab, changesTab, closeFileTab, cycleTab, emptyFileTabs, fileNodeId, isChangesTab, fileTabKey, fileTabLimit, fileTabName, openFileTab, persistFileTabs,
   reconcileFileTabs, reopenTabKind, resolveFileTab, restoreFileTabs, sameFileTab, type FileTab } from "./fileTabs";
 import { FileTabLabel } from "./SessionTabStrip";
 import { ShellLanguageContext } from "./shellLanguage";
@@ -124,5 +124,37 @@ test("a file tab label shows the file name, keeps the path literal in its toolti
     assert.ok(html.includes("src/&lt;b&gt;&amp;name.ts\nProject"), html);
     assert.ok(html.includes(translate(locale, "Unsaved changes")), html);
     assert.ok(!render(false).includes("session-tab-dirty"));
+  }
+});
+
+test("the changes of a project have one tab of their own, which is kept like a file tab", () => {
+  const changes = changesTab({ id: "p", path: "/p" });
+  assert.deepEqual(changes, { projectId: "p", projectPath: "/p", path: "", view: "changes" });
+  assert.ok(isChangesTab(changes) && !isChangesTab(file("a")));
+  assert.equal(fileTabKey(changes), '["p","","changes"]');
+  assert.notEqual(fileNodeId(changes), fileNodeId(changesTab({ id: "q", path: "/q" })));
+  // Opening them again activates the tab; they close, reopen and survive a restart like a file.
+  let state = openFileTab(openFileTab(openFileTab(emptyFileTabs(), file("a")), changes), file("b"));
+  state = openFileTab(state, changesTab({ id: "p", path: "/p" }));
+  assert.equal(state.open.length, 3);
+  assert.ok(sameFileTab(state.active, changes));
+  assert.ok(resolveFileTab(catalog, changes));
+  let stored = "";
+  persistFileTabs(value => { stored = value; }, state);
+  assert.deepEqual(restoreFileTabs(() => stored), { open: [file("a"), changes, file("b")], active: changes, closed: [] });
+  assert.deepEqual(reconcileFileTabs(openFileTab(emptyFileTabs(), changesTab({ id: "old", path: "/old" })), catalog).open, [], "An archived project has no tab.");
+  const json = (value: unknown) => () => JSON.stringify(value);
+  for (const read of [json({ version: 1, open: [{ ...changes, path: "a.ts" }], active: null }), json({ version: 1, open: [{ ...changes, view: "history" }], active: null }),
+    json({ version: 1, open: [changes, changes], active: null })])
+    assert.equal(restoreFileTabs(read), null);
+});
+
+test("a changes tab is labeled with its project in every language", () => {
+  for (const locale of locales) {
+    const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider,
+      { value: { locale, choice: locale, setLanguage: () => assert.fail("rendering must not dispatch") } },
+      createElement(FileTabLabel, { tab: changesTab({ id: "p", path: "/p" }), project: "<Project>", dirty: true })));
+    assert.ok(html.includes(translate(locale, "Changes")) && html.includes("&lt;Project&gt;"), html);
+    assert.ok(!html.includes("session-tab-dirty"), "The changes hold no edit.");
   }
 });

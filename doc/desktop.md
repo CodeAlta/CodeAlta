@@ -1087,6 +1087,47 @@ the sending session.
 
 ## Files
 
+### Changes
+
+The counts beside the branch in the composer are a button: it opens the **Changes** tab of the project,
+which is also what `alta diff show` does for an agent. There is one such tab per project. It is a tab
+of the same strip as the sessions and the files (`view: "changes"` in `fileTabs`), so it closes, reopens,
+cycles and is restored like a file tab, and several can be open. It opens in a pane on the right of the
+tab it was asked from, or in the pane that already holds a changes tab; from there it is dragged, split
+and merged like any tab.
+
+- The header names the project, the work tree and the branch, what is compared when it is not the
+  uncommitted changes, the number of files and the lines added and removed. **Auto-refresh** reads the
+  lists every five seconds while the tab is shown; the refresh button reads them now. A list that did
+  not change is answered with `unchanged` and nothing is drawn again; a file is read again only when its
+  `revision` changed, and the diff keeps its scroll position.
+- The files are a tree (folders first, a chain of single folders on one row, each folder with its
+  number of files) or a flat list, with the status letter and the `+`/`−` lines of each file. The filter
+  keeps the paths that hold every word. Up/Down, PageUp/PageDown, Home and End move through the files,
+  Enter goes to the diff. The width of the list and every choice of the tab are kept in
+  `codealta.desktop.changes.v1`.
+- **History**, under the files and behind a splitter, chooses what is compared: **Uncommitted changes**,
+  everything since the base of the branch when it has commits of its own, or one of the recent commits
+  (**Load more** adds twenty, up to 200).
+- The diff is Monaco's diff editor, read-only, with the highlighting of the file's language and the
+  changed words marked inside a changed line. It is side by side or inline (inline by itself when the
+  pane is narrower than 780 pixels), with the unchanged regions folded behind expanders. The arrows and
+  `Alt+Up` / `Alt+Down` go through the changes. **Open file** opens the file in an editor tab when it
+  is inside the project folder. The `…` menu has **Hide unchanged lines**, **Ignore whitespace
+  changes**, **Wrap lines** and **Copy path**.
+- A file that is new or deleted is shown whole, tinted green or red, instead of beside an empty side.
+  A binary file, a file over 1 MB and a file that cannot be read say so instead of a diff.
+- In a pane narrower than 760 pixels the files and the history sit above the diff.
+
+### Edits in the timeline
+
+The tile of a tool call that edited files (`write_file`, `apply_patch`, `replace_in_file` and the like)
+shows the lines it added and removed, and its details open with the diff: a row per line with the line
+numbers of both sides, a header per file and a rule per hunk. The host takes both from the `diff` of the
+call's record (`HistoryToolProjection`): the lines are counted over the whole diff, and up to 16 Ki
+UTF-16 units of it are sent, cut at the end of a line. The files of a **Modified files** card open in
+the same view.
+
 ### File editor
 
 `Ctrl+E` (or `/edit` in the command palette) opens **Open file** for the selected project: the `@`
@@ -1168,19 +1209,54 @@ server. Without a running MCP plugin (explicit roots, `CODEALTA_DISABLE_PLUGINS=
 the configuration alone and its tools read `tools not loaded`.
 
 `projectGit.status` returns the branch of the repository containing the project folder and how much
-its tracked files differ from the last commit. Archived projects are answered too.
+its work tree differs from the last commit. Archived projects are answered too.
 
 - The repository is the nearest `.git` at or above the project folder; a `.git` file (a linked
   worktree or a submodule) is followed to the directory it names. Without one the answer is
   `not_repository`.
 - The branch is read from the `HEAD` file, without starting git. On a detached `HEAD` the branch is
   the first seven digits of the commit and `detached` is set.
-- `insertions`, `deletions` and `changedFiles` come from one `git diff --shortstat HEAD`: staged and
-  unstaged changes of tracked files in the whole repository. Untracked files are not counted.
-- Git runs without a shell or prompts and is stopped after 3 seconds. When it is not installed,
-  fails (for example in a repository without a commit) or is stopped, the answer is still `ok` with
-  the branch and the three counts unset.
-- An answer is reused for 5 seconds per project folder, and the host runs one git process at a time.
+- `insertions`, `deletions` and `changedFiles` are the totals of the list `projectGit.changes` returns
+  for the comparison with `HEAD`: staged and unstaged changes of tracked files in the whole repository,
+  and the files git neither tracks nor ignores.
+- Git runs without a shell or prompts and is stopped after 10 seconds. When it is not installed, fails
+  or is stopped, the answer is still `ok` with the branch and the three counts unset.
+- The composer asks every two seconds while it is on screen. A list is reused for four times as long as
+  git took to produce it, at least one second and at most thirty, so a slow repository is not read all
+  the time; a failure is reused for five seconds. One list is read at a time.
+
+`projectGit.changes` lists the changed files of that repository. `comparison` chooses what is compared:
+
+- `head` (the default): the work tree against the last commit. It is one
+  `git diff --raw --numstat -z -M HEAD` (against the empty tree in a repository without a commit) and one
+  `git ls-files --others --exclude-standard -z`, run together. The lines of an untracked file are counted
+  by reading it, once per content (length and last write time), for files up to 2 MB and up to 500 new
+  files per list.
+- `branch`: the work tree against the commit the branch left its base at (`git merge-base`), so the
+  commits of the branch are included. The base is the upstream of the branch, or `origin/main`,
+  `origin/master`, `main` or `master` when it has none; it is looked up at most every ten seconds. The
+  answer always names it (`baseReference`, `baseAhead`), and a branch without a base or without a commit
+  of its own is answered as `head`.
+- `commit` with the full id of a commit in `commit`: that commit against its first parent (against the
+  empty tree for a first commit). Its list is kept ten minutes.
+
+Each file has its path relative to the work tree (`root`), the path it had before a rename, a status
+(`modified`, `added`, `deleted`, `renamed`, `copied`, `conflicted`, `untracked`), its added and removed
+lines (unset for a binary file) and a `revision` that changes when one of its two contents does. The
+answer has a `revision` of its own: a page that sends it back as `knownRevision` gets `unchanged` and
+nothing else. `prefix` is the project folder inside the work tree, which is how the page knows the
+project-relative path of a file. A list holds at most 3000 files and 4 MB of git output; `truncated`
+says that there were more.
+
+`projectGit.file` returns both contents of one file of that list, as text: the one of the commit
+(`git cat-file blob` of the object the list named) and the one of the work tree, or of the commit for
+the comparison `commit`. A side is `text`, `absent`, `binary`, `too_large` (more than 1 MB) or
+`unreadable`. Only a path of the current list is read (`not_changed` otherwise), a link is never
+followed, and UTF-16 with a byte order mark is decoded.
+
+`projectGit.commits` returns the newest commits of the current branch (id, short id, author, date,
+subject), 20 by default and at most 200, with `more` when older ones exist; it has the same
+`knownRevision` answer. `projectGit.watch` is the channel through which `alta diff show` reaches the page.
 
 `promptImages.read` returns one image of a persisted user message as base64 with its media type. It
 takes the host epoch, a session id, the journal offset of the message (the `offset` of its history
@@ -1218,6 +1294,7 @@ shortcuts**, a filterable window listing the same commands by category.
 | `Ctrl+Q` | Exit (`/exit`); works from any window |
 | `Ctrl+O` | Open project |
 | `Ctrl+E`, `Ctrl+S` in a file tab | Open a project file in an editor tab (`/edit`), save the file |
+| `Alt+Up`, `Alt+Down` in a Changes tab | Go to the previous or next change of the shown file |
 | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+PageUp` / `Ctrl+PageDown`) | Previous / next tab |
 | `Ctrl+W`, `Ctrl+Shift+T` | Close tab, reopen the last closed tab |
 | `Enter`, `Ctrl+Enter`, `Shift+Enter` | Send (queued while a turn runs), steer the running turn, new line |
