@@ -288,9 +288,12 @@ a preference of the window: nothing is written to the project or to the catalog.
 
 A row also has an icon for the changes of its project and one for its code editor. These three icons
 and the **…** button take no room until the pointer or the keyboard is on the row; the icon of an open
-Changes tab or code editor stays visible and tinted. Icons have the color of what they stand for: a
-project is a folder, open or closed (an archive box once archived), a session a robot head, a session
-started by another one an arrow under its parent, and the global sessions a house.
+Changes tab or code editor stays visible and tinted. A row that shows such an icon keeps the room of its
+other buttons while they are hidden: the icon is in the same place with the pointer on the row or away
+from it. A row that shows none gives its whole width to the name. `explorer/projectRowButtons.browser.test.ts`
+lays the rows out in a browser and checks where the buttons are in both cases. Icons have the color of
+what they stand for: a project is a folder, open or closed (an archive box once archived), a session a
+robot head, a session started by another one an arrow under its parent, and the global sessions a house.
 **Rename project…** and a session's **Rename…** open a small popover beside the row, with the current
 name selected: Enter or **Rename** saves it; Escape, **Cancel** or a click elsewhere leaves the name
 as it is. A rename that is refused says why under the field.

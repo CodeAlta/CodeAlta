@@ -32,6 +32,11 @@
 @media (hover: none) {
   .ide-shell .project-row-action, .ide-shell .project-action-row > .project-actions-trigger { display: inline-flex; }
 }
+/* A row that shows the icon of an open tab keeps the room of its other buttons and of its menu: the icon is where the pointer finds it. */
+@media (hover: hover) {
+  .ide-shell .project-action-row:has(> .project-row-action[data-open="true"]):not(:hover, :focus-within) > .project-row-action:not([data-open="true"]),
+  .ide-shell .project-action-row:has(> .project-row-action[data-open="true"]):not(:hover, :focus-within) > .project-actions-trigger:not([aria-expanded="true"]) { display: inline-flex; visibility: hidden; }
+}
 
 /* The global sessions stay at the foot of the projects; open, they scroll in what they are given. */
 .ide-shell .project-root-list { max-height: 45%; overflow-x: hidden; overflow-y: auto; }
