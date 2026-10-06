@@ -6,10 +6,26 @@ import "monaco-editor/features/linesOperations/register.js";
 import "monaco-editor/features/find/register.js";
 import "monaco-editor/features/contextmenu/register.js";
 import "monaco-editor/features/tokenization/register.js";
+// What a code editor needs beyond typing: going to a line, folding, matching brackets, several carets, comments,
+// indentation, the other places a word is used, links, and suggestions when asked for. Every editor of the page
+// gets them: the small ones (the prompt, a configuration) turn off what would show in them.
+import "monaco-editor/features/gotoLine/register.js";
+import "monaco-editor/features/folding/register.js";
+import "monaco-editor/features/bracketMatching/register.js";
+import "monaco-editor/features/multicursor/register.js";
+import "monaco-editor/features/comment/register.js";
+import "monaco-editor/features/indentation/register.js";
+import "monaco-editor/features/wordHighlighter/register.js";
+import "monaco-editor/features/smartSelect/register.js";
+import "monaco-editor/features/caretOperations/register.js";
+import "monaco-editor/features/cursorUndo/register.js";
+import "monaco-editor/features/lineSelection/register.js";
+import "monaco-editor/features/links/register.js";
+import "monaco-editor/features/suggest/register.js";
 // The icon font of the editor's own widgets: the marks of a diff, the arrows of the find box.
 import "monaco-editor/features/codicon/register.js";
 import EditorWorker from "monaco-editor/editor/editor.worker.js?worker";
-import { shellColor } from "./shellColors";
+import { shellColor } from "../shellColors";
 
 // Vite emits a same-origin worker: no CDN, inline script, eval or blob CSP exception.
 globalThis.MonacoEnvironment = Object.freeze({ getWorker: () => new EditorWorker() });
@@ -55,6 +71,17 @@ function applyShellTheme() {
   set("diffEditor.unchangedCodeBackground", color("--text"), "0a");
   set("editorWidget.background", color("--panel-2"));
   set("editorWidget.border", color("--text"), "33");
+  set("quickInput.background", color("--panel-2"));
+  set("quickInput.foreground", color("--text"));
+  set("quickInputList.focusBackground", color("--accent"), "40");
+  set("editorSuggestWidget.background", color("--panel-2"));
+  set("editorSuggestWidget.selectedBackground", color("--accent"), "40");
+  set("editorBracketMatch.background", color("--accent"), "26");
+  set("editorBracketMatch.border", color("--accent"), "80");
+  set("editor.wordHighlightBackground", color("--text"), "1f");
+  set("editor.findMatchBackground", color("--accent"), "73");
+  set("editor.findMatchHighlightBackground", color("--accent"), "38");
+  set("minimap.background", color("--panel"));
   set("input.background", color("--bg"));
   set("scrollbarSlider.background", color("--text"), "26");
   set("scrollbarSlider.hoverBackground", color("--text"), "40");

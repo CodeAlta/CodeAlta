@@ -192,7 +192,8 @@ Both apps use the same shortcuts and slash commands unless noted.
 | Help / command discovery | `F1`, `/help`, or `?` |
 | Command palette | `Ctrl+P` or `/` |
 | Open project | `Ctrl+O` or `/open` |
-| Open file editor | `Ctrl+E` or `/edit` |
+| Open a file in the editor | `Ctrl+E` or `/edit` |
+| Open the code editor of the project (desktop) | `Ctrl+E` `Ctrl+E` or `/editor` |
 | Open full prompt editor | `F6` |
 | Choose agent, model and reasoning | `/model` |
 | Open model providers | `Ctrl+G Ctrl+R` or `/model_providers` |

@@ -1,0 +1,160 @@
+/* The code editor of a project: its side (the files, the search), the tabs of its open files, what is shown of the
+   file in front, and the status bar. */
+.project-editor { container-type: inline-size; display: flex; height: 100%; min-width: 0; min-height: 0; background: var(--bg); outline: none; }
+
+/* The side */
+.editor-side { flex: none; display: flex; flex-direction: column; min-width: 0; max-width: 72%; background: var(--panel); }
+.editor-side-views { flex: none; display: flex; align-items: stretch; height: 34px; border-bottom: 1px solid var(--line); }
+.editor-side-views > .bp6-button { align-self: center; margin-inline: 2px 4px; }
+.editor-side-view { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; padding: 0 8px; border: 0; border-radius: 0; background: transparent;
+  box-shadow: none; color: var(--muted); font-size: 12px; white-space: nowrap; cursor: pointer; }
+.editor-side-view > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.editor-side-view:hover { background: color-mix(in srgb, var(--panel-2) 55%, transparent); color: var(--text); }
+.editor-side-view[aria-selected="true"] { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+.editor-side-header { flex: none; display: flex; align-items: center; gap: 4px; min-height: 30px; padding: 3px 4px 0 12px; }
+.editor-side-title { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .05em;
+  text-transform: uppercase; }
+.editor-side-actions { flex: none; display: inline-flex; color: var(--muted); }
+.editor-side-empty.bp6-non-ideal-state { flex: 1 1 auto; min-height: 0; padding: 16px; }
+.editor-side-splitter { flex: none; width: 7px; margin-inline: -3px; border-inline: 3px solid transparent; background: var(--line); background-clip: padding-box; cursor: col-resize; z-index: 2; touch-action: none; }
+.editor-side-splitter:hover, .editor-side-splitter:active { background: var(--accent); background-clip: padding-box; }
+
+/* The files */
+.editor-tree { flex: 1 1 auto; min-height: 0; overflow: auto; padding-top: 4px; outline: none; font-size: 12.5px; }
+.editor-tree-row { position: relative; display: flex; align-items: center; gap: 5px; height: 24px; padding-right: 8px; color: var(--text); white-space: nowrap; cursor: pointer; user-select: none;
+  /* One line for each folder above the row, under the arrow of that folder. */
+  background-image: repeating-linear-gradient(to right, color-mix(in srgb, var(--text) 11%, transparent) 0 1px, transparent 1px 12px);
+  background-repeat: no-repeat; background-position: 12px 0; background-size: calc(var(--depth) * 12px) 100%; }
+.editor-tree-row:hover { background-color: color-mix(in srgb, var(--panel-2) 80%, transparent); }
+.editor-tree-row[aria-selected="true"] { background-color: color-mix(in srgb, var(--accent) 16%, transparent); }
+.editor-tree:focus-visible .editor-tree-row[aria-selected="true"] { background-color: color-mix(in srgb, var(--accent) 30%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 70%, transparent); }
+.editor-tree-row[data-active="true"] .editor-tree-name { font-weight: 600; }
+.editor-tree-row[data-ignored="true"] > * { opacity: .5; }
+.editor-tree-row[data-over] { background-color: color-mix(in srgb, var(--accent) 24%, transparent); box-shadow: inset 0 0 0 1px var(--accent); }
+.editor-tree-twist { flex: none; display: inline-grid; place-items: center; width: 14px; height: 14px; color: var(--muted); }
+.editor-tree-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.editor-tree-git { flex: none; width: 14px; font: 600 10.5px/1 "Cascadia Code", "SFMono-Regular", Consolas, monospace; text-align: center; }
+.editor-tree-changed { flex: none; width: 6px; height: 6px; margin: 0 4px; border-radius: 50%; background: var(--yellow); opacity: .75; }
+.editor-tree-row[data-git="modified"] :is(.editor-tree-name, .editor-tree-git), .editor-tree-row[data-git="renamed"] :is(.editor-tree-name, .editor-tree-git),
+.editor-tree-row[data-git="copied"] :is(.editor-tree-name, .editor-tree-git) { color: var(--yellow); }
+.editor-tree-row[data-git="added"] :is(.editor-tree-name, .editor-tree-git), .editor-tree-row[data-git="untracked"] :is(.editor-tree-name, .editor-tree-git) { color: var(--green); }
+.editor-tree-row[data-git="conflicted"] :is(.editor-tree-name, .editor-tree-git) { color: var(--red); }
+.editor-tree-input { cursor: default; }
+.editor-tree-input input { flex: 1 1 auto; min-width: 0; height: 20px; padding: 0 5px; border: 1px solid var(--accent); border-radius: 3px; background: var(--bg); color: var(--text); font: inherit; outline: none; }
+.editor-tree-input[data-invalid="true"] input { border-color: var(--red); }
+.editor-tree-problem { position: absolute; left: calc(44px + var(--depth) * 12px); right: 8px; top: 23px; z-index: 5; padding: 4px 7px; border: 1px solid var(--red); border-radius: 0 0 4px 4px;
+  background: color-mix(in srgb, var(--red) 16%, var(--panel)); font-size: 11.5px; line-height: 1.35; white-space: normal; }
+.editor-tree-note { padding-left: calc(26px + var(--depth) * 12px) !important; color: var(--muted); font-size: 11.5px; font-style: italic; cursor: default; }
+.editor-tree-note:hover { background-color: transparent; }
+
+/* The search */
+.editor-search { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.editor-search-form { flex: none; display: flex; align-items: center; gap: 2px; padding: 7px 4px 4px 8px; }
+.editor-search-query.bp6-input-group { flex: 1 1 auto; min-width: 0; }
+.editor-search-toggles { display: inline-flex; height: 100%; align-items: center; padding-right: 1px; }
+.editor-search-toggle.bp6-button { min-width: 22px; min-height: 22px; padding: 0 2px; }
+.editor-search-globs { flex: none; display: grid; gap: 5px; padding: 2px 8px 6px; }
+.editor-search-globs label { display: grid; gap: 2px; color: var(--muted); font-size: 11px; }
+.editor-search-summary { flex: none; display: flex; align-items: center; gap: 6px; margin: 0; padding: 3px 12px 5px; color: var(--muted); font-size: 11.5px; }
+.editor-search-summary[data-state="failed"] { color: var(--red); }
+.editor-search-more { padding-top: 0; font-style: italic; }
+.editor-search-results { flex: 1 1 auto; min-height: 0; overflow: auto; outline: none; font-size: 12.5px; }
+.editor-search-row { display: flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px 0 6px; white-space: nowrap; cursor: pointer; user-select: none; }
+.editor-search-row:hover { background: color-mix(in srgb, var(--panel-2) 80%, transparent); }
+.editor-search-row[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.editor-search-results:focus-visible .editor-search-row[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+.editor-search-file > svg:first-child { flex: none; color: var(--muted); }
+.editor-search-name { flex: 1 1 auto; display: flex; align-items: baseline; gap: 7px; min-width: 0; overflow: hidden; }
+.editor-search-name strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.editor-search-name small { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 11px; }
+.editor-search-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--panel-2); color: var(--muted); font-size: 10.5px; line-height: 16px; text-align: center; }
+.editor-search-match { padding-left: 25px; }
+.editor-search-line { flex: none; min-width: 3ch; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
+.editor-search-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; color: color-mix(in srgb, var(--text) 78%, var(--muted));
+  font-size: 12px; tab-size: 2; }
+.editor-search-text mark { border-radius: 2px; background: color-mix(in srgb, var(--yellow) 42%, transparent); color: var(--text); }
+
+/* The open files */
+.editor-main { flex: 1 1 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.editor-tabs { flex: none; display: flex; align-items: stretch; height: 34px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.editor-side-toggle.bp6-button { flex: none; align-self: center; margin: 0 3px 0 5px; }
+.editor-tab-strip { position: relative; flex: 1 1 0; display: flex; min-width: 0; overflow: auto hidden; scrollbar-width: none; }
+.editor-tab-strip::-webkit-scrollbar { display: none; }
+.editor-tab { position: relative; flex: none; display: flex; align-items: center; gap: 6px; max-width: 260px; padding: 0 5px 0 10px; border-right: 1px solid var(--line); color: var(--muted);
+  font-size: 12.5px; white-space: nowrap; cursor: pointer; user-select: none; }
+.editor-tab:first-child { border-left: 1px solid var(--line); }
+.editor-tab:hover { background: color-mix(in srgb, var(--panel-2) 55%, transparent); color: var(--text); }
+.editor-tab[aria-selected="true"] { height: 34px; background: var(--bg); color: var(--text); box-shadow: inset 0 2px 0 var(--accent); }
+.editor-tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.editor-tab[data-preview="true"] .editor-tab-name { font-style: italic; }
+.editor-tab[data-missing="true"] .editor-tab-name { text-decoration: line-through; }
+.editor-tab-folder { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 11px; }
+.editor-tab-close { flex: none; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.editor-tab-close:hover { background: color-mix(in srgb, var(--text) 14%, transparent); }
+.editor-tab-close > svg { opacity: 0; }
+.editor-tab:hover .editor-tab-close > svg, .editor-tab[aria-selected="true"] .editor-tab-close > svg { opacity: .8; }
+.editor-tab-dot { display: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.editor-tab[data-dirty="true"] .editor-tab-dot { display: block; }
+.editor-tab[data-dirty="true"] .editor-tab-close > svg { display: none; }
+.editor-tab[data-dirty="true"] .editor-tab-close:hover .editor-tab-dot { display: none; }
+.editor-tab[data-dirty="true"] .editor-tab-close:hover > svg { display: block; opacity: 1; }
+.editor-tab[data-drop]::before { content: ""; position: absolute; top: 5px; bottom: 5px; left: -1px; width: 2px; background: var(--accent); }
+.editor-tab[data-drop="after"]::before { left: auto; right: -1px; }
+.editor-tab-actions { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 0 5px; border-left: 1px solid var(--line); }
+
+/* What is shown of the file in front */
+.editor-stage { position: relative; flex: 1 1 auto; display: flex; min-height: 0; }
+.editor-stage > * { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; }
+/* The text editor keeps the whole stage, also while something else is shown over it. */
+.editor-stage > .editor-surface { position: absolute; inset: 0; height: auto; }
+.editor-surface[data-hidden="true"] { visibility: hidden; pointer-events: none; }
+.editor-empty.bp6-non-ideal-state { overflow: auto; }
+.editor-empty > .bp6-non-ideal-state-visual { color: color-mix(in srgb, var(--accent) 70%, var(--muted)); }
+.editor-empty-keys { display: grid; gap: 7px; width: max-content; max-width: 100%; margin-inline: auto; color: var(--muted); font-size: 12.5px; text-align: start; }
+.editor-empty-keys > span { display: flex; align-items: center; gap: 12px; }
+.editor-empty-keys kbd { flex: none; min-width: 104px; padding: 2px 7px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--panel); color: var(--text);
+  font: 11.5px/1.5 "Cascadia Code", "SFMono-Regular", Consolas, monospace; text-align: center; }
+.editor-empty-actions { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.editor-markdown { overflow: auto; padding: 18px clamp(16px, 6%, 64px) 48px; }
+.editor-markdown > .markdown-content { max-width: 880px; margin-inline: auto; }
+
+/* A picture */
+.editor-image { position: relative; display: flex; }
+.editor-image-view { --checker: color-mix(in srgb, var(--text) 6%, transparent); position: relative; flex: 1 1 auto; display: grid; place-items: center; min-width: 0; min-height: 0; padding: 16px; overflow: auto; outline: none;
+  background-color: var(--bg);
+  background-image: linear-gradient(45deg, var(--checker) 25%, transparent 25%, transparent 75%, var(--checker) 75%), linear-gradient(45deg, var(--checker) 25%, transparent 25%, transparent 75%, var(--checker) 75%);
+  background-position: 0 0, 8px 8px; background-size: 16px 16px; }
+.editor-image-view img { display: block; max-width: none; box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 14%, transparent); }
+.editor-image-view img[data-pixels="true"] { image-rendering: pixelated; }
+.editor-image[data-fit="true"] .editor-image-view { overflow: hidden; }
+.editor-image[data-fit="true"] img { position: absolute; inset: 16px; width: calc(100% - 32px); height: calc(100% - 32px); object-fit: scale-down; box-shadow: none; }
+.editor-image[data-fit="true"][data-vector="true"] img { object-fit: contain; }
+.editor-image-failed { display: grid; justify-items: center; gap: 8px; margin: 0; color: var(--muted); font-size: 12.5px; }
+.editor-image-tools { position: absolute; right: 14px; bottom: 12px; display: inline-flex; align-items: center; gap: 1px; padding: 2px; border: 1px solid var(--line); border-radius: 7px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent); box-shadow: 0 4px 14px rgb(0 0 0 / .22); }
+.editor-image-zoom.bp6-button { min-width: 50px; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+
+/* The status bar */
+.editor-status { flex: none; display: flex; align-items: center; gap: 2px; min-height: 26px; padding: 0 6px 0 12px; border-top: 1px solid var(--line); background: var(--panel); color: var(--muted);
+  font-size: 12px; white-space: nowrap; overflow: hidden; }
+.editor-status .file-editor-status { margin-right: 10px; }
+.editor-status-path { display: inline-flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; margin-right: 6px; }
+.editor-status-path > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.editor-status-item { flex: none; padding: 2px 7px; border: 0; border-radius: 4px; background: transparent; color: inherit; font: inherit; font-variant-numeric: tabular-nums; }
+button.editor-status-item { cursor: pointer; }
+button.editor-status-item:hover { background: var(--panel-2); color: var(--text); }
+.editor-status .bp6-button { flex: none; min-height: 22px; margin-left: 4px; font-size: 12px; }
+
+/* In a pane too narrow for both, the side and the file take turns. */
+.project-editor[data-narrow="true"]:not([data-side="none"]) :is(.editor-main, .editor-side-splitter) { display: none; }
+.project-editor[data-narrow="true"] .editor-side { flex: 1 1 auto; width: auto !important; max-width: none; }
+@container (max-width: 760px) { .editor-status-item:not(button):nth-of-type(n + 3) { display: none; } }
+@container (max-width: 520px) { .editor-status-path { visibility: hidden; } .editor-tab { max-width: 170px; } }
+
+/* The editor of a project, from its row in the projects */
+.ide-shell .project-editor-trigger { position: relative; flex: 0 0 24px; width: 24px; min-height: 24px; height: 24px; padding: 0; justify-content: center; opacity: 0; color: var(--muted); }
+.ide-shell .project-action-row:hover > .project-editor-trigger, .ide-shell .project-action-row:focus-within > .project-editor-trigger,
+.ide-shell .project-editor-trigger[data-open="true"] { opacity: 1; }
+.ide-shell .project-editor-trigger:hover { color: var(--text); }
+.ide-shell .project-editor-trigger[data-open="true"] { color: var(--accent); }
+.ide-shell .project-editor-trigger[data-unsaved="true"]::after { content: ""; position: absolute; top: 3px; right: 2px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }

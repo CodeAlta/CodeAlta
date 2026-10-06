@@ -1,5 +1,5 @@
 import type { ProjectFileReadResponse, ProjectFileWriteResponse } from "#neoastra";
-import type { MessageKey } from "./localization";
+import type { MessageKey } from "../localization";
 
 /** What the editor last read or wrote: the text, the revision a save must still match, and the text with `\n` line ends. */
 export type FileBaseline = Readonly<{ content: string; revision: string; lines: string }>;

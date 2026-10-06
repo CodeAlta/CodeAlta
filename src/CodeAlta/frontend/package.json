@@ -8,7 +8,7 @@
     "demo": "vite --mode demo --host 127.0.0.1 --strictPort --open",
     "build": "tsc --noEmit && vite build",
     "build:demo": "tsc --noEmit && vite build --mode demo",
-    "test": "tsx --test src/*.test.ts src/*.test.tsx"
+    "test": "tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\""
   },
   "dependencies": {
     "@blueprintjs/core": "6.21.0",

@@ -6,7 +6,7 @@ import { PluginHtml } from "./PluginHtml";
 import { AppIcon } from "./AppIcon";
 import { useShellLanguage } from "./shellLanguage";
 import { CodePreview } from "./CodePreview";
-import { DiffPreview } from "./DiffPreview";
+import { DiffPreview } from "./changes/DiffPreview";
 import { isDialogBackdrop } from "./dialogBackdrop";
 
 // Immutable supplied presentation only: opening this dialog grants no RPC or mutation authority.

@@ -35,7 +35,8 @@ export function CodeEditor({ value, onChange, language, label, readOnly = false,
     const instance = monaco.editor.create(node, { model, automaticLayout: true, ariaLabel: label, readOnly,
       fontFamily: getComputedStyle(node).fontFamily, fontSize: 13, lineHeight: 20, minimap: { enabled: false },
       scrollBeyondLastLine: false, wordWrap: wrap ? "on" : "off", renderLineHighlight: "line", stickyScroll: { enabled: false },
-      padding: { top: 8, bottom: 8 }, quickSuggestions: false, suggestOnTriggerCharacters: false, links: false, tabSize: 2 });
+      padding: { top: 8, bottom: 8 }, quickSuggestions: false, suggestOnTriggerCharacters: false, links: false, tabSize: 2,
+      folding: false, occurrencesHighlight: "off", matchBrackets: "never" });
     editor.current = instance;
     if (handle) handle.current = { focus: () => instance.focus(), reveal: (line, column) => {
       const lineNumber = Math.min(Math.max(line, 1), model.getLineCount());

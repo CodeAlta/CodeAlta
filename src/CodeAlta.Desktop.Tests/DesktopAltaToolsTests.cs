@@ -109,6 +109,73 @@ public sealed class DesktopAltaToolsTests
         }
     }
 
+    [TestMethod]
+    public async Task EditorOpen_ExistsOnlyWhereAWindowHasACodeEditor()
+    {
+        // The terminal host registers no view: the command is not part of its tool, in its help or its policies.
+        var plain = Dispatcher(new Notes());
+        Assert.AreEqual(AltaExitCodes.Usage, (await plain.InvokeAsync(["editor", "open"])).ExitCode);
+        Assert.IsFalse((await plain.InvokeAsync(["--help"])).Stdout.Contains("editor", StringComparison.Ordinal));
+        Assert.IsFalse((await plain.InvokeAsync(["tool", "list"])).Stdout.Contains("editor open", StringComparison.Ordinal));
+
+        var root = Directory.CreateTempSubdirectory("codealta-alta-editor-").FullName;
+        try
+        {
+            var projects = new ProjectCatalog(new CatalogOptions { GlobalRoot = Directory.CreateDirectory(Path.Combine(root, "global")).FullName });
+            var project = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "app")).FullName);
+            var other = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "other")).FullName);
+            Directory.CreateDirectory(Path.Combine(project.ProjectPath, "src"));
+            File.WriteAllText(Path.Combine(project.ProjectPath, "src", "app.ts"), "x");
+            File.WriteAllText(Path.Combine(root, "outside.txt"), "x");
+            var view = new DesktopEditorView();
+            var services = new AltaServiceCollection().Add(projects).Add<IAltaEditorView>(view);
+            var registry = new AltaCommandRegistry();
+            var desktop = new AltaCommandDispatcher(registry, services);
+            services.Add(registry).Add(desktop);
+            var session = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "s", SourceProjectId = project.Id };
+            StringAssert.Contains((await desktop.InvokeAsync(["--help"])).Stdout, "editor");
+            StringAssert.Contains((await desktop.InvokeAsync(["tool", "list"])).Stdout, "editor open");
+            // The changes view is another service: its command is not there without it.
+            Assert.IsFalse((await desktop.InvokeAsync(["tool", "list"])).Stdout.Contains("diff show", StringComparison.Ordinal));
+
+            // No window listens: the command says so instead of pretending.
+            var unseen = await desktop.InvokeAsync(["editor", "open"], caller: session);
+            Assert.AreEqual(AltaExitCodes.ServiceUnavailable, unseen.ExitCode);
+            StringAssert.Contains(unseen.Stdout + unseen.Stderr, "view.unavailable");
+
+            var opened = new List<ProjectFileShowEvent>();
+            using var watching = view.Watch(opened.Add);
+            // The project of the calling session by default; a file by its path in the project or by a full path inside it.
+            var own = await desktop.InvokeAsync(["editor", "open", "--file", "src\\app.ts", "--line", "12", "--column", "3"], caller: session);
+            Assert.AreEqual(AltaExitCodes.Success, own.ExitCode, own.Stdout + own.Stderr);
+            StringAssert.Contains(own.Stdout, "alta.editor.opened");
+            Assert.AreEqual(AltaExitCodes.Success, (await desktop.InvokeAsync(["editor", "open", "--file", Path.Combine(project.ProjectPath, "src", "app.ts")], caller: session)).ExitCode);
+            Assert.AreEqual(AltaExitCodes.Success, (await desktop.InvokeAsync(["editor", "open", "--project", other.Slug], caller: session)).ExitCode);
+            Assert.AreEqual(AltaExitCodes.Success, (await desktop.InvokeAsync(["editor", "open"], caller: AltaCallerIdentity.Cli, cwd: project.ProjectPath)).ExitCode);
+            CollectionAssert.AreEqual(new ProjectFileShowEvent[] { new(project.Id, "src/app.ts", 12, 3), new(project.Id, "src/app.ts", null, null),
+                new(other.Id, null, null, null), new(project.Id, null, null, null) }, opened);
+
+            // Nothing is opened for a project that is not one, for a file that is not in the folder, or for a position that is not one.
+            Assert.AreEqual(AltaExitCodes.NotFound, (await desktop.InvokeAsync(["editor", "open", "--project", "missing"], caller: session)).ExitCode);
+            Assert.AreEqual(AltaExitCodes.NotFound, (await desktop.InvokeAsync(["editor", "open", "--file", "src/none.ts"], caller: session)).ExitCode);
+            Assert.AreEqual(AltaExitCodes.NotFound, (await desktop.InvokeAsync(["editor", "open", "--file", "src"], caller: session)).ExitCode);
+            foreach (var file in new[] { "../outside.txt", Path.Combine(root, "outside.txt"), "a//b", "a/./b", project.ProjectPath })
+                Assert.AreEqual(AltaExitCodes.Usage, (await desktop.InvokeAsync(["editor", "open", "--file", file], caller: session)).ExitCode, file);
+            Assert.AreEqual(AltaExitCodes.Usage, (await desktop.InvokeAsync(["editor", "open", "--file", "src/app.ts", "--line", "0"], caller: session)).ExitCode);
+            Assert.AreEqual(AltaExitCodes.Usage, (await desktop.InvokeAsync(["editor", "open", "--file", "src/app.ts", "--line", "x"], caller: session)).ExitCode);
+            Assert.AreEqual(AltaExitCodes.Usage, (await desktop.InvokeAsync(["editor", "open", "--file", "src/app.ts", "--column", "2"], caller: session)).ExitCode);
+            Assert.AreEqual(AltaExitCodes.Usage, (await desktop.InvokeAsync(["editor", "open", "--line", "4"], caller: session)).ExitCode);
+            other.Archived = true;
+            await projects.SaveAsync(other);
+            Assert.AreEqual(AltaExitCodes.NotFound, (await desktop.InvokeAsync(["editor", "open", "--project", other.Id], caller: session)).ExitCode);
+            Assert.HasCount(4, opened);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static AltaCommandDispatcher Dispatcher(Notes notes)
     {
         var services = new AltaServiceCollection().Add<IAltaNotesService>(notes);

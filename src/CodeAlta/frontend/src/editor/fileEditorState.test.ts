@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { canSaveFile, fileConflictDismissed, fileEdited, fileLoaded, fileLoading, fileReadFailure, fileSaved, fileSaveUnknown, fileSaving, fileStatus,
   initialFileEditorState, maximumFileLength } from "./fileEditorState";
-import { messages } from "./localization";
+import { messages } from "../localization";
 
 const read = (content: string, readOnly = false) => fileLoaded({ status: "ok", content, revision: "r1", readOnly });
 

@@ -4,7 +4,7 @@ import type { FileChanges } from "./fileChanges";
 import { useShellLanguage } from "./shellLanguage";
 import { AppIcon } from "./AppIcon";
 import { isDialogBackdrop } from "./dialogBackdrop";
-import { DiffPreview } from "./DiffPreview";
+import { DiffPreview } from "./changes/DiffPreview";
 
 // Read-only disclosure: paths never become links, filesystem targets or RPC inputs.
 // The parent keys this subtree by the exact supplied record, not just byte offset.

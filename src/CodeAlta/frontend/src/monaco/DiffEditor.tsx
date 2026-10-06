@@ -34,7 +34,8 @@ export function DiffEditor({ documentKey, original, modified, language, label, s
       fontFamily: getComputedStyle(node).fontFamily, fontSize: 13, lineHeight: 20, minimap: { enabled: false }, scrollBeyondLastLine: false,
       stickyScroll: { enabled: false }, renderOverviewRuler: true, renderIndicators: true, renderMarginRevertIcon: false, renderGutterMenu: false,
       useInlineViewWhenSpaceIsLimited: true, renderSideBySideInlineBreakpoint: 780, diffAlgorithm: "advanced", lineNumbersMinChars: 4,
-      glyphMargin: false, folding: false, links: false, padding: { top: 6, bottom: 6 }, renderLineHighlight: "none", scrollbar: { useShadows: false } });
+      glyphMargin: false, folding: false, links: false, padding: { top: 6, bottom: 6 }, renderLineHighlight: "none", scrollbar: { useShadows: false },
+      occurrencesHighlight: "off", matchBrackets: "never" });
     editor.current = instance;
     if (handle) handle.current = { focus: () => instance.getModifiedEditor().focus(), go: target => { instance.goToDiff(target); report(); } };
     const report = () => {

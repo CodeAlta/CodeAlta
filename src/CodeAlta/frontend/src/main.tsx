@@ -15,7 +15,7 @@ import { showToast } from "./appToaster";
 import { availableUpdate, installedNotice, UpdateNotice } from "./UpdateNotice";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
-  sessionAsks, sessionNotes, sessionPluginEvents, projectGit, promptImages, composerStatus, pluginUi, sessionUserInput, type BootStatus,
+  sessionAsks, sessionNotes, sessionPluginEvents, projectFiles, projectGit, promptImages, composerStatus, pluginUi, sessionUserInput, type BootStatus,
   type ReminderListRequest,
   type ReminderListResponse,
   type ReminderDetailRequest,
@@ -36,11 +36,13 @@ import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./
 import { createProjectArchive } from "./projectArchive";
 import { browserActivation } from "./sessionBrowser";
 import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, changesTab, closeFileTab, cycleTab, emptyFileTabs, fileTabKey, isChangesTab, fileTabName, fileTabsKey, openFileTab, persistFileTabs, reconcileFileTabs, reopenTabKind, restoreFileTabs, sameFileTab, type FileTab, type TabKind, type TabPosition } from "./fileTabs";
-import { createFileEditors } from "./fileEditors";
-import { OpenFileDialog } from "./OpenFileDialog";
-import { ProjectFileEditor, UnsavedExitDialog, UnsavedFileDialog } from "./ProjectFileEditor";
-import { ProjectChangesPanel } from "./ProjectChangesPanel";
+import { activateFileTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isChangesTab, isEditorTab, fileTabsKey, openFileTab, persistFileTabs, reconcileFileTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, type FileTab, type TabKind, type TabPosition } from "./fileTabs";
+import { createFileEditors } from "./editor/fileEditors";
+import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
+import { OpenFileDialog } from "./editor/OpenFileDialog";
+import { ProjectEditor, type EditorRequest } from "./editor/ProjectEditor";
+import { UnsavedExitDialog, UnsavedFileDialog } from "./editor/UnsavedDialogs";
+import { ProjectChangesPanel } from "./changes/ProjectChangesPanel";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { ReadOnlyComposer } from "./ReadOnlyComposer";
 import { useLocalDraftImages } from "./useLocalDraftImages";
@@ -143,6 +145,7 @@ import "@blueprintjs/core/lib/css/blueprint.css";
 import "flexlayout-react/style/light.css";
 import "./colorSchemes.gen.css";
 import "./style.css";
+import "./editor/editor.css";
 
 type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; epoch: string | null;
   ready: () => boolean; navigate: (action: MessageNavigation) => void;
@@ -228,13 +231,20 @@ function App() {
   const [tabsReady, setTabsReady] = useState(false);
   // File editor tabs share the strip with the sessions. An active file is shown over the session selection,
   // which stays as it is; selecting a session, a project or the new-session tab leaves the file.
-  const [restoredFileTabs] = useState(() => restoreFileTabs(() => localStorage.getItem(fileTabsKey)));
+  const [restoredFileTabs] = useState(() => {
+    // The files that were tabs of their own before the editor had tabs: each project's editor opens its files.
+    adoptLegacyFiles(() => localStorage.getItem(editorStorageKey), value => localStorage.setItem(editorStorageKey, value),
+      restoreLegacyFiles(() => localStorage.getItem(fileTabsKey)));
+    return restoreFileTabs(() => localStorage.getItem(fileTabsKey));
+  });
   const [fileTabs, setFileTabs] = useState(emptyFileTabs);
   const [fileEditors] = useState(createFileEditors);
   useSyncExternalStore(fileEditors.subscribe, fileEditors.snapshot);
   const [fileClosing, setFileClosing] = useState<{ tab: FileTab; busy: boolean } | null>(null);
   // The file an `alta diff show` asked a changes tab to select, by project.
   const [changeRequests, setChangeRequests] = useState<ReadonlyMap<string, Readonly<{ path: string | null }>>>(() => new Map());
+  // What was last asked of each project's code editor: a file, a place in it, its files.
+  const [editorRequests, setEditorRequests] = useState<ReadonlyMap<string, EditorRequest>>(() => new Map());
   // The kinds of tab closed, oldest first: Reopen restores the most recent one.
   const closedTabKinds = useRef<TabKind[]>([]);
   // Scope-local text is App-owned even when storage is denied or workspace DOM is unmounted.
@@ -653,6 +663,28 @@ function App() {
     openFile(changesTab(project));
   }
   const showChangesLatest = useRef(showChanges); showChangesLatest.current = showChanges;
+  // Opens the code editor of a project in its tab: on a file, at a place in it, or with the files of the project.
+  function openEditor(project: Readonly<{ id: string; path: string }>, request: EditorRequest) {
+    setEditorRequests(current => new Map(current).set(project.id, request));
+    openFile(editorTab(project));
+  }
+  const openEditorLatest = useRef(openEditor); openEditorLatest.current = openEditor;
+  // An agent asks for the editor of a project with `alta editor open`.
+  useEffect(() => {
+    const epoch = status?.hostEpoch;
+    if (!epoch) return;
+    const abort = new AbortController();
+    void (async () => {
+      try {
+        for await (const request of await projectFiles.watch({ expectedEpoch: epoch }, { signal: abort.signal })) {
+          if (abort.signal.aborted) return;
+          const project = currentSnapshot.current?.projects.find(value => value.id === request.projectId && !value.archived);
+          if (project) openEditorLatest.current(project, { path: request.path, line: request.line, column: request.column, explorer: request.path === null ? true : null });
+        }
+      } catch { /* The bridge is gone: the editor still opens from the window. */ }
+    })();
+    return () => abort.abort();
+  }, [status?.hostEpoch]);
   const [showProjectChanges] = useState(() => (project: Readonly<{ id: string; path: string }>) => showChangesLatest.current(project));
   // An agent asks for the changes of a project with `alta diff show`.
   useEffect(() => {
@@ -673,6 +705,8 @@ function App() {
   function closeFile(tab: FileTab, discard = false) {
     if (!discard && fileEditors.dirty(fileTabKey(tab))) { activateFile(tab); setFileClosing({ tab, busy: false }); return; }
     setFileClosing(null);
+    // What was asked of a closed editor is not asked again when it is reopened.
+    if (isEditorTab(tab)) setEditorRequests(current => { const next = new Map(current); next.delete(tab.projectId); return next; });
     closedTabKinds.current = [...closedTabKinds.current, "file" as const].slice(-64);
     tabFocusPending.current = true;
     setFileTabs(state => closeFileTab(state, tab));
@@ -785,10 +819,21 @@ function App() {
     // A refused save keeps the tab: its editor shows why.
     if (saved) closeFile(tab, true); else setFileClosing(null);
   }
+  // The project a file is picked in: the one of the editor or the changes in front, else the selected project.
+  function editedProject() {
+    const tab = fileTabs.active;
+    const shown = tab && snapshot ? resolveFileTab(snapshot, tab) : undefined;
+    return owned ? shown ?? (selectedProject && !selectedProject.archived ? selectedProject : null) : null;
+  }
   function openFilePicker() {
-    if (dialog || paletteOpen || !owned || !selectedProject || selectedProject.archived || currentView.current !== "workspace"
+    if (dialog || paletteOpen || !editedProject() || currentView.current !== "workspace"
       || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
     setDialog("file");
+  }
+  // The code editor of a project with its files shown: `/editor`, the second Ctrl+E, the icon of a project.
+  function openProjectEditor(project: Readonly<{ id: string; path: string }> | null = editedProject()) {
+    if (!owned || !project || currentView.current !== "workspace") return;
+    openEditor(project, { path: null, line: null, column: null, explorer: true });
   }
   function captureTabLifetime() {
     const revision = browserRevision.current;
@@ -851,7 +896,8 @@ function App() {
     if (!snapshot || view !== "workspace" || settingsVisible.current) return;
     const valid = reconcileSessionTabs(tabs, snapshot);
     if (action === "closeTab") {
-      if (fileTabs.active) closeFile(fileTabs.active);
+      // In a code editor the tab that closes is the one of the file shown; the editor closes once it shows none.
+      if (fileTabs.active) { if (!isEditorTab(fileTabs.active) || !fileEditors.closeFile(fileTabKey(fileTabs.active))) closeFile(fileTabs.active); }
       else if (valid.active) {
         closedTabKinds.current = [...closedTabKinds.current, "session" as const].slice(-64);
         tabFocusPending.current = true; applyTabState(closeSessionTab(valid, valid.active));
@@ -901,7 +947,7 @@ function App() {
   function focusPromptSoon() {
     requestAnimationFrame(() => requestAnimationFrame(() => {
       if (currentView.current !== "workspace" || settingsVisible.current
-        || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') || document.querySelector(".file-editor[data-active='true']")) return;
+        || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') || document.querySelector(".project-editor[data-active='true']")) return;
       const prompt = document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt");
       if (prompt) prompt.focus();
       else document.querySelector<HTMLButtonElement>('.session-tabs [role="tab"][aria-selected="true"], .session-tabs > button')?.focus();
@@ -1116,7 +1162,7 @@ function App() {
       case "focusAskFile": return session && !!visibleAsk(".ask-file-review");
       case "closeTab": case "previousTab": case "nextTab": return tabs.open.length + fileTabs.open.length > 0;
       case "reopenTab": return tabs.closed.length + fileTabs.closed.length > 0;
-      case "editFile": return owned && view === "workspace" && !!selectedProject && !selectedProject.archived;
+      case "editFile": case "projectEditor": return view === "workspace" && !!editedProject();
       case "refreshStatuses": return owned && tabs.open.length > 0;
       case "newSession": return owned && !!snapshot && !selectedProject?.archived;
       case "renameProject": return owned && !!selectedProject && !selectedProject.archived;
@@ -1144,6 +1190,7 @@ function App() {
       case "palette": openPalette(); break;
       case "openProject": setDialog("project"); break;
       case "editFile": openFilePicker(); break;
+      case "projectEditor": openProjectEditor(); break;
       case "newSession": selectProject(projectId); requestAnimationFrame(() => document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt")?.focus()); break;
       case "focusSidebar": runShortcut("focusProjects"); break;
       case "focusAskFile": visibleAsk(".ask-file-review")?.dispatchEvent(new CustomEvent("codealta-ask-file-focus")); break;
@@ -1175,6 +1222,11 @@ function App() {
       // In an open ask Ctrl+N and Ctrl+P move between its questions and between the comments of its file.
       if (!commandChord.current && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && ["n", "p"].includes(event.key.toLowerCase())
         && target?.closest("[data-ask-keys]")) return;
+      // In the text of the code editor Ctrl+G goes to a line, as in the terminal UI's editor.
+      const editing = !!target?.closest("[data-editor-keys]");
+      // A list that renames its own rows (the files of the code editor) keeps F2.
+      if (!commandChord.current && event.key === "F2" && target?.closest("[data-rename-keys]")) return;
+      if (editing && !commandChord.current && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && event.key.toLowerCase() === "g") return;
       const focus = target?.closest("#session-prompt, #catalog-prompt") ? "prompt" : target?.closest(workspaceEditingSelector) ? "text" : "none";
       // "?" outside text opens help, as it does when typed into an empty prompt.
       const resolved = focus === "none" && !commandChord.current && event.key === "?" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.repeat
@@ -1186,6 +1238,8 @@ function App() {
       const plugin = resolved.command || resolved.chord ? null : resolvePluginKey(event, chorded, focus, pluginShortcuts.current.keys);
       if (plugin) { event.preventDefault(); event.stopPropagation(); pluginShortcuts.current.run(plugin.id); return; }
       if (!resolved.handled) return;
+      // A key whose command has nothing to act on now is the editor's: F3 goes to the next match of its search.
+      if (editing && resolved.command && !chorded && !commandAvailable(resolved.command)) return;
       event.preventDefault(); event.stopPropagation();
       if (resolved.command) runCommand(resolved.command);
     }
@@ -1293,7 +1347,7 @@ function App() {
   useLayoutEffect(() => {
     if (dialog === "reminders" && !remindersCurrent) setDialog(null);
   }, [dialog, remindersCurrent]);
-  const filePickerProject = owned && selectedProject && !selectedProject.archived ? selectedProject : null;
+  const filePickerProject = editedProject();
   useLayoutEffect(() => {
     if (dialog === "file" && !filePickerProject) setDialog(null);
   }, [dialog, filePickerProject]);
@@ -1864,7 +1918,9 @@ function App() {
                 || !!projectRenameTarget || projectArchive.locked || !!projectOpening.getSnapshot() }),
               open: selectProject, rename: () => void beginProjectRename(), archive: () => setDialog("archive"),
               sessions: { canCreate: scopeCanCreateSession, create: id => scopeSessionAction(id, "create"),
-                search: id => scopeSessionAction(id, "search"), browse: id => scopeSessionAction(id, "browse") } }} />}
+                search: id => scopeSessionAction(id, "search"), browse: id => scopeSessionAction(id, "browse") } }}
+            editor={owned ? { open: id => fileTabs.open.some(tab => isEditorTab(tab) && tab.projectId === id),
+              unsaved: project => fileEditors.dirty(fileTabKey(editorTab(project))), show: project => openProjectEditor(project) } : undefined} />}
           {projectArchive.records.length > 0 && <button type="button" className="quiet-button" onClick={() => setDialog("archive")}>{t("Archive operation evidence")}</button>}
           {projectRenameNotice && !projectRenaming && <p role="alert" className="notice error-text">{workflowNotice(language.locale, projectRenameNotice)}</p>}
           {projectRenameLocked && <button type="button" className="quiet-button" onClick={() => void refreshProjectRename()}>{t("Refresh project name (no retry)")}</button>}
@@ -2023,10 +2079,11 @@ function App() {
               ? <ProjectChangesPanel key={fileTabKey(tab)} tab={tab} epoch={!status ? undefined : owned ? status.hostEpoch : null}
                 projectName={snapshot?.projects.find(project => project.id === tab.projectId)?.name} request={changeRequests.get(tab.projectId)}
                 visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)}
-                onOpenFile={path => openFile({ projectId: tab.projectId, projectPath: tab.projectPath, path })} />
-              : <ProjectFileEditor key={fileTabKey(tab)} tab={tab} editors={fileEditors}
-              epoch={!status ? undefined : owned ? status.hostEpoch : null}
-              visible={visible} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)} />}>
+                onOpenFile={path => openEditor({ id: tab.projectId, path: tab.projectPath }, { path, line: null, column: null, explorer: null })} />
+              : <ProjectEditor key={fileTabKey(tab)} tab={tab} editors={fileEditors} request={editorRequests.get(tab.projectId)}
+              projectName={snapshot?.projects.find(project => project.id === tab.projectId)?.name} platform={shellPreferences?.platform ?? "windows"}
+              epoch={!status ? undefined : owned ? status.hostEpoch : null} onPickFile={openFilePicker}
+              visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)} />}>
           <div id="active-session-content" className="active-session-content">
           {error && <div className="banner banner-error" role="alert">{error}</div>}
           {draftHandoffNotice && <p role="status" className="notice">{draftHandoffNotice}</p>}
@@ -2135,13 +2192,15 @@ function App() {
     {dialog === "help" && <CommandHelp onClose={closeHelp} pluginCommands={pluginContributed.commands} />}
     {dialog === "file" && filePickerProject && <OpenFileDialog epoch={status!.hostEpoch!} project={filePickerProject}
       observe={value => mutation?.capability.observe(value)} onClose={() => setDialog(null)}
-      onOpen={path => { setDialog(null); openFile({ projectId: filePickerProject.id, projectPath: filePickerProject.path, path }); }} />}
-    {exiting && <UnsavedExitDialog names={exiting.tabs.map(fileTabName)} busy={exiting.busy}
+      // A file picked for a project whose editor is not open opens it on that file alone, without the files of the project.
+      onOpen={path => { setDialog(null); openEditor(filePickerProject, { path, line: null, column: null, explorer: false }); }}
+      onOpenEditor={() => { setDialog(null); openProjectEditor(filePickerProject); }} />}
+    {exiting && <UnsavedExitDialog names={exiting.tabs.flatMap(tab => fileEditors.unsaved(fileTabKey(tab)))} busy={exiting.busy}
       onSave={() => void saveAllAndExit(exiting.tabs)} onDiscard={() => { setExiting(null); quitApplication(); }}
       onCancel={() => { if (!exiting.busy) { setExiting(null); exitCanceled(); } }} />}
     {exitQuestionFor !== null && <RunningExitDialog runningSessions={exitQuestionFor} onCancel={() => { setExitQuestionFor(null); exitCanceled(); }}
       onExit={() => { setExitQuestionFor(null); quitApplication(true); }} />}
-    {fileClosing && <UnsavedFileDialog name={fileTabName(fileClosing.tab)} mode="close" busy={fileClosing.busy}
+    {fileClosing && <UnsavedFileDialog name={fileEditors.unsaved(fileTabKey(fileClosing.tab)).join(", ")} mode="close" busy={fileClosing.busy}
       onSave={() => void saveAndCloseFile(fileClosing.tab)} onDiscard={() => closeFile(fileClosing.tab, true)}
       onCancel={() => { if (!fileClosing.busy) setFileClosing(null); }} />}
     {dialog === "sessions" && browserCapture && <SessionBrowser snapshot={browserCapture.snapshot} projectId={browserCapture.projectId} observations={runtimeObservationControls()} recentCount={recentSessionCount} activeSessionId={sessionId} batch={batchDeleteControls()}

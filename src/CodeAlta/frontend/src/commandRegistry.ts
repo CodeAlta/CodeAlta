@@ -5,7 +5,7 @@ import type { MessageKey } from "./localization";
  * dispatcher. Names, labels and key gestures follow the terminal UI so both heads share one key map.
  */
 export type CommandId =
-  | "help" | "palette" | "openProject" | "editFile" | "about" | "skills" | "plugins" | "settings" | "prompts" | "nextPrompt"
+  | "help" | "palette" | "openProject" | "editFile" | "projectEditor" | "about" | "skills" | "plugins" | "settings" | "prompts" | "nextPrompt"
   | "providers" | "models" | "logs" | "mcp" | "config" | "focusSidebar" | "toggleNavigator" | "focusPrompt" | "focusAskFile" | "modelSelector"
   | "usage" | "sessionInfo" | "reminders" | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest"
   | "expandPrompt" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "clearQueue" | "compact"
@@ -37,7 +37,8 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "help", name: "help", label: "Help", description: "Show the commands and their shortcuts.", category: "General", keys: ["F1"], hints: ["?"], search: "? commands shortcuts keyboard" },
   { id: "palette", name: "command_palette", label: "Command Palette", description: "Search and run a command.", category: "General", keys: ["Ctrl+P"], hints: ["/"], search: "/ palette commands" },
   { id: "openProject", name: "open", label: "Open", description: "Open a project by name or folder.", category: "General", keys: ["Ctrl+O"], search: "project folder open_project open_folder" },
-  { id: "editFile", name: "edit", label: "Edit File", description: "Open a project file in an editor tab.", category: "General", keys: ["Ctrl+E"], search: "open_file open file editor view" },
+  { id: "editFile", name: "edit", label: "Edit File", description: "Open a project file in the code editor.", category: "General", keys: ["Ctrl+E"], search: "open_file open file editor view" },
+  { id: "projectEditor", name: "editor", label: "Project Editor", description: "Open the code editor of the project with its files.", category: "General", hints: ["Ctrl+E Ctrl+E"], search: "code editor files explorer tree folders project_editor" },
   { id: "newSession", name: "new_session", label: "New Session", description: "Start a new session in the selected project.", category: "General", search: "create session draft" },
   { id: "about", name: "about", label: "About", description: "Show the version of CodeAlta.", category: "General", keys: ["Ctrl+G Ctrl+A"] },
   { id: "exit", name: "exit", label: "Exit", description: "Close CodeAlta.", category: "General", keys: ["Ctrl+Q"], search: "quit close" },

@@ -1,7 +1,7 @@
 import { useImperativeHandle, useLayoutEffect, useRef, type ClipboardEventHandler, type KeyboardEventHandler, type Ref } from "react";
 import { Classes } from "@blueprintjs/core";
 import "monaco-editor/languages/definitions/markdown/register.js";
-import { followShellTheme, monaco } from "./monacoEnvironment";
+import { followShellTheme, monaco } from "./monaco/monacoEnvironment";
 
 
 export type PromptInput = Pick<HTMLTextAreaElement, "value" | "disabled" | "selectionStart" | "selectionEnd"
@@ -25,7 +25,7 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
       lineDecorationsWidth: 0, lineNumbersMinChars: 0, scrollBeyondLastLine: false, wordWrap: "on",
       overviewRulerLanes: 0, renderLineHighlight: "none", stickyScroll: { enabled: false },
       padding: { top: 8, bottom: 8 }, scrollbar: { alwaysConsumeMouseWheel: false },
-      quickSuggestions: false, suggestOnTriggerCharacters: false, tabFocusMode: true, links: false });
+      quickSuggestions: false, suggestOnTriggerCharacters: false, tabFocusMode: true, links: false, occurrencesHighlight: "off", matchBrackets: "never" });
     editor.current = instance;
     const unfollowTheme = followShellTheme();
 

@@ -5,7 +5,7 @@ import { useShellLanguage } from "./shellLanguage";
 import { ProjectRowActions, type ProjectRowAuthority } from "./ProjectRowActions";
 import { SessionTabMenu } from "./SessionTabMenu";
 
-export function ProjectRailRows({ projects, selectedId, onSelect, actions, children, activity, renaming }: {
+export function ProjectRailRows({ projects, selectedId, onSelect, actions, children, activity, renaming, editor }: {
   activity?: (projectId: string | null) => ReactNode;
   projects: WorkspaceProject[];
   selectedId: string | null;
@@ -16,6 +16,8 @@ export function ProjectRailRows({ projects, selectedId, onSelect, actions, child
   /** The rename form of the project being renamed, shown beside its row. */
   renaming?: { id: string; form: ReactNode };
   actions?: ProjectRowAuthority;
+  /** The code editors of the projects: which are open, which hold unsaved edits, and how one is opened. */
+  editor?: Readonly<{ open: (id: string) => boolean; unsaved: (project: WorkspaceProject) => boolean; show: (project: WorkspaceProject) => void }>;
   children?: ReactNode;
 }) {
   const { t } = useShellLanguage();
@@ -35,7 +37,10 @@ export function ProjectRailRows({ projects, selectedId, onSelect, actions, child
         aria-expanded={selectedId === project.id && expanded} onClick={() => select(project.id)}>
         <AppIcon name="chevronDown" size={12} className={selectedId === project.id && expanded ? "tree-chevron expanded" : "tree-chevron"} />
         <AppIcon name="folder" size={15} /><strong>{project.name}</strong>{activity?.(project.id)}{project.archived && <small>{t("Archived")}</small>}
-      </button>{renaming?.id === project.id && renaming.form}</ProjectRowActions>{selectedId === project.id && <li className="project-session-branch" hidden={!expanded}>{children}</li>}</Fragment>)}
+      </button>{editor && !project.archived && <button type="button" className="icon-button project-editor-trigger" data-open={editor.open(project.id)}
+        data-unsaved={editor.unsaved(project)} aria-label={t("Code editor of {name}", { name: project.name })}
+        title={t(editor.open(project.id) ? "Show the code editor" : "Open the code editor")} onClick={() => editor.show(project)}>
+        <AppIcon name="code" size={15} /></button>}{renaming?.id === project.id && renaming.form}</ProjectRowActions>{selectedId === project.id && <li className="project-session-branch" hidden={!expanded}>{children}</li>}</Fragment>)}
     </ul>
     <ul className="nav-list project-root-list" aria-label={t("Global sessions")}>
       <li className="project-action-row" onContextMenu={event => { if (sessions) { event.preventDefault(); setOtherMenu(true); } }}>

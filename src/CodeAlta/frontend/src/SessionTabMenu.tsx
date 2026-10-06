@@ -7,8 +7,10 @@ export type SessionMenuEntry = { key: string; label: string; disabled?: boolean;
   | { key: string; divider: true; label?: string };
 
 // The portal stays inside the themed shell, not FlexLayout's unthemed popup container.
-export function SessionTabMenu({ anchor, items, title, container, current, onClose }: {
+export function SessionTabMenu({ anchor, at, items, title, container, current, onClose }: {
   anchor: HTMLElement; items: SessionMenuEntry[]; title: string; container: HTMLElement;
+  /** A point of the window the menu opens at (a context menu), instead of under its anchor. */
+  at?: Readonly<{ x: number; y: number }>;
   current: () => boolean; onClose: () => void;
 }) {
   // Blueprint's childRef declaration predates React 19's nullable RefObject type.
@@ -19,13 +21,13 @@ export function SessionTabMenu({ anchor, items, title, container, current, onClo
     const place = () => {
       if (!anchor.isConnected || !current()) { onClose(); return; }
       const rect = anchor.getBoundingClientRect(), menu = popup.current?.getBoundingClientRect();
-      setPosition({ left: Math.max(4, Math.min(rect.right - (menu?.width ?? 220), window.innerWidth - (menu?.width ?? 220) - 4)),
-        top: Math.max(4, Math.min(rect.bottom + 4, window.innerHeight - (menu?.height ?? 160) - 4)) });
+      setPosition({ left: Math.max(4, Math.min(at ? at.x : rect.right - (menu?.width ?? 220), window.innerWidth - (menu?.width ?? 220) - 4)),
+        top: Math.max(4, Math.min(at ? at.y : rect.bottom + 4, window.innerHeight - (menu?.height ?? 160) - 4)) });
     };
     place();
     window.addEventListener("resize", place);
     return () => window.removeEventListener("resize", place);
-  }, [anchor, current, onClose]);
+  }, [anchor, at?.x, at?.y, current, onClose]);
   function close(restore: boolean) {
     if (restore && anchor.isConnected && current() && popup.current?.contains(document.activeElement)) anchor.focus({ preventScroll: true });
     onClose();

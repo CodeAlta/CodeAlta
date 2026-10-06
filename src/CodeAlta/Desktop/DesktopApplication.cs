@@ -207,6 +207,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         SessionAsksService? asks = null;
         ReminderService? reminders = null;
         DesktopChangesView? changesView = null;
+        DesktopEditorView? editorView = null;
         GitIssuesService? gitIssues = null;
         AppUpdateService? appUpdate = null;
         ModelCatalogService? providers = null;
@@ -409,7 +410,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 asks = new SessionAsksService(host.Commands.Asks, epoch);
                 reminders = new ReminderService(host.WorkspaceReads, host.Commands, epoch);
                 changesView = new DesktopChangesView();
-                DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView);
+                editorView = new DesktopEditorView();
+                DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView);
                 workspacePrepared.TrySetResult();
                 {
                     // Leave room for ordinary pasted images and their base64/JSON overhead.
@@ -478,7 +480,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionAsksService(asks);
                     builder.AddSessionNotesService(new SessionNotesService(host.WorkspaceReads, host.RuntimeService, epoch));
                     builder.AddSessionPluginEventsService(new SessionPluginEventsService(host.WorkspaceReads, host.ProjectCatalog, epoch, host.PluginRuntime));
-                    builder.AddProjectFilesService(new ProjectFilesService(host.ProjectCatalog, epoch, host.ProjectFileSearchService));
+                    builder.AddProjectFilesService(new ProjectFilesService(host.ProjectCatalog, epoch, host.ProjectFileSearchService, editorView));
                     builder.AddProjectGitService(new ProjectGitService(host.ProjectCatalog, epoch, changesView));
                     builder.AddPromptImagesService(new PromptImagesService(host.WorkspaceReads, epoch));
                     builder.AddComposerStatusService(new ComposerStatusService(host.ProjectCatalog, epoch, roots.Home, host.PluginRuntime));

@@ -8,7 +8,7 @@ CodeAlta is a workspace for agentic coding. It brings together local project nav
 
 It comes as two apps that share the same harness and the same `~/.alta` profile:
 
-- **CodeAlta Desktop**, the `alta` command: a desktop application with session tabs you can split and arrange, a file editor, and one Settings window.
+- **CodeAlta Desktop**, the `alta` command: a desktop application with session tabs you can split and arrange, a code editor for your projects, and one Settings window.
 - **CodeAlta TUI**, the `altatui` command: a keyboard-first terminal UI.
 
 This guide applies to both. Screenshots have a **Desktop / TUI** switch, and pages point out where the two apps differ.

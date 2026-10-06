@@ -8,8 +8,7 @@ import type { WorkspaceSnapshot } from "#neoastra";
 import { resolveSessionTab, type SessionTab, type SessionTabs as Tabs } from "./sessionTabs";
 import { SessionTabActivity, type RuntimeObservationControls } from "./RuntimeObservation";
 import { createSessionTabModel, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction } from "./sessionTabLayout";
-import { emptyFileTabs, fileNodeId, fileTabName, isChangesTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
-import { fileAppearance } from "./fileAppearance";
+import { emptyFileTabs, fileNodeId, isChangesTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
 import { useSessionTabDrag } from "./useSessionTabDrag";
 import { plainTitle } from "./sessionTitle";
 
@@ -20,21 +19,21 @@ export function SessionTabLabel({ label, path, dirty }: { label: string; path: s
 }
 
 /**
- * A file tab's header text: the file name (the project-relative path and its project as tooltip) and the unsaved
- * mark. A changes tab is named after its project.
+ * The header text of a project's tab: what it shows (its code editor or its changes) and the name of the project,
+ * with the folder as tooltip. The editor carries the unsaved mark while one of its files holds edits.
  */
 export function FileTabLabel({ tab, project, dirty }: { tab: FileTab; project: string; dirty: boolean }) {
   const { t } = useShellLanguage();
-  if (isChangesTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={`${t("Changes")} · ${project}\n${tab.projectPath}`}>
-    {t("Changes")} <span className="session-tab-project">{project}</span></span></span>;
-  return <span className="session-tab-title"><span className="session-tab-label" title={`${tab.path}\n${project}`}>{fileTabName(tab)}</span>
-    {dirty && <span className="session-tab-dirty" role="img" title={t("Unsaved changes")} aria-label={t("Unsaved changes")} />}</span>;
+  const name = t(isChangesTab(tab) ? "Changes" : "Editor");
+  return <span className="session-tab-title"><span className="session-tab-label" title={`${name} · ${project}\n${tab.projectPath}`}>
+    {name} <span className="session-tab-project">{project}</span></span>
+    {dirty && !isChangesTab(tab) && <span className="session-tab-dirty" role="img" title={t("Unsaved changes")} aria-label={t("Unsaved changes")} />}</span>;
 }
 
 const noFiles = emptyFileTabs();
 
 // Each pane retains its own live factory payload. App owns session authority and drafts.
-// File editors are tabs of the same dock; App owns which files are open and which one is active.
+// The code editors and the changes of projects are tabs of the same dock; App owns which are open and which one is active.
 export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen, observations, capture, children, renderSession, newSessionLabel,
   files = noFiles, renderFile, selectFile, closeFile, fileDirty, onSessionTabClick }: {
   state: Tabs; snapshot?: WorkspaceSnapshot; dirty: (id: string) => boolean;
@@ -83,7 +82,7 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
   const label = (tab: SessionTab | null) => tab ? `${plainTitle(snapshot && resolveSessionTab(snapshot, tab)?.title || t("Unavailable session"))} - ${
     tab.projectId === null ? t("Global") : snapshot?.projects.find(project => project.id === tab.projectId)?.name ?? t("Unavailable project")}` : newSessionLabel ?? t("New session");
   const projectName = (file: FileTab) => snapshot?.projects.find(project => project.id === file.projectId)?.name ?? t("Unavailable project");
-  const fileLabel = (file: FileTab) => isChangesTab(file) ? `${t("Changes")} · ${projectName(file)}` : fileTabName(file);
+  const fileLabel = (file: FileTab) => `${t(isChangesTab(file) ? "Changes" : "Editor")} · ${projectName(file)}`;
   useLayoutEffect(() => { reconcileSessionTabModel(model, state, label, files, fileLabel); });
   useLayoutEffect(() => { if (menu && !menu.current()) setMenu(null); });
   function guard() {
@@ -187,7 +186,7 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
         if (node.getId() === sessionDraftNodeId) { values.content = <span data-session-node={node.getId()}>{label(null)}</span>; return; }
         const file = files.open.find(value => fileNodeId(value) === node.getId());
         if (file) {
-          const look = isChangesTab(file) ? { icon: "changes" as const, tone: "orange" } : fileAppearance(file.path, false);
+          const look = isChangesTab(file) ? { icon: "changes" as const, tone: "orange" } : { icon: "code" as const, tone: "azure" };
           values.leading = <span className="file-tab-icon" data-file-tone={look.tone}><AppIcon name={look.icon} size={14} /></span>;
           values.content = <span data-session-node={node.getId()}><FileTabLabel tab={file} dirty={!!fileDirty?.(file)} project={projectName(file)} /></span>;
           return;

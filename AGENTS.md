@@ -32,13 +32,13 @@ cd ../../../site
 lunet build
 ```
 
-All .NET tests, the frontend tests (`npm test`) and the Lunet website build must pass, and docs must be updated before submitting. `npm test` also runs the `src/*.browser.test.ts` files, which mount real components in headless Edge and are skipped where Edge is not installed. A frontend test that no longer matches the app is fixed or removed, never left failing.
+All .NET tests, the frontend tests (`npm test`) and the Lunet website build must pass, and docs must be updated before submitting. `npm test` runs every `*.test.ts(x)` file under `src` and its feature folders, including the `src/*.browser.test.ts` files, which mount real components in headless Edge and are skipped where Edge is not installed. A frontend test that no longer matches the app is fixed or removed, never left failing.
 
 ## Working on the desktop WebApp
 
 The desktop UI (`src/CodeAlta`, React frontend in `src/CodeAlta/frontend`) runs in a WebView2 window. Drive the running window through the Chrome DevTools Protocol instead of guessing from the source: look at it, click in it, read its DOM and console.
 
-**1. Build.** `dotnet build CodeAlta/CodeAlta.csproj` from `src` builds the host and the frontend (it restores npm packages and regenerates the typed RPC client `src/CodeAlta/obj/neoastra/neoastra.ts`). The frontend alone is checked from `src/CodeAlta/frontend` with `node node_modules/typescript/bin/tsc --noEmit` and one test file with `node node_modules/tsx/dist/cli.mjs --test src/<name>.test.ts` (`npm test` runs them all). The `src/*.browser.test.ts` files start their own Edge; do not use them to look at the app.
+**1. Build.** `dotnet build CodeAlta/CodeAlta.csproj` from `src` builds the host and the frontend (it restores npm packages and regenerates the typed RPC client `src/CodeAlta/obj/neoastra/neoastra.ts`). The frontend alone is checked from `src/CodeAlta/frontend` with `node node_modules/typescript/bin/tsc --noEmit` and one test file with `node node_modules/tsx/dist/cli.mjs --test src/<name>.test.ts`, or `src/<feature>/<name>.test.ts` for a feature folder (`npm test` runs them all). The `src/*.browser.test.ts` files start their own Edge; do not use them to look at the app.
 
 **2. Launch the developer instance with remote debugging.** `--dev` starts a second CodeAlta beside the normal one (see "Developer instance" below), and WebView2 opens a DevTools port when this variable is set; the MCP configuration expects port 9222. From the repository root (PowerShell):
 

@@ -3,7 +3,7 @@ import { Button, Callout, NonIdealState, Tag } from "@blueprintjs/core";
 import { globalConfig, type GlobalConfigValidationResponse } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
-import { CodeEditor } from "./CodeEditor";
+import { CodeEditor } from "./monaco/CodeEditor";
 import { canSaveConfig, configReadNotice, configSaveNotice, maximumConfigLength, type ConfigBaseline, type ConfigNotice } from "./configEditor";
 import { useShellLanguage } from "./shellLanguage";
 

@@ -128,6 +128,25 @@ Existing guardrail coverage to keep intact when touching startup/session boundar
 - `src/CodeAlta.Tests/ModelProviderInitializationServiceTests.cs` covers per-provider failure/timeout isolation and model-list caching/reuse.
 - `src/CodeAlta.Orchestration.Tests/AgentHubTests.cs`, `src/CodeAlta.Tests/AgentSessionJournalFileTests.cs`, and `src/CodeAlta.Orchestration.Tests/SessionRuntimeStressTests.cs` cover per-session runtime coordination and journal/concurrency behavior.
 
+## Desktop Frontend Sources
+
+The React sources of the desktop app are in `src/CodeAlta/frontend/src`. A feature has a folder of its own
+there, with its components, its state modules, their tests and its stylesheet:
+
+- `editor/`: the code editor of a project (the files, the search, the open files, their text and pictures).
+- `changes/`: the Changes tab, the git status of the composer and the diffs shown in the timeline.
+- `monaco/`: the Monaco setup shared by every editor of the page, the languages, and the text and diff editors.
+
+Rules for these sources:
+
+- Put a new feature in a folder of its own. Move the files of an existing feature into one when a change
+  touches most of them, with `git mv` so that their history follows. What several features share (the shell,
+  the tabs, the icons, the localization) stays at the root.
+- A test sits beside the module it tests: `npm test` runs every `*.test.ts` and `*.test.tsx` under `src`.
+- Keep what can be decided without the DOM in a module of plain functions with a test, and the component thin.
+- A feature's stylesheet is imported from `main.tsx`, after `style.css`, not from its components: the tests
+  import components without a bundler.
+
 ## Frontend Shell Shape
 
 The TUI frontend should stay organized around explicit state, commands, events, and projections rather than broad callbacks into `CodeAltaApp`:

@@ -93,6 +93,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | `prompt` | List, inspect, create, edit, and select file-backed agent or system prompts. |
 | `plugin` | Inspect active plugin runtime state. |
 | `diff` | Show the changed files of a project to the user. Only in CodeAlta Desktop. |
+| `editor` | Show the files of a project to the user in the code editor. Only in CodeAlta Desktop. |
 
 `note` is a compatibility alias for `notes`. Prefer the plural `notes` group because it names the sidebar panel and the single sticky notes document. `skills activate` and `skills_activate` are compatibility aliases for `skill activate`. Prefer the singular `skill` group in new prompts and docs.
 
@@ -312,6 +313,29 @@ one of the changed files. The command emits `alta.diff.shown` with the project a
 
 The group exists only where a host registers `IAltaChangesView`, which the desktop host does: in the
 terminal UI and the standalone tool it is not among the commands, their help or `alta tool list`.
+
+## Editor command
+
+`alta editor open` opens the code editor of a project in the CodeAlta Desktop window, and a file in it. It
+shows a file to the user: an agent that wants to read one reads it with its own tools.
+
+```text
+alta editor open
+alta editor open --file src/app.ts
+alta editor open --file src/app.ts --line 120 --column 8
+alta editor open --project <project-id-or-slug-or-path>
+```
+
+The project defaults to the one of the calling session, then to the catalog project of the cwd; an
+archived project is not shown. `--file` is a path relative to the project folder, or a full path inside
+it; the file must exist. Without it the editor opens with the files of the project. `--line` and
+`--column` are 1-based and need a file. The command emits `alta.editor.opened` with the project, the
+file and the position, `file.notFound` for a file that is not in the folder, or `view.unavailable` when
+no window is open.
+
+Like `diff`, the group exists only where a host registers its view (`IAltaEditorView`), which the desktop
+host does: in the terminal UI and the standalone tool it is not among the commands, their help or
+`alta tool list`.
 
 ## Skill commands
 

@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { InputGroup } from "@blueprintjs/core";
 import { sessionOperations, type SessionReferenceSearchResponse } from "#neoastra";
-import { ActivitySpinner } from "./ActivitySpinner";
-import { AppIcon } from "./AppIcon";
-import { AppWindow } from "./AppWindow";
-import { fileAppearance, splitProjectPath } from "./fileAppearance";
-import { validReferenceSearch } from "./referencePopup";
-import { useShellLanguage } from "./shellLanguage";
+import { ActivitySpinner } from "../ActivitySpinner";
+import { AppIcon } from "../AppIcon";
+import { AppWindow } from "../AppWindow";
+import { fileAppearance, splitProjectPath } from "../fileAppearance";
+import { validReferenceSearch } from "../referencePopup";
+import { useShellLanguage } from "../shellLanguage";
 
 const pageStep = 8;
 
@@ -16,15 +16,18 @@ function searchedFiles(page: SessionReferenceSearchResponse | null) {
 }
 
 /**
- * The file picker of the editor (Ctrl+E, `/edit`): the `@` search of the selected project limited to
- * files, recently used first and fuzzy-ranked as the query grows. Enter opens the selected file in an
- * editor tab, Escape closes the window.
+ * The file picker of the editor (Ctrl+E, `/edit`): the `@` search of a project limited to files, recently
+ * used first and fuzzy-ranked as the query grows. Enter opens the selected file in the code editor of the
+ * project, Escape closes the window. Ctrl+E again opens the editor with the files of the project instead.
  */
-export function OpenFileDialog({ epoch, project, search = sessionOperations.searchReferences, observe, onOpen, onClose }: {
+export function OpenFileDialog({ epoch, project, search = sessionOperations.searchReferences, observe, onOpen, onOpenEditor, onClose }: {
   epoch: string; project: Readonly<{ id: string; name: string; path: string }>;
   search?: typeof sessionOperations.searchReferences;
   observe?: (value: { status: string; epoch: string | null }) => void;
-  onOpen: (path: string) => void; onClose: () => void;
+  onOpen: (path: string) => void;
+  /** The second Ctrl+E: the code editor of the project, with its files shown. */
+  onOpenEditor?: () => void;
+  onClose: () => void;
 }) {
   const { t } = useShellLanguage();
   const input = useRef<HTMLInputElement>(null);
@@ -76,7 +79,14 @@ export function OpenFileDialog({ epoch, project, search = sessionOperations.sear
     onCancel={event => { event.preventDefault(); onClose(); }}
     onKeyDown={event => {
       event.stopPropagation();
-      if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.ctrlKey || event.altKey || event.metaKey) return;
+      if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+      // Ctrl+E Ctrl+E: the picker gives way to the editor of the project.
+      if (onOpenEditor && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && event.key.toLowerCase() === "e") {
+        event.preventDefault();
+        if (!event.repeat) onOpenEditor();
+        return;
+      }
+      if (event.ctrlKey || event.altKey || event.metaKey) return;
       const handled = event.key === "ArrowDown" ? (move(1), true) : event.key === "ArrowUp" ? (move(-1), true)
         : event.key === "PageDown" ? (move(pageStep), true) : event.key === "PageUp" ? (move(-pageStep), true)
         : event.key === "Home" && event.target !== input.current ? (setSelected(0), true)
@@ -100,6 +110,7 @@ export function OpenFileDialog({ epoch, project, search = sessionOperations.sear
         </div>; })}
       {page && count === 0 && page.status !== "indexing" && <p className="reference-empty">{t("No files match.")}</p>}
     </div>
-    <footer className="reference-hint"><span><kbd>↑</kbd><kbd>↓</kbd> {t("move")}</span><span><kbd>Enter</kbd> {t("open")}</span><span><kbd>Esc</kbd> {t("close")}</span></footer>
+    <footer className="reference-hint"><span><kbd>↑</kbd><kbd>↓</kbd> {t("move")}</span><span><kbd>Enter</kbd> {t("open")}</span>
+      {onOpenEditor && <span><kbd>Ctrl+E</kbd> {t("project files")}</span>}<span><kbd>Esc</kbd> {t("close")}</span></footer>
   </AppWindow>;
 }

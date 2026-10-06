@@ -6,7 +6,7 @@ title: Desktop and TUI
 
 CodeAlta has two apps:
 
-- **CodeAlta Desktop** (`alta`) is a desktop application with session tabs you can arrange, a file editor and a single Settings window. It is the most complete way to use CodeAlta.
+- **CodeAlta Desktop** (`alta`) is a desktop application with session tabs you can arrange, a code editor for your projects and a single Settings window. It is the most complete way to use CodeAlta.
 - **CodeAlta TUI** (`altatui`) is a keyboard-first terminal UI.
 
 Both apps share the same harness: the same agent runtime, providers, tools, agent prompts, skills, MCP servers and plugins, on the same `~/.alta` profile. This documentation applies to both. Where the two apps differ, the page says so, and screenshots have a **Desktop / TUI** switch.
@@ -61,12 +61,19 @@ Session tabs can be dragged along the tab strip to reorder them, to the edge of 
   </div>
 </div>
 
-### Files beside sessions
+### A code editor for each project
 
-`Ctrl+E` opens a project file in an editor tab. An editor tab can be split like a session tab, so the file stays visible beside the session that works on it.
+The `</>` button of a project in the sidebar, or `Ctrl+E` `Ctrl+E`, opens the code editor of the project: its folders and files, a search in files, and the files you open as tabs. You can create, rename, move and delete files there, and pictures are shown as pictures. See [Code editor](workspace.md#code-editor).
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-code-editor.webp" alt="CodeAlta Desktop with a session on the left and a C# file in an editor tab on the right" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-code-editor.webp" alt="CodeAlta Desktop code editor with the files of a project on the left and a C# file on the right" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The files of a project, the open files as tabs, and the selected file.</figcaption>
+</figure>
+
+`Ctrl+E` opens one file with the files hidden. The editor is a tab like a session, so it can stay beside the session that works on the file.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-editor-session.webp" alt="CodeAlta Desktop with a session on the left and a C# file in the code editor on the right" loading="lazy">
   <figcaption class="small text-secondary mt-2">A session and a file of the project, side by side.</figcaption>
 </figure>
 
@@ -108,7 +115,7 @@ When a new version is available, the desktop app shows a notice with **Update an
 | --- | --- | --- |
 | Command | `alta` | `altatui` |
 | Session tabs | Drag to reorder, split and merge panes | One visible tab at a time |
-| File editor | Editor tabs that can sit beside a session | Editor tab |
+| Code editor | One tab per project with its files, a search in files and file tabs | One editor tab per file |
 | Git changes | Changes tab with the changed files, recent commits and a diff | Not available |
 | Settings | One window with a page per area | One dialog per area |
 | Appearance | Light, dark or system theme, 13 color schemes | Terminal themes |

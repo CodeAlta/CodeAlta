@@ -1,19 +1,19 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Button, ButtonGroup, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Switch } from "@blueprintjs/core";
 import { projectGit } from "#neoastra";
-import { ActivitySpinner } from "./ActivitySpinner";
-import { AppIcon } from "./AppIcon";
-import { CodeEditor } from "./CodeEditor";
-import { DiffEditor, type DiffEditorChanges, type DiffEditorHandle } from "./DiffEditor";
-import { fileAppearance } from "./fileAppearance";
-import { fileLanguage } from "./fileLanguage";
-import type { FileTab } from "./fileTabs";
+import { ActivitySpinner } from "../ActivitySpinner";
+import { AppIcon } from "../AppIcon";
+import { CodeEditor } from "../monaco/CodeEditor";
+import { DiffEditor, type DiffEditorChanges, type DiffEditorHandle } from "../monaco/DiffEditor";
+import { fileAppearance } from "../fileAppearance";
+import { fileLanguage } from "../monaco/fileLanguage";
+import type { FileTab } from "../fileTabs";
 import { changeBar, changeCommitsReply, changeContent, changeContentNotice, changeFileName, changeFolder, changeHistoryHeight, changeLabel, changeLetter,
   changeListReply, changeListRows, changeListWidth, changeScopeKey, changesPreferencesKey, changeTreeRows, commitLimitMaximum, commitPageSize, filterChanges,
   orderChanges, persistChangesPreferences, projectRelativePath, restoreChangesPreferences, selectedChange, type ChangeCommit, type ChangeCommits,
   type ChangeContent, type ChangedFile, type ChangeList, type ChangeRow, type ChangeScope, type ChangesPreferences } from "./projectChanges";
-import { sessionTime } from "./sessionTime";
-import { useShellLanguage } from "./shellLanguage";
+import { sessionTime } from "../sessionTime";
+import { useShellLanguage } from "../shellLanguage";
 
 const autoRefreshMilliseconds = 5000;
 const ignore = () => { };

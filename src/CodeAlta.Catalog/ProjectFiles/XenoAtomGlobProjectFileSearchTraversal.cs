@@ -1,20 +1,9 @@
-using XenoAtom.Glob.Git;
 using XenoAtom.Glob.IO;
-using XenoAtom.Glob.Ignore;
 
 namespace CodeAlta.Catalog;
 
 internal sealed class XenoAtomGlobProjectFileSearchTraversal : IProjectFileSearchTraversal
 {
-    private static readonly IgnoreRuleSet FixedExclusionRules = IgnoreRuleSet.ParseGitIgnore(
-        """
-        .git/
-        .hg/
-        .svn/
-        .jj/
-        .sl/
-        """);
-
     private readonly FileTreeWalker _walker = new();
 
     public ProjectFileTraversalSnapshot Traverse(
@@ -35,16 +24,7 @@ internal sealed class XenoAtomGlobProjectFileSearchTraversal : IProjectFileSearc
         var normalizedRoot = ProjectFilePathUtilities.NormalizeProjectRoot(projectRoot);
         var items = new List<ProjectFileSearchItem>();
         var batch = new List<ProjectFileSearchItem>(batchSize);
-        var isGitAware = RepositoryDiscovery.TryDiscover(normalizedRoot, out var repositoryContext);
-        var walkOptions = new FileTreeWalkOptions
-        {
-            IncludeDirectories = true,
-            CancellationToken = cancellationToken,
-            RepositoryContext = repositoryContext,
-            AdditionalRuleSets = isGitAware
-                ? [FixedExclusionRules]
-                : BuildNonGitRuleSets(normalizedRoot, cancellationToken),
-        };
+        var walkOptions = ProjectFileTree.CreateWalkOptions(_walker, normalizedRoot, includeDirectories: true, cancellationToken, out var isGitAware);
 
         foreach (var entry in _walker.Enumerate(normalizedRoot, walkOptions))
         {
@@ -68,34 +48,6 @@ internal sealed class XenoAtomGlobProjectFileSearchTraversal : IProjectFileSearc
         }
 
         return new ProjectFileTraversalSnapshot(isGitAware, items);
-    }
-
-    private IReadOnlyList<IgnoreRuleSet> BuildNonGitRuleSets(string projectRoot, CancellationToken cancellationToken)
-    {
-        var ruleSets = new List<IgnoreRuleSet> { FixedExclusionRules };
-        var discoveryOptions = new FileTreeWalkOptions
-        {
-            CancellationToken = cancellationToken,
-            AdditionalRuleSets = [FixedExclusionRules],
-        };
-
-        foreach (var entry in _walker.Enumerate(projectRoot, discoveryOptions))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!string.Equals(entry.Name, ".gitignore", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            var baseDirectory = Path.GetDirectoryName(entry.RelativePath)?.Replace('\\', '/') ?? string.Empty;
-            ruleSets.Add(
-                IgnoreRuleSet.ParseGitIgnore(
-                    File.ReadAllText(entry.FullPath),
-                    baseDirectory: baseDirectory,
-                    sourcePath: entry.FullPath));
-        }
-
-        return ruleSets;
     }
 
     private static ProjectFileSearchItem CreateItem(

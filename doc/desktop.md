@@ -1091,8 +1091,8 @@ the sending session.
 
 The counts beside the branch in the composer are a button: it opens the **Changes** tab of the project,
 which is also what `alta diff show` does for an agent. There is one such tab per project. It is a tab
-of the same strip as the sessions and the files (`view: "changes"` in `fileTabs`), so it closes, reopens,
-cycles and is restored like a file tab, and several can be open. It opens in a pane on the right of the
+of the same strip as the sessions and the code editors (`view: "changes"` in `fileTabs`), so it closes,
+reopens, cycles and is restored like an editor tab, and several can be open. It opens in a pane on the right of the
 tab it was asked from, or in the pane that already holds a changes tab; from there it is dragged, split
 and merged like any tab.
 
@@ -1112,8 +1112,8 @@ and merged like any tab.
 - The diff is Monaco's diff editor, read-only, with the highlighting of the file's language and the
   changed words marked inside a changed line. It is side by side or inline (inline by itself when the
   pane is narrower than 780 pixels), with the unchanged regions folded behind expanders. The arrows and
-  `Alt+Up` / `Alt+Down` go through the changes. **Open file** opens the file in an editor tab when it
-  is inside the project folder. The `…` menu has **Hide unchanged lines**, **Ignore whitespace
+  `Alt+Up` / `Alt+Down` go through the changes. **Open file** opens the file in the code editor of the
+  project when it is inside the project folder. The `…` menu has **Hide unchanged lines**, **Ignore whitespace
   changes**, **Wrap lines** and **Copy path**.
 - A file that is new or deleted is shown whole, tinted green or red, instead of beside an empty side.
   A binary file, a file over 1 MB and a file that cannot be read say so instead of a diff.
@@ -1128,51 +1128,116 @@ call's record (`HistoryToolProjection`): the lines are counted over the whole di
 UTF-16 units of it are sent, cut at the end of a line. The files of a **Modified files** card open in
 the same view.
 
-### File editor
+### Code editor
 
-`Ctrl+E` (or `/edit` in the command palette) opens **Open file** for the selected project: the `@`
-search limited to files, recently used first, with the same colored icon per file type. Up/Down and
-PageUp/PageDown move the selection, Enter opens the file and Escape closes the window. The command
-needs a selected project that is not archived and an owned host.
+A project has one **code editor**: a tab of the same strip as the sessions (`view: "editor"` in `fileTabs`),
+labeled **Editor** and the name of the project. It holds the files of the project on a side and the open files
+as tabs of its own, so that several files of one project share one tab. Its sources are in
+`frontend/src/editor/`.
 
-The file opens in a tab of the same strip as the sessions: the icon of its file type at the leading
-edge, the file name (the project-relative path and the project name as tooltip) and a dot while it
-has unsaved edits. There is one tab per file; opening a file that is already open selects its tab.
-File tabs close (`Ctrl+W`), reopen (`Ctrl+Shift+T`, in the order tabs were closed), cycle
-(`Ctrl+Alt+Left` / `Ctrl+Alt+Right`, after the session tabs), drag and split like session tabs. Up
-to 32 open files and the selected one are restored with the window (`codealta.desktop.fileTabs.v1`
-in local storage); a file whose project is gone or archived is not restored. While a file tab is
-selected, the commands that act on a session (send, abort, message navigation, notes, session info
-and the like) are unavailable; selecting a session tab, a session or project in the Explorer, or
-the New session tab returns to the session.
+It is opened in three ways:
 
-The editor is Monaco. The file name or extension chooses the highlighting; anything unknown is plain
-text. Every grammar Monaco ships is available (about eighty: C#, F#, VB, TypeScript, JavaScript, XML
-and MSBuild files, Markdown, YAML, HTML, CSS/SCSS/Less, Python, Rust, Go, Java, Kotlin, Scala, Swift,
-C/C++, Objective-C, shell, PowerShell, batch, SQL dialects, Dockerfile, Ruby, PHP, Lua, Perl, R, Dart,
-Julia, Elixir, Clojure, Scheme, Pascal, Solidity, Razor, GraphQL, Protobuf, HCL, Bicep and others),
-and the app adds its own small grammars for what Monaco lacks: JSON, TOML, Makefile and diff/patch
-(`frontend/src/monacoGrammars.ts`). A language is one lazily loaded chunk, fetched the first time a
-file needs it; `frontend/src/fileLanguage.ts` maps file names and extensions to languages. To add a
-language, add its Monarch grammar to `monacoGrammars.ts` and its extensions to `fileLanguage.ts`.
-The footer shows the state (**Saved**,
-**Modified**, **Saving…**, **Read-only**, **Changed on disk**), the caret line and column, the
-path, a **Wrap lines** switch (on by default), **Reload** and **Save**.
+- `Ctrl+E` (`/edit`) opens **Open file** for a project: the `@` search limited to files, recently used first.
+  Enter opens the file in the project's editor. An editor that was not open yet opens on that file alone,
+  without its side.
+- `Ctrl+E` again in that window (`Ctrl+E Ctrl+E`), `/editor`, or the `</>` icon of a project in the
+  Explorer opens the editor with the files of the project and the keyboard in them. The icon shows while the
+  pointer is over the project, stays visible and tinted while the project's editor is open, and has a dot while
+  one of its files holds unsaved edits.
+- `alta editor open` does the same for an agent (see `doc/live-tool.md`), and **Open file** in a Changes tab
+  opens the file there.
 
-- `Ctrl+S` saves through `projectFiles.write` with the revision that was read, from the editor or
-  from anywhere else in the tab. Text is written with the line endings the editor shows: a file
-  with mixed line endings gets its dominant one once it is edited and saved.
-- When the file changed on disk since it was read, nothing is written and the tab offers **Reload**
-  (replace the edits with the file on disk), **Overwrite** (write the edits anyway) or **Cancel**
-  (keep editing; the next save asks again).
-- Closing a tab with unsaved edits asks **Save**, **Discard** or **Cancel**; a save that is refused
-  keeps the tab open. **Reload** with unsaved edits asks before dropping them.
-- A file with the read-only attribute opens read-only. A binary file, a file over 1 MiB, a missing
-  file, a path outside the project folder and an archived or unavailable project show the reason in
-  place of the editor, with **Reload** to read again.
-- Unsaved edits live in the open tab only and are not stored. **Exit** (`Ctrl+Q`, `/exit`) asks **Save all**,
-  **Exit without saving** or **Cancel** while files hold unsaved edits; the window's own close button and
-  `Alt+F4` close without asking and drop them.
+The project is the one of the code editor or the Changes tab in front, otherwise the selected project. The
+editor needs an owned host and a project that is not archived. Editor tabs close, reopen, cycle, drag and split
+like session tabs; the open editors are restored with the window (`codealta.desktop.fileTabs.v1`), and a
+stored tab of one file, from before the editor had tabs of its own, becomes the editor of its project with
+that file. While an editor is in front, the commands that act on a session are unavailable.
+
+**Side.** Two views, **Files** and **Search** (`Ctrl+Shift+E`, `Ctrl+Shift+F`); `Ctrl+B` or the button at
+the left of the file tabs hides and shows the side, and its splitter sets its width. In a pane narrower than
+560 pixels the side and the file take turns.
+
+- **Files** is a tree read one folder at a time: `projectFiles.list` is asked for the project folder and for
+  each folder as it is opened, never for what is below a closed folder. What git ignores is left out;
+  **Show ignored files** (the `…` menu) lists it dimmed. The open folders are listed again every four
+  seconds while the files are shown, when the window gets the focus and after each change made in the tree;
+  a folder that did not change is answered with `unchanged` and redraws nothing. Only the rows in view are
+  drawn.
+- A file changed since the last commit has the color and the letter of its status (as in the Changes tab), and
+  a folder that holds one has a dot; they come from `projectGit.changes`, read every five seconds.
+- A click previews a file (its tab is in italics and is taken over by the next preview); a double click, Enter
+  or an edit keeps it open. Arrows, Home, End, PageUp and PageDown move through the rows, Left and Right close
+  and open a folder, and the letters of a name go to the next row that starts with them.
+- **New file**, **New folder** (in the selected folder, or beside the selected file), `F2` to rename and
+  `Delete` to delete, also in the menu of a row with **Copy path**, **Copy relative path**, **Reveal in File
+  Explorer** (Finder, or the containing folder on Linux) and **Find in folder**. A name is typed in the tree
+  itself and checked as it is typed; a new name may hold folders (`a/b/c.ts`). An entry dragged onto a folder
+  moves there. The open files of a renamed or moved entry keep their tabs, their text and their unsaved edits.
+- A deletion asks first. The entry goes to the Recycle Bin (the Trash on macOS and Linux) when the system has
+  one the host can use; otherwise, or when the trash refuses, the question becomes the one of a deletion that
+  cannot be undone. The question says how many open files with unsaved edits are closed with it.
+- **Search** looks for a text through the files of the project, with **Match case**, **Match whole word**
+  and **Use regular expression**, and globs for the files to include and to exclude. It runs a moment after
+  the typing stops, or at once on Enter, and lists the matches by file as `projectFiles.search` finds them.
+  A row shows the line of a match from a few words before it, so that the match itself shows in a narrow
+  side. A match opens its file on its line with the match selected. **Find in folder** fills the files to include.
+
+**Open files.** A tab per file with the icon of its type; a name that several tabs share is followed by its
+folder. A tab shows a dot while its file has unsaved edits and is struck through when the file is gone from
+the disk. Tabs are dragged to another place of the strip, closed with the middle button or `Ctrl+W`, and
+`Ctrl+Tab` / `Ctrl+Shift+Tab` go to the next and the previous one. The menu of a tab has **Close**, **Close
+others**, **Close saved**, **Close all**, **Keep open**, the two paths and **Show in the files**. `Ctrl+W`
+closes the file shown; with no file left it closes the editor. The open files, the one shown, the side and the
+open folders of each project are kept in `codealta.desktop.editor.v1`, with the width of the side and the
+view options. A file is read the first time it is shown.
+
+**Text.** The editor is Monaco, with line numbers, folding, matching brackets, several carets, the other
+places of the word under the caret, and:
+
+- `Ctrl+F` and `Ctrl+H` find and replace, with regular expressions, case and whole words; `F3` and
+  `Shift+F3` go to the next and the previous match.
+- `Ctrl+G` goes to a line (and a column, `120:8`), as in the terminal UI's editor: in the text of the code
+  editor that key is not the first stroke of a `Ctrl+G` chord.
+- `Alt+Z` and the `…` menu turn **Wrap lines** on and off (on at first); the menu also has **Minimap**,
+  **Reload from disk**, **Copy path** and the three commands above.
+- The status bar shows the state (**Saved**, **Modified**, **Saving…**, **Read-only**, **Changed on disk**,
+  **Deleted on disk**), the path, the line and column (a click goes to a line), the indentation, the line
+  endings, the encoding, the language, and **Save**.
+
+The file name or extension chooses the highlighting; anything unknown is plain text. Every grammar Monaco
+ships is available (about eighty), and the app adds its own small grammars for what Monaco lacks: JSON, TOML,
+Makefile and diff/patch (`frontend/src/monaco/monacoGrammars.ts`). A language is one lazily loaded chunk,
+fetched the first time a file needs it; `frontend/src/monaco/fileLanguage.ts` maps file names and extensions
+to languages. To add a language, add its Monarch grammar to `monacoGrammars.ts` and its extensions to
+`fileLanguage.ts`.
+
+**Pictures and previews.** A PNG, JPEG, GIF, WebP, BMP, ICO or AVIF file (read through `projectFiles.image`)
+is shown on a checkered background, fitted to the pane, with zoom buttons, `Ctrl` and the wheel, its size in
+pixels and in bytes. An SVG file is text that opens as its drawing, and a Markdown file is text that can be
+shown as a page: two buttons at the right of the tabs switch between **Preview** and **Text**, and a file
+opens in the view last chosen for its kind. A preview is made from the text as the editor holds it, unsaved
+edits included.
+
+**Saving and changes from elsewhere.**
+
+- `Ctrl+S` saves the file shown through `projectFiles.write` with the revision that was read, and
+  `Ctrl+Shift+S` saves every file with unsaved edits. Text is written with the line endings the editor
+  shows: a file with mixed line endings gets its dominant one once it is edited and saved.
+- The open files are compared with the disk every two and a half seconds while the editor is shown
+  (`projectFiles.stat`). A file that something else changed and that holds no edit is read again: the
+  text is replaced where it differs, the caret and the scroll position stay, and one undo brings the
+  previous text back. This is how an agent's edits appear in an open file.
+- A file with unsaved edits that changed on the disk is not replaced: the editor offers **Reload** (replace
+  the edits with the file on disk), **Overwrite** (write the edits anyway) or **Cancel** (keep editing; the
+  next save asks again). The same question answers a save that finds another revision on the disk.
+- Closing files with unsaved edits asks **Save**, **Discard** or **Cancel**, and so does closing the editor;
+  a save that is refused keeps the file open.
+- A file with the read-only attribute opens read-only. A binary file, a file over 1 MiB, a missing file, a
+  path outside the project folder and an archived or unavailable project show the reason in place of the
+  text, with **Reload** to read again.
+- Unsaved edits live in the open editor only and are not stored. **Exit** (`Ctrl+Q`, `/exit`) asks **Save
+  all**, **Exit without saving** or **Cancel** while files hold unsaved edits; the window's own close button
+  and `Alt+F4` close without asking and drop them.
 
 ### Project files and git status
 
@@ -1181,24 +1246,56 @@ never a folder, refuse another host epoch (`stale_epoch`) and answer `unavailabl
 mode. Other refusals shared by both are `invalid` (no project id, or a malformed request),
 `unknown_project`, `project_unavailable` (the folder is gone) and `read_failed`.
 
-`projectFiles.read` and `projectFiles.write` read and replace one existing text file, addressed by a
-path relative to the project folder (forward or back slashes, at most 1024 characters; responses use
-forward slashes). The service does not create, rename or delete files, and refuses archived projects
-(`archived_project`).
+`projectFiles` gives the code editor the files of a project. An entry is addressed by a path relative to
+the project folder (forward or back slashes, at most 1024 characters; responses use forward slashes). The
+service refuses archived projects (`archived_project`), and never renames or deletes the project folder
+itself.
 
 - A path that is rooted, names a drive or a stream (`:`), has a `..` segment or crosses a link
   (a symbolic link or junction below the project folder) is refused as `outside_root`. Empty or `.`
   segments, control characters and names ending in a dot or a space are `invalid`.
-- A file larger than 1 MiB on disk is `too_large` and is not read; the same limit applies to the
-  bytes a write would produce. A file that is not UTF-8, or UTF-16/UTF-32 with a BOM, or that
-  contains a NUL character, is `binary`. A missing file, and a folder, are `not_found`.
-- A read returns the text with its newlines unchanged, its size in bytes, whether the file has the
-  read-only attribute, and a revision (SHA-256 of the file's bytes). It also records the file among
-  the project's recent files.
-- A write keeps the file's encoding and BOM and writes the newlines it is given. It must name the
+- `list` returns the entries of up to 256 folders, each on its own and nothing below it (an empty path is
+  the project folder): the name, whether it is a folder and whether git ignores it, folders first, then
+  files, by name without regard to case and with numbers by value. It is `ProjectFileTree.ListFolder` of
+  `CodeAlta.Catalog`: the rules of the nearest git work tree at or above the folder (`.gitignore` files
+  down to the folder, `.git/info/exclude`, the global excludes file), or the `.gitignore` files between
+  the project folder and the folder outside a work tree, evaluated with XenoAtom.Glob. The folders of
+  version control systems and links are never listed. Each folder has a `revision`; a request that names
+  it as `knownRevision` gets `unchanged`. A folder holds at most 5000 entries (`truncated`). The answer
+  also says whether the host can move entries to the trash and show one in the file manager.
+- `read` returns the text of a file with its newlines unchanged, its size in bytes, its encoding, whether
+  it has the read-only attribute, a revision (SHA-256 of the file's bytes) and a `stamp` (size and last
+  write time). A file larger than 1 MiB on disk is `too_large` and is not read. A file that is not UTF-8,
+  or UTF-16/UTF-32 with a BOM, or that contains a NUL character, is `binary`. A missing file, and a
+  folder, are `not_found`. A read records the file among the project's recent files, unless it is a
+  `reload`.
+- `write` keeps the file's encoding and BOM and writes the newlines it is given. It must name the
   revision that was read: when the file on disk has another one the answer is `conflict` with the
   current revision and nothing is written. With `overwrite` the revision is not compared. A
-  read-only file is `read_only`; a failure while replacing the file is `write_failed`.
+  read-only file is `read_only`; a failure while replacing the file is `write_failed`. The 1 MiB limit
+  applies to the bytes a write would produce.
+- `stat` returns the stamp of up to 128 files without reading them: another stamp than the one of the
+  read means that the file changed.
+- `create` makes an empty file or a folder, with the folders above it that do not exist yet; `rename`
+  renames or moves a file or a folder (not into itself). Neither replaces anything: a name that is
+  taken is `exists`, except a rename to the same name in another case.
+- `delete` moves a file or a folder with all it holds to the trash of the system (`DesktopFileTrash`:
+  the Recycle Bin through the shell on Windows, `/usr/bin/trash` on macOS 14 and later, `gio trash` on
+  Linux), or with `permanent` removes it for good. Without a usable trash the first is
+  `trash_unavailable`, and a trash that refuses is `trash_failed`: nothing is removed for good that was
+  not asked to be.
+- `image` returns a picture of at most 16 MiB as base64 with the media type found in its content
+  (`unsupported_type` otherwise); `reveal` shows an entry, or the project folder, in the file manager.
+- `search` is a stream: one `file` event for each file with matches, then one `done` event with the
+  totals or with why the search did not run (`invalid_pattern`, `invalid_glob`, `timeout`…). The files
+  are those the XenoAtom.Glob scanner walks (`ProjectFileTree.EnumerateFiles`: what git ignores is left
+  out), narrowed by the include and exclude globs (`ProjectFilePathFilter`), where a name or a path
+  matches anywhere in the project and a folder matches what it holds. Both types are in
+  `CodeAlta.Catalog`: the desktop assembly does not reference XenoAtom.Glob. A page that stops reading
+  stops the search. A text or a .NET regular expression is matched line by
+  line, in text files of at most 1 MiB; a search reports at most 2000 matches in 500 files, 200 in one
+  file, and gives up a line that takes more than a second.
+- `watch` is the channel through which `alta editor open` reaches the page.
 
 `composerStatus.read` returns the plugin status items of a composer for a project id (or none) and
 a session id (or none): each has the plugin id, a name, a label, a text, a tone (`info`, `success`,
@@ -1293,7 +1390,11 @@ shortcuts**, a filterable window listing the same commands by category.
 | `Ctrl+P`, `F1` | Command palette, help |
 | `Ctrl+Q` | Exit (`/exit`); works from any window |
 | `Ctrl+O` | Open project |
-| `Ctrl+E`, `Ctrl+S` in a file tab | Open a project file in an editor tab (`/edit`), save the file |
+| `Ctrl+E`, `Ctrl+E` `Ctrl+E` | Open a project file in the code editor (`/edit`), open the code editor with the files of the project (`/editor`) |
+| In a code editor: `Ctrl+S`, `Ctrl+Shift+S`, `Ctrl+W`, `Ctrl+Tab` | Save the file, save every file, close the file shown, next file |
+| In a code editor: `Ctrl+B`, `Ctrl+Shift+E`, `Ctrl+Shift+F` | Show or hide the side, go to the files, search in files |
+| In the text of a code editor: `Ctrl+G`, `Ctrl+F`, `Ctrl+H`, `F3`, `Alt+Z` | Go to line, find, replace, next match, wrap lines |
+| In the files of a code editor: `F2`, `Delete`, `Enter`, `Space` | Rename, delete, open, preview |
 | `Alt+Up`, `Alt+Down` in a Changes tab | Go to the previous or next change of the shown file |
 | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+PageUp` / `Ctrl+PageDown`) | Previous / next tab |
 | `Ctrl+W`, `Ctrl+Shift+T` | Close tab, reopen the last closed tab |
@@ -1311,8 +1412,8 @@ shortcuts**, a filterable window listing the same commands by category.
 | `Ctrl+G` then `Ctrl+K` / `Ctrl+N` / `Ctrl+Y` / `Ctrl+L` / `Ctrl+A` | Skills, plugins, MCP servers, logs, about |
 
 Switching to a session tab, by clicking it or with the tab keys, and creating, closing or reopening one
-puts the keyboard focus in that session's prompt, so typing can start at once. A file tab focuses its
-editor. The window's own icon (Alt+Tab, task switcher) is `alta.ico`, shipped next to the executable.
+puts the keyboard focus in that session's prompt, so typing can start at once. A code editor takes it
+in its text, or in its files when it shows no text. The window's own icon (Alt+Tab, task switcher) is `alta.ico`, shipped next to the executable.
 
 The second stroke of a `Ctrl+G` chord works with or without `Ctrl` held. Shortcuts work while the
 prompt editor has focus; the ones marked "outside text" stay ordinary caret keys in text fields. An

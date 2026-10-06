@@ -3,7 +3,7 @@ import { Alert, Button, Callout, Classes, NonIdealState } from "@blueprintjs/cor
 import { boot, startupConfig, type StartupConfigDocument, type StartupConfigValidation } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
-import { CodeEditor, type CodeEditorHandle } from "./CodeEditor";
+import { CodeEditor, type CodeEditorHandle } from "./monaco/CodeEditor";
 import { colorSchemeAttribute } from "./colorSchemes";
 import { canSaveRecovery, recoveryStatus } from "./configRecovery";
 import { maximumConfigLength } from "./configEditor";

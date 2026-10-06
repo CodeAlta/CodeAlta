@@ -5,7 +5,7 @@ import { sessionTabDrop } from "./sessionTabDrag";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { closeSessionTab, emptySessionTabs, openSessionTab, sessionTabLimit, type SessionTab } from "./sessionTabs";
 import { createSessionTabModel, fileTabAction, ownsSessionTabContent, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation } from "./sessionTabLayout";
-import { activateFileTab, changesTab, closeFileTab, emptyFileTabs, fileNodeId, openFileTab, type FileTab } from "./fileTabs";
+import { activateFileTab, changesTab, closeFileTab, editorTab, emptyFileTabs, fileNodeId, isChangesTab, openFileTab, type FileTab } from "./fileTabs";
 
 const tab = (id: string) => ({ projectId: "p", sessionId: id, path: "/p" });
 const snapshot: WorkspaceSnapshot = { configured: true, projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false,
@@ -279,20 +279,21 @@ test("unchanged App identity makes repeated presentation reconciliation inert; s
   model.removeChangeListener(listener);
 });
 
-const file = (path: string): FileTab => ({ projectId: "p", projectPath: "/p", path });
+// The code editor of a project, named here like the file that used to be a tab of its own.
+const file = (project: string): FileTab => editorTab({ id: project, path: `/${project}` });
 
-test("file tabs join the session strip: one node per file, selected while active, removed when closed", () => {
+test("editor tabs join the session strip: one node per project, selected while active, removed when closed", () => {
   const model = createSessionTabModel(), state = both();
   let files = openFileTab(emptyFileTabs(), file("src/a.ts"));
   reconcileSessionTabModel(model, state, label, files);
   const two = model.getNodeById(sessionNodeId(tab("two"))) as TabNode;
   const a = model.getNodeById(fileNodeId(file("src/a.ts"))) as TabNode;
-  assert.equal(a.getName(), "a.ts");
-  assert.equal(a.getComponent(), "file");
+  assert.equal(a.getName(), "editor");
+  assert.equal(a.getComponent(), "editor");
   assert.equal(a.isEnableDrag(), true);
   assert.equal(model.getActiveTabset()?.getSelectedNode(), a);
   assert.equal(model.getNodeById(sessionDraftNodeId), undefined);
-  // Opening the same file again does not add a tab; another file does and keeps the first node.
+  // Opening the same editor again does not add a tab; another project's does and keeps the first node.
   files = openFileTab(openFileTab(files, file("src/a.ts")), file("b.md"));
   reconcileSessionTabModel(model, state, label, files);
   assert.equal(model.getNodeById(a.getId()), a);
@@ -376,7 +377,7 @@ test("file tabs select, move and split like session tabs; closing is an App inte
 test("a changes tab opens in a pane on the right; the next one joins it and both are tabs like any other", () => {
   const model = createSessionTabModel(), state = both();
   const first = changesTab({ id: "p", path: "/p" }), second = changesTab({ id: "q", path: "/q" });
-  const named = (file: FileTab) => file.view ? `Changes · ${file.projectId}` : file.path;
+  const named = (file: FileTab) => `${isChangesTab(file) ? "Changes" : "Editor"} · ${file.projectId}`;
   reconcileSessionTabModel(model, state, label, emptyFileTabs(), named);
   const sessions = model.getActiveTabset()!;
   let files = openFileTab(emptyFileTabs(), first);
@@ -400,7 +401,7 @@ test("a changes tab opens in a pane on the right; the next one joins it and both
   const move = Actions.moveNode(node.getId(), sessions.getId(), DockLocation.CENTER, -1, true);
   assert.equal(sessionLayoutActionAllowed(model, move, state, snapshot, () => true, files), true);
   model.doAction(move);
-  reconcileSessionTabModel(model, state, label, files, file => file.view ? `Changes · renamed ${file.projectId}` : file.path);
+  reconcileSessionTabModel(model, state, label, files, file => `${isChangesTab(file) ? "Changes" : "Editor"} · renamed ${file.projectId}`);
   assert.equal(node.getName(), "Changes · renamed p");
   assert.equal(node.getParent(), sessions);
   // Closed, its node goes and the pane with its last tab.

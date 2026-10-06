@@ -7,10 +7,10 @@ import { AppIcon } from "./AppIcon";
 import { addComment, commentsFit, editComment, finishComment, moveComments, neighbourComment, orderedComments, reviewSnapshot, type ReviewComment } from "./askReview";
 import { fileAppearance } from "./fileAppearance";
 import { canSaveFile, fileConflictDismissed, fileEdited, fileLoaded, fileLoading, fileSaved, fileSaveUnknown, fileSaving, initialFileEditorState,
-  maximumFileLength } from "./fileEditorState";
-import { fileLanguage } from "./fileLanguage";
-import { followShellTheme, monaco } from "./monacoEnvironment";
-import { ensureMonacoLanguage } from "./monacoLanguages";
+  maximumFileLength } from "./editor/fileEditorState";
+import { fileLanguage } from "./monaco/fileLanguage";
+import { followShellTheme, monaco } from "./monaco/monacoEnvironment";
+import { ensureMonacoLanguage } from "./monaco/monacoLanguages";
 import { maximumFileCommentLength, type AskFileReview as AskFileReviewAnswer } from "./sessionAsks";
 import { useShellLanguage } from "./shellLanguage";
 
@@ -69,7 +69,7 @@ export function AskFileReview({ epoch, projectId, path, disabled = false, handle
     if (projectId === null) { setState(fileLoaded({ status: "unknown_project", content: null, revision: null, readOnly: false })); return; }
     const controller = new AbortController();
     setState(fileLoading);
-    void api.read({ expectedEpoch: epoch, projectId, path }, { signal: controller.signal, timeoutMilliseconds: 15000 }).then(value => {
+    void api.read({ expectedEpoch: epoch, projectId, path, reload: false }, { signal: controller.signal, timeoutMilliseconds: 15000 }).then(value => {
       if (!controller.signal.aborted) setState(fileLoaded(value));
     }).catch(() => { if (!controller.signal.aborted) setState(fileLoaded({ status: "read_failed", content: null, revision: null, readOnly: false })); });
     return () => controller.abort();
@@ -109,7 +109,8 @@ export function AskFileReview({ epoch, projectId, path, disabled = false, handle
     const editor = monaco.editor.create(node, { model, automaticLayout: true, ariaLabel: path, readOnly: latest.current.disabled,
       fontFamily: getComputedStyle(node).fontFamily, fontSize: 13, lineHeight: 20, minimap: { enabled: false }, glyphMargin: true,
       scrollBeyondLastLine: false, wordWrap: "on", renderLineHighlight: "line", stickyScroll: { enabled: false },
-      padding: { top: 8, bottom: 8 }, quickSuggestions: false, suggestOnTriggerCharacters: false, links: false, tabSize: 2 });
+      padding: { top: 8, bottom: 8 }, quickSuggestions: false, suggestOnTriggerCharacters: false, links: false, tabSize: 2,
+      folding: false, occurrencesHighlight: "off", matchBrackets: "never" });
     let disposed = false;
     void ensureMonacoLanguage(language).then(registered => { if (registered && !disposed) monaco.editor.setModelLanguage(model, language); });
     const unfollowTheme = followShellTheme();

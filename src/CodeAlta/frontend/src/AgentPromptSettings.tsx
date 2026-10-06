@@ -3,7 +3,7 @@ import { Button, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, Me
 import { agentPrompts, type AgentPromptDocument, type AgentPromptEntry } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
-import { CodeEditor } from "./CodeEditor";
+import { CodeEditor } from "./monaco/CodeEditor";
 import { ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
 import { scopedKey, settingsFailure, type SettingsScope } from "./settingsEditing";
 import { useShellLanguage } from "./shellLanguage";

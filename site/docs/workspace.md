@@ -15,7 +15,7 @@ The workspace is the same in both apps. Use the **Desktop / TUI** switch on a sc
 The main screen has four important areas:
 
 - **Navigator/sidebar**: projects, their sessions and child sessions, running work, and navigator actions.
-- **Workspace tabs**: session tabs and editor tabs share the same tab strip.
+- **Workspace tabs**: session tabs, the code editor and the changes of a project share the same tab strip.
 - **Timeline**: user messages, assistant messages, reasoning/status updates, tool calls, results, statistics cards, compaction notices, and modified-file summaries.
 - **Prompt bar**: prompt editor, queue strip, agent prompt selector, provider/model/reasoning selectors, context usage, compact button, and status text.
 
@@ -35,7 +35,7 @@ Press `Ctrl+P`, or type `/` in an empty prompt, to search and run any command. E
 
 ### Split panes (desktop)
 
-In the desktop app, session and editor tabs can be arranged in panes:
+In the desktop app, session tabs, the code editor and the Changes tab can be arranged in panes:
 
 - drag a tab along the tab strip to reorder it;
 - drag a tab to an edge of a pane to split the window side by side or stacked;
@@ -145,13 +145,81 @@ Type `@` in the prompt to search project files and folders. Accepted entries bec
 @"src/path with spaces/file.cs":10-40
 ```
 
-Use `Ctrl+E` or `/edit` to open the same picker in editor mode.
+Use `Ctrl+E` or `/edit` to open the same picker and edit the selected file in the [code editor](#code-editor).
 
-## Editor tabs
+## Code editor
 
-{{ alta_shot "alta-desktop-code-editor.webp" "alta-code-editor.png" "Editor tab with syntax-highlighted source code" "Editor tabs sit beside session tabs for quick inspection and focused edits without leaving CodeAlta." }}
+{{ alta_shot "alta-desktop-code-editor.webp" "alta-code-editor.png" "Code editor of a project with its files, the open files as tabs and syntax-highlighted source code" "The code editor of a project: its files on the left, the open files as tabs, and the selected file." }}
 
-Editor tabs support syntax highlighting, line/column status, dirty markers, `Ctrl+S` save, reload prompts for on-disk changes, and close confirmation for unsaved edits. In the desktop app an editor tab can be placed in its own pane, beside the session that works on the file.
+CodeAlta Desktop has a code editor for each project. It is one tab beside the session tabs, and it holds every file you open in the project. You can move, split or close it like any other tab, and it is restored with its open files at the next start.
+
+Open it in one of these ways:
+
+- Click the `</>` button of a project in the sidebar. The button stays visible while the editor of the project is open, with a dot when a file has unsaved changes.
+- Press `Ctrl+E` `Ctrl+E`, or run `/editor`, to open the editor of the current project with its files.
+- Press `Ctrl+E`, or run `/edit`, to pick one file. A new editor opens on that file with the files hidden, which keeps the view simple when you only want one file. `Ctrl+B` shows the files.
+
+### Files
+
+The **Files** pane shows the folders and files of the project. A folder is read when you expand it, so a large project opens right away. Files excluded by `.gitignore` are hidden: **Show ignored files** in the `…` menu of the pane shows them dimmed. Changed files have the color and the letter of their git status, and a dot marks the folders that contain them.
+
+- Click a file to preview it. Its tab name is in italics, and the next file you click takes its place. Double-click the file, or edit it, to keep its tab.
+- **New file** and **New folder** are at the top of the pane and in the menu of a folder (right-click).
+- `F2` renames the selected file or folder. `Delete` moves it to the Recycle Bin (the Trash on macOS and Linux) after a confirmation.
+- Drag a file or a folder onto another folder to move it.
+- Use the arrow keys to move in the tree, and type the first letters of a name to jump to it.
+
+The pane follows the changes made outside the editor, for example by an agent.
+
+### Editing
+
+The editor has syntax highlighting, line numbers, code folding, bracket matching and multiple cursors. Its `…` menu has **Wrap lines**, **Minimap** and **Reload from disk**.
+
+| Action | Shortcut |
+| --- | --- |
+| Save the file / all files | `Ctrl+S` / `Ctrl+Shift+S` |
+| Find / replace in the file, also with a regular expression | `Ctrl+F` / `Ctrl+H` |
+| Go to a line | `Ctrl+G` |
+| Next file | `Ctrl+Tab` |
+| Close the file | `Ctrl+W` |
+| Show or hide the files | `Ctrl+B` |
+| Show the files / search in files | `Ctrl+Shift+E` / `Ctrl+Shift+F` |
+| Wrap lines | `Alt+Z` |
+
+A dot on a file tab marks unsaved changes. CodeAlta asks before it closes a file, the editor or the app with unsaved changes. A file changed by another program or by an agent is reloaded when you have not edited it. When you have, the editor tells you and lets you reload the file or keep your version.
+
+### Search in files
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-editor-search.webp" alt="CodeAlta Desktop code editor with the results of a regular expression search in the files of a project" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The results of a search, file by file. A click opens the file on the match.</figcaption>
+</figure>
+
+The **Search** pane (`Ctrl+Shift+F`) searches the text of the project files, without the ignored ones. The buttons of the field match the case, whole words or a regular expression. The filter button adds two fields to include or exclude files, for example `src, *.ts`. Click a result to open the file at that line.
+
+### Pictures and previews
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-editor-preview.webp" alt="CodeAlta Desktop code editor showing an SVG file as a drawing, with zoom controls" loading="lazy">
+  <figcaption class="small text-secondary mt-2">An SVG file shown as a drawing. The buttons at the right of the tabs switch to its text.</figcaption>
+</figure>
+
+A PNG, JPEG, GIF, WebP, AVIF, BMP or ICO file is shown as a picture, with zoom controls. An SVG file opens as a drawing and a Markdown file as text. For both, the buttons at the right of the file tabs switch between the preview and the text, and the editor remembers your choice.
+
+### Beside a session
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-editor-session.webp" alt="CodeAlta Desktop with a session on the left and a C# file in the code editor on the right" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A session and the file it talks about, side by side.</figcaption>
+</figure>
+
+Drag the editor tab to an edge of the window to keep a file visible beside the session that works on it.
+
+An agent can open a file for you with `alta editor open --file <path> --line <n>`, for example to show you the code it is talking about. Without `--file`, the command opens the editor of the project.
+
+### Editor tabs in the TUI
+
+In CodeAlta TUI, `Ctrl+E` opens the selected file in an editor tab of its own. Editor tabs support syntax highlighting, line/column status, dirty markers, `Ctrl+S` save, reload prompts for on-disk changes, and close confirmation for unsaved edits.
 
 ## Changes (desktop)
 
@@ -167,7 +235,7 @@ The Changes tab shows what changed in the git repository of a project. Open it b
 - **Diff**: the selected file with syntax highlighting, side by side or inline. Unchanged regions are folded, and you can expand them. `Alt+Down` and `Alt+Up` jump to the next and previous change.
 - **Refresh**: the tab refreshes every five seconds while **Auto-refresh** is on. The refresh button reads the changes right away.
 
-The `…` menu of the diff has **Hide unchanged lines**, **Ignore whitespace changes**, **Wrap lines** and **Copy path**. **Open file** opens the file in an editor tab.
+The `…` menu of the diff has **Hide unchanged lines**, **Ignore whitespace changes**, **Wrap lines** and **Copy path**. **Open file** opens the file in the [code editor](#code-editor).
 
 An agent can open this tab for you with `alta diff show`, for example when it has finished a change and wants you to review it.
 

@@ -43,7 +43,7 @@ altatui</code></pre>
   <div class="alta-section-head">
     <span class="alta-kicker">CodeAlta Desktop</span>
     <h2 class="display-6">The complete CodeAlta experience</h2>
-    <p>A desktop app with session tabs you can drag and split, a file editor, and every setting in one window.</p>
+    <p>A desktop app with session tabs you can drag and split, a code editor for your projects, and every setting in one window.</p>
   </div>
   <div class="alta-showcase">
     <div class="alta-window">
@@ -105,7 +105,7 @@ altatui</code></pre>
       <h3><span class="alta-icon" style="--accent: #38bdf8; --accent-2: #6366f1;"><i class="bi bi-window"></i></span> Desktop</h3>
       <ul>
         <li>Session tabs you can drag, split and merge</li>
-        <li>File editor tabs beside sessions</li>
+        <li>A code editor for each project, beside its sessions</li>
         <li>All settings in one window</li>
         <li>Light and dark themes with 13 color schemes</li>
         <li>Keeps running in the notification area</li>
@@ -180,10 +180,10 @@ altatui</code></pre>
     <div class="alta-tour-row">
       <div class="alta-tour-copy">
         <h3>Edit files next to the session</h3>
-        <p>Open a project file with <code>Ctrl+E</code> in an editor tab with syntax highlighting. On the desktop, put the editor beside the session that is working on it.</p>
-        <a href="{{site.basepath}}/docs/workspace/#editor-tabs">File editor <i class="bi bi-arrow-right"></i></a>
+        <p>On the desktop, each project has a code editor with its files, a search in files and the open files as tabs. Put it beside the session that is working on the code. In the TUI, <code>Ctrl+E</code> opens a file in an editor tab.</p>
+        <a href="{{site.basepath}}/docs/workspace/#code-editor">Code editor <i class="bi bi-arrow-right"></i></a>
       </div>
-      {{ alta_shot "alta-desktop-code-editor.webp" "alta-code-editor.png" "File editor showing C# code" "" }}
+      {{ alta_shot "alta-desktop-code-editor.webp" "alta-code-editor.png" "Code editor with the files of a project and a C# file" "" }}
     </div>
     <div class="alta-tour-row">
       <div class="alta-tour-copy">

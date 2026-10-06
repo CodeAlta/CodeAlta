@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ProjectGitStatusRequest } from "#neoastra";
 import { AppIcon } from "./AppIcon";
-import { projectGitStatus, type ProjectGitView } from "./projectGit";
+import { projectGitStatus, type ProjectGitView } from "./changes/projectGit";
 import { useShellLanguage } from "./shellLanguage";
 
 const refreshMilliseconds = 2000;

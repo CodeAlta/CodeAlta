@@ -1,6 +1,6 @@
 import { useMemo } from "react";
-import { AppIcon } from "./AppIcon";
-import { fileAppearance } from "./fileAppearance";
+import { AppIcon } from "../AppIcon";
+import { fileAppearance } from "../fileAppearance";
 import { parseUnifiedDiff } from "./unifiedDiff";
 
 // React text nodes only: the lines of a diff never become markup or links.

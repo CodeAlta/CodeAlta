@@ -1,22 +1,23 @@
 import type { WorkspaceSnapshot } from "#neoastra";
 
 /**
- * One tab of a project beside the sessions: a project file open in an editor (the project-relative path), or,
- * with `view: "changes"` and no path, the changed files of the project's repository.
+ * One tab of a project beside the sessions: its code editor (`view: "editor"`, with the files opened in it as
+ * tabs of its own) or the changed files of its repository (`view: "changes"`). A project has one of each at most.
  */
-export type FileTab = Readonly<{ projectId: string; projectPath: string; path: string; view?: "changes" }>;
+export type FileTab = Readonly<{ projectId: string; projectPath: string; view: "editor" | "changes" }>;
 export type FileTabs = Readonly<{ open: readonly FileTab[]; active: FileTab | null; closed: readonly FileTab[] }>;
 export const fileTabsKey = "codealta.desktop.fileTabs.v1";
 export const fileTabLimit = 32;
 export const emptyFileTabs = (): FileTabs => ({ open: [], active: null, closed: [] });
-// One tab per file of a project, and one for its changes; the path is compared as the host returned it.
-export const fileTabKey = (tab: FileTab) => JSON.stringify(tab.view ? [tab.projectId, tab.path, tab.view] : [tab.projectId, tab.path]);
+export const fileTabKey = (tab: FileTab) => JSON.stringify([tab.projectId, tab.view]);
 export const isChangesTab = (tab: FileTab) => tab.view === "changes";
+export const isEditorTab = (tab: FileTab) => tab.view === "editor";
 /** The tab of a project's changes. */
-export const changesTab = (project: Readonly<{ id: string; path: string }>): FileTab => ({ projectId: project.id, projectPath: project.path, path: "", view: "changes" });
+export const changesTab = (project: Readonly<{ id: string; path: string }>): FileTab => ({ projectId: project.id, projectPath: project.path, view: "changes" });
+/** The tab of a project's code editor. */
+export const editorTab = (project: Readonly<{ id: string; path: string }>): FileTab => ({ projectId: project.id, projectPath: project.path, view: "editor" });
 export const fileNodeId = (tab: FileTab) => `file:${fileTabKey(tab)}`;
 export const sameFileTab = (a: FileTab | null, b: FileTab | null) => a === b || !!a && !!b && fileTabKey(a) === fileTabKey(b);
-export const fileTabName = (tab: FileTab) => tab.path.slice(tab.path.lastIndexOf("/") + 1);
 
 /** The project a tab was opened from, while it is still that folder and can be edited. */
 export function resolveFileTab(snapshot: WorkspaceSnapshot, tab: FileTab) {
@@ -25,8 +26,8 @@ export function resolveFileTab(snapshot: WorkspaceSnapshot, tab: FileTab) {
 }
 
 /**
- * Opens a file, or activates its tab when it is already open. At the limit the oldest inactive tab
- * that `keep` does not hold (unsaved edits) is closed; when every tab is held the file is not opened.
+ * Opens a tab, or activates it when it is already open. At the limit the oldest inactive tab
+ * that `keep` does not hold (unsaved edits) is closed; when every tab is held the tab is not opened.
  */
 export function openFileTab(state: FileTabs, tab: FileTab, keep: (tab: FileTab) => boolean = () => false): FileTabs {
   const existing = state.open.find(value => sameFileTab(value, tab));
@@ -40,7 +41,7 @@ export function openFileTab(state: FileTabs, tab: FileTab, keep: (tab: FileTab) 
   return { open, active: tab, closed: state.closed.filter(value => !sameFileTab(value, tab)) };
 }
 
-/** Closes a tab; closing the active one leaves no file active (the session selection shows again). */
+/** Closes a tab; closing the active one leaves no tab of a project active (the session selection shows again). */
 export function closeFileTab(state: FileTabs, tab: FileTab): FileTabs {
   if (!state.open.some(value => sameFileTab(value, tab))) return state;
   return { open: state.open.filter(value => !sameFileTab(value, tab)), active: sameFileTab(state.active, tab) ? null : state.active,
@@ -69,7 +70,7 @@ export function reopenTabKind(order: readonly TabKind[], sessionsClosed: number,
 }
 
 export type TabPosition = Readonly<{ kind: "draft" } | { kind: TabKind; index: number }>;
-/** Next/previous tab over one ring: the new-session tab, the session tabs, then the file tabs. */
+/** Next/previous tab over one ring: the new-session tab, the session tabs, then the tabs of projects. */
 export function cycleTab(sessions: number, files: number, current: TabPosition, delta: 1 | -1): TabPosition {
   const count = 1 + sessions + files;
   const at = current.kind === "draft" ? 0 : current.kind === "session" ? 1 + current.index : 1 + sessions + current.index;
@@ -77,7 +78,21 @@ export function cycleTab(sessions: number, files: number, current: TabPosition, 
   return next === 0 ? { kind: "draft" } : next <= sessions ? { kind: "session", index: next - 1 } : { kind: "file", index: next - 1 - sessions };
 }
 
-export function restoreFileTabs(read: () => string | null): FileTabs | null {
+type StoredTab = { projectId?: unknown; projectPath?: unknown; path?: unknown; view?: unknown };
+const text = (field: unknown, limit: number): field is string => typeof field === "string" && field.length > 0 && field.length <= limit;
+// A tab as it was stored: of the editor or the changes, or, from before the editor had tabs of its own, of one file.
+function storedTab(value: unknown): { tab: FileTab; file: string | null } | null {
+  if (!value || typeof value !== "object") return null;
+  const stored = value as StoredTab;
+  if (!text(stored.projectId, 256) || !text(stored.projectPath, 4096)) return null;
+  const project = { id: stored.projectId, path: stored.projectPath };
+  if (stored.view === "changes" || stored.view === "editor")
+    return stored.path === undefined || stored.path === "" ? { tab: stored.view === "changes" ? changesTab(project) : editorTab(project), file: null } : null;
+  return stored.view === undefined && text(stored.path, 1024) ? { tab: editorTab(project), file: stored.path } : null;
+}
+
+type Restored = { tabs: FileTabs; files: ReadonlyMap<string, readonly string[]> };
+function restore(read: () => string | null): Restored | null {
   try {
     const raw = read();
     if (!raw || raw.length > 131072) return null;
@@ -85,18 +100,30 @@ export function restoreFileTabs(read: () => string | null): FileTabs | null {
     if (!value || typeof value !== "object") return null;
     const data = value as { version?: unknown; open?: unknown; active?: unknown };
     if (data.version !== 1 || !Array.isArray(data.open) || data.open.length > fileTabLimit) return null;
-    const text = (field: unknown, limit: number) => typeof field === "string" && field.length > 0 && field.length <= limit;
-    const valid = (tab: unknown): tab is FileTab => !!tab && typeof tab === "object" && text((tab as FileTab).projectId, 256)
-      && text((tab as FileTab).projectPath, 4096) && ((tab as FileTab).view === undefined ? text((tab as FileTab).path, 1024)
-        : (tab as FileTab).view === "changes" && (tab as FileTab).path === "");
-    if (!data.open.every(valid) || data.active !== null && !valid(data.active)) return null;
-    const open = data.open.map((tab): FileTab => tab.view ? changesTab({ id: tab.projectId, path: tab.projectPath })
-      : { projectId: tab.projectId, projectPath: tab.projectPath, path: tab.path });
-    if (new Set(open.map(fileTabKey)).size !== open.length) return null;
-    const active = data.active === null ? null : open.find(tab => sameFileTab(tab, data.active as FileTab));
-    if (active === undefined) return null;
-    return { open, active, closed: [] };
+    const stored = data.open.map(storedTab);
+    const active = data.active === null ? null : storedTab(data.active);
+    if (stored.some(entry => entry === null) || active === null && data.active !== null) return null;
+    const open: FileTab[] = [];
+    const files = new Map<string, string[]>();
+    for (const entry of stored) {
+      // The files that were tabs of their own are now the files of their project's editor.
+      if (entry!.file !== null) files.set(entry!.tab.projectId, [...files.get(entry!.tab.projectId) ?? [], entry!.file]);
+      if (!open.some(tab => sameFileTab(tab, entry!.tab))) open.push(entry!.tab);
+      else if (entry!.file === null) return null;
+    }
+    const selected = active ? open.find(tab => sameFileTab(tab, active.tab)) : null;
+    if (selected === undefined) return null;
+    return { tabs: { open, active: selected, closed: [] }, files };
   } catch { return null; }
+}
+
+export function restoreFileTabs(read: () => string | null): FileTabs | null {
+  return restore(read)?.tabs ?? null;
+}
+
+/** The files that were stored as tabs of their own, by project: the editor of that project opens them. */
+export function restoreLegacyFiles(read: () => string | null): ReadonlyMap<string, readonly string[]> {
+  return restore(read)?.files ?? new Map();
 }
 
 export function persistFileTabs(write: (value: string) => void, state: FileTabs): boolean {

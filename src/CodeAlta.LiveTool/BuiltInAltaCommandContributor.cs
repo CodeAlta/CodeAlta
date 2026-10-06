@@ -95,8 +95,9 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         Read("plugin status"),
     ];
 
-    // It changes nothing but what the window shows.
+    // They change nothing but what the window shows.
     private static readonly AltaCommandPolicy DiffShowPolicy = Read("diff show");
+    private static readonly AltaCommandPolicy EditorOpenPolicy = Read("editor open");
 
     public IEnumerable<CommandNode> CreateCommandLineNodes(AltaCommandContributionContext context)
     {
@@ -121,6 +122,12 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         {
             yield return CreateDiffCommand(context.Invocation);
         }
+
+        // Likewise for the code editor.
+        if (context.Invocation.Services.Get<IAltaEditorView>() is not null)
+        {
+            yield return CreateEditorCommand(context.Invocation);
+        }
     }
 
     public IEnumerable<AltaCommandPolicy> GetCommandPolicies(AltaCommandContributionContext context)
@@ -130,7 +137,15 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
     }
 
     private static IReadOnlyList<AltaCommandPolicy> PoliciesFor(AltaCommandContext context)
-        => context.Services.Get<IAltaChangesView>() is null ? Policies : [.. Policies, DiffShowPolicy];
+    {
+        var changes = context.Services.Get<IAltaChangesView>() is not null;
+        var editor = context.Services.Get<IAltaEditorView>() is not null;
+        if (!changes && !editor) return Policies;
+        var policies = new List<AltaCommandPolicy>(Policies);
+        if (changes) policies.Add(DiffShowPolicy);
+        if (editor) policies.Add(EditorOpenPolicy);
+        return policies;
+    }
 
     private static IReadOnlyList<AltaCommandPolicy> GetEffectivePolicies(AltaCommandContext context)
     {
@@ -293,6 +308,121 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             project.Slug,
             projectPath = project.ProjectPath,
             file = path,
+        });
+        return AltaExitCodes.Success;
+    }
+
+    private static Command CreateEditorCommand(AltaCommandContext context)
+    {
+        var group = Group("editor", "Show the files of a project to the user in the code editor.");
+        string? projectRef = null;
+        string? file = null;
+        string? line = null;
+        string? column = null;
+        var open = Leaf("open", "Open the code editor of a project in the CodeAlta window, and a file in it.");
+        open.Add("project=", "Project id, slug or path. Defaults to the project of the calling session, then to the cwd.", value => projectRef = value);
+        open.Add("file=", "File to open: a path relative to the project folder, or a full path inside it. Without it the editor opens with the files of the project.", value => file = value);
+        open.Add("line=", "1-based line to go to in the file.", value => line = value);
+        open.Add("column=", "1-based column on that line.", value => column = value);
+        open.Add(async (_, _) => await HandleEditorOpenAsync(context, projectRef, file, line, column).ConfigureAwait(false));
+        AddHelpText(
+            open,
+            "The editor is where the user reads and edits files: use it to show them a file, not to read one yourself.",
+            "Examples: `alta editor open`; `alta editor open --file src/app.ts`; `alta editor open --file src/app.ts --line 120`; `alta editor open --project CodeAlta`.");
+        group.Add(open);
+        AddHelpText(group, "Example: `alta editor open --file readme.md` opens that file of the current project for the user.");
+        return group;
+    }
+
+    private static async ValueTask<int> HandleEditorOpenAsync(AltaCommandContext context, string? projectRef, string? file, string? line, string? column)
+    {
+        if (context.Services.Get<IAltaEditorView>() is not { } view)
+        {
+            AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "service.unavailable", AltaExitCodes.ServiceUnavailable,
+                "Required in-process service 'IAltaEditorView' is unavailable.");
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        if (!context.TryGetRequired<ProjectCatalog>(nameof(ProjectCatalog), out var catalog))
+        {
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        var reference = NormalizeOptionalText(projectRef) ?? NormalizeOptionalText(context.Caller.SourceProjectId);
+        var project = reference is not null
+            ? await ResolveProjectAsync(catalog, reference, context, includeArchived: false).ConfigureAwait(false)
+            : await catalog.GetByPathAsync(ResolvePath(context, context.Cwd ?? Environment.CurrentDirectory), context.CancellationToken).ConfigureAwait(false);
+        if (project is null || project.Archived)
+        {
+            return NotFound(context, "project.notFound", reference is null ? "No catalog project matches the current directory." : $"Project '{reference}' was not found.");
+        }
+
+        int? lineNumber = null, columnNumber = null;
+        if (NormalizeOptionalText(line) is { } lineText)
+        {
+            if (!int.TryParse(lineText, NumberStyles.None, CultureInfo.InvariantCulture, out var number) || number < 1)
+            {
+                return UsageError(context, "usage.invalidLine", "The line must be a number, starting at 1.", "alta editor open");
+            }
+
+            lineNumber = number;
+        }
+
+        if (NormalizeOptionalText(column) is { } columnText)
+        {
+            if (lineNumber is null || !int.TryParse(columnText, NumberStyles.None, CultureInfo.InvariantCulture, out var number) || number < 1)
+            {
+                return UsageError(context, "usage.invalidColumn", "The column must be a number, starting at 1, and needs a line.", "alta editor open");
+            }
+
+            columnNumber = number;
+        }
+
+        // A file of the project folder: its relative path, or a full path that is inside the folder.
+        var path = NormalizeOptionalText(file);
+        if (path is not null)
+        {
+            var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(project.ProjectPath));
+            if (Path.IsPathFullyQualified(path))
+            {
+                var relative = Path.GetRelativePath(root, Path.GetFullPath(path));
+                path = relative == "." || Path.IsPathRooted(relative) ? null : relative;
+            }
+
+            path = path?.Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/');
+            if (path is null || path.Length > 1024 || Path.IsPathRooted(path) || path.Contains(':') || path.Split('/').Any(static segment => segment is "" or "." or ".."))
+            {
+                return UsageError(context, "usage.invalidFile", "The file must be a path inside the project folder.", "alta editor open");
+            }
+
+            if (!File.Exists(Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar))))
+            {
+                return NotFound(context, "file.notFound", $"File '{path}' was not found in the project folder.");
+            }
+        }
+        else if (lineNumber is not null)
+        {
+            return UsageError(context, "usage.missingFile", "A line needs the file it is in: add `--file`.", "alta editor open");
+        }
+
+        if (!view.Open(project.Id, path, lineNumber, columnNumber))
+        {
+            AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "view.unavailable", AltaExitCodes.ServiceUnavailable,
+                "No CodeAlta window is open to show the editor.");
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        AltaJsonlWriter.WriteRecord(context.Stdout, new
+        {
+            type = "alta.editor.opened",
+            version = 1,
+            correlationId = context.CorrelationId,
+            projectId = project.Id,
+            project.Slug,
+            projectPath = project.ProjectPath,
+            file = path,
+            line = lineNumber,
+            column = columnNumber,
         });
         return AltaExitCodes.Success;
     }
