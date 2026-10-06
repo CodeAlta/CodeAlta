@@ -6,7 +6,7 @@ import { createRoot } from "react-dom/client";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { ComposerStatus } from "./ComposerStatus";
 import { settingsNavigation } from "./settingsNavigation";
-import { colorSchemeAttribute } from "./colorSchemes";
+import { showAppearance } from "./colorSchemes";
 import { dismissStartupScreen, rememberAppearance } from "./startupScreen";
 import { ConfigRecoveryScreen } from "./ConfigRecoveryScreen";
 import { RunningExitDialog } from "./RunningExitDialog";
@@ -146,7 +146,6 @@ import { createPaletteFocusRestoration } from "./paletteActions";
 import "normalize.css";
 import "@blueprintjs/core/lib/css/blueprint.css";
 import "flexlayout-react/style/light.css";
-import "./colorSchemes.gen.css";
 import "./style.css";
 import "./editor/editor.css";
 import "./explorer/explorer.css";
@@ -321,7 +320,7 @@ function App() {
   const [search, writeSearch] = useState("");
   function setSearch(value: string) { invalidateCreation(); writeSearch(value); }
   const [projectFilter, setProjectFilter] = useState("");
-  const { projectSort, setProjectSort, theme, shownTheme, setTheme, colorScheme, setColorScheme, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount } = useWindowPreferences();
+  const { projectSort, setProjectSort, theme, shownTheme, appearance, setTheme, colorScheme, setColorScheme, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount } = useWindowPreferences();
   // What the Explorer remembers between starts: the scopes left open and the favorite projects.
   const [storedProjectTree] = useState(() => restoreProjectTree(() => localStorage.getItem(projectTreeKey)));
   const [projectTree, setProjectTree] = useState<ProjectTree>(storedProjectTree ?? emptyProjectTree);
@@ -523,15 +522,11 @@ function App() {
   const [clock, setClock] = useState(Date.now);
 
   useLayoutEffect(() => {
-    document.documentElement.dataset.theme = shownTheme;
-    document.documentElement.classList.toggle(Classes.DARK, shownTheme === "dark");
-    const scheme = colorSchemeAttribute(colorScheme);
-    if (scheme) document.documentElement.dataset.colorScheme = scheme;
-    else delete document.documentElement.dataset.colorScheme;
+    showAppearance(document.documentElement, Classes.DARK, appearance);
     // The next start shows these colors before the application has loaded.
-    rememberAppearance(shownTheme, appearance => void boot.appearance({ theme: appearance.theme, background: appearance.background },
+    rememberAppearance(appearance.theme, remembered => void boot.appearance({ theme: remembered.theme, background: remembered.background },
       { timeoutMilliseconds: 8_000 }).catch(() => { /* The window keeps the colors it started with. */ }));
-  }, [shownTheme, colorScheme]);
+  }, [appearance]);
   // The start-up screen stays until the window has something to show in its place: the host's answer and the
   // workspace, or the reason there is none. It never stays longer than a few seconds.
   useEffect(() => {

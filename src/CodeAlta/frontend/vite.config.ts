@@ -5,8 +5,8 @@ import react from "@vitejs/plugin-react";
 import { blueprintPaletteVariables } from "./src/blueprintPalette";
 import { splashDocument, splashMarkup, splashScript } from "./src/splashMarkup";
 
-// Blueprint's stylesheet reaches the bundle with its palette literals turned into palette variables, so the
-// color schemes (src/colorSchemes.gen.css) restyle every Blueprint component by redefining those variables.
+// Blueprint's stylesheet reaches the bundle with its palette literals turned into palette variables, so a
+// color scheme (src/colorSchemes.ts) restyles every Blueprint component by redefining those variables.
 const blueprintPalette = (): Plugin => ({
   name: "codealta:blueprint-palette",
   enforce: "pre",

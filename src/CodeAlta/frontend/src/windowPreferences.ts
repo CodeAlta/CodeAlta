@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { colorSchemeIds, colorSchemeStorageKey, defaultColorScheme } from "./colorSchemes";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { colorSchemeIds, colorSchemeOf, colorSchemeStorageKey, defaultColorScheme, type ShownAppearance } from "./colorSchemes";
 import type { PreferenceIssue } from "./localization";
 import { readRecentSessionCount, recentSessionCountKey, validRecentSessionCount } from "./recentSessions";
 import { persistProjectSort, projectSortStorageKey, type ProjectSort } from "./explorer/projectRail";
@@ -100,5 +100,6 @@ export function useWindowPreferences() {
   function closeNarrowRail() { changeRail(resetNarrowRail(railCurrent.current), false); }
 
   const shownTheme = effectiveTheme(theme, useSystemDark());
-  return { theme, shownTheme, setTheme, colorScheme, setColorScheme, projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices, recentSessionCount, setRecentSessionCount };
+  const appearance: ShownAppearance = useMemo(() => ({ theme: shownTheme, scheme: colorScheme, palette: colorSchemeOf(colorScheme)[shownTheme] }), [shownTheme, colorScheme]);
+  return { theme, shownTheme, appearance, setTheme, colorScheme, setColorScheme, projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices, recentSessionCount, setRecentSessionCount };
 }

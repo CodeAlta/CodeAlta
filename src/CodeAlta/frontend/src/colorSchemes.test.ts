@@ -1,23 +1,38 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import { colorSchemeAttribute, colorSchemeIds, colorSchemes, defaultColorScheme } from "./colorSchemes";
+import { applyPalette, colorSchemeIds, colorSchemeOf, colorSchemes, defaultColorScheme, paletteVariables, schemeSwatch, showAppearance } from "./colorSchemes";
+import { blueprintPalette } from "./colorSchemes.gen";
 
-test("Blueprint is the default scheme and needs no attribute", () => {
+// The part of the document root that showing an appearance touches.
+function fakeRoot() {
+  const properties = new Map<string, string>([["--splash-background", "#101010"]]);
+  const classes = new Set<string>();
+  const style = { get length() { return properties.size; }, item: (index: number) => [...properties.keys()][index] ?? "",
+    getPropertyValue: (name: string) => properties.get(name) ?? "", setProperty: (name: string, value: string) => { properties.set(name, value); },
+    removeProperty: (name: string) => { properties.delete(name); return ""; } };
+  const classList = { toggle: (name: string, on?: boolean) => { if (on) classes.add(name); else classes.delete(name); return !!on; } };
+  const root = { style, dataset: {} as Record<string, string | undefined>, classList } as unknown as HTMLElement;
+  return { root, properties, classes };
+}
+
+test("Blueprint is the default scheme and redefines nothing", () => {
   assert.equal(colorSchemes[0].id, defaultColorScheme);
-  assert.equal(colorSchemeAttribute(defaultColorScheme), undefined);
-  assert.equal(colorSchemeAttribute("elderberry"), "elderberry");
-  assert.equal(colorSchemeAttribute("unknown"), undefined);
+  assert.equal(colorSchemeOf("elderberry").name, "Elderberry");
+  assert.equal(colorSchemeOf("unknown"), colorSchemes[0]);
   assert.equal(new Set(colorSchemeIds).size, colorSchemeIds.length);
+  assert.deepEqual(paletteVariables(colorSchemes[0].dark), {});
+  assert.deepEqual(paletteVariables(colorSchemes[0].light), {});
 });
 
-test("every generated scheme has a dark and a light rule in the generated stylesheet", () => {
-  const css = readFileSync(new URL("./colorSchemes.gen.css", import.meta.url), "utf8");
-  for (const scheme of colorSchemes.slice(1)) {
+test("every scheme has a whole palette for both themes", () => {
+  const names = Object.keys(blueprintPalette).sort();
+  assert.equal(names.length, 87);
+  for (const scheme of colorSchemes) {
     assert.match(scheme.id, /^[a-z][a-z0-9-]*$/);
-    assert.ok(css.includes(`:root[data-color-scheme="${scheme.id}"] {`), scheme.id);
-    assert.ok(css.includes(`:root[data-color-scheme="${scheme.id}"][data-theme="light"] {`), scheme.id);
-    for (const swatch of [scheme.dark, scheme.light]) for (const color of Object.values(swatch)) assert.match(color, /^#[0-9a-f]{6}$/);
+    for (const palette of [scheme.dark, scheme.light]) {
+      assert.deepEqual(Object.keys(palette).sort(), names, scheme.id);
+      for (const color of Object.values(palette)) assert.match(color, /^#[0-9a-f]{6}$/);
+    }
   }
 });
 
@@ -27,8 +42,44 @@ test("a scheme's text keeps a readable contrast against its background", () => {
     return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
   };
   const contrast = (left: string, right: string) => { const [low, high] = [luminance(left), luminance(right)].sort((a, b) => a - b); return (high + 0.05) / (low + 0.05); };
-  for (const scheme of colorSchemes) for (const swatch of [scheme.dark, scheme.light]) {
+  for (const scheme of colorSchemes) for (const theme of ["dark", "light"] as const) {
+    const swatch = schemeSwatch(scheme[theme], theme);
     assert.ok(contrast(swatch.background, swatch.foreground) >= 7, `${scheme.id} text`);
     assert.ok(contrast(swatch.background, swatch.accent) >= 3, `${scheme.id} accent`);
   }
+});
+
+test("a palette sets the palette variables it changes and removes those of the palette before", () => {
+  const { root, properties } = fakeRoot();
+  const cherry = colorSchemeOf("cherry"), kiwi = colorSchemeOf("kiwi");
+  applyPalette(root, cherry.dark);
+  assert.equal(properties.get("--bp-palette-dark-gray-1"), cherry.dark["dark-gray-1"]);
+  assert.equal(properties.get("--bp-palette-blue-3"), cherry.dark["blue-3"]);
+  // White is Blueprint's own in this scheme: it is not redefined.
+  assert.equal(properties.has("--bp-palette-white"), false);
+  const first = root.dataset.palette;
+  assert.match(first ?? "", /^[0-9a-f]{8}$/);
+
+  applyPalette(root, kiwi.light);
+  assert.equal(properties.get("--bp-palette-dark-gray-1"), kiwi.light["dark-gray-1"]);
+  assert.notEqual(root.dataset.palette, first);
+
+  applyPalette(root, blueprintPalette);
+  assert.deepEqual([...properties.keys()], ["--splash-background"]);
+  assert.equal(root.dataset.palette, undefined);
+});
+
+test("showing an appearance sets the theme, the scheme and its palette on the root", () => {
+  const { root, properties, classes } = fakeRoot();
+  showAppearance(root, "dark-class", { theme: "dark", scheme: "plum", palette: colorSchemeOf("plum").dark });
+  assert.equal(root.dataset.theme, "dark");
+  assert.equal(root.dataset.colorScheme, "plum");
+  assert.ok(classes.has("dark-class"));
+  assert.equal(properties.get("--bp-palette-gray-1"), colorSchemeOf("plum").dark["gray-1"]);
+
+  showAppearance(root, "dark-class", { theme: "light", scheme: defaultColorScheme, palette: blueprintPalette });
+  assert.equal(root.dataset.theme, "light");
+  assert.equal(root.dataset.colorScheme, undefined);
+  assert.equal(classes.has("dark-class"), false);
+  assert.equal(properties.has("--bp-palette-gray-1"), false);
 });

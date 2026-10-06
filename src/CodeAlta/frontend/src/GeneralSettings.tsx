@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Button, ButtonGroup, Card, HTMLSelect, Switch } from "@blueprintjs/core";
 import { AppIcon, type IconName } from "./AppIcon";
 import type { ProjectSort } from "./explorer/projectRail";
-import { colorSchemes } from "./colorSchemes";
+import { colorSchemes, schemeSwatch } from "./colorSchemes";
 import { themeLabel, themes, type EffectiveTheme, type Theme, type PreferenceNotices } from "./windowPreferences";
 import { useShellLanguage } from "./shellLanguage";
 import { locales, languageNames, preferenceNotice } from "./localization";
@@ -57,7 +57,7 @@ export function GeneralSettings({ theme, setTheme, shownTheme, colorScheme, setC
       notice={notices.scheme && <p role="status" className="notice" data-diagnostic={notices.scheme}>{preferenceNotice(locale, "Color scheme", "Blueprint", notices.scheme)}</p>}>
       <div className="color-scheme-grid" role="radiogroup" aria-label={t("Color scheme")}>
         {colorSchemes.map(scheme => {
-          const swatch = scheme[shownTheme];
+          const swatch = schemeSwatch(scheme[shownTheme], shownTheme);
           return <Button key={scheme.id} role="radio" aria-checked={colorScheme === scheme.id} active={colorScheme === scheme.id} alignText="start"
             icon={<span className="color-scheme-swatch" aria-hidden="true" style={{ background: swatch.background, borderColor: swatch.tint }}>
               <i style={{ background: swatch.foreground }} /><i style={{ background: swatch.tint }} /><i style={{ background: swatch.accent }} /></span>}

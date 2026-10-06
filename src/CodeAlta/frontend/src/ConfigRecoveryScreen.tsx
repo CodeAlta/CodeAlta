@@ -4,7 +4,7 @@ import { boot, startupConfig, type StartupConfigDocument, type StartupConfigVali
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import { CodeEditor, type CodeEditorHandle } from "./monaco/CodeEditor";
-import { colorSchemeAttribute } from "./colorSchemes";
+import { showAppearance } from "./colorSchemes";
 import { canSaveRecovery, recoveryStatus } from "./configRecovery";
 import { maximumConfigLength } from "./configEditor";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
@@ -20,18 +20,14 @@ type Api = Pick<typeof startupConfig, "read" | "reload" | "validate" | "save" | 
  */
 export function ConfigRecoveryScreen({ developer = false, api = startupConfig }: { developer?: boolean; api?: Api }) {
   const language = useLanguagePreference();
-  const { shownTheme, colorScheme } = useWindowPreferences();
+  const { appearance } = useWindowPreferences();
   const titleBar = useWindowTitleBar();
   // The same theme as the workspace: this screen stands where it would.
   useLayoutEffect(() => {
-    document.documentElement.dataset.theme = shownTheme;
-    document.documentElement.classList.toggle(Classes.DARK, shownTheme === "dark");
-    const scheme = colorSchemeAttribute(colorScheme);
-    if (scheme) document.documentElement.dataset.colorScheme = scheme;
-    else delete document.documentElement.dataset.colorScheme;
-    rememberAppearance(shownTheme, appearance => void boot.appearance({ theme: appearance.theme, background: appearance.background },
+    showAppearance(document.documentElement, Classes.DARK, appearance);
+    rememberAppearance(appearance.theme, remembered => void boot.appearance({ theme: remembered.theme, background: remembered.background },
       { timeoutMilliseconds: 8_000 }).catch(() => { /* The window keeps the colors it started with. */ }));
-  }, [shownTheme, colorScheme]);
+  }, [appearance]);
   return <ShellLanguageContext.Provider value={language}><div className="config-recovery-shell">
     <header className="config-recovery-titlebar" data-neoastra-drag-region><WindowBrand developer={developer} /><WindowControls snapshot={titleBar} /></header>
     <ConfigRecovery api={api} />

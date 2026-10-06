@@ -48,11 +48,11 @@ const diffColors = (mode: keyof typeof themes): Record<string, string> => {
 monaco.editor.defineTheme("codealta-dark", { base: themes.dark.base, inherit: true, colors: diffColors("dark"), rules: rules("dark", themes.dark.inline) });
 monaco.editor.defineTheme("codealta-light", { base: themes.light.base, inherit: true, colors: diffColors("light"), rules: rules("light", themes.light.inline) });
 
-// A color scheme tints the editor like the panels around it; Blueprint's own palette keeps Monaco's surfaces.
+// A palette tints the editor like the panels around it; Blueprint's own palette keeps Monaco's surfaces.
 function applyShellTheme() {
   const root = document.documentElement;
   const mode = root.dataset.theme === "light" ? "light" : "dark";
-  if (!root.dataset.colorScheme) { monaco.editor.setTheme(`codealta-${mode}`); return; }
+  if (!root.dataset.palette) { monaco.editor.setTheme(`codealta-${mode}`); return; }
   const probe = root.appendChild(document.createElement("span"));
   const color = (property: string) => shellColor(probe, property);
   const colors: Record<string, string> = diffColors(mode);
@@ -92,11 +92,11 @@ function applyShellTheme() {
   monaco.editor.setTheme("codealta-scheme");
 }
 
-/** Keeps Monaco's theme in step with the shell theme and color scheme; returns the disposer. */
+/** Keeps Monaco's theme in step with the shell theme and palette; returns the disposer. */
 export function followShellTheme(): () => void {
   applyShellTheme();
   const observer = new MutationObserver(applyShellTheme);
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-color-scheme"] });
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-palette"] });
   return () => observer.disconnect();
 }
 
