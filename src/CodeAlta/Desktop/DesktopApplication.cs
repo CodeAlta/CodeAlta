@@ -30,6 +30,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         // its window and ends there, before touching anything the running one holds (its log file, say).
         if (options.Owned is not null && ProfileInUse(options)) return ActivateRunningInstance(options);
         if (options.ExitRunning) return 0; // None is running: there is nothing to exit.
+        // A start from a terminal gives the prompt back: the application runs in a process of its own.
+        if (DesktopTerminalStart.TryHandOver(options, Console.Error) is { } handedOver) return handedOver;
         return RunWithCapture(options, RunCore);
     }
 
@@ -356,6 +358,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // This method runs for the whole life of the application: say now that it is ready, or the launches
             // routed to it (a second start, the Dock) would wait for it to return.
             application.NotifyReady();
+            // So does the start that waits in a terminal for this window.
+            DesktopTerminalStart.NotifyShown(options.StartToken);
             // The page's theme: kept for the next start, and the window controls follow it now.
             void RememberAppearance(DesktopAppearance remembered)
             {

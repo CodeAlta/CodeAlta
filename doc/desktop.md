@@ -94,6 +94,41 @@ When CodeAlta is installed so deep that its files reach that length (a tool path
 folder, not the usual `.dotnet\tools`), it says so in a message at start, naming the folder and the
 length, and exits, instead of staying on its start-up screen with half of its files.
 
+### Started from a terminal
+
+`alta` typed in a terminal gives the prompt back once the window is shown. A shell waits for the
+program it starts, and on Windows the launcher that `dotnet tool install` writes for a tool packed
+per runtime is a script (`alta.cmd`), which waits for a windowed program as well: the terminal used
+to stay busy until CodeAlta exited. Such a start now runs the application in a second process and
+ends (`DesktopTerminalStart`):
+
+- **When.** For `alta` and `alta --dev` started from a terminal: on Windows when the process that
+  started `alta.exe` has a console, on macOS and Linux when the standard input, output or error is
+  a terminal. The Start Menu shortcut, a taskbar pin, the Dock and a desktop entry have no
+  terminal, so the process they start is the application, as before. So is a start under a
+  debugger, on explicit roots, or through `dotnet alta.dll`.
+- **The application.** The same executable with the same options, working directory and
+  environment. On Windows it is started as the Start Menu starts it, so neither the console nor
+  the pipes of a caller that reads the output reach it; it takes the application identity, so the
+  taskbar still groups its window with the shortcut. On macOS and Linux it starts a session of
+  its own (`setsid`) and replaces a terminal on its standard streams with `/dev/null`: closing the
+  terminal or Ctrl+C does not reach it, and nothing it or the web view writes lands in the
+  terminal. A stream redirected to a file or a pipe is kept.
+- **The wait.** The first process creates an empty file in the temporary folder
+  (`codealta-start-<token>`) and gives its token to the application in `CODEALTA_START_TOKEN`; the
+  application removes the file once its window shows the start-up screen, and the first process
+  ends with exit code 0. When the application ends before that, the first process ends with the
+  same exit code and names the log folder on the standard error. After 30 seconds it stops waiting
+  and ends with 0.
+- **Already running.** The start shows the window of the running application itself; nothing is
+  handed over.
+- **`alta --wait`** (alone or with `--dev`) runs the application in the started process, which
+  keeps the terminal until it exits: for a script that waits for CodeAlta, and on macOS and Linux
+  to read what the application writes when it does not start. A windowed program writes nothing
+  to a console on Windows.
+- A start that cannot be handed over (no temporary folder, the process cannot be started) runs
+  the application in the started process.
+
 ### Updates
 
 Once per start the desktop asks nuget.org whether a newer `CodeAlta` package is published, as the
@@ -127,7 +162,7 @@ or the launcher's path changes. The first time, a notice in the window says wher
   has its own application identity, so the taskbar groups the window with that shortcut and a pin
   keeps the name and icon. The shortcut starts the executable of the installed version, not the
   tool's launcher: for a tool packed per runtime the launcher is a script (`alta.cmd`), and a
-  shortcut to it would keep a console window open. The executable's path holds the version, so the
+  shortcut to it would show a console window. The executable's path holds the version, so the
   first start of each version writes the shortcut again, together with the copy that a pin on the
   taskbar starts.
 - **macOS:** `~/Applications/CodeAlta.app`, a bundle whose executable is a shell script that becomes

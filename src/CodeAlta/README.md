@@ -66,11 +66,17 @@ instance runs the build you are testing. `alta --dev --exit` asks it to exit.
 | --- | --- |
 | `alta` | Starts the app for the current folder. If it is already running, shows its window. |
 | `alta --dev` | Starts the developer instance. |
+| `alta --wait` | Starts the app and keeps the terminal until it exits, alone or with `--dev`. |
 | `alta --exit` | Asks the running app to exit. It asks first about unsaved files and running sessions. |
 | `alta --version` | Prints the version. |
 | `alta --help` | Prints the options. |
 
 `--help` and `--version` do not start the host or create any storage.
+
+Started from a terminal, `alta` and `alta --dev` run the window in a second process and give the
+prompt back once it is shown: exit code 0 then, or the code the app failed to start with. `--wait`
+keeps the app in the process you started; so does a start under a debugger. See
+[Started from a terminal](../../doc/desktop.md#started-from-a-terminal).
 
 Set `CODEALTA_DISABLE_PLUGINS=1` to start without plugins.
 

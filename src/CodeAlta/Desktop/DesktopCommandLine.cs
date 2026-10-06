@@ -18,6 +18,15 @@ internal sealed record DesktopLaunchOptions(string DataRoot, string? CatalogRoot
     /// its window closed), and starts nothing itself.
     /// </summary>
     internal bool ExitRunning { get; init; }
+
+    /// <summary>
+    /// Stay with what started this process until the application exits, instead of giving a terminal its
+    /// prompt back (see <see cref="DesktopTerminalStart"/>).
+    /// </summary>
+    internal bool Wait { get; init; }
+
+    /// <summary>The token of the start that waits for this application's window; null when none does.</summary>
+    internal string? StartToken { get; init; }
     internal bool ReviewOwnedCommandPermissions { get; init; }
     internal bool EnableOwnedUserInput { get; init; }
 }
@@ -28,12 +37,16 @@ internal static class DesktopCommandLine
     /// <summary>Asks the running instance to exit instead of starting one.</summary>
     internal const string ExitOption = "--exit";
 
+    /// <summary>Keeps the terminal until the application exits.</summary>
+    internal const string WaitOption = "--wait";
+
     private const string HelpText = """
         CodeAlta Desktop
 
         Usage:
           alta                Start CodeAlta Desktop for the current folder.
           alta --dev          Start the developer instance beside the normal one.
+          alta --wait         Start it and keep the terminal until it exits.
           alta --exit         Ask the running CodeAlta Desktop to exit.
           alta --version      Print the version.
           alta --help, -h     Print this help.
@@ -42,6 +55,9 @@ internal static class DesktopCommandLine
         with CodeAlta TUI (altatui). It runs the built-in plugins (MCP, Git, Statistics) and the
         source plugins of ~/.alta/plugins and of the current project. Set CODEALTA_DISABLE_PLUGINS=1
         to start without plugins. When CodeAlta Desktop is already running, alta shows its window.
+
+        In a terminal, alta gives the prompt back once the window is shown. --wait keeps the
+        terminal instead, alone or with --dev.
 
         --dev runs a second instance on the same profile. It shares configuration, providers,
         credentials, prompts, skills and projects, and keeps its own sessions under ~/.alta/dev.
@@ -118,6 +134,12 @@ internal static class DesktopCommandLine
         if (args is [ExitOption] or [CodeAltaInstanceProfile.DeveloperOption, ExitOption] or [ExitOption, CodeAltaInstanceProfile.DeveloperOption])
         {
             options = CreateDefaultOptions(developer: args.Length == 2) with { ExitRunning = true };
+            error = null;
+            return true;
+        }
+        if (args is [WaitOption] or [CodeAltaInstanceProfile.DeveloperOption, WaitOption] or [WaitOption, CodeAltaInstanceProfile.DeveloperOption])
+        {
+            options = CreateDefaultOptions(developer: args.Length == 2) with { Wait = true };
             error = null;
             return true;
         }

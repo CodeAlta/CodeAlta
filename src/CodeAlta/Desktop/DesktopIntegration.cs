@@ -11,7 +11,7 @@ namespace CodeAlta.Desktop;
 /// a Start Menu shortcut on Windows, <c>CodeAlta.app</c> in the user's Applications folder on macOS, and a
 /// desktop entry on Linux. On macOS and Linux each starts the tool's launcher (<c>alta</c> in the .NET tools
 /// folder), so an update of the tool needs nothing here. On Windows that launcher is a script, which would
-/// keep a console window open: the shortcut starts the executable of the installed version instead, and is
+/// show a console window: the shortcut starts the executable of the installed version instead, and is
 /// written again by the first start of each version. Everything is written in the user's own folders: no
 /// elevation.
 /// </summary>
@@ -45,7 +45,7 @@ internal static class DesktopIntegration
 
     /// <summary>
     /// What the desktop's entry starts: the launcher, except on Windows, where it is the executable beside the
-    /// application (a shortcut to the launcher's script would keep a console window open while CodeAlta runs).
+    /// application (a shortcut to the launcher's script would show a console window while CodeAlta starts).
     /// </summary>
     internal static string EntryStart(string launcher, string baseDirectory, bool windows)
     {

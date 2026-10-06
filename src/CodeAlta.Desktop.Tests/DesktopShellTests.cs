@@ -225,7 +225,7 @@ public sealed class DesktopShellTests
     [TestMethod]
     public void WindowsEntry_StartsTheExecutableAndTheOthersTheLauncher()
     {
-        // The launcher of Windows is a script: a shortcut to it would keep a console window open.
+        // The launcher of Windows is a script: a shortcut to it would show a console window.
         Assert.AreEqual(@"C:\Users\me\.dotnet\tools\.store\codealta\1.2.3\codealta.win-x64\1.2.3\tools\net10.0\win-x64\alta.exe",
             DesktopIntegration.EntryStart(@"C:\Users\me\.dotnet\tools\alta.cmd",
                 @"C:\Users\me\.dotnet\tools\.store\codealta\1.2.3\codealta.win-x64\1.2.3\tools\net10.0\win-x64\", windows: true));

@@ -47,7 +47,7 @@ $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
 Start-Process src\CodeAlta\bin\Debug\net10.0\alta.exe -ArgumentList "--dev" -WorkingDirectory (Get-Location)
 ```
 
-`http://127.0.0.1:9222/json/list` then lists one page, `app://codealta/index.html`. The window is titled **CodeAlta (dev)** and shows a **DEV** tag beside its name. `alta.exe` is a windowed executable: it has no console, and a startup failure only shows as the process exiting (a second developer instance exits at once, because one is already running).
+`http://127.0.0.1:9222/json/list` then lists one page, `app://codealta/index.html`. The window is titled **CodeAlta (dev)** and shows a **DEV** tag beside its name. `alta.exe` is a windowed executable: it has no console. Started from a shell, it runs the window in a second `alta.exe` process and exits once the window is shown, with code 0; a non-zero exit code is a startup failure, and the log is under `%LOCALAPPDATA%\CodeAlta\desktop-dev\logs`. A second developer instance shows the window of the running one and exits at once. Add `--wait` to keep the window in the process you started.
 
 **3. Connect.** Two checked-in files register the same `chrome-devtools` MCP server ([chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp)), attached to `http://127.0.0.1:9222`: `.mcp.json` for agents that read project MCP configuration (Claude Code and others), and `.alta/mcp.json` for CodeAlta itself. Both start it with `npx -y chrome-devtools-mcp@latest …`, so `npx` must be on the `PATH` of the application that starts the server. On Windows with Node managed by fnm, add the default version's folder (`%APPDATA%\fnm\aliases\default`) to the user `PATH`. Start the app before the first tool call.
 
