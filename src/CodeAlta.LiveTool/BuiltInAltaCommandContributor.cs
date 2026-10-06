@@ -389,7 +389,8 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
                 path = relative == "." || Path.IsPathRooted(relative) ? null : relative;
             }
 
-            path = path?.Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/');
+            // Either separator on every system, as `alta diff show` and the window take a path.
+            path = path?.Replace('\\', '/');
             if (path is null || path.Length > 1024 || Path.IsPathRooted(path) || path.Contains(':') || path.Split('/').Any(static segment => segment is "" or "." or ".."))
             {
                 return UsageError(context, "usage.invalidFile", "The file must be a path inside the project folder.", "alta editor open");

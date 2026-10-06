@@ -327,8 +327,9 @@ alta editor open --project <project-id-or-slug-or-path>
 ```
 
 The project defaults to the one of the calling session, then to the catalog project of the cwd; an
-archived project is not shown. `--file` is a path relative to the project folder, or a full path inside
-it; the file must exist. Without it the editor opens with the files of the project. `--line` and
+archived project is not shown. `--file` is a path relative to the project folder, with `/` or `\` on
+every system, or a full path inside it; the file must exist. Without it the editor opens with the files
+of the project. `--line` and
 `--column` are 1-based and need a file. The command emits `alta.editor.opened` with the project, the
 file and the position, `file.notFound` for a file that is not in the folder, or `view.unavailable` when
 no window is open.

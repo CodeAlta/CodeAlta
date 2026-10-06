@@ -70,8 +70,11 @@ public sealed class ProjectFileTree
         ArgumentNullException.ThrowIfNull(relativeFolder);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumEntries);
         var root = ProjectFilePathUtilities.NormalizeProjectRoot(projectRoot);
-        var folder = relativeFolder.Replace('\\', '/').Trim('/');
-        if (folder.Length > 0 && (Path.IsPathRooted(folder) || folder.Contains(':') || folder.Split('/').Any(static part => part is "" or "." or "..")))
+        var folder = relativeFolder.Replace('\\', '/');
+        // A leading separator makes a rooted path on every system, whatever follows it.
+        var rooted = folder.StartsWith('/');
+        folder = folder.TrimEnd('/');
+        if (rooted || folder.Length > 0 && (Path.IsPathRooted(folder) || folder.Contains(':') || folder.Split('/').Any(static part => part is "" or "." or "..")))
         {
             throw new ArgumentException("The folder must be a path inside the project folder.", nameof(relativeFolder));
         }

@@ -105,7 +105,8 @@ public sealed class ProjectFileTreeTests
         CollectionAssert.AreEqual(new[] { "z/", "a.txt" }, Names(limited));
 
         Assert.ThrowsExactly<DirectoryNotFoundException>(() => tree.ListFolder(project.Path, "missing", false, 10, default));
-        foreach (var folder in new[] { "..", "z/../..", "./z", "z//x", Path.GetTempPath() })
+        // A rooted path is one on every system: a leading separator of either kind, as well as the system's own form.
+        foreach (var folder in new[] { "..", "z/../..", "./z", "z//x", "/z", "\\z", "/", "C:/z", Path.GetTempPath() })
             Assert.ThrowsExactly<ArgumentException>(() => tree.ListFolder(project.Path, folder, false, 10, default), folder);
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => tree.ListFolder(project.Path, "", false, 0, default));
         using var canceled = new CancellationTokenSource();
