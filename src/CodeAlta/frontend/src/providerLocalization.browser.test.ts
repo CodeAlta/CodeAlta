@@ -254,5 +254,9 @@ test("provider presentation preserves literal decisions and input owners across 
       }
       assert.equal(await evaluate(`providerFixture.answers.length===${["empty", "late", "uncertain"].includes(mode) ? 1 : 0} && providerFixture.cancels.length===0`), true, mode);
     }
-  } finally { socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 }); }
+  } finally {
+    // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
+    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
+    socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
+  }
 });

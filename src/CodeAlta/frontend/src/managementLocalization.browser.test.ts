@@ -104,6 +104,8 @@ test("batch deletion locale changes retain exact confirmations, original owners 
     await languages();
     await check("management.deletion.calls.length===1 && management.batch.getSnapshot().items.map(i=>i.outcome).join('|')==='deleted|not-started|not-started'");
   } finally {
+    // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
+    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
     socket?.close();
     if (browser && browser.exitCode === null) { const closed = new Promise<void>(resolve => browser!.once("exit", () => resolve())); browser.kill(); await Promise.race([closed, new Promise(resolve => setTimeout(resolve, 5000))]); }
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
