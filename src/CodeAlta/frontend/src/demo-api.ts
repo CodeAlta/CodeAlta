@@ -118,6 +118,8 @@ export const providerLogin = Object.freeze({ status: unavailable, login: unavail
 export const projectFiles = Object.freeze({ read: unavailable, write: unavailable, list: unavailable, stat: unavailable, create: unavailable, rename: unavailable,
   delete: unavailable, image: unavailable, reveal: unavailable, search: unavailable, watch: unavailable });
 export const projectGit = Object.freeze({ status: unavailable, changes: unavailable, commits: unavailable, file: unavailable, watch: unavailable });
+export const terminals = Object.freeze({ acknowledge: unavailable, attach: unavailable, close: unavailable, create: unavailable, detach: unavailable, input: unavailable,
+  open: unavailable, profiles: unavailable, rename: unavailable, resize: unavailable, show: unavailable, watch: unavailable });
 export const promptImages = Object.freeze({ read: unavailable });
 // The demo keeps the user's color schemes in the browser, where the desktop keeps a file for each.
 const demoSchemesKey = "codealta.demo.colorSchemes.v1";

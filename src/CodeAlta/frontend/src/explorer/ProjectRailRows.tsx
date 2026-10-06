@@ -13,6 +13,8 @@ export type ProjectTreeView = Readonly<{
   setFavorite: (project: WorkspaceProject, favorite: boolean) => void;
   /** The sessions of an open scope other than the selected one. */
   sessions: (id: string | null) => ReactNode;
+  /** What follows the sessions of an open scope: its terminals. */
+  after?: (id: string | null) => ReactNode;
 }>;
 
 /** A tab of a project that its row opens: the code editor, the changes. */
@@ -45,7 +47,7 @@ function rowKey(event: KeyboardEvent<HTMLElement>, toggle: (id: string | null) =
   target?.focus();
 }
 
-export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, actions, children, activity, renaming, editor, changes, tree }: {
+export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, actions, children, activity, renaming, editor, changes, terminals, tree }: {
   activity?: (projectId: string | null) => ReactNode;
   /** The projects listed, the favorite ones first. */
   projects: WorkspaceProject[];
@@ -63,6 +65,8 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
   editor?: ProjectTabs & Readonly<{ unsaved: (project: WorkspaceProject) => boolean }>;
   /** The Changes tabs of the projects: which are open, and how one is opened. */
   changes?: ProjectTabs;
+  /** The terminals of the projects: how many a project has, and how a new one is opened in its folder. */
+  terminals?: Readonly<{ count: (id: string) => number; create: (project: WorkspaceProject) => void }>;
   /** What is open and what is a favorite. Without it only the selected scope is open, until its row closes it. */
   tree?: ProjectTreeView;
   /** The sessions of the selected scope. */
@@ -86,12 +90,13 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
   const twist = (id: string | null) => <span className="tree-twist" onClick={event => { event.stopPropagation(); toggle(id); }}>
     <AppIcon name="chevronDown" size={12} className={open(id) ? "tree-chevron expanded" : "tree-chevron"} /></span>;
   // The sessions of the selected scope stay in the page while it is closed: what is being typed there is kept.
-  const branch = (id: string | null) => id === selectedId ? <li className="project-session-branch" hidden={!open(id)}>{children}</li>
-    : tree && open(id) ? <li className="project-session-branch">{tree.sessions(id)}</li> : null;
+  const branch = (id: string | null) => id === selectedId ? <li className="project-session-branch" hidden={!open(id)}>{children}{tree?.after?.(id)}</li>
+    : tree && open(id) ? <li className="project-session-branch">{tree.sessions(id)}{tree.after?.(id)}</li> : null;
   const row = (project: WorkspaceProject) => {
     const favorite = !!tree?.favorite(project.id);
     const editing = !!editor?.open(project.id);
     const changing = !!changes?.open(project.id);
+    const running = terminals?.count(project.id) ?? 0;
     return <Fragment key={project.id}><ProjectRowActions project={project} authority={actions}
       favorite={tree ? { value: favorite, set: value => tree.setFavorite(project, value) } : undefined}>
       <button type="button" title={`${project.name}\n${project.path}`} aria-pressed={selectedId === project.id} aria-expanded={open(project.id)}
@@ -111,6 +116,11 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
         data-unsaved={editor.unsaved(project)} aria-label={t("Code editor of {name}", { name: project.name })}
         title={t(editing ? "Show the code editor" : "Open the code editor")} onClick={() => editor.show(project)}>
         <AppIcon name="code" size={15} /></button>}
+      {terminals && !project.archived && <button type="button" className="icon-button project-row-action project-terminal-trigger" data-open={running > 0}
+        aria-label={t("New terminal in {name}", { name: project.name })}
+        title={running > 0 ? `${t("New terminal")} (${t(running === 1 ? "{count} terminal" : "{count} terminals", { count: running })})` : t("New terminal")}
+        onClick={() => terminals.create(project)}>
+        <AppIcon name="terminal" size={15} /></button>}
       {renaming?.id === project.id && renaming.form}
     </ProjectRowActions>{branch(project.id)}</Fragment>;
   };

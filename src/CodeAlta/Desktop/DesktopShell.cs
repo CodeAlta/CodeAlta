@@ -18,7 +18,7 @@ internal enum DesktopCloseAction
     /// <summary>The page is asked to exit: it has its own questions first (unsaved files), then asks to exit.</summary>
     RequestExit,
 
-    /// <summary>The page asks first: sessions are running and exiting stops them.</summary>
+    /// <summary>The page asks first: sessions are running, or terminals run a command, and exiting stops them.</summary>
     ConfirmExit,
 
     /// <summary>The application exits.</summary>
@@ -27,11 +27,11 @@ internal enum DesktopCloseAction
 
 /// <summary>
 /// A notice for the page: <c>exit-requested</c> (the tray's Exit, or a closed window that cannot stay hidden),
-/// <c>confirm-exit</c>, which carries the number of running sessions, <c>confirm-close</c> (the window was
-/// closed, and the user has not said yet what that does) and <c>entry-added</c> (the application was just added
-/// to the desktop's applications).
+/// <c>confirm-exit</c>, which carries the number of running sessions and of terminals that run a command,
+/// <c>confirm-close</c> (the window was closed, and the user has not said yet what that does) and
+/// <c>entry-added</c> (the application was just added to the desktop's applications).
 /// </summary>
-internal sealed record DesktopShellEvent(string Kind, int RunningSessions);
+internal sealed record DesktopShellEvent(string Kind, int RunningSessions, int BusyTerminals = 0);
 
 /// <summary>
 /// How the application lives beyond its window: an icon in the notification area (the menu bar on macOS, the
@@ -76,6 +76,9 @@ internal sealed class DesktopShell
 
     /// <summary>The number of sessions with a run in flight; zero until there is a host to ask.</summary>
     internal Func<int>? RunningSessions { get; set; }
+
+    /// <summary>The number of terminals whose shell runs a command; zero until there are terminals to ask.</summary>
+    internal Func<int>? BusyTerminals { get; set; }
 
     /// <summary>The desktop's dialogs; null until the desktop services have started.</summary>
     internal NeoAstra.Desktop.Dialogs.INeoDialogs? Dialogs { get; set; }
@@ -234,11 +237,12 @@ internal sealed class DesktopShell
     /// </summary>
     internal void RequestUserExit() => Apply(DecideUserExit(HasWatchers()), 0);
 
-    /// <summary>The page's exit: the application exits, after the page's question while sessions run.</summary>
+    /// <summary>The page's exit: the application exits, after the page's question while sessions run or terminals run a command.</summary>
     internal void RequestExit(bool confirmed)
     {
-        var running = CountRunning();
-        Apply(DecideExit(confirmed, running, HasWatchers()), running);
+        var running = Count(RunningSessions);
+        var terminals = Count(BusyTerminals);
+        Apply(DecideExit(confirmed, running + terminals, HasWatchers()), running, terminals);
     }
 
     /// <summary>Shows the window again and brings it to the front.</summary>
@@ -278,7 +282,7 @@ internal sealed class DesktopShell
         return new Registration(this, watcher);
     }
 
-    private void Apply(DesktopCloseAction action, int running)
+    private void Apply(DesktopCloseAction action, int running, int terminals = 0)
     {
         switch (action)
         {
@@ -292,7 +296,7 @@ internal sealed class DesktopShell
                 break;
             case DesktopCloseAction.ConfirmExit:
                 Show();
-                Publish(new("confirm-exit", running));
+                Publish(new("confirm-exit", running, terminals));
                 break;
             case DesktopCloseAction.Ask:
                 // The window may have been closed from the taskbar while minimized: the question has to be seen.
@@ -310,9 +314,9 @@ internal sealed class DesktopShell
         }
     }
 
-    private int CountRunning()
+    private static int Count(Func<int>? count)
     {
-        try { return Math.Max(0, RunningSessions?.Invoke() ?? 0); }
+        try { return Math.Max(0, count?.Invoke() ?? 0); }
         catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException) { return 0; }
     }
 

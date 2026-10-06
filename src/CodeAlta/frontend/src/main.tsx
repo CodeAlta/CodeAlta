@@ -23,7 +23,7 @@ import {
   type ReminderListResponse,
   type ReminderDetailRequest,
   type ConfigurationSnapshot, type WorkspaceSession, type WorkspaceSnapshot,
-  desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse,
+  desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem,
 } from "#neoastra";
 import { loadWorkspace, sessionListSignature, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
@@ -39,7 +39,7 @@ import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./
 import { createProjectArchive } from "./projectArchive";
 import { browserActivation } from "./sessionBrowser";
 import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isChangesTab, isEditorTab, fileTabsKey, openFileTab, persistFileTabs, reconcileFileTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, type FileTab, type TabKind, type TabPosition } from "./fileTabs";
+import { activateFileTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isChangesTab, isEditorTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, terminalTab, type FileTab, type TabKind, type TabPosition } from "./fileTabs";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
 import { OpenFileDialog } from "./editor/OpenFileDialog";
@@ -113,6 +113,11 @@ import { SessionTabMenu } from "./SessionTabMenu";
 import { isSessionContextKey, restoreSessionMenuFocus, sessionActionAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
 import { projectRailProjection } from "./explorer/projectRail";
 import { ProjectRailRows } from "./explorer/ProjectRailRows";
+import { createTerminalWorkspace } from "./terminal/terminalWorkspace";
+import { TerminalPanel } from "./terminal/TerminalPanel";
+import { TerminalList } from "./terminal/TerminalList";
+import { persistTerminalLook, restoreTerminalLook, terminalLookKey, type TerminalLook } from "./terminal/terminalLook";
+import { applicationKey, terminalsOf } from "./terminal/terminals";
 import { ExplorerSessions, SessionRowTitle, sessionRowIndent } from "./explorer/ExplorerSessions";
 import { collapseAllScopes, emptyProjectTree, expandScope, globalScope, isExpanded, isFavorite, persistProjectTree, projectTreeKey, restoreProjectTree, scopeKey,
   setFavorite, toggleScope, type ProjectTree } from "./explorer/projectTree";
@@ -148,9 +153,11 @@ import { createPaletteFocusRestoration } from "./paletteActions";
 import "normalize.css";
 import "@blueprintjs/core/lib/css/blueprint.css";
 import "flexlayout-react/style/light.css";
+import "@xterm/xterm/css/xterm.css";
 import "./style.css";
 import "./editor/editor.css";
 import "./explorer/explorer.css";
+import "./terminal/terminal.css";
 
 type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; epoch: string | null;
   ready: () => boolean; navigate: (action: MessageNavigation) => void;
@@ -761,7 +768,7 @@ function App() {
   // How the application lives beyond its window: whether closing it leaves CodeAlta running, and the host's
   // requests to exit (Exit in the tray) or to ask before an exit that stops running sessions.
   const [shellPreferences, setShellPreferences] = useState<DesktopShellPreferences | null>(null);
-  const [exitQuestionFor, setExitQuestionFor] = useState<number | null>(null);
+  const [exitQuestionFor, setExitQuestionFor] = useState<Readonly<{ sessions: number; terminals: number }> | null>(null);
   // Closing the window asks, until the answer is remembered, whether CodeAlta keeps running behind its icon.
   // A question about an exit already on screen is answered first.
   const [closeQuestion, setCloseQuestion] = useState(false);
@@ -829,7 +836,7 @@ function App() {
           if (abort.signal.aborted) return;
           if (notice.kind === "entry-added") announceEntry(currentPlatform.current);
           else if (notice.kind === "exit-requested") requestExit.current();
-          else if (notice.kind === "confirm-exit") setExitQuestionFor(notice.runningSessions);
+          else if (notice.kind === "confirm-exit") setExitQuestionFor({ sessions: notice.runningSessions, terminals: notice.busyTerminals });
           else if (notice.kind === "confirm-close" && !exitPending.current) setCloseQuestion(true);
         }
       } catch { /* The bridge is gone; the window's own close still works. */ }
@@ -986,7 +993,7 @@ function App() {
   function focusPromptSoon() {
     requestAnimationFrame(() => requestAnimationFrame(() => {
       if (currentView.current !== "workspace" || settingsVisible.current
-        || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') || document.querySelector(".project-editor[data-active='true']")) return;
+        || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') || document.querySelector(".project-editor[data-active='true'], .terminal-panel[data-active='true']")) return;
       const prompt = document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt");
       if (prompt) prompt.focus();
       else document.querySelector<HTMLButtonElement>('.session-tabs [role="tab"][aria-selected="true"], .session-tabs > button')?.focus();
@@ -1070,6 +1077,54 @@ function App() {
   useEffect(() => { if (menuTarget && !activeMenu) setMenuTarget(null); }, [menuTarget, activeMenu]);
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
+  // The terminals belong to the application: this window lists them, and shows in tabs those it was asked to.
+  // A terminal runs with or without a tab, and its tab goes when it does.
+  const [terminalWorkspace] = useState(() => createTerminalWorkspace(address => {
+    const epoch = currentHostEpoch.current;
+    if (epoch) void terminals.open({ expectedEpoch: epoch, address }).catch(() => { /* The link is not opened. */ });
+  }));
+  const terminalList = useSyncExternalStore(terminalWorkspace.hub.subscribe, terminalWorkspace.hub.list);
+  const [terminalLook, setTerminalLook] = useState(() => restoreTerminalLook(() => localStorage.getItem(terminalLookKey)));
+  useEffect(() => { terminalWorkspace.setLook(terminalLook); }, [terminalWorkspace, terminalLook]);
+  function changeTerminalLook(look: TerminalLook) {
+    setTerminalLook(look);
+    persistTerminalLook(value => localStorage.setItem(terminalLookKey, value), look);
+  }
+  const terminalEpoch = owned ? status?.hostEpoch ?? null : null;
+  useEffect(() => terminalEpoch ? terminalWorkspace.hub.connect(terminalEpoch) : undefined, [terminalWorkspace, terminalEpoch]);
+  useEffect(() => { setFileTabs(state => reconcileTerminalTabs(state, new Set(terminalList.map(terminal => terminal.id)))); }, [terminalList]);
+  function showTerminal(terminal: TerminalItem) { openFile(terminalTab(terminal)); }
+  const showTerminalLatest = useRef(showTerminal); showTerminalLatest.current = showTerminal;
+  // A session can ask for the tab of a terminal to be shown.
+  useEffect(() => terminalWorkspace.hub.onReveal(id => {
+    const asked = terminalWorkspace.hub.list().find(terminal => terminal.id === id);
+    if (asked) showTerminalLatest.current(asked);
+  }), [terminalWorkspace]);
+  // A new terminal, in the folder a session works in when it is opened from one, in the folder of the project otherwise.
+  async function createTerminal(terminalProjectId: string | null, terminalSessionId: string | null = null) {
+    if (!owned) return;
+    const reply = await terminalWorkspace.hub.create(terminalProjectId, terminalSessionId, terminalLook.shellIntegration, terminalLook.shell).catch(() => null);
+    if (reply?.status === "ok" && reply.terminal) { showTerminal(reply.terminal); return; }
+    const message: MessageKey = reply?.status === "no_shell" ? "No command interpreter was found on this system."
+      : reply?.status === "limit" ? "Too many terminals are open. Close one first."
+      : reply?.status === "no_folder" || reply?.status === "project_unavailable" ? "The folder of the terminal no longer exists."
+      : "The terminal could not be started.";
+    showToast({ intent: "danger", icon: "error", timeout: 8000, message: t(message) });
+  }
+  const createTerminalLatest = useRef(createTerminal); createTerminalLatest.current = createTerminal;
+  const [openSessionTerminal] = useState(() => (terminalProjectId: string | null, terminalSessionId: string | null) => void createTerminalLatest.current(terminalProjectId, terminalSessionId));
+  // What a new terminal is opened from: the terminal in front, the session in front, or the selected project.
+  function terminalOrigin(): Readonly<{ projectId: string | null; sessionId: string | null }> | null {
+    if (!owned) return null;
+    const tab = fileTabs.active;
+    if (tab && isTerminalTab(tab)) {
+      const shown = terminalList.find(terminal => terminal.id === tab.terminalId);
+      return { projectId: shown?.projectId ?? (tab.projectId || null), sessionId: shown?.sessionId ?? null };
+    }
+    if (tab) return { projectId: tab.projectId, sessionId: null };
+    if (selectedProject?.archived) return null;
+    return { projectId, sessionId: selectedSession?.id ?? null };
+  }
   // A start without any enabled provider opens their settings, as the terminal application does; there the
   // setup guide starts by itself the first time.
   const [providerGuide, setProviderGuide] = useState(false);
@@ -1217,6 +1272,7 @@ function App() {
       case "closeTab": case "previousTab": case "nextTab": return tabs.open.length + fileTabs.open.length > 0;
       case "reopenTab": return tabs.closed.length + fileTabs.closed.length > 0;
       case "editFile": case "projectEditor": return view === "workspace" && !!editedProject();
+      case "newTerminal": return view === "workspace" && !!terminalOrigin();
       case "refreshStatuses": return owned && tabs.open.length > 0;
       case "newSession": return owned && !!snapshot && !selectedProject?.archived;
       case "renameProject": return owned && !!selectedProject && !selectedProject.archived;
@@ -1245,6 +1301,7 @@ function App() {
       case "openProject": setDialog("project"); break;
       case "editFile": openFilePicker(); break;
       case "projectEditor": openProjectEditor(); break;
+      case "newTerminal": { const origin = terminalOrigin(); if (origin) void createTerminal(origin.projectId, origin.sessionId); break; }
       case "newSession": selectProject(projectId); requestAnimationFrame(() => document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt")?.focus()); break;
       case "focusSidebar": runShortcut("focusProjects"); break;
       case "focusAskFile": visibleAsk(".ask-file-review")?.dispatchEvent(new CustomEvent("codealta-ask-file-focus")); break;
@@ -1264,6 +1321,8 @@ function App() {
     // Capture phase: the prompt editor (Monaco) must not see keys that belong to a command.
     function commandKey(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape") { commandChord.current = false; return; }
+      // A terminal has the keyboard: its program gets every key but the few the application keeps.
+      if (!commandChord.current && event.target instanceof HTMLElement && event.target.closest("[data-terminal-keys] .terminal-host") && !applicationKey(event)) return;
       // Exit is global, as in the terminal UI: it also works while a window of the app is open.
       if (!commandChord.current && resolveCommandKey(event, false, "none").command === "exit") {
         event.preventDefault(); event.stopPropagation(); requestExit.current(); return;
@@ -1950,7 +2009,7 @@ function App() {
   const newPromptDisabled = creatingBusy || creationLocked || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !snapshot
     || !!selectedProject?.archived || projectId !== null && !selectedProject || (!localDraft.text.trim() && !localImages.images.length)
     || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim());
-  return <ShellLanguageContext.Provider value={language}><PluginUiContext.Provider value={pluginUiValue}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
+  return <ShellLanguageContext.Provider value={language}><PluginUiContext.Provider value={pluginUiValue}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
     {(hostSilent || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {hostSilent && <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
         <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button></div>}
@@ -2012,7 +2071,11 @@ function App() {
           {snapshot && <ProjectRailRows projects={projectListing?.projects ?? []} favorites={projectListing?.favorites ?? 0} selectedId={projectId} onSelect={selectProject} children={sessions}
             tree={{ expanded: id => isExpanded(projectTree, id), toggle: id => setProjectTree(current => toggleScope(current, id)),
               favorite: id => isFavorite(projectTree, id), setFavorite: (project, value) => setProjectTree(current => setFavorite(current, project.id, value)),
-              sessions: scopeSessions }}
+              sessions: scopeSessions,
+              after: id => <TerminalList terminals={terminalsOf(terminalList, id)} rename={terminalWorkspace.hub.rename}
+                active={fileTabs.active && isTerminalTab(fileTabs.active) ? fileTabs.active.terminalId ?? null : null}
+                onOpen={showTerminal} onClose={terminal => terminalWorkspace.hub.close(terminal.id)} /> }}
+            terminals={owned ? { count: id => terminalsOf(terminalList, id).length, create: project => void createTerminal(project.id) } : undefined}
             changes={owned ? { open: id => fileTabs.open.some(tab => isChangesTab(tab) && tab.projectId === id), show: project => showChanges(project) } : undefined}
             activity={id => <><RunningSessionBadge controls={runtimeObservationControls()} projectId={id} />
               <ReminderBadge count={activeReminders ? scopeReminderCount(activeReminders, snapshot, id) : 0} /></>}
@@ -2182,7 +2245,13 @@ function App() {
               if (tabs.active && tabKey(tabs.active) === tabKey(tab)) { applyTabState(next); if (file) activateFile(file); } else setTabs(next);
             }} reopen={() => tabCommand("reopenTab")}
             files={fileTabs} fileDirty={tab => fileEditors.dirty(fileTabKey(tab))} selectFile={activateFile} closeFile={tab => closeFile(tab)}
-            renderFile={(tab, visible) => isChangesTab(tab)
+            terminal={id => terminalList.find(terminal => terminal.id === id)}
+            renderFile={(tab, visible) => isTerminalTab(tab)
+              ? <TerminalPanel key={fileTabKey(tab)} workspace={terminalWorkspace} id={tab.terminalId ?? ""} terminal={terminalList.find(terminal => terminal.id === tab.terminalId)}
+                visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} look={terminalLook} onLook={changeTerminalLook}
+                onActivate={() => activateFile(tab)} rename={terminalWorkspace.hub.rename} onCloseTerminal={() => terminalWorkspace.hub.close(tab.terminalId ?? "")}
+                onCreate={() => { const shown = terminalList.find(terminal => terminal.id === tab.terminalId); void createTerminal(shown?.projectId ?? (tab.projectId || null), shown?.sessionId ?? null); }} />
+              : isChangesTab(tab)
               ? <ProjectChangesPanel key={fileTabKey(tab)} tab={tab} epoch={!status ? undefined : owned ? status.hostEpoch : null}
                 projectName={snapshot?.projects.find(project => project.id === tab.projectId)?.name} request={changeRequests.get(tab.projectId)}
                 visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)}
@@ -2308,7 +2377,7 @@ function App() {
     {exiting && <UnsavedExitDialog names={exiting.tabs.flatMap(tab => fileEditors.unsaved(fileTabKey(tab)))} busy={exiting.busy}
       onSave={() => void saveAllAndExit(exiting.tabs)} onDiscard={() => { setExiting(null); quitApplication(); }}
       onCancel={() => { if (!exiting.busy) { setExiting(null); exitCanceled(); } }} />}
-    {exitQuestionFor !== null && <RunningExitDialog runningSessions={exitQuestionFor} onCancel={() => { setExitQuestionFor(null); exitCanceled(); }}
+    {exitQuestionFor !== null && <RunningExitDialog runningSessions={exitQuestionFor.sessions} busyTerminals={exitQuestionFor.terminals} onCancel={() => { setExitQuestionFor(null); exitCanceled(); }}
       onExit={() => { setExitQuestionFor(null); quitApplication(true); }} />}
     {fileClosing && <UnsavedFileDialog name={fileEditors.unsaved(fileTabKey(fileClosing.tab)).join(", ")} mode="close" busy={fileClosing.busy}
       onSave={() => void saveAndCloseFile(fileClosing.tab)} onDiscard={() => closeFile(fileClosing.tab, true)}
@@ -2345,7 +2414,7 @@ function App() {
       onPrompt={request => ["send", "enqueue", "steer", "compact"].includes(request.mode ?? "")
         && askPluginComposer(request.mode as PluginComposerRequest["kind"], request.sessionId ?? null, request.text ?? null).result}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></ShowChangesContext.Provider></PluginUiContext.Provider></ShellLanguageContext.Provider>;
+  </div></OpenTerminalContext.Provider></ShowChangesContext.Provider></PluginUiContext.Provider></ShellLanguageContext.Provider>;
 }
 
 // Native modal matches the other shell dialogs: showModal supplies inert background,
@@ -2410,6 +2479,9 @@ function visibleAsk(selector: string): HTMLElement | null {
 /** Opens the changes tab of a project; null where the window has no host to read them from. */
 const ShowChangesContext = createContext<((project: Readonly<{ id: string; path: string }>) => void) | null>(null);
 
+/** Opens a terminal in the folder of a session, or of a project without one; null where the window has no host. */
+const OpenTerminalContext = createContext<((projectId: string | null, sessionId: string | null) => void) | null>(null);
+
 function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["projects"][number] | undefined, sessionId: string | null = null,
   /** The way to the changes tab for a composer the application builds itself, above the context. */
   show: ((project: Readonly<{ id: string; path: string }>) => void) | null = null): ComposerChromeValue {
@@ -2417,13 +2489,15 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   // The regions are read only when a plugin has content for them.
   const regions = useContext(PluginUiContext).contributions.regions;
   const showChanges = useContext(ShowChangesContext) ?? show;
+  const openTerminal = useContext(OpenTerminalContext);
   return useMemo(() => ({ context: id !== undefined && name !== undefined && path !== undefined
     ? <ProjectContext epoch={epoch} project={{ id, name, path }} read={projectGit.status}
-      onShowChanges={showChanges && !archived ? () => showChanges({ id, path }) : undefined} /> : undefined,
+      onShowChanges={showChanges && !archived ? () => showChanges({ id, path }) : undefined}
+      onOpenTerminal={openTerminal && !archived ? () => openTerminal(id, sessionId) : undefined} /> : undefined,
   status: epoch ? <>{regions && <PluginRegionSlot epoch={epoch} projectId={id ?? null} sessionId={sessionId} region="inline" read={pluginUi.regions} />}
     <ComposerStatus epoch={epoch} projectId={id ?? null} sessionId={sessionId} read={composerStatus.read} /></> : undefined,
   footer: epoch && regions ? <PluginRegionSlot epoch={epoch} projectId={id ?? null} sessionId={sessionId} region="footer" read={pluginUi.regions} /> : undefined }),
-  [epoch, id, name, path, archived, sessionId, regions, showChanges]);
+  [epoch, id, name, path, archived, sessionId, regions, showChanges, openTerminal]);
 }
 
 function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, timelineImages, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity }: {

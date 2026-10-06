@@ -90,9 +90,9 @@ nothing. Use it before `dotnet tool update -g CodeAlta`, which cannot replace th
 application.
 
 **Exit** (the tray's, Ctrl+Q, **Quit CodeAlta** or ⌘Q on macOS, or a closed window that cannot stay
-in the tray) first asks about files with unsaved edits, then, while sessions are running, says how
-many and that exiting stops them: **Exit CodeAlta** or **Cancel**. The end of the user's session at
-sign-out or shutdown exits without a question.
+in the tray) first asks about files with unsaved edits, then, while sessions are running or terminals
+run a command, says how many and that exiting stops them: **Exit CodeAlta** or **Cancel**. The end of
+the user's session at sign-out or shutdown exits without a question.
 
 On macOS the application has a menu bar, because a Mac application has no shortcut that its menu bar
 does not define:
@@ -286,9 +286,10 @@ Favorite projects are listed first, under **Favorites**, in the chosen order; th
 **Other projects**. The star of a row and the menu of the row add and remove a favorite. A favorite is
 a preference of the window: nothing is written to the project or to the catalog.
 
-A row also has an icon for the changes of its project and one for its code editor. These three icons
-and the **…** button take no room until the pointer or the keyboard is on the row; the icon of an open
-Changes tab or code editor stays visible and tinted. A row that shows such an icon keeps the room of its
+A row also has an icon for the changes of its project, one for its code editor and one that opens a
+terminal in its folder. These four icons and the **…** button take no room until the pointer or the
+keyboard is on the row; the icon of an open Changes tab or code editor stays visible and tinted, and so
+does the terminal icon of a project that has terminals. A row that shows such an icon keeps the room of its
 other buttons while they are hidden: the icon is in the same place with the pointer on the row or away
 from it. A row that shows none gives its whole width to the name. `explorer/projectRowButtons.browser.test.ts`
 lays the rows out in a browser and checks where the buttons are in both cases. Icons have the color of
@@ -1560,6 +1561,84 @@ no path and no project id, so the sessions of archived projects are answered too
 The page shows the image through a `data:` URL: the content security policy allows `data:` images and
 no `blob:` URL, and is unchanged.
 
+## Terminals
+
+A project has **terminals**: shells that run in the application, each shown in a tab of the same strip as
+the sessions (`view: "terminal"` in `fileTabs`). The terminal icon of a project row opens one in the folder
+of the project, the terminal button of the composer opens one in the folder the session works in, and
+**New Terminal** (``Ctrl+` ``, `Ctrl+G` `Ctrl+J`, `/terminal`) opens one from the tab in front. The first
+terminal opens in a pane under the tab it was asked from, a third of the height; the next ones are tabs
+of that pane. From there a terminal tab is dragged, split and merged like any tab. The pane of the
+terminals stays theirs: a session or a code editor opened while the keyboard is in a terminal opens in a
+pane of the sessions. The sources are in `Desktop/Terminals/` (host) and `frontend/src/terminal/` (page).
+
+- **A terminal belongs to the application, not to its tab.** Closing the tab leaves the shell running.
+  The terminals of a project are listed under its sessions in the Explorer (**Terminals**): a row opens
+  the tab again with everything the terminal wrote, renames it (the pencil, `F2`, a double-click; an
+  empty title gives back the folder) and ends it. A row shows the title or the folder the shell is in,
+  the shell, a spinner while a command runs, the exit code once the program has ended, a dot when the
+  program rang the bell and a mark when a session created the terminal. A terminal goes away when its
+  shell exits; one a session created stays until it is closed, so that what it wrote can still be read,
+  and so does a shell that fails within three seconds of starting. Terminals keep running while the
+  application stays in the notification area, and exiting ends them, after a question when a shell says
+  it runs a command. Terminal tabs are not restored at the next start. At most 64 terminals run at once.
+- **The host runs the shell and keeps its text.** The shell runs behind a pseudo-terminal of the system:
+  ConPTY on Windows (Windows 10 1809 and later), a pty on macOS and Linux. The host reads what it writes
+  into a text model of the screen (`TerminalScreen`: the screen, 10,000 lines that scrolled off it, the
+  screen of full-screen programs, long lines and their wrapping when the width changes) and keeps the
+  last two million characters as they were written. `alta terminal` reads the model, and a tab that
+  opens later is replayed the characters: neither needs the page, which the system may stop while the
+  window is hidden. The page's terminal is xterm.js and is a view only. One `terminals.watch` channel
+  carries the list of terminals and what the shown ones write; the page acknowledges what it took in, a
+  terminal is sent at most 512 Ki characters ahead of that, and a tab that falls further behind than the
+  host keeps is started again from what is left.
+- **Shells.** The default shell on Windows is PowerShell 7 when it is installed, then Windows PowerShell,
+  then the Command Prompt; Git Bash and the WSL distributions are found too. On macOS and Linux it is
+  `$SHELL`, then the shells of `/etc/shells`, started as a login shell on macOS. A shell starts with the
+  environment of the application, read again from the registry on Windows so that a new terminal sees
+  what was installed since, plus `TERM_PROGRAM=CodeAlta`, `TERM_PROGRAM_VERSION`, `COLORTERM=truecolor`,
+  `CODEALTA_TERMINAL` (the id of the terminal) and, outside Windows, `TERM=xterm-256color` and a UTF-8
+  `LANG` when none is set.
+- **Shell integration.** PowerShell, bash (Git Bash included), zsh and fish are started with a script
+  that makes them say where their prompt is, what command runs, how it ended and which folder they are
+  in (the `OSC 633` sequences of Visual Studio Code, and `OSC 133`); the Command Prompt gets a `PROMPT`
+  that says where its prompt is and its folder. This is what the spinner, the folder of the title and
+  the exit codes of `alta terminal` come from. The scripts are written to `terminal/` under the data
+  root (`TerminalIntegration`): PowerShell dot-sources its script, so an execution policy that forbids
+  scripts leaves the shell without it, and a prompt that a theme installs later is wrapped in its turn;
+  bash reads it with `--init-file` and the script reads the files
+  of the user; zsh reads four small files through `ZDOTDIR`, each of which reads the file of the user it
+  stands for; fish takes it with `--init-command`. A program started through `wsl.exe` is started as it
+  is. **Shell integration** in the options of a terminal turns it off for new terminals.
+- **Display.** Text is drawn with WebGL, in 24-bit color, with the Unicode 11 widths. The font is
+  CaskaydiaCove Nerd Font (Cascadia Code with the Nerd Fonts icons, SIL Open Font License 1.1), shipped
+  with the application with its license, so that prompts with icons show as they do in a terminal set
+  up for them. The sixteen colors a program names come from the theme and the color scheme, and a color
+  too close to the background is nudged until it is read. Links (`http`, `https`, and those a program
+  marks with `OSC 8`) open in the browser of the system; a program can write to the clipboard
+  (`OSC 52`) but not read it, and can show a progress bar in the header (`OSC 9;4`). Pictures (sixel,
+  iTerm, kitty) need WebAssembly, which the content security policy of the page does not allow yet.
+- **The header** of a terminal names the shell and the folder, shows the command that runs, and has
+  buttons for a new terminal in the same folder, **Find** (matches are counted and marked; case, whole
+  word, regular expression), the options and a menu (**Rename…**, **Clear**, **End terminal**). The
+  options are a popover: the cursor (bar, block, underline) and whether it blinks, the text size (8 to
+  24), **Copy on select**, the scrollback (1,000, 10,000 or 100,000 lines), the **Shell** new terminals
+  start when the system has several, and **Shell integration**. They apply to every terminal of the
+  window and are kept in `codealta.desktop.terminal.v1`.
+- **Keys.** A terminal takes the keyboard: `Ctrl` with a letter, the function keys and `Alt` with an
+  arrow go to the shell. The application keeps `Ctrl+P`, the `Ctrl+G` chords, `Ctrl+,`, ``Ctrl+` ``,
+  `Ctrl+PageUp` / `Ctrl+PageDown`, `Ctrl+Alt+Left` / `Ctrl+Alt+Right`, `Ctrl+Alt+B`, `Ctrl+Shift+T`,
+  `Ctrl+Shift+W` and `Ctrl+Shift+N`. `Ctrl+C` copies when text is selected and interrupts the program
+  when none is; `Ctrl+V` and `Shift+Insert` paste; `Ctrl+Shift+C` / `Ctrl+Shift+V` copy and paste too;
+  `Ctrl+F` finds; `Ctrl+Home` / `Ctrl+End` go to the top and the bottom. On macOS the Command key does
+  these and `Ctrl` is all for the program. A right click opens **Copy**, **Paste**, **Select all**,
+  **Find…** and **Clear**.
+
+Agents use the same terminals with `alta terminal` (see `doc/live-tool.md`): they list them, create one,
+read its screen or its last lines, type in it and wait for the command to end, rename it, show its tab
+and close it. A host started with `--review-owned-command-permissions` lets no session type in a
+terminal, since what is typed in a shell is a command nobody reviewed.
+
 ## Commands, help and keyboard shortcuts
 
 The desktop app uses the TUI's key map. `Ctrl+P` (or `/` in an empty prompt, or the search icon on
@@ -1580,8 +1659,10 @@ shortcuts**, a filterable window listing the same commands by category.
 | In the text of a code editor: `Ctrl+G`, `Ctrl+F`, `Ctrl+H`, `F3`, `Alt+Z` | Go to line, find, replace, next match, wrap lines |
 | In the files of a code editor: `F2`, `Delete`, `Enter`, `Space` | Rename, delete, open, preview |
 | `Alt+Up`, `Alt+Down` in a Changes tab | Go to the previous or next change of the shown file |
+| ``Ctrl+` ``, `Ctrl+G` then `Ctrl+J` | New terminal (`/terminal`) in the folder of the session or of the project |
+| In a terminal: `Ctrl+C`, `Ctrl+V`, `Ctrl+F`, `Ctrl+Home` / `Ctrl+End` | Copy the selection (or interrupt the program), paste, find, top / bottom |
 | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+PageUp` / `Ctrl+PageDown`) | Previous / next tab |
-| `Ctrl+W`, `Ctrl+Shift+T` | Close tab, reopen the last closed tab |
+| `Ctrl+W` (also `Ctrl+Shift+W`, which a terminal leaves to the application), `Ctrl+Shift+T` | Close tab, reopen the last closed tab |
 | `Enter`, `Ctrl+Enter`, `Shift+Enter` | Send (queued while a turn runs), steer the running turn, new line |
 | `Alt+Up` / `Alt+Down` in the prompt | Previous / next prompt sent from this window |
 | `F6`, `Ctrl+T` | Full prompt editor, next agent prompt |

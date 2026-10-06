@@ -5,13 +5,13 @@ import { workspace as fixtureWorkspace } from "./settingsShell.neoastra.mount";
 export * from "./settingsShell.neoastra.mount";
 // Optional shell/settings services remain unavailable, as in the browser demo.
 export { neoRpcContractHash, startupConfig, gitIssues, pluginUi, agentPrompts, mcpServers, plugins, skills,
-  globalConfig, providerLogin, appUpdate, reminder, colorSchemes } from "./demo-api";
+  globalConfig, providerLogin, appUpdate, reminder, colorSchemes, terminals } from "./demo-api";
 import { desktopShell as demoShell } from "./demo-api";
 
 const imported: WorkspaceProject[] = [];
 const imports: WorkspaceOpenProjectRequest[] = [];
 // The folder dialog of the test: it answers with `pick` and records what it was asked.
-type ShellNotice = { kind: string; runningSessions: number };
+type ShellNotice = { kind: string; runningSessions: number; busyTerminals: number };
 const fixture: { imports: WorkspaceOpenProjectRequest[]; pick: { status: string; path: string | null };
   picks: { title: string | null; initialDirectory: string | null }[];
   /** What the page asked of the shell, in order, and the notice the test sends as the host does. */

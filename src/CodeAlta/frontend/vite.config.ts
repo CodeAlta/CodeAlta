@@ -32,6 +32,15 @@ const startupScreen = (): Plugin => {
   };
 };
 
+// The font of the terminals is redistributed under the SIL Open Font License, which goes where the font goes.
+const terminalFontLicense = (): Plugin => ({
+  name: "codealta:terminal-font-license",
+  generateBundle() {
+    this.emitFile({ type: "asset", fileName: "assets/CaskaydiaCoveNerdFont-LICENSE.txt",
+      source: readFileSync(fileURLToPath(new URL("./src/terminal/fonts/LICENSE.txt", import.meta.url)), "utf8") });
+  },
+});
+
 export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
@@ -45,7 +54,7 @@ export default defineConfig(({ mode }) => ({
     "import.meta.env.VITE_DEMO_MODE": JSON.stringify(mode === "demo" ? "true" : "false"),
   },
   base: "./",
-  plugins: [blueprintPalette(), react(), startupScreen()],
+  plugins: [blueprintPalette(), react(), startupScreen(), terminalFontLicense()],
   server: { fs: { allow: ["..", fileURLToPath(new URL("../../CodeAlta.Tui/Assets/3d.flf", import.meta.url))] }, host: "127.0.0.1", strictPort: true, port: 5173 },
   build: { sourcemap: false, assetsInlineLimit: 0 },
 }));

@@ -1,7 +1,7 @@
 import { Actions, DockLocation, Model, RowNode, TabNode, TabSetNode, type Action } from "flexlayout-react";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { openSessionTab, reconcileSessionTabs, resolveSessionTab, selectedTab, sessionTabLimit, tabKey, type SessionTab, type SessionTabs } from "./sessionTabs";
-import { emptyFileTabs, fileNodeId, fileTabLimit, isChangesTab, type FileTab, type FileTabs } from "./fileTabs";
+import { emptyFileTabs, fileNodeId, fileTabLimit, isChangesTab, isTerminalTab, type FileTab, type FileTabs } from "./fileTabs";
 
 const panelId = "session-tabs-panel";
 // Presentation only: never persisted in the session list, recent history or draft owners.
@@ -41,7 +41,9 @@ const noFiles = emptyFileTabs();
 // The tabs of projects (their code editor, their changes) share the strip: an active one is the selected tab,
 // over the session selection. An editor opens in the pane of the tab it was asked from.
 // A changes tab opens beside the tab it was asked from: in the pane that already holds one, or in a new pane on
-// the right. From there it is a tab like any other and can be moved or closed.
+// the right. A terminal opens under it: in the pane that already holds one, or in a new pane at the bottom, a
+// third of the height. From there each is a tab like any other and can be moved or closed. The pane of the
+// terminals stays theirs: what is opened while the keyboard is in a terminal opens in a pane of the sessions.
 export function reconcileSessionTabModel(model: Model, state: SessionTabs, label: (tab: SessionTab | null) => string, files: FileTabs = noFiles,
   fileLabel: (file: FileTab) => string = file => file.view) {
   const open = state.open.slice(0, sessionTabLimit);
@@ -50,30 +52,53 @@ export function reconcileSessionTabModel(model: Model, state: SessionTabs, label
   if (!state.active) ids.add(sessionDraftNodeId);
   const existing: TabNode[] = [];
   model.visitNodes(node => { if (node instanceof TabNode) existing.push(node); });
+  const changeIds = new Set(openFiles.filter(isChangesTab).map(fileNodeId));
+  const terminalIds = new Set(openFiles.filter(isTerminalTab).map(fileNodeId));
+  // The pane a new tab opens in: the active one, unless it holds nothing but terminals; then one that holds something else.
+  const home = () => {
+    const terminalsOnly = (pane: TabSetNode) => pane.getChildren().length > 0 && pane.getChildren().every(child => terminalIds.has(child.getId()));
+    const active = model.getActiveTabset();
+    if (active && !terminalsOnly(active)) return active.getId();
+    let other: string | undefined;
+    model.visitNodes(node => { if (node instanceof TabSetNode && !terminalsOnly(node)) other ??= node.getId(); });
+    return other ?? active?.getId() ?? panelId;
+  };
   for (const tab of open) {
     const id = sessionNodeId(tab);
     const name = label(tab);
     const node = model.getNodeById(id);
-    if (!node) model.doAction(Actions.addTab({ type: "tab", id, name, component: "session" }, model.getActiveTabset()?.getId() ?? panelId, DockLocation.CENTER, -1, false));
+    if (!node) model.doAction(Actions.addTab({ type: "tab", id, name, component: "session" }, home(), DockLocation.CENTER, -1, false));
     else if (node instanceof TabNode && node.getName() !== name) model.doAction(Actions.renameTab(id, name));
   }
-  const changeIds = new Set(openFiles.filter(isChangesTab).map(fileNodeId));
   for (const file of openFiles) {
     const id = fileNodeId(file);
     const name = fileLabel(file);
     const node = model.getNodeById(id);
     if (node instanceof TabNode) { if (node.getName() !== name) model.doAction(Actions.renameTab(id, name)); continue; }
-    const target = model.getActiveTabset()?.getId() ?? panelId;
-    if (!isChangesTab(file)) { model.doAction(Actions.addTab({ type: "tab", id, name, component: "editor" }, target, DockLocation.CENTER, -1, false)); continue; }
+    const target = home();
+    if (!isChangesTab(file) && !isTerminalTab(file)) { model.doAction(Actions.addTab({ type: "tab", id, name, component: "editor" }, target, DockLocation.CENTER, -1, false)); continue; }
+    // The pane that already holds a tab of the same kind.
+    const alike = isChangesTab(file) ? changeIds : terminalIds;
     let beside: string | undefined;
-    model.visitNodes(other => { if (other instanceof TabNode && other.getId() !== id && changeIds.has(other.getId())) beside ??= other.getParent()?.getId(); });
-    model.doAction(Actions.addTab({ type: "tab", id, name, component: "changes" }, beside ?? target, beside ? DockLocation.CENTER : DockLocation.RIGHT, -1, false));
+    model.visitNodes(other => { if (other instanceof TabNode && other.getId() !== id && alike.has(other.getId())) beside ??= other.getParent()?.getId(); });
+    if (isChangesTab(file)) {
+      model.doAction(Actions.addTab({ type: "tab", id, name, component: "changes" }, beside ?? target, beside ? DockLocation.CENTER : DockLocation.RIGHT, -1, false));
+      continue;
+    }
+    model.doAction(Actions.addTab({ type: "tab", id, name, component: "terminal" }, beside ?? target, beside ? DockLocation.CENTER : DockLocation.BOTTOM, -1, false));
+    if (beside) continue;
+    // The new pane takes a third of the height it shares with the pane above it.
+    const pane = model.getNodeById(id)?.getParent();
+    const row = pane?.getParent();
+    if (pane instanceof TabSetNode && row instanceof RowNode && row.getChildren().length === 2) {
+      model.doAction(Actions.adjustWeights(row.getId(), row.getChildren().map(child => child === pane ? 34 : 66)));
+    }
   }
   if (!state.active) {
     const name = label(null);
     const draft = model.getNodeById(sessionDraftNodeId);
     if (!draft) model.doAction(Actions.addTab({ type: "tab", id: sessionDraftNodeId, name, component: "new-session",
-      enableDrag: false, enableClose: open.length > 0 }, model.getActiveTabset()?.getId() ?? panelId, DockLocation.CENTER, -1, true));
+      enableDrag: false, enableClose: open.length > 0 }, home(), DockLocation.CENTER, -1, true));
     else if (draft instanceof TabNode) {
       if (draft.getName() !== name) model.doAction(Actions.renameTab(sessionDraftNodeId, name));
       if (draft.isEnableClose() !== (open.length > 0)) model.doAction(Actions.updateNodeAttributes(sessionDraftNodeId, { enableClose: open.length > 0 }));

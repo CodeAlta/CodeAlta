@@ -136,7 +136,7 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
     // the focus, the arrows move between the answers around the ends, and Escape leaves everything as it was.
     const closeQuestion = "document.querySelector('.close-window-dialog')";
     const closeWindow = async () => {
-      await evaluate("projectFocusFixture.shell.length=0;projectFocusFixture.notify({kind:'confirm-close',runningSessions:0})");
+      await evaluate("projectFocusFixture.shell.length=0;projectFocusFixture.notify({kind:'confirm-close',runningSessions:0,busyTerminals:0})");
       assert.equal(await wait(`!!${closeQuestion} && document.activeElement?.textContent==='Keep running'`), true, "the default answer has the focus");
     };
     const arrow = async (name: "ArrowLeft" | "ArrowRight") => { await key(name, name, name === "ArrowLeft" ? 37 : 39); return evaluate("document.activeElement?.textContent"); };

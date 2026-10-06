@@ -20,6 +20,8 @@ test("single-stroke gestures follow the terminal key map and work inside the pro
     assert.equal(resolveCommandKey(ctrl("ArrowLeft", { altKey: true }), false, focus).command, "previousTab");
     assert.equal(resolveCommandKey(ctrl("ArrowRight", { altKey: true }), false, focus).command, "nextTab");
     assert.equal(resolveCommandKey(ctrl("w"), false, focus).command, "closeTab");
+    // The key a terminal leaves to the application: Ctrl+W is the shell's.
+    assert.equal(resolveCommandKey(ctrl("W", { shiftKey: true }), false, focus).command, "closeTab");
     assert.equal(resolveCommandKey(ctrl("T", { shiftKey: true }), false, focus).command, "reopenTab");
     assert.equal(resolveCommandKey(ctrl("t"), false, focus).command, "nextPrompt");
     assert.equal(resolveCommandKey(ctrl("p"), false, focus).command, "palette");
@@ -32,6 +34,9 @@ test("single-stroke gestures follow the terminal key map and work inside the pro
     assert.equal(resolveCommandKey(ctrl("F4"), false, focus).command, "messageLatest");
     assert.equal(resolveCommandKey(key("F6"), false, focus).command, "expandPrompt");
     assert.equal(resolveCommandKey(key("F1"), false, focus).command, "help");
+    // A new terminal, with the key it has in most editors and with a chord.
+    assert.equal(resolveCommandKey(ctrl("`"), false, focus).command, "newTerminal");
+    assert.deepEqual(resolveCommandKey(ctrl("j"), true, focus), { command: "newTerminal", chord: false, handled: true });
   }
 });
 

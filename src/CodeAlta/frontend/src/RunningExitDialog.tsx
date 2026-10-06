@@ -5,14 +5,14 @@ import { exitQuestion } from "./desktopShell";
 import { frontLayer } from "./frontLayer";
 import { useShellLanguage } from "./shellLanguage";
 
-/** Asks before an exit that stops running sessions. Cancel is the default: Enter does not stop them. */
-export function RunningExitDialog({ runningSessions, onExit, onCancel }: { runningSessions: number; onExit: () => void; onCancel: () => void }) {
+/** Asks before an exit that stops running sessions or ends what terminals run. Cancel is the default: Enter stops nothing. */
+export function RunningExitDialog({ runningSessions, busyTerminals = 0, onExit, onCancel }: { runningSessions: number; busyTerminals?: number; onExit: () => void; onCancel: () => void }) {
   const { t } = useShellLanguage();
-  const question = exitQuestion(runningSessions);
+  const questions = exitQuestion(runningSessions, busyTerminals);
   const layer = useRef(frontLayer());
   return <Dialog isOpen className="running-exit-dialog" title={t("Exit CodeAlta?")} icon={<AppIcon name="error" size={18} />} isCloseButtonShown={false}
     portalContainer={layer.current} onClose={onCancel}>
-    <DialogBody>{t(question.key, question.parameters)}</DialogBody>
+    <DialogBody>{questions.map(question => <p key={question.key}>{t(question.key, question.parameters)}</p>)}</DialogBody>
     <DialogFooter actions={<>
       <Button autoFocus onClick={onCancel}>{t("Cancel")}</Button>
       <Button intent="danger" onClick={onExit}>{t("Exit CodeAlta")}</Button>

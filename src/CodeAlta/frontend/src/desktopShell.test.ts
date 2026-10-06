@@ -3,13 +3,17 @@ import test from "node:test";
 import { closeBehavior, closeBehaviorLabel, closeBehaviors, closeQuestion, entryAddedNotice, exitQuestion, keepRunningPlace, nextChoice } from "./desktopShell";
 import { locales, translate } from "./localization";
 
-test("the exit question counts the sessions it would stop", () => {
-  assert.equal(translate("en", exitQuestion(1).key, exitQuestion(1).parameters), "A session is running. Exiting CodeAlta stops it.");
-  assert.equal(translate("en", exitQuestion(3).key, exitQuestion(3).parameters), "3 sessions are running. Exiting CodeAlta stops them.");
+test("the exit question counts the sessions it would stop and the terminals whose command it would end", () => {
+  const asked = (sessions: number, terminals = 0, locale: typeof locales[number] = "en") => exitQuestion(sessions, terminals).map(question => translate(locale, question.key, question.parameters));
+  assert.deepEqual(asked(1), ["A session is running. Exiting CodeAlta stops it."]);
+  assert.deepEqual(asked(3), ["3 sessions are running. Exiting CodeAlta stops them."]);
+  assert.deepEqual(asked(0, 1), ["A terminal is running a command. Exiting CodeAlta ends it."]);
+  assert.deepEqual(asked(0, 4), ["4 terminals are running a command. Exiting CodeAlta ends them."]);
+  assert.deepEqual(asked(2, 1), ["2 sessions are running. Exiting CodeAlta stops them.", "A terminal is running a command. Exiting CodeAlta ends it."]);
   for (const locale of locales) {
     if (locale === "en") continue;
-    assert.notEqual(translate(locale, exitQuestion(1).key), exitQuestion(1).key);
-    assert.ok(translate(locale, exitQuestion(3).key, exitQuestion(3).parameters).includes("3"));
+    assert.notDeepEqual(asked(1, 1, locale), asked(1, 1));
+    assert.ok(asked(3, 5, locale)[0].includes("3") && asked(3, 5, locale)[1].includes("5"));
   }
 });
 

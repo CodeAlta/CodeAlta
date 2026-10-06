@@ -2,10 +2,14 @@ import type { MessageKey } from "./localization";
 
 type Message = Readonly<{ key: MessageKey; parameters?: Readonly<Record<string, string | number>> }>;
 
-/** The question before an exit that stops running sessions. */
-export function exitQuestion(runningSessions: number): Message {
-  return runningSessions === 1 ? { key: "A session is running. Exiting CodeAlta stops it." }
-    : { key: "{count} sessions are running. Exiting CodeAlta stops them.", parameters: { count: runningSessions } };
+/** The question before an exit that stops running sessions, or ends what terminals run: a sentence for each. */
+export function exitQuestion(runningSessions: number, busyTerminals = 0): Message[] {
+  const questions: Message[] = [];
+  if (runningSessions === 1) questions.push({ key: "A session is running. Exiting CodeAlta stops it." });
+  else if (runningSessions > 1 || busyTerminals <= 0) questions.push({ key: "{count} sessions are running. Exiting CodeAlta stops them.", parameters: { count: runningSessions } });
+  if (busyTerminals === 1) questions.push({ key: "A terminal is running a command. Exiting CodeAlta ends it." });
+  else if (busyTerminals > 1) questions.push({ key: "{count} terminals are running a command. Exiting CodeAlta ends them.", parameters: { count: busyTerminals } });
+  return questions;
 }
 
 /** What closing the window does, as the host names it: the page asks, the application keeps running, or it exits. */

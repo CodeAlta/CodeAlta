@@ -17,6 +17,10 @@ in [`doc/desktop.md`](../../doc/desktop.md).
   generates the typed client under `obj/neoastra`.
 - The host is the same as the one of CodeAlta TUI: `CodeAlta.Orchestration`, `CodeAlta.Agent`,
   `CodeAlta.Catalog`, the plugin runtime and the built-in MCP, Git and Statistics plugins.
+- Terminals run behind the pseudo-terminal of the system (ConPTY on Windows, a pty on macOS and
+  Linux), started by the host in `Desktop/Terminals`. The page shows them with
+  [xterm.js](https://xtermjs.org) and the CaskaydiaCove Nerd Font (SIL Open Font License 1.1), both
+  packaged in the tool.
 
 The built page is packaged in the tool. The installed app has no UI server and loads nothing from
 the network. Node and npm are needed only to build.

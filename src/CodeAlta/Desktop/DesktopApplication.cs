@@ -210,6 +210,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         ReminderService? reminders = null;
         DesktopChangesView? changesView = null;
         DesktopEditorView? editorView = null;
+        Terminals.DesktopTerminals? terminals = null;
         GitIssuesService? gitIssues = null;
         AppUpdateService? appUpdate = null;
         ModelCatalogService? providers = null;
@@ -307,6 +308,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             {
                 await workspacePrepared.Task;
                 if (workspace is not null) await Task.WhenAll(workspace.CloseImportsAsync(), workspace.CloseSessionsAsync());
+                if (terminals is not null) await terminals.CloseAsync(); // The programs of the terminals end with the application.
                 if (reminders is not null) await reminders.DisposeAsync();
                 if (providers is not null) await providers.DrainAsync();
                 if (providerLogin is not null) await providerLogin.CloseAsync(); // A running sign-in is canceled and joined.
@@ -416,6 +418,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 reminders = new ReminderService(host.WorkspaceReads, host.Commands, epoch);
                 changesView = new DesktopChangesView();
                 editorView = new DesktopEditorView();
+                terminals = new Terminals.DesktopTerminals(DesktopCommandLine.Version, Path.Combine(options.DataRoot, "terminal"));
+                shell.BusyTerminals = () => terminals.Busy;
                 DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView);
                 workspacePrepared.TrySetResult();
                 {
@@ -488,6 +492,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionPluginEventsService(new SessionPluginEventsService(host.WorkspaceReads, host.ProjectCatalog, epoch, host.PluginRuntime));
                     builder.AddProjectFilesService(new ProjectFilesService(host.ProjectCatalog, epoch, host.ProjectFileSearchService, editorView));
                     builder.AddProjectGitService(new ProjectGitService(host.ProjectCatalog, epoch, changesView));
+                    // A terminal opened from a session starts in the folder that session works in.
+                    builder.AddTerminalsService(new TerminalsService(terminals, host.ProjectCatalog, epoch, async (sessionId, token) =>
+                        (await host.WorkspaceReads.ReadSnapshotAsync(token).ConfigureAwait(false)).Sessions
+                            .FirstOrDefault(session => string.Equals(session.SessionId, sessionId, StringComparison.Ordinal))?.WorkspacePath));
                     builder.AddPromptImagesService(new PromptImagesService(host.WorkspaceReads, epoch));
                     builder.AddComposerStatusService(new ComposerStatusService(host.ProjectCatalog, epoch, roots.Home, host.PluginRuntime));
                     pluginCommands = pluginAlta is null ? new PluginUiService() : new PluginUiService(host.ProjectCatalog, host.PluginRuntime, pluginUi, epoch);
@@ -636,6 +644,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddPluginUiService(new PluginUiService());
             builder.AddProjectFilesService(new ProjectFilesService());
             builder.AddProjectGitService(new ProjectGitService());
+            builder.AddTerminalsService(new TerminalsService());
             builder.AddPromptImagesService(new PromptImagesService());
             builder.AddComposerStatusService(new ComposerStatusService());
             builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));

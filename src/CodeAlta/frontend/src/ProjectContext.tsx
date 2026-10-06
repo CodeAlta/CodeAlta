@@ -13,10 +13,12 @@ type Read = (request: ProjectGitStatusRequest, options: { signal: AbortSignal; t
  * seconds while it is on screen (changes made outside the application show up too), and when `refreshKey`
  * changes (a turn ended). The counts open the changes of the project.
  */
-export function ProjectContext({ epoch, project, read, refreshKey, onShowChanges }: {
+export function ProjectContext({ epoch, project, read, refreshKey, onShowChanges, onOpenTerminal }: {
   epoch: string | null; project: Readonly<{ id: string; name: string; path: string }>; read: Read; refreshKey?: unknown;
   /** Opens the changes tab of the project; without it the counts are only shown. */
   onShowChanges?: () => void;
+  /** Opens a terminal in the folder the composer works in. */
+  onOpenTerminal?: () => void;
 }) {
   const { t, locale } = useShellLanguage();
   const [git, setGit] = useState<{ projectId: string; view: ProjectGitView | null }>();
@@ -55,6 +57,8 @@ export function ProjectContext({ epoch, project, read, refreshKey, onShowChanges
       ? <button type="button" className="project-context-changes" title={`${title}\n${t("Show changes")}`} aria-label={t("Show changes")} onClick={onShowChanges}>
         <AppIcon name="changes" size={13} />{counts}</button>
       : changes && <span className="project-context-changes" title={title}>{counts}</span>)}
+    {onOpenTerminal && <button type="button" className="project-context-terminal" title={t("New terminal")} aria-label={t("New terminal")} onClick={onOpenTerminal}>
+      <AppIcon name="terminal" size={13} /></button>}
   </div>;
 }
 

@@ -4,11 +4,13 @@ import { Button } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import { SessionTabMenu, type SessionMenuEntry } from "./SessionTabMenu";
 import { useShellLanguage } from "./shellLanguage";
-import type { WorkspaceSnapshot } from "#neoastra";
+import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
 import { resolveSessionTab, type SessionTab, type SessionTabs as Tabs } from "./sessionTabs";
 import { SessionTabActivity, type RuntimeObservationControls } from "./RuntimeObservation";
 import { createSessionTabModel, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction } from "./sessionTabLayout";
-import { emptyFileTabs, fileNodeId, isChangesTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
+import { emptyFileTabs, fileNodeId, isChangesTab, isTerminalTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
+import { ActivitySpinner } from "./ActivitySpinner";
+import { terminalTabLabel } from "./terminal/terminals";
 import { useSessionTabDrag } from "./useSessionTabDrag";
 import { plainTitle } from "./sessionTitle";
 
@@ -22,8 +24,19 @@ export function SessionTabLabel({ label, path, dirty }: { label: string; path: s
  * The header text of a project's tab: what it shows (its code editor or its changes) and the name of the project,
  * with the folder as tooltip. The editor carries the unsaved mark while one of its files holds edits.
  */
-export function FileTabLabel({ tab, project, dirty }: { tab: FileTab; project: string; dirty: boolean }) {
+export function FileTabLabel({ tab, project, dirty, terminal }: {
+  tab: FileTab; project: string; dirty: boolean;
+  /** What the host says of the terminal of a terminal tab. */
+  terminal?: TerminalItem;
+}) {
   const { t } = useShellLanguage();
+  if (isTerminalTab(tab)) {
+    // The title a terminal was given, or the folder it is in; a mark when it has ended or asks for attention.
+    const label = terminal ? terminalTabLabel(terminal, t("Terminal")) : t("Terminal");
+    const mark = !terminal ? null : !terminal.running ? ["ended", t("Ended (exit code {code})", { code: terminal.exitCode ?? 0 })] : terminal.attention ? ["attention", t("Asked for attention")] : null;
+    return <span className="session-tab-title"><span className="session-tab-label" title={terminal ? `${label}\n${terminal.folder}\n${terminal.profileName}` : label}>{label}</span>
+      {mark && <span className="terminal-tab-mark" data-kind={mark[0]} role="img" title={mark[1]} aria-label={mark[1]} />}</span>;
+  }
   const name = t(isChangesTab(tab) ? "Changes" : "Editor");
   return <span className="session-tab-title"><span className="session-tab-label" title={`${name} · ${project}\n${tab.projectPath}`}>
     {name} <span className="session-tab-project">{project}</span></span>
@@ -35,7 +48,7 @@ const noFiles = emptyFileTabs();
 // Each pane retains its own live factory payload. App owns session authority and drafts.
 // The code editors and the changes of projects are tabs of the same dock; App owns which are open and which one is active.
 export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen, observations, capture, children, renderSession, newSessionLabel,
-  files = noFiles, renderFile, selectFile, closeFile, fileDirty, onSessionTabClick }: {
+  files = noFiles, renderFile, selectFile, closeFile, fileDirty, terminal, onSessionTabClick }: {
   state: Tabs; snapshot?: WorkspaceSnapshot; dirty: (id: string) => boolean;
   select: (tab: SessionTab) => void; close: (tab: SessionTab) => void; reopen: () => void;
   observations?: RuntimeObservationControls;
@@ -46,6 +59,8 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
   /** Activates a file tab, or with null returns to the session selection. */
   selectFile?: (tab: FileTab | null) => void;
   closeFile?: (tab: FileTab) => void; fileDirty?: (tab: FileTab) => boolean;
+  /** What the host says of a terminal, for the tab that shows it. */
+  terminal?: (id: string) => TerminalItem | undefined;
   /** A session tab or the New session tab was clicked (not its close button): the shell moves the focus to its prompt. */
   onSessionTabClick?: () => void;
 }) {
@@ -82,7 +97,12 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
   const label = (tab: SessionTab | null) => tab ? `${plainTitle(snapshot && resolveSessionTab(snapshot, tab)?.title || t("Unavailable session"))} - ${
     tab.projectId === null ? t("Global") : snapshot?.projects.find(project => project.id === tab.projectId)?.name ?? t("Unavailable project")}` : newSessionLabel ?? t("New session");
   const projectName = (file: FileTab) => snapshot?.projects.find(project => project.id === file.projectId)?.name ?? t("Unavailable project");
-  const fileLabel = (file: FileTab) => `${t(isChangesTab(file) ? "Changes" : "Editor")} · ${projectName(file)}`;
+  const shownTerminal = (file: FileTab) => isTerminalTab(file) && file.terminalId ? terminal?.(file.terminalId) : undefined;
+  const fileLabel = (file: FileTab) => {
+    if (!isTerminalTab(file)) return `${t(isChangesTab(file) ? "Changes" : "Editor")} · ${projectName(file)}`;
+    const shown = shownTerminal(file);
+    return shown ? terminalTabLabel(shown, t("Terminal")) : t("Terminal");
+  };
   useLayoutEffect(() => { reconcileSessionTabModel(model, state, label, files, fileLabel); });
   useLayoutEffect(() => { if (menu && !menu.current()) setMenu(null); });
   function guard() {
@@ -186,9 +206,13 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
         if (node.getId() === sessionDraftNodeId) { values.content = <span data-session-node={node.getId()}>{label(null)}</span>; return; }
         const file = files.open.find(value => fileNodeId(value) === node.getId());
         if (file) {
-          const look = isChangesTab(file) ? { icon: "changes" as const, tone: "orange" } : { icon: "code" as const, tone: "azure" };
-          values.leading = <span className="file-tab-icon" data-file-tone={look.tone}><AppIcon name={look.icon} size={14} /></span>;
-          values.content = <span data-session-node={node.getId()}><FileTabLabel tab={file} dirty={!!fileDirty?.(file)} project={projectName(file)} /></span>;
+          const shown = shownTerminal(file);
+          const look = isTerminalTab(file) ? { icon: "terminal" as const, tone: shown && !shown.running ? "muted" : "green" }
+            : isChangesTab(file) ? { icon: "changes" as const, tone: "orange" } : { icon: "code" as const, tone: "azure" };
+          // A terminal whose shell runs a command shows it where its icon is.
+          values.leading = shown?.running && shown.busy ? <span className="file-tab-icon" data-file-tone={look.tone}><ActivitySpinner size={13} /></span>
+            : <span className="file-tab-icon" data-file-tone={look.tone}><AppIcon name={look.icon} size={14} /></span>;
+          values.content = <span data-session-node={node.getId()}><FileTabLabel tab={file} dirty={!!fileDirty?.(file)} project={projectName(file)} terminal={shown} /></span>;
           return;
         }
         const tab = state.open.find(value => sessionNodeId(value) === node.getId());

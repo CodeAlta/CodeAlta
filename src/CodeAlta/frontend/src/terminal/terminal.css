@@ -1,0 +1,88 @@
+/* The terminals: the font the application brings for them, a terminal in its tab, and their list in the Explorer. */
+
+/* CaskaydiaCove Nerd Font (Cascadia Code with the icons of the Nerd Fonts), SIL Open Font License 1.1: see fonts/LICENSE.txt.
+   The files of the page are used whether the system has a font of that name or not. */
+@font-face { font-family: "CaskaydiaCove Nerd Font"; font-style: normal; font-weight: 400; font-display: block;
+  src: url("./fonts/CaskaydiaCoveNerdFont-Regular.ttf") format("truetype"); }
+@font-face { font-family: "CaskaydiaCove Nerd Font"; font-style: normal; font-weight: 700; font-display: block;
+  src: url("./fonts/CaskaydiaCoveNerdFont-Bold.ttf") format("truetype"); }
+
+.terminal-panel { position: relative; display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; background: var(--bg); outline: 0; }
+.terminal-header { position: relative; flex: none; display: flex; align-items: center; gap: 8px; min-width: 0; height: 28px; padding: 0 4px 0 12px;
+  border-bottom: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 11.5px; user-select: none; }
+.terminal-shell { flex: none; color: var(--text); font-weight: 600; }
+/* A folder too long for its place loses its start: its last names say where the terminal is. */
+.terminal-folder, .ide-shell .terminal-row .terminal-row-title[data-folder="true"] { direction: rtl; text-align: left; }
+.terminal-folder { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--bp-typography-family-mono); }
+.terminal-state { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); }
+.terminal-state[data-ended="true"] { color: var(--muted); }
+.terminal-progress { flex: 0 0 72px; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--text) 14%, transparent); overflow: hidden; }
+.terminal-progress > span { display: block; height: 100%; border-radius: 2px; background: var(--accent); transition: width .2s ease; }
+.terminal-progress[data-state="2"] > span { background: var(--red); }
+.terminal-progress[data-state="4"] > span { background: var(--yellow); }
+.terminal-progress[data-state="3"] > span { animation: terminal-progress 1.2s ease-in-out infinite; }
+@keyframes terminal-progress { 0% { opacity: .25; } 50% { opacity: 1; } 100% { opacity: .25; } }
+.terminal-actions { flex: none; display: inline-flex; align-items: center; gap: 1px; margin-left: auto; }
+.terminal-actions .bp6-button { min-width: 24px; min-height: 24px; padding: 0; color: var(--muted); }
+.terminal-actions .bp6-button:hover, .terminal-actions .bp6-button.bp6-active { color: var(--text); }
+
+/* The terminal fills what is left; its own padding is inside it, where it is counted when it is sized. */
+.terminal-host { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; }
+.terminal-surface { position: absolute; inset: 0; }
+.terminal-surface .xterm { height: 100%; padding: 8px 0 8px 12px; }
+
+/* The options of the terminals: a preference on each row, its name on the left and its control on the right. */
+.terminal-options { display: grid; gap: 2px; width: min(340px, calc(100vw - 32px)); padding: 10px 12px; }
+.terminal-option { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 34px; }
+.terminal-option > label:not(.bp6-control), .terminal-option > span:first-child { flex: 1 1 auto; min-width: 0; color: var(--text); font-size: 13px; }
+.terminal-option .bp6-switch { flex: none; margin: 0; }
+.terminal-option .bp6-segmented-control .bp6-button { white-space: nowrap; }
+.terminal-option .terminal-option-size { flex: none; }
+.terminal-option .terminal-option-size .bp6-input { width: 58px; text-align: right; }
+.terminal-option .bp6-html-select { flex: none; width: 172px; }
+.terminal-option .bp6-html-select select { width: 100%; }
+.terminal-surface .xterm-viewport { background-color: transparent !important; }
+.terminal-panel[data-active="false"] .xterm-cursor-layer { opacity: .7; }
+
+.terminal-find { position: absolute; top: 34px; right: 18px; z-index: 5; display: flex; align-items: center; gap: 2px; padding: 4px 4px 4px 6px;
+  border: 1px solid var(--line-strong); border-radius: 6px; background: var(--panel-2); box-shadow: var(--shadow); }
+.terminal-find-query.bp6-input-group { width: 230px; }
+.terminal-find-toggles { display: inline-flex; height: 100%; align-items: center; padding-right: 1px; }
+.terminal-find-toggle.bp6-button { min-width: 22px; min-height: 22px; padding: 0 2px; }
+.terminal-find-count { flex: none; min-width: 38px; padding: 0 4px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; text-align: center; }
+.terminal-find-count[data-empty="true"] { color: var(--red); }
+.terminal-find > .bp6-button { min-width: 24px; min-height: 24px; padding: 0; }
+
+/* The terminals of a project, under its sessions: rows like theirs. */
+.ide-shell .terminal-list { margin: 0; padding: 0; }
+.ide-shell .terminal-list-title { display: flex; align-items: center; gap: 5px; margin: 0; padding: 5px 8px 2px 11px; color: var(--muted);
+  font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; user-select: none; }
+/* The icon, the title as wide as it is when there is room, and what is left for the name of the shell. */
+.ide-shell .terminal-row > button:first-child { display: grid; grid-template-columns: auto minmax(0, max-content) minmax(46px, 1fr); gap: 5px; }
+.ide-shell .terminal-row .terminal-row-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
+/* The name of the shell gives way before the title does: a row says first which terminal it is. It keeps
+   the room of the two buttons of the row, which take its place while the pointer or the keyboard is on the
+   row: nothing of the row moves when they come. */
+.ide-shell .terminal-row .terminal-row-meta { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 4px;
+  color: var(--muted); font-size: var(--bp-typography-size-body-small); }
+.ide-shell .terminal-row .terminal-row-meta > span:not([role]) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ide-shell .terminal-row .terminal-row-meta > [role] { flex: none; }
+.ide-shell .terminal-row-actions { position: absolute; top: 0; bottom: 0; right: 10px; display: flex; align-items: center; opacity: 0; pointer-events: none; }
+.ide-shell .terminal-row:hover > .terminal-row-actions, .ide-shell .terminal-row:focus-within > .terminal-row-actions { opacity: 1; pointer-events: auto; }
+.ide-shell .terminal-row:hover .terminal-row-meta, .ide-shell .terminal-row:focus-within .terminal-row-meta { visibility: hidden; }
+.ide-shell .terminal-row[data-ended="true"] .terminal-row-title { color: var(--muted); }
+.ide-shell .terminal-row .terminal-attention { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.ide-shell .terminal-row .terminal-agent { display: inline-flex; color: var(--muted); }
+.ide-shell .terminal-row-action { flex: 0 0 22px; width: 22px; height: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+.ide-shell .terminal-row-action:hover { color: var(--text); }
+/* Without a pointer to bring them, the buttons are always there, after the name of the shell. */
+@media (hover: none) {
+  .ide-shell .terminal-row-actions { position: static; opacity: 1; pointer-events: auto; }
+  .ide-shell .terminal-row > button:first-child { grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr); }
+  .ide-shell .terminal-row:focus-within .terminal-row-meta { visibility: visible; }
+}
+
+/* The mark of a terminal in its tab: what it does now. */
+.terminal-tab-mark { display: inline-flex; align-items: center; margin-left: 6px; }
+.terminal-tab-mark[data-kind="attention"]::before, .terminal-tab-mark[data-kind="ended"]::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.terminal-tab-mark[data-kind="ended"]::before { background: var(--muted); }

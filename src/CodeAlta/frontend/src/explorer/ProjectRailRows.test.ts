@@ -77,6 +77,23 @@ test("a project row opens its code editor and its changes, and shows which are o
   assert.match(alpha, /aria-pressed="true" aria-expanded="true" data-scope="a"/);
 });
 
+test("a project row opens a new terminal in its folder, and shows that the project has some", () => {
+  const html = renderToStaticMarkup(createElement(ProjectRailRows, { projects: [project("a", "Alpha"), project("b", "Beta"), project("c", "Gamma"), project("z", "Old", true)], selectedId: null,
+    onSelect: never, canRename: true, renameBusy: false, onRename: never, tree: { ...tree(["a"]), after: id => createElement("span", null, `terminals of ${id ?? "global"}`) },
+    terminals: { count: id => id === "a" ? 1 : id === "b" ? 3 : 0, create: never } }));
+  const [alpha, beta, gamma, old] = rows(html);
+  assert.match(alpha, /class="icon-button project-row-action project-terminal-trigger" data-open="true" aria-label="New terminal in Alpha" title="New terminal \(1 terminal\)"/);
+  assert.match(beta, /project-terminal-trigger" data-open="true" aria-label="New terminal in Beta" title="New terminal \(3 terminals\)"/);
+  assert.match(gamma, /project-terminal-trigger" data-open="false" aria-label="New terminal in Gamma" title="New terminal"/);
+  assert.doesNotMatch(old, /project-terminal-trigger/, "An archived project opens no terminal.");
+  // The terminals of an open project follow its sessions.
+  assert.ok(alpha.indexOf("sessions of a") > 0 && alpha.indexOf("terminals of a") > alpha.indexOf("sessions of a"), alpha);
+  assert.doesNotMatch(beta, /terminals of b/);
+  // Without terminals to open (a window that owns no host) the rows have no such button.
+  const plain = renderToStaticMarkup(createElement(ProjectRailRows, { projects: [project("a", "Alpha")], selectedId: null, onSelect: never, canRename: true, renameBusy: false, onRename: never, tree: tree([]) }));
+  assert.doesNotMatch(plain, /project-terminal-trigger/);
+});
+
 test("every open scope shows its sessions; the selected one keeps its own while it is closed", () => {
   const projects = [project("a", "Alpha"), project("b", "Beta"), project("c", "Gamma")];
   const render = (selectedId: string | null, expanded: (string | null)[]) => renderToStaticMarkup(createElement(ProjectRailRows, { projects, selectedId, onSelect: never,

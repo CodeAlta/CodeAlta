@@ -78,13 +78,13 @@ test("the buttons of a project row are where the icon of an open tab already is,
 
     await away();
     const { width } = await layout("editor");
-    // The star, the changes, the code editor and the menu, each in a column of its own at the end of the row.
-    const columns = { favorite: width - 96, changes: width - 72, editor: width - 48, actions: width - 24 };
+    // The star, the changes, the code editor, the terminal and the menu, each in a column of its own at the end of the row.
+    const columns = { favorite: width - 120, changes: width - 96, editor: width - 72, terminal: width - 48, actions: width - 24 };
     const all = Object.keys(columns);
 
-    // A row with an open tab shows the icon of that tab alone, and keeps the room of the other buttons: none
-    // of them moves when the pointer comes, and the name is cut at the same place.
-    for (const [id, open] of [["editor", ["editor"]], ["changes", ["changes"]], ["both", ["changes", "editor"]]] as const) {
+    // A row with an open tab, or with a terminal, shows that icon alone, and keeps the room of the other buttons:
+    // none of them moves when the pointer comes, and the name is cut at the same place.
+    for (const [id, open] of [["editor", ["editor"]], ["changes", ["changes"]], ["terminal", ["terminal"]], ["both", ["changes", "editor", "terminal"]]] as const) {
       await away();
       const alone = await layout(id);
       assert.deepEqual(shown(alone), open, `${id}: what is shown without the pointer`);
@@ -100,18 +100,18 @@ test("the buttons of a project row are where the icon of an open tab already is,
     await away();
     const free = await layout("none");
     assert.deepEqual(shown(free), []);
-    assert.deepEqual(Object.values(free.buttons).map(button => button.width), [0, 0, 0, 0]);
+    assert.deepEqual(Object.values(free.buttons).map(button => button.width), [0, 0, 0, 0, 0]);
     await over("none");
     const used = await layout("none");
     assert.deepEqual(shown(used), all);
     assert.deepEqual(places(used), columns);
-    assert.equal(free.name - used.name, 96, "the buttons take their room from the name while the pointer is there");
+    assert.equal(free.name - used.name, 120, "the buttons take their room from the name while the pointer is there");
 
-    // An archived project has no tab to open: its star and its menu are in the same last columns.
+    // An archived project has no tab and no terminal to open: its star and its menu are in the same last columns.
     await over("old");
     const old = await layout("old");
     assert.deepEqual(shown(old), ["favorite", "actions"]);
-    assert.deepEqual(places(old), { favorite: columns.favorite + 48, actions: columns.actions });
+    assert.deepEqual(places(old), { favorite: columns.favorite + 72, actions: columns.actions });
 
     // The keyboard on a row shows its buttons as the pointer does.
     await away();

@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { WorkspaceSnapshot } from "#neoastra";
-import { activateFileTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileNodeId, isChangesTab, isEditorTab, fileTabKey, fileTabLimit, openFileTab,
-  persistFileTabs, reconcileFileTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, type FileTab } from "./fileTabs";
+import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
+import { activateFileTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileNodeId, isChangesTab, isEditorTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
+  persistFileTabs, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, terminalTab, type FileTab } from "./fileTabs";
 import { FileTabLabel } from "./SessionTabStrip";
 import { ShellLanguageContext } from "./shellLanguage";
 import { locales, translate } from "./localization";
@@ -145,5 +145,59 @@ test("an editor tab is labeled with its project and marks unsaved edits in every
     const changed = render(changes(), true);
     assert.ok(changed.includes(translate(locale, "Changes")) && changed.includes("&lt;Project&gt;"), changed);
     assert.ok(!changed.includes("session-tab-dirty"), "The changes hold no edit.");
+  }
+});
+
+test("each terminal shown has a tab of its own, which lasts as long as the terminal and is not kept for the next start", () => {
+  const first = terminalTab({ id: "t1", projectId: "p", folder: "/p/src" }), second = terminalTab({ id: "t2", projectId: "p", folder: "/p" });
+  const free = terminalTab({ id: "t3", projectId: null, folder: "/home/me" });
+  assert.deepEqual(first, { projectId: "p", projectPath: "/p/src", view: "terminal", terminalId: "t1" });
+  assert.equal(free.projectId, "");
+  assert.equal(fileTabKey(first), '["p","terminal","t1"]');
+  assert.notEqual(fileNodeId(first), fileNodeId(second));
+  assert.ok(isTerminalTab(first) && !isTerminalTab(editor()) && !isEditorTab(first) && !isChangesTab(first));
+  // The folder its shell moved to does not make it another tab.
+  assert.ok(sameFileTab(first, { ...first, projectPath: "/p" }) && !sameFileTab(first, second));
+
+  let state = [editor(), first, second, free].reduce((tabs, tab) => openFileTab(tabs, tab), emptyFileTabs());
+  assert.deepEqual(state.open.map(tab => tab.terminalId ?? tab.view), ["editor", "t1", "t2", "t3"]);
+  // The catalog decides for the tabs of projects only: a terminal is not one of its entries.
+  assert.deepEqual(reconcileFileTabs(state, { ...catalog, projects: [] }).open.map(tab => tab.terminalId), ["t1", "t2", "t3"]);
+  assert.equal(reconcileFileTabs(state, catalog), state);
+
+  // Its terminal decides: a tab that is open and one that could be reopened both go with it.
+  state = closeFileTab(state, second);
+  assert.equal(reconcileTerminalTabs(state, new Set(["t1", "t2", "t3"])), state);
+  const lasting = reconcileTerminalTabs(state, new Set(["t1"]));
+  assert.deepEqual(lasting.open.map(tab => tab.terminalId ?? tab.view), ["editor", "t1"]);
+  assert.deepEqual(lasting.closed, []);
+  assert.equal(lasting.active, null, "The terminal of the active tab is gone.");
+  assert.ok(sameFileTab(reconcileTerminalTabs(activateFileTab(state, first), new Set(["t1"])).active, first));
+
+  // A terminal does not outlive the application: its tab is not stored.
+  let stored: string | null = null;
+  persistFileTabs(value => { stored = value; }, activateFileTab(state, first));
+  assert.deepEqual(restoreFileTabs(() => stored), { open: [editor()], active: null, closed: [] });
+  assert.equal(restoreFileTabs(() => JSON.stringify({ version: 1, open: [first], active: null })), null, "A stored terminal tab is not a tab to restore.");
+});
+
+test("the tab of a terminal shows its title or its folder, and a mark once it has ended or asks to be looked at", () => {
+  const terminal = (more: Partial<TerminalItem> = {}): TerminalItem => ({
+    id: "t1", projectId: "p", sessionId: null, title: "/p/src", titled: false, folder: "/p/src", profile: "sh", profileName: "<sh>", programTitle: null, running: true, exitCode: null,
+    integrated: true, busy: false, command: null, lastExitCode: null, columns: 120, rows: 30, created: "2026-10-06T00:00:00Z", open: true, attention: false, agent: false, ...more });
+  const tab = terminalTab({ id: "t1", projectId: "p", folder: "/p" });
+  for (const locale of locales) {
+    const render = (shown?: TerminalItem) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider,
+      { value: { locale, choice: locale, setLanguage: () => assert.fail("rendering must not dispatch") } },
+      createElement(FileTabLabel, { tab, project: "Project", dirty: true, terminal: shown })));
+    const running = render(terminal());
+    assert.ok(running.includes(`${translate(locale, "Terminal")} src`) && running.includes("&lt;sh&gt;"), running);
+    assert.ok(!running.includes("terminal-tab-mark") && !running.includes("session-tab-dirty"), running);
+    assert.ok(render(terminal({ title: "<dev> server", titled: true })).includes("&lt;dev&gt; server"));
+    const ended = render(terminal({ running: false, exitCode: 3 }));
+    assert.ok(ended.includes('data-kind="ended"') && ended.includes(translate(locale, "Ended (exit code {code})", { code: 3 })), ended);
+    assert.ok(render(terminal({ attention: true })).includes('data-kind="attention"'));
+    // Before the host has said anything of it, the tab is a terminal and nothing more.
+    assert.ok(render().includes(`>${translate(locale, "Terminal")}<`));
   }
 });

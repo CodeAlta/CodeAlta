@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Actions, DockLocation, TabNode, TabSetNode } from "flexlayout-react";
+import { Actions, DockLocation, RowNode, TabNode, TabSetNode } from "flexlayout-react";
 import { sessionTabDrop } from "./sessionTabDrag";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { closeSessionTab, emptySessionTabs, openSessionTab, sessionTabLimit, type SessionTab } from "./sessionTabs";
 import { createSessionTabModel, fileTabAction, ownsSessionTabContent, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation } from "./sessionTabLayout";
-import { activateFileTab, changesTab, closeFileTab, editorTab, emptyFileTabs, fileNodeId, isChangesTab, openFileTab, type FileTab } from "./fileTabs";
+import { activateFileTab, changesTab, closeFileTab, editorTab, emptyFileTabs, fileNodeId, isChangesTab, openFileTab, terminalTab, type FileTab } from "./fileTabs";
 
 const tab = (id: string) => ({ projectId: "p", sessionId: id, path: "/p" });
 const snapshot: WorkspaceSnapshot = { configured: true, projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false,
@@ -405,6 +405,60 @@ test("a changes tab opens in a pane on the right; the next one joins it and both
   assert.equal(node.getName(), "Changes · renamed p");
   assert.equal(node.getParent(), sessions);
   // Closed, its node goes and the pane with its last tab.
+  files = closeFileTab(closeFileTab(files, first), second);
+  reconcileSessionTabModel(model, state, label, files, named);
+  assert.equal(model.getNodeById(fileNodeId(first)), undefined);
+  assert.equal(model.getNodeById(pane.getId()), undefined);
+});
+
+test("a terminal opens in a pane under the tabs, a third of the height; the next one joins it and closing the last one gives the room back", () => {
+  const model = createSessionTabModel(), state = both();
+  const first = terminalTab({ id: "t1", projectId: "p", folder: "/p" }), second = terminalTab({ id: "t2", projectId: "p", folder: "/p/src" });
+  const named = (file: FileTab) => `Terminal ${file.terminalId}`;
+  reconcileSessionTabModel(model, state, label, emptyFileTabs(), named);
+  const sessions = model.getActiveTabset()!;
+  let files = openFileTab(emptyFileTabs(), first);
+  reconcileSessionTabModel(model, state, label, files, named);
+  const node = model.getNodeById(fileNodeId(first)) as TabNode;
+  assert.equal(node.getName(), "Terminal t1");
+  assert.equal(node.getComponent(), "terminal");
+  const pane = node.getParent() as TabSetNode;
+  assert.notEqual(pane, sessions, "Its own pane.");
+  const column = pane.getParent() as RowNode;
+  assert.equal(column, sessions.getParent());
+  const stacked = column.getChildren();
+  assert.ok(stacked.indexOf(pane) > stacked.indexOf(sessions), "Under the sessions.");
+  // One above the other: the pane of the sessions and the one of the terminals share a column of the window.
+  assert.notEqual(column, model.getRootRow());
+  assert.equal(column.getParent(), model.getRootRow());
+  assert.deepEqual(stacked.map(child => Math.round((child as TabSetNode).getWeight())), [66, 34]);
+  assert.equal(sessions.getTabNodes().length, 2, "The sessions stay where they were.");
+  // The next terminal is a tab of the same pane, wherever the keyboard is.
+  model.doAction(Actions.setActiveTabset(sessions.getId()));
+  files = openFileTab(files, second);
+  reconcileSessionTabModel(model, state, label, files, named);
+  assert.equal((model.getNodeById(fileNodeId(second)) as TabNode).getParent(), pane);
+  assert.equal(pane.getTabNodes().length, 2);
+  // A changes tab still opens on the right of where it is asked from, not in the pane of the terminals.
+  const changes = changesTab({ id: "p", path: "/p" });
+  files = openFileTab(files, changes);
+  reconcileSessionTabModel(model, state, label, files, named);
+  assert.notEqual((model.getNodeById(fileNodeId(changes)) as TabNode).getParent(), pane);
+  // The pane of the terminals stays theirs: what is opened while the keyboard is in a terminal opens with the sessions.
+  model.doAction(Actions.setActiveTabset(pane.getId()));
+  const more = openSessionTab(state, tab("three")), editor = editorTab({ id: "p", path: "/p" });
+  files = openFileTab(files, editor);
+  reconcileSessionTabModel(model, more, label, files, named);
+  assert.equal((model.getNodeById(sessionNodeId(tab("three"))) as TabNode).getParent(), sessions);
+  assert.equal((model.getNodeById(fileNodeId(editor)) as TabNode).getParent(), sessions);
+  model.doAction(Actions.setActiveTabset(pane.getId()));
+  reconcileSessionTabModel(model, { ...more, active: null }, label, activateFileTab(files, null), named);
+  assert.equal((model.getNodeById(sessionDraftNodeId) as TabNode).getParent(), sessions, "A new session is not started in the pane of the terminals.");
+  assert.deepEqual(pane.getTabNodes().map(child => child.getId()), [fileNodeId(first), fileNodeId(second)]);
+  reconcileSessionTabModel(model, more, label, files, named);
+  // The title follows the terminal, and closed tabs take their pane with them.
+  reconcileSessionTabModel(model, state, label, files, file => `renamed ${file.terminalId ?? file.view}`);
+  assert.equal(node.getName(), "renamed t1");
   files = closeFileTab(closeFileTab(files, first), second);
   reconcileSessionTabModel(model, state, label, files, named);
   assert.equal(model.getNodeById(fileNodeId(first)), undefined);

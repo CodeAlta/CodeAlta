@@ -2,16 +2,23 @@ import type { WorkspaceSnapshot } from "#neoastra";
 
 /**
  * One tab of a project beside the sessions: its code editor (`view: "editor"`, with the files opened in it as
- * tabs of its own) or the changed files of its repository (`view: "changes"`). A project has one of each at most.
+ * tabs of its own), the changed files of its repository (`view: "changes"`), or one of its terminals
+ * (`view: "terminal"`). A project has one editor and one changes tab at most, and a tab for each terminal shown.
+ * The tab of a terminal names the terminal; its project is empty for a terminal of no project, and its path
+ * is the folder the terminal started in.
  */
-export type FileTab = Readonly<{ projectId: string; projectPath: string; view: "editor" | "changes" }>;
+export type FileTab = Readonly<{ projectId: string; projectPath: string; view: "editor" | "changes" | "terminal"; terminalId?: string }>;
 export type FileTabs = Readonly<{ open: readonly FileTab[]; active: FileTab | null; closed: readonly FileTab[] }>;
 export const fileTabsKey = "codealta.desktop.fileTabs.v1";
 export const fileTabLimit = 32;
 export const emptyFileTabs = (): FileTabs => ({ open: [], active: null, closed: [] });
-export const fileTabKey = (tab: FileTab) => JSON.stringify([tab.projectId, tab.view]);
+export const fileTabKey = (tab: FileTab) => JSON.stringify(tab.view === "terminal" ? [tab.projectId, tab.view, tab.terminalId] : [tab.projectId, tab.view]);
 export const isChangesTab = (tab: FileTab) => tab.view === "changes";
 export const isEditorTab = (tab: FileTab) => tab.view === "editor";
+export const isTerminalTab = (tab: FileTab) => tab.view === "terminal";
+/** The tab of a terminal. */
+export const terminalTab = (terminal: Readonly<{ id: string; projectId: string | null; folder: string }>): FileTab =>
+  ({ projectId: terminal.projectId ?? "", projectPath: terminal.folder, view: "terminal", terminalId: terminal.id });
 /** The tab of a project's changes. */
 export const changesTab = (project: Readonly<{ id: string; path: string }>): FileTab => ({ projectId: project.id, projectPath: project.path, view: "changes" });
 /** The tab of a project's code editor. */
@@ -53,12 +60,23 @@ export function activateFileTab(state: FileTabs, tab: FileTab | null): FileTabs 
   return active === state.active || tab !== null && !active ? state : { ...state, active };
 }
 
-/** Drops tabs whose project is gone, archived or now another folder. Used on restore, never on unsaved edits. */
+/**
+ * Drops tabs whose project is gone, archived or now another folder. Used on restore, never on unsaved edits.
+ * The tab of a terminal lasts as long as its terminal: see {@link reconcileTerminalTabs}.
+ */
 export function reconcileFileTabs(state: FileTabs, snapshot: WorkspaceSnapshot): FileTabs {
-  const open = state.open.filter(tab => resolveFileTab(snapshot, tab));
-  const closed = state.closed.filter(tab => resolveFileTab(snapshot, tab));
+  const open = state.open.filter(tab => isTerminalTab(tab) || resolveFileTab(snapshot, tab));
+  const closed = state.closed.filter(tab => isTerminalTab(tab) || resolveFileTab(snapshot, tab));
   const active = open.find(tab => sameFileTab(tab, state.active)) ?? null;
   return open.length === state.open.length && closed.length === state.closed.length && active === state.active ? state : { open, active, closed };
+}
+
+/** Drops the tabs of terminals that are gone: a tab that is open, and one that could be reopened. */
+export function reconcileTerminalTabs(state: FileTabs, terminals: ReadonlySet<string>): FileTabs {
+  const lasting = (tab: FileTab) => !isTerminalTab(tab) || terminals.has(tab.terminalId ?? "");
+  if (state.open.every(lasting) && state.closed.every(lasting)) return state;
+  const open = state.open.filter(lasting);
+  return { open, active: open.find(tab => sameFileTab(tab, state.active)) ?? null, closed: state.closed.filter(lasting) };
 }
 
 export type TabKind = "session" | "file";
@@ -128,7 +146,8 @@ export function restoreLegacyFiles(read: () => string | null): ReadonlyMap<strin
 
 export function persistFileTabs(write: (value: string) => void, state: FileTabs): boolean {
   try {
-    const value = JSON.stringify({ version: 1, open: state.open, active: state.active });
+    // A terminal does not outlive the application: its tab is not one to restore.
+    const value = JSON.stringify({ version: 1, open: state.open.filter(tab => !isTerminalTab(tab)), active: state.active && !isTerminalTab(state.active) ? state.active : null });
     if (value.length > 131072) return false;
     write(value); return true;
   }
