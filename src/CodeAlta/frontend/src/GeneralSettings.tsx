@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 import { Button, ButtonGroup, Card, HTMLSelect, Switch } from "@blueprintjs/core";
 import { AppIcon, type IconName } from "./AppIcon";
+import { ColorSchemeSelect } from "./ColorSchemeSelect";
 import type { ProjectSort } from "./explorer/projectRail";
-import { colorSchemes, schemePalette, schemeSwatch, type ColorVariant } from "./colorSchemes";
+import type { ColorVariant } from "./colorSchemes";
 import { themeLabel, themes, type Theme, type PreferenceNotices } from "./windowPreferences";
 import { useShellLanguage } from "./shellLanguage";
 import { locales, languageNames, preferenceNotice } from "./localization";
@@ -26,7 +27,7 @@ export function GeneralSettings({ theme, setTheme, darker, setDarker, variant, c
   /** Whether the dark theme is the darker one. */
   darker: boolean;
   setDarker: (value: boolean) => void;
-  /** The theme on screen, which decides the variant of each scheme that is previewed. */
+  /** The theme on screen, which decides the variant of each scheme that is shown in the list. */
   variant: ColorVariant;
   colorScheme: string;
   setColorScheme: (value: string) => void;
@@ -59,17 +60,9 @@ export function GeneralSettings({ theme, setTheme, darker, setDarker, variant, c
     <Field label={t("Darker dark theme")} htmlFor="settings-darker">
       <Switch id="settings-darker" className="settings-checkbox" checked={darker} disabled={theme === "light"} onChange={event => setDarker(event.currentTarget.checked)} />
     </Field>
-    <Field label={t("Color scheme")}
+    <Field label={t("Color scheme")} htmlFor="settings-color-scheme"
       notice={notices.scheme && <p role="status" className="notice" data-diagnostic={notices.scheme}>{preferenceNotice(locale, "Color scheme", "Blueprint", notices.scheme)}</p>}>
-      <div className="color-scheme-grid" role="radiogroup" aria-label={t("Color scheme")}>
-        {colorSchemes.map(scheme => {
-          const swatch = schemeSwatch(schemePalette(scheme, variant), variant);
-          return <Button key={scheme.id} role="radio" aria-checked={colorScheme === scheme.id} active={colorScheme === scheme.id} alignText="start"
-            icon={<span className="color-scheme-swatch" aria-hidden="true" style={{ background: swatch.background, borderColor: swatch.tint }}>
-              <i style={{ background: swatch.foreground }} /><i style={{ background: swatch.tint }} /><i style={{ background: swatch.accent }} /></span>}
-            onClick={() => setColorScheme(scheme.id)}>{scheme.name}</Button>;
-        })}
-      </div>
+      <ColorSchemeSelect id="settings-color-scheme" value={colorScheme} variant={variant} onChange={setColorScheme} />
     </Field>
     <Field label={t("Sort projects")} htmlFor="settings-project-sort"
       notice={notices.sort && <p role="status" className="notice" data-diagnostic={notices.sort}>{preferenceNotice(locale, "Project sort", locale === "en" ? "name" : t("Name"), notices.sort)}</p>}>

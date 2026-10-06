@@ -911,7 +911,9 @@ grays and accents as they are. On Blueprint's own palette the window background 
 `#101317` and the panels from `#252a31` to `#181c21`: clearly darker, and still a dark gray rather than
 black. The darker theme has no palette of its own: it is always made from the dark one.
 
-The color scheme is **Blueprint** (Blueprint's own palette, the default) or one of the RootLoops
+The color scheme is chosen in a dropdown that shows every scheme with its swatch for the theme on screen.
+Choosing one applies it at once and leaves the list open, so that several can be tried in a row; Up, Down,
+Home and End move through the list. It is **Blueprint** (Blueprint's own palette, the default) or one of the RootLoops
 schemes that the TUI gets from XenoAtom.Terminal.UI: Cherry, Tomato, Orange, Pineapple, Apple, Kiwi,
 Kale, Blueberry, Plum, Elderberry, Blackberry and Raspberry. Each has two variants that follow the
 theme: its *Dark Soft* recipe for the dark theme and its *Light Soft* recipe for the light one. A scheme
