@@ -133,6 +133,7 @@ Existing guardrail coverage to keep intact when touching startup/session boundar
 The React sources of the desktop app are in `src/CodeAlta/frontend/src`. A feature has a folder of its own
 there, with its components, its state modules, their tests and its stylesheet:
 
+- `explorer/`: the projects of the Explorer (what is open, the favorites, the rows and what they open).
 - `editor/`: the code editor of a project (the files, the search, the open files, their text and pictures).
 - `changes/`: the Changes tab, the git status of the composer and the diffs shown in the timeline.
 - `monaco/`: the Monaco setup shared by every editor of the page, the languages, and the text and diff editors.

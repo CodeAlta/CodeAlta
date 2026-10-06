@@ -27,6 +27,17 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. Use `Ctrl+T` (or 
 > [!TIP]
 > If these shortcuts do not work in Windows Terminal, see [Troubleshooting: Windows Terminal shortcuts do not reach CodeAlta]({{site.basepath}}/docs/troubleshooting/#windows-terminal-shortcuts-do-not-reach-codealta).
 
+### Projects sidebar (desktop)
+
+<figure class="alta-figure my-4" style="max-width: 30rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-explorer.webp" alt="CodeAlta Desktop sidebar with favorite projects first, three open projects with their sessions, and the buttons of a project row" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Favorite projects first, several projects open, and the buttons of the project under the pointer.</figcaption>
+</figure>
+
+- Click the arrow of a project to show or hide its sessions. Several projects can stay open, and CodeAlta shows them the same way at the next start. **Collapse all** at the top closes them all.
+- Point at a project to see its buttons. The star adds it to **Favorites**, at the top of the list. The next two open its [changes](#changes-desktop) and its [code editor](#code-editor), and stay visible while that tab is open.
+- The `…` button of a project or a session, or a right-click, opens its menu.
+
 ### Command palette
 
 Press `Ctrl+P`, or type `/` in an empty prompt, to search and run any command. Each entry shows its slash command and its shortcut.
@@ -151,29 +162,20 @@ Use `Ctrl+E` or `/edit` to open the same picker and edit the selected file in th
 
 {{ alta_shot "alta-desktop-code-editor.webp" "alta-code-editor.png" "Code editor of a project with its files, the open files as tabs and syntax-highlighted source code" "The code editor of a project: its files on the left, the open files as tabs, and the selected file." }}
 
-CodeAlta Desktop has a code editor for each project. It is one tab beside the session tabs, and it holds every file you open in the project. You can move, split or close it like any other tab, and it is restored with its open files at the next start.
+CodeAlta Desktop has a code editor for each project: one tab that holds the files of the project and every file you open in it.
 
-Open it in one of these ways:
-
-- Click the `</>` button of a project in the sidebar. The button stays visible while the editor of the project is open, with a dot when a file has unsaved changes.
-- Press `Ctrl+E` `Ctrl+E`, or run `/editor`, to open the editor of the current project with its files.
-- Press `Ctrl+E`, or run `/edit`, to pick one file. A new editor opens on that file with the files hidden, which keeps the view simple when you only want one file. `Ctrl+B` shows the files.
+- Click the `</>` button of a project in the sidebar, press `Ctrl+E` `Ctrl+E`, or run `/editor` to open it with the files of the project.
+- Press `Ctrl+E`, or run `/edit`, to open a single file. `Ctrl+B` shows or hides the files.
 
 ### Files
 
-The **Files** pane shows the folders and files of the project. A folder is read when you expand it, so a large project opens right away. Files excluded by `.gitignore` are hidden: **Show ignored files** in the `…` menu of the pane shows them dimmed. Changed files have the color and the letter of their git status, and a dot marks the folders that contain them.
+The **Files** pane lists the folders and files of the project, without those excluded by `.gitignore`. Changed files have the color and the letter of their git status.
 
-- Click a file to preview it. Its tab name is in italics, and the next file you click takes its place. Double-click the file, or edit it, to keep its tab.
-- **New file** and **New folder** are at the top of the pane and in the menu of a folder (right-click).
-- `F2` renames the selected file or folder. `Delete` moves it to the Recycle Bin (the Trash on macOS and Linux) after a confirmation.
+- Click a file to preview it. Double-click it, or edit it, to keep its tab open.
+- **New file** and **New folder** are at the top of the pane. `F2` renames, and `Delete` moves to the Recycle Bin or the Trash.
 - Drag a file or a folder onto another folder to move it.
-- Use the arrow keys to move in the tree, and type the first letters of a name to jump to it.
-
-The pane follows the changes made outside the editor, for example by an agent.
 
 ### Editing
-
-The editor has syntax highlighting, line numbers, code folding, bracket matching and multiple cursors. Its `…` menu has **Wrap lines**, **Minimap** and **Reload from disk**.
 
 | Action | Shortcut |
 | --- | --- |
@@ -182,11 +184,10 @@ The editor has syntax highlighting, line numbers, code folding, bracket matching
 | Go to a line | `Ctrl+G` |
 | Next file | `Ctrl+Tab` |
 | Close the file | `Ctrl+W` |
-| Show or hide the files | `Ctrl+B` |
 | Show the files / search in files | `Ctrl+Shift+E` / `Ctrl+Shift+F` |
 | Wrap lines | `Alt+Z` |
 
-A dot on a file tab marks unsaved changes. CodeAlta asks before it closes a file, the editor or the app with unsaved changes. A file changed by another program or by an agent is reloaded when you have not edited it. When you have, the editor tells you and lets you reload the file or keep your version.
+The editor asks before it closes a file with unsaved changes. A file changed by an agent or by another program is reloaded, unless you have edited it: the editor then lets you choose.
 
 ### Search in files
 
@@ -195,7 +196,7 @@ A dot on a file tab marks unsaved changes. CodeAlta asks before it closes a file
   <figcaption class="small text-secondary mt-2">The results of a search, file by file. A click opens the file on the match.</figcaption>
 </figure>
 
-The **Search** pane (`Ctrl+Shift+F`) searches the text of the project files, without the ignored ones. The buttons of the field match the case, whole words or a regular expression. The filter button adds two fields to include or exclude files, for example `src, *.ts`. Click a result to open the file at that line.
+The **Search** pane (`Ctrl+Shift+F`) searches the text of the project files. It can match the case, whole words or a regular expression, and include or exclude files such as `src, *.ts`.
 
 ### Pictures and previews
 
@@ -204,22 +205,20 @@ The **Search** pane (`Ctrl+Shift+F`) searches the text of the project files, wit
   <figcaption class="small text-secondary mt-2">An SVG file shown as a drawing. The buttons at the right of the tabs switch to its text.</figcaption>
 </figure>
 
-A PNG, JPEG, GIF, WebP, AVIF, BMP or ICO file is shown as a picture, with zoom controls. An SVG file opens as a drawing and a Markdown file as text. For both, the buttons at the right of the file tabs switch between the preview and the text, and the editor remembers your choice.
+Pictures are shown as pictures. An SVG file opens as a drawing, and a Markdown file can be shown as a page: the buttons at the right of the file tabs switch between the preview and the text.
 
 ### Beside a session
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-editor-session.webp" alt="CodeAlta Desktop with a session on the left and a C# file in the code editor on the right" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-editor-session.webp" alt="CodeAlta Desktop with a session on the left and a source file in the code editor on the right" loading="lazy">
   <figcaption class="small text-secondary mt-2">A session and the file it talks about, side by side.</figcaption>
 </figure>
 
-Drag the editor tab to an edge of the window to keep a file visible beside the session that works on it.
-
-An agent can open a file for you with `alta editor open --file <path> --line <n>`, for example to show you the code it is talking about. Without `--file`, the command opens the editor of the project.
+Drag the editor tab to an edge of the window to keep a file beside the session that works on it. An agent can open a file for you with `alta editor open --file <path> --line <n>`.
 
 ### Editor tabs in the TUI
 
-In CodeAlta TUI, `Ctrl+E` opens the selected file in an editor tab of its own. Editor tabs support syntax highlighting, line/column status, dirty markers, `Ctrl+S` save, reload prompts for on-disk changes, and close confirmation for unsaved edits.
+In CodeAlta TUI, `Ctrl+E` opens a file in an editor tab with syntax highlighting, `Ctrl+S` to save, and a confirmation before closing unsaved edits.
 
 ## Changes (desktop)
 
@@ -228,7 +227,7 @@ In CodeAlta TUI, `Ctrl+E` opens the selected file in an editor tab of its own. E
   <figcaption class="small text-secondary mt-2">The changed files of a project, its recent commits, and the diff of the selected file.</figcaption>
 </figure>
 
-The Changes tab shows what changed in the git repository of a project. Open it by clicking the `+` / `−` numbers in the prompt bar. It opens beside the current tab, and you can move, split or close it like any other tab. Each project has its own Changes tab, so several can be open.
+The Changes tab shows what changed in the git repository of a project. Open it by clicking the `+` / `−` numbers in the prompt bar, or the changes button of a project in the sidebar. It opens beside the current tab, and you can move, split or close it like any other tab. Each project has its own Changes tab, so several can be open.
 
 - **Files**: the changed files as a tree or a flat list, with the lines added and removed in each file. Type in the filter to narrow the list.
 - **History**: under the files. Choose **Uncommitted changes**, all the changes of the branch since its base branch, or one of the recent commits. **Load more** shows older commits.

@@ -36,9 +36,21 @@ function activityTime(value: string): number | null {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
-export function projectRailProjection(snapshot: WorkspaceSnapshot, filter: string, sort: ProjectSort): {
-  projects: WorkspaceProject[]; evidenceNotice: string | null;
+/**
+ * The projects the Explorer lists: those the filter keeps, in the chosen order, the favorite ones first.
+ * `favorites` in the result is how many of them, from the first, are favorites.
+ */
+export function projectRailProjection(snapshot: WorkspaceSnapshot, filter: string, sort: ProjectSort, favorites: readonly string[] = []): {
+  projects: WorkspaceProject[]; favorites: number; evidenceNotice: string | null;
 } {
+  const ordered = orderedProjects(snapshot, filter, sort);
+  if (!favorites.length) return { ...ordered, favorites: 0 };
+  const chosen = new Set(favorites);
+  const first = ordered.projects.filter(project => chosen.has(project.id));
+  return { projects: [...first, ...ordered.projects.filter(project => !chosen.has(project.id))], favorites: first.length, evidenceNotice: ordered.evidenceNotice };
+}
+
+function orderedProjects(snapshot: WorkspaceSnapshot, filter: string, sort: ProjectSort): { projects: WorkspaceProject[]; evidenceNotice: string | null } {
   const term = filter.trim().toLowerCase();
   const projects = snapshot.projects.filter(project => !term
     || project.name.toLowerCase().includes(term) || project.path.toLowerCase().includes(term));

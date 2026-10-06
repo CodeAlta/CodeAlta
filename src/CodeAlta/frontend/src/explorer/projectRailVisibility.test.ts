@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { collapsedSessionWidth, constrainPaneLayout } from "./paneLayout";
+import { collapsedSessionWidth, constrainPaneLayout } from "../paneLayout";
 import { projectRailProjection } from "./projectRail";
 import { focusVisibleProject, persistProjectRailCollapsed, projectRailVisible, resetNarrowRail, restoreProjectRailCollapsed, restoreProjectRailFocus, toggleProjectRail } from "./projectRailVisibility";
 import type { WorkspaceSnapshot } from "#neoastra";

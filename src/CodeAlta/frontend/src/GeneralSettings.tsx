@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Button, ButtonGroup, Card, HTMLSelect, Switch } from "@blueprintjs/core";
 import { AppIcon, type IconName } from "./AppIcon";
-import type { ProjectSort } from "./projectRail";
+import type { ProjectSort } from "./explorer/projectRail";
 import { colorSchemes } from "./colorSchemes";
 import { themeLabel, themes, type EffectiveTheme, type Theme, type PreferenceNotices } from "./windowPreferences";
 import { useShellLanguage } from "./shellLanguage";

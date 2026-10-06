@@ -66,25 +66,29 @@ Session tabs can be dragged along the tab strip to reorder them, to the edge of 
 The `</>` button of a project in the sidebar, or `Ctrl+E` `Ctrl+E`, opens the code editor of the project: its folders and files, a search in files, and the files you open as tabs. You can create, rename, move and delete files there, and pictures are shown as pictures. See [Code editor](workspace.md#code-editor).
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-code-editor.webp" alt="CodeAlta Desktop code editor with the files of a project on the left and a C# file on the right" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-code-editor.webp" alt="CodeAlta Desktop code editor with the files of a project on the left and a source file on the right" loading="lazy">
   <figcaption class="small text-secondary mt-2">The files of a project, the open files as tabs, and the selected file.</figcaption>
 </figure>
 
 `Ctrl+E` opens one file with the files hidden. The editor is a tab like a session, so it can stay beside the session that works on the file.
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-editor-session.webp" alt="CodeAlta Desktop with a session on the left and a C# file in the code editor on the right" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-editor-session.webp" alt="CodeAlta Desktop with a session on the left and a source file in the code editor on the right" loading="lazy">
   <figcaption class="small text-secondary mt-2">A session and a file of the project, side by side.</figcaption>
 </figure>
 
 ### Review changes
 
-Click the `+` / `−` numbers in the prompt bar to open the Changes tab of the project. It lists the changed files and recent commits and shows a syntax-highlighted diff of the selected file. See [Changes](workspace.md#changes-desktop).
+Click the `+` / `−` numbers in the prompt bar, or the changes button of a project in the sidebar, to open the Changes tab of the project. It lists the changed files and recent commits and shows a syntax-highlighted diff of the selected file. See [Changes](workspace.md#changes-desktop).
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-changes.webp" alt="CodeAlta Desktop with the Changes tab of a project and a side-by-side diff" loading="lazy">
   <figcaption class="small text-secondary mt-2">The changes of a project, with the diff of the selected file.</figcaption>
 </figure>
+
+### Projects at hand
+
+Several projects can stay open in the sidebar, each with its sessions, and CodeAlta shows them the same way at the next start. Favorite projects are listed first. See [Projects sidebar](workspace.md#projects-sidebar-desktop).
 
 ### One Settings window
 
@@ -117,6 +121,7 @@ When a new version is available, the desktop app shows a notice with **Update an
 | Session tabs | Drag to reorder, split and merge panes | One visible tab at a time |
 | Code editor | One tab per project with its files, a search in files and file tabs | One editor tab per file |
 | Git changes | Changes tab with the changed files, recent commits and a diff | Not available |
+| Favorite projects | Listed first in the sidebar | Not available |
 | Settings | One window with a page per area | One dialog per area |
 | Appearance | Light, dark or system theme, 13 color schemes | Terminal themes |
 | Session notes | Movable Notes window over the timeline | Notes panel in the sidebar |

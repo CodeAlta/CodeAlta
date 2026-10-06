@@ -204,9 +204,37 @@ button (or double-click it) to return to the default size and position. Each kin
 its own geometry. Closing Reminders does not cancel an admitted action or retry an uncertain Save.
 
 In the explorer, a project row has one **…** menu (also on right-click): **New session**, **Search
-sessions…** and **Browse saved sessions** for that project, then **Open**, **Details**, **Rename
-project…** and **Archive project…**. **Global sessions** has the same session actions. Session search
-is an inline field above the session list; Escape or its clear button hides it.
+sessions…** and **Browse saved sessions** for that project, then **Open**, **Add to favorites** (or
+**Remove from favorites**), **Details**, **Rename project…** and **Archive project…**. **Global
+sessions** has the same session actions. Session search is an inline field above the session list of
+the selected project; Escape or its clear button hides it.
+
+Each project opens and closes on its own, and several can be open, each with its sessions. The chevron
+of a row opens and closes it without selecting it. Clicking a project selects it and opens it; clicking
+the selected project closes and opens it. A project that becomes the selected one in any other way (a
+session tab of another project, **Open project**) is opened too. **Collapse all** in the Projects header
+closes every project and the global sessions. What is open is kept with the favorites in this WebView's
+local storage (`codealta.desktop.projectTree.v1`) and restored as it was at the next start; with nothing
+stored, the selected project is the one open.
+
+Up and Down go through the rows of the Explorer, Home and End to the first and the last. Right opens a
+project and Left closes it; Left on a session goes to its project.
+
+The sessions of an open project are the same rows whether it is selected or not: the most recent ones
+(the recent-session count of **Settings → Appearance**), **Show more…** for the others. A click opens
+the session, which selects its project. **Rename…** and **Delete…** act on the selected session, so in
+another project they open the session first. The search field, the form of a new session and the
+notices of an unconfirmed action belong to the selected project.
+
+Favorite projects are listed first, under **Favorites**, in the chosen order; the others follow under
+**Other projects**. The star of a row and the menu of the row add and remove a favorite. A favorite is
+a preference of the window: nothing is written to the project or to the catalog.
+
+A row also has an icon for the changes of its project and one for its code editor. These three icons
+and the **…** button take no room until the pointer or the keyboard is on the row; the icon of an open
+Changes tab or code editor stays visible and tinted. Icons have the color of what they stand for: a
+project is a folder, open or closed (an archive box once archived), a session a robot head, a session
+started by another one an arrow under its parent, and the global sessions a house.
 **Rename project…** and a session's **Rename…** open a small popover beside the row, with the current
 name selected: Enter or **Rename** saves it; Escape, **Cancel** or a click elsewhere leaves the name
 as it is. A rename that is refused says why under the field.
@@ -816,7 +844,7 @@ fresh durable read without restoring run/queue/interaction authority.
 operating system), the color scheme, project sorting, the recent-session count and desktop project-rail
 collapse. The button before the window controls at the top right switches between the three themes. The rail's Sort projects selector and
 Show/Hide projects button use the same live preferences; changes apply immediately and are
-saved only to this WebView's local storage (theme, colorScheme, projectSort and projectRail v1 keys).
+saved only to this WebView's local storage (theme, colorScheme, projectSort, projectRail and projectTree v1 keys).
 
 The color scheme is **Blueprint** (Blueprint's own palette, the default) or one of the RootLoops
 schemes that the TUI gets from XenoAtom.Terminal.UI: Cherry, Tomato, Orange, Pineapple, Apple, Kiwi,

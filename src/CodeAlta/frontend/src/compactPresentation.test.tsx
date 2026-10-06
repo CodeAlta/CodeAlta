@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 import { TimelineMessage, commandPreview } from "./TimelineMessage";
-import { ProjectRailRows } from "./ProjectRailRows";
+import { ProjectRailRows } from "./explorer/ProjectRailRows";
 import type { TimelineItem } from "./timeline";
 import { FileChangeInspection } from "./FileChangeInspection";
 

@@ -1512,6 +1512,17 @@ export const messages = dictionary({
   "Code editor of {name}": ["Editor de código de {name}", "Éditeur de code de {name}", "Code-Editor von {name}", "{name} のコードエディター", "{name} 的代码编辑器"],
   "Show the code editor": ["Mostrar el editor de código", "Afficher l’éditeur de code", "Code-Editor anzeigen", "コードエディターを表示", "显示代码编辑器"],
   "Open the code editor": ["Abrir el editor de código", "Ouvrir l’éditeur de code", "Code-Editor öffnen", "コードエディターを開く", "打开代码编辑器"],
+  "Changes of {name}": ["Cambios de {name}", "Modifications de {name}", "Änderungen von {name}", "{name} の変更", "{name} 的更改"],
+  "Show the changes": ["Mostrar los cambios", "Afficher les modifications", "Änderungen anzeigen", "変更を表示", "显示更改"],
+  "Open the changes": ["Abrir los cambios", "Ouvrir les modifications", "Änderungen öffnen", "変更を開く", "打开更改"],
+  "Favorites": ["Favoritos", "Favoris", "Favoriten", "お気に入り", "收藏"],
+  "Other projects": ["Otros proyectos", "Autres projets", "Weitere Projekte", "その他のプロジェクト", "其他项目"],
+  "Add to favorites": ["Añadir a favoritos", "Ajouter aux favoris", "Zu Favoriten hinzufügen", "お気に入りに追加", "添加到收藏"],
+  "Remove from favorites": ["Quitar de favoritos", "Retirer des favoris", "Aus Favoriten entfernen", "お気に入りから削除", "从收藏中移除"],
+  "Add {name} to favorites": ["Añadir {name} a favoritos", "Ajouter {name} aux favoris", "{name} zu Favoriten hinzufügen", "{name} をお気に入りに追加", "将 {name} 添加到收藏"],
+  "Remove {name} from favorites": ["Quitar {name} de favoritos", "Retirer {name} des favoris", "{name} aus Favoriten entfernen", "{name} をお気に入りから削除", "将 {name} 从收藏中移除"],
+  "Collapse all": ["Contraer todo", "Tout réduire", "Alle zuklappen", "すべて折りたたむ", "全部折叠"],
+  "No global sessions.": ["No hay sesiones globales.", "Aucune session globale.", "Keine globalen Sitzungen.", "グローバルセッションはありません。", "没有全局会话。"],
   "Search": ["Buscar", "Rechercher", "Suchen", "検索", "搜索"],
 } satisfies Record<string, Row>);
 

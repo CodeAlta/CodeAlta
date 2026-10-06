@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 
 const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
-test("Ctrl+O focuses the opened project's prompt and cancellation restores its origin", { skip: !edge, timeout: 60_000 }, async () => {
+test("the Explorer keeps what is open; Ctrl+O focuses the opened project's prompt and cancellation restores its origin", { skip: !edge, timeout: 60_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-project-focus-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -95,6 +95,42 @@ test("Ctrl+O focuses the opened project's prompt and cancellation restores its o
     await evaluate("localStorage.setItem('settingsFixtureOwned','true');localStorage.setItem('settingsFixtureSecondProject','true')");
     await command("Page.reload");
     assert.equal(await wait("!!document.querySelector('#session-prompt') && !!document.querySelector('#project-list')"), true);
+
+    // The Explorer keeps what is open: a project opens and closes on its own, a session of another open project
+    // opens from its row, a favorite goes first, and the next start shows the same.
+    const scope = (id: string) => `document.querySelector('#project-list button[data-scope="${id}"]')`;
+    const expanded = () => evaluate(`['project','other'].map(id=>${scope("'+id+'")}.getAttribute('aria-expanded')).join()`);
+    const otherSession = `document.querySelector('#project-list .session-row > button[title="other-session"]')`;
+    assert.equal(await expanded(), "true,false", "with nothing remembered the selected project is the one open");
+    await evaluate(`${scope("other")}.querySelector('.tree-twist').click()`);
+    assert.equal(await wait(`!!${otherSession}`), true);
+    assert.equal(await evaluate(`${scope("project")}.getAttribute('aria-pressed')+${scope("other")}.getAttribute('aria-pressed')`), "truefalse", "the twist opens a project without selecting it");
+    // Arrows: left closes a project, right opens it, down goes to its first session and left comes back from it.
+    await evaluate(`${scope("project")}.focus()`);
+    await key("ArrowLeft", "ArrowLeft", 37);
+    assert.equal(await wait(`${scope("project")}.getAttribute('aria-expanded')==='false'`), true);
+    await key("ArrowRight", "ArrowRight", 39); await key("ArrowDown", "ArrowDown", 40);
+    assert.equal(await wait("document.activeElement?.parentElement?.classList.contains('session-row')===true"), true);
+    await key("ArrowLeft", "ArrowLeft", 37);
+    assert.equal(await wait(`document.activeElement===${scope("project")}`), true);
+    // The row of a session in the other open project opens it there, and the keyboard stays on that session.
+    await evaluate(`${otherSession}.click()`);
+    assert.equal(await wait(`${scope("other")}.getAttribute('aria-pressed')==='true' && document.activeElement?.getAttribute('aria-pressed')==='true' && document.activeElement.title==='other-session'`), true);
+    assert.equal(await expanded(), "true,true");
+    // A favorite is listed first, under a title of its own.
+    await evaluate(`${scope("other")}.parentElement.querySelector('.project-favorite-trigger').click()`);
+    assert.equal(await wait("document.querySelector('#project-list > li')?.classList.contains('project-section') && document.querySelector('#project-list button[data-scope]').dataset.scope==='other'"), true);
+    await command("Page.reload");
+    assert.equal(await wait("!!document.querySelector('#session-prompt') && !!document.querySelector('#project-list')"), true);
+    assert.equal(await expanded(), "true,true", "what was open is open at the next start");
+    assert.equal(await evaluate("document.querySelector('#project-list button[data-scope]').dataset.scope"), "other", "and the favorite is still first");
+    // Collapse all closes every project; what follows starts from one open project and no favorite.
+    await evaluate(`${scope("other")}.parentElement.querySelector('.project-favorite-trigger').click()`);
+    await evaluate(`document.querySelector('button[aria-label="Collapse all"]').click()`);
+    assert.equal(await wait("!document.querySelector('#project-list .project-section')"), true);
+    assert.equal(await expanded(), "false,false");
+    await evaluate(`${scope("project")}.querySelector('.tree-twist').click()`);
+    assert.equal(await expanded(), "true,false");
 
     // Cancel keeps the origin instead of focusing an unrelated project draft.
     await evaluate(`window.projectFocusOrigin=document.querySelector('button[aria-label="Add a project folder"]');projectFocusOrigin.focus()`);

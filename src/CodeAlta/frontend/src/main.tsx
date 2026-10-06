@@ -104,17 +104,19 @@ import { batchDeleteCandidate, createSessionBatchDeletion } from "./sessionBatch
 import type { BatchDeleteControls } from "./SessionBatchDeletePanel";
 import { RenamePopover } from "./RenamePopover";
 import { createProjectRename, projectNameVisible, projectRenameMessage, projectRenameSelectionCurrent, type ProjectNameTarget } from "./projectRename";
-import { sessionHierarchy } from "./sessionHierarchy";
+import { sessionHierarchy, type SessionHierarchyRow } from "./sessionHierarchy";
 import { limitSessionHierarchy } from "./recentSessions";
 import { SessionTabMenu } from "./SessionTabMenu";
 import { isSessionContextKey, restoreSessionMenuFocus, sessionActionAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
-import { projectRailProjection } from "./projectRail";
-import { ProjectRailRows } from "./ProjectRailRows";
+import { projectRailProjection } from "./explorer/projectRail";
+import { ProjectRailRows } from "./explorer/ProjectRailRows";
+import { ExplorerSessions, SessionRowTitle, sessionRowIndent } from "./explorer/ExplorerSessions";
+import { collapseAllScopes, emptyProjectTree, expandScope, globalScope, isExpanded, isFavorite, persistProjectTree, projectTreeKey, restoreProjectTree, scopeKey,
+  setFavorite, toggleScope, type ProjectTree } from "./explorer/projectTree";
 import { defaultIdeWidth, maximumIdeWidth, minimumIdeWidth, parseIdeWidth, persistIdeWidth, resizeIdeWidth } from "./ideWidth";
-import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./projectRailVisibility";
+import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./explorer/projectRailVisibility";
 import { nextTheme, themeLabel, useWindowPreferences } from "./windowPreferences";
 import { themeIcons } from "./GeneralSettings";
-import { plainTitle } from "./sessionTitle";
 import { GeneralSettings } from "./GeneralSettings";
 import { createHostLiveness, hostPingInterval, hostPingTimeout } from "./hostLiveness";
 import { reloadsAfterClose, rpcSessionClosed, sessionRecoveryKey } from "./sessionRecovery";
@@ -146,6 +148,7 @@ import "flexlayout-react/style/light.css";
 import "./colorSchemes.gen.css";
 import "./style.css";
 import "./editor/editor.css";
+import "./explorer/explorer.css";
 
 type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; epoch: string | null;
   ready: () => boolean; navigate: (action: MessageNavigation) => void;
@@ -318,7 +321,20 @@ function App() {
   function setSearch(value: string) { invalidateCreation(); writeSearch(value); }
   const [projectFilter, setProjectFilter] = useState("");
   const { projectSort, setProjectSort, theme, shownTheme, setTheme, colorScheme, setColorScheme, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount } = useWindowPreferences();
-  const [sessionExpansion, setSessionExpansion] = useState<{ projectId: string | null; search: string; extra: number } | null>(null);
+  // What the Explorer remembers between starts: the scopes left open and the favorite projects.
+  const [storedProjectTree] = useState(() => restoreProjectTree(() => localStorage.getItem(projectTreeKey)));
+  const [projectTree, setProjectTree] = useState<ProjectTree>(storedProjectTree ?? emptyProjectTree);
+  useEffect(() => { persistProjectTree(value => localStorage.setItem(projectTreeKey, value), projectTree); }, [projectTree]);
+  // How many more sessions than at first each scope of the Explorer shows.
+  const [sessionExtras, setSessionExtras] = useState<ReadonlyMap<string, number>>(() => new Map());
+  function setSessionExtra(scope: string | null, extra: number) {
+    setSessionExtras(current => {
+      if ((current.get(scopeKey(scope)) ?? 0) === extra) return current;
+      const next = new Map(current);
+      if (extra > 0) next.set(scopeKey(scope), extra); else next.delete(scopeKey(scope));
+      return next;
+    });
+  }
   const [notesVisible, setNotesVisible] = useState(true);
   const [dialog, writeDialog] = useState<"project" | "help" | "sessions" | "archive" | "reminders" | "file" | null>(null);
   // The folder chosen with "+" that the Open project window opens on; it lasts as long as that window.
@@ -596,7 +612,7 @@ function App() {
   }
 
   const snapshot = workspaceState.kind === "ready" ? workspaceState.snapshot : undefined;
-  const projectListing = snapshot ? projectRailProjection(snapshot, projectFilter, projectSort) : null;
+  const projectListing = snapshot ? projectRailProjection(snapshot, projectFilter, projectSort, projectTree.favorites) : null;
   useEffect(() => {
     if (!snapshot || initialSelectionMade.current) return;
     initialSelectionMade.current = true;
@@ -640,6 +656,16 @@ function App() {
   useEffect(() => {
     if (tabsReady && snapshot) persistFileTabs(value => localStorage.setItem(fileTabsKey, value), fileTabs);
   }, [fileTabs, tabsReady, snapshot]);
+
+  // A scope that becomes the selected one is opened. At the start what was remembered is kept as it is; with
+  // nothing remembered the selected scope is the one open, as it was before the Explorer remembered anything.
+  const treeScope = useRef<{ id: string | null } | null>(null);
+  useEffect(() => {
+    if (!tabsReady) return;
+    const seen = treeScope.current;
+    treeScope.current = { id: projectId };
+    if (seen ? seen.id !== projectId : !storedProjectTree) setProjectTree(current => expandScope(current, projectId));
+  }, [projectId, tabsReady]);
 
   function applyTabState(next: SessionTabsState) {
     setTabs(next);
@@ -961,14 +987,29 @@ function App() {
 
   const sessions = snapshot ? sessionsForProject(snapshot, projectId) : [];
   const loadedSessionRows = snapshot ? sessionHierarchy(sessions, snapshot.sessions, search, projectId) : [];
-  useEffect(() => { setSessionExpansion(null); }, [projectId, search]);
-  const extraSessions = sessionExpansion?.projectId === projectId && sessionExpansion.search === search ? sessionExpansion.extra : 0;
+  // A search starts again from the first sessions of its scope.
+  useEffect(() => { setSessionExtra(selectedScope.current, 0); }, [search]);
+  const extraSessions = sessionExtras.get(scopeKey(projectId)) ?? 0;
   const visibleSessionRows = limitSessionHierarchy(loadedSessionRows, recentSessionCount + extraSessions, sessionId);
   const visibleSessions = visibleSessionRows.map(row => row.session);
+  // The sessions of the open scopes other than the selected one, which has the list above.
+  const openScopes = useMemo(() => {
+    const scopes = new Map<string, { rows: SessionHierarchyRow[]; more: number }>();
+    if (!snapshot) return scopes;
+    for (const key of projectTree.expanded) {
+      const id = key === globalScope ? null : key;
+      if (id === projectId || id !== null && !snapshot.projects.some(project => project.id === id)) continue;
+      const all = sessionHierarchy(sessionsForProject(snapshot, id), snapshot.sessions, "", id);
+      const rows = limitSessionHierarchy(all, recentSessionCount + (sessionExtras.get(key) ?? 0), null);
+      scopes.set(key, { rows, more: all.length - rows.length });
+    }
+    return scopes;
+  }, [snapshot, projectTree.expanded, projectId, recentSessionCount, sessionExtras]);
   const autoStatusRefresh = useRef<() => Promise<void> | undefined>(() => undefined);
   autoStatusRefresh.current = () => {
     if (!snapshot || document.visibilityState === "hidden") return;
-    const candidates = [...visibleSessions, ...snapshot.sessions.filter(row => tabs.open.some(tab => tab.sessionId === row.id)), ...snapshot.sessions];
+    const candidates = [...visibleSessions, ...[...openScopes.values()].flatMap(scope => scope.rows.map(row => row.session)),
+      ...snapshot.sessions.filter(row => tabs.open.some(tab => tab.sessionId === row.id)), ...snapshot.sessions];
     const seen = new Set<string>();
     const observed = candidates.flatMap(row => {
       if (seen.has(row.id)) return [];
@@ -1361,6 +1402,8 @@ function App() {
   // One menu per scope row: the session actions first select that scope, then act on it.
   function scopeSessionAction(id: string | null, kind: "create" | "search" | "browse") {
     if (id !== selectedScope.current) selectProject(id);
+    // The form of a new session and the search field are with the sessions of the scope: a closed scope hides them.
+    if (kind !== "browse") setProjectTree(current => expandScope(current, id));
     if (kind === "browse") openSessionBrowser();
     else if (kind === "search") showSessionSearch();
     else if (scopeCanCreateSession(id)) { setCreatingVisible(true); setCreatingMessage(""); }
@@ -1393,6 +1436,55 @@ function App() {
     navigate("workspace");
     setCreatingVisible(false);
     setCreatingMessage("");
+  }
+
+  // A session of an open scope that is not the selected one. Opening it makes its scope the selected one; renaming
+  // and deleting act on the selected session, so they open it first and start once it is the one selected.
+  const pendingSessionAction = useRef<{ projectId: string | null; sessionId: string; action: SessionAction } | null>(null);
+  function openScopeSession(scope: string | null, session: WorkspaceSession, action: SessionAction) {
+    pendingSessionAction.current = { projectId: scope, sessionId: session.id, action };
+    selectProject(scope, session.id);
+  }
+  useLayoutEffect(() => {
+    const pending = pendingSessionAction.current;
+    pendingSessionAction.current = null;
+    if (!pending || pending.projectId !== projectId || pending.sessionId !== sessionId) return;
+    // The row that was used is gone with the list of its scope: the same session is now in the list of the selected one.
+    const button = sessionRail.current?.querySelector<HTMLButtonElement>('.session-row > button[aria-pressed="true"]');
+    if (!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) button?.focus({ preventScroll: true });
+    button?.scrollIntoView({ block: "nearest" });
+    if (pending.action === "open") return;
+    const rows = snapshot?.sessions.filter(session => session.id === pending.sessionId) ?? [];
+    if (rows.length !== 1) return;
+    const access = sessionActionAccess(rows[0], { id: pending.sessionId, projectId, hostEpoch: status?.hostEpoch ?? null }, pending.sessionId,
+      selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
+      mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
+      renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
+    if (!access[pending.action]) return;
+    focusAction.current = pending.action;
+    if (pending.action === "rename") { beginSessionRename(rows[0]); setDeletingId(null); }
+    else { beginSessionDelete(rows[0]); setRenamingId(null); }
+  }, [projectId, sessionId]);
+  function sessionMarks(session: WorkspaceSession, scope: string | null) {
+    return <>
+      <SessionDraftBadge active={draftIndicators.visible(session.id, sessionId)} />
+      {snapshot && <RunningSessionBadge controls={runtimeObservationControls()} tab={{ projectId: scope, sessionId: session.id, path: session.workspacePath }} />}
+      <ReminderBadge count={activeReminders?.get(session.id) ?? 0} />
+      <span className="session-meta"><span>{session.providerKey ?? t("No provider")}</span><SessionTime value={session.updatedAt} now={clock} /></span>
+    </>;
+  }
+  function scopeSessions(scope: string | null) {
+    const shown = openScopes.get(scopeKey(scope));
+    if (!shown || !snapshot) return null;
+    const project = scope === null ? undefined : snapshot.projects.find(value => value.id === scope);
+    const extra = sessionExtras.get(scopeKey(scope)) ?? 0;
+    return <ExplorerSessions rows={shown.rows} global={scope === null} more={shown.more} extended={extra > 0} marks={session => sessionMarks(session, scope)}
+      access={session => sessionActionAccess(session, { id: session.id, projectId: scope, hostEpoch: status?.hostEpoch ?? null }, session.id, scope, project,
+        currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
+        batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
+        renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)}
+      onAction={(session, action) => openScopeSession(scope, session, action)}
+      onMore={() => setSessionExtra(scope, extra + recentSessionCount)} onFewer={() => setSessionExtra(scope, 0)} />;
   }
 
   function dismissSessionMenu(restoreFocus: boolean) {
@@ -1877,6 +1969,8 @@ function App() {
         <SessionContentLayout sessionWidth={ideWidth.width} narrow={narrow} sessionsHidden={!railVisible}
           projects={sessions => <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}>
           <div className="panel-title"><span title={projectListing?.evidenceNotice ?? undefined}>{t("Projects")}<span className="count">{snapshot?.projects.length ?? 0}</span></span><span>
+            {snapshot && <Button variant="minimal" size="small" className="rail-action" icon={<AppIcon name="collapseAll" size={16} />} aria-label={t("Collapse all")} title={t("Collapse all")}
+              disabled={!projectTree.expanded.length} onClick={() => setProjectTree(collapseAllScopes)} />}
             {snapshot && <PopoverNext placement="bottom-end" content={<Menu aria-label={t("Project actions")}>
               <MenuDivider title={t("Sort projects")} />
               <MenuItem roleStructure="listoption" selected={projectSort === "name"} text={t("Name")} onClick={() => setProjectSort("name")} />
@@ -1902,7 +1996,11 @@ function App() {
             {t(projectFilter.trim() ? "No matching projects. Clear the filter to show them again." : "No projects in this snapshot.")}
             {projectId !== null && ` ${t("The selected project and session remain open.")}`}
           </p>}
-          {snapshot && <ProjectRailRows projects={projectListing?.projects ?? []} selectedId={projectId} onSelect={selectProject} children={sessions}
+          {snapshot && <ProjectRailRows projects={projectListing?.projects ?? []} favorites={projectListing?.favorites ?? 0} selectedId={projectId} onSelect={selectProject} children={sessions}
+            tree={{ expanded: id => isExpanded(projectTree, id), toggle: id => setProjectTree(current => toggleScope(current, id)),
+              favorite: id => isFavorite(projectTree, id), setFavorite: (project, value) => setProjectTree(current => setFavorite(current, project.id, value)),
+              sessions: scopeSessions }}
+            changes={owned ? { open: id => fileTabs.open.some(tab => isChangesTab(tab) && tab.projectId === id), show: project => showChanges(project) } : undefined}
             activity={id => <><RunningSessionBadge controls={runtimeObservationControls()} projectId={id} />
               <ReminderBadge count={activeReminders ? scopeReminderCount(activeReminders, snapshot, id) : 0} /></>}
             canRename={owned} renameBusy={projectRenameBusy || !mutation?.capability.canMutate()} onRename={() => void beginProjectRename()}
@@ -1982,13 +2080,9 @@ function App() {
                   openSessionMenu(session.id, event.currentTarget.querySelector<HTMLButtonElement>(".session-actions-trigger"));
                 }}>
               <button type="button" aria-pressed={sessionId === session.id} aria-describedby={`session-tooltip-${index}`} title={tooltip}
-                style={{ paddingLeft: 11 + Math.min(depth, 8) * 12 }}
+                style={{ paddingLeft: sessionRowIndent(depth) }}
                 onClick={() => { setMenuTarget(null); focusAction.current = null; selectedSessionId.current = session.id; setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); }}>
-                <AppIcon name="assistant" size={13} /><span className="session-title">{depth > 0 && <span aria-hidden="true">↳ </span>}{diagnostic && <span aria-hidden="true">⚠ </span>}{plainTitle(session.title)}</span>
-                <SessionDraftBadge active={draftIndicators.visible(session.id, sessionId)} />
-                {snapshot && <RunningSessionBadge controls={runtimeObservationControls()} tab={{ projectId, sessionId: session.id, path: session.workspacePath }} />}
-                <ReminderBadge count={activeReminders?.get(session.id) ?? 0} />
-                <span className="session-meta"><span>{session.providerKey ?? t("No provider")}</span><SessionTime value={session.updatedAt} now={clock} /></span>
+                <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} />{sessionMarks(session, projectId)}
               </button>
               <span id={`session-tooltip-${index}`} role="tooltip" className="session-tooltip"
                 tabIndex={tooltip.length > 256 ? 0 : undefined}>{tooltip}</span>
@@ -2019,10 +2113,10 @@ function App() {
               </div>}
             </div>;
             })}
-            {snapshot && visibleSessions.length === 0 && <div className="sidebar-empty">{t(search ? "No matching sessions." : "No sessions in this project.")}</div>}
+            {snapshot && visibleSessions.length === 0 && <div className="sidebar-empty">{t(search ? "No matching sessions." : projectId === null ? "No global sessions." : "No sessions in this project.")}</div>}
             <div className="session-list-disclosure">
-              {visibleSessionRows.length < loadedSessionRows.length && <button type="button" className="quiet-button" onClick={() => setSessionExpansion({ projectId, search, extra: extraSessions + recentSessionCount })}>{t("Show more…")} <span className="muted-text">({loadedSessionRows.length - visibleSessionRows.length})</span></button>}
-              {extraSessions > 0 && <button type="button" className="quiet-button" onClick={() => setSessionExpansion(null)}>{t("Show fewer")}</button>}
+              {visibleSessionRows.length < loadedSessionRows.length && <button type="button" className="quiet-button" onClick={() => setSessionExtra(projectId, extraSessions + recentSessionCount)}>{t("Show more…")} <span className="muted-text">({loadedSessionRows.length - visibleSessionRows.length})</span></button>}
+              {extraSessions > 0 && <button type="button" className="quiet-button" onClick={() => setSessionExtra(projectId, 0)}>{t("Show fewer")}</button>}
             </div>
           </div>
         </aside>}

@@ -1,0 +1,37 @@
+/* The Explorer: the projects, their sessions, and the tabs a project row opens. */
+
+/* The twist of a scope is a target of its own inside the row: it opens and closes without selecting. */
+.ide-shell .tree-twist { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 18px; height: 22px; margin: -3px -3px -3px -4px; border-radius: 4px; }
+.ide-shell .tree-twist:hover { background: color-mix(in srgb, var(--text) 13%, transparent); }
+.ide-shell .tree-twist:hover .tree-chevron { color: var(--text); }
+.ide-shell .tree-chevron { transition: transform .12s ease; }
+
+/* Icons have the color of what they stand for; the name follows the selection. */
+.ide-shell .project-icon, .ide-shell .session-icon { display: inline-flex; flex: none; }
+.ide-shell .project-action-row > button:first-child > strong { flex: 0 1 auto; min-width: 0; }
+
+/* The favorite projects are listed first, under a title of their own. */
+.ide-shell .project-list > .project-section { display: flex; align-items: center; gap: 5px; margin: 0; padding: 6px 8px 3px; color: var(--muted);
+  font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; user-select: none; }
+.ide-shell .project-list > .project-section:not(:first-child) { margin-top: 5px; padding-top: 9px; border-top: 1px solid var(--line); }
+.ide-shell .project-section > svg { color: #e0a83a; fill: currentColor; }
+
+/* What a project row opens or changes: shown with the pointer or the keyboard on the row, and while it is on. */
+.ide-shell .project-row-action { position: relative; display: none; flex: 0 0 24px; width: 24px; min-height: 24px; height: 24px; padding: 0; align-items: center; justify-content: center; color: var(--muted); }
+.ide-shell .project-action-row:hover > .project-row-action, .ide-shell .project-action-row:focus-within > .project-row-action,
+.ide-shell .project-row-action[data-open="true"] { display: inline-flex; }
+.ide-shell .project-row-action:hover { color: var(--text); }
+.ide-shell .project-row-action[data-open="true"] { color: var(--accent); }
+.ide-shell .project-editor-trigger[data-unsaved="true"]::after { content: ""; position: absolute; top: 3px; right: 2px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.ide-shell .project-favorite-trigger[data-on="true"], .ide-shell .project-favorite-trigger[data-on="true"]:hover { color: #e0a83a; }
+.ide-shell .project-favorite-trigger[data-on="true"] > svg { fill: currentColor; }
+/* The menu of a row takes no room either until the row is used. */
+.ide-shell .project-action-row > .project-actions-trigger { display: none; opacity: 1; align-items: center; justify-content: center; }
+.ide-shell .project-action-row:hover > .project-actions-trigger, .ide-shell .project-action-row:focus-within > .project-actions-trigger,
+.ide-shell .project-action-row > .project-actions-trigger[aria-expanded="true"] { display: inline-flex; }
+@media (hover: none) {
+  .ide-shell .project-row-action, .ide-shell .project-action-row > .project-actions-trigger { display: inline-flex; }
+}
+
+/* The global sessions stay at the foot of the projects; open, they scroll in what they are given. */
+.ide-shell .project-root-list { max-height: 45%; overflow-x: hidden; overflow-y: auto; }

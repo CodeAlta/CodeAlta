@@ -183,7 +183,7 @@ altatui</code></pre>
         <p>On the desktop, each project has a code editor with its files, a search in files and the open files as tabs. Put it beside the session that is working on the code. In the TUI, <code>Ctrl+E</code> opens a file in an editor tab.</p>
         <a href="{{site.basepath}}/docs/workspace/#code-editor">Code editor <i class="bi bi-arrow-right"></i></a>
       </div>
-      {{ alta_shot "alta-desktop-code-editor.webp" "alta-code-editor.png" "Code editor with the files of a project and a C# file" "" }}
+      {{ alta_shot "alta-desktop-code-editor.webp" "alta-code-editor.png" "Code editor with the files of a project and a source file" "" }}
     </div>
     <div class="alta-tour-row">
       <div class="alta-tour-copy">

@@ -150,11 +150,3 @@ button.editor-status-item:hover { background: var(--panel-2); color: var(--text)
 .project-editor[data-narrow="true"] .editor-side { flex: 1 1 auto; width: auto !important; max-width: none; }
 @container (max-width: 760px) { .editor-status-item:not(button):nth-of-type(n + 3) { display: none; } }
 @container (max-width: 520px) { .editor-status-path { visibility: hidden; } .editor-tab { max-width: 170px; } }
-
-/* The editor of a project, from its row in the projects */
-.ide-shell .project-editor-trigger { position: relative; flex: 0 0 24px; width: 24px; min-height: 24px; height: 24px; padding: 0; justify-content: center; opacity: 0; color: var(--muted); }
-.ide-shell .project-action-row:hover > .project-editor-trigger, .ide-shell .project-action-row:focus-within > .project-editor-trigger,
-.ide-shell .project-editor-trigger[data-open="true"] { opacity: 1; }
-.ide-shell .project-editor-trigger:hover { color: var(--text); }
-.ide-shell .project-editor-trigger[data-open="true"] { color: var(--accent); }
-.ide-shell .project-editor-trigger[data-unsaved="true"]::after { content: ""; position: absolute; top: 3px; right: 2px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }

@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { WorkspaceProject } from "#neoastra";
-import { AppIcon } from "./AppIcon";
-import { ProjectDetailsDialog } from "./ProjectDetailsEntry";
+import { AppIcon } from "../AppIcon";
+import { ProjectDetailsDialog } from "../ProjectDetailsEntry";
 import { projectRowAccess, projectRowCurrent, type ProjectRowContext } from "./projectRowActionAccess";
-import { isSessionContextKey } from "./sessionRowActions";
-import { SessionTabMenu } from "./SessionTabMenu";
-import { useShellLanguage } from "./shellLanguage";
+import { isSessionContextKey } from "../sessionRowActions";
+import { SessionTabMenu } from "../SessionTabMenu";
+import { useShellLanguage } from "../shellLanguage";
 
 /** Session actions of one scope (a project, or the global "Global sessions" scope when the id is null). */
 export type ScopeSessionActions = {
@@ -25,8 +25,11 @@ export type ProjectRowAuthority = {
 type Review = { project: WorkspaceProject; context: ProjectRowContext; origin: HTMLButtonElement;
   row: HTMLLIElement; details: boolean; opening: boolean };
 
-export function ProjectRowActions({ project, authority, children }: {
-  project: WorkspaceProject; authority?: ProjectRowAuthority; children: ReactNode;
+export function ProjectRowActions({ project, authority, favorite, children }: {
+  project: WorkspaceProject; authority?: ProjectRowAuthority;
+  /** Whether the project is a favorite, and how that is changed. */
+  favorite?: Readonly<{ value: boolean; set: (value: boolean) => void }>;
+  children: ReactNode;
 }) {
   const { t } = useShellLanguage();
   const row = useRef<HTMLLIElement>(null);
@@ -106,6 +109,12 @@ export function ProjectRowActions({ project, authority, children }: {
     else if (kind === "rename") owner.rename();
     else owner.archive();
   }
+  // A favorite is a preference of this window: it changes nothing of the project, so it asks for no access to it.
+  function setFavorite(original: Review, value: boolean) {
+    if (review.current !== original || original.details || !current(original)) return;
+    dismiss();
+    favorite?.set(value);
+  }
   const access = visible && authority ? projectRowAccess(visible.project, authority.current()) : null;
   return <li ref={row} className="project-action-row" onContextMenu={event => {
     if ((event.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"], [role="menu"], dialog')) return;
@@ -130,6 +139,8 @@ export function ProjectRowActions({ project, authority, children }: {
           { key: "project", divider: true as const },
         ] : []),
         { key: "open", label: t("Open"), icon: "open", onSelect: () => action("open", visible) },
+        ...(favorite ? [{ key: "favorite", label: t(favorite.value ? "Remove from favorites" : "Add to favorites"), icon: "star" as const,
+          onSelect: () => setFavorite(visible, !favorite.value) }] : []),
         { key: "details", label: t("Details"), icon: "info", onSelect: () => action("details", visible) },
         { key: "rename", label: t("Rename project…"), icon: "edit", disabled: !access?.rename, onSelect: () => action("rename", visible) },
         { key: "archive", label: t(project.archived ? "Unarchive project…" : "Archive project…"), icon: "archive", disabled: !access?.archive, onSelect: () => action("archive", visible) },

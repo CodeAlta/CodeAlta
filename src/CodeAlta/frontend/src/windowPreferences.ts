@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { colorSchemeIds, colorSchemeStorageKey, defaultColorScheme } from "./colorSchemes";
 import type { PreferenceIssue } from "./localization";
 import { readRecentSessionCount, recentSessionCountKey, validRecentSessionCount } from "./recentSessions";
-import { persistProjectSort, projectSortStorageKey, type ProjectSort } from "./projectRail";
-import { persistProjectRailCollapsed, projectRailVisibilityKey, resetNarrowRail, toggleProjectRail, type ProjectRailState } from "./projectRailVisibility";
+import { persistProjectSort, projectSortStorageKey, type ProjectSort } from "./explorer/projectRail";
+import { persistProjectRailCollapsed, projectRailVisibilityKey, resetNarrowRail, toggleProjectRail, type ProjectRailState } from "./explorer/projectRailVisibility";
 
 /** The theme the user picked; "system" follows the operating system. */
 export type Theme = "dark" | "light" | "system";

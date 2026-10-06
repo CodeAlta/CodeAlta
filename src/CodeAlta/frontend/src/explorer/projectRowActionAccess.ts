@@ -1,5 +1,5 @@
 import type { WorkspaceProject } from "#neoastra";
-import { selectedProjectDetails, type ProjectDetailsContext } from "./ProjectDetailsEntry";
+import { selectedProjectDetails, type ProjectDetailsContext } from "../ProjectDetailsEntry";
 
 export type ProjectRowContext = ProjectDetailsContext & Readonly<{
   generation: number; modalGeneration: number; canMutate: boolean; locked: boolean;

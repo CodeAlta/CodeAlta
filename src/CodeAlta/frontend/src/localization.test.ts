@@ -7,7 +7,7 @@ import { createElement } from "react";
 import { messages, locales, translate, resolveLocale, readLanguage, saveLanguage } from "./localization";
 import { inventoryNotice } from "./inventoryNotice";
 import { workflowNotice } from "./workflowNotice";
-import { ProjectRailRows } from "./ProjectRailRows";
+import { ProjectRailRows } from "./explorer/ProjectRailRows";
 import { ShellLanguageContext } from "./shellLanguage";
 import { AboutSettings } from "./AboutDialog";
 
