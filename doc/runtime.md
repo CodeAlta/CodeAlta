@@ -918,6 +918,7 @@ elsewhere or recoverable from the journal. Use Git or another external diff for 
 CodeAlta-runtime providers can receive host-injected tools. Current built-ins are:
 
 - `read_file`
+- `view_image`
 - `list_dir`
 - `grep`
 - `webget`
@@ -931,6 +932,51 @@ CodeAlta-runtime providers can receive host-injected tools. Current built-ins ar
 Mutation and shell tools flow through host permission handling. Tool schemas are bridged to provider-specific declarations, including strict-schema normalization where required. `request_user_input` is registered only when the send explicitly sets default-false `EnableUserInputTool` and has a selected user-input callback. A profile may disable it but cannot independently activate it. `OnUserInputRequest` selects a per-send callback or falls back to the session callback when null; a callback alone never enables the tool. Retained definitions keep their original callback selection. Owned input adds the separate run/attachment authority described above; other provider implementations must explicitly support these options.
 
 `AgentSendOptions.OnPermissionRequest` optionally selects the permission callback for one send's built-in tool definitions in the in-process `AgentSession`. Null preserves the existing `AgentSessionCreateOptions.OnPermissionRequest` fallback. Session options, custom tool definitions and user-input handling are unchanged; other provider session implementations must explicitly support this option. This is callback selection only, not automatic approval, lifetime cancellation, stale-callback rejection or recovery: a retained built-in tool definition still holds its original callback after the send returns. Owned command permissions default to denial; the backend opt-in described above supplies runtime execution/attachment binding. This API alone enables no Desktop approval route.
+
+### Images in tool results
+
+A tool gives the model an image by returning an `AgentToolResultItem.Image` (encoded bytes in base64, a media
+type and a display name) among the items of its result. `view_image` returns one for a local file, and a direct
+MCP tool returns one for each image block of its result. `read_file` stays a text tool: on an image it fails
+with a message that names `view_image`.
+
+`AgentSession` prepares the images of every tool result before it records the result
+(`AgentSessionToolImages`, `AgentImagePreparation`):
+
+- the bytes decide the format, not the declared media type. PNG, JPEG, GIF, WebP and BMP are read; the model
+  gets PNG, JPEG or WebP. A GIF, a BMP, an animated image (first frame) and a JPEG with a recorded
+  orientation are re-encoded;
+- an image whose longest side is over 2048 pixels is scaled down, and an image over 3.75 MB (5 MB in
+  base64, the smallest per-image limit of the providers) is re-encoded as JPEG and then scaled down further.
+  A screenshot stays PNG when it fits. A file over 64 MB or 100 megapixels is refused;
+- an image that cannot be sent is replaced by a line that says why, and the rest of the result is kept;
+- a result keeps at most eight images;
+- a model that declares no image input (`AgentImageInputCapability`) gets a line instead of the image.
+
+The prepared image is saved in the session's attachment folder, beside the journal
+(`<session-id>.attachments`, the folder of the images of a prompt), and the result records an
+`AgentToolResultItem.LocalImage`: its path, media type, name and size. The journal never holds image bytes.
+A store without that folder (`IAgentSessionAttachmentStore` not implemented) keeps the bytes in the tool
+message.
+
+The image is sent with every request of the run that read it. Outside that run it is pruned like an image
+of a user message (`AgentMediaCompaction`): the tool result keeps
+`[Image omitted from retained context: name (type, size).]`. The text budget of a tool result applies to
+its text only, and an image counts for a fixed 1,024 tokens in the local estimate.
+
+Each transport places the image where its API takes it:
+
+- OpenAI Responses on OpenAI's own endpoints (api.openai.com, Azure OpenAI, the Codex subscription): inside
+  the `function_call_output`, as a list of `input_text` and `input_image` parts;
+- every other transport (Chat Completions, Anthropic, Google, Mistral, and Responses on another endpoint):
+  the tool result keeps a line that names the image, and the images of consecutive tool results are attached
+  to one user message placed after them (`AgentToolResultImages.MoveToUserMessages`). This is the path the
+  images of a prompt take, so it works wherever image input works.
+
+`supports_tool_result_images` in a provider profile forces either placement.
+
+A text surface shows a result's images as lines: `[Image: name (image/png, 1280x720)]`. This is the content
+of the tool output event, so the terminal UI names an image without drawing it.
 
 #### Exact-run cancellation and provider lifetime
 

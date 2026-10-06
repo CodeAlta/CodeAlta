@@ -166,6 +166,21 @@ When the selected model supports image input, copy an image to the clipboard and
 > [!IMPORTANT]
 > In the TUI, image preview requires a terminal with inline image protocol support. Use a terminal that supports Sixel, such as Windows Terminal, or the Kitty/iTerm2 image protocols. Without that support, pasted-image previews may not render correctly even when the selected model can accept images.
 
+## Let the agent look at an image
+
+The agent can open an image file on its own. Give it a path, or let it find the file, and it reads the image with its `view_image` tool:
+
+```text
+Look at docs/img/login-page.png and tell me why the button is misaligned.
+
+Take a screenshot of the app with the test script, then check that the dialog is centered.
+```
+
+PNG, JPEG, GIF, WebP and BMP files are supported. A large image is scaled down to 2048 pixels on its longest side before it is sent. Images returned by MCP tools, such as a browser screenshot, reach the model the same way. The selected model must support image input.
+
+- **Desktop**: the timeline shows an **Image read** card with a preview of each image the agent looked at. Click the preview to open the image.
+- **TUI**: the tool call shows a line with the name, type and size of the image.
+
 ## Essential shortcuts
 
 {{ alta_shot "alta-desktop-help.webp" "alta-help.png" "Commands and shortcuts help" "Open help with <code>F1</code>, <code>/help</code>, or <code>?</code> in an empty prompt whenever you need a reminder of the commands and their shortcuts." }}

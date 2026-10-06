@@ -209,7 +209,8 @@ internal static class TinyMcpTools
             Content =
             [
                 new TextContentBlock { Text = "alpha" },
-                ImageContentBlock.FromBytes(new byte[] { 1, 2, 3, 4 }, "image/png"),
+                // A real image, one pixel wide: a client that looks at it can decode it.
+                ImageContentBlock.FromBytes(Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="), "image/png"),
                 AudioContentBlock.FromBytes(new byte[] { 5, 6, 7 }, "audio/wav"),
                 new ResourceLinkBlock { Uri = "file:///tmp/example.txt", Name = "example", MimeType = "text/plain" },
                 new EmbeddedResourceBlock

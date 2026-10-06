@@ -235,6 +235,49 @@ public sealed class ChatClientTurnExecutorTests
         CollectionAssert.AreEqual(imageBytes, dataContent.Data.ToArray());
     }
 
+    [TestMethod]
+    public async Task ExecuteTurnAsync_AttachesAToolResultImageToAUserMessage()
+    {
+        var client = new RecordingChatClient
+        {
+            Updates = [new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("Seen.")]) { MessageId = "message-1" }],
+        };
+        var executor = new ChatClientTurnExecutor(
+            (_, _) => ValueTask.FromResult<IChatClient>(client),
+            static (_, _) => Task.FromResult<IReadOnlyList<AgentModelInfo>>([]));
+        var imageBytes = new byte[] { 1, 2, 3 };
+        var request = CreateTurnRequest(
+        [
+            new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("Look at the screenshot.")]),
+            new AgentConversationMessage(
+                AgentConversationRole.Assistant,
+                [new AgentMessagePart.ToolCall("call-view", "view_image", JsonDocument.Parse("""{"path":"shot.png"}""").RootElement.Clone())]),
+            new AgentConversationMessage(
+                AgentConversationRole.Tool,
+                [
+                    new AgentMessagePart.ToolResult("call-view", new AgentToolResult(true,
+                    [
+                        new AgentToolResultItem.Text("Viewed image shot.png."),
+                        new AgentToolResultItem.Image(Convert.ToBase64String(imageBytes), "image/png", "shot.png"),
+                    ])),
+                ]),
+        ]);
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask, CancellationToken.None).ConfigureAwait(false);
+
+        Assert.IsNotNull(client.LastMessages);
+        Assert.AreEqual(4, client.LastMessages.Count);
+        Assert.AreEqual(ChatRole.Tool, client.LastMessages[2].Role);
+        var result = Assert.IsInstanceOfType<FunctionResultContent>(client.LastMessages[2].Contents.Single());
+        var resultParts = Assert.IsInstanceOfType<List<AIContent>>(result.Result);
+        Assert.IsTrue(resultParts.All(static part => part is TextContent), "The tool result is text.");
+        StringAssert.Contains(((TextContent)resultParts[1]).Text, "The image is attached to the message that follows the tool results.");
+        Assert.AreEqual(ChatRole.User, client.LastMessages[3].Role);
+        var attached = Assert.IsInstanceOfType<DataContent>(client.LastMessages[3].Contents.Single(static content => content is DataContent));
+        Assert.AreEqual("image/png", attached.MediaType);
+        CollectionAssert.AreEqual(imageBytes, attached.Data.ToArray());
+    }
+
     private static AgentTurnRequest CreateTurnRequest(IReadOnlyList<AgentConversationMessage>? conversation = null)
         => new()
         {

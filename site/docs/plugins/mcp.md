@@ -318,6 +318,8 @@ mcp__<server>__<tool>
 
 Alias parts keep ASCII letters and digits and replace other characters with `_`. If sanitized server or tool names collide, CodeAlta appends a stable hash suffix. The MCP tool input schema is passed through to the agent tool definition when it fits CodeAlta's strict/OpenAI-compatible tool schema subset. If an MCP schema uses dynamic object maps or required names outside local `properties`, CodeAlta exposes a strict-safe `arguments_json` string parameter instead; the string must contain the raw MCP argument JSON object and is unwrapped before the MCP call. Direct agent calls delegate to the same runtime path as the MCP live-tool call operation.
 
+When a tool returns an image, such as a browser screenshot, the agent sees it with the text of the result when the selected model supports image input. CodeAlta Desktop shows the image in an **Image read** card of the timeline, and the CodeAlta TUI shows a line that names it.
+
 If a server cannot start, connect, authenticate, or list tools, it contributes diagnostics for that request and no agent tools for that run. For protected HTTP servers, complete browser login from the dialog or with `alta mcp auth login <server>`, or configure static headers in JSON when the provider requires them.
 
 ## MCP Servers dialog

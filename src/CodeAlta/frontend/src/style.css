@@ -703,6 +703,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .message-reasoning { --card-color: color-mix(in srgb, var(--accent) 35%, var(--muted)); }
 .ide-shell .message-tool { --card-color: var(--muted); }
 .ide-shell .message-file, .ide-shell .message-plan { --card-color: var(--green); }
+.ide-shell .message-image { --card-color: var(--accent); }
 .ide-shell .message-error { --card-color: var(--red); }
 .ide-shell .message-status { --card-color: var(--green); }
 .ide-shell .message-plugin { --card-color: var(--bp-palette-gold-4); }
@@ -1590,6 +1591,12 @@ dialog.session-browser .session-batch-delete summary { cursor: pointer; color: v
 .timeline-image-thumbnail > .bp6-button-text { display: flex; align-items: center; justify-content: center; height: 100%; }
 .timeline-image-thumbnail img { display: block; width: auto; max-width: 180px; height: 70px; object-fit: cover; }
 .timeline-image-placeholder { display: block; width: 96px; height: 70px; background: color-mix(in srgb, var(--muted) 12%, transparent); }
+/* An image the model read is the content of its card: it is shown larger than the attachments of a prompt. */
+.message-image .timeline-images { margin-top: 4px; }
+.message-image .timeline-image-thumbnail.bp6-button { height: 162px; }
+.message-image .timeline-image-thumbnail.bp6-button[data-state="failed"] { width: 162px; }
+.message-image .timeline-image-thumbnail img { max-width: min(420px, 100%); height: 160px; object-fit: contain; }
+.message-image .timeline-image-placeholder { width: 240px; height: 160px; }
 dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body { padding: 12px; overflow: hidden; }
 dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body > .timeline-image-view { position: relative; flex: 1 1 0; min-height: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); }
 .timeline-image-view img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: scale-down; }

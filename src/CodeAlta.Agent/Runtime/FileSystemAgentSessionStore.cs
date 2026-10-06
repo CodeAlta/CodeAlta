@@ -8,7 +8,7 @@ namespace CodeAlta.Agent.Runtime;
 /// <summary>
 /// Persists local raw-API session journals on the filesystem.
 /// </summary>
-public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
+public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore, Images.IAgentSessionAttachmentStore
 {
     private const string SessionSummaryEventType = "local.sessionSummary";
     private const string SessionStateEventType = "local.sessionState";
@@ -784,6 +784,16 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
         }
 
         return sessionFile;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>The folder is beside the journal and has its name: <c>&lt;session&gt;.attachments</c>.</remarks>
+    public async ValueTask<string?> GetAttachmentDirectoryAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var sessionFile = await TryGetSessionFilePathAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        return sessionFile is null || Path.GetDirectoryName(sessionFile) is not { Length: > 0 } directory
+            ? null
+            : Path.Combine(directory, Path.GetFileNameWithoutExtension(sessionFile) + ".attachments");
     }
 
     private async Task<string?> TryGetSessionFilePathAsync(

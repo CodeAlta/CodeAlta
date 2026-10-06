@@ -1599,6 +1599,134 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_SendsAToolResultImageInsideTheFunctionOutput()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-tool-image", "gpt-test", "Seen.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+        });
+
+        _ = await executor.ExecuteTurnAsync(
+            CreateTurnRequest() with { Conversation = CreateToolImageConversation() },
+            static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        var inputItems = responsesClient.Requests.Single().InputItems;
+        Assert.AreEqual(3, inputItems.Count, "No message is added: the image is part of the function output.");
+        var output = Assert.IsInstanceOfType<FunctionCallOutputResponseItem>(inputItems[2]);
+        using var json = JsonDocument.Parse(ModelReaderWriter.Write(output).ToMemory());
+        Assert.AreEqual("call-view", json.RootElement.GetProperty("call_id").GetString());
+        var parts = json.RootElement.GetProperty("output");
+        Assert.AreEqual(JsonValueKind.Array, parts.ValueKind);
+        Assert.AreEqual(2, parts.GetArrayLength());
+        Assert.AreEqual("input_text", parts[0].GetProperty("type").GetString());
+        Assert.AreEqual("Viewed image shot.png.", parts[0].GetProperty("text").GetString());
+        Assert.AreEqual("input_image", parts[1].GetProperty("type").GetString());
+        Assert.AreEqual("data:image/png;base64,AQID", parts[1].GetProperty("image_url").GetString());
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_AttachesAToolResultImageToAUserMessageForAnotherEndpoint()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-tool-image-1", "gpt-test", "Seen.")],
+            [CreateTextOnlyAssistantResponseUpdate("response-tool-image-2", "gpt-test", "Seen.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "gateway",
+            BaseUri = new Uri("https://gateway.example/v1"),
+            ResponsesClientFactory = _ => responsesClient,
+        });
+        var request = CreateTurnRequest() with { Conversation = CreateToolImageConversation() };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        var inputItems = responsesClient.Requests[0].InputItems;
+        Assert.AreEqual(4, inputItems.Count);
+        var output = Assert.IsInstanceOfType<FunctionCallOutputResponseItem>(inputItems[2]);
+        using (var json = JsonDocument.Parse(ModelReaderWriter.Write(output).ToMemory()))
+        {
+            var text = json.RootElement.GetProperty("output").GetString();
+            StringAssert.Contains(text, "Viewed image shot.png.");
+            StringAssert.Contains(text, "[Image: shot.png (image/png)] The image is attached to the message that follows the tool results.");
+        }
+
+        var attached = Assert.IsInstanceOfType<MessageResponseItem>(inputItems[3]);
+        Assert.AreEqual(MessageRole.User, attached.Role);
+        Assert.AreEqual("Images returned by the tool calls above:", attached.Content[0].Text);
+        Assert.AreEqual("[Image: shot.png (image/png)] from view_image:", attached.Content[1].Text);
+        Assert.AreEqual("data:image/png;base64,AQID", attached.Content.Single(static part => part.Kind == ResponseContentPartKind.InputImage).InputImageUri);
+
+        // The profile of the provider says that its tool results take images.
+        _ = await executor.ExecuteTurnAsync(
+            request with { Provider = request.Provider with { Profile = new AgentProviderProfile { SupportsToolResultImages = true } } },
+            static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        Assert.AreEqual(3, responsesClient.Requests[1].InputItems.Count);
+    }
+
+    [TestMethod]
+    public async Task OpenAIChatTurnExecutor_AttachesAToolResultImageToAUserMessage()
+    {
+        var chatClient = new RecordingOpenAIChatClient(
+        [
+            OpenAIChatModelFactory.StreamingChatCompletionUpdate(
+                completionId: "chatcmpl-tool-image",
+                contentUpdate: [ChatMessageContentPart.CreateTextPart("Seen.")],
+                model: "gpt-test"),
+        ]);
+        var executor = new OpenAIChatTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ChatClientFactory = _ => chatClient,
+        });
+
+        _ = await executor.ExecuteTurnAsync(
+            CreateChatTurnRequest() with { Conversation = CreateToolImageConversation() },
+            static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        var messages = chatClient.Requests.Single().Messages.Where(static message => message is not SystemChatMessage and not DeveloperChatMessage).ToArray();
+        Assert.AreEqual(4, messages.Length);
+        var tool = Assert.IsInstanceOfType<ToolChatMessage>(messages[2]);
+        Assert.AreEqual("call-view", tool.ToolCallId);
+        var toolText = string.Concat(tool.Content.Select(static part => part.Text));
+        StringAssert.Contains(toolText, "Viewed image shot.png.");
+        StringAssert.Contains(toolText, "The image is attached to the message that follows the tool results.");
+        Assert.IsFalse(tool.Content.Any(static part => part.Kind == ChatMessageContentPartKind.Image));
+        var attached = Assert.IsInstanceOfType<UserChatMessage>(messages[3]);
+        Assert.AreEqual("Images returned by the tool calls above:", attached.Content[0].Text);
+        var image = attached.Content.Single(static part => part.Kind == ChatMessageContentPartKind.Image);
+        Assert.AreEqual("image/png", image.ImageBytesMediaType);
+        CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, image.ImageBytes.ToArray());
+    }
+
+    private static AgentConversationMessage[] CreateToolImageConversation()
+        =>
+        [
+            new AgentConversationMessage(
+                AgentConversationRole.User,
+                [new AgentMessagePart.Text("Look at the screenshot.")]),
+            new AgentConversationMessage(
+                AgentConversationRole.Assistant,
+                [new AgentMessagePart.ToolCall("call-view", "view_image", JsonDocument.Parse("""{"path":"shot.png"}""").RootElement.Clone())]),
+            new AgentConversationMessage(
+                AgentConversationRole.Tool,
+                [
+                    new AgentMessagePart.ToolResult("call-view", new AgentToolResult(true,
+                    [
+                        new AgentToolResultItem.Text("Viewed image shot.png."),
+                        new AgentToolResultItem.Image(Convert.ToBase64String(new byte[] { 1, 2, 3 }), "image/png", "shot.png"),
+                    ])),
+                ]),
+        ];
+
+    [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_UsesStreamedOutputItemsWhenCompletedPayloadOmitsOutput()
     {
         var completedResponse = new ResponseResult

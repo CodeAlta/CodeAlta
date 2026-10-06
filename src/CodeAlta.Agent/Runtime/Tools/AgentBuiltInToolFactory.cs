@@ -7,6 +7,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using CodeAlta.Agent.Runtime.Images;
 using XenoAtom.Glob;
 using XenoAtom.Glob.Git;
 using XenoAtom.Glob.IO;
@@ -33,6 +34,21 @@ public static class AgentBuiltInToolFactory
         "Rename or move a file or directory. Will not overwrite an existing destination.";
     private const string ApplyPatchToolDescription =
         "Use the `apply_patch` tool to edit files.";
+    private const string ViewImageToolName = "view_image";
+    private const string ViewImageToolDescription =
+        "Look at a local image file, such as a screenshot, a diagram, a mockup or a photo. The image is attached to the result so that you see it. PNG, JPEG, GIF, WebP and BMP files are supported; a large image is scaled down. Use this tool instead of read_file for image files.";
+
+    private static readonly JsonElement ViewImageSchema = ParseSchema(
+        """
+        {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string", "description": "Image file path. Relative paths resolve from the session working directory; absolute paths are accepted." }
+          },
+          "required": ["path"],
+          "additionalProperties": false
+        }
+        """);
 
     private static readonly JsonElement WriteFileSchema = ParseSchema(
         """
@@ -160,6 +176,12 @@ public static class AgentBuiltInToolFactory
                 (invocation, cancellationToken) => ReadFileAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
                 new AgentToolSpec(
+                    ViewImageToolName,
+                    ViewImageToolDescription,
+                    ViewImageSchema),
+                (invocation, cancellationToken) => ViewImageAsync(options, invocation, cancellationToken)),
+            new AgentToolDefinition(
+                new AgentToolSpec(
                     "list_dir",
                     "List the direct children of a directory as [dir] and [file] entries.",
                     CreateListDirSchema()),
@@ -240,7 +262,10 @@ public static class AgentBuiltInToolFactory
 
         if (AgentFileTypeDetector.IsProbablyBinaryFile(resolvedPath))
         {
-            return Task.FromResult(Failure($"'{resolvedPath}' appears to be a binary file. read_file only supports text files."));
+            return Task.FromResult(Failure(
+                AgentImagePreparation.FindFileMediaType(resolvedPath) is not null && ShouldIncludeBuiltInTool(options, ViewImageToolName)
+                    ? $"'{resolvedPath}' is an image. read_file only supports text files: use {ViewImageToolName} to look at it."
+                    : $"'{resolvedPath}' appears to be a binary file. read_file only supports text files."));
         }
 
         var offset = GetOptionalInt(invocation.Arguments, "offset") ?? 1;
@@ -274,6 +299,67 @@ public static class AgentBuiltInToolFactory
         return Task.FromResult(new AgentToolResult(
             true,
             [new AgentToolResultItem.Text(string.Join(Environment.NewLine, lines))]));
+    }
+
+    private static async Task<AgentToolResult> ViewImageAsync(
+        AgentBuiltInToolOptions options,
+        AgentToolInvocation invocation,
+        CancellationToken cancellationToken)
+    {
+        var path = GetRequiredString(invocation.Arguments, "path");
+        var resolvedPath = ResolvePath(options.WorkingDirectory, path);
+        if (Directory.Exists(resolvedPath))
+        {
+            return Failure($"'{resolvedPath}' is a directory. {ViewImageToolName} reads one image file.");
+        }
+
+        if (!File.Exists(resolvedPath))
+        {
+            return Failure($"File '{resolvedPath}' was not found.");
+        }
+
+        var limits = AgentImageLimits.Default;
+        byte[] bytes;
+        try
+        {
+            var length = new FileInfo(resolvedPath).Length;
+            if (length > limits.MaximumSourceBytes)
+            {
+                return Failure($"'{resolvedPath}' is too large to view ({AgentImagePreparation.FormatBytes(length)}; the limit is {AgentImagePreparation.FormatBytes(limits.MaximumSourceBytes)}).");
+            }
+
+            bytes = await File.ReadAllBytesAsync(resolvedPath, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return Failure($"'{resolvedPath}' could not be read: {exception.Message}");
+        }
+
+        // Decoding and resizing a large image takes time: it does not hold the session's thread.
+        var (prepared, error) = await Task.Run(
+                () => AgentImagePreparation.TryPrepare(bytes, limits, out var image, out var reason) ? (image, (string?)null) : (null, reason),
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (prepared is null)
+        {
+            return Failure($"'{resolvedPath}' cannot be viewed. {error}");
+        }
+
+        var size = AgentImagePreparation.FormatBytes(bytes.Length);
+        var summary = prepared.Width == 0
+            ? $"Viewed image {resolvedPath} ({prepared.MediaType}, {size})."
+            : prepared.Resized
+                ? string.Create(CultureInfo.InvariantCulture, $"Viewed image {resolvedPath} ({prepared.SourceWidth}x{prepared.SourceHeight}, {size}), scaled down to {prepared.Width}x{prepared.Height}.")
+                : string.Create(CultureInfo.InvariantCulture, $"Viewed image {resolvedPath} ({prepared.Width}x{prepared.Height}, {size}).");
+        return new AgentToolResult(
+            true,
+            [
+                new AgentToolResultItem.Text(summary),
+                new AgentToolResultItem.Image(
+                    Convert.ToBase64String(prepared.Bytes),
+                    prepared.MediaType,
+                    Path.GetFileName(resolvedPath)),
+            ]);
     }
 
     private static int GetStartLineFromEnd(string path, int offset, CancellationToken cancellationToken)

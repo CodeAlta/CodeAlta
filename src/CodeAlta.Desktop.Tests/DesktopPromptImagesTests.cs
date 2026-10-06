@@ -8,8 +8,8 @@ using CodeAlta.Orchestration.Runtime;
 namespace CodeAlta.Desktop.Tests;
 
 /// <summary>
-/// The image list of a user message's history row, and the image read over a real journal and a real
-/// prompt-image folder in a disposable catalog root.
+/// The image list of the history row of a user message or of a tool result, and the image read over a real
+/// journal and a real prompt-image folder in a disposable catalog root.
 /// </summary>
 [TestClass]
 public sealed class DesktopPromptImagesTests
@@ -100,6 +100,60 @@ public sealed class DesktopPromptImagesTests
         Assert.AreEqual("Hello\nLocal image (A): /store/a.png", rows[0].Text);
         StringAssert.Contains(rows[0].Details!, "/store/a.png");
         StringAssert.Contains(JsonSerializer.Serialize(rows[1], DesktopJsonContext.Default.HistoryEntry), "\"images\":null");
+    }
+
+    [TestMethod]
+    public void History_ListsTheImagesOfAToolResultWithoutTheirPaths()
+    {
+        var path = @"C:\Users\someone\.alta\sessions\2026\09\23\session.attachments\20260923-tool-shot.png";
+        var details = ToolResult(path);
+        var activity = new AgentActivityEvent(new("fixture"), Fixture.SessionId, DateTimeOffset.UnixEpoch, new AgentRunId("run"), AgentActivityKind.ToolCall,
+            AgentActivityPhase.Completed, "call-1", null, "view_image", null, details);
+        var output = ToolOutput("Viewed image shot.png.\n[Image: shot.png (image/png, 640x480)]", details);
+
+        var rows = WorkspaceService.ProjectHistory(new([new(0, activity), new(10, output)], null, false)).Entries;
+
+        // The output lists the image the model was given; its text is what a text surface shows.
+        CollectionAssert.AreEqual(new[] { new HistoryImage(0, "shot.png", "image/png") }, rows[1].Images);
+        Assert.AreEqual("Viewed image shot.png.\n[Image: shot.png (image/png, 640x480)]", rows[1].Text);
+        Assert.IsNull(rows[0].Images);
+        // Neither row names the file: the page reads the image by its index.
+        foreach (var row in rows)
+        {
+            var wire = JsonSerializer.Serialize(row, DesktopJsonContext.Default.HistoryEntry);
+            Assert.IsFalse(wire.Contains("someone", StringComparison.Ordinal), wire);
+            Assert.IsFalse(wire.Contains("attachments", StringComparison.Ordinal), wire);
+            using var parsed = JsonDocument.Parse(row.Details!);
+            var image = parsed.RootElement.GetProperty("result").GetProperty("items")[1];
+            Assert.AreEqual("localImage", image.GetProperty("$type").GetString());
+            Assert.AreEqual(640, image.GetProperty("width").GetInt32());
+            Assert.IsFalse(image.TryGetProperty("path", out _));
+            Assert.AreEqual("shot.png", parsed.RootElement.GetProperty("arguments").GetProperty("path").GetString());
+        }
+
+        // A tool result without an image is sent as it was recorded.
+        var plain = ToolOutput("done", JsonDocument.Parse("""{"toolName":"x","result":{"success":true,"items":[{"$type":"text","value":"done"}]}}""").RootElement.Clone());
+        var plainRow = WorkspaceService.ProjectHistory(new([new(0, plain)], null, false)).Entries.Single();
+        Assert.IsNull(plainRow.Images);
+        Assert.AreEqual(plain.Details!.Value.GetRawText(), plainRow.Details);
+    }
+
+    [TestMethod]
+    public async Task Read_ServesAnImageOfAToolResult()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var saved = await fixture.SaveAsync(("shot", Png));
+        var offset = await fixture.AddAsync(ToolOutput("Viewed image shot.png.", ToolResult(saved[0].Path)));
+
+        Assert.AreEqual(new PromptImageResponse("ok", "image/png", Convert.ToBase64String(Png)),
+            await fixture.Service.ReadAsync(new(Epoch, Fixture.SessionId, offset, 0), default));
+        Assert.AreEqual("missing_image", (await fixture.Service.ReadAsync(new(Epoch, Fixture.SessionId, offset, 1), default)).Status);
+
+        // A tool result that names a file outside the session's folder gets nothing.
+        var outside = Path.Combine(fixture.Root, "outside.png");
+        await File.WriteAllBytesAsync(outside, Png);
+        var foreign = await fixture.AddAsync(ToolOutput("Viewed.", ToolResult(outside)));
+        Assert.AreEqual("outside_store", (await fixture.Service.ReadAsync(new(Epoch, Fixture.SessionId, foreign, 0), default)).Status);
     }
 
     [TestMethod]
@@ -309,6 +363,45 @@ public sealed class DesktopPromptImagesTests
 
     private static AgentContentCompletedEvent User(string content, JsonElement? details)
         => new(new("fixture"), Fixture.SessionId, DateTimeOffset.UnixEpoch, new AgentRunId("run"), AgentContentKind.User, "user:" + Guid.NewGuid().ToString("N"), null, content, details);
+
+    private static AgentContentCompletedEvent ToolOutput(string content, JsonElement details)
+        => new(new("fixture"), Fixture.SessionId, DateTimeOffset.UnixEpoch, new AgentRunId("run"), AgentContentKind.ToolOutput,
+            "tool-output:" + Guid.NewGuid().ToString("N"), "call-1", content, details);
+
+    // The details a session records for a tool call that returned an image it saved.
+    private static JsonElement ToolResult(string imagePath)
+    {
+        using var buffer = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("toolCallId", "call-1");
+            writer.WriteString("toolName", "view_image");
+            writer.WriteStartObject("arguments");
+            writer.WriteString("path", "shot.png");
+            writer.WriteEndObject();
+            writer.WriteStartObject("result");
+            writer.WriteBoolean("success", true);
+            writer.WriteStartArray("items");
+            writer.WriteStartObject();
+            writer.WriteString("$type", "text");
+            writer.WriteString("value", "Viewed image shot.png.");
+            writer.WriteEndObject();
+            writer.WriteStartObject();
+            writer.WriteString("$type", "localImage");
+            writer.WriteString("path", imagePath);
+            writer.WriteString("mediaType", "image/png");
+            writer.WriteString("displayName", "shot.png");
+            writer.WriteNumber("width", 640);
+            writer.WriteNumber("height", 480);
+            writer.WriteEndObject();
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+
+        return JsonDocument.Parse(buffer.ToArray()).RootElement.Clone();
+    }
 
     // The details a prompt records: its input items, each with the fields its kind has.
     private static JsonElement Items(params (string Type, string Value, string? DisplayName, string? MediaType)[] items)

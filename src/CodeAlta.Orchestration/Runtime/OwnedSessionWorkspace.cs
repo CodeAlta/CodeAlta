@@ -168,9 +168,9 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
             (revision, start, end, offset, CancellationToken.None), cancellationToken);
     }
 
-    /// <summary>Reads one image of a persisted user message through the same admitted/drained store owner.</summary>
+    /// <summary>Reads one image of a persisted user message or tool result through the same admitted/drained store owner.</summary>
     /// <param name="sessionId">Selected durable session identity.</param>
-    /// <param name="offset">Journal offset of the user message, as a history page reported it.</param>
+    /// <param name="offset">Journal offset of the user message or of the tool output, as a history page reported it.</param>
     /// <param name="index">Position of the image among those of the message (<see cref="PromptImageHistory.ReadImages"/>).</param>
     /// <param name="cancellationToken">Cancels this wait, not an admitted underlying read.</param>
     /// <returns>
@@ -206,7 +206,7 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
             });
         }
 
-        if (record is not AgentContentCompletedEvent { Kind: AgentContentKind.User } message) return new(PromptImageReadStatus.MissingRecord);
+        if (record is not AgentContentCompletedEvent { Kind: AgentContentKind.User or AgentContentKind.ToolOutput } message) return new(PromptImageReadStatus.MissingRecord);
         var recorded = PromptImageHistory.ReadImages(message.Details);
         if (index < 0 || index >= recorded.Count) return new(PromptImageReadStatus.MissingImage);
         string directory;

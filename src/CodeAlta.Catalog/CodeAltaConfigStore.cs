@@ -2102,6 +2102,7 @@ public sealed class CodeAltaConfigStore
             SupportsThoughtSignatures = profile.SupportsThoughtSignatures,
             RequiresToolResultName = profile.RequiresToolResultName,
             RequiresAssistantAfterToolResult = profile.RequiresAssistantAfterToolResult,
+            SupportsToolResultImages = profile.SupportsToolResultImages,
             SupportsCacheControl = profile.SupportsCacheControl,
             SupportsStrictTools = profile.SupportsStrictTools,
             ThinkingFormat = profile.ThinkingFormat,

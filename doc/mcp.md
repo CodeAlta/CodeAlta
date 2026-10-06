@@ -141,6 +141,8 @@ alta mcp auth logout <server>
 - bounded tool calls with effective global or per-server tool timeout;
 - disabled-server, missing-server, disabled-tool, missing-tool, invalid transport, invalid URL/header, timeout, unavailable, and authentication diagnostics.
 
+An image block of a tool result is kept for a direct agent tool: the tool returns it with the text of the result, and the session checks it, scales it down when needed, saves it beside the journal and gives it to the model (see "Images in tool results" in `runtime.md`). An image over 32 MB is left out. `alta mcp tool call` output names an image by its media type and size and never holds its bytes. Audio blocks and embedded resources are still summarized as text.
+
 Runtime diagnostics redact sensitive values before they reach command output or the dialog. Redaction covers configured URLs/headers, secret-like dictionary keys, arguments, exceptions, text output, and structured JSON output. HTTP 401/403 diagnostics explicitly direct the user to use the dialog **Authorize/Login** action or `alta mcp auth login <server>` for browser OAuth, or to configure static headers (including `${NAME}` environment-variable references when preferred) when appropriate.
 
 ## HTTP OAuth/Authv2 browser login

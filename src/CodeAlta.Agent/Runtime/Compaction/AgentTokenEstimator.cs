@@ -160,6 +160,7 @@ internal static class AgentTokenEstimator
     private static long EstimateToolResult(AgentToolResult result)
     {
         var builder = new StringBuilder();
+        var imageTokens = 0L;
         foreach (var item in result.Items)
         {
             switch (item)
@@ -170,6 +171,10 @@ internal static class AgentTokenEstimator
                 case AgentToolResultItem.ImageUrl imageUrl:
                     builder.AppendLine(imageUrl.Url);
                     break;
+                case AgentToolResultItem.Image or AgentToolResultItem.LocalImage:
+                    // Like an image of a user message: a fixed cost, whatever its size.
+                    imageTokens += 1_024;
+                    break;
             }
         }
 
@@ -178,7 +183,7 @@ internal static class AgentTokenEstimator
             builder.AppendLine(result.Error);
         }
 
-        return EstimateText(builder.ToString());
+        return EstimateText(builder.ToString()) + imageTokens;
     }
 
     private static long EstimateText(string? text)

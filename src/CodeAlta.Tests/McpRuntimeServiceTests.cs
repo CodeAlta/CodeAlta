@@ -690,7 +690,12 @@ public sealed partial class McpRuntimeServiceTests
         Assert.AreEqual("alpha", rich.ContentText);
         Assert.AreEqual("ok", rich.StructuredContent?.GetProperty("visible").GetString());
         Assert.AreEqual("[redacted]", rich.StructuredContent?.GetProperty("apiToken").GetString());
-        Assert.IsTrue(rich.Content.Any(static block => block.Type == "image" && block.MimeType == "image/png" && block.Summary!.Contains("image content omitted", StringComparison.Ordinal)));
+        // The image is kept for the model; a command's output names it and does not hold its bytes.
+        var image = rich.Content.Single(static block => block.Type == "image");
+        Assert.AreEqual("image/png", image.MimeType);
+        StringAssert.StartsWith(image.Summary, "image (image/png, ");
+        StringAssert.StartsWith(image.ImageBase64, "iVBORw0KGgo");
+        Assert.IsFalse(System.Text.Json.JsonSerializer.Serialize(rich).Contains("iVBORw0KGgo", StringComparison.Ordinal));
         Assert.IsTrue(rich.Content.Any(static block => block.Type == "audio" && block.MimeType == "audio/wav" && block.Summary!.Contains("audio content omitted", StringComparison.Ordinal)));
         Assert.IsTrue(rich.Content.Any(static block => block.Type == "resource_link" && block.Summary!.Contains("resource link:", StringComparison.Ordinal)));
         Assert.IsTrue(rich.Content.Any(static block => block.Type == "resource" && block.Summary!.Contains("embedded resource omitted", StringComparison.Ordinal)));

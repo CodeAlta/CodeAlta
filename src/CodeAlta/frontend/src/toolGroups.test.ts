@@ -58,6 +58,17 @@ test("records that show nothing between tool calls keep them in one group", () =
   assert.deepEqual(groupTimelineTools(reconcileTimeline(spoken, null), spoken).filter(group => group.tools).map(group => group.rows.length), [1, 1]);
 });
 
+test("an image card between two tool calls ends the first group", () => {
+  const output = entry("2", { eventType: "contentCompleted", kind: "ToolOutput", activityId: null, parentActivityId: "tool-1", contentId: "out",
+    text: "Viewed.", images: [{ index: 0, title: "shot.png", mediaType: "image/png" }] });
+  const entries = [entry("1", { name: "view_image" }), output, entry("3")];
+  const rows = reconcileTimeline(entries, null);
+  const groups = groupTimelineTools(rows, entries);
+
+  assert.deepEqual(groups.map(group => [group.tools, group.rows.map(row => row.source === "history" ? row.item.category : row.source)]),
+    [[true, ["tool"]], [false, ["image"]], [true, ["tool"]]]);
+});
+
 test("retained live tool groups stay separate from journal groups and other runs", () => {
   const rows = reconcileTimeline([entry("1")], null);
   for (const [activityId, runId] of [["a", "run"], ["b", "run"], ["c", "other"]])

@@ -1006,9 +1006,10 @@ public sealed class AgentToolsTests
         Assert.IsFalse(officialOpenAiTools.Any(static tool => tool.Spec.Name == "request_user_input"));
         Assert.IsFalse(compatibleTools.Any(static tool => tool.Spec.Name == "request_user_input"));
         Assert.IsFalse(anthropicTools.Any(static tool => tool.Spec.Name == "request_user_input"));
-        Assert.IsFalse(officialOpenAiTools.Any(static tool => tool.Spec.Name == "view_image"));
-        Assert.IsFalse(compatibleTools.Any(static tool => tool.Spec.Name == "view_image"));
-        Assert.IsFalse(anthropicTools.Any(static tool => tool.Spec.Name == "view_image"));
+        // Every provider gets the tool that shows an image to the model.
+        Assert.IsTrue(officialOpenAiTools.Any(static tool => tool.Spec.Name == "view_image"));
+        Assert.IsTrue(compatibleTools.Any(static tool => tool.Spec.Name == "view_image"));
+        Assert.IsTrue(anthropicTools.Any(static tool => tool.Spec.Name == "view_image"));
         CollectionAssert.IsSubsetOf(
             new[] { "write_file", "replace_in_file", "delete_file_or_dir", "rename_file_or_dir" },
             compatibleTools.Select(static tool => tool.Spec.Name).ToArray());

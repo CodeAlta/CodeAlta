@@ -58,7 +58,8 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
             var chatClient = await _chatClientFactory(request.Provider, cancellationToken).ConfigureAwait(false);
             try
             {
-                var messages = AgentReasoningReplay.SanitizeForRequest(request.Conversation, request)
+                // A tool result of these clients is text: the images of tool results follow in a user message.
+                var messages = Images.AgentToolResultImages.MoveToUserMessages(AgentReasoningReplay.SanitizeForRequest(request.Conversation, request))
                     .Select(MapMessage)
                     .ToArray();
                 var updates = new List<ChatResponseUpdate>();
@@ -276,6 +277,9 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                     break;
                 case AgentToolResultItem.ImageUrl imageUrl:
                     contentItems.Add(new UriContent(new Uri(imageUrl.Url, UriKind.Absolute), "image/*"));
+                    break;
+                case AgentToolResultItem.Image or AgentToolResultItem.LocalImage:
+                    contentItems.Add(new TextContent(Images.AgentToolResultImages.Describe(item)));
                     break;
             }
         }

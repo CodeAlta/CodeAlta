@@ -146,6 +146,13 @@ public sealed record AgentProviderProfile
     public bool RequiresToolResultName { get; init; }
 
     /// <summary>
+    /// Gets or initializes whether a tool result can carry an image. When false, the images of tool results are
+    /// attached to a user message that follows them. Null lets the transport decide: the vendor's own endpoint
+    /// takes images in tool results, any other endpoint gets the user message.
+    /// </summary>
+    public bool? SupportsToolResultImages { get; init; }
+
+    /// <summary>
     /// Gets or initializes whether the provider supports cache-control metadata.
     /// </summary>
     public bool SupportsCacheControl { get; init; }

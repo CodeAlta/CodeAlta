@@ -537,13 +537,7 @@ internal static class AgentCompactionSerializer
 
     private static string RenderToolResult(AgentToolResult result)
     {
-        var segments = result.Items.Select(static item => item switch
-        {
-            AgentToolResultItem.Text text => text.Value,
-            AgentToolResultItem.ImageUrl imageUrl => imageUrl.Url,
-            _ => string.Empty,
-        });
-        var rendered = string.Join(Environment.NewLine, segments.Where(static value => !string.IsNullOrWhiteSpace(value)));
+        var rendered = result.Items.Count == 0 ? string.Empty : Images.AgentToolResultImages.RenderText(result);
         return string.IsNullOrWhiteSpace(rendered) ? (result.Error ?? "(no output)") : rendered;
     }
 

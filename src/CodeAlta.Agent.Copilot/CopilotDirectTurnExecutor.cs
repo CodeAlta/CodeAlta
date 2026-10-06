@@ -295,6 +295,7 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         {
             AgentMessagePart.Uri uri => IsImageMediaType(uri.MediaType),
             AgentMessagePart.Data data => IsImageMediaType(data.MediaType),
+            AgentMessagePart.ToolResult toolResult => toolResult.Result.Items.Any(static item => item is AgentToolResultItem.Image),
             _ => false,
         });
 

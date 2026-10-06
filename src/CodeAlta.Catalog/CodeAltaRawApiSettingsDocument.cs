@@ -57,6 +57,12 @@ public sealed class CodeAltaProviderProfileDocument
     public bool? RequiresAssistantAfterToolResult { get; set; }
 
     /// <summary>
+    /// Gets or sets whether a tool result can carry an image; when false, images follow in a user message.
+    /// </summary>
+    [JsonPropertyName("supports_tool_result_images")]
+    public bool? SupportsToolResultImages { get; set; }
+
+    /// <summary>
     /// Gets or sets whether the provider supports cache-control metadata.
     /// </summary>
     [JsonPropertyName("supports_cache_control")]

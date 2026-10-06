@@ -145,6 +145,7 @@ Use `[providers.<provider-key>.profile]` only when a provider-compatible endpoin
 | `supports_thought_signatures` | Whether provider thought-signature continuity is supported. |
 | `requires_tool_result_name` | Whether tool-result messages must include a tool name. |
 | `requires_assistant_after_tool_result` | Whether a synthetic assistant turn must be inserted after tool results. |
+| `supports_tool_result_images` | Whether a tool result can carry an image. When `false`, an image a tool returns is attached to a user message placed after the tool results. By default OpenAI's own Responses endpoints take images in tool results and every other endpoint gets the user message. |
 | `supports_cache_control` | Whether cache-control metadata is supported. |
 | `supports_strict_tools` | Whether strict tool schemas are supported. |
 | `thinking_format` | Provider-specific thinking/reasoning format name. |

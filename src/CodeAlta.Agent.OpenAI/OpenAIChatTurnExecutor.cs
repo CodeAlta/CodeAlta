@@ -5,6 +5,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Images;
 using CodeAlta.Agent.Runtime.Tools;
 using OpenAI.Chat;
 using XenoAtom.Logging;
@@ -220,7 +221,8 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
             }
         }
 
-        foreach (var message in AgentReasoningReplay.SanitizeForRequest(request.Conversation, request))
+        // A Chat Completions tool message is text: the images of tool results follow in a user message.
+        foreach (var message in AgentToolResultImages.MoveToUserMessages(AgentReasoningReplay.SanitizeForRequest(request.Conversation, request)))
         {
             messages.Add(MapMessage(message, request.Provider.Profile));
         }
@@ -645,21 +647,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         => mediaType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) == true;
 
     private static string RenderToolResult(AgentToolResult result)
-    {
-        if (result.Items.Count == 0)
-        {
-            return result.Error ?? string.Empty;
-        }
-
-        return string.Join(
-            Environment.NewLine,
-            result.Items.Select(static item => item switch
-            {
-                AgentToolResultItem.Text text => text.Value,
-                AgentToolResultItem.ImageUrl imageUrl => imageUrl.Url,
-                _ => string.Empty,
-            }).Where(static value => !string.IsNullOrWhiteSpace(value)));
-    }
+        => AgentToolResultImages.RenderText(result);
 
     private static string FormatProtocolTraceValue(string? value)
         => string.IsNullOrWhiteSpace(value) ? "<none>" : value.Trim();

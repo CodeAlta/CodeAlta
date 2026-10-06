@@ -85,6 +85,37 @@ test("a user message lists its images and no other record does", () => {
   assert.equal(buildTimelineItems([entry({ kind: "User", images: [{ index: 3, title: "Misplaced", mediaType: null }] })])[0].images, undefined);
 });
 
+test("the images a tool gave the model get a card after the tile of its call", () => {
+  const images = [{ index: 0, title: "shot.png", mediaType: "image/png" }, { index: 1, title: "page", mediaType: "image/png" }];
+  const activity = entry({ eventType: "activity", kind: "ToolCall", activityId: "tool", phase: "Completed", name: "view_image", text: null });
+  const output = entry({ offset: "2", kind: "ToolOutput", parentActivityId: "tool", text: "Viewed image shot.png.\n[Image: shot.png (image/png, 640x480)]",
+    details: '{"toolName":"view_image"}', images,
+    tool: { primary: null, isCommand: false, output: "Viewed image shot.png.", outputLines: 2, outputBytes: 60, fields: [] } });
+
+  const [tile, card, ...rest] = buildTimelineItems([activity, output]);
+
+  // The tile keeps the text of the output; the card has the images and is read at the offset of the output.
+  assert.equal(rest.length, 0);
+  assert.equal(tile.category, "tool");
+  assert.equal(tile.toolOutput, "Viewed image shot.png.");
+  assert.equal(tile.images, undefined);
+  assert.equal(card.category, "image");
+  assert.equal(card.key, "2");
+  assert.equal(card.icon, "fileImage");
+  assert.equal(card.subtitle, "shot.png, page");
+  assert.deepEqual(card.images, images);
+  assert.equal(card.markdown, null);
+  assert.equal(card.details, null);
+  assert.equal(card.copyMarkdown, null);
+
+  // An output without a tile on screen is the card itself, and an output without images adds nothing.
+  const [alone] = buildTimelineItems([output]);
+  assert.equal(alone.category, "image");
+  assert.equal(buildTimelineItems([activity, { ...output, images: null }]).length, 1);
+  // A malformed image list shows no image: the output stays the text of its tile.
+  assert.equal(buildTimelineItems([activity, { ...output, images: [{ index: 4, title: "x", mediaType: null }] }]).length, 1);
+});
+
 function entry(overrides: Partial<Entry>): Entry {
   return {
     offset: "1", eventType: "contentCompleted", providerId: "provider", sessionId: "session", runId: "run",

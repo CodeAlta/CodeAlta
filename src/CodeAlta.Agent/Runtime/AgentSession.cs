@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using CodeAlta.Agent.Runtime.Compaction;
+using CodeAlta.Agent.Runtime.Images;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.Runtime.Tools;
 
@@ -46,6 +47,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private readonly List<AgentEvent> _history;
     private readonly List<AgentConversationMessage> _conversation;
     private readonly Queue<AgentInput> _pendingSteerInputs = new();
+    private readonly AgentSessionToolImages _toolImages;
     private AgentModelInfo? _resolvedModelInfo;
     private bool _resolvedModelInfoLoaded;
     private AgentSessionSummary _summary;
@@ -103,6 +105,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         _protocolFamily = provider.ProtocolFamily;
         _providerKey = provider.ProviderKey;
         _store = store;
+        _toolImages = new AgentSessionToolImages(store as IAgentSessionAttachmentStore, summary.SessionId);
         _turnExecutor = turnExecutor;
         _cachedModels = cachedModels ?? LoadConstructorModelCache(provider, turnExecutor);
         _compactionSummarizer = new AgentCompactionSummarizer(new AgentTurnExecutorCompactionSummaryExecutor(turnExecutor));
@@ -430,6 +433,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
                     var toolDiff = toolFileChangeTracker?.CreateUnifiedDiff();
 
+                    // An image the tool returned is checked, resized when needed and saved beside the journal.
+                    result = await _toolImages.PrepareAsync(result, modelInfo, linkedCts.Token).ConfigureAwait(false);
                     var modelVisibleResult = CreateModelVisibleToolResult(
                         toolCall,
                         result,
@@ -1088,7 +1093,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             SystemMessage = systemMessage,
             DeveloperInstructions = developerInstructions,
             ReasoningEffort = _options.ReasoningEffort,
-            Conversation = conversation?.ToArray() ?? CreateProviderConversation().Messages.ToArray(),
+            Conversation = _toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo).ToArray(),
             Tools = tools,
             CanUseProviderContinuation = _allowProviderContinuation,
             State = _state,
@@ -1268,6 +1273,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             _activeRunId = null;
             _activeRunConversationStartIndex = null;
             _pendingSteerInputs.Clear();
+            _toolImages.ReleaseRun();
         }
         finally
         {
@@ -1944,7 +1950,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 return await _turnExecutor.ExecuteTurnAsync(
                         request with
                         {
-                            Conversation = _conversation.ToArray(),
+                            Conversation = _toolImages.Resolve(_conversation, request.ModelInfo).ToArray(),
                             State = _state,
                         },
                         (delta, ct) => OnStreamingDeltaAsync(runId, delta, ct),
@@ -2909,13 +2915,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
     private static string RenderToolResult(AgentToolResult result)
     {
-        var segments = result.Items.Select(static item => item switch
-        {
-            AgentToolResultItem.Text text => text.Value,
-            AgentToolResultItem.ImageUrl imageUrl => imageUrl.Url,
-            _ => string.Empty,
-        });
-        var rendered = string.Join(Environment.NewLine, segments.Where(static segment => !string.IsNullOrWhiteSpace(segment)));
+        var rendered = result.Items.Count == 0 ? string.Empty : AgentToolResultImages.RenderText(result);
         return string.IsNullOrWhiteSpace(rendered)
             ? (result.Error ?? "(no output)")
             : rendered;
@@ -2936,7 +2936,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             return result;
         }
 
-        var rendered = RenderToolResult(result);
+        // The budget is for text: an image of the result is kept beside the excerpt.
+        var images = result.Items.Where(AgentToolResultImages.IsImage).ToArray();
+        var rendered = images.Length == 0
+            ? RenderToolResult(result)
+            : RenderToolResult(result with { Items = [.. result.Items.Where(static item => !AgentToolResultImages.IsImage(item))] });
         var characterLimit = ResolveModelVisibleToolResultCharacterLimit(systemMessage, developerInstructions, modelInfo);
         if (characterLimit <= 0 || rendered.Length <= characterLimit)
         {
@@ -2946,7 +2950,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         var excerpt = CreateModelVisibleToolResultExcerpt(toolCall.Name, rendered, characterLimit);
         return result with
         {
-            Items = [new AgentToolResultItem.Text(excerpt)],
+            Items = [new AgentToolResultItem.Text(excerpt), .. images],
         };
     }
 
@@ -3137,7 +3141,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             }
 
             writer.WritePropertyName("result");
-            JsonSerializer.Serialize(writer, result, AgentJsonSerializerContext.Default.AgentToolResult);
+            // The details name an image; its bytes, when the result holds them, stay in the tool message.
+            var recorded = result.Items.Any(static item => item is AgentToolResultItem.Image)
+                ? result with { Items = [.. result.Items.Select(static item => item is AgentToolResultItem.Image ? new AgentToolResultItem.Text(AgentToolResultImages.Describe(item)) : item)] }
+                : result;
+            JsonSerializer.Serialize(writer, recorded, AgentJsonSerializerContext.Default.AgentToolResult);
             writer.WriteEndObject();
         }
 
@@ -3192,6 +3200,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         switch (toolCall.Name)
         {
             case "read_file":
+            case "view_image":
                 if (GetPath(toolCall.Arguments, "path") is { Length: > 0 } readPath)
                 {
                     AddReadFile(Resolve(readPath));

@@ -598,7 +598,14 @@ public sealed class McpPlugin : PluginBase
         }
 
         var text = FormatDirectToolResult(result);
-        return new AgentToolResult(!result.IsError, [new AgentToolResultItem.Text(text)], result.IsError ? text : null);
+        // The images of the result go to the model with its text: a screenshot tool is of no use without them.
+        var images = result.Content
+            .Where(static block => block.ImageBase64 is not null)
+            .Select((block, index) => (AgentToolResultItem)new AgentToolResultItem.Image(
+                block.ImageBase64!,
+                string.IsNullOrWhiteSpace(block.MimeType) ? "image/png" : block.MimeType,
+                index == 0 ? $"{server}-{tool}" : $"{server}-{tool}-{index + 1}"));
+        return new AgentToolResult(!result.IsError, [new AgentToolResultItem.Text(text), .. images], result.IsError ? text : null);
     }
 
     private static bool TryReadArguments(JsonElement element, bool useArgumentsJsonWrapper, out IReadOnlyDictionary<string, object?> arguments, out string error)

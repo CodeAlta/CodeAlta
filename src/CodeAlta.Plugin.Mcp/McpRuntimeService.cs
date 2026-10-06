@@ -108,11 +108,19 @@ internal sealed record McpRuntimeContentBlock
     public string? MimeType { get; init; }
 
     public string? Summary { get; init; }
+
+    /// <summary>The bytes of an image block, in base64: what a direct tool attaches to its result.</summary>
+    /// <remarks>Never written to a command's output, which names the image by its <see cref="Summary"/>.</remarks>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? ImageBase64 { get; init; }
 }
 
 internal sealed class McpRuntimeService : IAsyncDisposable
 {
     private const int FailedTransportReadDrainDelayMilliseconds = 50;
+
+    // Largest image of a tool result kept for the model; a session then makes it fit what a model accepts.
+    private const int MaximumImageBytes = 32 * 1024 * 1024;
 
     private readonly McpConfigDiscovery _discovery = new();
     private readonly McpPolicyLoader _policyLoader = new();
@@ -1217,7 +1225,10 @@ internal sealed class McpRuntimeService : IAsyncDisposable
 
         if (block is ImageContentBlock image)
         {
-            return new McpRuntimeContentBlock { Type = type, MimeType = image.MimeType, Summary = $"image content omitted ({image.DecodedData.Length} bytes)" };
+            var bytes = image.DecodedData;
+            return bytes.Length is > 0 and <= MaximumImageBytes
+                ? new McpRuntimeContentBlock { Type = type, MimeType = image.MimeType, Summary = $"image ({image.MimeType}, {bytes.Length} bytes)", ImageBase64 = Convert.ToBase64String(bytes.Span) }
+                : new McpRuntimeContentBlock { Type = type, MimeType = image.MimeType, Summary = $"image content omitted ({bytes.Length} bytes)" };
         }
 
         if (block is AudioContentBlock audio)

@@ -166,6 +166,7 @@ internal static class RawApiProviderDefaultsCatalog
             SupportsThoughtSignatures = defaults.SupportsThoughtSignatures ?? profile.SupportsThoughtSignatures,
             RequiresToolResultName = defaults.RequiresToolResultName ?? profile.RequiresToolResultName,
             RequiresAssistantAfterToolResult = defaults.RequiresAssistantAfterToolResult ?? profile.RequiresAssistantAfterToolResult,
+            SupportsToolResultImages = defaults.SupportsToolResultImages ?? profile.SupportsToolResultImages,
             SupportsCacheControl = defaults.SupportsCacheControl ?? profile.SupportsCacheControl,
             SupportsStrictTools = defaults.SupportsStrictTools ?? profile.SupportsStrictTools,
             ThinkingFormat = string.IsNullOrWhiteSpace(defaults.ThinkingFormat)
@@ -376,6 +377,9 @@ internal sealed class RawApiProviderDefaultsProfile
 
     [JsonPropertyName("requires_assistant_after_tool_result")]
     public bool? RequiresAssistantAfterToolResult { get; set; }
+
+    [JsonPropertyName("supports_tool_result_images")]
+    public bool? SupportsToolResultImages { get; set; }
 
     [JsonPropertyName("supports_cache_control")]
     public bool? SupportsCacheControl { get; set; }

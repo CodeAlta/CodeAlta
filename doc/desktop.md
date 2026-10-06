@@ -436,6 +436,20 @@ the other windows, and its title bar restores the default size. `Left`/`Right` o
 the title bar go to the previous or next image of the same message (past the last comes the first),
 and `Escape` closes the window.
 
+### Images a tool gives the model
+
+When a tool result has images (`view_image` on a file, a screenshot tool of an MCP server), the timeline
+shows an **Image read** card after the tile of the tool call. The card names the images and shows them as
+previews, larger than the thumbnails of a prompt; a click opens the same image window. The tile of the call
+keeps the text of the result. The card ends the group of tool calls it follows, so it sits where the image
+was read.
+
+The history row of the tool output lists its images by index, title and media type
+(`HistoryImageProjection`), and `promptImages.read` serves them by the journal offset of that row. The
+rules are those of the images of a prompt: the path comes from the journal record and never from the page,
+the file must be inside the session's attachment folder, and neither the output row nor the details of the
+tool call name the file.
+
 ### Asks and plan review
 
 An agent asks the user with **`alta ask --stdin`**: one or more questions, and optionally a file to

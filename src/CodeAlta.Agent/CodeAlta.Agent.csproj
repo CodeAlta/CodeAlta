@@ -22,6 +22,12 @@
   <ItemGroup>
     <PackageReference Include="DiffPlex" />
     <PackageReference Include="Microsoft.Extensions.AI.Abstractions" />
+    <!-- Images a tool gives the model are checked and resized with Skia: its native library is named for
+         every platform CodeAlta ships on instead of relying on what another package brings. -->
+    <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" />
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Win32" />
     <PackageReference Include="XenoAtom.Glob" />
     <PackageReference Include="XenoAtom.Logging" />
   </ItemGroup>

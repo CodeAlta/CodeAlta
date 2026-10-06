@@ -11,7 +11,7 @@ export type HistoryEntry = HistoryResponse["entries"][number];
 export type TimelineItem = Readonly<{
   key: string;
   eventType: string;
-  category: "user" | "assistant" | "reasoning" | "tool" | "file" | "status" | "prompt" | "plan" | "notes" | "error" | "plugin";
+  category: "user" | "assistant" | "reasoning" | "tool" | "file" | "image" | "status" | "prompt" | "plan" | "notes" | "error" | "plugin";
   icon: IconName;
   title: string;
   subtitle: string | null;
@@ -33,7 +33,7 @@ export type TimelineItem = Readonly<{
   /** The plugin a card comes from, for the commands its fragments name. */
   pluginKey?: string;
   fileChanges?: FileChanges;
-  /** The images attached to a user message; their content is read by index. */
+  /** The images attached to a user message, or the ones a tool gave the model; their content is read by index. */
   images?: ReadonlyArray<TimelineImage>;
   toolRecord?: ToolRecord;
   toolPhase?: string;
@@ -84,7 +84,11 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
     if (entry.eventType === "sessionUpdate" && !["warning", "reconnecting", "modelchanged", "compactionstarted", "compactioncompleted", "diffupdated"].includes(entry.kind?.toLowerCase() ?? "")) continue;
     if (entry.eventType === "activity" && entry.activityId && !isTerminalPhase(entry.phase) && terminalActivities.has(activityKey(entry))) continue;
     if ((entry.eventType === "contentCompleted" || entry.eventType === "contentDelta") &&
-        isToolOutput(entry.kind) && entry.parentActivityId && representedActivities.has(parentActivityKey(entry))) continue;
+        isToolOutput(entry.kind) && entry.parentActivityId && representedActivities.has(parentActivityKey(entry))) {
+      // The text of an output is shown on the tile of its call; the images the model was given get a card.
+      if (entry.eventType === "contentCompleted" && entry.images) { const card = presentedItem(entry); if (card.category === "image") result.push(card); }
+      continue;
+    }
 
     if (entry.eventType === "contentDelta" && entry.contentId) {
       const key = contentKey(entry);
@@ -153,6 +157,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
   let details = formatDetails(entry.details);
   let detailsLabel = "Details";
   const delegated = !streaming && normalizedKind === "user" && entry.eventType === "contentCompleted" ? parseDelegatedMessage(entry.text) : null;
+  const toolImages = !streaming && normalizedKind === "tooloutput" && entry.eventType === "contentCompleted" ? projectTimelineImages(entry.images) : undefined;
 
   if (entry.eventType === "contentCompleted" || entry.eventType === "contentDelta") {
     if (normalizedKind === "user") {
@@ -163,10 +168,12 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     else if (normalizedKind.startsWith("reasoning")) { category = "reasoning"; icon = "brain"; title = normalizedKind === "reasoningsummary" ? "Reasoning summary" : "Reasoning"; }
     else if (normalizedKind === "plan") { category = "plan"; icon = "plan"; title = "Plan"; }
     else if (normalizedKind === "filechangeoutput") { category = "file"; icon = "file"; title = "File changes"; }
+    else if (toolImages) { category = "image"; icon = "fileImage"; title = "Image"; markdown = null; details = null; }
     else if (normalizedKind.endsWith("output")) { category = "tool"; icon = "tool"; title = friendly(kind); }
     else { title = friendly(kind || entry.eventType); }
     subtitle = streaming ? "Streaming" : delegated
-      ? [friendly(delegated.kind), delegated.sourceSessionId?.slice(0, 8)].filter(Boolean).join(" · ") : null;
+      ? [friendly(delegated.kind), delegated.sourceSessionId?.slice(0, 8)].filter(Boolean).join(" · ")
+      : category === "image" ? toolImages!.map(image => image.title).join(", ") : null;
   } else if (entry.eventType === "activity") {
     category = normalizedKind === "filechange" ? "file" : "tool";
     icon = category === "file" ? "file" : "tool";
@@ -259,7 +266,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     bodyOmitted: entry.bodyOmitted,
     copyMarkdown,
     fileChanges: projectFileChanges(entry),
-    images: category === "user" ? projectTimelineImages(entry.images) : undefined,
+    images: category === "user" ? projectTimelineImages(entry.images) : category === "image" ? toolImages : undefined,
     toolRecord: projectToolRecord(entry),
     toolPhase: entry.eventType === "activity" ? entry.phase?.toLowerCase() : undefined,
     toolOutput: entry.tool?.output,

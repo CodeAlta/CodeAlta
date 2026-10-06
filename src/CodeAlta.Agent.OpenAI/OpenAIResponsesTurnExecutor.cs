@@ -9,6 +9,7 @@ using System.Net.WebSockets;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Images;
 using CodeAlta.Agent.Runtime.Tools;
 using CodeAlta.Agent.OpenAI.Codex;
 using OpenAI.Responses;
@@ -1314,7 +1315,13 @@ internal sealed class OpenAIResponsesTurnExecutor(
             MaxOutputTokenCount = request.MaxOutputTokens,
         };
 
-        foreach (var inputItem in CreateConversationItems(AgentReasoningReplay.SanitizeForRequest(request.Conversation, request)))
+        var conversation = AgentReasoningReplay.SanitizeForRequest(request.Conversation, request);
+        if (!SupportsToolResultImages(request))
+        {
+            conversation = AgentToolResultImages.MoveToUserMessages(conversation);
+        }
+
+        foreach (var inputItem in CreateConversationItems(conversation))
         {
             options.InputItems.Add(inputItem);
         }
@@ -1406,6 +1413,12 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return request.ModelInfo?.SupportedReasoningEfforts is not { } supportedReasoningEfforts ||
             supportedReasoningEfforts.Contains(reasoningEffort);
     }
+
+    // OpenAI's own Responses endpoints take images in a function call output. Another endpoint that speaks the
+    // protocol may not: it gets them in a user message unless its profile says otherwise.
+    private bool SupportsToolResultImages(AgentTurnRequest request)
+        => request.Provider.Profile?.SupportsToolResultImages
+           ?? (provider.CodexSubscription is not null || provider.IsAzureOpenAI || IsOfficialOpenAIResponsesEndpoint(provider));
 
     private static bool IsOfficialOpenAIResponsesEndpoint(OpenAIProviderOptions provider)
         => provider.CodexSubscription is null &&
@@ -1611,10 +1624,50 @@ internal sealed class OpenAIResponsesTurnExecutor(
     {
         foreach (var part in parts.OfType<AgentMessagePart.ToolResult>())
         {
-            yield return ResponseItem.CreateFunctionCallOutputItem(
+            var item = ResponseItem.CreateFunctionCallOutputItem(
                 part.CallId,
                 RenderToolResult(part.Result));
+            if (part.Result.Items.Any(static item => item is AgentToolResultItem.Image))
+            {
+                // The output of a function call is a string or a list of input parts: the list carries the images.
+                item.Patch.Set("$.output"u8, CreateFunctionOutputParts(part.Result));
+            }
+
+            yield return item;
         }
+    }
+
+    private static BinaryData CreateFunctionOutputParts(AgentToolResult result)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartArray();
+            foreach (var item in result.Items)
+            {
+                switch (item)
+                {
+                    case AgentToolResultItem.Image image:
+                        writer.WriteStartObject();
+                        writer.WriteString("type", "input_image");
+                        writer.WriteString("image_url", $"data:{image.MediaType};base64,{image.Base64Data}");
+                        writer.WriteEndObject();
+                        break;
+                    default:
+                        var text = AgentToolResultImages.RenderText(result with { Items = [item] });
+                        if (string.IsNullOrWhiteSpace(text)) break;
+                        writer.WriteStartObject();
+                        writer.WriteString("type", "input_text");
+                        writer.WriteString("text", text);
+                        writer.WriteEndObject();
+                        break;
+                }
+            }
+
+            writer.WriteEndArray();
+        }
+
+        return BinaryData.FromBytes(stream.ToArray());
     }
 
     private static bool TryCreateTextualMessage(
@@ -2354,21 +2407,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         => mediaType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) == true;
 
     private static string RenderToolResult(AgentToolResult result)
-    {
-        if (result.Items.Count == 0)
-        {
-            return result.Error ?? string.Empty;
-        }
-
-        return string.Join(
-            Environment.NewLine,
-            result.Items.Select(static item => item switch
-            {
-                AgentToolResultItem.Text text => text.Value,
-                AgentToolResultItem.ImageUrl imageUrl => imageUrl.Url,
-                _ => string.Empty,
-            }).Where(static value => !string.IsNullOrWhiteSpace(value)));
-    }
+        => AgentToolResultImages.RenderText(result);
 
     private static Exception CreateResponseFailureException(ResponseResult response, string fallbackStatus)
     {

@@ -130,13 +130,13 @@ internal sealed partial class WorkspaceService
                     type = "contentCompleted"; kind = completed.Kind.ToString(); contentId = completed.ContentId;
                     parentId = completed.ParentActivityId; text = completed.Content;
                     interactionId = completed.AskId; details = Json(completed.Details);
-                    // A user message lists its images; its text and details do not name their files.
+                    // A user message and a tool result list their images; their text and details do not name the files.
                     images = HistoryImageProjection.Project(completed, ref text, ref details, out imageCost);
                     break;
                 case AgentActivityEvent activity:
                     type = "activity"; kind = activity.Kind.ToString(); phase = activity.Phase.ToString();
                     activityId = activity.ActivityId; parentId = activity.ParentActivityId; name = activity.Name;
-                    text = activity.Message; details = Json(activity.Details);
+                    text = activity.Message; details = HistoryImageProjection.ActivityDetails(activity.Details);
                     break;
                 case AgentNotesEvent notes: type = "notes"; kind = notes.Kind.ToString(); text = notes.Markdown; break;
                 case AgentErrorEvent error:

@@ -1,3 +1,5 @@
+using CodeAlta.Agent.Runtime.Images;
+
 namespace CodeAlta.Agent.Runtime.Compaction;
 
 internal static class AgentMediaCompaction
@@ -18,6 +20,11 @@ internal static class AgentMediaCompaction
             foreach (var part in message.Parts)
             {
                 if (part is AgentMessagePart.Data data && IsImage(data.MediaType))
+                {
+                    return true;
+                }
+
+                if (part is AgentMessagePart.ToolResult toolResult && AgentToolResultImages.HasImages(toolResult.Result))
                 {
                     return true;
                 }
@@ -56,6 +63,27 @@ internal static class AgentMediaCompaction
                     rewrittenParts.Add(CreateOmittedImagePlaceholder(data));
                     prunedImageCount++;
                     prunedBase64Characters += data.Base64Data.Length;
+                    continue;
+                }
+
+                if (part is AgentMessagePart.ToolResult toolResult && AgentToolResultImages.HasImages(toolResult.Result))
+                {
+                    var items = new List<AgentToolResultItem>(toolResult.Result.Items.Count);
+                    foreach (var item in toolResult.Result.Items)
+                    {
+                        if (!AgentToolResultImages.IsImage(item))
+                        {
+                            items.Add(item);
+                            continue;
+                        }
+
+                        items.Add(CreateOmittedImagePlaceholder(item));
+                        prunedImageCount++;
+                        prunedBase64Characters += item is AgentToolResultItem.Image inline ? inline.Base64Data.Length : 0;
+                    }
+
+                    rewrittenParts ??= CopyPriorParts(message.Parts, partIndex);
+                    rewrittenParts.Add(toolResult with { Result = toolResult.Result with { Items = items } });
                     continue;
                 }
 
@@ -118,6 +146,12 @@ internal static class AgentMediaCompaction
             : $"{data.Base64Data.Length} base64 characters";
         return new AgentMessagePart.Text(
             $"[Image attachment omitted from retained context: {name}; mediaType={mediaType}; originalSize={sizeDescription}.]");
+    }
+
+    // The image of a tool result outside the run that read it: the model keeps a line that names it.
+    private static AgentToolResultItem.Text CreateOmittedImagePlaceholder(AgentToolResultItem image)
+    {
+        return new AgentToolResultItem.Text($"[Image omitted from retained context: {AgentToolResultImages.Name(image)}.]");
     }
 
     private static long? EstimateDecodedByteCount(string base64Data)

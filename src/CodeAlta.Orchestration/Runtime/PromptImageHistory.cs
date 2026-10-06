@@ -5,7 +5,7 @@ using CodeAlta.Catalog;
 
 namespace CodeAlta.Orchestration.Runtime;
 
-/// <summary>Outcome of reading one image of a persisted user message.</summary>
+/// <summary>Outcome of reading one image of a persisted user message or tool result.</summary>
 public enum PromptImageReadStatus
 {
     /// <summary>The image was read.</summary>
@@ -14,7 +14,7 @@ public enum PromptImageReadStatus
     /// <summary>No session has the asked identity.</summary>
     MissingSession,
 
-    /// <summary>The offset is not the start of a persisted user message.</summary>
+    /// <summary>The offset is not the start of a persisted user message or tool result.</summary>
     MissingRecord,
 
     /// <summary>The message has no image at the asked index.</summary>
@@ -43,19 +43,23 @@ public enum PromptImageReadStatus
 public sealed record PromptImageReadResult(PromptImageReadStatus Status, string? MediaType = null, byte[]? Bytes = null);
 
 /// <summary>
-/// Reads the images a persisted user message refers to. The message records the path of each image file; a
-/// frontend gets the images by index and never the paths.
+/// Reads the images a persisted user message or tool result refers to. The record names the path of each image
+/// file; a frontend gets the images by index and never the paths.
 /// </summary>
 public static class PromptImageHistory
 {
     /// <summary>Largest image file served, in bytes.</summary>
     public const int MaximumImageBytes = 8 * 1024 * 1024;
 
-    /// <summary>Lists the images recorded in the details of a user message, in the order their indexes name them.</summary>
-    /// <param name="details">The details of a completed user content event.</param>
+    /// <summary>
+    /// Lists the images recorded in the details of a user message or of a tool result, in the order their
+    /// indexes name them.
+    /// </summary>
+    /// <param name="details">The details of a completed user or tool-output content event.</param>
     /// <returns>
-    /// The <c>localImage</c> input items, then the entries of a legacy <c>attachments</c> list. A missing title
-    /// is the file name and a missing media type is <c>image/*</c>.
+    /// The <c>localImage</c> input items, then the entries of a legacy <c>attachments</c> list, then the
+    /// <c>localImage</c> items of a tool result. A missing title is the file name and a missing media type is
+    /// <c>image/*</c>.
     /// </returns>
     public static IReadOnlyList<PromptImageAttachmentReference> ReadImages(JsonElement? details)
     {
@@ -74,11 +78,18 @@ public static class PromptImageHistory
                     Add(images, Text(attachment, "path"), Text(attachment, "title"), Text(attachment, "mediaType"));
         }
 
+        if (root.TryGetProperty("result", out var result) && result.ValueKind == JsonValueKind.Object
+            && result.TryGetProperty("items", out var resultItems) && resultItems.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in resultItems.EnumerateArray())
+                if (IsLocalImage(item)) Add(images, Text(item, "path"), Text(item, "displayName"), Text(item, "mediaType"));
+        }
+
         return images;
     }
 
-    /// <summary>Tells whether an input item of a user message's details is a local image.</summary>
-    /// <param name="item">One element of the details' <c>items</c> list.</param>
+    /// <summary>Tells whether an item of a user message or of a tool result is a local image.</summary>
+    /// <param name="item">One element of an <c>items</c> list.</param>
     /// <returns>True for an object whose <c>$type</c> is <c>localImage</c>.</returns>
     public static bool IsLocalImage(JsonElement item)
         => item.ValueKind == JsonValueKind.Object && item.TryGetProperty("$type", out var type)

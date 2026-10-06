@@ -165,6 +165,8 @@ public sealed record AgentToolResult(
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
 [JsonDerivedType(typeof(AgentToolResultItem.Text), "text")]
 [JsonDerivedType(typeof(AgentToolResultItem.ImageUrl), "imageUrl")]
+[JsonDerivedType(typeof(AgentToolResultItem.Image), "image")]
+[JsonDerivedType(typeof(AgentToolResultItem.LocalImage), "localImage")]
 public abstract record AgentToolResultItem
 {
     /// <summary>
@@ -178,4 +180,30 @@ public abstract record AgentToolResultItem
     /// </summary>
     /// <param name="Url">The image URL (or data URL).</param>
     public sealed record ImageUrl(string Url) : AgentToolResultItem;
+
+    /// <summary>
+    /// An image a tool returns for the model to look at, as encoded bytes.
+    /// </summary>
+    /// <remarks>
+    /// This is what a tool handler returns. A session checks the image, resizes it when it is too large and,
+    /// when it has a folder for its attachments, saves it there and keeps a <see cref="LocalImage"/> instead.
+    /// </remarks>
+    /// <param name="Base64Data">The encoded image file (PNG, JPEG, GIF, WebP or BMP), in base64.</param>
+    /// <param name="MediaType">The image MIME type the tool declares; the bytes decide.</param>
+    /// <param name="DisplayName">Optional name shown for the image, such as its file name.</param>
+    public sealed record Image(string Base64Data, string MediaType, string? DisplayName = null) : AgentToolResultItem;
+
+    /// <summary>
+    /// An image of a tool result saved in the session's attachment folder.
+    /// </summary>
+    /// <remarks>
+    /// A session records this item in place of an <see cref="Image"/>: the journal names the file and does not
+    /// hold its bytes. The model receives the image while the run that read it is active.
+    /// </remarks>
+    /// <param name="Path">The full path of the saved image file.</param>
+    /// <param name="MediaType">The image MIME type.</param>
+    /// <param name="DisplayName">Optional name shown for the image, such as its file name.</param>
+    /// <param name="Width">Width in pixels, or 0 when unknown.</param>
+    /// <param name="Height">Height in pixels, or 0 when unknown.</param>
+    public sealed record LocalImage(string Path, string MediaType, string? DisplayName = null, int Width = 0, int Height = 0) : AgentToolResultItem;
 }

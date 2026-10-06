@@ -1129,6 +1129,7 @@ export const messages = dictionary({
   "{count} running": ["{count} en curso", "{count} en cours", "{count} aktiv", "{count} 実行中", "{count} 运行中"],
   "{count} canceled": ["{count} canceladas", "{count} annulé(s)", "{count} abgebrochen", "{count} キャンセル", "{count} 已取消"],
   "Modified files": ["Archivos modificados", "Fichiers modifiés", "Geänderte Dateien", "変更されたファイル", "已修改文件"],
+  "Image read": ["Imagen leída", "Image lue", "Bild gelesen", "読み取った画像", "已读取的图像"],
   "Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer": ["Enter para enviar · Shift+Enter nueva línea · Ctrl+Enter para dirigir", "Enter pour envoyer · Shift+Enter nouvelle ligne · Ctrl+Enter pour orienter", "Enter zum Senden · Shift+Enter für neue Zeile · Ctrl+Enter zum Steuern", "Enter で送信 · Shift+Enter で改行 · Ctrl+Enter で実行を誘導", "Enter 发送 · Shift+Enter 换行 · Ctrl+Enter 引导运行"],
   "Cancel transfer": ["Cancelar transferencia", "Annuler le transfert", "Übertragung abbrechen", "転送をキャンセル", "取消转移"],
   "Session configuration": ["Configuración de la sesión", "Configuration de la session", "Sitzungskonfiguration", "セッション設定", "会话配置"],
