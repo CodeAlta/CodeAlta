@@ -12,6 +12,9 @@ internal enum DesktopCloseAction
     /// <summary>The window is hidden; the application keeps running behind its tray icon.</summary>
     Hide,
 
+    /// <summary>The page asks whether the application keeps running behind its tray icon or exits.</summary>
+    Ask,
+
     /// <summary>The page is asked to exit: it has its own questions first (unsaved files), then asks to exit.</summary>
     RequestExit,
 
@@ -24,15 +27,17 @@ internal enum DesktopCloseAction
 
 /// <summary>
 /// A notice for the page: <c>exit-requested</c> (the tray's Exit, or a closed window that cannot stay hidden),
-/// <c>confirm-exit</c>, which carries the number of running sessions, and <c>entry-added</c> (the application
-/// was just added to the desktop's applications).
+/// <c>confirm-exit</c>, which carries the number of running sessions, <c>confirm-close</c> (the window was
+/// closed, and the user has not said yet what that does) and <c>entry-added</c> (the application was just added
+/// to the desktop's applications).
 /// </summary>
 internal sealed record DesktopShellEvent(string Kind, int RunningSessions);
 
 /// <summary>
 /// How the application lives beyond its window: an icon in the notification area (the menu bar on macOS, the
 /// status area on Linux) with <c>Open</c> and <c>Exit</c>, the application's menu bar on macOS, a window that
-/// can be closed without exiting, and a question before an exit that would stop running sessions.
+/// can be closed without exiting (the user is asked until an answer is remembered), and a question before an
+/// exit that would stop running sessions.
 /// </summary>
 internal sealed class DesktopShell
 {
@@ -96,8 +101,8 @@ internal sealed class DesktopShell
         }
     }
 
-    /// <summary>Whether closing the window leaves the application running.</summary>
-    internal bool CloseToTray { get { lock (_gate) return _preferences.CloseToTray; } }
+    /// <summary>What closing the window does: a question, until the user's answer is remembered.</summary>
+    internal DesktopCloseBehavior OnClose { get { lock (_gate) return _preferences.OnClose; } }
 
     /// <summary>
     /// True when this start added the application to the desktop (the Start Menu, the Applications folder,
@@ -129,12 +134,15 @@ internal sealed class DesktopShell
 
     /// <summary>
     /// What a close request leads to. Only what the user asks for can hide the window or wait for an answer;
-    /// the end of the session and anything that cannot be canceled exit at once.
+    /// the end of the session and anything that cannot be canceled exit at once. Where the window can stay
+    /// hidden, the user chooses: asked by the page until the answer is remembered, and hidden, as by default,
+    /// when no page can ask.
     /// </summary>
-    internal static DesktopCloseAction Decide(NeoWindowCloseReason reason, bool canCancel, bool closeToTray, bool canHide, bool hasPage)
+    internal static DesktopCloseAction Decide(NeoWindowCloseReason reason, bool canCancel, DesktopCloseBehavior onClose, bool canHide, bool hasPage)
     {
         if (!canCancel || reason is NeoWindowCloseReason.SessionEnd or NeoWindowCloseReason.System or NeoWindowCloseReason.Owner) return DesktopCloseAction.Exit;
-        if (reason is NeoWindowCloseReason.User or NeoWindowCloseReason.Programmatic && closeToTray && canHide) return DesktopCloseAction.Hide;
+        if (reason is NeoWindowCloseReason.User or NeoWindowCloseReason.Programmatic && canHide && onClose != DesktopCloseBehavior.Exit)
+            return onClose == DesktopCloseBehavior.Ask && hasPage ? DesktopCloseAction.Ask : DesktopCloseAction.Hide;
         return DecideUserExit(hasPage);
     }
 
@@ -217,7 +225,7 @@ internal sealed class DesktopShell
     {
         ArgumentNullException.ThrowIfNull(request);
         request.Cancel();
-        Apply(Decide(request.Reason, request.CanCancel, CloseToTray, CanHide, HasWatchers()), 0);
+        Apply(Decide(request.Reason, request.CanCancel, OnClose, CanHide, HasWatchers()), 0);
     }
 
     /// <summary>
@@ -242,12 +250,24 @@ internal sealed class DesktopShell
         _window.Activate();
     });
 
-    /// <summary>Changes whether closing the window leaves the application running, and keeps the choice.</summary>
-    internal void SetCloseToTray(bool value)
+    /// <summary>Changes what closing the window does, and keeps the choice.</summary>
+    internal void SetOnClose(DesktopCloseBehavior value)
     {
         DesktopPreferences preferences;
-        lock (_gate) preferences = _preferences = _preferences with { CloseToTray = value };
+        lock (_gate) preferences = _preferences = _preferences with { OnClose = value };
         preferences.Save(_dataRoot);
+    }
+
+    /// <summary>
+    /// Hides the window and leaves the application running: the user's answer to the question asked when the
+    /// window was closed.
+    /// </summary>
+    /// <returns>False when a hidden window could not be brought back: it stays as it is.</returns>
+    internal bool Hide()
+    {
+        if (!CanHide) return false;
+        Apply(DesktopCloseAction.Hide, 0);
+        return true;
     }
 
     /// <summary>Lets a page receive the shell's notices until the returned registration is disposed.</summary>
@@ -273,6 +293,11 @@ internal sealed class DesktopShell
             case DesktopCloseAction.ConfirmExit:
                 Show();
                 Publish(new("confirm-exit", running));
+                break;
+            case DesktopCloseAction.Ask:
+                // The window may have been closed from the taskbar while minimized: the question has to be seen.
+                Show();
+                Publish(new("confirm-close", 0));
                 break;
             default:
                 lock (_gate)

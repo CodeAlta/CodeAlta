@@ -11,11 +11,37 @@ import { desktopShell as demoShell } from "./demo-api";
 const imported: WorkspaceProject[] = [];
 const imports: WorkspaceOpenProjectRequest[] = [];
 // The folder dialog of the test: it answers with `pick` and records what it was asked.
+type ShellNotice = { kind: string; runningSessions: number };
 const fixture: { imports: WorkspaceOpenProjectRequest[]; pick: { status: string; path: string | null };
-  picks: { title: string | null; initialDirectory: string | null }[] } = { imports, pick: { status: "unavailable", path: null }, picks: [] };
+  picks: { title: string | null; initialDirectory: string | null }[];
+  /** What the page asked of the shell, in order, and the notice the test sends as the host does. */
+  shell: string[]; notify: (notice: ShellNotice) => void } = { imports, pick: { status: "unavailable", path: null }, picks: [], shell: [], notify: () => { } };
 Object.assign(window, { projectFocusFixture: fixture });
+// A shell where the application can keep running without its window, and nothing is remembered yet.
+const closing = { onClose: "ask" };
+const preferences = () => ({ status: "ok", onClose: closing.onClose, canKeepRunning: true, platform: "windows", entryAdded: false });
 export const desktopShell = {
   ...demoShell,
+  preferences: async () => preferences(),
+  setOnClose: async (request: { onClose: string | null }) => {
+    fixture.shell.push("setOnClose:" + request.onClose);
+    closing.onClose = request.onClose ?? closing.onClose;
+    return preferences();
+  },
+  hide: async () => { fixture.shell.push("hide"); return { status: "ok" }; },
+  exit: async () => { fixture.shell.push("exit"); return { status: "ok" }; },
+  watch: async (_request: object, options?: { signal?: AbortSignal }) => {
+    const waiting: ShellNotice[] = [];
+    let wake = () => { };
+    fixture.notify = notice => { waiting.push(notice); wake(); };
+    options?.signal?.addEventListener("abort", () => wake(), { once: true });
+    return (async function* () {
+      while (!options?.signal?.aborted) {
+        if (waiting.length === 0) await new Promise<void>(resolve => { wake = resolve; });
+        while (waiting.length > 0) yield waiting.shift()!;
+      }
+    })();
+  },
   pickFolder: async (request: { title: string | null; initialDirectory: string | null }) => { fixture.picks.push(request); return fixture.pick; },
 };
 export const workspace = {

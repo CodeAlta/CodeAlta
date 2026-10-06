@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 
 const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
-test("the Explorer keeps what is open; Ctrl+O focuses the opened project's prompt and cancellation restores its origin", { skip: !edge, timeout: 60_000 }, async () => {
+test("the Explorer keeps what is open; closing the window asks first; Ctrl+O focuses the opened project's prompt and cancellation restores its origin", { skip: !edge, timeout: 60_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-project-focus-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -131,6 +131,63 @@ test("the Explorer keeps what is open; Ctrl+O focuses the opened project's promp
     assert.equal(await expanded(), "false,false");
     await evaluate(`${scope("project")}.querySelector('.tree-twist').click()`);
     assert.equal(await expanded(), "true,false");
+
+    // Closing the window asks, until an answer is remembered, whether CodeAlta keeps running. Keep running has
+    // the focus, the arrows move between the answers around the ends, and Escape leaves everything as it was.
+    const closeQuestion = "document.querySelector('.close-window-dialog')";
+    const closeWindow = async () => {
+      await evaluate("projectFocusFixture.shell.length=0;projectFocusFixture.notify({kind:'confirm-close',runningSessions:0})");
+      assert.equal(await wait(`!!${closeQuestion} && document.activeElement?.textContent==='Keep running'`), true, "the default answer has the focus");
+    };
+    const arrow = async (name: "ArrowLeft" | "ArrowRight") => { await key(name, name, name === "ArrowLeft" ? 37 : 39); return evaluate("document.activeElement?.textContent"); };
+    const enter = async () => {
+      await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+      await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    };
+    const asked = () => evaluate("projectFocusFixture.shell.join()");
+    await evaluate(`window.closeOrigin=document.querySelector('button[aria-label="Collapse all"]');closeOrigin.focus()`);
+    await closeWindow();
+    assert.equal(await evaluate(`${closeQuestion}.textContent.includes('With its window closed, CodeAlta stays in the notification area')`), true);
+    assert.deepEqual([await arrow("ArrowLeft"), await arrow("ArrowLeft"), await arrow("ArrowLeft")], ["Exit CodeAlta", "Cancel", "Keep running"]);
+    assert.deepEqual([await arrow("ArrowRight"), await arrow("ArrowRight"), await arrow("ArrowRight")], ["Cancel", "Exit CodeAlta", "Keep running"]);
+    await key("Escape", "Escape", 27);
+    assert.equal(await wait(`!${closeQuestion} && document.activeElement===closeOrigin`), true, "Escape closes the question, not the window");
+    assert.equal(await asked(), "", "and asks nothing of the host");
+    // Enter keeps CodeAlta running, this once: nothing is remembered without the check box.
+    await closeWindow(); await enter();
+    assert.equal(await wait(`!${closeQuestion}`), true);
+    assert.equal(await asked(), "hide");
+    // With the check box the answer is remembered; Enter chooses the default from the check box as well.
+    await closeWindow();
+    await evaluate(`${closeQuestion}.querySelector('input[type=checkbox]').click();${closeQuestion}.querySelector('input[type=checkbox]').focus()`);
+    await enter();
+    assert.equal(await wait(`!${closeQuestion}`), true);
+    assert.equal(await asked(), "setOnClose:keep,hide");
+    // Exit is the page's own exit, which has its questions about unsaved files and running sessions.
+    await closeWindow();
+    await evaluate(`${closeQuestion}.querySelector('input[type=checkbox]').click();${closeQuestion}.querySelector('.bp6-intent-primary').focus()`);
+    assert.equal(await arrow("ArrowLeft"), "Exit CodeAlta");
+    await enter();
+    assert.equal(await wait(`!${closeQuestion} && projectFocusFixture.shell.length===2`), true);
+    assert.equal(await asked(), "setOnClose:exit,exit");
+    // The settings show what was remembered, and bring the question back.
+    await evaluate(`document.querySelector('button.activity-settings').click()`);
+    assert.equal(await wait("document.querySelector('#settings-on-close')?.value==='exit'"), true);
+    assert.deepEqual(await evaluate("Array.from(document.querySelector('#settings-on-close').options,option=>option.textContent)"), ["Ask each time", "Keep running", "Exit CodeAlta"]);
+    await evaluate(`(()=>{const select=document.querySelector('#settings-on-close');
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(select,'ask');
+      select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+    assert.equal(await wait("projectFocusFixture.shell.at(-1)==='setOnClose:ask' && document.querySelector('#settings-on-close').value==='ask'"), true);
+    // A window of the application in front does not hide the question: it is asked inside that window, and
+    // Escape closes the question alone.
+    await closeWindow();
+    assert.equal(await evaluate(`${closeQuestion}.closest('dialog[open]')?.contains(document.querySelector('#settings-on-close'))`), true);
+    await key("Escape", "Escape", 27);
+    assert.equal(await wait(`!${closeQuestion}`), true);
+    await frames();
+    assert.equal(await evaluate("!!document.querySelector('#settings-on-close') && !!document.activeElement?.closest('dialog[open]')"), true, "the settings stay open, with the keyboard");
+    await key("Escape", "Escape", 27);
+    assert.equal(await wait("!document.querySelector('#settings-on-close')"), true);
 
     // Cancel keeps the origin instead of focusing an unrelated project draft.
     await evaluate(`window.projectFocusOrigin=document.querySelector('button[aria-label="Add a project folder"]');projectFocusOrigin.focus()`);

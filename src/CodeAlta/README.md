@@ -125,7 +125,7 @@ disappear on refresh. `npm run build:demo` writes the same demo as static files 
   TUI. The app adds no desktop-specific state there.
 - `CodeAlta/desktop` in the local application data folder: `webview/` (web view data: open tabs,
   drafts, window geometry), `appearance.json` (theme of the start-up screen), `preferences.json`
-  (close-to-tray) and `update/` (the script and log of **Update and restart**).
+  (what closing the window does) and `update/` (the script and log of **Update and restart**).
 
 ## Tests
 

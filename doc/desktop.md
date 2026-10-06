@@ -55,12 +55,33 @@ plugin or session is started before it is valid.
 ### The application beyond its window
 
 CodeAlta keeps an icon in the notification area (the menu bar on macOS, the system tray on Linux)
-with **Open CodeAlta** and **Exit**; selecting the icon opens the window too. By default, closing
-the window hides it and leaves the application running there, so sessions keep running. Settings →
-Appearance → **Keep running when the window is closed** turns this off, and closing the window then
-exits. The choice is kept in `preferences.json` in the application data directory. Where the desktop
-has no status area (some Linux sessions), closing the window exits whatever the setting says; on
-macOS the Dock icon also brings the window back.
+with **Open CodeAlta** and **Exit**; selecting the icon opens the window too. Closing the window can
+hide it and leave the application running there, so sessions keep running. What closing does is the
+user's choice, kept in `preferences.json` in the application data directory (`onClose`: `ask`,
+`keep` or `exit`) and shown by Settings → Appearance → **When the window is closed**:
+
+- **Ask each time**, the choice of a new profile. The page asks **Keep CodeAlta running?**, saying
+  where CodeAlta stays, with **Keep running**, **Exit CodeAlta**, **Cancel** and a **Remember my
+  choice** check box. Keep running is the default: it has the focus, and Enter chooses it from the
+  check box too. The arrow keys move between the buttons, around the ends; Escape and Cancel leave
+  the window open and give the focus back to what had it. An answer given with the check box
+  becomes the setting; without it the question comes back at the next close.
+- **Keep running**: the window is hidden, without a question.
+- **Exit CodeAlta**: closing the window exits, with the questions of an exit (see below).
+
+Choosing **Ask each time** in the settings brings the question back. A `preferences.json` written
+before the question existed (`closeToTray`) is read as the choice it was, so nothing is asked of
+who had set the switch. Only closing the window is a question: **Exit** in the tray, Ctrl+Q,
+`alta --exit` and Quit on macOS exit. While an exit already asks about unsaved files or running
+sessions, closing the window asks nothing more. When no page can ask (it is being loaded, or it
+lost its host) the window is hidden, as it was by default. Before there is a workspace (start-up,
+the repair of a configuration file) and where the desktop has no status area (some Linux sessions),
+closing the window exits whatever the setting says; on macOS the Dock icon also brings the window
+back.
+
+The question, like the questions of an exit, is shown in front of an open window of the application
+(Settings, the session browser): those windows are modal dialogs in the browser's top layer, and a
+question added to the page itself would be behind them, out of reach (`frontLayer`).
 
 Starting `alta` while CodeAlta already runs with the same profile does not start a second one: the
 running one shows its window and comes to the front. `alta --exit` asks the running one to exit, as

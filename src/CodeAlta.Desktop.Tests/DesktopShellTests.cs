@@ -12,22 +12,28 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class DesktopShellTests
 {
     [TestMethod]
-    // Closing the window keeps the application in the tray, when there is one and the user wants it.
-    [DataRow(NeoWindowCloseReason.User, true, true, true, true, DesktopCloseAction.Hide)]
-    [DataRow(NeoWindowCloseReason.Programmatic, true, true, true, true, DesktopCloseAction.Hide)]
-    [DataRow(NeoWindowCloseReason.User, true, true, true, false, DesktopCloseAction.Hide)]
-    // Without a tray, or with the preference off, closing the window is an exit, which the page handles.
-    [DataRow(NeoWindowCloseReason.User, true, true, false, true, DesktopCloseAction.RequestExit)]
-    [DataRow(NeoWindowCloseReason.User, true, false, true, true, DesktopCloseAction.RequestExit)]
-    [DataRow(NeoWindowCloseReason.User, true, false, true, false, DesktopCloseAction.Exit)]
-    // Quitting the application (the macOS menu) is never a hide.
-    [DataRow(NeoWindowCloseReason.ApplicationQuit, true, true, true, true, DesktopCloseAction.RequestExit)]
+    // Closing the window keeps the application in the tray, when there is one and the user chose it.
+    [DataRow(NeoWindowCloseReason.User, true, DesktopCloseBehavior.KeepRunning, true, true, DesktopCloseAction.Hide)]
+    [DataRow(NeoWindowCloseReason.Programmatic, true, DesktopCloseBehavior.KeepRunning, true, true, DesktopCloseAction.Hide)]
+    [DataRow(NeoWindowCloseReason.User, true, DesktopCloseBehavior.KeepRunning, true, false, DesktopCloseAction.Hide)]
+    // Until the user has chosen, the page asks; without a page to ask, the window is hidden, as by default.
+    [DataRow(NeoWindowCloseReason.User, true, DesktopCloseBehavior.Ask, true, true, DesktopCloseAction.Ask)]
+    [DataRow(NeoWindowCloseReason.Programmatic, true, DesktopCloseBehavior.Ask, true, true, DesktopCloseAction.Ask)]
+    [DataRow(NeoWindowCloseReason.User, true, DesktopCloseBehavior.Ask, true, false, DesktopCloseAction.Hide)]
+    // Without a tray there is nothing to choose, and the user may have chosen to exit: the page handles the exit.
+    [DataRow(NeoWindowCloseReason.User, true, DesktopCloseBehavior.KeepRunning, false, true, DesktopCloseAction.RequestExit)]
+    [DataRow(NeoWindowCloseReason.User, true, DesktopCloseBehavior.Ask, false, true, DesktopCloseAction.RequestExit)]
+    [DataRow(NeoWindowCloseReason.User, true, DesktopCloseBehavior.Exit, true, true, DesktopCloseAction.RequestExit)]
+    [DataRow(NeoWindowCloseReason.User, true, DesktopCloseBehavior.Exit, true, false, DesktopCloseAction.Exit)]
+    // Quitting the application (the macOS menu) is never a hide, nor a question about the window.
+    [DataRow(NeoWindowCloseReason.ApplicationQuit, true, DesktopCloseBehavior.KeepRunning, true, true, DesktopCloseAction.RequestExit)]
+    [DataRow(NeoWindowCloseReason.ApplicationQuit, true, DesktopCloseBehavior.Ask, true, true, DesktopCloseAction.RequestExit)]
     // What cannot wait for an answer exits at once.
-    [DataRow(NeoWindowCloseReason.SessionEnd, true, true, true, true, DesktopCloseAction.Exit)]
-    [DataRow(NeoWindowCloseReason.System, true, true, true, true, DesktopCloseAction.Exit)]
-    [DataRow(NeoWindowCloseReason.User, false, true, true, true, DesktopCloseAction.Exit)]
-    public void ClosingTheWindow_HidesItOrExits(NeoWindowCloseReason reason, bool canCancel, bool closeToTray, bool canHide, bool hasPage, object expected)
-        => Assert.AreEqual((DesktopCloseAction)expected, DesktopShell.Decide(reason, canCancel, closeToTray, canHide, hasPage));
+    [DataRow(NeoWindowCloseReason.SessionEnd, true, DesktopCloseBehavior.Ask, true, true, DesktopCloseAction.Exit)]
+    [DataRow(NeoWindowCloseReason.System, true, DesktopCloseBehavior.KeepRunning, true, true, DesktopCloseAction.Exit)]
+    [DataRow(NeoWindowCloseReason.User, false, DesktopCloseBehavior.Ask, true, true, DesktopCloseAction.Exit)]
+    public void ClosingTheWindow_AsksHidesItOrExits(NeoWindowCloseReason reason, bool canCancel, object onClose, bool canHide, bool hasPage, object expected)
+        => Assert.AreEqual((DesktopCloseAction)expected, DesktopShell.Decide(reason, canCancel, (DesktopCloseBehavior)onClose, canHide, hasPage));
 
     [TestMethod]
     public void Exit_AsksOnlyWhileSessionsRun()
@@ -42,23 +48,44 @@ public sealed class DesktopShellTests
     }
 
     [TestMethod]
-    public void Preferences_KeepTheApplicationRunningByDefault_AndRememberTheChoice()
+    public void Preferences_AskByDefault_AndRememberTheChoice()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-preferences-" + Guid.NewGuid().ToString("N"));
+        var file = Path.Combine(root, "preferences.json");
         try
         {
-            Assert.IsTrue(DesktopPreferences.Load(root).CloseToTray);
-            Assert.IsTrue(new DesktopPreferences(CloseToTray: false).Save(root));
-            Assert.IsFalse(DesktopPreferences.Load(root).CloseToTray);
-            Assert.IsTrue(new DesktopPreferences(CloseToTray: true).Save(root));
-            Assert.IsTrue(DesktopPreferences.Load(root).CloseToTray);
+            Assert.AreEqual(DesktopCloseBehavior.Ask, DesktopPreferences.Load(root).OnClose);
+            foreach (var behavior in new[] { DesktopCloseBehavior.KeepRunning, DesktopCloseBehavior.Exit, DesktopCloseBehavior.Ask })
+            {
+                Assert.IsTrue(new DesktopPreferences(behavior).Save(root));
+                Assert.AreEqual(behavior, DesktopPreferences.Load(root).OnClose);
+            }
+            Assert.AreEqual("{\"onClose\":\"ask\"}", File.ReadAllText(file));
+            // The switch of the versions before the question was the user's choice: it is kept, and nothing is asked.
+            File.WriteAllText(file, "{\"closeToTray\":false}");
+            Assert.AreEqual(DesktopCloseBehavior.Exit, DesktopPreferences.Load(root).OnClose);
+            File.WriteAllText(file, "{\"closeToTray\":true}");
+            Assert.AreEqual(DesktopCloseBehavior.KeepRunning, DesktopPreferences.Load(root).OnClose);
             // A file that is not preferences gives the defaults; it is never an error at start-up.
-            File.WriteAllText(Path.Combine(root, "preferences.json"), "{\"closeToTray\":\"no\"}");
-            Assert.IsTrue(DesktopPreferences.Load(root).CloseToTray);
-            File.WriteAllText(Path.Combine(root, "preferences.json"), "not json");
-            Assert.IsTrue(DesktopPreferences.Load(root).CloseToTray);
+            foreach (var other in new[] { "{\"closeToTray\":\"no\"}", "{\"onClose\":\"later\"}", "{\"onClose\":true}", "[\"exit\"]", "not json" })
+            {
+                File.WriteAllText(file, other);
+                Assert.AreEqual(DesktopCloseBehavior.Ask, DesktopPreferences.Load(root).OnClose, other);
+            }
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
+    public void CloseBehavior_HasOneNameForTheFileAndThePage()
+    {
+        foreach (var (behavior, name) in new[] { (DesktopCloseBehavior.Ask, "ask"), (DesktopCloseBehavior.KeepRunning, "keep"), (DesktopCloseBehavior.Exit, "exit") })
+        {
+            Assert.AreEqual(name, DesktopPreferences.Name(behavior));
+            Assert.IsTrue(DesktopPreferences.TryParse(name, out var parsed));
+            Assert.AreEqual(behavior, parsed);
+        }
+        foreach (var other in new[] { null, "", "Ask", "tray", "keep " }) Assert.IsFalse(DesktopPreferences.TryParse(other, out _), other);
     }
 
     [TestMethod]
@@ -66,8 +93,12 @@ public sealed class DesktopShellTests
     {
         var service = new DesktopShellService();
         Assert.AreEqual("unavailable", service.Preferences(new()).Status);
-        Assert.IsFalse(service.SetCloseToTray(new(true)).CloseToTray);
+        Assert.AreEqual("ask", service.SetOnClose(new("exit")).OnClose);
+        Assert.AreEqual("unavailable", service.Hide(new()).Status);
         Assert.AreEqual("unavailable", service.Exit(new(Confirmed: true)).Status);
+        // What the page reads: the names of the generated client.
+        Assert.AreEqual("""{"status":"unavailable","onClose":"ask","canKeepRunning":false,"platform":"windows","entryAdded":false}""",
+            JsonSerializer.Serialize(service.Preferences(new()) with { Platform = "windows" }, DesktopJsonContext.Default.DesktopShellPreferences));
     }
 
     [TestMethod]

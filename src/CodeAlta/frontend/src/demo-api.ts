@@ -106,9 +106,9 @@ export const appUpdate = Object.freeze({
   openReleaseNotes: async () => ({ status: "unavailable" }), install: async () => ({ status: "unavailable" }), cancelInstallation: async () => ({ status: "unavailable" }),
 });
 export const desktopShell = Object.freeze({
-  preferences: async () => ({ status: "unavailable", closeToTray: false, canKeepRunning: false, platform: "windows", entryAdded: false }),
-  setCloseToTray: async () => ({ status: "unavailable", closeToTray: false, canKeepRunning: false, platform: "windows", entryAdded: false }),
-  exit: async () => ({ status: "unavailable" }), watch: unavailable,
+  preferences: async () => ({ status: "unavailable", onClose: "ask", canKeepRunning: false, platform: "windows", entryAdded: false }),
+  setOnClose: async () => ({ status: "unavailable", onClose: "ask", canKeepRunning: false, platform: "windows", entryAdded: false }),
+  hide: async () => ({ status: "unavailable" }), exit: async () => ({ status: "unavailable" }), watch: unavailable,
   pickFolder: async () => ({ status: "unavailable", path: null }),
 });
 export const providerLogin = Object.freeze({ status: unavailable, login: unavailable, logout: unavailable });

@@ -295,7 +295,7 @@ The **Appearance** page sets:
 - the theme: **Dark**, **Light**, or **System**;
 - one of 13 color schemes, each with a dark and a light variant;
 - how projects are sorted and how many recent sessions are listed per project;
-- whether CodeAlta keeps running in the notification area when the window is closed.
+- what closing the window does: ask, keep CodeAlta running in the notification area, or exit.
 
 <div class="row g-3 my-4">
   <div class="col-md-6">
@@ -392,9 +392,14 @@ When the startup update check finds a newer package on NuGet, CodeAlta shows a n
 
 ### Notification area (desktop)
 
-Closing the desktop window keeps CodeAlta and its sessions running, with an icon in the notification area. Click the icon to show the window, or use its menu to exit. `Ctrl+Q` exits directly. If sessions are still running, CodeAlta asks before exiting because exiting stops them.
+Closing the desktop window asks whether CodeAlta keeps running or exits. **Keep running** hides the window and leaves CodeAlta and its sessions running, with an icon in the notification area: click the icon to show the window, or use its menu to exit. Tick **Remember my choice** to stop being asked.
 
-Turn off **Keep running when the window is closed** in **Settings > Appearance** to exit when the window is closed.
+<figure class="alta-figure my-4" style="max-width: 30rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-close-question.webp" alt="CodeAlta Desktop asking Keep CodeAlta running? with Cancel, Exit CodeAlta and Keep running buttons and a Remember my choice check box" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Enter keeps CodeAlta running, Escape leaves the window open.</figcaption>
+</figure>
+
+**Settings > Appearance > When the window is closed** changes the choice later. `Ctrl+Q` exits directly. If sessions are still running, CodeAlta asks before exiting because exiting stops them.
 
 ## Plugin management
 

@@ -1,4 +1,6 @@
+import { useRef } from "react";
 import { Button, Dialog, DialogBody, DialogFooter } from "@blueprintjs/core";
+import { frontLayer } from "../frontLayer";
 import type { MessageKey } from "../localization";
 import { useShellLanguage } from "../shellLanguage";
 
@@ -23,7 +25,10 @@ export function UnsavedExitDialog({ names, busy = false, onSave, onDiscard, onCa
   names: readonly string[]; busy?: boolean; onSave: () => void; onDiscard: () => void; onCancel: () => void;
 }) {
   const { t } = useShellLanguage();
-  return <Dialog isOpen className="unsaved-file-dialog" title={t("Unsaved changes")} isCloseButtonShown={false} canOutsideClickClose={false} onClose={onCancel}>
+  // An exit can be asked for while a window of the application is open: the question is shown in front of it.
+  const layer = useRef(frontLayer());
+  return <Dialog isOpen className="unsaved-file-dialog" title={t("Unsaved changes")} isCloseButtonShown={false} canOutsideClickClose={false}
+    portalContainer={layer.current} onClose={onCancel}>
     <DialogBody>{t("Save the changes to {name} before exiting?", { name: names.join(", ") })}</DialogBody>
     <DialogFooter actions={<>
       <Button disabled={busy} onClick={onCancel}>{t("Cancel")}</Button>

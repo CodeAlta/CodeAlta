@@ -10,7 +10,8 @@ import { colorSchemeAttribute } from "./colorSchemes";
 import { dismissStartupScreen, rememberAppearance } from "./startupScreen";
 import { ConfigRecoveryScreen } from "./ConfigRecoveryScreen";
 import { RunningExitDialog } from "./RunningExitDialog";
-import { entryAddedNotice } from "./desktopShell";
+import { CloseWindowDialog } from "./CloseWindowDialog";
+import { closeBehavior, entryAddedNotice, type CloseBehavior } from "./desktopShell";
 import { showToast } from "./appToaster";
 import { availableUpdate, installedNotice, UpdateNotice } from "./UpdateNotice";
 import {
@@ -740,6 +741,8 @@ function App() {
   // Exit asks first while files hold unsaved edits; saving stops at the first file that could not be saved.
   const [exiting, setExiting] = useState<{ tabs: FileTab[]; busy: boolean } | null>(null);
   function exitApplication() {
+    // An exit asked for anywhere answers the question about the closed window.
+    setCloseQuestion(false);
     const unsaved = fileTabs.open.filter(tab => fileEditors.dirty(fileTabKey(tab)));
     if (unsaved.length === 0) { quitApplication(); return; }
     setExiting(current => current?.busy ? current : { tabs: unsaved, busy: false });
@@ -765,6 +768,11 @@ function App() {
   // requests to exit (Exit in the tray) or to ask before an exit that stops running sessions.
   const [shellPreferences, setShellPreferences] = useState<DesktopShellPreferences | null>(null);
   const [exitQuestionFor, setExitQuestionFor] = useState<number | null>(null);
+  // Closing the window asks, until the answer is remembered, whether CodeAlta keeps running behind its icon.
+  // A question about an exit already on screen is answered first.
+  const [closeQuestion, setCloseQuestion] = useState(false);
+  const exitPending = useRef(false);
+  exitPending.current = exiting !== null || exitQuestionFor !== null;
   // One look for a newer version per run, as the terminal application does: a newer one is announced once,
   // with the command that installs it; Settings > About keeps the result.
   const [appUpdateResult, setAppUpdateResult] = useState<AppUpdateResponse | null>(null);
@@ -828,15 +836,26 @@ function App() {
           if (notice.kind === "entry-added") announceEntry(currentPlatform.current);
           else if (notice.kind === "exit-requested") requestExit.current();
           else if (notice.kind === "confirm-exit") setExitQuestionFor(notice.runningSessions);
+          else if (notice.kind === "confirm-close" && !exitPending.current) setCloseQuestion(true);
         }
       } catch { /* The bridge is gone; the window's own close still works. */ }
     })();
     return () => abort.abort();
   }, [status?.hostEpoch]);
-  function setCloseToTray(enabled: boolean) {
-    setShellPreferences(current => current && { ...current, closeToTray: enabled });
-    void desktopShell.setCloseToTray({ enabled }, { timeoutMilliseconds: 8_000 })
-      .then(value => { if (value.status === "ok") setShellPreferences(value); }, () => { /* The switch shows what was asked. */ });
+  function setOnClose(onClose: CloseBehavior) {
+    setShellPreferences(current => current && { ...current, onClose });
+    void desktopShell.setOnClose({ onClose }, { timeoutMilliseconds: 8_000 })
+      .then(value => { if (value.status === "ok") setShellPreferences(value); }, () => { /* The setting shows what was asked. */ });
+  }
+  // The answers to the question about the closed window; a remembered one is what closing does from then on.
+  function keepRunning(remember: boolean) {
+    setCloseQuestion(false);
+    if (remember) setOnClose("keep");
+    void desktopShell.hide({}, { timeoutMilliseconds: 8_000 }).catch(() => { /* The window stays open. */ });
+  }
+  function exitOnClose(remember: boolean) {
+    if (remember) setOnClose("exit");
+    exitApplication();
   }
   async function saveAndCloseFile(tab: FileTab) {
     setFileClosing({ tab, busy: true });
@@ -2214,7 +2233,7 @@ function App() {
       </div>
     {settingsOpen && <SettingsOverlay section={settingsSection} onSection={navigate} onClose={closeSettings}>
       {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, shownTheme, colorScheme, setColorScheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); },
-        keepRunning: shellPreferences?.canKeepRunning ? { enabled: shellPreferences.closeToTray, platform: shellPreferences.platform, set: setCloseToTray } : null }} />
+        closing: shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, set: setOnClose } : null }} />
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}
         update={owned ? appUpdateResult : undefined} onOpenReleaseNotes={openReleaseNotes} onInstallUpdate={installUpdate} />
       : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
@@ -2289,6 +2308,8 @@ function App() {
       // A file picked for a project whose editor is not open opens it on that file alone, without the files of the project.
       onOpen={path => { setDialog(null); openEditor(filePickerProject, { path, line: null, column: null, explorer: false }); }}
       onOpenEditor={() => { setDialog(null); openProjectEditor(filePickerProject); }} />}
+    {closeQuestion && <CloseWindowDialog platform={shellPreferences?.platform ?? "windows"} onKeepRunning={keepRunning} onExit={exitOnClose}
+      onCancel={() => setCloseQuestion(false)} />}
     {exiting && <UnsavedExitDialog names={exiting.tabs.flatMap(tab => fileEditors.unsaved(fileTabKey(tab)))} busy={exiting.busy}
       onSave={() => void saveAllAndExit(exiting.tabs)} onDiscard={() => { setExiting(null); quitApplication(); }}
       onCancel={() => { if (!exiting.busy) { setExiting(null); exitCanceled(); } }} />}

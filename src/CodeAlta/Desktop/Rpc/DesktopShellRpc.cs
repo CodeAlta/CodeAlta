@@ -5,9 +5,9 @@ using NeoAstra.Rpc;
 namespace CodeAlta.Desktop.Rpc;
 
 /// <summary>
-/// The page's side of how the application lives beyond its window: whether closing the window leaves it
-/// running, an explicit exit, the question the page asks before an exit that would stop running sessions, and
-/// the operating system's folder dialog.
+/// The page's side of how the application lives beyond its window: what closing the window does and the
+/// question the page asks about it, an explicit exit, the question the page asks before an exit that would stop
+/// running sessions, and the operating system's folder dialog.
 /// </summary>
 [NeoRpcService("desktopShell", Version = 1)]
 internal sealed class DesktopShellService
@@ -26,7 +26,7 @@ internal sealed class DesktopShellService
         _shell = shell;
     }
 
-    /// <summary>Whether closing the window leaves the application running, and whether it can.</summary>
+    /// <summary>What closing the window does, and whether the application can keep running without it.</summary>
     [NeoRpcMethod("preferences")]
     public DesktopShellPreferences Preferences(DesktopShellRequest request)
     {
@@ -34,13 +34,27 @@ internal sealed class DesktopShellService
         return Current();
     }
 
-    /// <summary>Changes whether closing the window leaves the application running.</summary>
-    [NeoRpcMethod("setCloseToTray")]
-    public DesktopShellPreferences SetCloseToTray(DesktopShellCloseToTrayRequest request)
+    /// <summary>
+    /// Changes what closing the window does: <c>ask</c>, <c>keep</c> (the application keeps running) or
+    /// <c>exit</c>. Anything else changes nothing.
+    /// </summary>
+    [NeoRpcMethod("setOnClose")]
+    public DesktopShellPreferences SetOnClose(DesktopShellOnCloseRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (_shell is not null && request.Enabled is { } enabled) _shell.SetCloseToTray(enabled);
+        if (_shell is not null && DesktopPreferences.TryParse(request.OnClose, out var behavior)) _shell.SetOnClose(behavior);
         return Current();
+    }
+
+    /// <summary>
+    /// Hides the window and leaves the application running: the answer to the <c>confirm-close</c> notice of
+    /// <see cref="Watch"/>.
+    /// </summary>
+    [NeoRpcMethod("hide")]
+    public DesktopShellHideResponse Hide(DesktopShellRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return new(_shell is not null && _shell.Hide() ? "ok" : "unavailable");
     }
 
     /// <summary>
@@ -103,15 +117,19 @@ internal sealed class DesktopShellService
     }
 
     private DesktopShellPreferences Current() => _shell is null
-        ? new("unavailable", false, false, Platform, false)
-        : new("ok", _shell.CloseToTray, _shell.CanHide, Platform, _shell.EntryAdded);
+        ? new("unavailable", DesktopPreferences.Name(DesktopCloseBehavior.Ask), false, Platform, false)
+        : new("ok", DesktopPreferences.Name(_shell.OnClose), _shell.CanHide, Platform, _shell.EntryAdded);
 
     private static string Platform => OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
 }
 
 internal sealed record DesktopShellRequest;
 
-internal sealed record DesktopShellCloseToTrayRequest(bool? Enabled);
+/// <param name="OnClose"><c>ask</c>, <c>keep</c> or <c>exit</c>.</param>
+internal sealed record DesktopShellOnCloseRequest(string? OnClose);
+
+/// <summary><c>ok</c>, or <c>unavailable</c> where the window cannot stay hidden.</summary>
+internal sealed record DesktopShellHideResponse(string Status);
 
 /// <param name="Title">The title of the dialog; a default when blank.</param>
 /// <param name="InitialDirectory">The folder shown first; ignored unless it is an existing absolute folder.</param>
@@ -131,8 +149,11 @@ internal sealed record DesktopShellExitRequest(bool Confirmed);
 internal sealed record DesktopShellExitResponse(string Status);
 
 /// <param name="Status"><c>ok</c> or <c>unavailable</c>.</param>
-/// <param name="CloseToTray">Closing the window leaves the application running.</param>
+/// <param name="OnClose">
+/// What closing the window does: <c>ask</c> (the page asks, on a <c>confirm-close</c> notice), <c>keep</c> (the
+/// application keeps running) or <c>exit</c>.
+/// </param>
 /// <param name="CanKeepRunning">The platform has somewhere for the application to stay (a tray icon, the Dock).</param>
 /// <param name="Platform"><c>windows</c>, <c>macos</c> or <c>linux</c>: what that place is called.</param>
 /// <param name="EntryAdded">This start added the application to the desktop's applications.</param>
-internal sealed record DesktopShellPreferences(string Status, bool CloseToTray, bool CanKeepRunning, string Platform, bool EntryAdded);
+internal sealed record DesktopShellPreferences(string Status, string OnClose, bool CanKeepRunning, string Platform, bool EntryAdded);
