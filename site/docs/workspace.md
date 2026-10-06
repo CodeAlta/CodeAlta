@@ -15,7 +15,7 @@ The workspace is the same in both apps. Use the **Desktop / TUI** switch on a sc
 The main screen has four important areas:
 
 - **Navigator/sidebar**: projects, their sessions and child sessions, running work, and navigator actions.
-- **Workspace tabs**: session tabs, the code editor and the changes of a project share the same tab strip.
+- **Workspace tabs**: session tabs, the code editor, the changes and the terminals of a project share the same tab strip.
 - **Timeline**: user messages, assistant messages, reasoning/status updates, tool calls, results, statistics cards, compaction notices, and modified-file summaries.
 - **Prompt bar**: prompt editor, queue strip, agent prompt selector, provider/model/reasoning selectors, context usage, compact button, and status text.
 
@@ -35,7 +35,7 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. Use `Ctrl+T` (or 
 </figure>
 
 - Click the arrow of a project to show or hide its sessions. Several projects can stay open, and CodeAlta shows them the same way at the next start. **Collapse all** at the top closes them all.
-- Point at a project to see its buttons. The star adds it to **Favorites**, at the top of the list. The next two open its [changes](#changes-desktop) and its [code editor](#code-editor), and stay visible while that tab is open.
+- Point at a project to see its buttons. The star adds it to **Favorites**, at the top of the list. The next two open its [changes](#changes-desktop) and its [code editor](#code-editor), and stay visible while that tab is open. The last one opens a [terminal](#terminal-desktop).
 - The `…` button of a project or a session, or a right-click, opens its menu.
 
 ### Command palette
@@ -237,6 +237,43 @@ The Changes tab shows what changed in the git repository of a project. Open it b
 The `…` menu of the diff has **Hide unchanged lines**, **Ignore whitespace changes**, **Wrap lines** and **Copy path**. **Open file** opens the file in the [code editor](#code-editor).
 
 An agent can open this tab for you with `alta diff show`, for example when it has finished a change and wants you to review it.
+
+## Terminal (desktop)
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-terminal.webp" alt="CodeAlta Desktop with a session at the top, a terminal under it and the terminals of the project listed in the sidebar" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A terminal under a session, and the terminals of the project in the sidebar.</figcaption>
+</figure>
+
+CodeAlta Desktop has terminals: your own shell, in a tab under your sessions.
+
+- Click the terminal button of a project in the sidebar, or press ``Ctrl+` ``, to open a terminal in the folder of the project. The terminal button of the prompt bar opens one in the folder of the session.
+- A terminal keeps running when you close its tab. The terminals of a project are listed under its sessions: click one to show it again, rename it, or end it.
+- The list shows the folder the shell is in, and a spinner while a command runs.
+- `Ctrl+C` copies the selection, or interrupts the program when nothing is selected. `Ctrl+V` pastes and `Ctrl+F` finds text.
+- The options button of a terminal sets the cursor, the text size, **Copy on select**, the number of lines kept, and the shell new terminals start.
+
+<figure class="alta-figure my-4" style="max-width: 30rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-terminal-options.webp" alt="Options of a terminal in CodeAlta Desktop: cursor, blink, text size, copy on select, scrollback and shell integration" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The options of the terminals.</figcaption>
+</figure>
+
+The default shell is PowerShell on Windows and your login shell on macOS and Linux. On Windows you can also choose the Command Prompt, Git Bash or a WSL distribution. CodeAlta comes with a font that has the icons many prompts use, so there is nothing to install.
+
+### Terminals for agents
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-terminal-agent.webp" alt="CodeAlta Desktop with a session that ran a command in a terminal it created, and that terminal under the session" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A session runs a command in a terminal it created, and reads the result.</figcaption>
+</figure>
+
+An agent can use the same terminals: create one, type in it, wait for a command and read what it printed. Ask for it in your own words, for example:
+
+```text
+Start the dev server in a terminal and tell me when it is ready.
+```
+
+You see what the agent types, and you can type in the terminal yourself. A terminal an agent created has a small robot mark in the list.
 
 ## Model Providers
 

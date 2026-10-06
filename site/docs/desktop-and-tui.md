@@ -77,6 +77,15 @@ The `</>` button of a project in the sidebar, or `Ctrl+E` `Ctrl+E`, opens the co
   <figcaption class="small text-secondary mt-2">A session and a file of the project, side by side.</figcaption>
 </figure>
 
+### A terminal next to your sessions
+
+The terminal button of a project in the sidebar, or ``Ctrl+` ``, opens a terminal in the folder of the project. It keeps running when its tab is closed, and agents can use it too. See [Terminal](workspace.md#terminal-desktop).
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-terminal.webp" alt="CodeAlta Desktop with a session at the top and a terminal under it" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A terminal under a session, and the terminals of the project in the sidebar.</figcaption>
+</figure>
+
 ### Review changes
 
 Click the `+` / `−` numbers in the prompt bar, or the changes button of a project in the sidebar, to open the Changes tab of the project. It lists the changed files and recent commits and shows a syntax-highlighted diff of the selected file. See [Changes](workspace.md#changes-desktop).
@@ -121,6 +130,7 @@ When a new version is available, the desktop app shows a notice with **Update an
 | Session tabs | Drag to reorder, split and merge panes | One visible tab at a time |
 | Code editor | One tab per project with its files, a search in files and file tabs | One editor tab per file |
 | Git changes | Changes tab with the changed files, recent commits and a diff | Not available |
+| Terminal | Terminals in tabs, listed in the sidebar; agents can use them | Not available |
 | Favorite projects | Listed first in the sidebar | Not available |
 | Settings | One window with a page per area | One dialog per area |
 | Appearance | Light, dark or system theme, 13 color schemes | Terminal themes |

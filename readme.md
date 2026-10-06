@@ -28,7 +28,7 @@ See [Getting Started](https://codealta.github.io/docs/getting-started/) for requ
 
 ## ✨ Features
 
-- **Two apps, the same agents**: CodeAlta Desktop has session tabs you can drag and split, a code editor for your projects, and every setting in one window. CodeAlta TUI is a keyboard-first terminal UI. Both share the `~/.alta` profile, so a session started in one can be continued in the other.
+- **Two apps, the same agents**: CodeAlta Desktop has session tabs you can drag and split, a code editor and terminals for your projects, and every setting in one window. CodeAlta TUI is a keyboard-first terminal UI. Both share the `~/.alta` profile, so a session started in one can be continued in the other.
 - **Sessions on your projects**: sessions are saved on disk. Queue prompts, steer a running turn, and let a session delegate tasks to child sessions.
 - **The models you already have**: subscriptions and API keys for OpenAI, Anthropic, Google, Mistral, xAI, Azure OpenAI, and OpenAI-compatible servers.
 - **Everything the agent did**: tool calls, file diffs, and context usage are in the timeline and open with their details.
