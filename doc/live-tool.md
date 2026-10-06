@@ -94,6 +94,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | `plugin` | Inspect active plugin runtime state. |
 | `diff` | Show the changed files of a project to the user. Only in CodeAlta Desktop. |
 | `editor` | Show the files of a project to the user in the code editor. Only in CodeAlta Desktop. |
+| `terminal` | List, create, read, type in, rename, show and close the terminals of the window. Only in CodeAlta Desktop. |
 
 `note` is a compatibility alias for `notes`. Prefer the plural `notes` group because it names the sidebar panel and the single sticky notes document. `skills activate` and `skills_activate` are compatibility aliases for `skill activate`. Prefer the singular `skill` group in new prompts and docs.
 
@@ -337,6 +338,67 @@ no window is open.
 Like `diff`, the group exists only where a host registers its view (`IAltaEditorView`), which the desktop
 host does: in the terminal UI and the standalone tool it is not among the commands, their help or
 `alta tool list`.
+
+## Terminal commands
+
+`alta terminal` uses the terminals of the CodeAlta Desktop window: the shells the user sees in tabs and
+in the **Terminals** list of a project. A terminal keeps running in the window, where the user can
+watch it and type in it too: it is for what has to stay up (a dev server, a watcher, a REPL) or what the
+user should see. For a command that runs and ends, the shell tool of the agent is simpler.
+
+```text
+alta terminal list [--project <project>]
+alta terminal shells
+alta terminal create [--project <project>] [--cwd <folder>] [--shell <id>] [--title <text>] [--command <line>] [--show]
+alta terminal read <terminal-id> [--lines <n>]
+alta terminal commands <terminal-id> [--last <n>] [--output]
+alta terminal send <terminal-id> [--text <text> | --stdin] [--key <name>]... [--enter] [--wait <seconds>]
+alta terminal rename <terminal-id> [<title>]
+alta terminal show <terminal-id>
+alta terminal close <terminal-id>
+```
+
+- `list` emits one `alta.terminal` per terminal, in the order they were created: `id`, `title`, `state`,
+  `folder` (where the shell is now), `shell`, `projectId`, `sessionId`, `processId`, the size of the
+  screen, `tab` and `createdBy` (`session` or `user`). `state` is `idle` (the shell is at its prompt),
+  `busy` (it runs `command`), `running` (the shell does not say which) or `exited` (with `exitCode`).
+  `tab` is `visible`, `open` or `closed`: a terminal runs with or without a tab.
+- `create` starts a shell and emits `alta.terminal.created`. The terminal is listed under the project
+  of the calling session (or `--project`, or the catalog project of the cwd) and starts in the working
+  directory of the calling session (or `--cwd`, or the project folder). `--shell` is an id of
+  `alta terminal shells`, whose first entry is the default. `--command` types a command line and Enter
+  in the new terminal, and `--show` opens its tab. A terminal a session creates stays until it is
+  closed, even once its shell has exited, so that it can still be read.
+- `read` emits `alta.terminal.text`: the rows of the screen, or with `--lines` the last lines with those
+  that scrolled off it (the host keeps 10,000). The text has no colors. A program that draws the whole
+  screen (an editor, a pager) is read as its screen (`fullScreen`).
+- `commands` lists the last commands the shell ran (`alta.terminal.command`: the command line, the
+  folder, `state`, `exitCode`, and with `--output` what it printed). Only a shell that reports its
+  commands has some: one whose `state` is `idle` or `busy`.
+- `send` types as the keyboard of the terminal would: the text (an end of line is Enter; several lines
+  are a paste for a program that tells pastes from typing), then the keys, then Enter with `--enter`.
+  Keys are named `enter`, `tab`, `escape`, `space`, `backspace`, `delete`, `insert`, `up`, `down`,
+  `left`, `right`, `home`, `end`, `pageup`, `pagedown`, `f1` to `f12`, or one character, each with
+  `ctrl+`, `alt+` and `shift+` (`ctrl+c`, `shift+tab`). With `--wait`, a shell that reports its commands
+  is waited for until the command has ended, and `alta.terminal.sent` carries its `output` and
+  `commandExitCode`; any other terminal is waited for until it has printed nothing for a moment, and
+  `output` is what it showed since. When the time runs out, `settled` is false, the command keeps
+  running, and `nextStep` says how to read the terminal later.
+- `rename` gives a title, or without one gives back the title the terminal has by itself: its folder.
+- `show` opens the tab of a terminal for the user, and answers `view.unavailable` when no window is open.
+- `close` ends the shell and what runs in it; the terminal is gone.
+
+What a call returns is bounded: when a text is longer than the output budget of the call
+(`maxOutputBytes`), its last lines are kept and `truncated` (or `outputTruncated`) is true.
+
+`terminal.notFound` answers an id that is not a terminal, `terminal.ended` typing in a terminal whose
+program has ended, and `terminal.inputDenied` (exit code 4) typing on a host that has the user review
+the commands of its sessions (`--review-owned-command-permissions`): `send` and `create --command` are
+refused there, everything else works.
+
+Like `diff` and `editor`, the group exists only where a host registers its service (`IAltaTerminals`),
+which the desktop host does: in the terminal UI and the standalone tool it is not among the commands,
+their help or `alta tool list`.
 
 ## Skill commands
 

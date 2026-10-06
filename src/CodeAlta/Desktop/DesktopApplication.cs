@@ -420,7 +420,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 editorView = new DesktopEditorView();
                 terminals = new Terminals.DesktopTerminals(DesktopCommandLine.Version, Path.Combine(options.DataRoot, "terminal"));
                 shell.BusyTerminals = () => terminals.Busy;
-                DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView);
+                // A host that has the user review the commands of its sessions lets no session type in a terminal.
+                DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
+                    new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions));
                 workspacePrepared.TrySetResult();
                 {
                     // Leave room for ordinary pasted images and their base64/JSON overhead.

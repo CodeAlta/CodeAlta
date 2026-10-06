@@ -14,7 +14,7 @@ using XenoAtom.CommandLine;
 
 namespace CodeAlta.LiveTool;
 
-internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
+internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContributor
 {
     // Agent-originated sends should return after the delegated run is accepted, not after
     // the delegated LLM finishes. The timeout is only a submission-acknowledgement guard.
@@ -128,6 +128,12 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         {
             yield return CreateEditorCommand(context.Invocation);
         }
+
+        // And for the terminals.
+        if (context.Invocation.Services.Get<IAltaTerminals>() is not null)
+        {
+            yield return CreateTerminalCommand(context.Invocation);
+        }
     }
 
     public IEnumerable<AltaCommandPolicy> GetCommandPolicies(AltaCommandContributionContext context)
@@ -140,10 +146,12 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
     {
         var changes = context.Services.Get<IAltaChangesView>() is not null;
         var editor = context.Services.Get<IAltaEditorView>() is not null;
-        if (!changes && !editor) return Policies;
+        var terminals = context.Services.Get<IAltaTerminals>() is not null;
+        if (!changes && !editor && !terminals) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
         if (changes) policies.Add(DiffShowPolicy);
         if (editor) policies.Add(EditorOpenPolicy);
+        if (terminals) policies.AddRange(TerminalPolicies);
         return policies;
     }
 
