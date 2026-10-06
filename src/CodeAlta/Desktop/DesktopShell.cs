@@ -50,6 +50,7 @@ internal sealed class DesktopShell
     private bool _commands;
     private bool _exiting;
     private bool _entryAdded;
+    private int _pickingFolder;
 
     /// <param name="window">The main window.</param>
     /// <param name="dispatcher">The dispatcher of the window's thread.</param>
@@ -70,6 +71,30 @@ internal sealed class DesktopShell
 
     /// <summary>The number of sessions with a run in flight; zero until there is a host to ask.</summary>
     internal Func<int>? RunningSessions { get; set; }
+
+    /// <summary>The desktop's dialogs; null until the desktop services have started.</summary>
+    internal NeoAstra.Desktop.Dialogs.INeoDialogs? Dialogs { get; set; }
+
+    /// <summary>
+    /// Lets the user choose a folder with the dialog of the operating system, over the main window. One
+    /// dialog is shown at a time.
+    /// </summary>
+    /// <param name="title">The title of the dialog.</param>
+    /// <param name="initialDirectory">The folder shown first, when it exists.</param>
+    /// <param name="cancellationToken">Cancels the wait where the platform dialog can be canceled.</param>
+    /// <returns>The pick, or null while another folder dialog is open.</returns>
+    internal async Task<DesktopFolderPick?> PickFolderAsync(string title, string? initialDirectory, CancellationToken cancellationToken)
+    {
+        if (Interlocked.CompareExchange(ref _pickingFolder, 1, 0) != 0) return null;
+        try
+        {
+            return await DesktopFolderPicker.PickAsync(_window, _dispatcher, Dialogs, title, initialDirectory, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Volatile.Write(ref _pickingFolder, 0);
+        }
+    }
 
     /// <summary>Whether closing the window leaves the application running.</summary>
     internal bool CloseToTray { get { lock (_gate) return _preferences.CloseToTray; } }

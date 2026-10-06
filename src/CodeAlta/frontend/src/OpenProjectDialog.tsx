@@ -8,11 +8,12 @@ import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import { AppWindow } from "./AppWindow";
 import { folderCompletionRequest, projectFolderCompletion } from "./directoryCompletion";
+import { sameFolder, type FolderPick } from "./folderPicker";
 import { useShellLanguage } from "./shellLanguage";
 import { workflowNotice, type WorkflowNotice } from "./workflowNotice";
 
 export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, getCurrentEpoch, getCurrentScope, allowCompletion, capability, opening,
-  completeDirectory, onOpen, onRefresh, onImported, onClose }: {
+  completeDirectory, initialFolder, pickFolder, onOpen, onRefresh, onImported, onClose }: {
   snapshot: WorkspaceSnapshot | undefined; getCurrentSnapshot: () => WorkspaceSnapshot | undefined; epoch: string | undefined;
   getCurrentEpoch: () => string | undefined;
   getCurrentScope: () => { projectId: string | null; sessionId: string | null };
@@ -20,13 +21,17 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, getCurr
   capability: ReturnType<typeof createMutationCapability> | undefined;
   opening: ReturnType<typeof createProjectOpening>;
   completeDirectory: (request: WorkspaceDirectoryCompletionRequest, options: { signal: AbortSignal }) => Promise<WorkspaceDirectoryCompletionResponse>;
+  /** A folder chosen before the window opened: it is checked at once, ready to be trusted and opened. */
+  initialFolder?: string;
+  /** Shows the operating system's folder dialog, starting in the given folder; absent where there is none. */
+  pickFolder?: (initialDirectory: string | null) => Promise<FolderPick>;
   onOpen: (project: SavedProjectIdentity) => boolean; onRefresh: (signal: AbortSignal) => Promise<{ configured: boolean } | undefined>;
   onImported: (id: string, path: string, signal: AbortSignal) => Promise<boolean>;
   onClose: () => void;
 }) {
   const { t, locale } = useShellLanguage();
   // One field: a saved project's name or path, or the absolute path of a folder to add.
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialFolder ?? "");
   const filter = query;
   const [active, setActive] = useState(0);
   const [preview, setPreview] = useState<{ requestedPath: string; path: string }>();
@@ -46,7 +51,8 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, getCurr
   const alive = useRef(true);
   const origin = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const busyNow = useRef(false);
-  const draftNow = useRef("");
+  const draftNow = useRef(initialFolder ?? "");
+  const picking = useRef(false);
   const editRevision = useRef(0);
   const suggestWork = useRef<AbortController | null>(null);
   const results = useRef<HTMLDivElement>(null);
@@ -209,10 +215,36 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, getCurr
       event.preventDefault(); submit();
     }
   }
-  async function checkPath() {
+  // The folder chosen before the window opened is checked once, like a typed path submitted with Enter.
+  useEffect(() => { if (initialFolder?.trim()) void checkPath(initialFolder); }, []);
+  // Puts a folder into the field as if it had been typed, and checks it. A folder that is a saved project is opened.
+  function takeFolder(path: string) {
+    const saved = snapshot?.projects.find(project => sameFolder(project.path, path));
+    if (saved) { choose(saved); return; }
+    editRevision.current++;
+    draftNow.current = path;
+    setQuery(path);
+    setActive(0);
+    void checkPath(path);
+  }
+  // The operating system's folder dialog, opened in the folder the field names when it names one.
+  async function browse() {
+    if (!pickFolder || !canImport || picking.current || busyNow.current || busy || opening.getSnapshot()) return;
+    picking.current = true;
+    const pick = await pickFolder(typedFolder || null);
+    picking.current = false;
+    if (!alive.current) return;
+    if (pick.status === "ok") { takeFolder(pick.path); return; }
+    if (pick.status === "unavailable" || pick.status === "failed") setMessage({ key: pick.status === "unavailable"
+      ? "This system has no folder dialog. Type the folder path instead." : "The folder dialog could not be opened. Type the folder path instead." });
+    document.getElementById("saved-project-filter")?.focus();
+  }
+  async function checkPath(path?: string) {
+    // A suggestion request for the text before a chosen folder is dropped: the folder replaces what was typed.
+    if (path !== undefined) clearSuggestions();
     if (busyNow.current || busy || suggestWork.current || opening.getSnapshot() || !canImport) return;
     clearSuggestions();
-    const requested = query.trim();
+    const requested = (path ?? query).trim();
     busyNow.current = true;
     setBusy(true);
     setPreview(undefined);
@@ -267,12 +299,20 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, getCurr
     else setMessage({ key: "Could not refresh the project list. No import was requested." });
   }
   const locked = busy || refreshFailed || !!importEvidence;
+  const canBrowse = !!pickFolder && canImport;
   return <AppWindow storageKey="codealta.desktop.window.open-project.v1" className="open-project-dialog" titleId="open-project-title"
     title={<><AppIcon name="open" size={14} /> {t("Open project")}</>}
     preferredSize={viewport => ({ width: Math.min(780, viewport.width - 40), height: Math.min(620, viewport.height - 40) })} minimumSize={{ width: 440, height: 340 }}
     onClose={dismiss} closeLabel={t("Close")} onCancel={event => { event.preventDefault(); dismiss(); }}
     // Escape closes the window even from the search field, where it would otherwise only clear the text.
-    onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape" && !event.nativeEvent.isComposing) { event.preventDefault(); dismiss(); } }}
+    onKeyDown={event => {
+      event.stopPropagation();
+      if (event.key === "Escape" && !event.nativeEvent.isComposing) { event.preventDefault(); dismiss(); }
+      // Ctrl+O opened this window; pressed again here, it opens the operating system's folder dialog.
+      else if (canBrowse && event.key.toLowerCase() === "o" && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && !event.repeat) {
+        event.preventDefault(); void browse();
+      }
+    }}
     onOpened={() => document.getElementById("saved-project-filter")?.focus()}
     headerActions={<><span className="reference-status" role="status">{(busy || suggestBusy) && <ActivitySpinner size={12} />}{matches.length === 1 ? t("1 project") : t("{count} projects", { count: matches.length })}</span>
       <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={14} />} disabled={busy} aria-label={t("Refresh projects")} title={t("Refresh projects")} onClick={() => void refreshList()} /></>}>
@@ -282,7 +322,10 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, getCurr
       aria-activedescendant={index >= 0 ? `saved-project-${index}` : undefined} value={query}
       onChange={event => { editRevision.current++; draftNow.current = event.target.value; setQuery(event.target.value); setActive(0);
         clearSuggestions(); setPreview(undefined); setConfirmed(false); setMessage(""); setNotice(""); }}
-      onKeyDown={savedKeys} placeholder={t("Project name or folder path")} />
+      onKeyDown={savedKeys} placeholder={t("Project name or folder path")}
+      rightElement={canBrowse ? <Button variant="minimal" size="small" className="open-project-browse" icon={<AppIcon name="folderSearch" size={15} />}
+        disabled={busy || !!importEvidence} aria-label={`${t("Browse for a folder")} (Ctrl+O)`} title={`${t("Browse for a folder")} (Ctrl+O)`}
+        onClick={() => void browse()} /> : undefined} />
     <div ref={results} id="saved-project-results" className="reference-list" role="listbox" aria-label={t("Saved projects and folders")}>
       {matches.map((project, i) => <div role="option" id={`saved-project-${i}`} key={`${project.id}:${project.path}:${i}`} className="reference-row"
         aria-selected={i === index} aria-disabled={locked} title={project.path}
@@ -316,6 +359,6 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, getCurr
     </div>}
     {notice && <p role="status" className="open-project-notice">{workflowNotice(locale, notice)}</p>}
     {message && <p role="alert" className="open-project-notice error-text">{workflowNotice(locale, message)}</p>}
-    <footer className="reference-hint"><span><kbd>↑</kbd><kbd>↓</kbd> {t("move")}</span><span><kbd>Enter</kbd> {t("open")}</span><span><kbd>Tab</kbd> {t("complete")}</span><span><kbd>Esc</kbd> {t("close")}</span></footer>
+    <footer className="reference-hint"><span><kbd>↑</kbd><kbd>↓</kbd> {t("move")}</span><span><kbd>Enter</kbd> {t("open")}</span><span><kbd>Tab</kbd> {t("complete")}</span>{canBrowse && <span><kbd>Ctrl+O</kbd> {t("browse")}</span>}<span><kbd>Esc</kbd> {t("close")}</span></footer>
   </AppWindow>;
 }

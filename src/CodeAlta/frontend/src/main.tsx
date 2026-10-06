@@ -92,6 +92,7 @@ import { ProviderSettings } from "./ProviderSettings";
 import { sessionTime } from "./sessionTime";
 import { createProjectOpening } from "./projectOpening";
 import { OpenProjectDialog } from "./OpenProjectDialog";
+import { pickFolder, sameFolder } from "./folderPicker";
 import { savedProjectSelection } from "./savedProjectSelection";
 import { createSessionCreation, createdSessionSelection, sessionCreationMessage, type SessionTarget } from "./sessionCreation";
 import { createSessionRename, renamedSessionVisible, renameSelectionCurrent, sessionRenameMessage, type RenameTarget } from "./sessionRename";
@@ -307,7 +308,13 @@ function App() {
   const [sessionExpansion, setSessionExpansion] = useState<{ projectId: string | null; search: string; extra: number } | null>(null);
   const [notesVisible, setNotesVisible] = useState(true);
   const [dialog, writeDialog] = useState<"project" | "help" | "sessions" | "archive" | "reminders" | "file" | null>(null);
-  function setDialog(value: typeof dialog) { batchDeletion.invalidate(); invalidateCreation(); writeDialog(value); }
+  // The folder chosen with "+" that the Open project window opens on; it lasts as long as that window.
+  const [projectFolder, setProjectFolder] = useState<string | null>(null);
+  const addingFolder = useRef(false);
+  function setDialog(value: typeof dialog) {
+    batchDeletion.invalidate(); invalidateCreation(); writeDialog(value);
+    if (value !== "project") setProjectFolder(null);
+  }
   const helpOrigin = useRef<{ element: HTMLElement | null; view: View; sessionId: string | null; scope: string | null } | null>(null);
   const [paletteOpen, writePaletteOpen] = useState(false);
   function setPaletteOpen(value: boolean) { invalidateCreation(true); writePaletteOpen(value); }
@@ -843,6 +850,28 @@ function App() {
   }
   // After opening a project or creating, switching or closing a tab, typing goes to the prompt now shown.
   // Two frames let the newly active pane render its prompt; a file tab focuses its own editor.
+  // The operating system's folder dialog exists where a host owns the window and folders can be added.
+  const canPickFolder = () => !demoMode && owned && !!mutation?.capability.canMutate();
+  const browseForFolder = (initialDirectory: string | null) => pickFolder(desktopShell.pickFolder, t("Add a project folder"), initialDirectory);
+  // "+" adds a folder: it goes straight to the folder dialog. A folder that is already a project is opened;
+  // any other is shown in the Open project window, checked and ready to be trusted. Where there is no folder
+  // dialog, the window opens so that a path can be typed.
+  async function addProjectFolder() {
+    if (addingFolder.current) return;
+    if (!canPickFolder()) { setDialog("project"); return; }
+    addingFolder.current = true;
+    const pick = await browseForFolder(null);
+    addingFolder.current = false;
+    if (pick.status === "canceled" || pick.status === "busy") return;
+    // Another window was opened while the folder dialog was up: the pick is dropped.
+    if (document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+    if (pick.status !== "ok") { setDialog("project"); return; }
+    const saved = currentSnapshot.current?.projects.find(project => sameFolder(project.path, pick.path));
+    if (saved && !projectOpening.getSnapshot()) { selectProject(saved.id); focusPromptSoon(); return; }
+    setDialog("project");
+    setProjectFolder(pick.path);
+  }
+
   function focusPromptSoon() {
     requestAnimationFrame(() => requestAnimationFrame(() => {
       if (currentView.current !== "workspace" || settingsVisible.current
@@ -1779,7 +1808,7 @@ function App() {
             </Menu>}>
               <Button variant="minimal" size="small" className="rail-action" icon={<AppIcon name="ellipsis" size={18} />} aria-label={t("Project actions")} title={t("Project actions")} />
             </PopoverNext>}
-            <Button variant="minimal" size="small" className="rail-action" icon={<AppIcon name="plus" size={18} />} aria-label={`${t("Open project")} (Ctrl+O)`} title={`${t("Open project")} (Ctrl+O)`} onClick={() => setDialog("project")} />
+            <Button variant="minimal" size="small" className="rail-action" icon={<AppIcon name="plus" size={18} />} aria-label={t("Add a project folder")} title={t("Add a project folder")} onClick={() => void addProjectFolder()} />
           </span></div>
           {workspaceState.kind === "loading" && <LoadingRows />}
           {workspaceState.kind === "unconfigured" && <div className="sidebar-empty">{t("No catalog configured. See the launch instructions below.")}</div>}
@@ -2041,6 +2070,7 @@ function App() {
         }} />}
     </SettingsOverlay>}
     {dialog === "project" && <OpenProjectDialog snapshot={snapshot} getCurrentSnapshot={() => currentSnapshot.current}
+      initialFolder={projectFolder ?? undefined} pickFolder={canPickFolder() ? browseForFolder : undefined}
       epoch={owned ? status?.hostEpoch : undefined}
       capability={owned ? mutation?.capability : undefined} opening={projectOpening}
       allowCompletion={!demoMode}

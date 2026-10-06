@@ -110,7 +110,7 @@ Each session has sticky Markdown notes that agents keep up to date with a checkl
 
 ## Open Project dialog
 
-Open it with `Ctrl+O`, `/open`, or the `+` action of the Projects sidebar.
+Open it with `Ctrl+O` or `/open`.
 Opening a project puts the cursor in its prompt, so you can start typing.
 
 The dialog supports project-name and directory completion. Rooted paths such as `/`, `C:`, `D:`, and `~` open folders. In the TUI, the **Include hidden** toggle includes archived/hidden projects in completion.
@@ -119,6 +119,17 @@ The dialog supports project-name and directory completion. Rooted paths such as 
   <img src="{{site.basepath}}/img/alta-desktop-open-project.webp" alt="CodeAlta Desktop Open project dialog filtering projects by name" loading="lazy">
   <figcaption class="small text-secondary mt-2">Type a name to filter known projects, or a path to open a folder.</figcaption>
 </figure>
+
+### Choose a folder with the system dialog
+
+In CodeAlta Desktop you can also pick the folder with the folder dialog of your operating system:
+
+- The `+` button of the Projects sidebar opens the folder dialog directly, to add a folder as a project.
+- In the Open Project dialog, the button at the end of the field opens it too. So does pressing `Ctrl+O` again, which makes `Ctrl+O` `Ctrl+O` the quick way to browse for a folder.
+
+On Windows the dialog accepts a pasted path in its **Folder** field or its address bar. After you choose a folder, CodeAlta shows it with **Trust and open folder**: press `Enter` to add it as a project. A folder that is already a project is opened right away.
+
+In the CodeAlta TUI, the `+` action of the Projects sidebar opens the Open Project dialog.
 
 ## File/folder picker and prompt attachments
 

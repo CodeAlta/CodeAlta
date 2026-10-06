@@ -324,6 +324,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var chrome = await DesktopWindowChrome.StartAsync(application, options.DataRoot);
             chromeLifetime = chrome;
             await chrome.ApplyWindowIconAsync(window);
+            shell.Dialogs = chrome.Services.Dialogs;
             await shell.StartTrayAsync(chrome.Services, options.Developer);
             await shell.StartApplicationMenuAsync(chrome.Services, options.Developer);
             instanceLifetime = await AcquireInstanceAsync(application, options);

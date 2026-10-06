@@ -123,7 +123,7 @@ Other API-key providers use the same pattern with their own environment variable
 
 {{ alta_shot "alta-desktop-new-session.webp" "alta-home.png" "New session screen" "Selecting a project opens a new session for it. The prompt at the bottom starts the session in that project folder." }}
 
-1. Open a project with `Ctrl+O`, `/open`, or the `+` button of the Projects sidebar.
+1. Open a project with `Ctrl+O` or `/open`, or add a folder with the `+` button of the Projects sidebar. In CodeAlta Desktop, `+` opens the folder dialog of your operating system.
 2. Select the agent prompt and the provider/model/reasoning combination below the prompt if needed. The built-in **Default** agent prompt is a good starting point.
 3. Type a prompt in the prompt editor.
 4. Press `Enter` to send. Use `Shift+Enter` for a new line.

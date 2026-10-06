@@ -191,7 +191,8 @@ composer. The panel (or its collapsed disclosure) can be dragged anywhere over t
 panel resized; its size and position are kept across collapse/expand and saved locally, relative to the
 pane's top-right corner, and its header restores the default. There is no nested notes dock or notes divider.
 Project and session rows open floating action menus from their **…** button, context menu or Shift+F10; the
-Projects header has a filter box, a sort/actions menu and an Open project button. A dot-matrix spinner on a
+Projects header has a filter box, a sort/actions menu (with **Open project…**) and a **+** button that adds a
+project folder with the operating system's folder dialog. A dot-matrix spinner on a
 session tab, its sidebar row and its project marks an observed running session, including sessions whose
 tab is closed. Existing session-keyed transitions and
 draft/uncertain-action guards remain in place.
@@ -284,6 +285,27 @@ on the typed folder itself checks it and offers **Trust and open folder**, which
 Escape closes the window. Saved projects use deterministic name order, **not** last-active or recent order.
 Opening a project or trusting a folder focuses its prompt; canceling restores focus to the control
 that opened the window.
+
+A folder can also be chosen with the operating system's folder dialog (`desktopShell.pickFolder`):
+
+- The button at the end of the field, or `Ctrl+O` pressed again inside the window, opens the dialog in the
+  folder the field names. The chosen folder replaces the text of the field and is checked like a typed path
+  submitted with Enter; a folder that is a saved project is opened.
+- **+** in the Projects header goes straight to the dialog, since it adds a folder. A folder that is already
+  a project is opened. Any other folder is shown in the Open project window, checked, with **Trust and open
+  folder** focused. Canceling the dialog opens nothing. Where there is no folder dialog (and in a
+  catalog-only launch) **+** opens the window, so that a path can be typed.
+
+Choosing a folder never trusts it: the page gets a path, and adding the project still goes through the
+check and **Trust and open folder**. One folder dialog is open at a time and it may stay open ten minutes,
+the longest an invocation lasts.
+
+On Windows the dialog is the Explorer file dialog in folder mode (`IFileOpenDialog` with
+`FOS_PICKFOLDERS`, in `DesktopFolderPicker`): it has the address bar, the search box and a **Folder** field
+a path can be pasted into, and it reopens where it was last used. NeoAstra's own Windows folder dialog is
+the folder tree of `SHBrowseForFolder`, which takes no typed path; it is only the fallback when the
+Explorer dialog cannot be created. On macOS and Linux NeoAstra's folder dialog is the system one
+(`choose folder`, the desktop portal or zenity).
 Navigation requires the row's unique, unchanged ID/path/name/archive state in the current bounded
 snapshot. It selects existing sessions without importing, creating a runtime, or discarding their
 drafts. Archived projects are labeled and their sessions open read-only; a catalog-only launch

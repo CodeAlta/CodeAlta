@@ -1,7 +1,10 @@
 using System.Text;
+using System.Text.Json;
 using CodeAlta.Desktop;
 using CodeAlta.Desktop.Rpc;
 using NeoAstra;
+using NeoAstra.Desktop;
+using NeoAstra.Desktop.Dialogs;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -65,6 +68,56 @@ public sealed class DesktopShellTests
         Assert.AreEqual("unavailable", service.Preferences(new()).Status);
         Assert.IsFalse(service.SetCloseToTray(new(true)).CloseToTray);
         Assert.AreEqual("unavailable", service.Exit(new(Confirmed: true)).Status);
+    }
+
+    [TestMethod]
+    public async Task FolderPick_WithoutAShell_IsUnavailable_AndItsTitleIsOneBoundedLine()
+    {
+        var response = await new DesktopShellService().PickFolderAsync(new("Add a project folder", null), CancellationToken.None);
+        Assert.AreEqual(new DesktopShellPickFolderResponse("unavailable", null), response);
+        var wire = JsonSerializer.Serialize(response, DesktopJsonContext.Default.DesktopShellPickFolderResponse);
+        Assert.AreEqual("""{"status":"unavailable","path":null}""", wire);
+
+        Assert.AreEqual("Add a project folder", DesktopShellService.Title("  Add a project folder\r\n"));
+        Assert.AreEqual("Select a folder", DesktopShellService.Title(null));
+        Assert.AreEqual("Select a folder", DesktopShellService.Title(" \t "));
+        Assert.AreEqual(120, DesktopShellService.Title(new string('x', 400)).Length);
+    }
+
+    [TestMethod]
+    public async Task FolderPick_ReturnsOnlyAnExistingFolderByItsFullPath()
+    {
+        var folder = Directory.CreateTempSubdirectory("codealta-folder-pick-").FullName;
+        try
+        {
+            var file = Path.Combine(folder, "file.txt");
+            await File.WriteAllTextAsync(file, "x");
+            Assert.AreEqual(folder, DesktopFolderPicker.ExistingDirectory($"  {folder}  "));
+            Assert.IsNull(DesktopFolderPicker.ExistingDirectory(file), "A file is not a folder.");
+            Assert.IsNull(DesktopFolderPicker.ExistingDirectory(Path.Combine(folder, "missing")));
+            Assert.IsNull(DesktopFolderPicker.ExistingDirectory("relative"));
+            Assert.IsNull(DesktopFolderPicker.ExistingDirectory(null));
+            Assert.IsNull(DesktopFolderPicker.ExistingDirectory(folder + "\0"));
+
+            // The answer of the system dialog, where NeoAstra shows it: a folder, a cancellation, or no dialog at all.
+            var dialogs = new NeoFakeDialogs();
+            dialogs.Enqueue(NeoDesktopResult<IReadOnlyList<string>>.Success([folder]));
+            dialogs.Enqueue(NeoDesktopResult<IReadOnlyList<string>>.Failure(NeoDesktopStatus.Canceled));
+            dialogs.Enqueue(NeoDesktopResult<IReadOnlyList<string>>.Failure(NeoDesktopStatus.Unsupported));
+            dialogs.Enqueue(NeoDesktopResult<IReadOnlyList<string>>.Success([file]));
+            dialogs.Enqueue(NeoDesktopResult<IReadOnlyList<string>>.Failure(NeoDesktopStatus.Denied, "path_scope"));
+            Assert.AreEqual(new DesktopFolderPick(DesktopFolderPickStatus.Ok, folder),
+                await DesktopFolderPicker.ShowNeoAstraDialogAsync(null, dialogs, "Add a project folder", folder, CancellationToken.None));
+            foreach (var expected in new[] { DesktopFolderPickStatus.Canceled, DesktopFolderPickStatus.Unavailable, DesktopFolderPickStatus.Failed, DesktopFolderPickStatus.Failed })
+            {
+                Assert.AreEqual(new DesktopFolderPick(expected),
+                    await DesktopFolderPicker.ShowNeoAstraDialogAsync(null, dialogs, "Add a project folder", null, CancellationToken.None));
+            }
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
     }
 
     [TestMethod]

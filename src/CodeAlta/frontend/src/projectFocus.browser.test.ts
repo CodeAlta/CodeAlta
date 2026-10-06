@@ -97,9 +97,40 @@ test("Ctrl+O focuses the opened project's prompt and cancellation restores its o
     assert.equal(await wait("!!document.querySelector('#session-prompt') && !!document.querySelector('#project-list')"), true);
 
     // Cancel keeps the origin instead of focusing an unrelated project draft.
-    await evaluate(`window.projectFocusOrigin=document.querySelector('button[aria-label="Open project (Ctrl+O)"]');projectFocusOrigin.focus()`);
+    await evaluate(`window.projectFocusOrigin=document.querySelector('button[aria-label="Add a project folder"]');projectFocusOrigin.focus()`);
     await open(); await key("Escape", "Escape", 27);
     assert.equal(await wait("!document.querySelector('dialog[open]') && document.activeElement===projectFocusOrigin"), true);
+
+    // "+" goes straight to the folder dialog. A canceled dialog opens no window.
+    await evaluate("projectFocusFixture.pick={status:'canceled',path:null};projectFocusOrigin.click()");
+    assert.equal(await wait("projectFocusFixture.picks.length===1"), true);
+    await frames();
+    assert.equal(await evaluate("!document.querySelector('dialog[open]')"), true);
+    assert.deepEqual(await evaluate("projectFocusFixture.picks[0]"), { title: "Add a project folder", initialDirectory: null });
+    // A folder that is no project yet is shown in the window, checked and ready to be trusted.
+    await evaluate("projectFocusFixture.pick={status:'ok',path:'C:/fixture/picked'};projectFocusOrigin.click()");
+    assert.equal(await wait("document.querySelector('.project-import-confirm code')?.textContent==='C:/fixture/picked'"), true);
+    assert.equal(await evaluate("document.querySelector('#saved-project-filter').value"), "C:/fixture/picked");
+    assert.equal(await wait("document.activeElement===document.querySelector('.project-import-confirm button')"), true, "Enter trusts the picked folder");
+    // In the window, Ctrl+O and the browse button open the folder dialog in the folder the field names.
+    await evaluate("projectFocusFixture.pick={status:'ok',path:'C:/fixture/browsed'}");
+    await key("o", "KeyO", 79, true);
+    assert.equal(await wait("document.querySelector('.project-import-confirm code')?.textContent==='C:/fixture/browsed'"), true);
+    assert.equal(await evaluate("projectFocusFixture.picks[2].initialDirectory"), "C:/fixture/picked");
+    await evaluate("projectFocusFixture.pick={status:'canceled',path:null};document.querySelector('.open-project-browse').click()");
+    assert.equal(await wait("projectFocusFixture.picks.length===4 && document.activeElement?.id==='saved-project-filter'"), true);
+    assert.equal(await evaluate("document.querySelector('.project-import-confirm code')?.textContent"), "C:/fixture/browsed", "a canceled dialog keeps the checked folder");
+    // A system without a folder dialog says so, and the path can still be typed.
+    await evaluate("projectFocusFixture.pick={status:'unavailable',path:null};document.querySelector('.open-project-browse').click()");
+    assert.equal(await wait("document.querySelector('.open-project-notice.error-text')?.textContent.includes('no folder dialog')"), true);
+    await key("Escape", "Escape", 27);
+    assert.equal(await wait("!document.querySelector('dialog[open]')"), true);
+    assert.equal(await evaluate("projectFocusFixture.imports.filter(r=>r.confirmed).length"), 0, "choosing a folder trusts nothing");
+    // A folder that is already a project is opened without the window.
+    await evaluate("projectFocusFixture.pick={status:'ok',path:'/fixture/other/'};projectFocusOrigin.focus();projectFocusOrigin.click()");
+    await opened("/fixture/other");
+    assert.equal(await evaluate("projectFocusFixture.imports.length"), 2, "only the two picked folders were checked");
+    await evaluate("projectFocusFixture.imports.length=0;projectFocusFixture.pick={status:'unavailable',path:null}");
 
     // Opening from a non-editor control must put real keyboard input into the new prompt.
     await open(); await filter("Other project"); await key("Enter", "Enter", 13);

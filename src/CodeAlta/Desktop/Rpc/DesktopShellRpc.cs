@@ -6,7 +6,8 @@ namespace CodeAlta.Desktop.Rpc;
 
 /// <summary>
 /// The page's side of how the application lives beyond its window: whether closing the window leaves it
-/// running, an explicit exit, and the question the page asks before an exit that would stop running sessions.
+/// running, an explicit exit, the question the page asks before an exit that would stop running sessions, and
+/// the operating system's folder dialog.
 /// </summary>
 [NeoRpcService("desktopShell", Version = 1)]
 internal sealed class DesktopShellService
@@ -55,6 +56,35 @@ internal sealed class DesktopShellService
         return new("ok");
     }
 
+    /// <summary>
+    /// Lets the user choose a folder with the dialog of the operating system and returns its full path.
+    /// The page decides what the folder is for: choosing it opens nothing and trusts nothing.
+    /// </summary>
+    /// <remarks>The dialog may stay open as long as an invocation may last: ten minutes.</remarks>
+    [NeoRpcMethod("pickFolder", TimeoutMilliseconds = 600_000)]
+    public async Task<DesktopShellPickFolderResponse> PickFolderAsync(DesktopShellPickFolderRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_shell is null) return new("unavailable", null);
+        var pick = await _shell.PickFolderAsync(Title(request.Title), request.InitialDirectory, cancellationToken).ConfigureAwait(false);
+        return pick is not { } value
+            ? new("busy", null)
+            : value.Status switch
+            {
+                DesktopFolderPickStatus.Ok => new("ok", value.Path),
+                DesktopFolderPickStatus.Canceled => new("canceled", null),
+                DesktopFolderPickStatus.Unavailable => new("unavailable", null),
+                _ => new("failed", null),
+            };
+    }
+
+    // The title the page asks for, as one bounded line; the default when it gives none.
+    internal static string Title(string? value)
+    {
+        var text = new string([.. (value ?? string.Empty).Where(static character => !char.IsControl(character) && !char.IsSurrogate(character)).Take(120)]).Trim();
+        return text.Length == 0 ? "Select a folder" : text;
+    }
+
     /// <summary>The shell's notices for this page, until the page goes away.</summary>
     [NeoRpcMethod("watch")]
     public NeoRpcChannel<DesktopShellEvent> Watch(DesktopShellRequest request, CancellationToken cancellationToken)
@@ -82,6 +112,17 @@ internal sealed class DesktopShellService
 internal sealed record DesktopShellRequest;
 
 internal sealed record DesktopShellCloseToTrayRequest(bool? Enabled);
+
+/// <param name="Title">The title of the dialog; a default when blank.</param>
+/// <param name="InitialDirectory">The folder shown first; ignored unless it is an existing absolute folder.</param>
+internal sealed record DesktopShellPickFolderRequest(string? Title, string? InitialDirectory);
+
+/// <param name="Status">
+/// <c>ok</c>, <c>canceled</c> (the user chose nothing), <c>busy</c> (a folder dialog is already open),
+/// <c>unavailable</c> (no folder dialog on this system) or <c>failed</c>.
+/// </param>
+/// <param name="Path">The full path of the chosen folder; null unless <c>ok</c>.</param>
+internal sealed record DesktopShellPickFolderResponse(string Status, string? Path);
 
 /// <param name="Confirmed">The user already agreed to stop the running sessions.</param>
 internal sealed record DesktopShellExitRequest(bool Confirmed);
