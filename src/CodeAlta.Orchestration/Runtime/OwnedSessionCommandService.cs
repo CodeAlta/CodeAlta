@@ -148,16 +148,28 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     private IReadOnlyList<AgentToolDefinition> ToolsFor(string? sessionId, string? projectId, string workingDirectory, string providerKey)
         => SessionTools?.Invoke(new(sessionId, projectId, workingDirectory, providerKey)) ?? [];
 
+    /// <summary>
+    /// Gets whether one more command can be admitted. The service keeps a bounded number of receipts for one run
+    /// of the host: a caller that creates something for a command, such as a session for a prompt, asks first, so
+    /// that nothing is left behind when the command is then refused.
+    /// </summary>
+    public bool HasCapacity
+    {
+        get { lock (_gate) return _receipts.Count < _capacity; }
+    }
+
     /// <summary>Creates a draft through the host runtime using the same restricted permission and input policy as owned sends.</summary>
     /// <remarks>The caller owns admission and must drain the returned task before disposing the host.</remarks>
     /// <param name="project">An already resolved, trusted catalog project; null creates a global session.</param>
     /// <param name="provider">An enabled provider selected from the host registry.</param>
     /// <param name="title">An optional validated title.</param>
+    /// <param name="createdBy">Who creates the session when it is not the user, such as an automation; recorded with the session.</param>
     /// <returns>The persisted session descriptor.</returns>
     /// <exception cref="ArgumentNullException">The provider is null.</exception>
     /// <exception cref="ArgumentException">The provider is disabled or the project is invalid.</exception>
     /// <exception cref="ObjectDisposedException">The host command owner is closing.</exception>
-    public Task<SessionViewDescriptor> CreateDraftSessionAsync(ProjectDescriptor? project, ModelProviderDescriptor provider, string? title)
+    public Task<SessionViewDescriptor> CreateDraftSessionAsync(ProjectDescriptor? project, ModelProviderDescriptor provider, string? title,
+        AltaActorProvenance? createdBy = null)
     {
         ArgumentNullException.ThrowIfNull(provider);
         if (!provider.IsEnabled) throw new ArgumentException("An enabled provider is required.", nameof(provider));
@@ -170,8 +182,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         return Plugins is null ? Create(options) : CreateWithPluginsAsync(Plugins, options);
 
         Task<SessionViewDescriptor> Create(SessionExecutionOptions options)
-            => project is null ? _runtime.CreateGlobalSessionAsync(options, title, CancellationToken.None)
-                : _runtime.CreateProjectSessionAsync(project, options, title, CancellationToken.None);
+            => project is null ? _runtime.CreateGlobalSessionAsync(options, title, null, createdBy, CancellationToken.None)
+                : _runtime.CreateProjectSessionAsync(project, options, title, null, createdBy, CancellationToken.None);
 
         // With what plugins give every run of this scope, so the first send keeps this attachment.
         async Task<SessionViewDescriptor> CreateWithPluginsAsync(PluginOrchestrationBridge plugins, SessionExecutionOptions options)

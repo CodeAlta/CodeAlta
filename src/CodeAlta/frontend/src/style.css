@@ -134,7 +134,7 @@ code, pre { font-family: var(--bp-typography-family-mono); }
 .count { display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; background: var(--panel-3); color: var(--muted); }
 ul { margin: 0; padding: 0; }
 .nav-list { flex: 1 1 auto; min-height: 0; list-style: none; display: block; overflow-y: scroll; padding-right: 3px; }
-.project-root-list { flex: 0 0 auto; overflow: visible; border-top: 1px solid var(--line); }
+.project-root-list { flex: 0 0 auto; overflow: visible; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
 .nav-list li + li { margin-top: 3px; }
 .nav-list button { width: 100%; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 9px; border: 0; border-radius: 9px; background: transparent; text-align: left; cursor: pointer; }
 .nav-list button:hover { background: var(--panel-2); }

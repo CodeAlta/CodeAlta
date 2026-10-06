@@ -118,7 +118,7 @@ test("visible selection/invert is capped, excludes hidden selections and does no
 test("only exact nontruncated nonarchived unique loaded identities become candidates", () => {
   const snapshot: WorkspaceSnapshot = { configured: true, projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false,
     projects: [{ id: "p", path: "/p", name: "Project", archived: false }], sessions: [{ id: "a", title: "short", fullTitle: "Exact title", fullTitleTruncated: false,
-      messageCount: null, createdAt: null, updatedAt: "saved", parentSessionId: null, lineageIssue: null, providerKey: null, scopeKind: "project", projectId: "p", workspacePath: "/p" }] };
+      messageCount: null, automationId: null, createdAt: null, updatedAt: "saved", parentSessionId: null, lineageIssue: null, providerKey: null, scopeKind: "project", projectId: "p", workspacePath: "/p" }] };
   const tab = { sessionId: "a", projectId: "p", path: "/p" };
   assert.equal(batchDeleteCandidate(snapshot, tab, epoch)?.confirmedTitle, "Exact title");
   for (const changed of [{ ...snapshot, configured: false }, { ...snapshot, sessionsTruncated: true }, { ...snapshot, projectsTruncated: true },

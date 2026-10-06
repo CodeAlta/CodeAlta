@@ -5,8 +5,14 @@ namespace CodeAlta.Catalog;
 /// </summary>
 public sealed record AltaActorProvenance
 {
-    /// <summary>Gets the actor kind, such as <c>user</c>, <c>agent</c>, <c>host</c>, or <c>plugin</c>.</summary>
+    /// <summary>The <see cref="Kind"/> of an automation: a session it starts names it in <see cref="AutomationId"/>.</summary>
+    public const string AutomationKind = "automation";
+
+    /// <summary>Gets the actor kind, such as <c>user</c>, <c>agent</c>, <c>host</c>, <c>plugin</c>, or <c>automation</c>.</summary>
     public required string Kind { get; init; }
+
+    /// <summary>Gets the identifier of the automation, when the actor is one.</summary>
+    public string? AutomationId { get; init; }
 
     /// <summary>Gets the source CodeAlta session identifier, when the actor is associated with a session.</summary>
     public string? SourceSessionId { get; init; }

@@ -47,7 +47,7 @@ function rowKey(event: KeyboardEvent<HTMLElement>, toggle: (id: string | null) =
   target?.focus();
 }
 
-export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, actions, children, activity, renaming, editor, changes, terminals, tree }: {
+export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, actions, children, activity, renaming, editor, changes, terminals, tree, head }: {
   activity?: (projectId: string | null) => ReactNode;
   /** The projects listed, the favorite ones first. */
   projects: WorkspaceProject[];
@@ -71,6 +71,8 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
   tree?: ProjectTreeView;
   /** The sessions of the selected scope. */
   children?: ReactNode;
+  /** What stands between the chats and the projects: the title of the projects and their filter. */
+  head?: ReactNode;
 }) {
   const { t } = useShellLanguage();
   const [folded, setFolded] = useState<{ id: string | null } | null>(null);
@@ -126,29 +128,31 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
   };
   const title = (key: "Favorites" | "Other projects", icon: boolean) => <li className="project-section" role="presentation">
     {icon && <AppIcon name="star" size={11} />}<span>{t(key)}</span></li>;
+  // The chats, the sessions of no project, come first: one row, closed until it is opened.
   return <>
-    <ul id="project-list" className="nav-list project-list" aria-label={t("Projects")} onKeyDown={event => rowKey(event, toggle)}>
-      {favorites > 0 && title("Favorites", true)}
-      {projects.slice(0, favorites).map(row)}
-      {favorites > 0 && favorites < projects.length && title("Other projects", false)}
-      {projects.slice(favorites).map(row)}
-    </ul>
-    <ul className="nav-list project-root-list" aria-label={t("Global sessions")} onKeyDown={event => rowKey(event, toggle)}>
+    <ul className="nav-list project-root-list" aria-label={t("Chats")} onKeyDown={event => rowKey(event, toggle)}>
       <li className="project-action-row" onContextMenu={event => { if (sessions) { event.preventDefault(); setOtherMenu(true); } }}>
         <button type="button" aria-pressed={selectedId === null} aria-expanded={open(null)} data-scope="" onClick={() => select(null)}>
-          {twist(null)}<span className="project-icon" data-file-tone="teal"><AppIcon name="home" size={15} /></span><strong>{t("Global sessions")}</strong>{activity?.(null)}
+          {twist(null)}<span className="project-icon" data-file-tone="teal"><AppIcon name="chat" size={15} /></span><strong>{t("Chats")}</strong>{activity?.(null)}
         </button>
-        {sessions && <button ref={otherTrigger} type="button" className="icon-button project-actions-trigger" aria-label={t("Actions for {title}", { title: t("Global sessions") })}
+        {sessions && <button ref={otherTrigger} type="button" className="icon-button project-actions-trigger" aria-label={t("Actions for {title}", { title: t("Chats") })}
           aria-haspopup="menu" aria-expanded={otherMenu} onClick={() => setOtherMenu(value => !value)}><AppIcon name="ellipsis" size={16} /></button>}
-        {sessions && otherMenu && otherTrigger.current && <SessionTabMenu anchor={otherTrigger.current} title={t("Sessions")} container={document.body}
+        {sessions && otherMenu && otherTrigger.current && <SessionTabMenu anchor={otherTrigger.current} title={t("Chats")} container={document.body}
           current={() => true} onClose={() => queueMicrotask(() => setOtherMenu(false))}
           items={[
-            { key: "create", label: t("New session"), icon: "newSession", disabled: !sessions.canCreate(null), onSelect: () => sessions.create(null) },
+            { key: "create", label: t("New chat"), icon: "newSession", disabled: !sessions.canCreate(null), onSelect: () => sessions.create(null) },
             { key: "search", label: `${t("Search sessions")}…`, icon: "search", onSelect: () => sessions.search(null) },
             { key: "browse", label: t("Browse saved sessions"), icon: "browse", onSelect: () => sessions.browse(null) },
           ]} />}
       </li>
       {branch(null)}
+    </ul>
+    {head}
+    <ul id="project-list" className="nav-list project-list" aria-label={t("Projects")} onKeyDown={event => rowKey(event, toggle)}>
+      {favorites > 0 && title("Favorites", true)}
+      {projects.slice(0, favorites).map(row)}
+      {favorites > 0 && favorites < projects.length && title("Other projects", false)}
+      {projects.slice(favorites).map(row)}
     </ul>
   </>;
 }

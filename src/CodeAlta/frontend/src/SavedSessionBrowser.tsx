@@ -55,7 +55,7 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
   const selected = Math.max(0, rows.findIndex(item => tabKey(item.tab) === selectedKey));
   function setSelected(index: number) { setSelectedKey(rows[index] ? tabKey(rows[index].tab) : null); }
   const project = snapshot.projects.filter(row => row.id === projectId);
-  const scopeName = scope === null ? t("Global sessions") : project.length === 1 ? project[0].name : t("ambiguous or missing");
+  const scopeName = scope === null ? t("Chats") : project.length === 1 ? project[0].name : t("ambiguous or missing");
   useEffect(() => { const element = dialog.current!; element.showModal(); search.current?.focus(); return () => element.close(); }, []);
   useEffect(() => { dialog.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" }); }, [selected, query, scope]);
   function activate(index: number) {
@@ -88,7 +88,7 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
       <HTMLSelect aria-label={t("Session browser scope")} value={scope === null ? "global" : "project"}
         onChange={event => change(() => { setScope(event.target.value === "global" ? null : projectId); setSelectedKey(null); })}>
         {projectId !== null && <option value="project">{project.length === 1 ? project[0].name : t("ambiguous or missing")}{project[0]?.archived ? t(" (archived, read-only)") : ""}</option>}
-        <option value="global">{t("Global sessions")}</option>
+        <option value="global">{t("Chats")}</option>
       </HTMLSelect>
       <span className="settings-editor-spacer" />
       <span className="bp6-text-muted" role="status">{t("{shown} of {matching} sessions", { shown: rows.length, matching: page.matched })}{page.hidden > 0 && <>{" · "}{t("{count} matches omitted by the 200-row display limit.", { count: page.hidden })}</>}</span>

@@ -32,7 +32,7 @@ test("info keeps observed configuration, current/pending prompts and usage prove
 test("info refuses cross-read attachment, host, scope and invalid usage instead of merging", async () => {
   for (const value of [{ ...usage(), attachmentGeneration: "3" }, { ...usage(), hostEpoch: "other" },
     { ...usage(), observation: { ...usage().observation!, source: "invented" } },
-    { ...usage(), observation: { ...usage().observation!, window: { currentTokens: "-1", tokenLimit: null, messageCount: null, label: null, totalContextEnvelope: null, maxOutputTokens: null } } }]) {
+    { ...usage(), observation: { ...usage().observation!, window: { currentTokens: "-1", tokenLimit: null, messageCount: null, automationId: null, label: null, totalContextEnvelope: null, maxOutputTokens: null } } }]) {
     const result = await read(runtime(), value);
     assert.match(JSON.stringify(result), /Unavailable/);
     assert.doesNotMatch(JSON.stringify(result), /observed-model/);

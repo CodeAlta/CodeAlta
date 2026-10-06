@@ -3,7 +3,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
-import { activateFileTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileNodeId, isChangesTab, isEditorTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
+import { activateFileTab, automationsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isEditorTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
   persistFileTabs, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, terminalTab, type FileTab } from "./fileTabs";
 import { FileTabLabel } from "./SessionTabStrip";
 import { ShellLanguageContext } from "./shellLanguage";
@@ -145,6 +145,28 @@ test("an editor tab is labeled with its project and marks unsaved edits in every
     const changed = render(changes(), true);
     assert.ok(changed.includes(translate(locale, "Changes")) && changed.includes("&lt;Project&gt;"), changed);
     assert.ok(!changed.includes("session-tab-dirty"), "The changes hold no edit.");
+  }
+});
+
+test("the automations have one tab, of no project, that outlives the projects and is kept for the next start", () => {
+  assert.deepEqual(automationsTab, { projectId: "", projectPath: "", view: "automations" });
+  assert.ok(isAutomationsTab(automationsTab) && !isAutomationsTab(editor()) && !isEditorTab(automationsTab) && !isChangesTab(automationsTab) && !isTerminalTab(automationsTab));
+  const state = openFileTab(openFileTab(emptyFileTabs(), editor()), automationsTab);
+  assert.deepEqual(names(state.open), ["editor:p", "automations:"]);
+  assert.equal(state.active, automationsTab);
+  assert.equal(openFileTab(state, { ...automationsTab }).open.length, 2, "Asked again, the one that is open is shown.");
+  // It belongs to no project: it stays when the projects go.
+  assert.deepEqual(reconcileFileTabs(state, { ...catalog, projects: [] }), { open: [automationsTab], active: automationsTab, closed: [] });
+  assert.equal(reconcileTerminalTabs(state, new Set()), state);
+  let stored = "";
+  persistFileTabs(value => { stored = value; }, state);
+  assert.deepEqual(restoreFileTabs(() => stored), { ...state, closed: [] });
+  // A stored tab that names a project is not the tab of the automations.
+  assert.equal(restoreFileTabs(() => JSON.stringify({ version: 1, open: [{ projectId: "p", projectPath: "/p", view: "automations" }], active: null })), null);
+  for (const locale of locales) {
+    const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: () => assert.fail("rendering must not dispatch") } },
+      createElement(FileTabLabel, { tab: automationsTab, project: "", dirty: false })));
+    assert.ok(html.includes(translate(locale, "Automations")) && !html.includes("session-tab-dirty"), html);
   }
 });
 

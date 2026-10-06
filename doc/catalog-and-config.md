@@ -8,7 +8,7 @@ CodeAlta keeps user-owned durable state under a global root and project-local `.
 
 | Path under `~/.alta` | Owner | Purpose |
 | --- | --- | --- |
-| `config.toml` | `CodeAltaConfigStore` | Global chat defaults, providers, and plugins. |
+| `config.toml` | `CodeAltaConfigStore` | Global chat defaults, providers, and plugins; the automations of CodeAlta Desktop that are kept with the user. |
 | `mcp.json` | MCP plugin | Global MCP server connection definitions. |
 | `projects/` | `ProjectCatalog` | Markdown project descriptors keyed by project slug. |
 | `checkouts/` | `ProjectCatalog` helpers | Default checkout root used by catalog planning APIs. |
@@ -21,11 +21,12 @@ CodeAlta keeps user-owned durable state under a global root and project-local `.
 | `plugins/` | Plugin runtime | User-scoped source plugin packages. |
 | `skills/` | Skill catalog | User-scoped CodeAlta skill roots. |
 | `color-schemes/` | Desktop `ColorSchemesService` | The user's color schemes of the desktop window, one JSON file each (see `doc/desktop.md`). |
+| `automations.json` | Desktop `AutomationStateStore` | What an instance remembers of the automations: whether they are paused, their runs, what the event triggers have seen and which automations of a project the user allowed (see `doc/desktop.md`). It is under the state root. |
 | `sessions/internal/` | Work-session catalog | Internal session linkage descriptors still read by the catalog. |
 
 ### Instance state and the developer instance
 
-`CatalogOptions.StateRoot` is the root of what one running instance alone writes: `sessions/` (journals and prompt-image copies), `cache/cache.sqlite3`, `ui-state.yaml`, `saved_prompts/` and the legacy `threads/internal/`. It defaults to the global root, so the layout above is unchanged for the normal instance, whose lock is `~/.alta/alta.lock`.
+`CatalogOptions.StateRoot` is the root of what one running instance alone writes: `sessions/` (journals and prompt-image copies), `cache/cache.sqlite3`, `ui-state.yaml`, `saved_prompts/`, `automations.json` and the legacy `threads/internal/`. It defaults to the global root, so the layout above is unchanged for the normal instance, whose lock is `~/.alta/alta.lock`.
 
 The developer instance (`alta --dev`, `altatui --dev`; `CodeAltaInstanceProfile` in `CodeAlta.Hosting`) keeps the same global root and sets the state root to `~/.alta/dev/`. It therefore shares `config.toml`, `auth/`, `mcp.json`, `projects/`, `prompts/`, `skills/`, `plugins/`, `color-schemes/` and the rest of `cache/`, and writes its sessions, session cache, view state, drafts, terminal logs (`dev/logs/`) and lock (`dev/alta.lock`) apart, which lets it run beside the normal instance. The desktop developer instance also uses its own WebView data root (`CodeAlta/desktop-dev` under the local application-data directory). A host with a separate state root does not refresh the coordinator `AGENTS.md` of the global root; it only creates it when missing. The first time it runs, its `ui-state.yaml` starts from the normal instance's per-project provider/model preferences and navigator settings (`SessionViewCatalog.SeedViewStateFromAsync`); open sessions, selection and layouts are not copied, and later changes on either side stay separate.
 
@@ -55,7 +56,7 @@ Project-local CodeAlta state lives under `<project>/.alta/`:
 
 | Path | Purpose |
 | --- | --- |
-| `<project>/.alta/config.toml` | Project-local config overrides. |
+| `<project>/.alta/config.toml` | Project-local config overrides, and the automations of CodeAlta Desktop that are kept with the project. |
 | `<project>/.alta/mcp.json` | Project-local MCP server connection definitions. |
 | `<project>/.alta/plugins/<package-id>/plugin.cs` | Project-scoped trusted source plugin packages. |
 | `<project>/.alta/skills/<skill-name>/SKILL.md` | Project-scoped skills. |
@@ -89,6 +90,8 @@ disabled = ["ilspy-decompile"]
 - `providers`: configured model-provider documents keyed by provider key;
 - `skills`: skill enablement settings, currently normalized disabled skill names;
 - `plugins`: plugin enablement keyed by built-in id or source package id, plus plugin-owned policy such as `[plugins.mcp]`.
+
+`[automations.<guid>]` tables are the automations of CodeAlta Desktop, in the global file and in the file of a project. `CodeAltaConfigDocument` does not model them: the desktop reads and writes them apart (`AutomationConfig`, see `doc/desktop.md`), and the typed saves keep them like every other table they do not model. The check for the configuration shapes of older versions reads the keys of the file, not the text of its strings: a prompt may quote such a key.
 
 Legacy `[acp]` and `[acp.*]` blocks are no longer active configuration. `CodeAltaConfigStore` ignores them and keeps them when saving, like every other setting it does not model.
 

@@ -48,8 +48,8 @@ test("exact selected project and global requests produce switchable persisted ca
   const snapshot: WorkspaceSnapshot = { ...empty,
     projects: [{ id: project.projectId, path: project.projectPath, name: "Project", archived: false }],
     sessions: [
-      { messageCount: null, createdAt: null, id: "draft-1", title: "My draft", fullTitle: "My draft", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: project.projectId, lineageIssue: null, workspacePath: project.projectPath, providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" },
-      { messageCount: null, createdAt: null, id: "global-1", title: "Global Session", fullTitle: "Global Session", fullTitleTruncated: false, parentSessionId: null, scopeKind: "global", projectId: null, lineageIssue: null, workspacePath: "C:\\test-owned\\global", providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" },
+      { messageCount: null, automationId: null, createdAt: null, id: "draft-1", title: "My draft", fullTitle: "My draft", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: project.projectId, lineageIssue: null, workspacePath: project.projectPath, providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" },
+      { messageCount: null, automationId: null, createdAt: null, id: "global-1", title: "Global Session", fullTitle: "Global Session", fullTitleTruncated: false, parentSessionId: null, scopeKind: "global", projectId: null, lineageIssue: null, workspacePath: "C:\\test-owned\\global", providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" },
     ],
   };
   assert.deepEqual(createdSessionSelection(snapshot, projectResult), { projectId: project.projectId, sessionId: "draft-1" });

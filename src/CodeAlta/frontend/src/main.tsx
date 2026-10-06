@@ -23,7 +23,7 @@ import {
   type ReminderListResponse,
   type ReminderDetailRequest,
   type ConfigurationSnapshot, type WorkspaceSession, type WorkspaceSnapshot,
-  desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem,
+  desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations,
 } from "#neoastra";
 import { loadWorkspace, sessionListSignature, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
@@ -39,7 +39,7 @@ import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./
 import { createProjectArchive } from "./projectArchive";
 import { browserActivation } from "./sessionBrowser";
 import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isChangesTab, isEditorTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, terminalTab, type FileTab, type TabKind, type TabPosition } from "./fileTabs";
+import { activateFileTab, automationsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, terminalTab, type FileTab, type TabKind, type TabPosition } from "./fileTabs";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
 import { OpenFileDialog } from "./editor/OpenFileDialog";
@@ -115,6 +115,10 @@ import { projectRailProjection } from "./explorer/projectRail";
 import { ProjectRailRows } from "./explorer/ProjectRailRows";
 import { createTerminalWorkspace } from "./terminal/terminalWorkspace";
 import { TerminalPanel } from "./terminal/TerminalPanel";
+import { createAutomationsHub } from "./automations/automationsHub";
+import { AutomationsPanel } from "./automations/AutomationsPanel";
+import { SessionOrigin } from "./automations/SessionOrigin";
+import { sessionOrigin } from "./automations/automations";
 import { TerminalList } from "./terminal/TerminalList";
 import { persistTerminalLook, restoreTerminalLook, terminalLookKey, type TerminalLook } from "./terminal/terminalLook";
 import { applicationKey, terminalsOf } from "./terminal/terminals";
@@ -158,6 +162,7 @@ import "./style.css";
 import "./editor/editor.css";
 import "./explorer/explorer.css";
 import "./terminal/terminal.css";
+import "./automations/automations.css";
 
 type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; epoch: string | null;
   ready: () => boolean; navigate: (action: MessageNavigation) => void;
@@ -666,7 +671,8 @@ function App() {
     if (!tabsReady) return;
     const seen = treeScope.current;
     treeScope.current = { id: projectId };
-    if (seen ? seen.id !== projectId : !storedProjectTree) setProjectTree(current => expandScope(current, projectId));
+    // The chats stay closed until the user opens them: a start with nothing selected does not open them.
+    if (seen ? seen.id !== projectId : !storedProjectTree && projectId !== null) setProjectTree(current => expandScope(current, projectId));
   }, [projectId, tabsReady]);
 
   function applyTabState(next: SessionTabsState) {
@@ -1093,6 +1099,32 @@ function App() {
   const terminalEpoch = owned ? status?.hostEpoch ?? null : null;
   useEffect(() => terminalEpoch ? terminalWorkspace.hub.connect(terminalEpoch) : undefined, [terminalWorkspace, terminalEpoch]);
   useEffect(() => { setFileTabs(state => reconcileTerminalTabs(state, new Set(terminalList.map(terminal => terminal.id)))); }, [terminalList]);
+  // The automations belong to the application too: this window lists them and is told when they change.
+  const [automationsHub] = useState(() => createAutomationsHub(automations));
+  useEffect(() => terminalEpoch ? automationsHub.connect(terminalEpoch) : undefined, [automationsHub, terminalEpoch]);
+  const automationState = useSyncExternalStore(automationsHub.subscribe, automationsHub.getSnapshot);
+  // An automation starts a session without the window asking: the sessions are read again when its runs change.
+  const automationRuns = automationState.runs.map(run => `${run.id}:${run.status}:${run.sessionId ?? ""}`).join("|");
+  useEffect(() => { if (automationRuns) readSessionList.current(); }, [automationRuns]);
+  const [automationFocus, setAutomationFocus] = useState<string | null>(null);
+  function openAutomations(id: string | null = null) {
+    if (id) setAutomationFocus(id);
+    openFile(automationsTab);
+  }
+  // Opens the session of a run. One that was just started is not in the list of sessions yet: the list is read first.
+  async function openAutomationSession(id: string) {
+    let shown = currentSnapshot.current;
+    if (!shown?.sessions.some(session => session.id === id)) {
+      try {
+        const fresh = await workspace.snapshot({}, { timeoutMilliseconds: 30_000 });
+        if (!creationAlive.current || !fresh.configured) return;
+        publishWorkspaceState({ kind: "ready", snapshot: fresh });
+        shown = fresh;
+      } catch { return; }
+    }
+    const session = shown.sessions.find(candidate => candidate.id === id);
+    if (session) selectProject(session.scopeKind === "project" ? session.projectId : null, session.id);
+  }
   function showTerminal(terminal: TerminalItem) { openFile(terminalTab(terminal)); }
   const showTerminalLatest = useRef(showTerminal); showTerminalLatest.current = showTerminal;
   // A session can ask for the tab of a terminal to be shown.
@@ -1121,7 +1153,7 @@ function App() {
       const shown = terminalList.find(terminal => terminal.id === tab.terminalId);
       return { projectId: shown?.projectId ?? (tab.projectId || null), sessionId: shown?.sessionId ?? null };
     }
-    if (tab) return { projectId: tab.projectId, sessionId: null };
+    if (tab) return { projectId: tab.projectId || null, sessionId: null };
     if (selectedProject?.archived) return null;
     return { projectId, sessionId: selectedSession?.id ?? null };
   }
@@ -1273,6 +1305,7 @@ function App() {
       case "reopenTab": return tabs.closed.length + fileTabs.closed.length > 0;
       case "editFile": case "projectEditor": return view === "workspace" && !!editedProject();
       case "newTerminal": return view === "workspace" && !!terminalOrigin();
+      case "automations": return owned;
       case "refreshStatuses": return owned && tabs.open.length > 0;
       case "newSession": return owned && !!snapshot && !selectedProject?.archived;
       case "renameProject": return owned && !!selectedProject && !selectedProject.archived;
@@ -1302,6 +1335,7 @@ function App() {
       case "editFile": openFilePicker(); break;
       case "projectEditor": openProjectEditor(); break;
       case "newTerminal": { const origin = terminalOrigin(); if (origin) void createTerminal(origin.projectId, origin.sessionId); break; }
+      case "automations": openAutomations(); break;
       case "newSession": selectProject(projectId); requestAnimationFrame(() => document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt")?.focus()); break;
       case "focusSidebar": runShortcut("focusProjects"); break;
       case "focusAskFile": visibleAsk(".ask-file-review")?.dispatchEvent(new CustomEvent("codealta-ask-file-focus")); break;
@@ -2030,6 +2064,8 @@ function App() {
           <nav className="activity-rail" aria-label={t("Workspace navigation")}>
             <Button ref={projectRailToggle} variant="minimal" size="small" active={railVisible} icon={<AppIcon name="folder" size={16} />} aria-label={t("Explorer")} title={t("Explorer")} aria-expanded={railVisible} aria-controls="project-rail" onClick={toggleProjects} />
             <Button variant="minimal" size="small" icon={<AppIcon name="search" size={16} />} aria-label={t("Open command palette")} aria-haspopup="dialog" title={`${t("Open command palette")} (Ctrl+P)`} onClick={openPalette} />
+            <Button variant="minimal" size="small" icon={<AppIcon name="automation" size={16} />} className="activity-automations" disabled={!owned}
+              active={!!fileTabs.active && isAutomationsTab(fileTabs.active)} aria-label={t("Automations")} title={`${t("Automations")} (Ctrl+G, Ctrl+M)`} onClick={() => openAutomations()} />
             <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={16} />} className="activity-settings" aria-label={t("Settings & extensions")} title={t("Settings & extensions")} onClick={() => navigate("appearance")} />
           </nav>
         </WindowBrand>
@@ -2039,7 +2075,7 @@ function App() {
         </div>
         <WindowControls snapshot={windowSnapshot} />
         <SessionContentLayout sessionWidth={ideWidth.width} narrow={narrow} sessionsHidden={!railVisible}
-          projects={sessions => <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}>
+          projects={sessions => { const railHead = <>
           <div className="panel-title"><span title={projectListing?.evidenceNotice ?? undefined}>{t("Projects")}<span className="count">{snapshot?.projects.length ?? 0}</span></span><span>
             {snapshot && <Button variant="minimal" size="small" className="rail-action" icon={<AppIcon name="collapseAll" size={16} />} aria-label={t("Collapse all")} title={t("Collapse all")}
               disabled={!projectTree.expanded.length} onClick={() => setProjectTree(collapseAllScopes)} />}
@@ -2068,7 +2104,10 @@ function App() {
             {t(projectFilter.trim() ? "No matching projects. Clear the filter to show them again." : "No projects in this snapshot.")}
             {projectId !== null && ` ${t("The selected project and session remain open.")}`}
           </p>}
-          {snapshot && <ProjectRailRows projects={projectListing?.projects ?? []} favorites={projectListing?.favorites ?? 0} selectedId={projectId} onSelect={selectProject} children={sessions}
+          </>;
+          return <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}>
+          {!snapshot && railHead}
+          {snapshot && <ProjectRailRows head={railHead} projects={projectListing?.projects ?? []} favorites={projectListing?.favorites ?? 0} selectedId={projectId} onSelect={selectProject} children={sessions}
             tree={{ expanded: id => isExpanded(projectTree, id), toggle: id => setProjectTree(current => toggleScope(current, id)),
               favorite: id => isFavorite(projectTree, id), setFavorite: (project, value) => setProjectTree(current => setFavorite(current, project.id, value)),
               sessions: scopeSessions,
@@ -2098,7 +2137,7 @@ function App() {
           {projectArchive.records.length > 0 && <button type="button" className="quiet-button" onClick={() => setDialog("archive")}>{t("Archive operation evidence")}</button>}
           {projectRenameNotice && !projectRenaming && <p role="alert" className="notice error-text">{workflowNotice(language.locale, projectRenameNotice)}</p>}
           {projectRenameLocked && <button type="button" className="quiet-button" onClick={() => void refreshProjectRename()}>{t("Refresh project name (no retry)")}</button>}
-        </aside>}
+        </aside>; }}
           splitter={<PaneSplitter className="session-splitter" label={t("Resize Explorer")} value={ideWidth.width} hidden={narrow || !railVisible}
             onResize={delta => setIdeWidth(value => resizeIdeWidth(value, delta))} onReset={() => setIdeWidth(defaultIdeWidth)} />}
           sessions={<aside className="session-rail" aria-label={t("Sessions")} ref={sessionRail} hidden={!railVisible}>
@@ -2111,7 +2150,7 @@ function App() {
             rightElement={<Button variant="minimal" size="small" icon={<AppIcon name="close" size={14} />} aria-label={t("Clear filter")} title={t("Clear filter")}
               onClick={() => { setSearch(""); setSessionOptionsOpen(false); }} />} />}
           {creatingVisible && <div className="session-create">
-            <label>{selectedProject ? t("New session in {name}", { name: selectedProject.name }) : t("New global session")}
+            <label>{selectedProject ? t("New session in {name}", { name: selectedProject.name }) : t("New chat")}
               <input value={creatingTitle} maxLength={256} disabled={creatingBusy} placeholder={t("Title (optional)")} onChange={event => setCreatingTitle(event.target.value)} /></label>
             {creationProviderChoice()}
             <button type="button" className="quiet-button" disabled={creatingBusy || creationLocked} onClick={() => void createSelectedSession()}>{t("Create and open")}</button>
@@ -2189,7 +2228,7 @@ function App() {
               </div>}
             </div>;
             })}
-            {snapshot && visibleSessions.length === 0 && <div className="sidebar-empty">{t(search ? "No matching sessions." : projectId === null ? "No global sessions." : "No sessions in this project.")}</div>}
+            {snapshot && visibleSessions.length === 0 && <div className="sidebar-empty">{t(search ? "No matching sessions." : projectId === null ? "No chats." : "No sessions in this project.")}</div>}
             <div className="session-list-disclosure">
               {visibleSessionRows.length < loadedSessionRows.length && <button type="button" className="quiet-button" onClick={() => setSessionExtra(projectId, extraSessions + recentSessionCount)}>{t("Show more…")} <span className="muted-text">({loadedSessionRows.length - visibleSessionRows.length})</span></button>}
               {extraSessions > 0 && <button type="button" className="quiet-button" onClick={() => setSessionExtra(projectId, 0)}>{t("Show fewer")}</button>}
@@ -2202,7 +2241,7 @@ function App() {
               lifetime: creationGeneration.current, capturePopup: captureReferenceLifetime,
               observe: value => mutation?.capability.observe(value) } : null}><main className="content">
           <SessionTabStrip state={sessionTabPresentation(tabs, snapshot, projectId, sessionId)} snapshot={snapshot}
-            newSessionLabel={t("New session — {project}", { project: selectedProject?.name ?? t("Global") })}
+            newSessionLabel={selectedProject ? t("New session — {project}", { project: selectedProject.name }) : t("New chat")}
             renderSession={(tab, visible) => {
               const row = snapshot && resolveSessionTab(snapshot, tab);
               if (!snapshot) return null;
@@ -2216,7 +2255,11 @@ function App() {
                 ? { expectedEpoch: status.hostEpoch, projectId: tab.projectId, projectPath: tab.path!, sessionId: row.id,
                   lifetime: creationGeneration.current, capturePopup: captureReferenceLifetime,
                   observe: value => mutation?.capability.observe(value) } : null}>
-              <SessionWorkspace session={row} snapshot={snapshot} selectedProjectId={tab.projectId} onRunActivity={running => { runtimeObservations.setLive(tab, running); noteRunActivity(tab.sessionId, running); }} notesReader={owners.notesReader} observing={visible && view === "workspace" && !settingsOpen}
+              <SessionWorkspace session={row} snapshot={snapshot} selectedProjectId={tab.projectId}
+                origin={row.automationId ? (() => {
+                  const origin = sessionOrigin(row.id, row.automationId, automationState.items, automationState.runs, t);
+                  return <SessionOrigin name={origin.name} summary={origin.summary} onOpen={owned ? () => openAutomations(origin.id) : undefined} />;
+                })() : undefined} onRunActivity={running => { runtimeObservations.setLive(tab, running); noteRunActivity(tab.sessionId, running); }} notesReader={owners.notesReader} observing={visible && view === "workspace" && !settingsOpen}
                 active={tab.sessionId === sessionId} notesToggle={notesVisible} onActivate={() => { if (sessionId !== tab.sessionId || fileTabs.active) selectSessionTab(tab); }}
                 infoTrigger={sessionInfoTrigger} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger}
                 infoLifetime={{ revision: 0, current: () => !!currentSnapshot.current && !!resolveSessionTab(currentSnapshot.current, tab)
@@ -2246,7 +2289,13 @@ function App() {
             }} reopen={() => tabCommand("reopenTab")}
             files={fileTabs} fileDirty={tab => fileEditors.dirty(fileTabKey(tab))} selectFile={activateFile} closeFile={tab => closeFile(tab)}
             terminal={id => terminalList.find(terminal => terminal.id === id)}
-            renderFile={(tab, visible) => isTerminalTab(tab)
+            renderFile={(tab, visible) => isAutomationsTab(tab)
+              ? <AutomationsPanel key={fileTabKey(tab)} hub={automationsHub} projects={snapshot?.projects.filter(project => !project.archived) ?? []} sessions={snapshot?.sessions ?? []}
+                projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null} epoch={!status ? undefined : owned ? status.hostEpoch : null}
+                providers={configurationState.snapshot?.providerRuntimeAvailable ? [...configurationState.snapshot.providers].filter(provider => provider.enabled).sort((a, b) => Number(b.isDefault) - Number(a.isDefault)) : []}
+                visible={visible && view === "workspace" && !settingsOpen} focus={automationFocus} onFocused={() => setAutomationFocus(null)}
+                onActivate={() => activateFile(tab)} onOpenSession={id => void openAutomationSession(id)} />
+              : isTerminalTab(tab)
               ? <TerminalPanel key={fileTabKey(tab)} workspace={terminalWorkspace} id={tab.terminalId ?? ""} terminal={terminalList.find(terminal => terminal.id === tab.terminalId)}
                 visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} look={terminalLook} onLook={changeTerminalLook}
                 onActivate={() => activateFile(tab)} rename={terminalWorkspace.hub.rename} onCloseTerminal={() => terminalWorkspace.hub.close(tab.terminalId ?? "")}
@@ -2500,11 +2549,13 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   [epoch, id, name, path, archived, sessionId, regions, showChanges, openTerminal]);
 }
 
-function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, timelineImages, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity }: {
+function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, timelineImages, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin }: {
   /** Reports whether the session is working while its panel watches it. */
   onRunActivity?: (running: boolean | null) => void;
   /** A draft prompt to send once this session's composer holds it. */
   autoSend?: { text: string; consume: () => void } | null;
+  /** What started the session when it was not the user, shown above its timeline. */
+  origin?: ReactNode;
   /** Active reminders of this session as last reported by the host; null while unknown. */
   activeReminderCount?: number | null;
   notesReader: ReturnType<typeof createNotesReader>;
@@ -2637,6 +2688,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
     {demoMode
       ? <DemoConversation session={session} />
       : <>
+        {origin}
         <div className="session-timeline-area" data-ask={askMode}>
         <div className="ask-file-slot" ref={setAskFileSlot} hidden={askMode !== "file"} />
         <div className="timeline-scroll" ref={timeline.elementRef}

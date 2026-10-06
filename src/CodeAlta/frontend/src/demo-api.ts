@@ -22,10 +22,10 @@ const snapshot: WorkspaceSnapshot = {
     { id: "docs", name: "Documentation", path: "C:\\work\\docs", archived: false },
   ],
   sessions: [
-    { messageCount: null, createdAt: null, id: "demo-active", title: "Build the desktop workspace", fullTitle: "Build the desktop workspace", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: "codealta", lineageIssue: null, workspacePath: "C:\\code\\CodeAlta", providerKey: "openai", updatedAt: "A few seconds ago" },
-    { messageCount: null, createdAt: null, id: "demo-review", title: "Review runtime ownership", fullTitle: "Review runtime ownership", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: "codealta", lineageIssue: null, workspacePath: "C:\\code\\CodeAlta", providerKey: "openai", updatedAt: "18 minutes ago" },
-    { messageCount: null, createdAt: null, id: "demo-docs", title: "Improve onboarding", fullTitle: "Improve onboarding", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: "docs", lineageIssue: null, workspacePath: "C:\\work\\docs", providerKey: "anthropic", updatedAt: "Yesterday" },
-    { messageCount: null, createdAt: null, id: "demo-global", title: "Explore CodeAlta", fullTitle: "Explore CodeAlta", fullTitleTruncated: false, parentSessionId: null, scopeKind: "global", projectId: null, lineageIssue: null, workspacePath: null, providerKey: null, updatedAt: "Last week" },
+    { messageCount: null, automationId: null, createdAt: null, id: "demo-active", title: "Build the desktop workspace", fullTitle: "Build the desktop workspace", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: "codealta", lineageIssue: null, workspacePath: "C:\\code\\CodeAlta", providerKey: "openai", updatedAt: "A few seconds ago" },
+    { messageCount: null, automationId: null, createdAt: null, id: "demo-review", title: "Review runtime ownership", fullTitle: "Review runtime ownership", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: "codealta", lineageIssue: null, workspacePath: "C:\\code\\CodeAlta", providerKey: "openai", updatedAt: "18 minutes ago" },
+    { messageCount: null, automationId: null, createdAt: null, id: "demo-docs", title: "Improve onboarding", fullTitle: "Improve onboarding", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: "docs", lineageIssue: null, workspacePath: "C:\\work\\docs", providerKey: "anthropic", updatedAt: "Yesterday" },
+    { messageCount: null, automationId: null, createdAt: null, id: "demo-global", title: "Explore CodeAlta", fullTitle: "Explore CodeAlta", fullTitleTruncated: false, parentSessionId: null, scopeKind: "global", projectId: null, lineageIssue: null, workspacePath: null, providerKey: null, updatedAt: "Last week" },
   ],
 };
 
@@ -120,6 +120,10 @@ export const projectFiles = Object.freeze({ read: unavailable, write: unavailabl
 export const projectGit = Object.freeze({ status: unavailable, changes: unavailable, commits: unavailable, file: unavailable, watch: unavailable });
 export const terminals = Object.freeze({ acknowledge: unavailable, attach: unavailable, close: unavailable, create: unavailable, detach: unavailable, input: unavailable,
   open: unavailable, profiles: unavailable, rename: unavailable, resize: unavailable, show: unavailable, watch: unavailable });
+// The demo starts no session by itself: its automations tab says so.
+const noAutomations = async () => ({ status: "unavailable", paused: false, scanned: false, items: [], faults: [], runs: [], upcoming: [] });
+export const automations = Object.freeze({ list: noAutomations, refresh: noAutomations, save: unavailable, delete: unavailable, setEnabled: unavailable,
+  allow: unavailable, setPaused: unavailable, run: unavailable, runs: unavailable, preview: unavailable, watch: unavailable });
 export const promptImages = Object.freeze({ read: unavailable });
 // The demo keeps the user's color schemes in the browser, where the desktop keeps a file for each.
 const demoSchemesKey = "codealta.demo.colorSchemes.v1";

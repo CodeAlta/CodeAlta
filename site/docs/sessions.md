@@ -8,7 +8,7 @@ A CodeAlta session is a durable work unit with provider/model state, prompt hist
 
 ## Global vs project sessions
 
-- **Global sessions** are useful for coordination across projects: planning, triage, comparing work, or creating project-specific child sessions.
+- **Global sessions** are useful for coordination across projects: planning, triage, comparing work, or creating project-specific child sessions. CodeAlta Desktop calls them **Chats** and lists them first in the sidebar.
 - **Project sessions** are scoped to one project. They can attach project files, see same-project session context, and use project-local configuration from `<project>/.alta/config.toml`.
 
 The sidebar keeps running sessions visible even when their tab is closed. Closing a tab does not stop active work, and unsent session drafts are saved under `~/.alta/saved_prompts/`.

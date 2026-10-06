@@ -7,6 +7,7 @@ doc:
   - {path: prompts.md, title: "<i class='bi bi-chat-square-text' aria-hidden='true'></i> Agent Prompts"}
   - {path: workspace.md, title: "<i class='bi bi-display' aria-hidden='true'></i> Workspace and Dialogs"}
   - {path: sessions.md, title: "<i class='bi bi-diagram-3' aria-hidden='true'></i> Sessions and Delegation"}
+  - {path: automations.md, title: "<i class='bi bi-lightning-charge' aria-hidden='true'></i> Automations"}
   - {path: advanced-agent-workflows.md, title: "<i class='bi bi-stars' aria-hidden='true'></i> Advanced Agent Workflows"}
   - {path: plugins/readme.md, title: "<i class='bi bi-puzzle' aria-hidden='true'></i> Plugins", folder: true}
   - {path: troubleshooting.md, title: "<i class='bi bi-life-preserver' aria-hidden='true'></i> Troubleshooting"}

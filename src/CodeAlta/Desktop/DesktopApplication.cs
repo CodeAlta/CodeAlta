@@ -208,6 +208,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         SessionOperationsService? operations = null;
         SessionAsksService? asks = null;
         ReminderService? reminders = null;
+        Automations.AutomationService? automations = null;
         DesktopChangesView? changesView = null;
         DesktopEditorView? editorView = null;
         Terminals.DesktopTerminals? terminals = null;
@@ -287,7 +288,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     ? null
                     : new SessionDiscoveryScope(roots.Home, roots.Instructions),
                 BuiltInSkillRoot = roots.Builtin,
-                OwnedCommandReceiptCapacity = 256, PluginEnvironment = FrozenDictionary<string, string?>.Empty,
+                // Sends of the page, reminders and automations share it for the whole run of the application.
+                OwnedCommandReceiptCapacity = 4096, PluginEnvironment = FrozenDictionary<string, string?>.Empty,
                 ReviewOwnedCommandPermissions = options.ReviewOwnedCommandPermissions,
                 AutoApproveOwnedPermissions = !options.ReviewOwnedCommandPermissions,
                 EnableOwnedAsks = true,
@@ -308,6 +310,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             {
                 await workspacePrepared.Task;
                 if (workspace is not null) await Task.WhenAll(workspace.CloseImportsAsync(), workspace.CloseSessionsAsync());
+                if (automations is not null) await automations.DisposeAsync(); // Nothing more is started; sessions end with the host.
                 if (terminals is not null) await terminals.CloseAsync(); // The programs of the terminals end with the application.
                 if (reminders is not null) await reminders.DisposeAsync();
                 if (providers is not null) await providers.DrainAsync();
@@ -420,9 +423,16 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 editorView = new DesktopEditorView();
                 terminals = new Terminals.DesktopTerminals(DesktopCommandLine.Version, Path.Combine(options.DataRoot, "terminal"));
                 shell.BusyTerminals = () => terminals.Busy;
+                // The definitions are shared with every instance; what ran is this instance's. The developer
+                // instance starts paused, so that it does not run again what the normal one already runs.
+                automations = new Automations.AutomationService(host.CatalogOptions.ConfigPath, token => host.ProjectCatalog.LoadAsync(token),
+                    new Automations.AutomationStateStore(Path.Combine(host.CatalogOptions.StateRoot, "automations.json"), pausedByDefault: options.Developer),
+                    new Automations.AutomationRunner(host), TimeProvider.System, TimeZoneInfo.Local, new Automations.GitAutomationFeed());
                 // A host that has the user review the commands of its sessions lets no session type in a terminal.
                 DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
-                    new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions));
+                    new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
+                    new DesktopAltaAutomations(automations, host.ProjectCatalog));
+                automations.Start();
                 workspacePrepared.TrySetResult();
                 {
                     // Leave room for ordinary pasted images and their base64/JSON overhead.
@@ -430,7 +440,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     var builder = new NeoRpcBuilder(chrome.Authorize(new NeoRpcOptions
                     {
                         ContractHash = NeoRpcGeneratedContract.Hash, Release = true, MaximumFrameBytes = 128 * 1024 * 1024,
-                        MaximumChannelsPerSession = 34, MaximumUnacknowledgedChannelItems = 2,
+                        MaximumChannelsPerSession = 35, MaximumUnacknowledgedChannelItems = 2,
                         // Up to 32 open session panes, plus workspace/control observations.
                         MaximumConcurrentInvocationsPerSession = 128,
                         RequestRatePerSecond = 512, RequestRateBurst = 1024,
@@ -486,6 +496,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     _ = providers.StartInitialization(); // Retained and joined by providers.DrainAsync.
                     builder.AddModelCatalogService(providers);
                     builder.AddReminderService(reminders);
+                    builder.AddAutomationsService(new AutomationsService(automations, host.ProjectCatalog, epoch));
                     gitIssues = new GitIssuesService(host.ProjectCatalog, epoch);
                     builder.AddGitIssuesService(gitIssues);
                     builder.AddSessionOperationsService(operations);
@@ -647,6 +658,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddProjectFilesService(new ProjectFilesService());
             builder.AddProjectGitService(new ProjectGitService());
             builder.AddTerminalsService(new TerminalsService());
+            builder.AddAutomationsService(new AutomationsService());
             builder.AddPromptImagesService(new PromptImagesService());
             builder.AddComposerStatusService(new ComposerStatusService());
             builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));

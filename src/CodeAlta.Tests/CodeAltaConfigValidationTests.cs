@@ -60,6 +60,53 @@ public sealed class CodeAltaConfigValidationTests
     }
 
     [TestMethod]
+    public void ValidateGlobalConfigContent_LegacyKeyNamedInAString_IsNotALegacyConfig()
+    {
+        // The prompt of an automation is free text: naming an old key in it does not make the file an old one.
+        var result = CodeAltaConfigStore.ValidateGlobalConfigContent(
+            """"
+            [providers.openai]
+            type = "openai-chat"
+            api_url = "https://api.openai.com/v1"
+            display_name = 'is_default = "true"'
+
+            [automations.0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77]
+            name = "Check \"wire_api = x\" lines"
+            prompt = '''
+            [backends.openai]
+            provider = "openai"
+            base_uri = "https://example.invalid"
+            '''
+            notes = """
+            provider = "it's quoted"
+            """
+            """",
+            "config.toml");
+
+        Assert.IsTrue(result.IsValid, result.Message);
+    }
+
+    [TestMethod]
+    public void ValidateGlobalConfigContent_LegacyKeyAfterAString_IsStillReported()
+    {
+        var result = CodeAltaConfigStore.ValidateGlobalConfigContent(
+            """"
+            [chat]
+            note = "it's a # sign, not a comment"
+            description = """
+            two lines
+            """
+            wire_api = "responses"
+            """",
+            "config.toml");
+
+        Assert.IsFalse(result.IsValid);
+        StringAssert.Contains(result.Message, "Legacy CodeAlta config keys");
+        Assert.AreEqual(6, result.Line);
+        Assert.AreEqual(1, result.Column);
+    }
+
+    [TestMethod]
     public void ValidateGlobalConfigContent_InvalidProvider_ReturnsInvalidWithoutStartingProviders()
     {
         var result = CodeAltaConfigStore.ValidateGlobalConfigContent(

@@ -95,6 +95,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | `diff` | Show the changed files of a project to the user. Only in CodeAlta Desktop. |
 | `editor` | Show the files of a project to the user in the code editor. Only in CodeAlta Desktop. |
 | `terminal` | List, create, read, type in, rename, show and close the terminals of the window. Only in CodeAlta Desktop. |
+| `automation` | List, create, run, enable, disable and delete automations, and find the one that started a session. Only in CodeAlta Desktop. |
 
 `note` is a compatibility alias for `notes`. Prefer the plural `notes` group because it names the sidebar panel and the single sticky notes document. `skills activate` and `skills_activate` are compatibility aliases for `skill activate`. Prefer the singular `skill` group in new prompts and docs.
 
@@ -399,6 +400,66 @@ refused there, everything else works.
 Like `diff` and `editor`, the group exists only where a host registers its service (`IAltaTerminals`),
 which the desktop host does: in the terminal UI and the standalone tool it is not among the commands,
 their help or `alta tool list`.
+
+## Automation commands
+
+`alta automation` uses the automations of CodeAlta Desktop: prompts that start a session by themselves,
+on a schedule, on an event of the repository, or when asked. An automation is written in the
+configuration of the user or of its project, so it outlives the session that creates it, unlike a
+reminder; each run starts a new session.
+
+```text
+alta automation list [--project <project> | --chats]
+alta automation show <automation-id>
+alta automation current [--session <session-id>]
+alta automation runs [<automation-id>] [--limit <n>]
+alta automation run <automation-id>
+alta automation create --name <text> (--content <text> | --stdin) [--trigger <trigger>]... [--project <project> | --chat]
+                       [--store user|project] [--model <provider[:model][@effort]>] [--agent <id>] [--disabled] [--catch-up]
+alta automation enable <automation-id>
+alta automation disable <automation-id>
+alta automation delete <automation-id>
+```
+
+- `list` emits one `alta.automation` per automation, by name: `id`, `name`, `enabled`, `runsIn`
+  (`project` or `chat`), `projectId`, `projectPath`, `triggers`, `model`, `agent`, `nextRunAt`,
+  `running`, `allowed`, `problem` (why it cannot run as defined) and `file` (the configuration file that
+  defines it). `show` adds the `prompt` and the last five runs. An id can be given by its first
+  characters. `allowed` is false for an automation that came with the repository of its project and
+  that the user has not allowed yet in the Automations tab: its triggers start nothing until then, and
+  only the user allows it. `run` works either way.
+- A trigger is written on one line: `daily@09:00` (several times: `daily@09:00,17:30`), `hourly@15`
+  (minute 15; every two hours: `hourly@15/2`), `weekly@mon,thu@08:30`, `cron@0 9 * * 1-5` (five fields,
+  local time), `issue@opened`, `pull_request@opened`, `pull_request@updated` (new commits). An issue or
+  pull request trigger watches the repository of the project and runs for what the people of the
+  repository open (its owner, the members of its organization, its collaborators); `+anyone`, as in
+  `issue@opened+anyone`, runs for every author. Without `--trigger` the automation is run by hand.
+- `create` emits `alta.automation.created`. The automation runs in the project of the calling session
+  (or `--project`), or as a chat with `--chat`. It is written in the configuration of the user, or with
+  `--store project` in the `.alta/config.toml` of its project. `--catch-up` runs what was missed while
+  CodeAlta was closed. What is refused (a trigger that is not one, a name that is missing) is a usage
+  error with the reason, and nothing is written.
+- `run` starts an automation now, whatever its triggers and whether or not it is enabled, and emits
+  `alta.automation.run` once the session exists: `id`, `automationId`, `status`, `trigger`, `detail`,
+  `sessionId`, `projectId`, `startedAt`. It does not wait for the answer of the session. A run that
+  cannot start has the status `failed` and its `message`, and the command fails.
+- `runs` lists the runs of one automation, or of all, newest first (20, or `--limit` up to 100). `status`
+  is `running`, `completed`, `failed`, `cancelled`, `interrupted` (CodeAlta stopped during the run) or
+  `skipped` (the previous run was still in progress). `trigger` is `manual` or the kind of the trigger,
+  and `detail` names the issue or the pull request that started the run.
+- `current` shows the automation that started a session (the calling one, or `--session`) and the run
+  that did: this is how a session started by an automation finds its definition and the runs before
+  it. `alta.automation.none` answers a session that the user, or another session, started.
+- `enable` and `disable` switch the triggers of an automation (`alta.automation.changed`); `delete`
+  removes it from its configuration file (`alta.automation.deleted`). Its runs and their sessions stay.
+
+`automation.notFound` (exit code for not found) answers an id that is not an automation.
+`automation.startedByAutomation` (exit code 4) answers `run`, `create`, `enable`, `disable` and `delete`
+called by a session that an automation started: such a session reads the automations and changes none.
+
+The group exists only where a host registers its service (`IAltaAutomations`), which the desktop host
+does: in the terminal UI and the standalone tool it is not among the commands, their help or
+`alta tool list`.
 
 ## Skill commands
 

@@ -25,7 +25,7 @@ internal sealed partial class WorkspaceService
     internal WorkspaceService(CodeAltaHost host, string epoch) : this(host.WorkspaceReads, host.ProjectCatalog, epoch)
     {
         _sessionProviders = host.ModelProviderRegistry;
-        _createSession = host.Commands.CreateDraftSessionAsync;
+        _createSession = (project, provider, title) => host.Commands.CreateDraftSessionAsync(project, provider, title);
         _draftPrompts = host.Commands.GetDraftPromptChoicesAsync;
         _renameSession = host.Commands.RenameSessionAsync;
         _deleteSession = host.Commands.DeleteCatalogSessionAsync;

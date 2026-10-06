@@ -166,9 +166,12 @@ internal sealed partial class WorkspaceService
             if (lineageIssue is not null) parent = null;
             string? scopeKind = null;
             string? projectId = null;
+            string? automationId = null;
             if (headers?.TryGetValue(session.SessionId, out var header) == true && header.SessionId == session.SessionId
                 && header.CreatedAt == session.CreatedAt && header.WorkingDirectory == session.WorkspacePath)
             {
+                // The automation that started the session, as the session itself records it.
+                if (header.CreatedBy is { Kind: AltaActorProvenance.AutomationKind, AutomationId: { Length: 36 } automation }) automationId = automation;
                 if (header.Kind == SessionViewKind.GlobalSession && header.ProjectRef is null)
                     scopeKind = "global";
                 else if (header.Kind == SessionViewKind.ProjectSession && header.ProjectRef is { } reference
@@ -179,12 +182,13 @@ internal sealed partial class WorkspaceService
                 }
             }
             var cost = 512 + 64 + 6 * (session.SessionId.Length + title.Length + fullTitle.Length + (parent?.Length ?? 0)
-                + (session.WorkspacePath?.Length ?? 0) + (session.ProviderKey?.Length ?? 0) + (projectId?.Length ?? 0));
+                + (session.WorkspacePath?.Length ?? 0) + (session.ProviderKey?.Length ?? 0) + (projectId?.Length ?? 0) + (automationId?.Length ?? 0));
             if (cost > remaining) break;
             remaining -= cost;
             displayedSessions.Add(new WorkspaceSession(session.SessionId, title, session.WorkspacePath, session.ProviderKey, session.UpdatedAt,
                 fullTitle, sourceTitle.Length > 4096, parent, scopeKind, projectId, lineageIssue,
-                session.CreatedAt.Year > 1 ? session.CreatedAt : null, session.ViewState?.MessageCount is >= 0 ? session.ViewState.MessageCount : null));
+                session.CreatedAt.Year > 1 ? session.CreatedAt : null, session.ViewState?.MessageCount is >= 0 ? session.ViewState.MessageCount : null,
+                automationId));
         }
         return new WorkspaceSnapshot(true, displayedProjects.ToArray(), displayedSessions.ToArray(),
             displayedProjects.Count < projects.Count, displayedSessions.Count < sessions.Count, shortened);
@@ -239,4 +243,4 @@ internal sealed record WorkspaceSnapshot(bool Configured, WorkspaceProject[] Pro
 internal sealed record WorkspaceProject(string Id, string Name, string Path, bool Archived);
 internal sealed record WorkspaceSession(string Id, string Title, string? WorkspacePath, string? ProviderKey, DateTimeOffset UpdatedAt,
     string FullTitle, bool FullTitleTruncated, string? ParentSessionId, string? ScopeKind, string? ProjectId, string? LineageIssue,
-    DateTimeOffset? CreatedAt, int? MessageCount = null);
+    DateTimeOffset? CreatedAt, int? MessageCount = null, string? AutomationId = null);

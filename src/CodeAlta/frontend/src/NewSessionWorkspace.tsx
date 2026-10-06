@@ -23,9 +23,9 @@ export function NewSessionWorkspace({ project, preferredHeight, onHeight, chrome
           <LogoWord text={logo.code} /><LogoWord text={logo.alta} className="logo-alta" />
         </div>
         <p className="welcome-subtitle">{project ? t("Next session will start in {project} from folder {folder}.", { project: project.name, folder: project.path })
-          : t("Global workspace ready for a new session.")}</p>
+          : t("Ready for a new chat, in no project.")}</p>
         <p>{project ? t("Use the prompt below to start a new session for {project}.", { project: project.name })
-          : t("Use the prompt below to start a new global session.")}</p>
+          : t("Use the prompt below to start a new chat.")}</p>
         <p>{t("Switch projects in the sidebar before sending if you want a different scope.")}</p>
         <p>{t("Reopen any session tab to continue previous work.")}</p>
       </div>

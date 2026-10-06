@@ -86,6 +86,15 @@ The terminal button of a project in the sidebar, or ``Ctrl+` ``, opens a termina
   <figcaption class="small text-secondary mt-2">A terminal under a session, and the terminals of the project in the sidebar.</figcaption>
 </figure>
 
+### Automations
+
+An automation sends a prompt by itself: every morning, every Friday, or when an issue or a pull request is opened. Each run starts a new session. See [Automations](automations.md).
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-automations.webp" alt="CodeAlta Desktop Automations tab with the next 24 hours and the automations of a project" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The automations of a project and when they run next.</figcaption>
+</figure>
+
 ### Review changes
 
 Click the `+` / `−` numbers in the prompt bar, or the changes button of a project in the sidebar, to open the Changes tab of the project. It lists the changed files and recent commits and shows a syntax-highlighted diff of the selected file. See [Changes](workspace.md#changes-desktop).
@@ -131,6 +140,8 @@ When a new version is available, the desktop app shows a notice with **Update an
 | Code editor | One tab per project with its files, a search in files and file tabs | One editor tab per file |
 | Git changes | Changes tab with the changed files, recent commits and a diff | Not available |
 | Terminal | Terminals in tabs, listed in the sidebar; agents can use them | Not available |
+| Automations | Prompts that run on a schedule, on a new issue or pull request, or on demand | Not available |
+| Sessions of no project | **Chats**, first in the sidebar | **Global sessions** |
 | Favorite projects | Listed first in the sidebar | Not available |
 | Settings | One window with a page per area | One dialog per area |
 | Appearance | Light, dark or system theme, 13 color schemes | Terminal themes |

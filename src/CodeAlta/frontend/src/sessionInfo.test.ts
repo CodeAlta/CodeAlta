@@ -7,7 +7,7 @@ import { SessionInfoDialog } from "./SessionInfoDialog";
 import { copySessionId, dismissSessionInfoOnKey, restoreSessionInfoFocus, selectedSessionInfoAvailable, sessionInfoCopyFeedback, sessionInfoView } from "./sessionInfo";
 
 const session: WorkspaceSession = {
-  messageCount: null, createdAt: null, id: "session-1", title: "Recorded title", fullTitle: "Recorded title", fullTitleTruncated: false,
+  messageCount: null, automationId: null, createdAt: null, id: "session-1", title: "Recorded title", fullTitle: "Recorded title", fullTitleTruncated: false,
   parentSessionId: null, scopeKind: "project", projectId: "p", lineageIssue: null,
   workspacePath: "/exact/p", providerKey: "recorded-provider", updatedAt: "2026-09-23T01:02:03+00:00",
 };
@@ -52,7 +52,7 @@ test("exact selected project identity/path renders only recorded snapshot metada
 
 test("global persists even when its working path equals a project; unknown or mismatched scope is not inferred", () => {
   const global = { ...session, scopeKind: "global" as const, projectId: null };
-  assert.equal(sessionInfoView({ ...snapshot, sessions: [global] }, global, null).scope, "Global session");
+  assert.equal(sessionInfoView({ ...snapshot, sessions: [global] }, global, null).scope, "Chat");
   assert.match(sessionInfoView({ ...snapshot, sessions: [global] }, global, "p").scopeWarning!, /does not belong/);
   const unknown = { ...session, scopeKind: null, projectId: null };
   assert.equal(sessionInfoView({ ...snapshot, sessions: [unknown] }, unknown, "p").scope, "Unverified / unmatched scope");
@@ -91,7 +91,7 @@ test("a session/project switch never reuses the previous selection's info or aut
   const changed = { ...snapshot, sessions: [next] };
   assert.equal(sessionInfoView(changed, session, "p").canCopyId, false);
   assert.equal(sessionInfoView(changed, next, null).title, "New selection");
-  assert.equal(sessionInfoView(changed, next, null).scope, "Global session");
+  assert.equal(sessionInfoView(changed, next, null).scope, "Chat");
   assert.equal(sessionInfoView(snapshot, session, "another").scopeWarning !== null, true);
 });
 

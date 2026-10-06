@@ -261,15 +261,18 @@ its own geometry. Closing Reminders does not cancel an admitted action or retry 
 
 In the explorer, a project row has one **…** menu (also on right-click): **New session**, **Search
 sessions…** and **Browse saved sessions** for that project, then **Open**, **Add to favorites** (or
-**Remove from favorites**), **Details**, **Rename project…** and **Archive project…**. **Global
-sessions** has the same session actions. Session search is an inline field above the session list of
+**Remove from favorites**), **Details**, **Rename project…** and **Archive project…**. **Chats** has
+the same session actions. Session search is an inline field above the session list of
 the selected project; Escape or its clear button hides it.
+
+The **Chats** are the sessions of no project, which the TUI calls global sessions. Their row is the
+first of the Explorer, above the projects, and is closed until it is opened.
 
 Each project opens and closes on its own, and several can be open, each with its sessions. The chevron
 of a row opens and closes it without selecting it. Clicking a project selects it and opens it; clicking
 the selected project closes and opens it. A project that becomes the selected one in any other way (a
 session tab of another project, **Open project**) is opened too. **Collapse all** in the Projects header
-closes every project and the global sessions. What is open is kept with the favorites in this WebView's
+closes every project and the chats. What is open is kept with the favorites in this WebView's
 local storage (`codealta.desktop.projectTree.v1`) and restored as it was at the next start; with nothing
 stored, the selected project is the one open.
 
@@ -294,7 +297,8 @@ other buttons while they are hidden: the icon is in the same place with the poin
 from it. A row that shows none gives its whole width to the name. `explorer/projectRowButtons.browser.test.ts`
 lays the rows out in a browser and checks where the buttons are in both cases. Icons have the color of
 what they stand for: a project is a folder, open or closed (an archive box once archived), a session a
-robot head, a session started by another one an arrow under its parent, and the global sessions a house.
+robot head, a session started by another one an arrow under its parent, a session started by an
+automation a bolt, and the chats two speech bubbles.
 **Rename project…** and a session's **Rename…** open a small popover beside the row, with the current
 name selected: Enter or **Rename** saves it; Escape, **Cancel** or a click elsewhere leaves the name
 as it is. A rename that is refused says why under the field. A session keeps the name it was created
@@ -401,7 +405,7 @@ snapshot. It selects existing sessions without importing, creating a runtime, or
 drafts. Archived projects are labeled and their sessions open read-only; a catalog-only launch
 can also navigate saved projects read-only. **Details** in a project's **…** menu
 opens a read-only window with the display name, full recorded path, ID and archive flag, each value
-with a copy button at the end of its row. The Global sessions root has no project details;
+with a copy button at the end of its row. The Chats root has no project details;
 missing, duplicated or changed ID/path rows cannot open it. A failed/pending catalog refresh
 disables inspection until a successful fresh snapshot, and project, session or host changes
 dismiss stale details. It has no total session count, tags, description or source metadata. A copy
@@ -1655,6 +1659,131 @@ read its screen or its last lines, type in it and wait for the command to end, r
 and close it. A host started with `--review-owned-command-permissions` lets no session type in a
 terminal, since what is typed in a shell is a command nobody reviewed.
 
+## Automations
+
+An **automation** is a prompt that starts a session by itself: on a schedule, when something happens in the
+repository of its project, or when it is asked to. Each run creates a new session, named after the
+automation (and after the issue or the pull request that started it), in its project or as a chat, and
+sends it the prompt. A reminder is for the session that sets
+it and is lost when the application stops; an automation is written in a configuration file and starts
+sessions of its own. Automations exist in CodeAlta Desktop only. The sources are in `Desktop/Automations/`
+(host), `Desktop/Rpc/AutomationsRpc.cs` and `frontend/src/automations/` (page).
+
+- **Where they are kept.** An automation is one table of the configuration of the user
+  (`~/.alta/config.toml`) or of a project (`<project>/.alta/config.toml`, which a repository shares with
+  everyone who opens it). The key of the table is the identifier of the automation, a GUID.
+
+  ```toml
+  [automations.0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77]
+  name = "Issue triage"
+  enabled = true
+  project = "C:/code/app"            # configuration of the user only: the folder of the project it runs in
+  model = "codex:gpt-6.1-sol@high"   # provider[:model][@effort]
+  agent = "default"
+  catch_up = false
+  triggers = [
+    { type = "daily", at = ["09:00", "17:30"] },
+    { type = "weekly", days = ["mon", "thu"], at = ["08:30"] },
+    { type = "hourly", minute = 15, every = 2 },
+    { type = "cron", expression = "0 9 * * 1-5" },
+    { type = "issue", event = "opened" },
+    { type = "pull_request", event = "updated", authors = "anyone" },
+  ]
+  prompt = '''
+  Triage the issues opened since yesterday.
+  '''
+  ```
+
+  Only `name` and `prompt` are required. In the configuration of the user, an automation without `project`
+  runs as a chat; in the file of a project it runs in that project. Without `model` it takes the default
+  provider and the first model it lists; an effort it does not name is the one a new session gets. A name
+  has at most 120 characters, a prompt 32,768, and an automation 8 triggers. The files are read apart from
+  the rest of the configuration (`AutomationConfig.Read`): a table that is not an automation is listed in
+  the tab with the reason and breaks nothing else. Saving writes that one table and leaves every other
+  byte of the file as it was (`AutomationConfig.Write` finds the table with the Tomlyn syntax tree). The
+  files of all the projects are read away from the window, eight at a time, again every minute and when
+  the tab asks: an automation written by hand, or pulled with the repository, shows up by itself.
+- **What comes with a project is allowed first.** The configuration of a project comes with its
+  repository: other people write it, and a pull can change it. The triggers of an automation kept there
+  start it only once the user allowed it in this instance, as it is: the card says **Waits for you to
+  allow it** and has an **Allow** button. What is allowed is the definition (name, prompt, model, agent
+  prompt, triggers): a change of any of them asks again, and its switch does not answer. An automation
+  saved from the editor or by `alta automation create` is allowed by that, and one kept with the user
+  needs no allowance. Running an automation by hand never needs one. The allowance is for the file the
+  automation is in: the same table in another folder asks again, and when two files hold the same
+  identifier, the one that was allowed is the automation. A configuration file of a project that is a
+  link, or whose `.alta` folder is one, is neither read for automations nor written: the repository
+  gives that link, and it may name any file. The allowances are in `automations.json`.
+- **Schedules** are read on the clock of the machine. `hourly` is a minute of the hour, every 1 to 12
+  hours counted from midnight; `daily` one or more times of day; `weekly` days and times; `cron` five
+  fields (minute, hour, day of the month, month, day of the week) with `*`, lists, ranges, steps and the
+  names of months and days. When both the day of the month and the day of the week are given, either one
+  is enough, as in cron. A time the clock skips when it moves forward is due when it would have been
+  reached, and a time it shows twice is due once. An automation without trigger is run by hand.
+- **Events of the repository.** `issue` (opened) and `pull_request` (opened, or `updated` when it gets
+  commits) watch the repository of the project on GitHub, GitLab or Azure DevOps (work items and pull
+  requests there). A desktop application cannot be called by a provider, so it asks: every five minutes,
+  only for the repositories an enabled trigger watches, with the credentials of the issue picker, and
+  with the entity tag of its last reading on GitHub, where an unchanged list then costs nothing
+  (`GitRepositoryFeed` in `CodeAlta.Plugin.Git`). The first look of a trigger starts nothing: what is
+  there already is not an event. An event starts the automation only when its author is one of the
+  people of the repository (on GitHub its owner, a member of its organization or a collaborator, as
+  GitHub reports the association; on GitLab a developer or more; on Azure DevOps anyone of the
+  organization), since what a stranger writes would otherwise reach a session; `authors = "anyone"` asks
+  for every author. The prompt is followed by what happened: the repository, the number of the issue or
+  pull request, then its title, its author and its link, each on a line of its own and cleaned of what
+  is not seen (control characters, marks that turn the text around), and a line that says they are
+  someone else's words. The events of one automation run one at a time, in their order: an event that
+  comes during a run waits for it to end. The card of the automation names the repository it watches,
+  or says why it sees nothing (no repository, no sign-in, no access). A reading lists the 30 newest
+  issues, or the 100 pull requests that changed last: the commits of a pull request are noticed from
+  the second time it is listed.
+- **What is missed.** An automation runs while CodeAlta is open. A time that passed more than two
+  minutes ago (the application was closed, the computer slept) is not run later, and what happened in a
+  repository meanwhile starts nothing. With `catch_up = true` a missed schedule runs once at the next
+  start, and each issue or pull request that came meanwhile starts its run. A schedule that is due while
+  the previous run of the same automation is still in progress is recorded as skipped.
+- **Runs.** A run checks what the automation names (project, provider, model, effort, agent prompt),
+  and that the host still accepts a command, before it creates anything, so that neither a wrong name
+  nor a full host leaves an empty session behind; it then creates the session and sends the prompt once. The session records the automation that created it in its journal
+  (`created_by`, kind `automation`), which is how the Explorer and the session itself know. A run is
+  `running`, `completed` (the session answered), `failed` (with the reason), `cancelled`, `interrupted`
+  (the application stopped meanwhile) or `skipped`.
+- **State.** What an instance remembers is in `automations.json` under its state root, apart from the
+  definitions: whether the automations are paused, when the schedules were last looked at (written once
+  a minute and when the application closes), the last 100 runs of each automation (2,000 in all), what
+  the event triggers have seen and which automations of a project were allowed. A state file that is
+  there and cannot be read starts an empty state with the automations paused. **Running / Paused** in the tab stops every trigger at once;
+  running an automation by hand still works. The developer instance (`--dev`) reads the same
+  definitions as the installed application and starts paused, so that it does not run them a second
+  time.
+- **The tab.** The bolt of the activity bar, **Automations** in the command palette and `Ctrl+G`
+  `Ctrl+M` open one tab (`view: "automations"` in `fileTabs`), kept for the next start. It shows the
+  next 24 hours on a line (a mark for each time a schedule is due, a band for an automation that runs
+  all along), a card for each automation (what starts it, where it runs, when it is next due, how its
+  last run ended, a switch, **Run now**, and **Edit…**, **Duplicate** and **Delete…** in its menu), the
+  runs of the selected automation or the recent runs of all, and templates a new one starts from. A run
+  opens its session. The editor is a window: name, where it runs, where it is stored (**My
+  configuration** or **The project**), the triggers with the next times of each schedule, the prompt,
+  the provider, model, effort and agent prompt, and **Save and run**.
+- **Sessions.** A session started by an automation has a bolt for icon in the Explorer and, above its
+  timeline, a line that names the automation and what triggered it, with a link to the automation in
+  the tab. Deleting an automation leaves its runs and their sessions.
+- **Agents** use the same automations with `alta automation` (see `doc/live-tool.md`): they list them,
+  create one, run one, read its runs, and a session started by an automation finds it with
+  `alta automation current`. A session that an automation started reads the automations and changes
+  none: it cannot run, create, enable, disable or delete one, so that nothing it was told by an issue
+  can keep itself going.
+- **Writing a file.** A change reads the file, replaces the text of one table and writes the file back
+  under a name of its own beside it, then moves it over the file; changes are made one at a time. The
+  file keeps its line endings and its UTF-8 mark. Nothing is written unless the new text reads back with
+  the automation in it: a file that holds `automations = { … }` on one line, or already holds the 64
+  automations that are read from one file, is left as it is, with the reason. The switch of an
+  automation changes the file as it is on disk, not as it was last read.
+
+Each run takes one of the commands the host accepts in one run of the application, with the sends of the
+page and the reminders: the desktop keeps 4,096 of them.
+
 ## Commands, help and keyboard shortcuts
 
 The desktop app uses the TUI's key map. `Ctrl+P` (or `/` in an empty prompt, or the search icon on
@@ -1677,6 +1806,7 @@ shortcuts**, a filterable window listing the same commands by category.
 | `Alt+Up`, `Alt+Down` in a Changes tab | Go to the previous or next change of the shown file |
 | ``Ctrl+` ``, `Ctrl+G` then `Ctrl+J` | New terminal (`/terminal`) in the folder of the session or of the project |
 | In a terminal: `Ctrl+C`, `Ctrl+V`, `Ctrl+F`, `Ctrl+Home` / `Ctrl+End` | Copy the selection (or interrupt the program), paste, find, top / bottom |
+| `Ctrl+G` then `Ctrl+M` | Automations (`/automations`) |
 | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+PageUp` / `Ctrl+PageDown`) | Previous / next tab |
 | `Ctrl+W` (also `Ctrl+Shift+W`, which a terminal leaves to the application), `Ctrl+Shift+T` | Close tab, reopen the last closed tab |
 | `Enter`, `Ctrl+Enter`, `Shift+Enter` | Send (queued while a turn runs), steer the running turn, new line |
@@ -1779,7 +1909,7 @@ an intent while its original waiter is live; Abort-only recovery does not erase 
 text. Late valid epoch mismatch disables mutations even after the old selection is cancelled.
 Reload permits manual receipt browsing, not reconstruction of lost text/keys. Abort control
 settlement is not rollback, decision retraction or run termination. The host's separate shared
-receipt capacity remains 256, paged 64 at a time.
+receipt capacity is 4,096 for one run of the application, paged 64 at a time.
 
 The composer visibly emphasizes **Cancel observed run** when an eligible point-in-time target
 is available, keeping **Send** as a separate secondary button. This is not a live-running indicator.
@@ -1928,7 +2058,7 @@ An uncertain steering request retains its immutable target, key and text across 
 Use **Refresh submissions** to reconcile it or **Retry exact steering request** deliberately;
 there is no automatic retry. A fresh runtime observation does not change that retained target.
 Only one steering dispatch per session is in flight, independently of an owned send; steering
-shares the host's 256-receipt limit. Closing presentation cancels only the waiter, while host
+shares the host's 4,096-receipt limit. Closing presentation cancels only the waiter, while host
 shutdown retains and joins accepted steering and cancellation work.
 
 The compact prompt toolbar offers **Compact observed idle attachment** (or `Ctrl+F11` from the
@@ -1942,7 +2072,7 @@ or stale targets fail without fallback, discovery or replacement. Compaction sum
 attachment's context **at provider admission**, not a history snapshot captured by the UI, and
 may use the configured model/network and persist context changes. It creates no new permission
 authority. One compaction per session
-may be in flight and shares the 256-receipt limit. Refresh submissions for the settled outcome;
+may be in flight and shares the 4,096-receipt limit. Refresh submissions for the settled outcome;
 busy, unsupported and unsuccessful compaction are not success. Uncertain requests survive
 selection changes for manual receipt reconciliation. Replaying a busy receipt does not try again:
 a new explicit action uses a fresh key. Closing the panel cancels only the wait; shutdown retains

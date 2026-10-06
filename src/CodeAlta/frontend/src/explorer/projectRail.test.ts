@@ -8,7 +8,7 @@ import { ProjectRailRows } from "./ProjectRailRows";
 
 const project = (id: string, name: string, path = `/${id}`, archived = false): WorkspaceProject => ({ id, name, path, archived });
 const session = (id: string, projectId: string, workspacePath: string, updatedAt: string): WorkspaceSession => ({
-  messageCount: null, createdAt: null, id, title: id, fullTitle: id, fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId,
+  messageCount: null, automationId: null, createdAt: null, id, title: id, fullTitle: id, fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId,
   lineageIssue: null, workspacePath, providerKey: null, updatedAt,
 });
 const snapshot = (projects: WorkspaceProject[], sessions: readonly WorkspaceSession[] = []): WorkspaceSnapshot => ({
@@ -67,7 +67,7 @@ test("filtering and rename refresh never change selection, and a renamed project
   assert.equal(renamed.sessions[0].id, selected.sessionId);
 });
 
-test("filtered rail renders a fixed accessible Global sessions root, archived label, tooltip and hidden selection", () => {
+test("filtered rail renders a fixed accessible Chats root, archived label, tooltip and hidden selection", () => {
   const value = snapshot([project("arch", "Archived", "/full/private/path", true), project("selected", "Hidden")]);
   const render = (filter: string, selectedId: string | null) => renderToStaticMarkup(createElement(ProjectRailRows, {
     projects: projectRailProjection(value, filter, "name").projects, selectedId, onSelect: () => {}, canRename: true,
@@ -79,8 +79,9 @@ test("filtered rail renders a fixed accessible Global sessions root, archived la
   assert.doesNotMatch(archived, /Rename project/);
   const hidden = render("no-match", "selected");
   assert.match(hidden, /aria-label="Projects"/);
-  assert.match(hidden, /aria-label="Global sessions"/);
-  assert.match(hidden, /Global sessions/);
+  assert.match(hidden, /aria-label="Chats"/);
+  assert.match(hidden, /<strong>Chats<\/strong>/);
+  assert.ok(hidden.indexOf('aria-label="Chats"') < hidden.indexOf('aria-label="Projects"'), "The chats come before the projects.");
   assert.doesNotMatch(hidden, /Hidden/);
   assert.match(hidden, /aria-pressed="false"/);
   assert.doesNotMatch(hidden, /aria-pressed="true"/); // hidden project is still selected in state, not retargeted to root

@@ -10,9 +10,15 @@ import { useShellLanguage } from "../shellLanguage";
 /** How far a row is pushed in for each level of its session under its parents. */
 export const sessionRowIndent = (depth: number) => 11 + Math.min(depth, 8) * 12;
 
-/** The icon and the title of a session row: a session started by another one has an icon of its own. */
+/**
+ * The icon and the title of a session row: a session started by another one has an icon of its own, and so has a
+ * session started by an automation.
+ */
 export function SessionRowTitle({ session, depth, diagnostic }: Pick<SessionHierarchyRow, "session" | "depth" | "diagnostic">) {
-  return <><span className="session-icon" data-file-tone={depth > 0 ? "teal" : "purple"}><AppIcon name={depth > 0 ? "childSession" : "assistant"} size={13} /></span>
+  const { t } = useShellLanguage();
+  const automated = !!session.automationId;
+  return <><span className="session-icon" data-file-tone={depth > 0 ? "teal" : automated ? "gold" : "purple"} title={automated && depth === 0 ? t("Started by an automation") : undefined}>
+    <AppIcon name={depth > 0 ? "childSession" : automated ? "automation" : "assistant"} size={13} /></span>
     <span className="session-title">{diagnostic && <span aria-hidden="true">⚠ </span>}{plainTitle(session.title)}</span></>;
 }
 
@@ -68,7 +74,7 @@ export function ExplorerSessions({ rows, global, more, extended, access, marks, 
           ]} />}
       </div>;
     })}
-    {rows.length === 0 && <div className="sidebar-empty">{t(global ? "No global sessions." : "No sessions in this project.")}</div>}
+    {rows.length === 0 && <div className="sidebar-empty">{t(global ? "No chats." : "No sessions in this project.")}</div>}
     <div className="session-list-disclosure">
       {more > 0 && <button type="button" className="quiet-button" onClick={onMore}>{t("Show more…")} <span className="muted-text">({more})</span></button>}
       {extended && <button type="button" className="quiet-button" onClick={onFewer}>{t("Show fewer")}</button>}

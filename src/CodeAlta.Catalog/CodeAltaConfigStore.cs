@@ -2391,7 +2391,8 @@ public sealed class CodeAltaConfigStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(content);
 
-        var normalized = content.ToLowerInvariant();
+        // A legacy key is a key: the text of a string value (the prompt of an automation, a description) is not one.
+        var normalized = MaskTomlStrings(content).ToLowerInvariant();
         string[] legacyMarkers =
         [
             "[backends",
@@ -2426,6 +2427,54 @@ public sealed class CodeAltaConfigStore
                 span,
                 "Legacy CodeAlta config keys are no longer supported. Migrate to [chat].default_provider, providers.<key>.type, and providers.<key>.api_url.");
         }
+    }
+
+    /// <summary>
+    /// Returns the content with the text of every TOML string replaced by spaces, offsets and line breaks unchanged.
+    /// </summary>
+    internal static string MaskTomlStrings(string content)
+    {
+        var masked = content.ToCharArray();
+        var index = 0;
+        while (index < masked.Length)
+        {
+            var current = masked[index];
+            if (current == '#')
+            {
+                // A comment runs to the end of its line; a quote in it opens nothing.
+                while (index < masked.Length && masked[index] != '\n') index++;
+            }
+            else if (current is '"' or '\'')
+            {
+                var multiline = index + 2 < masked.Length && masked[index + 1] == current && masked[index + 2] == current;
+                index += multiline ? 3 : 1;
+                while (index < masked.Length)
+                {
+                    if (masked[index] == current && (!multiline
+                        || index + 2 < masked.Length && masked[index + 1] == current && masked[index + 2] == current))
+                    {
+                        index += multiline ? 3 : 1;
+                        break;
+                    }
+
+                    // An unterminated single-line string ends with its line, as it does for the parser.
+                    if (!multiline && masked[index] == '\n') break;
+                    if (current == '"' && masked[index] == '\\' && index + 1 < masked.Length && masked[index + 1] is not ('\r' or '\n'))
+                    {
+                        masked[index++] = ' ';
+                    }
+
+                    if (masked[index] is not ('\r' or '\n')) masked[index] = ' ';
+                    index++;
+                }
+            }
+            else
+            {
+                index++;
+            }
+        }
+
+        return new string(masked);
     }
 
     private static TomlTextPosition GetTomlTextPosition(string content, int offset)

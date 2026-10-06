@@ -5,7 +5,7 @@ import { activeReminderCounts, sameActiveReminders, scopeReminderCount } from ".
 
 const reply = (patch: Partial<ReminderActiveResponse> = {}): ReminderActiveResponse => ({ status: "ok", epoch: "e1",
   sessions: [{ sessionId: "one", activeCount: 2, nextDueAt: null }, { sessionId: "global", activeCount: 1, nextDueAt: "2026-10-03T10:00:00+00:00" }], ...patch });
-const session = (id: string, projectId: string | null): WorkspaceSession => ({ messageCount: null, createdAt: null, id, title: id, fullTitle: id,
+const session = (id: string, projectId: string | null): WorkspaceSession => ({ messageCount: null, automationId: null, createdAt: null, id, title: id, fullTitle: id,
   fullTitleTruncated: false, parentSessionId: null, scopeKind: projectId ? "project" : "global", projectId, lineageIssue: null,
   workspacePath: projectId ? "/p" : null, providerKey: "fixture", updatedAt: "2026-09-24T00:00:00Z" });
 const snapshot: WorkspaceSnapshot = { configured: true, projects: [{ id: "p", name: "Project", path: "/p", archived: false }],

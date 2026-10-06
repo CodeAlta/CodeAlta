@@ -37,11 +37,11 @@ export function sessionInfoView(snapshot: WorkspaceSnapshot, session: WorkspaceS
     : [];
   const verifiedProject = project.length === 1 ? project[0] : null;
   const scope = verifiedProject ? `Project: ${verifiedProject.name}`
-    : session.scopeKind === "global" && session.projectId === null ? "Global session" : "Unverified / unmatched scope";
+    : session.scopeKind === "global" && session.projectId === null ? "Chat" : "Unverified / unmatched scope";
   const scopeWarning = verifiedProject && selectedProjectId !== verifiedProject.id
     ? "The selected project does not match this session's verified project."
-    : scope === "Global session" && selectedProjectId !== null
-      ? "This global session does not belong to the selected project." : null;
+    : scope === "Chat" && selectedProjectId !== null
+      ? "This chat does not belong to the selected project." : null;
   // The bounded display title is already in the header; do not surface longer summary/prompt-derived text here.
   const title = session.title;
   const date = session.updatedAt;

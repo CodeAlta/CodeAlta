@@ -37,20 +37,21 @@ internal static class DesktopAltaTools
     /// <param name="changes">Where <c>alta diff show</c> asks the window to show changed files; without it the command does not exist.</param>
     /// <param name="editor">Where <c>alta editor open</c> asks the window to open the code editor; without it the command does not exist.</param>
     /// <param name="terminals">The terminals the <c>alta terminal</c> commands use; without them the commands do not exist.</param>
+    /// <param name="automations">The automations the <c>alta automation</c> commands use; without them the commands do not exist.</param>
     /// <exception cref="ArgumentNullException">The host or the reminders are null.</exception>
     internal static void Attach(CodeAltaHost host, AltaReminderService reminders, PluginAltaServiceBridge? pluginAlta = null, IAltaChangesView? changes = null,
-        IAltaEditorView? editor = null, IAltaTerminals? terminals = null)
+        IAltaEditorView? editor = null, IAltaTerminals? terminals = null, IAltaAutomations? automations = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(reminders);
-        var dispatcher = Compose(host, reminders, changes, editor, terminals);
+        var dispatcher = Compose(host, reminders, changes, editor, terminals, automations);
         pluginAlta?.SetDispatcher(dispatcher);
         host.Commands.SessionTools = CreateSessionTools(dispatcher);
     }
 
     /// <summary>Builds the dispatcher of the alta commands over a host's services.</summary>
     internal static AltaCommandDispatcher Compose(CodeAltaHost host, AltaReminderService reminders, IAltaChangesView? changes = null, IAltaEditorView? editor = null,
-        IAltaTerminals? terminals = null)
+        IAltaTerminals? terminals = null, IAltaAutomations? automations = null)
     {
         var permissions = host.RuntimeService.Permissions;
         var services = new AltaServiceCollection()
@@ -77,6 +78,7 @@ internal static class DesktopAltaTools
         if (changes is not null) services.Add(changes);
         if (editor is not null) services.Add(editor);
         if (terminals is not null) services.Add(terminals);
+        if (automations is not null) services.Add(automations);
         var registry = new AltaCommandRegistry();
         var dispatcher = new AltaCommandDispatcher(registry, services);
         services.Add(registry).Add(dispatcher);

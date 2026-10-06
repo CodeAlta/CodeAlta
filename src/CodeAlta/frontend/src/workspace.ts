@@ -49,5 +49,5 @@ export function sessionListSignature(snapshot: WorkspaceSnapshot): string {
 
 export function workspaceNotice(snapshot: WorkspaceSnapshot): string | null {
   if (!snapshot.projectsTruncated && !snapshot.sessionsTruncated && !snapshot.displayTextTruncated) return null;
-  return "Display limits applied (up to 200 projects / 500 sessions, with a wire-size limit); some labels may be shortened. This is not paging: the shared loader still reads the whole catalog. Sessions whose projects are omitted appear under Global / unmatched.";
+  return "Display limits applied (up to 200 projects / 500 sessions, with a wire-size limit); some labels may be shortened. This is not paging: the shared loader still reads the whole catalog. Sessions whose projects are omitted appear under Chats.";
 }

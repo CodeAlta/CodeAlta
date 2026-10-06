@@ -1,0 +1,158 @@
+/* The Automations tab: a header, the runs to come on one line, cards, the detail of one, the templates. */
+.automations { container-type: inline-size; display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; overflow-y: auto; padding: 20px 24px 28px; background: var(--bg); outline: none; }
+.automations > * { width: 100%; max-width: 1480px; margin-inline: auto; flex: none; }
+.automations h2, .automations h3, .automations h4, .automations p { margin: 0; }
+.automations h3 { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.automations h4 { margin: 14px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+
+.automations-header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; align-items: center; gap: 12px; }
+.automations-header h2 { font-size: 20px; font-weight: 650; line-height: 1.2; }
+.automations-header p { margin-top: 2px; color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.automations-emblem { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px; color: #1c2127;
+  background: linear-gradient(135deg, #f5c04f, #f0883e 55%, #e76a6e); box-shadow: 0 6px 18px -8px #f0883e; }
+.automations-pause.bp6-control { margin: 0 4px 0 0; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.automations > .automations-notice { margin-top: 14px; }
+.automation-faults { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 12px; }
+.automation-faults li { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 8px; align-items: baseline; }
+.automation-faults small { grid-column: 2; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.automations-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); align-items: start; gap: 22px; margin-top: 20px; }
+.automations[data-empty] .automations-body { grid-template-columns: minmax(0, 1fr); }
+.automations-main { display: grid; gap: 22px; min-width: 0; }
+.automations-side { position: sticky; top: 0; min-width: 0; }
+@container (max-width: 980px) {
+  .automations-body { grid-template-columns: minmax(0, 1fr); }
+  .automations-side { position: static; }
+  .automations-header { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+  .automations-header p { display: none; }
+}
+@container (max-width: 620px) {
+  .automations-pause.bp6-control { display: none; }
+}
+
+/* The next day on one line. */
+.automation-timeline { display: grid; gap: 8px; padding: 12px 16px 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.automation-timeline-track { position: relative; height: 44px; margin: 0 8px; }
+.automation-timeline-track::before { content: ""; position: absolute; left: 0; right: 0; top: 11px; height: 2px; border-radius: 1px; background: linear-gradient(90deg, var(--accent), var(--line-strong) 14%); }
+.automation-timeline-now { position: absolute; left: -4px; top: 7px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); }
+.automation-timeline-tick { position: absolute; top: 12px; transform: translateX(-50%); display: grid; justify-items: center; gap: 3px; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
+.automation-timeline-tick i { width: 1px; height: 7px; background: var(--line-strong); }
+.automation-timeline-mark { position: absolute; top: 5px; width: 14px; height: 14px; margin-left: -7px; padding: 0; border: 2px solid var(--panel); border-radius: 50%; background: currentColor; cursor: pointer; transition: transform 120ms; }
+.automation-timeline-mark:hover, .automation-timeline-mark:focus-visible { transform: scale(1.35); z-index: 2; outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 30%, transparent); }
+.automation-timeline-mark[data-selected] { z-index: 1; box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 45%, transparent); }
+.automation-timeline-band { position: absolute; top: 9px; height: 6px; min-width: 14px; padding: 0; border: 0; border-radius: 3px; background: currentColor; opacity: .55; cursor: pointer; transition: opacity 120ms; }
+.automation-timeline-band:hover, .automation-timeline-band:focus-visible, .automation-timeline-band[data-selected] { opacity: 1; outline: none; }
+
+/* The cards. */
+.automation-list { display: grid; gap: 10px; }
+.automation-list-head { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(140px, 220px); align-items: center; gap: 10px; }
+.automation-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.automation-card { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; row-gap: 10px; padding: 12px 12px 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  transition: border-color 120ms, box-shadow 120ms, transform 120ms; }
+.automation-card:hover { border-color: var(--line-strong); box-shadow: 0 8px 22px -14px #000; transform: translateY(-1px); }
+.automation-card[data-selected] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.automation-card[data-off] .automation-card-main { opacity: .62; }
+.automation-card-main { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; min-width: 0; padding: 0; border: 0; background: none; color: var(--text); text-align: left; cursor: pointer; }
+.automation-card-main:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 8px; }
+.automation-card-glyph { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: color-mix(in srgb, currentColor 16%, transparent); }
+.automation-card-text { display: grid; gap: 1px; min-width: 0; }
+.automation-card-text strong { font-size: 14px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.automation-card-when { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.automation-card-switch.bp6-control { align-self: start; margin: 4px 0 0; }
+.automation-card-meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.automation-scope, .automation-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 2px 8px; border-radius: 999px; font-size: 11px; color: var(--muted); background: var(--panel-3); }
+.automation-scope span, .automation-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.automation-scope[data-kind="project"] svg { color: #e0a83a; }
+.automation-scope[data-kind="chat"] svg { color: #58c2a8; }
+.automation-card-foot { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding-top: 6px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.automation-card-state { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.automation-card-state[data-problem] { color: var(--danger, #e76a6e); }
+.automation-card-last { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.automation-card-actions { display: inline-flex; align-items: center; gap: 2px; }
+.automation-allow > .bp6-callout-body, .automation-allow { display: flex; align-items: center; gap: 10px; }
+.automation-allow span { flex: 1; min-width: 0; }
+
+.automation-run-mark { display: inline-grid; place-items: center; width: 16px; height: 16px; flex: none; }
+.automation-run-mark[data-tone="ok"] { color: #3fb950; }
+.automation-run-mark[data-tone="failed"] { color: #e76a6e; }
+.automation-run-mark[data-tone="running"] { color: var(--accent); }
+.automation-run-mark[data-tone="muted"] { color: var(--muted); }
+
+/* The detail of one automation, or the latest runs of all. */
+.automation-detail { display: grid; padding: 14px 16px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); min-width: 0; }
+.automation-detail > header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px; margin-bottom: 4px; }
+.automation-detail > header > div { display: grid; justify-items: start; gap: 4px; min-width: 0; }
+.automation-detail > header h3 { font-size: 15px; letter-spacing: 0; text-transform: none; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; display: block; }
+.automation-detail > h4:first-child { margin-top: 0; }
+.automation-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 12px; margin: 10px 0 0; font-size: 12px; }
+.automation-facts dt { color: var(--muted); }
+.automation-facts dd { margin: 0; min-width: 0; }
+.automation-facts ul { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.automation-facts li { display: flex; align-items: center; gap: 6px; }
+.automation-facts li > span { display: inline-flex; }
+.automation-file { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.automation-prompt { max-height: 180px; margin: 0; padding: 8px 10px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--text); font: inherit; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.automation-runs { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.automation-run { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 8px; background: none; color: var(--text); font-size: 12px; text-align: left; }
+button.automation-run { cursor: pointer; }
+button.automation-run:hover, button.automation-run:focus-visible { background: var(--panel-3); outline: none; }
+.automation-run-text { display: grid; min-width: 0; }
+.automation-run-text strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.automation-run-text span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.automation-run time { color: var(--muted); white-space: nowrap; }
+.automation-run > svg { color: var(--muted); }
+.automation-empty { padding: 10px 2px; color: var(--muted); font-size: 12px; }
+
+/* The first time: what automations are for. */
+.automations-hero { display: grid; justify-items: start; gap: 10px; padding: 26px 28px; border: 1px solid var(--line); border-radius: 14px;
+  background: radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, #f0883e 16%, transparent), transparent 55%), radial-gradient(90% 120% at 100% 100%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%), var(--panel); }
+.automations-hero h3 { font-size: 22px; font-weight: 650; letter-spacing: 0; text-transform: none; color: var(--text); }
+.automations-hero p { max-width: 60ch; color: var(--muted); font-size: 14px; line-height: 1.5; }
+
+/* The templates. */
+.automation-templates { display: grid; gap: 10px; }
+.automation-templates ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.automation-template { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; row-gap: 4px; align-items: center; width: 100%; height: 100%; padding: 12px; border: 1px dashed var(--line-strong); border-radius: 12px;
+  background: none; color: var(--text); text-align: left; cursor: pointer; transition: border-color 120ms, background 120ms, transform 120ms; }
+.automation-template:hover:not(:disabled), .automation-template:focus-visible { border-style: solid; border-color: var(--accent); background: var(--panel); transform: translateY(-1px); outline: none; }
+.automation-template:disabled { opacity: .5; cursor: not-allowed; }
+.automation-template strong { font-size: 13px; font-weight: 600; }
+.automation-template > span:not(.automation-card-glyph):not(.bp6-tag) { grid-column: 1 / -1; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.automation-template .bp6-tag { grid-column: 1 / -1; justify-self: start; margin-top: 2px; }
+
+/* The window that writes one. */
+.automation-editor { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.automation-editor-body { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow-y: auto; padding: 16px 18px 6px; }
+.automation-editor-body .bp6-form-group { margin: 0 0 12px; }
+.automation-editor-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: end; }
+.automation-editor-row[data-columns="4"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.automation-prompt-group { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 150px; }
+.automation-prompt-group .bp6-form-content { flex: 1 1 auto; display: flex; }
+.automation-prompt-group textarea { flex: 1 1 auto; min-height: 130px; resize: none; line-height: 1.5; }
+.automation-triggers { display: grid; gap: 6px; margin: 0 0 6px; padding: 0; list-style: none; }
+.automation-trigger { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 8px 8px 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.automation-trigger-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: color-mix(in srgb, currentColor 16%, transparent); }
+.automation-trigger-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 28px; font-size: 13px; color: var(--text); }
+.automation-trigger-fields > span { color: var(--muted); }
+.automation-minute.bp6-numeric-input { width: 64px; }
+.automation-minute.bp6-numeric-input .bp6-input-group, .automation-minute.bp6-numeric-input input { width: 100%; }
+.automation-cron { flex: 1 1 180px; }
+.automation-cron input { font-family: var(--mono, ui-monospace, "Cascadia Mono", Consolas, monospace); }
+.automation-times { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.automation-time { display: inline-flex; align-items: center; }
+.automation-time input[type="time"] { height: 28px; padding: 0 6px; font: inherit; font-variant-numeric: tabular-nums; color-scheme: dark; }
+:root[data-theme="light"] .automation-time input[type="time"] { color-scheme: light; }
+.automation-trigger-preview { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0; font-size: 11px; color: var(--muted); }
+.automation-trigger-preview span { text-transform: uppercase; letter-spacing: .06em; }
+.automation-trigger-preview[data-problem] { color: var(--danger, #e76a6e); }
+.automation-editor-switches { display: flex; flex-wrap: wrap; gap: 4px 22px; margin-bottom: 8px; }
+.automation-editor-switches .bp6-control { margin: 0; }
+.automation-editor-footer { flex: none; display: flex; justify-content: flex-end; gap: 8px; padding: 10px 18px 14px; border-top: 1px solid var(--line); }
+@container (max-width: 560px) { .automation-editor-row[data-columns="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* A session an automation started, in the Explorer and at the top of its timeline. */
+.session-origin { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, #f0883e 9%, var(--panel)); font-size: 12px; color: var(--muted); }
+.session-origin > svg { color: #f0883e; flex: none; }
+.session-origin strong { color: var(--text); font-weight: 600; }
+.session-origin span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-origin .bp6-button { margin-left: auto; flex: none; }

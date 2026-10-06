@@ -134,6 +134,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         {
             yield return CreateTerminalCommand(context.Invocation);
         }
+
+        // And for the automations.
+        if (context.Invocation.Services.Get<IAltaAutomations>() is not null)
+        {
+            yield return CreateAutomationCommand(context.Invocation);
+        }
     }
 
     public IEnumerable<AltaCommandPolicy> GetCommandPolicies(AltaCommandContributionContext context)
@@ -147,11 +153,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var changes = context.Services.Get<IAltaChangesView>() is not null;
         var editor = context.Services.Get<IAltaEditorView>() is not null;
         var terminals = context.Services.Get<IAltaTerminals>() is not null;
-        if (!changes && !editor && !terminals) return Policies;
+        var automations = context.Services.Get<IAltaAutomations>() is not null;
+        if (!changes && !editor && !terminals && !automations) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
         if (changes) policies.Add(DiffShowPolicy);
         if (editor) policies.Add(EditorOpenPolicy);
         if (terminals) policies.AddRange(TerminalPolicies);
+        if (automations) policies.AddRange(AutomationPolicies);
         return policies;
     }
 
