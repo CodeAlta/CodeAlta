@@ -1,7 +1,11 @@
+import { darkerPalette } from "./colorPalette";
 import { blueprintPalette, generatedColorSchemes, type Palette, type PaletteColor } from "./colorSchemes.gen";
 
 /** A color scheme of the window: the palettes of its dark and light themes. */
 export type ColorScheme = Readonly<{ id: string; name: string; dark: Palette; light: Palette }>;
+
+/** The theme a palette is for: the light one, the dark one, or the dark one with deeper surfaces. */
+export type ColorVariant = "light" | "dark" | "darker";
 
 export const defaultColorScheme = "blueprint";
 export const colorSchemeStorageKey = "codealta.desktop.colorScheme.v1";
@@ -16,10 +20,15 @@ export const colorSchemeIds: readonly string[] = colorSchemes.map(scheme => sche
 /** The scheme with an id; Blueprint's own for an id that names none. */
 export const colorSchemeOf = (id: string): ColorScheme => colorSchemes.find(scheme => scheme.id === id) ?? colorSchemes[0];
 
+/** The palette a scheme shows in a theme. The darker theme has no palette of its own: it is made from the dark one. */
+export function schemePalette(scheme: ColorScheme, variant: ColorVariant): Palette {
+  return variant === "light" ? scheme.light : variant === "dark" ? scheme.dark : darkerPalette(scheme.dark);
+}
+
 /** The colors that stand for a palette in a picker. */
 export type ColorSchemeSwatch = Readonly<{ background: string; tint: string; foreground: string; accent: string }>;
-export function schemeSwatch(palette: Palette, theme: "dark" | "light"): ColorSchemeSwatch {
-  return theme === "light"
+export function schemeSwatch(palette: Palette, variant: ColorVariant): ColorSchemeSwatch {
+  return variant === "light"
     ? { background: palette["light-gray-5"], tint: palette["gray-4"], foreground: palette["dark-gray-1"], accent: palette["blue-3"] }
     : { background: palette["dark-gray-1"], tint: palette["gray-1"], foreground: palette["light-gray-5"], accent: palette["blue-4"] };
 }

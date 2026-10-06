@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyPalette, colorSchemeIds, colorSchemeOf, colorSchemes, defaultColorScheme, paletteVariables, schemeSwatch, showAppearance } from "./colorSchemes";
+import { applyPalette, colorSchemeIds, colorSchemeOf, colorSchemes, defaultColorScheme, paletteVariables, schemePalette, schemeSwatch, showAppearance, type ColorVariant } from "./colorSchemes";
 import { blueprintPalette } from "./colorSchemes.gen";
 
 // The part of the document root that showing an appearance touches.
@@ -42,11 +42,23 @@ test("a scheme's text keeps a readable contrast against its background", () => {
     return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
   };
   const contrast = (left: string, right: string) => { const [low, high] = [luminance(left), luminance(right)].sort((a, b) => a - b); return (high + 0.05) / (low + 0.05); };
-  for (const scheme of colorSchemes) for (const theme of ["dark", "light"] as const) {
-    const swatch = schemeSwatch(scheme[theme], theme);
-    assert.ok(contrast(swatch.background, swatch.foreground) >= 7, `${scheme.id} text`);
-    assert.ok(contrast(swatch.background, swatch.accent) >= 3, `${scheme.id} accent`);
+  for (const scheme of colorSchemes) for (const variant of ["dark", "darker", "light"] as ColorVariant[]) {
+    const swatch = schemeSwatch(schemePalette(scheme, variant), variant);
+    assert.ok(contrast(swatch.background, swatch.foreground) >= 7, `${scheme.id} ${variant} text`);
+    assert.ok(contrast(swatch.background, swatch.accent) >= 3, `${scheme.id} ${variant} accent`);
   }
+});
+
+test("a scheme's themes are its two palettes, and the darker theme is made from the dark one", () => {
+  const plum = colorSchemeOf("plum");
+  assert.equal(schemePalette(plum, "light"), plum.light);
+  assert.equal(schemePalette(plum, "dark"), plum.dark);
+  const darker = schemePalette(plum, "darker");
+  assert.notEqual(darker["dark-gray-1"], plum.dark["dark-gray-1"]);
+  assert.equal(darker["light-gray-5"], plum.dark["light-gray-5"]);
+  // On Blueprint's own palette the darker theme redefines the surfaces and nothing else.
+  assert.deepEqual(Object.keys(paletteVariables(schemePalette(colorSchemes[0], "darker"))),
+    ["--bp-palette-black", ...[1, 2, 3, 4, 5].map(step => `--bp-palette-dark-gray-${step}`)]);
 });
 
 test("a palette sets the palette variables it changes and removes those of the palette before", () => {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { colorSchemeIds, colorSchemeOf, colorSchemeStorageKey, defaultColorScheme, type ShownAppearance } from "./colorSchemes";
+import { colorSchemeIds, colorSchemeOf, colorSchemeStorageKey, defaultColorScheme, schemePalette, type ColorVariant, type ShownAppearance } from "./colorSchemes";
 import type { PreferenceIssue } from "./localization";
 import { readRecentSessionCount, recentSessionCountKey, validRecentSessionCount } from "./recentSessions";
 import { persistProjectSort, projectSortStorageKey, type ProjectSort } from "./explorer/projectRail";
@@ -15,11 +15,16 @@ export const themes: readonly Theme[] = ["dark", "light", "system"];
 export function nextTheme(theme: Theme): Theme { return themes[(themes.indexOf(theme) + 1) % themes.length]; }
 
 /** The name of a theme choice, as a translation key. */
-export function themeLabel(theme: Theme): "Dark" | "Light" | "System" { return theme === "dark" ? "Dark" : theme === "light" ? "Light" : "System"; }
+export function themeLabel(theme: Theme): "Dark" | "Light" | "Auto" { return theme === "dark" ? "Dark" : theme === "light" ? "Light" : "Auto"; }
 
 /** Resolves a theme choice against what the operating system prefers. */
 export function effectiveTheme(theme: Theme, systemDark: boolean): EffectiveTheme {
   return theme === "system" ? systemDark ? "dark" : "light" : theme;
+}
+
+/** The palette variant of a theme: the dark theme has a darker one, the light theme only its own. */
+export function colorVariant(theme: EffectiveTheme, darker: boolean): ColorVariant {
+  return theme === "light" ? "light" : darker ? "darker" : "dark";
 }
 
 const systemDarkQuery = "(prefers-color-scheme: dark)";
@@ -36,6 +41,7 @@ function useSystemDark(): boolean {
   return dark;
 }
 export const themeStorageKey = "codealta.desktop.theme.v1";
+export const darkerStorageKey = "codealta.desktop.darker.v1";
 type Preference = "theme" | "scheme" | "sort" | "rail" | "recent";
 export type PreferenceNotices = Partial<Record<Preference, PreferenceIssue>>;
 
@@ -53,18 +59,20 @@ function readPreference<T extends string>(key: string, valid: readonly T[], fall
 export function useWindowPreferences() {
   const [initial] = useState(() => ({
     theme: readPreference(themeStorageKey, themes, "dark"),
+    darker: readPreference(darkerStorageKey, ["on", "off"], "off"),
     scheme: readPreference(colorSchemeStorageKey, colorSchemeIds, defaultColorScheme),
     recent: readRecentSessionCount(() => localStorage.getItem(recentSessionCountKey)),
     sort: readPreference(projectSortStorageKey, ["name", "recent"], "name"),
     rail: readPreference(projectRailVisibilityKey, ["expanded", "collapsed"], "expanded"),
   }));
   const [theme, updateTheme] = useState<Theme>(initial.theme.value);
+  const [darker, updateDarker] = useState(initial.darker.value === "on");
   const [colorScheme, updateColorScheme] = useState(initial.scheme.value);
   const [recentSessionCount, updateRecent] = useState(initial.recent.value);
   const [projectSort, updateSort] = useState<ProjectSort>(initial.sort.value);
   const [railState, updateRail] = useState<ProjectRailState>({ desktopCollapsed: initial.rail.value === "collapsed", narrowOpen: false });
   const railCurrent = useRef(railState);
-  const [notices, setNotices] = useState<PreferenceNotices>({ theme: initial.theme.notice, scheme: initial.scheme.notice, sort: initial.sort.notice, rail: initial.rail.notice, recent: initial.recent.issue });
+  const [notices, setNotices] = useState<PreferenceNotices>({ theme: initial.theme.notice ?? initial.darker.notice, scheme: initial.scheme.notice, sort: initial.sort.notice, rail: initial.rail.notice, recent: initial.recent.issue });
 
   function setRecentSessionCount(value: number) {
     if (!validRecentSessionCount(value)) return;
@@ -80,6 +88,11 @@ export function useWindowPreferences() {
   function setTheme(value: Theme) {
     updateTheme(value);
     save("theme", () => { try { localStorage.setItem(themeStorageKey, value); return true; } catch { return false; } });
+  }
+  // Part of the theme: a failure to keep it is reported with the theme.
+  function setDarker(value: boolean) {
+    updateDarker(value);
+    save("theme", () => { try { localStorage.setItem(darkerStorageKey, value ? "on" : "off"); return true; } catch { return false; } });
   }
   function setColorScheme(value: string) {
     if (!colorSchemeIds.includes(value)) return;
@@ -100,6 +113,7 @@ export function useWindowPreferences() {
   function closeNarrowRail() { changeRail(resetNarrowRail(railCurrent.current), false); }
 
   const shownTheme = effectiveTheme(theme, useSystemDark());
-  const appearance: ShownAppearance = useMemo(() => ({ theme: shownTheme, scheme: colorScheme, palette: colorSchemeOf(colorScheme)[shownTheme] }), [shownTheme, colorScheme]);
-  return { theme, shownTheme, appearance, setTheme, colorScheme, setColorScheme, projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices, recentSessionCount, setRecentSessionCount };
+  const variant = colorVariant(shownTheme, darker);
+  const appearance: ShownAppearance = useMemo(() => ({ theme: shownTheme, scheme: colorScheme, palette: schemePalette(colorSchemeOf(colorScheme), variant) }), [shownTheme, colorScheme, variant]);
+  return { theme, shownTheme, variant, appearance, setTheme, darker, setDarker, colorScheme, setColorScheme, projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices, recentSessionCount, setRecentSessionCount };
 }

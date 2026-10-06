@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import { Button, ButtonGroup, Card, HTMLSelect, Switch } from "@blueprintjs/core";
 import { AppIcon, type IconName } from "./AppIcon";
 import type { ProjectSort } from "./explorer/projectRail";
-import { colorSchemes, schemeSwatch } from "./colorSchemes";
-import { themeLabel, themes, type EffectiveTheme, type Theme, type PreferenceNotices } from "./windowPreferences";
+import { colorSchemes, schemePalette, schemeSwatch, type ColorVariant } from "./colorSchemes";
+import { themeLabel, themes, type Theme, type PreferenceNotices } from "./windowPreferences";
 import { useShellLanguage } from "./shellLanguage";
 import { locales, languageNames, preferenceNotice } from "./localization";
 import { closeBehavior, closeBehaviorLabel, closeBehaviors, keepRunningPlace, type CloseBehavior } from "./desktopShell";
@@ -20,11 +20,14 @@ function Field({ label, htmlFor, notice, children }: { label: string; htmlFor?: 
   </div>;
 }
 
-export function GeneralSettings({ theme, setTheme, shownTheme, colorScheme, setColorScheme, sort, setSort, desktopCollapsed, setDesktopCollapsed, notices, recentSessionCount, setRecentSessionCount, closing }: {
+export function GeneralSettings({ theme, setTheme, darker, setDarker, variant, colorScheme, setColorScheme, sort, setSort, desktopCollapsed, setDesktopCollapsed, notices, recentSessionCount, setRecentSessionCount, closing }: {
   theme: Theme;
   setTheme: (value: Theme) => void;
+  /** Whether the dark theme is the darker one. */
+  darker: boolean;
+  setDarker: (value: boolean) => void;
   /** The theme on screen, which decides the variant of each scheme that is previewed. */
-  shownTheme: EffectiveTheme;
+  variant: ColorVariant;
   colorScheme: string;
   setColorScheme: (value: string) => void;
   sort: ProjectSort;
@@ -53,11 +56,14 @@ export function GeneralSettings({ theme, setTheme, shownTheme, colorScheme, setC
           icon={<AppIcon name={themeIcons[value]} size={15} />} onClick={() => setTheme(value)}>{t(themeLabel(value))}</Button>)}
       </ButtonGroup>
     </Field>
+    <Field label={t("Darker dark theme")} htmlFor="settings-darker">
+      <Switch id="settings-darker" className="settings-checkbox" checked={darker} disabled={theme === "light"} onChange={event => setDarker(event.currentTarget.checked)} />
+    </Field>
     <Field label={t("Color scheme")}
       notice={notices.scheme && <p role="status" className="notice" data-diagnostic={notices.scheme}>{preferenceNotice(locale, "Color scheme", "Blueprint", notices.scheme)}</p>}>
       <div className="color-scheme-grid" role="radiogroup" aria-label={t("Color scheme")}>
         {colorSchemes.map(scheme => {
-          const swatch = schemeSwatch(scheme[shownTheme], shownTheme);
+          const swatch = schemeSwatch(schemePalette(scheme, variant), variant);
           return <Button key={scheme.id} role="radio" aria-checked={colorScheme === scheme.id} active={colorScheme === scheme.id} alignText="start"
             icon={<span className="color-scheme-swatch" aria-hidden="true" style={{ background: swatch.background, borderColor: swatch.tint }}>
               <i style={{ background: swatch.foreground }} /><i style={{ background: swatch.tint }} /><i style={{ background: swatch.accent }} /></span>}

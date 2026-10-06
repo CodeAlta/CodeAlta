@@ -896,11 +896,20 @@ fresh durable read without restoring run/queue/interaction authority.
 
 ### Appearance
 
-**Settings → Appearance** manages the language, the theme (Dark, Light, or System, which follows the
-operating system), the color scheme, project sorting, the recent-session count and desktop project-rail
-collapse. The button before the window controls at the top right switches between the three themes. The rail's Sort projects selector and
+**Settings → Appearance** manages the language, the theme (Dark, Light, or Auto, which follows the
+operating system), a darker dark theme, the color scheme, project sorting, the recent-session count and
+desktop project-rail collapse. The button before the window controls at the top right switches between the
+three themes. The rail's Sort projects selector and
 Show/Hide projects button use the same live preferences; changes apply immediately and are
-saved only to this WebView's local storage (theme, colorScheme, projectSort, projectRail and projectTree v1 keys).
+saved only to this WebView's local storage (theme, darker, colorScheme, projectSort, projectRail and projectTree v1 keys).
+
+**Darker dark theme** deepens the dark theme of every scheme, wherever the dark theme is shown (Dark, or
+Auto on a dark system). It is not a dimmer: `darkerPalette` in `frontend/src/colorPalette.ts` lowers only
+the surfaces (black and the five dark grays, which are the inset color, the window background, the panels
+and what is raised above them) by 0.06 of Oklab lightness, each keeping its tint, and leaves text, mid
+grays and accents as they are. On Blueprint's own palette the window background goes from `#1c2127` to
+`#101317` and the panels from `#252a31` to `#181c21`: clearly darker, and still a dark gray rather than
+black. The darker theme has no palette of its own: it is always made from the dark one.
 
 The color scheme is **Blueprint** (Blueprint's own palette, the default) or one of the RootLoops
 schemes that the TUI gets from XenoAtom.Terminal.UI: Cherry, Tomato, Orange, Pineapple, Apple, Kiwi,
@@ -927,6 +936,9 @@ diagrams, which draw with the window's colors outside CSS, follow `data-theme` a
 - Blueprint compiles most component colors to literals. The Vite build (`blueprintPalette` in
   `vite.config.ts`) rewrites every literal of Blueprint's stylesheet that equals a palette color into the
   palette variable, so a scheme reaches all components and the default renders exactly as before.
+- Blueprint computes the background of cards and inputs from a mid gray (`--bp-surface-background-color-default-rest`),
+  which a palette with other surfaces would leave where it was. `style.css` binds it to the palette's own
+  inset step (black in the dark themes, white in the light one).
 - The app's own colors (`--bg`, `--panel`, `--text`, `--accent`, … in `style.css`) are defined from the
   palette variables and follow the scheme. Monaco takes its surface colors from them while a scheme is
   selected and keeps its own with Blueprint.

@@ -292,8 +292,9 @@ The desktop app has one Settings window with a page per area: **Appearance**, **
 The **Appearance** page sets:
 
 - the UI language: **Auto**, English, Spanish, French, German, Japanese, or Simplified Chinese;
-- the theme: **Dark**, **Light**, or **System**;
-- one of 13 color schemes, each with a dark and a light variant;
+- the theme: **Dark**, **Light**, or **Auto**, which follows the operating system;
+- **Darker dark theme**, for deeper backgrounds in the dark theme with the same text and accents;
+- one of 13 color schemes, each with a dark, a darker and a light variant;
 - how projects are sorted and how many recent sessions are listed per project;
 - what closing the window does: ask, keep CodeAlta running in the notification area, or exit.
 

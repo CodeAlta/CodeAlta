@@ -1088,7 +1088,7 @@ export const messages = dictionary({
   "Desktop": ["Escritorio", "Bureau", "Desktop", "デスクトップ", "桌面"],
   "Appearance & navigator": ["Apariencia y navegación", "Apparence et navigation", "Darstellung und Navigation", "外観とナビゲーター", "外观与导航"],
   "Theme": ["Tema", "Thème", "Design", "テーマ", "主题"],
-  "System": ["Sistema", "Système", "System", "システム", "系统"],
+  "Darker dark theme": ["Tema oscuro más oscuro", "Thème sombre plus foncé", "Dunkles Design noch dunkler", "ダークテーマをより暗くする", "更深的深色主题"],
   "Theme: {theme}": ["Tema: {theme}", "Thème : {theme}", "Design: {theme}", "テーマ: {theme}", "主题：{theme}"],
   "Dark": ["Oscuro", "Sombre", "Dunkel", "ダーク", "深色"],
   "Light": ["Claro", "Clair", "Hell", "ライト", "浅色"],
