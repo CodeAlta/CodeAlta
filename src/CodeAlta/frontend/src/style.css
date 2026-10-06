@@ -833,15 +833,21 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .prompt-editor .monaco-editor textarea { min-height: 0; padding: 0; margin: 0; border: 0; box-shadow: none; }
 .expanded-prompt-dialog .app-window-body > p { flex-shrink: 0; }
 .appearance-settings h2 { margin: 0 0 12px; font-size: var(--bp-typography-size-heading-medium); font-weight: var(--bp-typography-weight-bold); }
-.settings-field { display: grid; grid-template-columns: minmax(160px, 280px) minmax(0, 1fr); align-items: center; gap: 6px 20px; padding: 12px 0; border-top: 1px solid var(--line); }
-.settings-field > label, .settings-field-label { color: var(--text); }
-.settings-field-control { display: flex; align-items: center; justify-content: flex-end; min-width: 0; }
-.settings-field-control .bp6-html-select { min-width: 220px; }
+/* The card lays its rows out by its own width, not the window's: the Settings window has a size of its own. */
+.appearance-settings { container-type: inline-size; }
+/* A row: its name, and its control at the end. The control takes the room it needs first and the name what
+   is left: a name column that took its share first left the control too little, and the control went over it. */
+.settings-field { display: grid; grid-template-columns: minmax(140px, 1fr) auto; align-items: center; gap: 6px 20px; padding: 12px 0; border-top: 1px solid var(--line); }
+.settings-field > label, .settings-field-label { max-width: 280px; color: var(--text); }
+.settings-field-control { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.settings-field-control .bp6-html-select { min-width: 220px; max-width: 100%; }
 .settings-field-control .bp6-control { margin: 0; }
+/* A group of buttons that does not fit its row breaks into lines rather than leaving the card. */
+.settings-field-control .bp6-button-group { flex-wrap: wrap; max-width: 100%; }
 /* The scheme dropdown is as wide as the selects around it; its list scrolls when the schemes do not fit. */
-.color-scheme-target { flex: 0 1 220px; min-width: 0; }
+.color-scheme-target { flex: 0 1 auto; width: 220px; max-width: 100%; min-width: 0; }
 .color-scheme-select.bp6-button { width: 100%; }
-/* In a narrow window the button goes below the dropdown rather than being squeezed beside it. */
+/* Without room beside the dropdown, the button goes below it rather than being squeezed. */
 .scheme-customize.bp6-button { flex: none; }
 .color-scheme-select .bp6-button-text { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .color-scheme-menu.bp6-menu { max-height: min(60vh, 420px); overflow-y: auto; }
@@ -850,7 +856,21 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .settings-field > .notice { grid-column: 1 / -1; margin: 0; color: var(--muted); line-height: 1.5; }
 /* What a preference carries below its control, over the whole width of the row. */
 .settings-field > .settings-field-wide { grid-column: 1 / -1; min-width: 0; }
-.settings-field-control { flex-wrap: wrap; gap: 8px; }
+/* A card too narrow for a name beside a list or a group of buttons: the control goes below its name and takes
+   the width of the row. A switch is small enough to stay beside its name. */
+@container (max-width: 480px) {
+  .settings-field { grid-template-columns: minmax(0, 1fr); }
+  .settings-field:has(> .settings-field-control > .bp6-switch) { grid-template-columns: minmax(0, 1fr) auto; }
+  .settings-field > label, .settings-field-label { max-width: none; }
+  .settings-field-control { justify-content: flex-start; }
+  .settings-field-control .bp6-html-select { width: 100%; min-width: 0; }
+  .settings-field-control .bp6-html-select select { width: 100%; }
+  .color-scheme-target { flex: 1 1 220px; width: auto; }
+}
+/* At the smallest size of the Settings window the three themes fit on one line without their icons. */
+@container (max-width: 290px) {
+  .settings-field-control .bp6-button-group .bp6-button > svg { display: none; }
+}
 .scheme-problems ul { margin: 4px 0 0; padding-left: 18px; }
 .scheme-problems code { margin-right: 4px; font-size: 12px; overflow-wrap: anywhere; }
 /* The editor of a color scheme: a panel of the appearance card, drawn with the colors it edits. */
@@ -861,12 +881,17 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 /* A label and its control; in a narrow window the control goes below its label instead of being squeezed. */
 .scheme-editor-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .scheme-editor-row > :first-child { flex: 0 0 120px; }
-.scheme-editor-name { flex: 1 1 200px; max-width: 320px; }
+.scheme-editor-name { flex: 1 1 200px; min-width: 0; max-width: 320px; }
 .scheme-editor-row > .bp6-segmented-control { flex: none; }
 .scheme-editor .bp6-segmented-control .bp6-button { white-space: nowrap; overflow-wrap: normal; }
-.scheme-editor-colors { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px 28px; }
-.scheme-color { display: grid; grid-template-columns: minmax(0, 1fr) 34px 86px 24px; align-items: center; gap: 8px; }
-.scheme-color > label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* As many columns of colors as fit, and one that is as narrow as the editor when a column does not. */
+.scheme-editor-colors { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 8px 28px; }
+/* The name of a color, then its well, its text and its reset; without room beside the name they go below it. */
+.scheme-color { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.scheme-color > label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scheme-color-controls { display: flex; flex: none; align-items: center; gap: 8px; }
+.scheme-color-text { width: 86px; }
+.scheme-color-reset.bp6-button { width: 24px; min-width: 24px; padding: 0; }
 /* The color itself, as a button that opens the color picker of the system. */
 input.scheme-color-well { appearance: none; -webkit-appearance: none; width: 34px; height: 26px; padding: 0; border: 1px solid var(--line-strong); border-radius: 5px; background: none; cursor: pointer; }
 input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }

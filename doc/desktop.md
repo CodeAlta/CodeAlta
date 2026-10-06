@@ -904,6 +904,15 @@ Show/Hide projects button use the same live preferences; changes apply immediate
 saved only to this WebView's local storage (theme, darker, colorScheme, projectSort, projectRail and projectTree v1 keys).
 The user's own color schemes are files of the profile (see below).
 
+The rows of the page follow the width of their card, not of the window: the Settings window has a size of
+its own. A control is beside the name of its row while there is room for both, and goes below it, over the
+width of the row, when the card is narrow (a container query on the card, at 480 px). A switch stays beside
+its name, a group of buttons breaks into lines rather than leaving the card, and at the smallest size of
+the Settings window the theme buttons drop their icons. The colors of the scheme editor do the same: the
+well and the text of a color go below its name. `appearanceLayout.browser.test.ts` lays the card and the
+editor out from the smallest width the Settings window gives them to a wide one, in every language, and
+fails when a control covers its name or leaves the card.
+
 **Darker dark theme** deepens the dark theme of every scheme, wherever the dark theme is shown (Dark, or
 Auto on a dark system). It is not a dimmer: `darkerPalette` in `frontend/src/colorPalette.ts` lowers only
 the surfaces (black and the five dark grays, which are the inset color, the window background, the panels

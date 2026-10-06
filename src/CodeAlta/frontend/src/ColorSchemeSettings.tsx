@@ -31,17 +31,20 @@ function ColorField({ label, value, chosen, disabled, onChange, onReset }: {
   const [typed, setTyped] = useState<string | null>(null);
   return <div className="scheme-color" data-chosen={chosen || undefined}>
     <label htmlFor={id}>{label}</label>
-    <input id={id} type="color" className="scheme-color-well" value={value} disabled={disabled} onChange={event => { setTyped(null); onChange(event.target.value); }} />
-    <InputGroup className="scheme-color-text" value={typed ?? value} maxLength={7} spellCheck={false} disabled={disabled} aria-label={`${label} (#rrggbb)`}
-      onChange={event => {
-        const text = event.target.value;
-        setTyped(text);
-        // A color pasted without its sign is a color too.
-        const color = parseColor(text) ?? parseColor(`#${text}`);
-        if (color) onChange(color);
-      }} onBlur={() => setTyped(null)} />
-    <Button variant="minimal" size="small" className="scheme-color-reset" icon={<AppIcon name="reset" size={14} />} disabled={disabled || !chosen}
-      aria-label={t("Reset {name}", { name: label })} title={t("Reset {name}", { name: label })} onClick={() => { setTyped(null); onReset(); }} />
+    {/* Together: in a narrow editor they go below the name as one. */}
+    <span className="scheme-color-controls">
+      <input id={id} type="color" className="scheme-color-well" value={value} disabled={disabled} onChange={event => { setTyped(null); onChange(event.target.value); }} />
+      <InputGroup className="scheme-color-text" value={typed ?? value} maxLength={7} spellCheck={false} disabled={disabled} aria-label={`${label} (#rrggbb)`}
+        onChange={event => {
+          const text = event.target.value;
+          setTyped(text);
+          // A color pasted without its sign is a color too.
+          const color = parseColor(text) ?? parseColor(`#${text}`);
+          if (color) onChange(color);
+        }} onBlur={() => setTyped(null)} />
+      <Button variant="minimal" size="small" className="scheme-color-reset" icon={<AppIcon name="reset" size={14} />} disabled={disabled || !chosen}
+        aria-label={t("Reset {name}", { name: label })} title={t("Reset {name}", { name: label })} onClick={() => { setTyped(null); onReset(); }} />
+    </span>
   </div>;
 }
 
