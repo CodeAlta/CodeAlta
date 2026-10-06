@@ -168,6 +168,64 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
+    public Task NamedSession_KeepsItsNameWhenASendAttachesItAgain() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        // The attachment made at creation ends when a send attaches the session with another model.
+        f.Provider.ReleaseAbort.TrySetResult();
+        var project = await f.Observe(f.Host.ProjectCatalog.GetByPathAsync(f.ProjectRoot));
+        Assert.IsNotNull(project);
+        var named = await f.Observe(f.Host.Commands.CreateDraftSessionAsync(project, f.Provider.Descriptor, "Nightly review"));
+        var unnamed = await f.Observe(f.Host.Commands.CreateDraftSessionAsync(project, f.Provider.Descriptor, null));
+
+        var first = f.AdmitSend(new OwnedTextSendRequest("named-send", named.SessionId, "input")
+            { Selection = new(f.Provider.Descriptor.ProviderId.Value, "default", "selected-model", AgentReasoningEffort.High) });
+        Assert.IsNotNull(first.Receipt);
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, first.Receipt, "named send");
+        Assert.AreEqual("selected-model", f.Provider.Options!.Model);
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(first.Receipt.Completion)).Outcome);
+        Assert.AreEqual("Nightly review", await TitleAsync(named.SessionId));
+
+        // A rename is a name too, and it stays when the next send attaches the session again.
+        Assert.IsTrue(await f.Observe(f.Host.Commands.RenameSessionAsync(unnamed.SessionId, project.Id, f.ProjectRoot, "Renamed")));
+        var second = f.AdmitSend(new OwnedTextSendRequest("renamed-send", unnamed.SessionId, "input")
+            { Selection = new(f.Provider.Descriptor.ProviderId.Value, "default", "selected-model", AgentReasoningEffort.High) });
+        Assert.IsNotNull(second.Receipt);
+        await f.ObserveReadiness(f.Provider.SecondSendStarted.Task, second.Receipt, "renamed send");
+        f.Provider.ReleaseSecondSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(second.Receipt.Completion)).Outcome);
+        Assert.AreEqual("Renamed", await TitleAsync(unnamed.SessionId));
+
+        async Task<string?> TitleAsync(string sessionId)
+        {
+            var metadata = await f.Observe(f.Host.SessionViewCatalog.JournalStore.CreateSessionStore().GetSessionAsync(sessionId));
+            Assert.IsNotNull(metadata);
+            return (metadata.Details as RawApiSessionMetadataDetails)?.Title;
+        }
+    });
+
+    [TestMethod]
+    public Task UnnamedSession_TakesTheFirstLineOfItsSummaryWhenASendAttachesItAgain() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        f.Provider.ReleaseAbort.TrySetResult();
+        var project = await f.Observe(f.Host.ProjectCatalog.GetByPathAsync(f.ProjectRoot));
+        Assert.IsNotNull(project);
+        var unnamed = await f.Observe(f.Host.Commands.CreateDraftSessionAsync(project, f.Provider.Descriptor, null));
+        Assert.AreEqual(project.DisplayName, unnamed.Title);
+        var send = f.AdmitSend(new OwnedTextSendRequest("unnamed-send", unnamed.SessionId, "input")
+            { Selection = new(f.Provider.Descriptor.ProviderId.Value, "default", "selected-model", AgentReasoningEffort.High) });
+        Assert.IsNotNull(send.Receipt);
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send.Receipt, "unnamed send");
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Receipt.Completion)).Outcome);
+        var metadata = await f.Observe(f.Host.SessionViewCatalog.JournalStore.CreateSessionStore().GetSessionAsync(unnamed.SessionId));
+        Assert.IsNotNull(metadata);
+        Assert.AreEqual($"Project session for {project.DisplayName}.", (metadata.Details as RawApiSessionMetadataDetails)?.Title);
+    });
+
+    [TestMethod]
     public Task SelectedConfiguration_ReachesProviderAndRetriesKeepExactSettings() => Fixture.RunAsync(async f =>
     {
         f.Provider.ExposeSelectionModels = true;

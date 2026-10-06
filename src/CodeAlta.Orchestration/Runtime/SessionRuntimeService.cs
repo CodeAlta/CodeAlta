@@ -409,6 +409,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var session = TryCreateRecoverableSession(metadata, projects);
         if (session is not null)
         {
+            // A send that attaches the session again writes this title: the name the session was given stays.
+            if (GivenTitle(metadata, session, projects) is { } title) session.Title = title;
             if (metadata.ViewState is not null)
             {
                 ApplyCachedSessionLocalState(session, metadata.ViewState);
@@ -779,14 +781,14 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ProviderId = options.ProviderId.Value,
             ProviderKey = options.ProviderKey ?? options.ProviderId.Value,
             WorkingDirectory = options.WorkingDirectory,
-            Title = string.IsNullOrWhiteSpace(title) ? "Global Session" : title.Trim(),
+            Title = string.IsNullOrWhiteSpace(title) ? UnnamedGlobalSessionTitle : title.Trim(),
             Status = SessionViewStatus.Draft,
             ParentSessionId = NormalizeOptionalText(parentSessionId),
             CreatedBy = createdBy,
             CreatedAt = now,
             UpdatedAt = now,
             LastActiveAt = now,
-            LatestSummary = "Global overview and coordination session.",
+            LatestSummary = UnnamedGlobalSessionSummary,
             ModelId = options.Model,
             ReasoningEffort = options.ReasoningEffort,
             AgentPromptId = NormalizeOptionalText(options.AgentPromptId),
@@ -861,7 +863,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             CreatedAt = now,
             UpdatedAt = now,
             LastActiveAt = now,
-            LatestSummary = $"Project session for {project.DisplayName}.",
+            LatestSummary = UnnamedProjectSessionSummary(project),
             ModelId = options.Model,
             ReasoningEffort = options.ReasoningEffort,
             AgentPromptId = NormalizeOptionalText(options.AgentPromptId),
@@ -3336,7 +3338,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 ProviderId = providerKey,
                 ProviderKey = providerKey,
                 WorkingDirectory = normalizedCwd,
-                Title = BuildSessionTitle(session, "Global Session"),
+                Title = BuildSessionTitle(session, UnnamedGlobalSessionTitle),
                 Status = SessionViewStatus.Active,
                 ParentSessionId = parentSessionId,
                 CreatedAt = session.CreatedAt,
@@ -3473,19 +3475,40 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             !relativePath.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal);
     }
 
+    private const string UnnamedGlobalSessionTitle = "Global Session";
+    private const string UnnamedGlobalSessionSummary = "Global overview and coordination session.";
+
+    private static string UnnamedProjectSessionSummary(ProjectDescriptor project) => $"Project session for {project.DisplayName}.";
+
     private static string BuildSessionTitle(AgentSessionMetadata session, string fallback)
+        => SummaryTitle(session.Summary) ?? fallback;
+
+    private static string? SummaryTitle(string? summary)
     {
-        if (!string.IsNullOrWhiteSpace(session.Summary))
+        if (!string.IsNullOrWhiteSpace(summary))
         {
-            var summary = session.Summary.Trim();
-            var firstLine = summary.Split(['\r', '\n'], 2, StringSplitOptions.RemoveEmptyEntries)[0].Trim();
+            var firstLine = summary.Trim().Split(['\r', '\n'], 2, StringSplitOptions.RemoveEmptyEntries)[0].Trim();
             if (!string.IsNullOrWhiteSpace(firstLine))
             {
                 return firstLine.Length <= 80 ? firstLine : firstLine[..80];
             }
         }
 
-        return fallback;
+        return null;
+    }
+
+    /// <summary>
+    /// The name a session was given, at its creation or by a rename; null for a session that was never named, whose
+    /// saved title is what it was created with or the first line of the summary it was created with.
+    /// </summary>
+    private static string? GivenTitle(AgentSessionMetadata metadata, SessionViewDescriptor session, IReadOnlyList<ProjectDescriptor> projects)
+    {
+        var title = NormalizeOptionalText((metadata.Details as RawApiSessionMetadataDetails)?.Title);
+        if (title is null) return null;
+        if (session.Kind == SessionViewKind.GlobalSession)
+            return title is UnnamedGlobalSessionTitle || title == SummaryTitle(UnnamedGlobalSessionSummary) ? null : title;
+        var project = projects.FirstOrDefault(candidate => string.Equals(candidate.Id, session.ProjectRef, StringComparison.Ordinal));
+        return project is not null && (title == project.DisplayName || title == SummaryTitle(UnnamedProjectSessionSummary(project))) ? null : title;
     }
 
     private static string? ResolveParentSessionId(string? parentSessionId, string? createdBySessionId)
