@@ -81,7 +81,7 @@ public sealed class GitIssueLookupTests
         foreach (var remote in new[]
                  {
                      null, "", "   ", "not a url", "/srv/git/repo.git", @"C:\repos\project", "file:///srv/git/repo.git",
-                     "git@bitbucket.org:org/repo.git", "https://example.com/org/repo.git", "git@code.example.com:team/project.git",
+                     "git@git.sr.ht:~org/repo", "https://example.com/org/repo.git", "git@code.example.com:team/project.git",
                      // A host that only resembles a provider is another host.
                      "https://github.com.evil.example/org/repo", "https://evilgithub.com/org/repo", "https://notgitlab.com/group/project",
                      "https://dev.azure.com.evil.example/org/Project/_git/repo", "https://visualstudio.com/Project/_git/repo",

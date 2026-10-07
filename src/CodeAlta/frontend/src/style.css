@@ -1377,13 +1377,13 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body {
 
 /* Chromeless window: the page draws the title bar. The application mark sits over the Explorer column and the
    session tab strips along the top edge continue it up to the window controls. */
-.ide-shell { --titlebar-height: var(--neoastra-titlebar-height, 38px); --titlebar-inset-end: var(--neoastra-titlebar-inset-right, 0px); --brand-width: calc(204px + var(--neoastra-titlebar-inset-left, 0px)); --window-actions-width: 40px; }
+.ide-shell { --titlebar-height: var(--neoastra-titlebar-height, 38px); --titlebar-inset-end: var(--neoastra-titlebar-inset-right, 0px); --brand-width: calc(218px + var(--neoastra-titlebar-inset-left, 0px)); --window-actions-width: 40px; }
 /* The developer instance says so beside the mark: its navigation needs that much more room. */
-.ide-shell:has(.window-brand-tag) { --brand-width: calc(248px + var(--neoastra-titlebar-inset-left, 0px)); }
+.ide-shell:has(.window-brand-tag) { --brand-width: calc(262px + var(--neoastra-titlebar-inset-left, 0px)); }
 .ide-shell .workspace-shell:has(> .window-controls) { --titlebar-inset-end: 138px; }
 .window-brand { grid-area: brand; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 0 6px 0 calc(11px + var(--neoastra-titlebar-inset-left, 0px)); overflow: hidden; background: var(--panel); white-space: nowrap; }
 .window-brand .activity-rail { display: flex; align-items: center; gap: 2px; margin-left: auto; }
-.window-brand .activity-rail > .bp6-button { min-width: 28px; min-height: 28px; padding: 0; color: var(--muted); }
+.window-brand .activity-rail > .bp6-button { min-width: 26px; min-height: 28px; padding: 0; color: var(--muted); }
 .window-brand .activity-rail > .bp6-button:hover, .window-brand .activity-rail > .bp6-button.bp6-active { color: var(--text); }
 .window-actions { position: absolute; z-index: 3; top: 0; right: var(--titlebar-inset-end); display: flex; align-items: center; justify-content: center; width: var(--window-actions-width); height: var(--titlebar-height); }
 .window-actions > .bp6-button { min-width: 28px; min-height: 28px; padding: 0; color: var(--muted); }

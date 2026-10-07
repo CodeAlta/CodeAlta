@@ -381,7 +381,7 @@ Unload can still fail if plugin code keeps static references, host-static delega
 
 ## Built-in plugins
 
-Built-ins use the same abstraction model. The Git backend is packaged as `CodeAlta.Plugin.Git` (plugin id `git`) and is enabled by default. It serves projects hosted on GitHub, GitLab and Azure DevOps. Its HTTP client, authentication, repository/issue queries, agent tools and disposal have one backend owner. The TUI injects the existing `#` prompt contribution into that instance; the picker, attachment, prompt parser and terminal binding accessors belong to the TUI, not the backend assembly. A parameterless `GitPlugin` supplies no prompt presentation. Custom heads can use the constructor taking `Func<GitPlugin, IEnumerable<PluginPromptEditorContribution>>` to supply their own neutral contributions. The delegate is deferred until enumeration and receives the same backend instance; it does not transfer backend lifetime to an attachment. No desktop picker is implied.
+Built-ins use the same abstraction model. The Git backend is packaged as `CodeAlta.Plugin.Git` (plugin id `git`) and is enabled by default. It serves projects hosted on GitHub, GitLab, Azure DevOps and Bitbucket Cloud. Its HTTP client, authentication, repository/issue queries, agent tools and disposal have one backend owner. The TUI injects the existing `#` prompt contribution into that instance; the picker, attachment, prompt parser and terminal binding accessors belong to the TUI, not the backend assembly. A parameterless `GitPlugin` supplies no prompt presentation. Custom heads can use the constructor taking `Func<GitPlugin, IEnumerable<PluginPromptEditorContribution>>` to supply their own neutral contributions. The delegate is deferred until enumeration and receives the same backend instance; it does not transfer backend lifetime to an attachment. No desktop picker is implied.
 
 The provider of a project is read from its git remotes by `GitRemoteUrl` (`https://`, `ssh://` and `user@host:path` forms):
 
@@ -390,6 +390,9 @@ The provider of a project is read from its git remotes by `GitRemoteUrl` (`https
 | GitHub | `github.com` | Issues, through `api.github.com` | `gh` |
 | GitLab | `gitlab.com`, hosts named `gitlab.*`, and the host of `GITLAB_HOST`/`GITLAB_URI`/`GL_HOST` | Issues of the project (nested groups included), through `https://<host>/api/v4` | `glab` |
 | Azure DevOps | `dev.azure.com`, `ssh.dev.azure.com`, `<organization>.visualstudio.com`, `vs-ssh.visualstudio.com` | Work items of the project that owns the repository, through `dev.azure.com` (WIQL, then one field read) | `az` |
+| Bitbucket | `bitbucket.org`, `altssh.bitbucket.org` | Issues of the repository, through `api.bitbucket.org/2.0` | none |
+
+The plugin is also an `IIssueTrackerSource`: `GitIssueLookup.GetTracker` gives the issues and the pull requests of the repository as an `IIssueTracker` (`GitHostTracker`, with one `GitHostApi` per provider), which the Issues tab of the desktop lists and reads (see `doc/desktop.md`). Any plugin can implement `IIssueTrackerSource` to add a tracker to a project; the types are in `PluginIssueTracking.cs`. The events of a Bitbucket repository are not read: its automation triggers start nothing.
 
 A remote whose path does not spell an ordinary repository (an escaped separator, a query, a missing segment) names no repository, so nothing derived from it reaches a provider. Azure DevOps Server (on-premises) and GitLab instances under a URL prefix are not recognized.
 

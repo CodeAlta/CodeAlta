@@ -530,13 +530,14 @@ files and folders from the same index as the TUI (`.gitignore`-aware, recently u
 as the query grows, at most 64 rows) with a colored icon per file type, the name and its folder.
 Up/Down, PageUp/PageDown and Home/End move the selection, Enter replaces the `@query` with a
 Markdown link (`[name](relative/path)`) and Escape leaves the text as typed. Typing `#` the same
-way opens the issues of the project's hosted repository (**GitHub issues**, **GitLab issues** or
-**Azure DevOps work items**, from the project's git remote): number, title, state and last update,
-most recently updated first, 50 at most. The search field matches a number or title words,
+way opens the issues and the pull requests of the project's hosted repository (**GitHub issues**, **GitLab
+issues**, **Azure DevOps work items** or **Bitbucket issues**, from the project's git remote): an icon that
+says which it is, number, title, state and last update, most recently updated first, 50 at most. The search field matches a number or title words,
 **Include closed** (`Ctrl+I`) filters closed issues, and Enter inserts `[#123](url)`. The credentials
 come from the provider's environment variable or CLI (`GITHUB_TOKEN`/`GH_TOKEN` or `gh auth token`;
-`GITLAB_TOKEN` or `glab config get token`; `AZURE_DEVOPS_EXT_PAT` or `az account get-access-token`);
-pull and merge requests are not listed.
+`GITLAB_TOKEN` or `glab config get token`; `AZURE_DEVOPS_EXT_PAT` or `az account get-access-token`;
+`BITBUCKET_ACCESS_TOKEN`). The pull requests are found beside the issues from one listing of the recent ones,
+kept a minute; a provider that refuses them still shows its issues.
 Both windows are resizable and remember their size. Catalog-only and unverified inputs have no picker.
 
 ### Images of a prompt
@@ -2146,6 +2147,50 @@ settings, the store of the links), `Desktop/WorkItems/WorkItemRunner.cs` and
 - **Limits.** A reading names at most 32 projects and returns at most 100 tasks and 100 plans for
   each; the text of an item is cut at 200 KiB. CodeAlta TUI has the two commands and no cards or tab.
 
+## Issues and pull requests
+
+The **Issues** tab shows the issues and the pull requests of a project, from where they are kept: the service
+that hosts its repository, and the trackers plugins add. There is one tab (`view: "issues"`), opened by the
+issue icon of the activity bar, **Issues** in the search of the window, `Ctrl+G` then `Ctrl+B`, or `/issues`.
+The sources are `CodeAlta.Plugins.Abstractions/PluginIssueTracking.cs` (the model), `CodeAlta.Plugin.Git/GitHostTracker.cs`
+(the hosting services), `Desktop/Rpc/IssuesRpc.cs` (host) and `frontend/src/issues/` (page).
+
+- **Trackers.** A tracker is an `IIssueTracker`: a service name (`github`, `gitlab`, `azure_devops`, `bitbucket`,
+  `jira`), what it is of (`owner/repository`, or the key of a project), the kinds of items it has, a listing and
+  the reading of one item. A plugin that knows trackers implements `IIssueTrackerSource`
+  (`GetTrackersAsync(projectPath)`); the host asks every active plugin that implements it, and a plugin that
+  fails hides no other. The Git plugin gives the tracker of the hosted repository of the folder; the Jira plugin
+  gives the Jira project a project names in its configuration. With several trackers the tab shows a choice
+  beside the project; one service appears once.
+- **The hosting services** are read through their REST APIs with the credentials of the user (see
+  `doc/plugins.md`). GitHub: the issues and pulls listings, and the search for words and for merged or unmerged
+  pull requests. GitLab: issues and merge requests of the project, with `search`. Azure DevOps: the work items of
+  the project by WIQL, and the pull requests of the repository (no search there: the titles of the first hundred
+  are matched). Bitbucket Cloud: issues and pull requests with its query language; a repository without an issue
+  tracker says so. A refusal is a sentence the tab shows, with how to sign in when signing in is what is missing
+  (a private repository answers "not found" to a visitor).
+- **Lists.** The toolbar has the project, the tracker, **Issues** or **Pull requests** (merge requests on GitLab,
+  work items on Azure DevOps), and a filter. **Open**, **Closed**, **Merged** (pull requests only) and **All**
+  are tabs; a draft pull request is open. A listing holds 50 items, the most recently updated first, and says
+  when more match. What is typed is asked 350 ms after the last key. A row has the state as an icon in the color
+  people know (green open, purple merged or done, red closed without a merge, gray draft), the title, the
+  number or key, the author, the last change, up to three labels in their colors and the number of comments.
+- **Reading.** The item that is selected is read on the right: kind and state, type and priority when the
+  tracker has them, who opened it and when, the branches of a pull request, assignees and labels, then the
+  description and up to 100 comments, rendered as Markdown behind the boundary of the timeline (a tracker that
+  keeps HTML gives its HTML, which the same boundary cleans). A double click, or the expand button, opens the
+  same in a window that keeps its size. A description is cut at 200 KiB, and so are the comments together.
+- **Actions.** **Start in a new worktree** and **Start in a new session** create a session of the project
+  (`ISessionStarter`, the one that starts work items) named after the item, with a prompt that says what to do
+  (work on the issue; review the pull request, without merging or commenting), the title, link, state, author,
+  labels and branches, and the description in a fence longer than any run of backticks in it, said to be
+  information and not instructions. The way of starting chosen in **Settings > Work items** comes first.
+  **Open on …** opens the item in the browser of the system: the host opens an address only when it is https.
+  **Copy link** copies it.
+- **What is sent to the page** is cleaned: control and bidirectional characters are removed from titles and
+  names, texts are bounded, a link that is not https drops its item, a color is six hexadecimal digits or is
+  not sent, and the text of an exception never is.
+
 ## UI tools
 
 A session can see and drive the window it runs in. The tools are those of
@@ -2296,6 +2341,7 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | In a terminal: `Ctrl+C`, `Ctrl+V`, `Ctrl+F`, `Ctrl+Home` / `Ctrl+End` | Copy the selection (or interrupt the program), paste, find, top / bottom |
 | `Ctrl+G` then `Ctrl+M` | Automations (`/automations`) |
 | `Ctrl+G` then `Ctrl+I` | Work items (`/work_items`) |
+| `Ctrl+G` then `Ctrl+B` | Issues and pull requests (`/issues`) |
 | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+PageUp` / `Ctrl+PageDown`) | Previous / next tab |
 | `Ctrl+W` (also `Ctrl+Shift+W`, which a terminal leaves to the application), `Ctrl+Shift+T` | Close tab, reopen the last closed tab |
 | `Enter`, `Ctrl+Enter`, `Shift+Enter` | Send (queued while a turn runs), steer the running turn, new line |

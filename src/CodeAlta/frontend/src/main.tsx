@@ -23,7 +23,7 @@ import {
   type ReminderListResponse,
   type ReminderDetailRequest,
   type ConfigurationSnapshot, type WorkspaceSession, type WorkspaceSnapshot,
-  desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workItems as workItemsApi,
+  desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workItems as workItemsApi, issues as issuesApi,
 } from "#neoastra";
 import { loadWorkspace, sessionListSignature, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
@@ -41,7 +41,7 @@ import { sessionRunning, createRuntimeObservations, maximumRuntimeRows, runtimeT
 import { createProjectArchive } from "./projectArchive";
 import { browserActivation } from "./sessionBrowser";
 import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, automationsTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type TabKind, type TabPosition } from "./fileTabs";
+import { activateFileTab, automationsTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type TabKind, type TabPosition } from "./fileTabs";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
 import { OpenFileDialog } from "./editor/OpenFileDialog";
@@ -121,6 +121,7 @@ import { createAutomationsHub } from "./automations/automationsHub";
 import { AutomationsPanel } from "./automations/AutomationsPanel";
 import { SessionOrigin } from "./automations/SessionOrigin";
 import { sessionOrigin } from "./automations/automations";
+import { IssuesPanel } from "./issues/IssuesPanel";
 import { createWorkItemsHub } from "./workItems/workItemsHub";
 import { WorkItemsPanel, type WorkItemsFocus } from "./workItems/WorkItemsPanel";
 import { WorkItemCards } from "./workItems/WorkItemCards";
@@ -176,6 +177,7 @@ import "./explorer/explorer.css";
 import "./terminal/terminal.css";
 import "./automations/automations.css";
 import "./workItems/workItems.css";
+import "./issues/issues.css";
 import "./worktrees/worktrees.css";
 import "./mcpHost/mcpHost.css";
 
@@ -1401,7 +1403,7 @@ function App() {
       case "reopenTab": return tabs.closed.length + fileTabs.closed.length > 0;
       case "editFile": case "projectEditor": return view === "workspace" && !!editedProject();
       case "newTerminal": return view === "workspace" && !!terminalOrigin();
-      case "automations": case "workItems": return owned;
+      case "automations": case "workItems": case "issues": return owned;
       case "refreshStatuses": return owned && tabs.open.length > 0;
       case "newSession": return owned && !!snapshot && !selectedProject?.archived;
       case "renameProject": return owned && !!selectedProject && !selectedProject.archived;
@@ -1433,6 +1435,7 @@ function App() {
       case "newTerminal": { const origin = terminalOrigin(); if (origin) void createTerminal(origin.projectId, origin.sessionId); break; }
       case "automations": openAutomations(); break;
       case "workItems": openWorkItems(); break;
+      case "issues": openFile(issuesTab); break;
       case "newSession": selectProject(projectId); requestAnimationFrame(() => document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt")?.focus()); break;
       case "focusSidebar": runShortcut("focusProjects"); break;
       case "focusAskFile": visibleAsk(".ask-file-review")?.dispatchEvent(new CustomEvent("codealta-ask-file-focus")); break;
@@ -2171,6 +2174,8 @@ function App() {
             <Button variant="minimal" size="small" icon={<AppIcon name="task" size={16} />} className="activity-work" disabled={!owned}
               active={!!fileTabs.active && isWorkItemsTab(fileTabs.active)} aria-label={t("Work items")} title={`${t("Work items")} (Ctrl+G, Ctrl+I)`} onClick={() => openWorkItems()}>
               {work.some(item => item.stage === "todo") && <span className="activity-work-dot" aria-hidden="true" />}</Button>
+            <Button variant="minimal" size="small" icon={<AppIcon name="issueOpen" size={16} />} className="activity-issues" disabled={!owned}
+              active={!!fileTabs.active && isIssuesTab(fileTabs.active)} aria-label={t("Issues")} title={`${t("Issues")} (Ctrl+G, Ctrl+B)`} onClick={() => openFile(issuesTab)} />
             <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={16} />} className="activity-settings" aria-label={t("Settings & extensions")} title={t("Settings & extensions")} onClick={() => navigate("appearance")} />
           </nav>
         </WindowBrand>
@@ -2386,7 +2391,12 @@ function App() {
             }} reopen={() => tabCommand("reopenTab")}
             files={fileTabs} fileDirty={tab => fileEditors.dirty(fileTabKey(tab))} selectFile={activateFile} closeFile={tab => closeFile(tab)}
             terminal={id => terminalList.find(terminal => terminal.id === id)}
-            renderFile={(tab, visible) => isWorkItemsTab(tab)
+            renderFile={(tab, visible) => isIssuesTab(tab)
+              ? <IssuesPanel key={fileTabKey(tab)} api={issuesApi} epoch={!status ? undefined : owned ? status.hostEpoch : null}
+                projects={snapshot?.projects.filter(project => !project.archived) ?? []} projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null}
+                visible={visible && view === "workspace" && !settingsOpen} preferredStart={workState.settings.start} onActivate={() => activateFile(tab)}
+                onOpenSession={id => void openAutomationSession(id)} onNotice={message => showToast({ message, intent: "danger", icon: "error", timeout: 8000 })} />
+              : isWorkItemsTab(tab)
               ? <WorkItemsPanel key={fileTabKey(tab)} hub={workHub} projects={snapshot?.projects.filter(project => !project.archived) ?? []} sessions={snapshot?.sessions ?? []}
                 runningSessions={runningSessionIds} projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null}
                 visible={visible && view === "workspace" && !settingsOpen} focus={workFocus} onFocused={() => setWorkFocus(null)}

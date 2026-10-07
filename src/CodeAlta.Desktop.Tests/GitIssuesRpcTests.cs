@@ -82,7 +82,7 @@ public sealed class GitIssuesRpcTests
 
         foreach (var remote in new[]
                  {
-                     "https://codeberg.org/org/repo.git", "git@bitbucket.org:org/repo.git", "https://github.com.evil.example/org/repo",
+                     "https://codeberg.org/org/repo.git", "git@git.sr.ht:~org/repo", "https://github.com.evil.example/org/repo",
                      "https://github.com/org", "https://github.com/or%20g/repo", "not a url",
                      // A self-managed GitLab host this fixture does not configure, and paths that spell no repository.
                      "git@code.example.com:team/project.git", "https://gitlab.com/group/pro%2Fject", "https://dev.azure.com/org/Project/repo",
@@ -524,6 +524,31 @@ public sealed class GitIssuesRpcTests
            + (pullRequest ? ",\"pull_request\":{}" : "") + "}";
 
     /// <summary>Answers the expected provider host from a literal function and records what was asked.</summary>
+    [TestMethod]
+    public async Task PullRequests_AreListedBesideTheIssues_ByTheirLastChange()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Http.Respond = _ => Json(Array(Issue(7, "Newest issue", day: 9), Issue(5, "Older issue", day: 3, state: "closed")));
+        fixture.Http.RespondPulls = _ => Json("""
+            [{"number":8,"title":"A pull request","html_url":"https://github.com/org/repo/pull/8","state":"open","head":{"ref":"work"},"updated_at":"2026-05-06T00:00:00Z"},
+             {"number":4,"title":"Elsewhere","html_url":"https://evil.example/org/repo/pull/4","state":"open","head":{"ref":"x"},"updated_at":"2026-05-05T00:00:00Z"}]
+            """);
+
+        var reply = await fixture.SearchAsync("");
+
+        Assert.AreEqual("ok", reply.Status);
+        CollectionAssert.AreEqual(new[] { (7, "issue"), (8, "pull_request"), (5, "issue") }, reply.Issues.Select(static issue => (issue.Number, issue.Kind)).ToArray(),
+            "A pull request takes its place among the issues; a link to another host is not shown.");
+        Assert.AreEqual("https://github.com/org/repo/pull/8", reply.Issues[1].Url);
+        StringAssert.StartsWith(fixture.Http.PullRequests.Single(), "/repos/org/repo/pulls?state=all");
+
+        // A provider that refuses the pull requests still shows its issues.
+        using var refused = await Fixture.CreateAsync();
+        refused.Http.Respond = _ => Json(Array(Issue(7, "Newest issue", day: 9)));
+        refused.Http.RespondPulls = _ => new HttpResponseMessage(HttpStatusCode.Forbidden);
+        CollectionAssert.AreEqual(new[] { 7 }, (await refused.SearchAsync("")).Issues.Select(static issue => issue.Number).ToArray());
+    }
+
     private sealed class ProviderStub : HttpMessageHandler
     {
         /// <summary>The only scheme and host a request may be sent to.</summary>
@@ -541,10 +566,26 @@ public sealed class GitIssuesRpcTests
 
         public Func<string, CancellationToken, Task<HttpResponseMessage>>? RespondAsync { get; set; }
 
+        /// <summary>
+        /// Answers the requests for pull requests, which the picker makes beside the ones for issues. They are kept
+        /// apart, so that a test about issues says what it expects of issues only; by default there are none.
+        /// </summary>
+        public Func<string, HttpResponseMessage> RespondPulls { get; set; } = _ => Json("[]");
+
+        /// <summary>Path and query of each request for pull requests, unescaped.</summary>
+        public List<string> PullRequests { get; } = [];
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Assert.AreEqual(ExpectedAuthority, request.RequestUri!.GetLeftPart(UriPartial.Authority));
             var path = Uri.UnescapeDataString(request.RequestUri.PathAndQuery);
+            if (path.Contains("/pulls", StringComparison.Ordinal) || path.Contains("/merge_requests", StringComparison.Ordinal) || path.Contains("/pullrequests", StringComparison.Ordinal)
+                || path.Contains(" is:pr", StringComparison.Ordinal))
+            {
+                PullRequests.Add(path);
+                return Task.FromResult(RespondPulls(path));
+            }
+
             Requests.Add(path);
             RawRequests.Add(request.RequestUri.PathAndQuery);
             Headers.Add((request.Headers.Accept.ToString(), request.Headers.UserAgent.ToString(), request.Headers.Authorization?.ToString()));

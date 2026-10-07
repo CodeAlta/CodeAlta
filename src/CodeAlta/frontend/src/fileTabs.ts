@@ -7,10 +7,10 @@ import type { WorkspaceSnapshot } from "#neoastra";
  * The tab of a terminal names the terminal; its project is empty for a terminal of no project, and its path
  * is the folder the terminal started in. The automations of the application have one tab, of no project
  * (`view: "automations"`), and so have the work items, the tasks and the plans of every project
- * (`view: "workItems"`). The code editor also opens on the folder of a source plugin or of a skill: its tab
+ * (`view: "workItems"`), and the issues and pull requests (`view: "issues"`). The code editor also opens on the folder of a source plugin or of a skill: its tab
  * names that folder where a tab names a project, and carries the name of the plugin or of the skill.
  */
-export type FileTab = Readonly<{ projectId: string; projectPath: string; view: "editor" | "changes" | "terminal" | "automations" | "workItems"; terminalId?: string; name?: string }>;
+export type FileTab = Readonly<{ projectId: string; projectPath: string; view: "editor" | "changes" | "terminal" | "automations" | "workItems" | "issues"; terminalId?: string; name?: string }>;
 export type FileTabs = Readonly<{ open: readonly FileTab[]; active: FileTab | null; closed: readonly FileTab[] }>;
 export const fileTabsKey = "codealta.desktop.fileTabs.v1";
 export const fileTabLimit = 32;
@@ -25,6 +25,9 @@ export const automationsTab: FileTab = Object.freeze({ projectId: "", projectPat
 /** The tab of the work items: there is one, whatever the project. */
 export const isWorkItemsTab = (tab: FileTab) => tab.view === "workItems";
 export const workItemsTab: FileTab = Object.freeze({ projectId: "", projectPath: "", view: "workItems" });
+/** The tab of the issues and the pull requests: there is one, whatever the project. */
+export const isIssuesTab = (tab: FileTab) => tab.view === "issues";
+export const issuesTab: FileTab = Object.freeze({ projectId: "", projectPath: "", view: "issues" });
 /** The tab of a terminal. */
 export const terminalTab = (terminal: Readonly<{ id: string; projectId: string | null; folder: string }>): FileTab =>
   ({ projectId: terminal.projectId ?? "", projectPath: terminal.folder, view: "terminal", terminalId: terminal.id });
@@ -97,7 +100,7 @@ export function activateFileTab(state: FileTabs, tab: FileTab | null): FileTabs 
  */
 export function reconcileFileTabs(state: FileTabs, snapshot: WorkspaceSnapshot): FileTabs {
   // The folder of a plugin or of a skill is not a project of the workspace: its editor says so itself when the folder is gone.
-  const lasting = (tab: FileTab) => isTerminalTab(tab) || isAutomationsTab(tab) || isWorkItemsTab(tab) || isFolderTab(tab) || resolveFileTab(snapshot, tab);
+  const lasting = (tab: FileTab) => isTerminalTab(tab) || isAutomationsTab(tab) || isWorkItemsTab(tab) || isIssuesTab(tab) || isFolderTab(tab) || resolveFileTab(snapshot, tab);
   const open = state.open.filter(lasting);
   const closed = state.closed.filter(lasting);
   const active = open.find(tab => sameFileTab(tab, state.active)) ?? null;
@@ -137,6 +140,7 @@ function storedTab(value: unknown): { tab: FileTab; file: string | null } | null
   const stored = value as StoredTab;
   if (stored.view === "automations") return stored.projectId === "" && stored.projectPath === "" ? { tab: automationsTab, file: null } : null;
   if (stored.view === "workItems") return stored.projectId === "" && stored.projectPath === "" ? { tab: workItemsTab, file: null } : null;
+  if (stored.view === "issues") return stored.projectId === "" && stored.projectPath === "" ? { tab: issuesTab, file: null } : null;
   if (!text(stored.projectId, 256) || !text(stored.projectPath, 4096)) return null;
   const project = { id: stored.projectId, path: stored.projectPath };
   if (stored.projectId.startsWith(pluginFolderPrefix) || stored.projectId.startsWith(skillFolderPrefix))

@@ -34,6 +34,7 @@ public sealed class GitIssueLookup
     private readonly Lock _cacheLock = new();
     private readonly Dictionary<string, CacheEntry<GitRepositoryReference?>> _repositories = new(StringComparer.Ordinal);
     private readonly Dictionary<string, CacheEntry<IReadOnlyList<GitIssueReferenceItem>>> _recentIssues = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, CacheEntry<IReadOnlyList<GitIssueReferenceItem>>> _recentPullRequests = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, CacheEntry<GitRemoteCredential?>> _credentials = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _repositoryGate = new(1, 1);
     private readonly SemaphoreSlim _recentIssuesGate = new(1, 1);
@@ -92,6 +93,8 @@ public sealed class GitIssueLookup
     /// (<c>GITLAB_HOST</c>, else gitlab.com), then <c>glab config get token --host</c> for the
     /// repository's host. A token is never sent to another host than the one it was issued for.</item>
     /// <item>Azure DevOps: <c>AZURE_DEVOPS_EXT_PAT</c>, then <c>az account get-access-token</c>.</item>
+    /// <item>Bitbucket: <c>BITBUCKET_ACCESS_TOKEN</c> or <c>BITBUCKET_TOKEN</c> (an access token), else
+    /// <c>BITBUCKET_USERNAME</c> or <c>BITBUCKET_EMAIL</c> with <c>BITBUCKET_APP_PASSWORD</c> or <c>BITBUCKET_API_TOKEN</c>.</item>
     /// </list>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="repository"/> is null.</exception>
@@ -109,6 +112,18 @@ public sealed class GitIssueLookup
                     : null;
                 token ??= await GitCommandLine.TryReadTokenAsync("glab", ["config", "get", "token", "--host", repository.Host], TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
                 return GitRemoteCredential.TryBearer(token);
+            }
+
+            case GitRemoteProvider.Bitbucket:
+            {
+                if (ReadEnvironment("BITBUCKET_ACCESS_TOKEN", "BITBUCKET_TOKEN") is { } accessToken)
+                {
+                    return GitRemoteCredential.TryBearer(accessToken);
+                }
+
+                return ReadEnvironment("BITBUCKET_USERNAME", "BITBUCKET_EMAIL") is { } user && ReadEnvironment("BITBUCKET_APP_PASSWORD", "BITBUCKET_API_TOKEN") is { } secret
+                    ? GitRemoteCredential.Basic(user, secret)
+                    : null;
             }
 
             case GitRemoteProvider.AzureDevOps:
@@ -188,6 +203,95 @@ public sealed class GitIssueLookup
         {
             _repositoryGate.Release();
         }
+    }
+
+    /// <summary>
+    /// Gets the issues and the pull requests of the hosted repository of a folder, read with this instance's
+    /// client, credentials and cache.
+    /// </summary>
+    /// <param name="directory">The folder to inspect.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The tracker, or <see langword="null"/> when no remote of the folder names a supported provider.</returns>
+    /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+    public async ValueTask<CodeAlta.Plugins.Abstractions.IIssueTracker?> GetTrackerAsync(string? directory, CancellationToken cancellationToken = default)
+        => await ResolveRepositoryAsync(directory, cancellationToken).ConfigureAwait(false) is { } repository ? GetTracker(repository) : null;
+
+    /// <summary>Gets the issues and the pull requests of a repository, read with this instance's client, credentials and cache.</summary>
+    /// <param name="repository">The repository.</param>
+    /// <returns>The tracker.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="repository"/> is null.</exception>
+    public CodeAlta.Plugins.Abstractions.IIssueTracker GetTracker(GitRepositoryReference repository)
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        return new GitHostTracker(_client, repository, token => GetAuthorizationAsync(repository, token));
+    }
+
+    /// <summary>
+    /// Queries the pull requests (merge requests on GitLab) of a repository for the text typed after <c>#</c>:
+    /// the most recently updated ones for no text, the ones whose number starts with the digits typed, or the
+    /// ones the words match.
+    /// </summary>
+    /// <param name="repository">The repository to query.</param>
+    /// <param name="queryText">The typed text.</param>
+    /// <param name="maximumResults">The preferred maximum result count, clamped to 1..100.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The matching pull requests, most recently updated first; none when the provider refuses or cannot be reached.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="repository"/> or <paramref name="queryText"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+    public async ValueTask<IReadOnlyList<GitIssueReferenceItem>> QueryPullRequestsAsync(GitRepositoryReference repository, string queryText, int maximumResults, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(queryText);
+        var limit = Math.Clamp(maximumResults, 1, GitIssueSource.MaximumPageSize);
+        var text = queryText.Trim();
+        var tracker = GetTracker(repository);
+        var recent = await GetRecentPullRequestsAsync(tracker, repository, cancellationToken).ConfigureAwait(false);
+        if (text.Length == 0)
+        {
+            return [.. recent.Take(limit)];
+        }
+
+        List<GitIssueReferenceItem> found;
+        if (text.All(char.IsAsciiDigit))
+        {
+            found = [.. recent.Where(item => item.Number.ToString(System.Globalization.CultureInfo.InvariantCulture).StartsWith(text, StringComparison.Ordinal))];
+            if (found.TrueForAll(item => item.Number.ToString(System.Globalization.CultureInfo.InvariantCulture) != text) &&
+                await tracker.ReadAsync(CodeAlta.Plugins.Abstractions.TrackedItemKind.PullRequest, text, cancellationToken).ConfigureAwait(false) is { } exact)
+            {
+                found.Insert(0, GitIssueReferenceItem.From(exact.Item, repository));
+            }
+        }
+        else
+        {
+            // The recent ones answer most of what is typed; the search of the provider is asked only for what they miss.
+            found = [.. recent.Where(item => item.Title.Contains(text, StringComparison.OrdinalIgnoreCase))];
+            if (found.Count < limit && text.Length >= 3)
+            {
+                var page = await tracker.ListAsync(new(CodeAlta.Plugins.Abstractions.TrackedItemKind.PullRequest, CodeAlta.Plugins.Abstractions.TrackedItemFilter.All, text, limit), cancellationToken).ConfigureAwait(false);
+                found.AddRange(page.Items.Select(item => GitIssueReferenceItem.From(item, repository)).Where(item => found.TrueForAll(known => known.Number != item.Number)));
+            }
+        }
+
+        return [.. found.Take(limit)];
+    }
+
+    private async ValueTask<IReadOnlyList<GitIssueReferenceItem>> GetRecentPullRequestsAsync(CodeAlta.Plugins.Abstractions.IIssueTracker tracker, GitRepositoryReference repository, CancellationToken cancellationToken)
+    {
+        var key = HostKey(repository) + "/" + repository.FullName;
+        if (IsCaching && TryGetCached(_recentPullRequests, key, out var cached))
+        {
+            return cached;
+        }
+
+        var page = await tracker.ListAsync(new(CodeAlta.Plugins.Abstractions.TrackedItemKind.PullRequest, CodeAlta.Plugins.Abstractions.TrackedItemFilter.All, null, GitIssueSource.MaximumPageSize), cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<GitIssueReferenceItem> items = [.. page.Items.Select(item => GitIssueReferenceItem.From(item, repository))];
+        // A listing the provider refused is asked again at the next key: it may be a limit that passes.
+        if (IsCaching && page.Problem is null)
+        {
+            Store(_recentPullRequests, key, items);
+        }
+
+        return items;
     }
 
     /// <summary>Queries the issues of a repository for the text typed after <c>#</c>.</summary>

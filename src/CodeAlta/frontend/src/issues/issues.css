@@ -1,0 +1,57 @@
+/* The Issues tab. It has the frame of the Work items tab (header, toolbar, lists as tabs, a list and a reader),
+   with the colors people know from the services: green for what is open, purple for what is merged or done,
+   red for a pull request closed without a merge, gray for a draft. */
+.issues-page { --issue-open: #2da44e; --issue-done: #8957e5; --issue-closed: #cf222e; --issue-draft: var(--muted); }
+:root:not([data-theme="light"]) .issues-page { --issue-open: #3fb950; --issue-done: #a371f7; --issue-closed: #f85149; }
+.issues-emblem { background: linear-gradient(135deg, #3fb950, #2f81f7); }
+.issues-toolbar { grid-template-columns: auto auto auto minmax(140px, 280px); }
+.issues-source { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; max-width: 320px; font-size: 12.5px; white-space: nowrap; }
+.issues-source > strong { font-weight: 600; }
+.issues-source > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-family: var(--bp-typography-family-mono); font-size: 12px; }
+.issues-notice { margin-top: 10px; }
+.issues-more { margin: 8px 0 0; color: var(--muted); font-size: 12px; text-align: center; }
+
+.issue-row-item[data-tone="open"] .issue-glyph, .issue-state[data-tone="open"] { color: var(--issue-open); }
+.issue-row-item[data-tone="done"] .issue-glyph, .issue-state[data-tone="done"] { color: var(--issue-done); }
+.issue-row-item[data-tone="closed"] .issue-glyph, .issue-state[data-tone="closed"] { color: var(--issue-closed); }
+.issue-row-item[data-tone="draft"] .issue-glyph, .issue-state[data-tone="draft"] { color: var(--issue-draft); }
+.issue-state.bp6-tag { background: color-mix(in srgb, currentColor 14%, transparent); font-weight: 600; }
+.issue-ref { color: var(--muted); font-family: var(--bp-typography-family-mono); font-size: .92em; font-weight: 500; }
+.issue-row-item .issue-row-line { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 2px; }
+.issue-row-facts { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.issue-row-item .issue-label { font-size: 10.5px; line-height: 15px; padding: 0 7px; }
+.issue-label { flex: 0 0 auto; min-width: 0; max-width: 150px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.issue-label[data-plain] { border: 1px solid var(--line-strong); color: var(--muted); font-weight: 500; }
+.issue-more { color: var(--muted); font-size: 11px; }
+.issue-comments { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+
+.issue-heading { display: grid; gap: 8px; min-width: 0; padding: 14px 4px 12px 20px; }
+.issue-heading h3 { margin: 0; font-size: 18px; font-weight: 650; line-height: 1.3; color: var(--text); overflow-wrap: anywhere; }
+.issue-heading h3 > .issue-ref { font-size: .82em; }
+.issue-facts, .issue-branches, .issue-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0; color: var(--muted); font-size: 12px; }
+.issue-facts > span { display: inline-flex; align-items: center; gap: 4px; }
+.issue-branches { gap: 6px; }
+.issue-branches code { padding: 1px 6px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-size: 11.5px; }
+.issue-tags { gap: 5px; }
+.issue-detail .work-detail-actions { gap: 10px; }
+
+.issue-text { display: grid; gap: 4px; min-width: 0; }
+.issue-nothing { margin: 0; color: var(--muted); font-style: italic; font-size: 13px; }
+.issue-comments-list { display: grid; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.issue-comments-list > h4 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.issue-comment { min-width: 0; padding: 10px 14px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.issue-comment > header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; color: var(--muted); font-size: 12px; }
+.issue-comment > header > strong { color: var(--text); font-weight: 600; }
+.issue-comment > header > time { margin-left: auto; }
+.issue-comment .markdown-content { font-size: 13px; }
+.issue-comment .markdown-content > :first-child { margin-top: 0; }
+.issue-comment .markdown-content > :last-child { margin-bottom: 0; }
+
+.issue-window-body > .issue-heading { padding: 4px 0 12px; border-bottom: 1px solid var(--line); }
+.issue-window-body > .work-window-actions { display: grid; gap: 10px; }
+
+@container (max-width: 860px) {
+  .issues-toolbar { grid-template-columns: minmax(0, 1fr); }
+  .issues-toolbar > .bp6-segmented-control { justify-self: start; }
+  .issue-heading { padding-left: 0; }
+}

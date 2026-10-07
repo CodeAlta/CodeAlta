@@ -112,7 +112,11 @@ internal sealed class GitIssuesService : IDisposable
             provider = ProviderName(repository.Provider);
             repositoryName = repository.FullName;
             var result = await _lookup.QueryAsync(repository, request.Query, limit, cancellationToken).ConfigureAwait(false);
-            var issues = Entries(result.Issues, repository.Host, limit);
+            // The pull requests are found beside the issues: a provider that refuses them still shows its issues.
+            IReadOnlyList<GitIssueReferenceItem> pulls = [];
+            try { pulls = await _lookup.QueryPullRequestsAsync(repository, request.Query, limit, cancellationToken).ConfigureAwait(false); }
+            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested) { }
+            var issues = Entries(Merge(result.Issues, pulls), repository.Host, limit);
             // Matches found beside a refused request (a rate-limited search) are still worth showing.
             return issues.Count == 0 && result.FailureStatusCode is { } refusal
                 ? Refused("failed", repositoryName, string.Create(CultureInfo.InvariantCulture, $"{repository.Provider.GetDisplayName()} answered the request with HTTP {(int)refusal}."))
@@ -137,8 +141,22 @@ internal sealed class GitIssuesService : IDisposable
         {
             GitRemoteProvider.GitLab => "gitlab",
             GitRemoteProvider.AzureDevOps => "azure_devops",
+            GitRemoteProvider.Bitbucket => "bitbucket",
             _ => "github",
         };
+
+    // Both lists come in the order they are shown in: the one whose next item changed last gives the next row.
+    private static List<GitIssueReferenceItem> Merge(IReadOnlyList<GitIssueReferenceItem> issues, IReadOnlyList<GitIssueReferenceItem> pulls)
+    {
+        var merged = new List<GitIssueReferenceItem>(issues.Count + pulls.Count);
+        int issue = 0, pull = 0;
+        while (issue < issues.Count || pull < pulls.Count)
+        {
+            merged.Add(pull >= pulls.Count || issue < issues.Count && issues[issue].UpdatedAt >= pulls[pull].UpdatedAt ? issues[issue++] : pulls[pull++]);
+        }
+
+        return merged;
+    }
 
     private static List<GitIssueEntry> Entries(IReadOnlyList<GitIssueReferenceItem> issues, string host, int limit)
     {
@@ -148,14 +166,14 @@ internal sealed class GitIssuesService : IDisposable
             if (entries.Count >= limit) break;
             var title = Clean(issue.Title, MaximumTitleLength);
             if (issue.Number <= 0 || title.Length == 0 || IssueUrl(issue.Url, host) is not { } url) continue;
-            entries.Add(new(issue.Number, title, url, Clean(issue.State, MaximumStateLength), issue.IsOpen, issue.UpdatedAt));
+            entries.Add(new(issue.Number, title, url, Clean(issue.State, MaximumStateLength), issue.IsOpen, issue.UpdatedAt, issue.IsPullRequest ? "pull_request" : "issue"));
         }
 
         return entries;
     }
 
     // Only a link to the host of the repository itself is handed to the page for insertion into a prompt.
-    private static string? IssueUrl(string? value, string host)
+    internal static string? IssueUrl(string? value, string host)
         => value is { Length: > 0 and <= MaximumUrlLength } && !value.Any(static character => char.IsControl(character) || char.IsWhiteSpace(character))
            && Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps && uri.UserInfo.Length == 0
            && string.Equals(uri.Host, host, StringComparison.OrdinalIgnoreCase) && uri.AbsoluteUri.Length <= MaximumUrlLength
@@ -163,7 +181,7 @@ internal sealed class GitIssuesService : IDisposable
             : null;
 
     // Removes control, line-breaking and bidirectional-override characters and unpaired surrogates, then bounds the text.
-    private static string Clean(string? value, int maximum)
+    internal static string Clean(string? value, int maximum)
     {
         if (string.IsNullOrEmpty(value)) return string.Empty;
         var text = new StringBuilder(Math.Min(value.Length, maximum));
@@ -185,10 +203,10 @@ internal sealed class GitIssuesService : IDisposable
         return text.ToString().Trim();
     }
 
-    private static bool Identity(string? value)
+    internal static bool Identity(string? value)
         => SingleLine(value, MaximumIdentityLength) && !string.IsNullOrWhiteSpace(value) && value == value.Trim();
 
-    private static bool SingleLine(string? value, int maximum)
+    internal static bool SingleLine(string? value, int maximum)
     {
         if (value is null || value.Length > maximum) return false;
         for (var index = 0; index < value.Length; index++)
@@ -207,15 +225,16 @@ internal sealed record GitIssuesSearchRequest(string ExpectedEpoch, string? Proj
 /// <summary>
 /// The found issues, most recently updated first. The status is <c>ok</c>, <c>invalid_request</c>,
 /// <c>stale_epoch</c>, <c>unknown_project</c>, <c>archived_project</c>, <c>project_unavailable</c>,
-/// <c>no_repository</c> (no project, or its folder has no GitHub, GitLab or Azure DevOps remote) or
-/// <c>failed</c>; only a failure carries a message. The provider is <c>github</c>, <c>gitlab</c> or
-/// <c>azure_devops</c> once the repository is known.
+/// <c>no_repository</c> (no project, or its folder has no GitHub, GitLab, Azure DevOps or Bitbucket remote) or
+/// <c>failed</c>; only a failure carries a message. The provider is <c>github</c>, <c>gitlab</c>,
+/// <c>azure_devops</c> or <c>bitbucket</c> once the repository is known.
 /// </summary>
 internal sealed record GitIssuesSearchResponse(string Status, string Epoch, string? Provider, string? Repository,
     IReadOnlyList<GitIssueEntry> Issues, string? Message);
 
 /// <summary>
-/// One issue or work item (never a pull or merge request); the title is untrusted text to render as text.
-/// The state is the provider's own word for it, and <c>Open</c> says whether it still counts as open.
+/// One issue, work item or pull request; the title is untrusted text to render as text. The state is the
+/// provider's own word for it, and <c>Open</c> says whether it still counts as open. The kind is
+/// <c>issue</c> or <c>pull_request</c>.
 /// </summary>
-internal sealed record GitIssueEntry(int Number, string Title, string Url, string State, bool Open, DateTimeOffset? UpdatedAt);
+internal sealed record GitIssueEntry(int Number, string Title, string Url, string State, bool Open, DateTimeOffset? UpdatedAt, string Kind = "issue");

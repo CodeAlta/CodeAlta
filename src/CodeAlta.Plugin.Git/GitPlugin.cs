@@ -11,7 +11,7 @@ namespace CodeAlta.Plugin.Git;
 /// provider CLIs (<c>gh</c>, <c>glab</c>, <c>az</c>) as agent tools when they are installed.
 /// </summary>
 [Plugin("git", DisplayName = "Git", Description = "Adds an issue prompt picker for GitHub, GitLab and Azure DevOps repositories and exposes their CLIs (gh, glab, az) when available.")]
-public sealed class GitPlugin : PluginBase
+public sealed class GitPlugin : PluginBase, IIssueTrackerSource
 {
     private readonly Func<GitPlugin, IEnumerable<PluginPromptEditorContribution>>? _createPromptEditorContributions;
     private readonly GitPluginBackend _backend;
@@ -40,6 +40,10 @@ public sealed class GitPlugin : PluginBase
         _createPromptEditorContributions = createPromptEditorContributions;
         _backend = backend;
     }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<IIssueTracker>> GetTrackersAsync(string projectPath, CancellationToken cancellationToken)
+        => _lookup is { } lookup && await lookup.GetTrackerAsync(projectPath, cancellationToken).ConfigureAwait(false) is { } tracker ? [tracker] : [];
 
     /// <inheritdoc />
     public override async ValueTask InitializeAsync(CancellationToken cancellationToken = default)

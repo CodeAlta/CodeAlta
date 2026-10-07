@@ -1,9 +1,11 @@
 using System.Globalization;
+using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Plugin.Git;
 
 /// <summary>
-/// Describes an issue (a GitHub or GitLab issue, an Azure DevOps work item) that can be inserted into a prompt.
+/// Describes an issue (a GitHub, GitLab or Bitbucket issue, an Azure DevOps work item) or a pull request that
+/// can be inserted into a prompt.
 /// </summary>
 /// <param name="Number">The issue number.</param>
 /// <param name="Title">The issue title.</param>
@@ -14,6 +16,15 @@ namespace CodeAlta.Plugin.Git;
 /// <param name="Repository">The repository full name.</param>
 public sealed record GitIssueReferenceItem(int Number, string Title, string Url, DateTimeOffset UpdatedAt, string State, bool IsOpen, string Repository)
 {
+    /// <summary>Gets whether the item is a pull request (a merge request on GitLab) and not an issue.</summary>
+    public bool IsPullRequest { get; init; }
+
+    /// <summary>Makes the reference of an item of a tracker whose ids are numbers.</summary>
+    internal static GitIssueReferenceItem From(TrackedItem item, GitRepositoryReference repository)
+        => new(int.Parse(item.Id, NumberStyles.None, CultureInfo.InvariantCulture), item.Title, item.Url, item.UpdatedAt ?? item.CreatedAt ?? default,
+            item.StateText ?? item.State.ToString().ToLowerInvariant(), item.State is TrackedItemState.Open or TrackedItemState.Draft, repository.FullName)
+        { IsPullRequest = item.Kind == TrackedItemKind.PullRequest };
+
     /// <summary>Gets the displayed issue id.</summary>
     public string Id => FormattableString.Invariant($"#{Number}");
 

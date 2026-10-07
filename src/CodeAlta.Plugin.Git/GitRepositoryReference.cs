@@ -13,6 +13,9 @@ public enum GitRemoteProvider
 
     /// <summary>Azure DevOps Services (dev.azure.com).</summary>
     AzureDevOps,
+
+    /// <summary>Bitbucket Cloud (bitbucket.org).</summary>
+    Bitbucket,
 }
 
 /// <summary>Display helpers for <see cref="GitRemoteProvider"/>.</summary>
@@ -20,12 +23,13 @@ public static class GitRemoteProviderExtensions
 {
     /// <summary>Gets the name of the provider as its users write it.</summary>
     /// <param name="provider">The provider.</param>
-    /// <returns><c>GitHub</c>, <c>GitLab</c> or <c>Azure DevOps</c>.</returns>
+    /// <returns><c>GitHub</c>, <c>GitLab</c>, <c>Azure DevOps</c> or <c>Bitbucket</c>.</returns>
     public static string GetDisplayName(this GitRemoteProvider provider)
         => provider switch
         {
             GitRemoteProvider.GitLab => "GitLab",
             GitRemoteProvider.AzureDevOps => "Azure DevOps",
+            GitRemoteProvider.Bitbucket => "Bitbucket",
             _ => "GitHub",
         };
 
@@ -39,7 +43,7 @@ public static class GitRemoteProviderExtensions
 /// <summary>Identifies a repository hosted by a supported provider.</summary>
 /// <param name="Provider">The hosting provider.</param>
 /// <param name="Host">The web host of the provider instance, such as <c>github.com</c>, <c>gitlab.example.com</c> or <c>dev.azure.com</c>.</param>
-/// <param name="Owner">The GitHub owner, the GitLab namespace (groups separated by <c>/</c>) or the Azure DevOps organization.</param>
+/// <param name="Owner">The GitHub owner, the GitLab namespace (groups separated by <c>/</c>), the Azure DevOps organization or the Bitbucket workspace.</param>
 /// <param name="Name">The repository name.</param>
 public sealed record GitRepositoryReference(GitRemoteProvider Provider, string Host, string Owner, string Name)
 {
@@ -64,6 +68,13 @@ public sealed record GitRepositoryReference(GitRemoteProvider Provider, string H
     public static GitRepositoryReference GitLab(string host, string namespacePath, string name)
         => new(GitRemoteProvider.GitLab, host, namespacePath, name);
 
+    /// <summary>Creates a reference to a Bitbucket Cloud repository.</summary>
+    /// <param name="workspace">The workspace that owns the repository.</param>
+    /// <param name="name">The repository name.</param>
+    /// <returns>The reference.</returns>
+    public static GitRepositoryReference Bitbucket(string workspace, string name)
+        => new(GitRemoteProvider.Bitbucket, GitRemoteUrl.BitbucketHost, workspace, name);
+
     /// <summary>Creates a reference to an Azure DevOps Services repository.</summary>
     /// <param name="organization">The organization.</param>
     /// <param name="project">The project that owns the repository.</param>
@@ -79,6 +90,7 @@ internal static class GitRemoteUrl
     public const string GitHubHost = "github.com";
     public const string GitLabHost = "gitlab.com";
     public const string AzureDevOpsHost = "dev.azure.com";
+    public const string BitbucketHost = "bitbucket.org";
 
     private const int MaximumPartLength = 100;
     private const string LegacyAzureDevOpsSuffix = ".visualstudio.com";
@@ -145,6 +157,17 @@ internal static class GitRemoteUrl
         if (host is GitHubHost or "ssh.github.com")
         {
             return TryParseGitHub(segments, out repository);
+        }
+
+        if (host is BitbucketHost or "altssh.bitbucket.org")
+        {
+            // https://bitbucket.org/{workspace}/{repository}.git
+            if (TryParseGitHub(segments, out var slug))
+            {
+                repository = GitRepositoryReference.Bitbucket(slug.Owner, slug.Name);
+            }
+
+            return repository is not null;
         }
 
         if (host is AzureDevOpsHost)

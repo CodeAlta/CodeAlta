@@ -129,6 +129,8 @@ export const automations = Object.freeze({ list: noAutomations, refresh: noAutom
 // The demo has no project folder to keep tasks and plans in.
 export const workItems = Object.freeze({ list: async () => ({ status: "unavailable", projects: [], settings: null }), read: unavailable, act: unavailable,
   saveSettings: unavailable, watch: unavailable });
+// The demo has no repository whose issues could be read.
+export const issues = Object.freeze({ sources: async () => ({ status: "unavailable", sources: [] }), list: unavailable, read: unavailable, start: unavailable, openLink: unavailable });
 export const promptImages = Object.freeze({ read: unavailable });
 export const toolCalls = Object.freeze({ read: unavailable, observe: unavailable });
 // The demo keeps the user's color schemes in the browser, where the desktop keeps a file for each.

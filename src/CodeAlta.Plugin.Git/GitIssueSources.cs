@@ -14,10 +14,16 @@ internal sealed class GitIssueQuery(HttpClient client, GitRepositoryReference re
 {
     public GitRepositoryReference Repository { get; } = repository;
 
+    /// <summary>Gets whether the requests carry no credentials: the provider sees a visitor.</summary>
+    public bool Anonymous => authorization is null;
+
     public HttpStatusCode? FailureStatusCode { get; private set; }
 
     public void ReportFailure(HttpStatusCode statusCode)
         => FailureStatusCode ??= statusCode;
+
+    /// <summary>Gets a query of the same repository with the same credentials, whose refusals are its own.</summary>
+    public GitIssueQuery Fork() => new(client, Repository, authorization);
 
     public Task<HttpResponseMessage> GetAsync(string url, string accept, CancellationToken cancellationToken)
         => SendAsync(new HttpRequestMessage(HttpMethod.Get, url), accept, cancellationToken);
@@ -52,6 +58,7 @@ internal abstract class GitIssueSource
         {
             GitRemoteProvider.GitLab => GitLabIssueSource.Instance,
             GitRemoteProvider.AzureDevOps => AzureDevOpsIssueSource.Instance,
+            GitRemoteProvider.Bitbucket => BitbucketIssueSource.Instance,
             _ => GitHubIssueSource.Instance,
         };
 
@@ -408,4 +415,31 @@ internal sealed class AzureDevOpsIssueSource : GitIssueSource
     private static bool IsClosedState(string state)
         => state.Equals("Closed", StringComparison.OrdinalIgnoreCase) || state.Equals("Done", StringComparison.OrdinalIgnoreCase) ||
            state.Equals("Removed", StringComparison.OrdinalIgnoreCase) || state.Equals("Completed", StringComparison.OrdinalIgnoreCase);
+}
+
+/// <summary>Bitbucket Cloud issues, read as the Issues tab reads them.</summary>
+internal sealed class BitbucketIssueSource : GitIssueSource
+{
+    public static BitbucketIssueSource Instance { get; } = new();
+
+    public override Task<GitIssueFetch> ListRecentAsync(GitIssueQuery query, int maximumResults, CancellationToken cancellationToken)
+        => FetchAsync(query, null, maximumResults, cancellationToken);
+
+    public override Task<GitIssueFetch> SearchAsync(GitIssueQuery query, string text, int maximumResults, CancellationToken cancellationToken)
+        => FetchAsync(query, text, maximumResults, cancellationToken);
+
+    public override async Task<IReadOnlyList<GitIssueReferenceItem>> GetAsync(GitIssueQuery query, int number, CancellationToken cancellationToken)
+    {
+        // A number that names no issue is an ordinary miss: the refusal of this one request is not kept.
+        var probe = query.Fork();
+        var detail = await BitbucketApi.Instance.ReadAsync(probe, CodeAlta.Plugins.Abstractions.TrackedItemKind.Issue, number, cancellationToken).ConfigureAwait(false);
+        return detail is null ? [] : [GitIssueReferenceItem.From(detail.Item, query.Repository)];
+    }
+
+    private static async Task<GitIssueFetch> FetchAsync(GitIssueQuery query, string? text, int maximumResults, CancellationToken cancellationToken)
+    {
+        var items = await BitbucketApi.Instance.ListAsync(query, CodeAlta.Plugins.Abstractions.TrackedItemKind.Issue, CodeAlta.Plugins.Abstractions.TrackedItemFilter.All,
+            string.IsNullOrWhiteSpace(text) ? null : text.Trim(), Math.Clamp(maximumResults, 1, MaximumPageSize), cancellationToken).ConfigureAwait(false);
+        return new([.. items.Select(item => GitIssueReferenceItem.From(item, query.Repository))], query.FailureStatusCode is null);
+    }
 }

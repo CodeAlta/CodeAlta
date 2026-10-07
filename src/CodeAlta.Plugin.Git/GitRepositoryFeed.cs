@@ -123,6 +123,8 @@ public sealed class GitRepositoryFeed : IDisposable
         {
             repository = await _repository(directory, cancellationToken).ConfigureAwait(false);
             if (repository is null) return new(GitFeedStatus.NoRepository, null, []);
+            // The events of a Bitbucket repository are not read yet: its triggers start nothing.
+            if (repository.Provider == GitRemoteProvider.Bitbucket) return new(GitFeedStatus.NoRepository, null, []);
             var authorization = (await _credential(repository, cancellationToken).ConfigureAwait(false))?.ToHeader();
             return repository.Provider switch
             {

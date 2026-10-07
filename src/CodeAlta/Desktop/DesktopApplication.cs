@@ -544,7 +544,14 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddModelCatalogService(providers);
                     builder.AddReminderService(reminders);
                     builder.AddAutomationsService(new AutomationsService(automations, host.ProjectCatalog, epoch));
-                    builder.AddWorkItemsService(new WorkItemsService(workItems, host.ProjectCatalog, new WorkItems.WorkItemRunner(host, workItems, worktrees), epoch));
+                    var sessionStarter = new WorkItems.SessionStarter(host, worktrees);
+                    builder.AddWorkItemsService(new WorkItemsService(workItems, host.ProjectCatalog, new WorkItems.WorkItemRunner(sessionStarter, workItems), epoch));
+                    // The trackers are the ones of the plugins that are active when the page asks: the Git plugin for the
+                    // repository of a project, and plugins such as Jira for trackers that are elsewhere.
+                    var pluginRuntime = host.PluginRuntime;
+                    builder.AddIssuesService(new IssuesService(
+                        () => [.. (pluginRuntime?.ActivePlugins ?? []).Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugins.Abstractions.IIssueTrackerSource>()],
+                        host.ProjectCatalog, sessionStarter, epoch));
                     gitIssues = new GitIssuesService(host.ProjectCatalog, epoch);
                     builder.AddGitIssuesService(gitIssues);
                     builder.AddSessionOperationsService(operations);
@@ -727,6 +734,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddTerminalsService(new TerminalsService());
             builder.AddAutomationsService(new AutomationsService());
             builder.AddWorkItemsService(new WorkItemsService());
+            builder.AddIssuesService(new IssuesService());
             builder.AddPromptImagesService(new PromptImagesService());
             builder.AddToolCallsService(new ToolCallsService());
             builder.AddComposerStatusService(new ComposerStatusService());

@@ -4,7 +4,7 @@ title: Git plugin
 
 # Git plugin
 
-The built-in Git plugin connects CodeAlta to the service that hosts your repository. It works with GitHub, GitLab and Azure DevOps. It adds issue lookup while you write prompts, and it gives agents the command-line tool of your provider when that tool is installed.
+The built-in Git plugin connects CodeAlta to the service that hosts your repository. It works with GitHub, GitLab, Azure DevOps and Bitbucket. It feeds the [Issues tab](../issues.md) of CodeAlta Desktop, adds issue lookup while you write prompts, and it gives agents the command-line tool of your provider when that tool is installed.
 
 {.table}
 | Provider | Detected from the git remote | `#` lists | Agent tool |
@@ -12,6 +12,7 @@ The built-in Git plugin connects CodeAlta to the service that hosts your reposit
 | GitHub | `github.com` | Issues | `gh` |
 | GitLab | `gitlab.com` and self-managed instances | Issues | `glab` |
 | Azure DevOps | `dev.azure.com` and `<organization>.visualstudio.com` | Work items of the project | `az` |
+| Bitbucket | `bitbucket.org` | Issues | |
 
 CodeAlta reads the remotes of the project folder and prefers `origin`. HTTPS and SSH remotes are both recognized.
 
@@ -28,7 +29,7 @@ Type `#` in the prompt editor to search the issues of the project's repository. 
 [#18](https://dev.azure.com/organization/project/_workitems/edit/18)
 ```
 
-Closed issues are listed too. Use **Include closed** (`Ctrl+I`) to hide them. Pull requests and merge requests are not listed.
+Closed issues are listed too. Use **Include closed** (`Ctrl+I`) to hide them. In CodeAlta Desktop the picker also lists the pull requests and merge requests of the repository, with their own icon.
 
 <figure class="my-4">
   <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-github-issue-picker.gif" alt="CodeAlta issue prompt picker dialog" loading="lazy">
@@ -47,6 +48,7 @@ CodeAlta looks for credentials in this order and sends them only to the provider
 | GitHub | `GITHUB_TOKEN`, then `GH_TOKEN` | `gh auth token` |
 | GitLab | `GITLAB_TOKEN`, then `GITLAB_ACCESS_TOKEN` | `glab config get token --host <host>` |
 | Azure DevOps | `AZURE_DEVOPS_EXT_PAT` | `az account get-access-token` |
+| Bitbucket | `BITBUCKET_ACCESS_TOKEN`, or `BITBUCKET_USERNAME` with `BITBUCKET_APP_PASSWORD` | |
 
 Without credentials, lookups are anonymous. This works for public GitHub and GitLab projects, with lower rate limits. Private projects and Azure DevOps need a sign-in.
 

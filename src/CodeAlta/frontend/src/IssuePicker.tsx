@@ -100,9 +100,10 @@ export function IssuePicker({ edit, input }: { edit: (text: string) => void; inp
       {count > 0 && <div className="issue-head" aria-hidden="true"><span /><span>{t("Issue")}</span><span>{t("Title")}</span><span>{t("State")}</span><span>{t("Updated")}</span></div>}
       <div id={listId} ref={list} role="listbox" aria-label={heading} className="reference-list">
         {issues.map((issue, at) => { const closed = !issue.open; const updated = sessionTime(issue.updatedAt, locale, now);
-          return <div role="option" id={`${listId}-${at}`} key={issue.number} aria-selected={at === index} className="issue-row" title={issue.url}
+          return <div role="option" id={`${listId}-${at}`} key={`${issue.kind}:${issue.number}`} aria-selected={at === index} className="issue-row" title={issue.url}
             onMouseMove={() => { if (at !== index) setSelected(at); }} onClick={() => choose(at)}>
-            <span className="issue-icon" data-file-tone={closed ? "purple" : "green"}><AppIcon name={closed ? "issueClosed" : "issueOpen"} size={16} /></span>
+            <span className="issue-icon" data-file-tone={closed ? "purple" : "green"} title={issue.kind === "pull_request" ? t("Pull request") : undefined}>
+              <AppIcon name={issue.kind === "pull_request" ? "pullRequest" : closed ? "issueClosed" : "issueOpen"} size={16} /></span>
             <span className="issue-number">#{issue.number}</span>
             <span className="issue-title">{issue.title}</span>
             <span className="issue-state">{issue.state}</span>
