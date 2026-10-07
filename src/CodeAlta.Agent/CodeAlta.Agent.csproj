@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="CodeAlta.Agent.Anthropic" />
+    <InternalsVisibleTo Include="CodeAlta.Agent.Claude" />
     <InternalsVisibleTo Include="CodeAlta.Agent.Copilot" />
     <InternalsVisibleTo Include="CodeAlta.Agent.GoogleGenAI" />
     <InternalsVisibleTo Include="CodeAlta.Agent.Mistral" />
