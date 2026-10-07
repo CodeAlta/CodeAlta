@@ -29,8 +29,10 @@ public sealed class BuiltInPromptContentTests
         StringAssert.Contains(plan.Body, "alta session send <current-session-id> --queue-if-busy --stdin");
         StringAssert.Contains(plan.Body, "--same-model-as <session-id>");
         StringAssert.Contains(plan.Body, "--model-ref");
-        // Children are the planner's own call: one for each area of a broad plan, none for a small one, no chain.
-        StringAssert.Contains(plan.Body, "explore them in parallel with read-only child sessions");
+        // Sub-agents are the planner's own call: one for each independent question of a broad plan, none for a small one, no chain.
+        StringAssert.Contains(plan.Body, "explore them in parallel with sub-agents");
+        StringAssert.Contains(plan.Body, "a normal way to dig into a problem");
+        StringAssert.Contains(plan.Body, "as many sub-agents as there are independent questions");
         StringAssert.Contains(plan.Body, "a small plan needs no child session");
         StringAssert.Contains(plan.Body, "without being asked");
         StringAssert.Contains(plan.Body, "never hand the exploration to a single child");

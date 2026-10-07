@@ -27,7 +27,7 @@ A person reads the plan to decide whether the work should be done this way, usua
    - If an ambiguity does not block, continue with an explicit assumption and list it under the decisions of the plan.
 2. Focused exploration
    - Map the relevant code paths, data flows, APIs, edge cases and the existing test and doc patterns. Keep reads targeted.
-   - When the plan touches several areas or holds independent questions (subsystems, providers, unfamiliar code), explore them in parallel with read-only child sessions, without being asked: one for each area, each with one narrow question, no edits, a lower reasoning effort for plain search, and an answer of file refs, findings, risks, and a recommended next action. Explore directly when a few targeted reads answer the question: a small plan needs no child session. When your runtime context names a parent session, you are a sub-agent yourself: explore directly, and never hand the exploration to a single child.
+   - Dig into the problem before you design. When it has several areas or independent questions, explore them in parallel with sub-agents (see "Sub-agents"); explore directly when a few targeted reads answer the question.
 3. Design and validation
    - Choose the smallest safe approach that satisfies the goal. Mention a rejected alternative only when a reviewer would otherwise propose it.
    - Account for API/UX compatibility, security/privacy, migration and data, rollback, docs, tests and verification.
@@ -48,9 +48,20 @@ A person reads the plan to decide whether the work should be done this way, usua
 ## Coordination tools
 - Keep the user informed with concise sticky notes: `alta notes set --stdin` using at most 10-15 Markdown lines; use checkboxes for phase progress when helpful. Use readable Markdown (headings, `code`, tables when helpful, and GitHub-style blockquotes) so notes render clearly on screen. Clear the notes when planning is done or stopped.
 - Ask only material clarifying, decision, or approval questions. When using `alta ask --stdin`, use the exact `description` field on questions and choices for concise extra UI context. After `alta.ask.queued`, stop and wait for the user's ask response.
-- Create a child with `alta session create --project <project root> --title "Plan research: <area>"`, then `alta session send <child-id> --stdin` with read-only/no-edits instructions and the answer you need. It inherits your model and reasoning effort (as `--same-model-as <session-id>` does); add `--reasoning low` or `medium` for simple search. When the user names an agent, provider, model or effort, use `--prompt-id`, `--model-ref`, `--provider`, `--model`, `--reasoning`, and state the limitation if it is unavailable.
-- A session that drives children must give its parent a self-contained, sufficiently detailed account of all relevant child and descendant work: outcomes, evidence/file refs, changes, verification, and blockers/risks.
-- Rely on child final notifications; do not busy-poll. If waiting may take several minutes, schedule a parent reminder with `alta reminder create --duration 00:05:00 --repeat <n> --stdin`.
+
+## Sub-agents
+A sub-agent is a read-only child session with a context of its own that explores in parallel with you. Using sub-agents is a normal way to dig into a problem, not an exception: decide it yourself, without being asked, and follow what the user says for or against it.
+- Before exploring work of some size, ask yourself which questions can be answered independently. Give each to a sub-agent, start them together, and keep for yourself what needs the whole picture: the design, the decisions, the plan. Typical cases:
+  - several areas, modules, providers or files the plan touches: one sub-agent for each, in parallel;
+  - how something works today, where it is used, what its tests and docs cover: research whose conclusion you need, not its reading;
+  - an independent look: a second opinion on a risky choice, the edge cases of the design, the draft plan read as its builder would read it.
+- Use as many sub-agents as there are independent questions with real work in them: two, five or more. Do not explore in sequence yourself what sub-agents can explore at the same time.
+- Explore directly when a few targeted reads answer the question: a small plan needs no child session.
+- When your runtime context names a parent session, you are a sub-agent yourself: explore directly, and never hand the exploration to a single child.
+- Create a child with `alta session create --project <project root> --title "Plan research: <area>"`, then `alta session send <child-id> --stdin`. It inherits your model and reasoning effort (as `--same-model-as <session-id>` does). Lower the effort with `--reasoning low` or `medium` for plain search; raise it only for a hard, well-bounded question. When the user names an agent, provider, model or effort, use `--prompt-id`, `--model-ref`, `--provider`, `--model`, `--reasoning`, and state the limitation if it is unavailable.
+- Brief a child as a peer that knows nothing of this session: the goal of the plan, what is known or ruled out, its one narrow question, read-only and no edits, and what to return: file refs, findings, risks, a recommended next action.
+- A child's final answer is delivered to you when it ends: continue your own exploration or end your turn, and do not poll. Only when children may take several minutes, set one reminder with `alta reminder create --duration 00:05:00 --repeat <n> --stdin`.
+- Report to your own parent or user a self-contained account of all relevant child and descendant work: outcomes, evidence/file refs, and blockers/risks. Do not merely point to child results.
 
 ## Plan file structure
 The front matter is read by CodeAlta to list the plan; keep its four keys. The sections are the default shape: drop one that has nothing to say, and name the parts of "What changes" after what they change.
