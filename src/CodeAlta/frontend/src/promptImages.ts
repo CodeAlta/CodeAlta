@@ -83,6 +83,40 @@ export function pngHeader(bytes: Uint8Array): { width: number; height: number } 
   return { width, height };
 }
 
+// What the host accepts between the header and the end of a PNG, besides its image data.
+const keptPngChunks = new Set(["IHDR", "IDAT", "IEND", "sRGB", "gAMA", "cHRM", "pHYs"]);
+
+// A canvas writes the PNG the browser wants, not the narrow one the host takes: WebKit, the web view of the
+// macOS application, adds an eXIf chunk. The chunks a decoder may skip (a lowercase first letter) and the host
+// does not take are left out; nothing else is touched, so the header check still decides what a valid image is.
+export function stripPngMetadata(bytes: Uint8Array): Uint8Array {
+  if (bytes.length < 20 || ![137, 80, 78, 71, 13, 10, 26, 10].every((b, i) => bytes[i] === b)) return bytes;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const kept: Uint8Array[] = [bytes.subarray(0, 8)];
+  let dropped = false; let offset = 8;
+  while (offset < bytes.length) {
+    if (offset > bytes.length - 12) return bytes;
+    const length = view.getUint32(offset);
+    if (length > bytes.length - offset - 12) return bytes;
+    const type = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8));
+    const skippable = (bytes[offset + 4] & 0x20) !== 0;
+    if (skippable && !keptPngChunks.has(type)) dropped = true; else kept.push(bytes.subarray(offset, offset + length + 12));
+    offset += length + 12;
+  }
+  if (!dropped) return bytes;
+  const result = new Uint8Array(kept.reduce((total, part) => total + part.length, 0));
+  let position = 0;
+  for (const part of kept) { result.set(part, position); position += part.length; }
+  return result;
+}
+
+// Not String.fromCharCode(...bytes): the arguments of a multi-megabyte image overflow the stack.
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  return btoa(binary);
+}
+
 // Only called for files synchronously obtained from the originating user paste event.
 // No navigator.clipboard, filesystem paths, URL fetching, HTML or blob URLs. Decode first:
 // clipboard PNGs may contain palettes, grayscale, interlacing or ordinary metadata that
@@ -99,10 +133,11 @@ export async function readPastedImage(file: File, title: string): Promise<Sessio
     const dataUrl = canvas.toDataURL("image/png");
     const prefix = "data:image/png;base64,";
     if (!dataUrl.startsWith(prefix)) throw new Error(imagePasteFailure);
-    const base64 = dataUrl.slice(prefix.length);
-    const bytes = Uint8Array.from(atob(base64), value => value.charCodeAt(0));
+    const written = dataUrl.slice(prefix.length);
+    const all = Uint8Array.from(atob(written), value => value.charCodeAt(0));
+    const bytes = stripPngMetadata(all);
     const dimensions = pngHeader(bytes);
     if (dimensions.width !== bitmap.width || dimensions.height !== bitmap.height) throw new Error(imagePasteFailure);
-    return Object.freeze({ title, mediaType: "image/png", base64 });
+    return Object.freeze({ title, mediaType: "image/png", base64: bytes === all ? written : toBase64(bytes) });
   } finally { bitmap.close(); }
 }

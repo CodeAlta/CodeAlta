@@ -184,6 +184,10 @@ public sealed class ClaudeCodeProviderTests
             new[] { AgentReasoningEffort.Low, AgentReasoningEffort.Medium, AgentReasoningEffort.High, AgentReasoningEffort.XHigh, AgentReasoningEffort.Max },
             probe.Models[0].SupportedReasoningEfforts!.ToArray());
         Assert.IsNull(probe.Models[2].SupportedReasoningEfforts);
+
+        // The CLI does not say which models take images: all the ones it runs do, and the composer only lets
+        // an image be pasted for a model that says so.
+        Assert.IsTrue(probe.Models.All(static model => AgentImageInputCapability.Read(model) == true));
         StringAssert.Contains(probe.StatusMessage, "/fake/bin/claude");
         StringAssert.Contains(probe.StatusMessage, "Claude Max");
         Assert.IsFalse(probe.StatusMessage!.Contains("someone@example.test", StringComparison.Ordinal), "The identity of the account stays in the CLI.");
@@ -271,7 +275,9 @@ public sealed class ClaudeCodeProviderTests
         await using var pinnedRuntime = new ClaudeCodeModelProviderRuntime(pinned);
 
         CollectionAssert.AreEqual(new[] { "sonnet", "haiku" }, (await filteredRuntime.ProbeAsync()).Models.Select(static model => model.Id).ToArray());
-        CollectionAssert.AreEqual(new[] { "claude-custom-9" }, (await pinnedRuntime.ProbeAsync()).Models.Select(static model => model.Id).ToArray());
+        var pinnedModels = (await pinnedRuntime.ProbeAsync()).Models;
+        CollectionAssert.AreEqual(new[] { "claude-custom-9" }, pinnedModels.Select(static model => model.Id).ToArray());
+        Assert.AreEqual(true, AgentImageInputCapability.Read(pinnedModels[0]), "A model the CLI does not list takes images like the others.");
         Assert.AreEqual("claude-custom-9", pinnedRuntime.Descriptor.DefaultModelId);
     }
 

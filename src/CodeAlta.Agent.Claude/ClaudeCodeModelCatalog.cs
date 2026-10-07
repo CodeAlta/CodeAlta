@@ -28,13 +28,17 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
 
     private static readonly TimeSpan CacheLifetime = TimeSpan.FromMinutes(5);
 
+    // The CLI does not say which models take images: the ones it runs do, and it accepts an image in a prompt
+    // whatever the model is. CodeAlta only lets an image be attached for a model that says it takes them.
+    private const string ImageInputCapability = "supportsImageInput";
+
     // The aliases of the CLI, offered when it cannot be asked.
     private static readonly AgentModelInfo[] FallbackModels =
     [
-        new(DefaultModelId, "Default (recommended)", "The model Claude Code selects for the account."),
-        new("opus", "Opus", "The Opus model of the installed Claude Code."),
-        new("sonnet", "Sonnet", "The Sonnet model of the installed Claude Code."),
-        new("haiku", "Haiku", "The Haiku model of the installed Claude Code."),
+        CreateUnlistedModel(DefaultModelId, "Default (recommended)", "The model Claude Code selects for the account."),
+        CreateUnlistedModel("opus", "Opus", "The Opus model of the installed Claude Code."),
+        CreateUnlistedModel("sonnet", "Sonnet", "The Sonnet model of the installed Claude Code."),
+        CreateUnlistedModel("haiku", "Haiku", "The Haiku model of the installed Claude Code."),
     ];
 
     private readonly ClaudeCodeModelProviderRuntimeOptions _options;
@@ -173,7 +177,7 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
                 }
             }
 
-            var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal);
+            var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal) { [ImageInputCapability] = true };
             if (ClaudeCodeJson.GetString(entry, "resolvedModel") is { Length: > 0 } resolvedModel)
             {
                 capabilities["resolvedModel"] = resolvedModel;
@@ -190,11 +194,14 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
                 ClaudeCodeJson.GetString(entry, "description"),
                 Provider: "Claude Code",
                 SupportedReasoningEfforts: efforts is { Count: > 0 } ? efforts : null,
-                Capabilities: capabilities.Count == 0 ? null : capabilities));
+                Capabilities: capabilities));
         }
 
         return models;
     }
+
+    private static AgentModelInfo CreateUnlistedModel(string id, string displayName, string? description)
+        => new(id, displayName, description, Provider: "Claude Code", Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal) { [ImageInputCapability] = true });
 
     internal static (bool IsSignedIn, string? Summary) ReadAccount(JsonElement response)
     {
@@ -229,7 +236,7 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
         if (!string.IsNullOrWhiteSpace(_options.SingleModelId))
         {
             var single = _options.SingleModelId.Trim();
-            return [models.FirstOrDefault(model => string.Equals(model.Id, single, StringComparison.OrdinalIgnoreCase)) ?? new AgentModelInfo(single, single, Provider: "Claude Code")];
+            return [models.FirstOrDefault(model => string.Equals(model.Id, single, StringComparison.OrdinalIgnoreCase)) ?? CreateUnlistedModel(single, single, description: null)];
         }
 
         if (string.IsNullOrWhiteSpace(_options.ModelsIncludeRegex))

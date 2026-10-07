@@ -542,6 +542,10 @@ Both windows are resizable and remember their size. Catalog-only and unverified 
 
 Clipboard PNG, JPEG, WebP, GIF and BMP files pass through the browser decoder and are normalized to
 PNG before wire validation, so editor-generated PNG metadata, palettes and interlacing are accepted.
+The PNG the canvas writes is not always the narrow one the host takes (`OwnedPromptImages` refuses
+compressed metadata, animation and unknown chunks): WebKit, the web view of the macOS application, adds
+an `eXIf` chunk. `stripPngMetadata` leaves out the chunks a decoder may skip and the host does not take
+before the validation; a PNG without such a chunk is sent as the canvas wrote it.
 Paint.NET clipboard data must be exposed as an image file by Chrome/WebView2; there is no direct native
 clipboard reader. A conversion error does not mean that the selected model lacks image support.
 Animation is reduced to one frame and source metadata is not retained. There is no per-image size,

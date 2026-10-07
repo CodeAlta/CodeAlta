@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createImageDrafts, freezeImages, pngHeader, readPastedImage } from "./promptImages";
+import { createImageDrafts, freezeImages, pngHeader, readPastedImage, stripPngMetadata } from "./promptImages";
 import { captureSubmission } from "./sessionOperations";
 import { deflateSync } from "node:zlib";
 
@@ -124,6 +124,51 @@ test("image draft replacement is bounded, immutable and exact-revision fenced", 
   assert.equal(owner.replace("overflow", owner.get("overflow"), frozen), false);
   assert.equal(owner.replace("a", owner.get("a"), []), true);
   assert.equal(owner.replace("overflow", owner.get("overflow"), frozen), true);
+});
+
+test("the PNG a canvas wrote is given without the metadata the canvas added to it", async () => {
+  const chunk = (type: string, data: Buffer) => {
+    const result = Buffer.alloc(data.length + 12);
+    result.writeUInt32BE(data.length); result.write(type, 4); data.copy(result, 8);
+    let crc = 0xffffffff;
+    for (const byte of result.subarray(4, -4)) {
+      crc ^= byte;
+      for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+    result.writeUInt32BE(~crc >>> 0, result.length - 4);
+    return result;
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(1); header.writeUInt32BE(1, 4); header[8] = 8; header[9] = 6;
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const ihdr = chunk("IHDR", header); const srgb = chunk("sRGB", Buffer.from([0]));
+  const idat = chunk("IDAT", deflateSync(Buffer.from([0, 255, 0, 0, 255]))); const iend = chunk("IEND", Buffer.alloc(0));
+  // WebKit, the web view of the macOS application, writes an eXIf chunk in the PNG of a canvas.
+  const webkit = Buffer.concat([signature, ihdr, srgb, chunk("eXIf", Buffer.alloc(68, 1)), idat, chunk("tEXt", Buffer.from("a\0b")), iend]);
+  const narrow = Buffer.concat([signature, ihdr, srgb, idat, iend]);
+  assert.throws(() => pngHeader(webkit), "the host accepts no such chunk");
+  assert.deepEqual(Buffer.from(stripPngMetadata(webkit)), narrow);
+  assert.equal(stripPngMetadata(narrow), narrow, "a PNG without such a chunk is given as it is");
+  // A chunk a decoder cannot skip is not removed: the PNG stays one the header check refuses.
+  const palette = Buffer.concat([signature, ihdr, chunk("PLTE", Buffer.alloc(3)), idat, iend]);
+  assert.equal(stripPngMetadata(palette), palette);
+  assert.throws(() => pngHeader(palette));
+  for (const bytes of [new Uint8Array(), new TextEncoder().encode("<svg/>"), webkit.subarray(0, webkit.length - 5)])
+    assert.equal(stripPngMetadata(bytes), bytes, "what is not a whole PNG is left to the header check");
+
+  const oldBitmap = Object.getOwnPropertyDescriptor(globalThis, "createImageBitmap");
+  const oldDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "createImageBitmap", { configurable: true, value: async () => ({ width: 1, height: 1, close: () => {} }) });
+  Object.defineProperty(globalThis, "document", { configurable: true, value: {
+    createElement: () => ({ width: 0, height: 0, getContext: () => ({ drawImage: () => {} }), toDataURL: () => `data:image/png;base64,${webkit.toString("base64")}` }),
+  } });
+  try {
+    const image = await readPastedImage(new File([webkit], "clipboard", { type: "image/png" }), "Screenshot");
+    assert.deepEqual(image, { title: "Screenshot", mediaType: "image/png", base64: narrow.toString("base64") });
+  } finally {
+    if (oldBitmap) Object.defineProperty(globalThis, "createImageBitmap", oldBitmap); else Reflect.deleteProperty(globalThis, "createImageBitmap");
+    if (oldDocument) Object.defineProperty(globalThis, "document", oldDocument); else Reflect.deleteProperty(globalThis, "document");
+  }
 });
 
 test("PNG preview header refuses malformed and non-raster payloads regardless of size", () => {
