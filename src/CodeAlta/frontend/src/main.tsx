@@ -23,7 +23,7 @@ import {
   type ReminderListResponse,
   type ReminderDetailRequest,
   type ConfigurationSnapshot, type WorkspaceSession, type WorkspaceSnapshot,
-  desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workItems as workItemsApi, issues as issuesApi,
+  desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workItems as workItemsApi, issues as issuesApi, pullRequestPrompts,
 } from "#neoastra";
 import { loadWorkspace, sessionListSignature, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
@@ -122,6 +122,8 @@ import { AutomationsPanel } from "./automations/AutomationsPanel";
 import { SessionOrigin } from "./automations/SessionOrigin";
 import { sessionOrigin } from "./automations/automations";
 import { IssuesPanel } from "./issues/IssuesPanel";
+import { PullRequestButton } from "./pullRequests/PullRequestButton";
+import { PullRequestSettings } from "./pullRequests/PullRequestSettings";
 import { createWorkItemsHub } from "./workItems/workItemsHub";
 import { WorkItemsPanel, type WorkItemsFocus } from "./workItems/WorkItemsPanel";
 import { WorkItemCards } from "./workItems/WorkItemCards";
@@ -186,7 +188,7 @@ type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; e
   latestReady: () => boolean; latest: () => void; cancelLatest: () => void }>;
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
-type View = "workspace" | "appearance" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "mcpHost";
+type View = "workspace" | "appearance" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost";
 type SettingsSection = Exclude<View, "workspace">;
 const paneLayoutStorageKey = "codealta.desktop.panes.v1";
 
@@ -1210,6 +1212,8 @@ function App() {
   }
   function showTerminal(terminal: TerminalItem) { openFile(terminalTab(terminal)); }
   const showTerminalLatest = useRef(showTerminal); showTerminalLatest.current = showTerminal;
+  const navigateLatest = useRef(navigate); navigateLatest.current = navigate;
+  const [openPullRequestSettings] = useState(() => () => navigateLatest.current("pullRequests"));
   // A session can ask for the tab of a terminal to be shown.
   useEffect(() => terminalWorkspace.hub.onReveal(id => {
     const asked = terminalWorkspace.hub.list().find(terminal => terminal.id === id);
@@ -2148,7 +2152,7 @@ function App() {
   const newPromptDisabled = creatingBusy || creationLocked || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !snapshot
     || !!selectedProject?.archived || projectId !== null && !selectedProject || (!localDraft.text.trim() && !localImages.images.length)
     || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim());
-  return <ShellLanguageContext.Provider value={language}><PluginUiContext.Provider value={pluginUiValue}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
+  return <ShellLanguageContext.Provider value={language}><PluginUiContext.Provider value={pluginUiValue}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
     {(hostSilent || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {hostSilent && <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
         <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button></div>}
@@ -2469,6 +2473,8 @@ function App() {
       : settingsSection === "worktrees" ? <WorktreeSettings epoch={owned ? status!.hostEpoch : null}
         pick={owned ? initial => pickFolder(desktopShell.pickFolder, t("Folder for worktrees"), initial) : undefined} />
       : settingsSection === "workItems" ? <WorkItemSettings hub={workHub} />
+      : settingsSection === "pullRequests" ? <PullRequestSettings api={pullRequestPrompts} epoch={!status ? undefined : owned ? status.hostEpoch : null}
+          project={selectedProject && !selectedProject.archived ? { id: selectedProject.id, name: selectedProject.name } : null} />
       : settingsSection === "mcpHost" ? <McpHostSettings epoch={owned ? status!.hostEpoch : null} developer={status?.developerMode ?? false} />
       : settingsSection === "skills" ? <SkillSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject}
         onEdit={owned ? folder => { closeSettings(); openSkillEditor(folder); } : undefined} />
@@ -2584,7 +2590,7 @@ function App() {
       onPrompt={request => ["send", "enqueue", "steer", "compact"].includes(request.mode ?? "")
         && askPluginComposer(request.mode as PluginComposerRequest["kind"], request.sessionId ?? null, request.text ?? null).result}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></SessionListRefreshContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></PluginUiContext.Provider></ShellLanguageContext.Provider>;
+  </div></SessionListRefreshContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></PullRequestSettingsContext.Provider></PluginUiContext.Provider></ShellLanguageContext.Provider>;
 }
 
 // Native modal matches the other shell dialogs: showModal supplies inert background,
@@ -2598,7 +2604,7 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
   const destinations: readonly [MessageKey, readonly [SettingsSection, MessageKey, IconName][]][] = [
     ["Personalization", [["appearance", "Appearance", "palette"]]],
     ["Agent & models", [["providers", "Providers", "provider"], ["models", "Models", "model"], ["prompts", "Agent prompts", "assistant"], ["skills", "Skills", "skill"],
-      ["worktrees", "Worktrees", "worktree"], ["workItems", "Work items", "task"]]],
+      ["worktrees", "Worktrees", "worktree"], ["workItems", "Work items", "task"], ["pullRequests", "Pull requests", "pullRequest"]]],
     ["Extensions", [["plugins", "Plugins", "plugin"], ["mcp", "MCP Servers", "server"]]],
     ["Advanced", [["config", "Configuration file", "config"], ["mcpHost", "CodeAlta MCP", "remote"]]],
     ["Diagnostics", [["logs", "Application Logs", "logs"], ["about", "About", "info"]]],
@@ -2669,6 +2675,8 @@ function WorktreeBadge({ session }: { session: WorkspaceSession }) {
 
 /** Opens a terminal in the folder of a session, or of a project without one; null where the window has no host. */
 const OpenTerminalContext = createContext<((projectId: string | null, sessionId: string | null) => void) | null>(null);
+/** Opens the settings of the instructions for a pull request; null where the window has none. */
+const PullRequestSettingsContext = createContext<(() => void) | null>(null);
 
 function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["projects"][number] | undefined, sessionId: string | null = null,
   /** The way to the changes tab for a composer the application builds itself, above the context. */
@@ -2683,6 +2691,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   const showChanges = useContext(ShowChangesContext) ?? show;
   const openTerminal = useContext(OpenTerminalContext);
   const refreshSessions = useContext(SessionListRefreshContext);
+  const openPullRequestSettings = useContext(PullRequestSettingsContext);
   const worktreePath = session?.worktreePath ?? null, worktreeName = session?.worktreeName ?? null, worktreeMissing = session?.worktreeMissing === true;
   return useMemo(() => {
     const worktree = sessionWorktree({ worktreePath, worktreeName, worktreeRoot: null, worktreeMissing });
@@ -2692,11 +2701,14 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
     ? <ProjectContext epoch={epoch} project={{ id, name, path }} read={projectGit.status} worktree={worktree} place={place}
       onWorktreeGone={refreshSessions ?? undefined} branches={!!showChanges && !archived}
       onShowChanges={showChanges && !archived ? () => showChanges({ id, path }, shown) : undefined}
-      onOpenTerminal={openTerminal && !archived ? () => openTerminal(id, sessionId) : undefined} /> : undefined,
+      onOpenTerminal={openTerminal && !archived ? () => openTerminal(id, sessionId) : undefined}
+      // A session that exists can be asked for a pull request of its work; a draft has no work yet.
+      pullRequest={epoch && sessionId && !place && !archived ? <PullRequestButton api={pullRequestPrompts} epoch={epoch} projectId={id} sessionId={sessionId}
+        onOpenSettings={openPullRequestSettings ?? undefined} onNotice={message => showToast({ message, intent: "warning", icon: "warning-sign", timeout: 6000 })} /> : undefined} /> : undefined,
   status: epoch ? <>{regions && <PluginRegionSlot epoch={epoch} projectId={id ?? null} sessionId={sessionId} region="inline" read={pluginUi.regions} />}
     <ComposerStatus epoch={epoch} projectId={id ?? null} sessionId={sessionId} read={composerStatus.read} /></> : undefined,
   footer: epoch && regions ? <PluginRegionSlot epoch={epoch} projectId={id ?? null} sessionId={sessionId} region="footer" read={pluginUi.regions} /> : undefined });
-  }, [epoch, id, name, path, archived, sessionId, regions, showChanges, openTerminal, refreshSessions, worktreePath, worktreeName, worktreeMissing, place]);
+  }, [epoch, id, name, path, archived, sessionId, regions, showChanges, openTerminal, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeMissing, place]);
 }
 
 function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards }: {

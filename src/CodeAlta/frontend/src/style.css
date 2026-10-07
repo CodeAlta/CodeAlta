@@ -1524,6 +1524,16 @@ button.project-context-changes { display: inline-flex; align-items: center; gap:
 button.project-context-changes:hover, button.project-context-changes:focus-visible { border-color: var(--line-strong); background: var(--panel-2); color: var(--text); outline: none; }
 .project-context-changes [data-change="added"] { color: var(--green); }
 .project-context-changes [data-change="removed"] { color: var(--red); }
+/* What asks the session for a pull request: one quiet icon of the strip, and the page of its instructions. */
+button.project-context-pull { flex: none; display: inline-flex; align-items: center; justify-content: center; margin: -2px -4px; padding: 3px 7px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer; }
+button.project-context-pull:hover, button.project-context-pull:focus-visible, button.project-context-pull[aria-expanded="true"] { border-color: var(--line-strong); background: var(--panel-2); color: var(--text); outline: none; }
+.pull-request-source { color: var(--muted); font-size: 11px; }
+.pull-request-fields { display: grid; gap: 12px; }
+.pull-request-identity { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
+.pull-request-identity .bp6-form-group { margin-bottom: 10px; }
+.pull-request-copy, .pull-request-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.pull-request-content.bp6-form-group { margin: 0; }
+.pull-request-content textarea { min-height: 320px; font: 12.5px/1.55 var(--bp-typography-family-mono); resize: vertical; }
 .composer-status-end { margin-left: auto; flex: none; }
 /* Plugin status items at the end of the composer status line (MCP servers). */
 .composer-plugin-status { display: inline-flex; align-items: center; gap: 10px; }

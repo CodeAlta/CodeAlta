@@ -27,6 +27,7 @@
     <Content Include="BuiltinSkills\**\*" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="SR.yml" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="SR.yml" />
     <EmbeddedResource Include="DefaultConfig\config.toml" LogicalName="CodeAlta.Catalog.DefaultConfig.config.toml" />
+    <EmbeddedResource Include="PullRequests\default.pr.md" LogicalName="CodeAlta.Catalog.PullRequests.default.pr.md" />
   </ItemGroup>
 
 </Project>

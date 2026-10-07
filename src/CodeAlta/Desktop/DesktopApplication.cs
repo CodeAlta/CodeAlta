@@ -545,6 +545,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddModelCatalogService(providers);
                     builder.AddReminderService(reminders);
                     builder.AddAutomationsService(new AutomationsService(automations, host.ProjectCatalog, epoch));
+                    builder.AddPullRequestPromptsService(new PullRequestPromptsService(new CodeAlta.Catalog.PullRequests.PullRequestPromptCatalog(host.CatalogOptions), host.ProjectCatalog, epoch));
                     var sessionStarter = new WorkItems.SessionStarter(host, worktrees);
                     builder.AddWorkItemsService(new WorkItemsService(workItems, host.ProjectCatalog, new WorkItems.WorkItemRunner(sessionStarter, workItems), epoch));
                     // The trackers are the ones of the plugins that are active when the page asks: the Git plugin for the
@@ -736,6 +737,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddAutomationsService(new AutomationsService());
             builder.AddWorkItemsService(new WorkItemsService());
             builder.AddIssuesService(new IssuesService());
+            builder.AddPullRequestPromptsService(new PullRequestPromptsService());
             builder.AddPromptImagesService(new PromptImagesService());
             builder.AddToolCallsService(new ToolCallsService());
             builder.AddComposerStatusService(new ComposerStatusService());

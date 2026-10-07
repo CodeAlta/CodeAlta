@@ -44,6 +44,22 @@ The session receives the title, the link and the description of the item. For a 
 
 **Open on GitHub** (or the name of the service) opens the item in your browser, and **Copy link** copies its address.
 
+## Create a pull request
+
+When a session has finished its work, the pull request button under its prompt asks it to open a pull request. The session puts its work on a branch, commits it, pushes it and answers with the link. It never merges.
+
+The button waits until the session is idle and the prompt is empty.
+
+What the session is told is listed in **Settings > Pull requests**. CodeAlta ships one kind, **Default**. Add your own kinds there, for you or for one project: a release, a hotfix, the checklist of your team. With several kinds, the button lets you choose.
+
+{.table}
+| Kind | File |
+|---|---|
+| Yours, for every project | `~/.alta/prompts/pull-requests/<name>.pr.md` |
+| Of one project | `<project>/.alta/prompts/pull-requests/<name>.pr.md` |
+
+A file named `default.pr.md` replaces the built-in instructions. A kind of the project replaces one of yours with the same name.
+
 ## For agents
 
 A session reads the same issues and pull requests with `alta issue`, wherever they are kept:

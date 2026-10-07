@@ -2207,6 +2207,30 @@ The sources are `CodeAlta.Plugins.Abstractions/PluginIssueTracking.cs` (the mode
   names, texts are bounded, a link that is not https drops its item, a color is six hexadecimal digits or is
   not sent, and the text of an exception never is.
 
+### Create a pull request
+
+A session can be asked to open a pull request for its work. The sources are
+`CodeAlta.Catalog/PullRequests/` (the kinds), `Desktop/Rpc/PullRequestPromptsRpc.cs` (host) and
+`frontend/src/pullRequests/` (button and settings page).
+
+- **Kinds.** A kind is a Markdown file `<id>.pr.md` with an optional header (`name`, `description`); its body is
+  what the session is sent. `PullRequestPromptCatalog` reads the one that ships (`default`, an embedded
+  resource), those of the user (`~/.alta/prompts/pull-requests/`) and those of a project
+  (`<project>/.alta/prompts/pull-requests/`). The nearest file of an id is the one in use: project, then user,
+  then built-in. An id is letters, digits, `-` or `_` (64 at most), a body holds 32 KiB at most, a folder gives
+  64 kinds at most, and a file that is a link is not read.
+- **The button** (`PullRequestButton`) is one icon of the strip under the prompt of a session of a project,
+  before the terminal button; a chat, a session being placed and an archived one have none. Its menu reads the
+  kinds in use when it opens (`pullRequestPrompts.list`), the default one first, and ends with **Pull request
+  instructions…**, which opens the settings page. Choosing a kind sends its body to the session as a prompt of
+  the user. It is refused, with a notice, while the session is running and while a draft is being typed: the
+  instructions are a message of their own.
+- **Settings > Pull requests** (`PullRequestSettings`) lists every kind, with where it comes from and whether a
+  nearer one replaces it (`list` with `all`). The built-in one is shown as it is, with **Customize for me** and
+  **Customize for <project>**, which start a copy with the same id. A kind of the user or of the selected
+  project is edited in place (name, description, instructions) and removed; the file name and where it is kept
+  are chosen when it is created. `save` and `delete` write the file of the user or of the project.
+
 ## UI tools
 
 A session can see and drive the window it runs in. The tools are those of

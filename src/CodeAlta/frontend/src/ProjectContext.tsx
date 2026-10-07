@@ -18,7 +18,7 @@ type Read = (request: ProjectGitStatusRequest, options: { signal: AbortSignal; t
  * changes (a turn ended). The counts open the changes of that folder, and the branch opens the branches the
  * folder can move to. Before a session exists, a chip chooses where it will work.
  */
-export function ProjectContext({ epoch, project, read, refreshKey, worktree = null, place, onWorktreeGone, onShowChanges, onOpenTerminal, branches }: {
+export function ProjectContext({ epoch, project, read, refreshKey, worktree = null, place, onWorktreeGone, onShowChanges, onOpenTerminal, branches, pullRequest }: {
   epoch: string | null; project: Readonly<{ id: string; name: string; path: string }>; read: Read; refreshKey?: unknown;
   /** The git worktree the session works in, as the session records it; null for the folder of the project. */
   worktree?: Readonly<{ path: string; name: string; missing: boolean }> | null;
@@ -32,6 +32,8 @@ export function ProjectContext({ epoch, project, read, refreshKey, worktree = nu
   onOpenTerminal?: () => void;
   /** Lets the branch be changed from its chip; false where the window cannot change it. */
   branches?: boolean | BranchApi;
+  /** What asks the session for a pull request; shown where there is a repository. */
+  pullRequest?: React.ReactNode;
 }) {
   const { t, locale } = useShellLanguage();
   // The checkout that is read: the worktree while its folder is there, the folder of the project otherwise.
@@ -93,6 +95,7 @@ export function ProjectContext({ epoch, project, read, refreshKey, worktree = nu
       ? <button type="button" className="project-context-changes" title={`${title}\n${t("Show changes")}`} aria-label={t("Show changes")} onClick={onShowChanges}>
         <AppIcon name="changes" size={13} />{counts}</button>
       : changes && <span className="project-context-changes" title={title}>{counts}</span>)}
+    {view && pullRequest}
     {onOpenTerminal && <button type="button" className="project-context-terminal" title={t("New terminal")} aria-label={t("New terminal")} onClick={onOpenTerminal}>
       <AppIcon name="terminal" size={13} /></button>}
   </div>;
