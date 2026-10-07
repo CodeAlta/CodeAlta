@@ -529,22 +529,58 @@ internal sealed partial class ClaudeCodeSession
 
     private void ReadResultUsage(JsonElement result)
     {
+        // A result names every model the conversation used so far, a subagent's included: which window is the one
+        // of the context is known with the model that answered.
         if (result.TryGetProperty("modelUsage", out var modelUsage) && modelUsage.ValueKind == JsonValueKind.Object)
         {
+            _modelContextWindows.Clear();
             foreach (var model in modelUsage.EnumerateObject())
             {
-                if (ClaudeCodeJson.GetInt64(model.Value, "contextWindow") is > 0 and var contextWindow &&
-                    (_lastModel is null || model.Name.StartsWith(_lastModel, StringComparison.OrdinalIgnoreCase) || modelUsage.EnumerateObject().Count() == 1))
+                if (ClaudeCodeJson.GetInt64(model.Value, "contextWindow") is > 0 and var contextWindow)
                 {
-                    _contextWindow = contextWindow;
+                    _modelContextWindows[model.Name] = contextWindow;
                 }
             }
         }
 
-        _resultCost = ClaudeCodeJson.GetDouble(result, "total_cost_usd");
+        // `total_cost_usd` is the cost of the conversation so far, also in a process that resumed it: the cost of
+        // the turn is what was added since the result before. A total smaller than the one before is a count that
+        // started again, and is then the cost of the turn.
+        _resultCost = null;
+        if (ClaudeCodeJson.GetDouble(result, "total_cost_usd") is { } total)
+        {
+            if (_costTotal is { } before)
+            {
+                _resultCost = total >= before ? total - before : total;
+            }
+
+            _costTotal = total;
+        }
+
         _resultDurationMs = ClaudeCodeJson.GetDouble(result, "duration_ms");
     }
 
+    private long? ResolveContextWindow()
+    {
+        if (_lastModel is { } answered)
+        {
+            foreach (var (model, contextWindow) in _modelContextWindows)
+            {
+                if (model.StartsWith(answered, StringComparison.OrdinalIgnoreCase) || answered.StartsWith(model, StringComparison.OrdinalIgnoreCase))
+                {
+                    return contextWindow;
+                }
+            }
+        }
+
+        // What the CLI said of its context when it started, then the only model there is.
+        return _contextWindow ?? (_modelContextWindows.Count == 1 ? _modelContextWindows.Values.First() : null);
+    }
+
+    private readonly Dictionary<string, long> _modelContextWindows = new(StringComparer.OrdinalIgnoreCase);
+
+    // The cost of the conversation at its last result; null when it is not known (a session saved without it).
+    private double? _costTotal;
     private double? _resultCost;
     private double? _resultDurationMs;
     private int _conversationCount;
@@ -583,7 +619,7 @@ internal sealed partial class ClaudeCodeSession
             Usage = usageSnapshot,
             ProviderSessionId = _claudeSessionId,
             ProviderState = _claudeSessionId is { } sessionId
-                ? new ClaudeCodeProviderState(sessionId, _syncedUsers, _syncedAssistants, _instructionsHash).ToJson()
+                ? new ClaudeCodeProviderState(sessionId, _syncedUsers, _syncedAssistants, _instructionsHash, _costTotal).ToJson()
                 : null,
         };
     }
@@ -604,13 +640,14 @@ internal sealed partial class ClaudeCodeSession
         var cacheWrite = ClaudeCodeJson.GetInt64(usage, "cache_creation_input_tokens") ?? 0;
         var output = _lastOutputTokens ?? ClaudeCodeJson.GetInt64(usage, "output_tokens") ?? 0;
         var current = input + cacheRead + cacheWrite + output;
+        var contextWindow = ResolveContextWindow();
         return new AgentSessionUsage(
             Window: new AgentWindowUsageSnapshot(
                 CurrentTokens: current,
-                TokenLimit: _contextWindow,
+                TokenLimit: contextWindow,
                 MessageCount: messageCount,
                 Label: "Active context window",
-                TotalContextEnvelope: _contextWindow),
+                TotalContextEnvelope: contextWindow),
             LastOperation: new AgentOperationUsageSnapshot(
                 Model: _lastModel,
                 InputTokens: input,

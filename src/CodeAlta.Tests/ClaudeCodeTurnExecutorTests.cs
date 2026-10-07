@@ -463,6 +463,66 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task CostOfATurn_IsWhatTheConversationCostSinceTheTurnBefore()
+    {
+        // The CLI reports the cost of the whole conversation with each result, also after it resumed it.
+        var cli = new ClaudeCodeFakeCli();
+        AgentTurnResponse first, second, third;
+        await using (var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions()))
+        {
+            first = await ExecuteAsync(executor, CreateRequest([User("one")]));
+            second = await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two")], first));
+        }
+
+        Assert.AreEqual(0.01, first.Usage!.LastOperation!.Cost!.Value, 1e-9);
+        Assert.AreEqual(0.01, second.Usage!.LastOperation!.Cost!.Value, 1e-9, "Not the 0.02 the conversation cost so far.");
+
+        // The application was started again: the total the turn is counted from is in the state of the session.
+        await using (var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions()))
+        {
+            third = await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two"), second.AssistantMessage, User("three")], second));
+        }
+
+        Assert.IsNotNull(cli.Last.ResumedSessionId);
+        Assert.AreEqual(0.01, third.Usage!.LastOperation!.Cost!.Value, 1e-9);
+
+        // A session saved before that total was kept: its next turn has no cost rather than the cost of all of them.
+        var legacy = JsonNode.Parse(third.ProviderState!.Value.GetRawText())!.AsObject();
+        Assert.IsTrue(legacy.Remove("cost"));
+        var saved = third with { ProviderState = JsonDocument.Parse(legacy.ToJsonString()).RootElement.Clone() };
+        await using (var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions()))
+        {
+            var conversation = new List<AgentConversationMessage> { User("one"), first.AssistantMessage, User("two"), second.AssistantMessage, User("three"), third.AssistantMessage, User("four") };
+            var fourth = await ExecuteAsync(executor, CreateRequest(conversation, saved));
+            Assert.IsNull(fourth.Usage!.LastOperation!.Cost);
+
+            conversation.AddRange([fourth.AssistantMessage, User("five")]);
+            var fifth = await ExecuteAsync(executor, CreateRequest(conversation, fourth));
+            Assert.AreEqual(0.01, fifth.Usage!.LastOperation!.Cost!.Value, 1e-9);
+        }
+    }
+
+    [TestMethod]
+    public async Task ContextWindow_IsTheOneOfTheModelThatAnswered()
+    {
+        // A result names every model the conversation used, a subagent's included, whatever the order.
+        var cli = new ClaudeCodeFakeCli
+        {
+            ModelUsage = static () => new JsonObject
+            {
+                ["claude-test-1"] = new JsonObject { ["contextWindow"] = 200000 },
+                ["claude-other-9"] = new JsonObject { ["contextWindow"] = 1000000 },
+            },
+        };
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+
+        var first = await ExecuteAsync(executor, CreateRequest([User("one")]));
+
+        Assert.AreEqual("claude-test-1", first.Usage!.LastOperation!.Model);
+        Assert.AreEqual(200_000, first.Usage.Window!.TokenLimit);
+    }
+
+    [TestMethod]
     public async Task SummaryRequestOfALocalCompaction_IsRefused()
     {
         var cli = new ClaudeCodeFakeCli();

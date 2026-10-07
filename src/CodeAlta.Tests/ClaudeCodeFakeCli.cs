@@ -14,6 +14,7 @@ namespace CodeAlta.Tests;
 internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
 {
     private readonly ConcurrentQueue<ClaudeCodeFakeProcess> _processes = new();
+    private readonly ConcurrentDictionary<string, double> _totalCosts = new(StringComparer.Ordinal);
 
     /// <summary>Gets or sets the turn run for each user message. The default answers "ok".</summary>
     public Func<ClaudeCodeFakeProcess, JsonElement, Task> OnUserMessage { get; set; } = static (process, message) =>
@@ -36,6 +37,13 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
 
     /// <summary>Gets or sets a value indicating whether the CLI answers the interrupt request.</summary>
     public bool AnswerInterrupt { get; set; } = true;
+
+    /// <summary>Gets or sets what a result says of the models of the conversation. The default names the model that answers.</summary>
+    public Func<JsonObject>? ModelUsage { get; set; }
+
+    /// <summary>Adds the cost of a turn to its conversation and returns the total, which is what the CLI reports.</summary>
+    public double AddCost(string conversationId, double cost)
+        => _totalCosts.AddOrUpdate(conversationId, cost, (_, total) => total + cost);
 
     /// <summary>Gets the processes that were started, in order.</summary>
     public IReadOnlyList<ClaudeCodeFakeProcess> Processes => [.. _processes];
@@ -381,9 +389,10 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
             ["is_error"] = isError,
             ["result"] = text,
             ["session_id"] = SessionId,
-            ["total_cost_usd"] = 0.01,
+            // The cost is the one of the conversation so far, also in a process that resumed it.
+            ["total_cost_usd"] = _cli.AddCost(ResumedSessionId ?? SessionId, 0.01),
             ["duration_ms"] = 42,
-            ["modelUsage"] = new JsonObject { ["claude-test-1"] = new JsonObject { ["contextWindow"] = 200000 } },
+            ["modelUsage"] = _cli.ModelUsage?.Invoke() ?? new JsonObject { ["claude-test-1"] = new JsonObject { ["contextWindow"] = 200000 } },
         };
         if (userMessage is { } user && user.TryGetProperty("uuid", out var uuid))
         {

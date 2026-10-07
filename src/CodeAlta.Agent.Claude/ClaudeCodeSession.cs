@@ -251,6 +251,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                 _pendingPreamble = null;
                 _instructions = null;
                 _instructionsHash = persisted.Instructions;
+                _costTotal = persisted.Cost;
             }
             else
             {
@@ -350,6 +351,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         _claudeSessionId = newSessionId;
         _instructions = appendSystemPrompt;
         _instructionsHash = ClaudeCodePrompts.HashInstructions(appendSystemPrompt);
+        _costTotal = 0;
     }
 
     private string CreateAppendSystemPrompt(AgentTurnRequest request)
@@ -802,7 +804,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
 /// <param name="Users">The user messages of the conversation the CLI was sent.</param>
 /// <param name="Assistants">The assistant messages of the conversation the CLI wrote.</param>
 /// <param name="Instructions">The hash of the instructions of CodeAlta the conversation was told last.</param>
-internal sealed record ClaudeCodeProviderState(string SessionId, int Users, int Assistants, string? Instructions = null)
+/// <param name="Cost">The cost of the conversation at its last result, from which the cost of the next turn is counted.</param>
+internal sealed record ClaudeCodeProviderState(string SessionId, int Users, int Assistants, string? Instructions = null, double? Cost = null)
 {
     private const string Kind = "claude-code";
 
@@ -819,7 +822,8 @@ internal sealed record ClaudeCodeProviderState(string SessionId, int Users, int 
             sessionId,
             (int)(ClaudeCodeJson.GetInt64(element, "users") ?? 0),
             (int)(ClaudeCodeJson.GetInt64(element, "assistants") ?? 0),
-            ClaudeCodeJson.GetString(element, "instructions"));
+            ClaudeCodeJson.GetString(element, "instructions"),
+            ClaudeCodeJson.GetDouble(element, "cost"));
     }
 
     public JsonElement ToJson()
@@ -833,6 +837,11 @@ internal sealed record ClaudeCodeProviderState(string SessionId, int Users, int 
             if (Instructions is not null)
             {
                 writer.WriteString("instructions", Instructions);
+            }
+
+            if (Cost is { } cost)
+            {
+                writer.WriteNumber("cost", cost);
             }
 
             writer.WriteEndObject();
