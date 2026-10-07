@@ -204,25 +204,142 @@ public sealed class ClaudeCodeTurnExecutorTests
             process.EmitTextTurn("msg_1", "ok", user);
         };
         await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
-        var first = await ExecuteAsync(executor, CreateRequest([User("one")]) with { Tools = [Tool("first_tool")] });
+        var first = await ExecuteAsync(executor, CreateRequest([User("one")]) with { Tools = [Tool("alta"), Tool("first_tool")] });
 
         cli.OnUserMessage = static (process, user) =>
         {
             process.EmitTextTurn("msg_2", "ok", user);
             return Task.CompletedTask;
         };
-        await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two")], first) with { Tools = [Tool("first_tool"), Tool("second_tool"), Tool("alta")] });
+        await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two")], first) with { Tools = [Tool("alta"), Tool("first_tool"), Tool("second_tool")] });
 
         var notification = cli.Last.Received.Single(static message =>
             message.GetProperty("type").GetString() == "control_request" &&
             message.GetProperty("request").GetProperty("subtype").GetString() == "mcp_message");
         Assert.AreEqual("notifications/tools/list_changed", notification.GetProperty("request").GetProperty("message").GetProperty("method").GetString());
         var tools = (await cli.Last.McpAsync("tools/list")).GetProperty("result").GetProperty("tools").EnumerateArray().ToArray();
-        CollectionAssert.AreEqual(new[] { "first_tool", "second_tool", "alta" }, tools.Select(static tool => tool.GetProperty("name").GetString()).ToArray());
+        CollectionAssert.AreEqual(new[] { "alta", "first_tool", "second_tool" }, tools.Select(static tool => tool.GetProperty("name").GetString()).ToArray());
 
-        // Claude Code defers the tools of a server until the model searches for them, except the gateway of CodeAlta.
-        Assert.IsTrue(tools[2].GetProperty("_meta").GetProperty("anthropic/alwaysLoad").GetBoolean());
-        Assert.IsFalse(tools[0].TryGetProperty("_meta", out _));
+        // Claude Code defers the tools of a server until the model searches for them. A session of CodeAlta
+        // carries the tools it was given, a tool that joins a run included: none of them is deferred.
+        Assert.IsTrue(tools.All(static tool => tool.GetProperty("_meta").GetProperty("anthropic/alwaysLoad").GetBoolean()));
+    }
+
+    [TestMethod]
+    public async Task ToolsOfTheFirstRequest_AreTheOnesTheCliListsWhenItStarts()
+    {
+        var cli = new ClaudeCodeFakeCli { ListsToolsAtStart = true };
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+
+        await ExecuteAsync(executor, CreateRequest([User("one")]) with { Tools = [Tool("alta"), Tool("take_snapshot")] });
+
+        // The first request of the model has them: they do not arrive with a later notification.
+        CollectionAssert.AreEqual(new[] { "alta", "take_snapshot" }, await cli.Last.ToolsListedAtStart.WaitAsync(Timeout));
+        Assert.IsFalse(cli.Last.Received.Any(static message =>
+            message.GetProperty("type").GetString() == "control_request" &&
+            message.GetProperty("request").GetProperty("subtype").GetString() == "mcp_message"));
+    }
+
+    [TestMethod]
+    public async Task InstructionsThatChangeBetweenTwoPrompts_AreGivenWithTheNextPrompt()
+    {
+        const string Brief = "# Agent Prompt\n\nYou are the Default agent.\n\nBe brief.\n\n# Runtime Context\n\n- Platform: test";
+        const string Plan = "# Agent Prompt\n\nYou are the Plan agent.\n\nPlan only.\n\n# Runtime Context\n\n- Platform: test";
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var first = await ExecuteAsync(executor, CreateRequest([User("one")]) with { DeveloperInstructions = Brief });
+        var process = cli.Last;
+        StringAssert.Contains(process.InitializeRequest.GetProperty("appendSystemPrompt").GetString(), "Be brief.");
+
+        var second = await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two")], first) with { DeveloperInstructions = Brief });
+
+        Assert.AreEqual("two", ClaudeCodeFakeProcess.UserText(process.UserMessages[1]), "The same instructions are not given twice.");
+
+        // Claude Code keeps the system prompt a conversation started with, also when it is resumed. Another agent
+        // prompt, an activated skill or tools that were turned on reach it with the prompt that follows them.
+        var third = await ExecuteAsync(
+            executor,
+            CreateRequest([User("one"), first.AssistantMessage, User("two"), second.AssistantMessage, User("three")], second) with { DeveloperInstructions = Plan });
+
+        Assert.AreSame(process, cli.Last, "The process is kept: starting another one would change nothing.");
+        var blocks = process.UserMessages[2].GetProperty("message").GetProperty("content").EnumerateArray().Select(static block => block.GetProperty("text").GetString()!).ToArray();
+        Assert.AreEqual(2, blocks.Length);
+        StringAssert.StartsWith(blocks[0], "<codealta_instructions_update>");
+        StringAssert.Contains(blocks[0], "You are the Plan agent.");
+        StringAssert.Contains(blocks[0], "Plan only.");
+        StringAssert.Contains(blocks[0], "Be brief.", "What no longer applies is named.");
+        Assert.IsFalse(blocks[0].Contains("Platform: test", StringComparison.Ordinal), "What did not change is not repeated.");
+        Assert.IsFalse(blocks[0].Contains("driven by CodeAlta", StringComparison.Ordinal));
+        Assert.AreEqual("three", blocks[1], "The prompt of the user stays the last block.");
+
+        await ExecuteAsync(
+            executor,
+            CreateRequest([User("one"), first.AssistantMessage, User("two"), second.AssistantMessage, User("three"), third.AssistantMessage, User("four")], third) with { DeveloperInstructions = Plan });
+
+        Assert.AreEqual("four", ClaudeCodeFakeProcess.UserText(process.UserMessages[3]));
+    }
+
+    [TestMethod]
+    public async Task InstructionsOfAResumedConversation_AreGivenAgainOnlyWhenTheyChanged()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        AgentTurnResponse first;
+        await using (var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions()))
+        {
+            first = await ExecuteAsync(executor, CreateRequest([User("one")]) with { DeveloperInstructions = "Be brief." });
+        }
+
+        // The application was started again: what the conversation was told is known by its state alone.
+        AgentTurnResponse second;
+        await using (var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions()))
+        {
+            second = await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two")], first) with { DeveloperInstructions = "Be brief." });
+            Assert.IsNotNull(cli.Last.ResumedSessionId);
+            Assert.AreEqual("two", ClaudeCodeFakeProcess.UserText(cli.Last.UserMessages.Single()));
+        }
+
+        await using (var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions()))
+        {
+            await ExecuteAsync(
+                executor,
+                CreateRequest([User("one"), first.AssistantMessage, User("two"), second.AssistantMessage, User("three")], second) with { DeveloperInstructions = "Plan only." });
+
+            // Without the text the conversation was given, all the instructions are given again.
+            var sent = ClaudeCodeFakeProcess.UserText(cli.Last.UserMessages.Single());
+            StringAssert.StartsWith(sent, "<codealta_instructions_update>");
+            StringAssert.Contains(sent, "replaces all the instructions of CodeAlta");
+            StringAssert.Contains(sent, "driven by CodeAlta");
+            StringAssert.Contains(sent, "Plan only.");
+            StringAssert.EndsWith(sent, "three");
+        }
+    }
+
+    [TestMethod]
+    public async Task InstructionsThatChangeDuringARun_WaitForTheNextPrompt()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        cli.OnUserMessage = static (process, user) =>
+        {
+            process.EmitInit();
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "Read", new JsonObject { ["file_path"] = "a.txt" })));
+            process.EmitToolResult("toolu_1", "content");
+            process.EmitAssistant("msg_2", new JsonArray(ClaudeCodeFakeProcess.TextBlock("done")));
+            process.EmitResult("done", user);
+            return Task.CompletedTask;
+        };
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var first = await ExecuteAsync(executor, CreateRequest([User("one")]) with { DeveloperInstructions = "Be brief." });
+        var call = first.AssistantMessage.Parts.OfType<AgentMessagePart.ToolCall>().Single();
+        var toolMessage = new AgentConversationMessage(
+            AgentConversationRole.Tool,
+            [new AgentMessagePart.ToolResult(call.CallId, new AgentToolResult(true, [new AgentToolResultItem.Text("content")]))]);
+
+        // The CLI is in the middle of its turn: nothing is sent to it for instructions only the next prompt needs.
+        var second = await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, toolMessage], first) with { DeveloperInstructions = "Changed meanwhile." });
+
+        Assert.AreEqual(1, cli.Processes.Count);
+        Assert.AreEqual(1, cli.Last.UserMessages.Count);
+        Assert.AreEqual("done", second.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
     }
 
     [TestMethod]

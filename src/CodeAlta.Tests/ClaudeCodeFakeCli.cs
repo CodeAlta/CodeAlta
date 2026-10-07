@@ -31,6 +31,9 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
     /// <summary>Gets or sets a value indicating whether the CLI predates the option that shows the reasoning.</summary>
     public bool RefuseReasoningDisplay { get; set; }
 
+    /// <summary>Gets or sets a value indicating whether the CLI lists the tools of CodeAlta once initialized, as the real one does.</summary>
+    public bool ListsToolsAtStart { get; set; }
+
     /// <summary>Gets or sets a value indicating whether the CLI answers the interrupt request.</summary>
     public bool AnswerInterrupt { get; set; } = true;
 
@@ -67,6 +70,7 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
     private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonElement>> _requests = new(StringComparer.Ordinal);
     private readonly ConcurrentQueue<JsonElement> _received = new();
     private readonly TaskCompletionSource _interrupted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<string[]> _toolsListedAtStart = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _nextRequestId;
     private int _disposed;
 
@@ -104,6 +108,9 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
     /// <summary>Gets the initialize request of the host.</summary>
     public JsonElement InitializeRequest => _received.First(static message =>
         Type(message) == "control_request" && message.GetProperty("request").GetProperty("subtype").GetString() == "initialize").GetProperty("request");
+
+    /// <summary>Completes with the names of the tools listed at the start, when <see cref="ClaudeCodeFakeCli.ListsToolsAtStart" /> is set.</summary>
+    public Task<string[]> ToolsListedAtStart => _toolsListedAtStart.Task;
 
     /// <summary>Completes when the host interrupted the turn.</summary>
     public Task Interrupted => _interrupted.Task;
@@ -415,6 +422,20 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
         return builder.ToString().Trim();
     }
 
+    private async Task ListToolsAtStartAsync()
+    {
+        try
+        {
+            await McpAsync("initialize", new JsonObject { ["protocolVersion"] = "2025-11-25" }).ConfigureAwait(false);
+            var listed = await McpAsync("tools/list").ConfigureAwait(false);
+            _toolsListedAtStart.TrySetResult([.. listed.GetProperty("result").GetProperty("tools").EnumerateArray().Select(static tool => tool.GetProperty("name").GetString()!)]);
+        }
+        catch (Exception ex)
+        {
+            _toolsListedAtStart.TrySetException(ex);
+        }
+    }
+
     private void AnswerControlRequest(JsonElement message)
     {
         var requestId = message.GetProperty("request_id").GetString()!;
@@ -422,7 +443,7 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
         switch (request.GetProperty("subtype").GetString())
         {
             case "initialize":
-                Respond(requestId, new JsonObject
+                var initialized = new JsonObject
                 {
                     ["commands"] = new JsonArray(),
                     ["models"] = new JsonArray(
@@ -441,7 +462,21 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
                     ["account"] = _cli.SignedIn
                         ? new JsonObject { ["email"] = "someone@example.test", ["organization"] = "Someone's Organization", ["subscriptionType"] = "Claude Max", ["apiProvider"] = "firstParty" }
                         : new JsonObject { ["tokenSource"] = "none", ["apiProvider"] = "firstParty" },
-                });
+                };
+                if (_cli.ListsToolsAtStart)
+                {
+                    // The server of CodeAlta is connected while the CLI initializes, before it answers.
+                    _ = Task.Run(async () =>
+                    {
+                        await ListToolsAtStartAsync().ConfigureAwait(false);
+                        Respond(requestId, initialized);
+                    });
+                }
+                else
+                {
+                    Respond(requestId, initialized);
+                }
+
                 break;
             case "get_context_usage":
                 Respond(requestId, new JsonObject { ["totalTokens"] = 18000, ["maxTokens"] = 200000, ["rawMaxTokens"] = 200000 });

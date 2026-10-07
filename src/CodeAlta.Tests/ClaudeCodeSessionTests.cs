@@ -51,7 +51,10 @@ public sealed class ClaudeCodeSessionTests
         using var directory = TestTempDirectory.Create();
         var cli = new ClaudeCodeFakeCli();
         await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
-        await using var session = await CreateSessionAsync(runtime, directory, developerInstructions: "# Agent Prompt\nBe brief.");
+        var alta = new AgentToolDefinition(
+            new AgentToolSpec("alta", "The live tool.", JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone()),
+            static (_, _) => Task.FromResult(new AgentToolResult(true, [])));
+        await using var session = await CreateSessionAsync(runtime, directory, tools: [alta], developerInstructions: "# Agent Prompt\nBe brief.");
 
         await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout);
 
@@ -60,8 +63,19 @@ public sealed class ClaudeCodeSessionTests
         var appended = initialize.GetProperty("appendSystemPrompt").GetString()!;
         StringAssert.Contains(appended, "driven by CodeAlta");
         StringAssert.Contains(appended, "mcp__codealta__alta");
-        StringAssert.Contains(appended, "cannot be run in a shell");
+        StringAssert.Contains(appended, "never a shell command");
         StringAssert.Contains(appended, "Be brief.");
+
+        // What CodeAlta has its own mechanism for is said once, for every agent prompt: which one to use.
+        StringAssert.Contains(appended, "`alta ask`");
+        StringAssert.Contains(appended, "`alta session`");
+        Assert.IsTrue(appended.IndexOf("Be brief.", StringComparison.Ordinal) > appended.IndexOf("`alta session`", StringComparison.Ordinal));
+
+        // No tool of Claude Code is named: which ones a version has is its own business.
+        foreach (var tool in new[] { "Glob", "Grep", "WebFetch" })
+        {
+            Assert.IsFalse(appended.Contains(tool, StringComparison.Ordinal), tool);
+        }
         Assert.AreEqual("codealta", initialize.GetProperty("sdkMcpServers")[0].GetString());
         Assert.AreEqual("codealta_pre_edit", initialize.GetProperty("hooks").GetProperty("PreToolUse")[0].GetProperty("hookCallbackIds")[0].GetString());
         Assert.IsFalse(process.Launch.Arguments.Contains("--system-prompt"), "The system prompt of Claude Code stays its own.");
@@ -289,6 +303,38 @@ public sealed class ClaudeCodeSessionTests
         CollectionAssert.AreEqual(new[] { "A", "B" }, asked.Form.Prompts[0].Options!.Select(static option => option.Label).ToArray());
         Assert.AreEqual("allow", decision!.Value.GetProperty("behavior").GetString());
         Assert.AreEqual("B", decision.Value.GetProperty("updatedInput").GetProperty("answers").GetProperty("Which one?").GetString());
+    }
+
+    [TestMethod]
+    public async Task QuestionOfARunThatCannotAsk_IsRefusedWithTheWayCodeAltaAsks()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        JsonElement? decision = null;
+        cli.OnUserMessage = async (process, user) =>
+        {
+            var input = new JsonObject { ["questions"] = new JsonArray(new JsonObject { ["question"] = "Which one?" }) };
+            process.EmitInit();
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "AskUserQuestion", input)));
+            decision = await process.AskPermissionAsync("AskUserQuestion", input, "toolu_1");
+            process.EmitToolResult("toolu_1", "refused", isError: true);
+            process.EmitAssistant("msg_2", new JsonArray(ClaudeCodeFakeProcess.TextBlock("I could not ask")));
+            process.EmitResult("I could not ask", user);
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        var alta = new AgentToolDefinition(
+            new AgentToolSpec("alta", "The live tool.", JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone()),
+            static (_, _) => Task.FromResult(new AgentToolResult(true, [])));
+        await using var session = await CreateSessionAsync(runtime, directory, tools: [alta]);
+
+        // The desktop application does not offer live questions: it asks with `alta ask`.
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("ask me"), EnableUserInputTool = false }).WaitAsync(Timeout);
+
+        Assert.AreEqual("deny", decision!.Value.GetProperty("behavior").GetString());
+        var message = decision.Value.GetProperty("message").GetString()!;
+        StringAssert.Contains(message, "mcp__codealta__alta");
+        StringAssert.Contains(message, "ask");
+        Assert.IsFalse(decision.Value.TryGetProperty("interrupt", out _));
     }
 
     [TestMethod]

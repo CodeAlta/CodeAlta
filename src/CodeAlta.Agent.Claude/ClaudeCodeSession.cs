@@ -41,6 +41,11 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private ChannelWriter<TurnEvent>? _eventWriter;
     private ChannelReader<TurnEvent>? _eventReader;
     private ClaudeCodeLaunchKey? _launchKey;
+    // What the conversation of the CLI was told of the instructions of CodeAlta: the text when this process
+    // gave it, and its hash, which the state of the session keeps.
+    private string? _instructions;
+    private string? _instructionsHash;
+    private string? _pendingInstructionsUpdate;
     private int _generation;
     private CancellationTokenSource? _idle;
 
@@ -110,8 +115,19 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             _providerId = request.ProviderId;
             _conversationCount = request.Conversation.Count;
             var newUserMessages = BindConversation(request);
+            // Before the process starts: the tools the CLI lists when it connects are the ones of this request.
+            var toolsChanged = SetExposedTools(request.Tools);
             await EnsureConnectionAsync(request, cancellationToken).ConfigureAwait(false);
-            await UpdateExposedToolsAsync(request.Tools).ConfigureAwait(false);
+            if (toolsChanged)
+            {
+                await AnnounceToolsAsync().ConfigureAwait(false);
+            }
+
+            if (newUserMessages.Count > 0)
+            {
+                _pendingInstructionsUpdate = TakeInstructionsUpdate(request);
+            }
+
             if (newUserMessages.Count > 0)
             {
                 DropWhatTheCliDidOnItsOwn();
@@ -231,6 +247,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                 // The transcript of the CLI holds the conversation: it is resumed.
                 _claudeSessionId = persisted.SessionId;
                 _pendingPreamble = null;
+                _instructions = null;
+                _instructionsHash = persisted.Instructions;
             }
             else
             {
@@ -295,7 +313,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             throw new InvalidOperationException(resolution.Error ?? "Claude Code was not found.");
         }
 
-        var appendSystemPrompt = ClaudeCodePrompts.CreateAppendSystemPrompt(request.DeveloperInstructions, hasTools: true);
+        // Claude Code keeps the system prompt a conversation started with: what is appended here is read by a
+        // new conversation only. A conversation that is resumed is told what changed with its next prompt.
+        var appendSystemPrompt = CreateAppendSystemPrompt(request);
         if (_claudeSessionId is { } resumeSessionId)
         {
             try
@@ -326,6 +346,37 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         }
 
         _claudeSessionId = newSessionId;
+        _instructions = appendSystemPrompt;
+        _instructionsHash = ClaudeCodePrompts.HashInstructions(appendSystemPrompt);
+    }
+
+    private string CreateAppendSystemPrompt(AgentTurnRequest request)
+    {
+        bool hasGateway;
+        lock (_gate)
+        {
+            hasGateway = _exposedTools.ContainsKey(ClaudeCodePrompts.GatewayTool);
+        }
+
+        return ClaudeCodePrompts.CreateAppendSystemPrompt(request.DeveloperInstructions, hasGateway);
+    }
+
+    // Returns what the conversation has to be told of its instructions before the prompt that starts, if anything:
+    // the parts that changed since it was given them, or all of them when what it was given is not known.
+    private string? TakeInstructionsUpdate(AgentTurnRequest request)
+    {
+        var current = CreateAppendSystemPrompt(request);
+        var hash = ClaudeCodePrompts.HashInstructions(current);
+        if (string.Equals(hash, _instructionsHash, StringComparison.Ordinal))
+        {
+            _instructions = current;
+            return null;
+        }
+
+        var update = ClaudeCodePrompts.CreateInstructionsUpdate(_instructions, current);
+        _instructions = current;
+        _instructionsHash = hash;
+        return update;
     }
 
     private async Task StartConnectionAsync(
@@ -475,7 +526,12 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     {
         foreach (var message in messages)
         {
-            var preamble = _pendingPreamble;
+            var preamble = (_pendingInstructionsUpdate, _pendingPreamble) switch
+            {
+                ({ } update, { } history) => update + "\n\n" + history,
+                var (update, history) => update ?? history,
+            };
+            _pendingInstructionsUpdate = null;
             _pendingPreamble = null;
             await SendUserAsync(writer => ClaudeCodePrompts.WriteUserContent(writer, message, preamble), cancellationToken).ConfigureAwait(false);
         }
@@ -655,7 +711,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         }
     }
 
-    private async Task UpdateExposedToolsAsync(IReadOnlyList<AgentToolDefinition> tools)
+    // Returns whether the CLI listed other tools than these: it then has to be told to list them again.
+    private bool SetExposedTools(IReadOnlyList<AgentToolDefinition> tools)
     {
         var exposed = new Dictionary<string, AgentToolDefinition>(StringComparer.Ordinal);
         var signature = new System.Text.StringBuilder();
@@ -670,22 +727,30 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             signature.Append(name).Append('\u001f').Append(definition.Spec.Description.Length).Append('\u001e');
         }
 
-        bool changed;
+        lock (_gate)
+        {
+            var changed = _mcpInitialized && !string.Equals(_exposedToolsSignature, signature.ToString(), StringComparison.Ordinal);
+            _exposedTools = exposed;
+            _exposedToolsSignature = signature.ToString();
+            return changed;
+        }
+    }
+
+    // A tool was registered during the run (the UI tools, an MCP server of CodeAlta): the CLI lists again.
+    private async Task AnnounceToolsAsync()
+    {
         ClaudeCodeConnection? connection;
         lock (_gate)
         {
-            changed = _mcpInitialized && !string.Equals(_exposedToolsSignature, signature.ToString(), StringComparison.Ordinal);
-            _exposedTools = exposed;
-            _exposedToolsSignature = signature.ToString();
-            connection = _connection;
+            // A process that started meanwhile lists the tools by itself.
+            connection = _mcpInitialized ? _connection : null;
         }
 
-        if (!changed || connection is null)
+        if (connection is null)
         {
             return;
         }
 
-        // A tool was registered during the run (an MCP server of CodeAlta was activated): the CLI lists again.
         try
         {
             await connection.RequestAsync(
@@ -723,7 +788,11 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
 /// What a session records in its journal to find the conversation of the CLI again: the identifier of its
 /// transcript, and how much of the conversation of CodeAlta it holds.
 /// </summary>
-internal sealed record ClaudeCodeProviderState(string SessionId, int Users, int Assistants)
+/// <param name="SessionId">The session of the CLI that holds the conversation.</param>
+/// <param name="Users">The user messages of the conversation the CLI was sent.</param>
+/// <param name="Assistants">The assistant messages of the conversation the CLI wrote.</param>
+/// <param name="Instructions">The hash of the instructions of CodeAlta the conversation was told last.</param>
+internal sealed record ClaudeCodeProviderState(string SessionId, int Users, int Assistants, string? Instructions = null)
 {
     private const string Kind = "claude-code";
 
@@ -739,7 +808,8 @@ internal sealed record ClaudeCodeProviderState(string SessionId, int Users, int 
         return new ClaudeCodeProviderState(
             sessionId,
             (int)(ClaudeCodeJson.GetInt64(element, "users") ?? 0),
-            (int)(ClaudeCodeJson.GetInt64(element, "assistants") ?? 0));
+            (int)(ClaudeCodeJson.GetInt64(element, "assistants") ?? 0),
+            ClaudeCodeJson.GetString(element, "instructions"));
     }
 
     public JsonElement ToJson()
@@ -750,6 +820,11 @@ internal sealed record ClaudeCodeProviderState(string SessionId, int Users, int 
             writer.WriteString("sessionId", SessionId);
             writer.WriteNumber("users", Users);
             writer.WriteNumber("assistants", Assistants);
+            if (Instructions is not null)
+            {
+                writer.WriteString("instructions", Instructions);
+            }
+
             writer.WriteEndObject();
         });
 }

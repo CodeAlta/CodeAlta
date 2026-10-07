@@ -298,15 +298,32 @@ sequenceDiagram
 
 The tools of a session (`alta`, plugin tools, the tools of MCP servers CodeAlta connected) are offered to the CLI through an MCP server named `codealta` that is served over the control protocol (`"type": "sdk"`): no port is opened and the caller is the session. Claude sees them as `mcp__codealta__<name>`.
 
-A call of such a tool is returned to `AgentSession` under the tool's own name: the session runs the real handler (with its own permission requests, activity events and skill handling), and the wrapper returned by `ResolveTool` gives the result back to the CLI as the answer of the MCP `tools/call`. A tool registered during a run (`alta mcp activate`) reaches the CLI through `notifications/tools/list_changed`.
+A call of such a tool is returned to `AgentSession` under the tool's own name: the session runs the real handler (with its own permission requests, activity events and skill handling), and the wrapper returned by `ResolveTool` gives the result back to the CLI as the answer of the MCP `tools/call`. The tools of the first request are set before the process starts, so that they are the ones the CLI lists when it connects to the server. A tool registered during a run (`alta ui activate`, `alta mcp activate`) reaches the CLI through `notifications/tools/list_changed`.
 
 CodeAlta's file, search, web, shell and question tools are not offered: Claude Code has its own (`ClaudeCodePrompts.ReplacedTools`).
 
-Claude Code defers the tools of an MCP server until the model searches for them. The `alta` gateway, which the instructions of CodeAlta name, is listed with `_meta["anthropic/alwaysLoad"]` so that it is there from the first request; the other tools of the session are found with the tool search of the CLI, which keeps a large set of plugin or MCP tools out of the context until one is needed.
+Claude Code defers the tools of an MCP server until the model searches for them. CodeAlta already decides which tools a session carries (the UI tools and the tools of its MCP servers join when the session asks for them) and its instructions name them as tools that are there, so every tool is listed with `_meta["anthropic/alwaysLoad"]`. One case remains, seen with CLI 2.1.292: a tool that joins while a turn runs is not added to the tool list of that turn, and the model loads it with the tool search of the CLI (`select:mcp__codealta__<name>`), which the note of the instructions tells it. From the next prompt on it is there.
+
+A picture in the result of a tool is passed to the CLI as MCP image content. The CLI also saves it in its own folder (`~/.claude/projects/<folder>/<session>/tool-results`), whether or not the tool was asked to save a file.
 
 ### Instructions
 
-Claude Code's system prompt stays. The developer instructions CodeAlta composes for the session (agent prompt, runtime context, tool guidance, skills, project context) are appended to it through the `appendSystemPrompt` field of the `initialize` request, after a short note that says where the session runs and how the tools of CodeAlta are named. CodeAlta's own system prompt is not sent. The CLI records its prompt once per conversation, so a later change of the instructions applies after its next compaction.
+Claude Code's system prompt stays. The developer instructions CodeAlta composes for the session (agent prompt, runtime context, tool guidance, skills, project context) are appended to it through the `appendSystemPrompt` field of the `initialize` request. CodeAlta's own system prompt is not sent.
+
+The instructions are the ones every provider gets: there is no second set of prompts for Claude Code. A short note written by `ClaudeCodePrompts.CreateAppendSystemPrompt` precedes them and says how they apply there:
+
+- a tool named `<name>` is `mcp__codealta__<name>`, and `alta <command> ...` is a call of that tool with those words as `args`, never a shell command;
+- CodeAlta's file, search, web, shell and question tools are not part of the session: the same work is done with the tools of Claude Code, which the note does not name (which ones a version of the CLI has is its own business);
+- what CodeAlta has its own way for is done its way, because the user sees and manages it in the window: `alta session` for the delegation the user asks for (the subagents of Claude Code stay its own, for its own work), `alta ask`, `alta skill`, the plan mode and the plan files, `alta notes`, `alta reminder`;
+- where the instructions differ from the defaults of Claude Code (when to commit, for instance), the instructions are followed.
+
+**The CLI keeps the system prompt a conversation started with.** A process that resumes a conversation (`--resume`, also with `--fork-session`) ignores the `appendSystemPrompt` it is given: checked with CLI 2.1.292 by resuming a conversation with another appended text and asking for it. The instructions of CodeAlta change during a session (another agent prompt after `alta session set_agent`, an activated skill, the line that says whether the UI tools are active, the date), so `ClaudeCodeSession` keeps what the conversation was told and compares it with the instructions of each prompt that starts:
+
+- nothing changed: nothing is sent;
+- something changed: the first content block of the user message is a `<codealta_instructions_update>` note (`ClaudeCodePrompts.CreateInstructionsUpdate`) that names the paragraphs that no longer apply by how they start and gives the new ones in full;
+- what the conversation was told is not known (the hash kept in the provider state of the session differs after a restart of the application, or the session predates this): the note gives all the instructions, as a replacement.
+
+A turn that goes on is never interrupted for it: the note goes with the next prompt. The provider state of the session keeps the hash of what was told last (`instructions`).
 
 ### Permissions, questions and edits
 
@@ -316,7 +333,7 @@ The CLI only prompts for what the user's Claude Code settings neither allow nor 
 | --- | --- | --- |
 | `Bash`, `PowerShell` | `AgentCommandPermissionRequest` | Reviewed like `shell_command` when the session reviews commands. |
 | `Edit`, `MultiEdit`, `Write`, `NotebookEdit` | `AgentFileChangePermissionRequest` | As for CodeAlta's own edit tools. |
-| `AskUserQuestion` | `AgentUserInputRequest` | Answered through the question form when the run allows questions; otherwise the tool is told to proceed. |
+| `AskUserQuestion` | `AgentUserInputRequest` | Answered through the question form when the run takes live questions. The desktop application does not (it asks with `alta ask`): the tool is then refused with a message that names `mcp__codealta__alta` and `ask --stdin`, so that the model asks that way instead of concluding that nothing can be asked. |
 | `mcp__codealta__*` | none | The tool asks its own permission when the session runs it. |
 | any other | none (allowed) | CodeAlta gates commands and file changes only, as for its own tools. |
 
@@ -330,7 +347,7 @@ To show the change of an edit, `AgentSession` reads the file before and after th
 - The probe fails with a message when the executable is not found or when the CLI says it is signed out (`account.tokenSource` is `none` and it names no API key source). A signed-in CLI names its plan and no token source; anything the probe does not recognize is tried, and a turn tells. The probe reports how the CLI authenticates (a plan or a provider), never an identity.
 - The CLI writes the thinking blocks of the model empty unless it is asked for their summary: the provider passes `--thinking-display summarized`, so that the timeline shows the reasoning as for other providers, and starts again without the option for a CLI that predates it.
 - Usage is the usage of the last model request, the context window the CLI reports (`get_context_usage`, then `modelUsage`), the cost of the turn and the subscription limit events (`rate_limit_event`). The window holds what the request read and wrote. The operation keeps the three inputs apart, as the statistics expect: `InputTokens` is the input that was not cached, `CacheReadTokens` and `CacheWriteTokens` what was read from and written to the prompt cache. The output tokens are those of the whole message (`message_delta`): the assistant line of a block only has the tokens generated so far.
-- The CLI keeps and compacts its context. Local compaction is disabled for the provider, and a manual compaction sends `/compact` to the CLI (`IAgentProviderCompaction`).
+- The CLI keeps and compacts its context. Local compaction is disabled for the provider, and a manual compaction sends `/compact` to the CLI (`IAgentProviderCompaction`). For such a provider the session keeps the context count the provider reported when the images of a run leave the conversation the session would send again: the CLI still has them, and its count holds a prompt and tools the session cannot estimate.
 
 ### Robustness
 

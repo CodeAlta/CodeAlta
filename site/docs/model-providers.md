@@ -120,10 +120,11 @@ CodeAlta never sees your Claude credentials, and there is no API key, endpoint o
 
 A session of this provider is a Claude Code session shown in CodeAlta:
 
-- Claude Code keeps its own system prompt, tools (`Read`, `Edit`, `Bash`, ...), settings, permission rules, hooks, skills and `CLAUDE.md` files. The instructions CodeAlta composes for the session (the agent prompt, skills, project context such as `AGENTS.md`) are added to its prompt.
+- Claude Code keeps its own system prompt, tools (`Read`, `Edit`, `Bash`, ...), settings, permission rules, hooks, skills and `CLAUDE.md` files. The instructions CodeAlta composes for the session (the agent prompt, skills, project context such as `AGENTS.md`) are added to its prompt, with a short note that says how they apply there: which tool `alta` is, and that CodeAlta's sessions, questions, skills, plans and notes are the ones to use where Claude Code has a tool of its own. Claude Code keeps the prompt a conversation started with, so when those instructions change later (you switch the agent prompt, a skill is activated, tools are turned on) CodeAlta gives what changed with your next prompt.
 - CodeAlta's own tools are available to it as MCP tools named `mcp__codealta__<name>`: the `alta` live tool, plugin tools, and the tools of the MCP servers you activated in CodeAlta.
 - Its tool calls, command output and file diffs appear in the timeline, and the session is saved, resumed, queued and steered like any other. The CLI keeps the conversation in its own transcript (`~/.claude/projects`), which is what a resumed session continues from.
-- When Claude Code asks a permission that your Claude Code settings do not already decide, CodeAlta answers it the way it does for its own tools: commands and file edits follow the session's review setting. A question of Claude (`AskUserQuestion`) opens the question form.
+- When Claude Code asks a permission that your Claude Code settings do not already decide, CodeAlta answers it the way it does for its own tools: commands and file edits follow the session's review setting. A question of Claude (`AskUserQuestion`) opens the question form where CodeAlta takes live questions; in the desktop application Claude asks with `alta ask`, as the other providers do.
+- A picture a tool returns (a screenshot of the window, for instance) is also saved by Claude Code in its own folder, `~/.claude/projects/<folder>/<session>/tool-results`.
 - Claude Code compacts its context itself. The **Compact** command asks it to (`/compact`).
 - A prompt that starts with `/` is a Claude Code slash command.
 

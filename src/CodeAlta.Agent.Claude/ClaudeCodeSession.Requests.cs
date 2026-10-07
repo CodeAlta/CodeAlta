@@ -123,11 +123,26 @@ internal sealed partial class ClaudeCodeSession
     // The question tool of Claude Code is answered through the question form of CodeAlta.
     private async Task<Action<Utf8JsonWriter>?> AskUserAsync(AgentProviderRunContext? run, string interactionId, JsonElement input, CancellationToken cancellationToken)
     {
-        if (run?.OnUserInputRequest is not { } ask ||
-            !ClaudeCodeJson.TryGetArray(input, "questions", out var questions) ||
-            questions.GetArrayLength() == 0)
+        if (run?.OnUserInputRequest is not { } ask)
         {
-            return Deny("Questions cannot be asked in this session. Continue with your best judgment and state your assumptions.", interrupt: false);
+            // The run does not take live questions (the desktop application asks with `alta ask`): the refusal
+            // names the way that works, so that the model does not conclude that nothing can be asked.
+            bool hasGateway;
+            lock (_gate)
+            {
+                hasGateway = _exposedTools.ContainsKey(ClaudeCodePrompts.GatewayTool);
+            }
+
+            return Deny(
+                hasGateway
+                    ? $"CodeAlta does not take questions through this tool in this run. To ask the user, call `{ClaudeCodeLauncher.McpToolPrefix}{ClaudeCodePrompts.GatewayTool}` with the args `ask --stdin` (`ask --help` gives the form), within the rules its instructions give for asking. Otherwise continue with your best judgment and state your assumptions."
+                    : "Questions cannot be asked in this session. Continue with your best judgment and state your assumptions.",
+                interrupt: false);
+        }
+
+        if (!ClaudeCodeJson.TryGetArray(input, "questions", out var questions) || questions.GetArrayLength() == 0)
+        {
+            return Deny("The question tool was called without a question.", interrupt: false);
         }
 
         var prompts = new List<AgentUserInputPrompt>();
@@ -358,14 +373,13 @@ internal sealed partial class ClaudeCodeSession
                             writer.WriteEndObject();
                         }
 
-                        if (string.Equals(name, ClaudeCodePrompts.GatewayTool, StringComparison.Ordinal))
-                        {
-                            // Claude Code defers the tools of an MCP server until the model searches for them. The
-                            // gateway of CodeAlta is the tool its instructions name: it is there from the start.
-                            writer.WriteStartObject("_meta");
-                            writer.WriteBoolean("anthropic/alwaysLoad", true);
-                            writer.WriteEndObject();
-                        }
+                        // Claude Code defers the tools of an MCP server until the model searches for them. CodeAlta
+                        // already decides which tools a session carries (the UI tools and the tools of its MCP
+                        // servers join when the session asks for them), and its instructions name them as tools
+                        // that are there: none is deferred a second time.
+                        writer.WriteStartObject("_meta");
+                        writer.WriteBoolean("anthropic/alwaysLoad", true);
+                        writer.WriteEndObject();
 
                         writer.WriteEndObject();
                     }

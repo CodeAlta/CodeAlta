@@ -583,7 +583,7 @@ internal sealed partial class ClaudeCodeSession
             Usage = usageSnapshot,
             ProviderSessionId = _claudeSessionId,
             ProviderState = _claudeSessionId is { } sessionId
-                ? new ClaudeCodeProviderState(sessionId, _syncedUsers, _syncedAssistants).ToJson()
+                ? new ClaudeCodeProviderState(sessionId, _syncedUsers, _syncedAssistants, _instructionsHash).ToJson()
                 : null,
         };
     }

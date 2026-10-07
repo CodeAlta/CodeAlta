@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent.Runtime;
@@ -13,6 +14,9 @@ internal static class ClaudeCodePrompts
     private const int HistoryPreambleLimit = 120_000;
     private const int HistoryToolArgumentsLimit = 600;
     private const int HistoryToolResultLimit = 1_500;
+
+    private const string InstructionsUpdateOpening = "<codealta_instructions_update>";
+    private const int RemovedParagraphPreview = 120;
 
     /// <summary>The command gateway of CodeAlta, which its instructions name.</summary>
     public const string GatewayTool = "alta";
@@ -37,35 +41,112 @@ internal static class ClaudeCodePrompts
     }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>
-    /// Creates the text added to the system prompt of Claude Code, which stays its own: where the session runs,
-    /// how the tools of CodeAlta are named there, and the instructions CodeAlta composed for the session.
+    /// Creates the text added to the system prompt of Claude Code, which stays its own: how the instructions
+    /// CodeAlta composed for the session, the same for every provider, apply to Claude Code, then those
+    /// instructions.
     /// </summary>
-    public static string CreateAppendSystemPrompt(string? developerInstructions, bool hasTools)
+    /// <param name="developerInstructions">The instructions CodeAlta composed for the session.</param>
+    /// <param name="hasGateway">Whether the session has the <c>alta</c> live tool.</param>
+    public static string CreateAppendSystemPrompt(string? developerInstructions, bool hasGateway)
     {
+        const string Prefix = ClaudeCodeLauncher.McpToolPrefix;
         var builder = new StringBuilder();
         builder.AppendLine("# CodeAlta");
         builder.AppendLine();
         builder.AppendLine("This Claude Code session is driven by CodeAlta, a coding-agent application. The user reads your answers and follows your tool calls in the CodeAlta window, not in a terminal.");
         builder.AppendLine();
-        if (hasTools)
+        builder.AppendLine("The instructions of CodeAlta for this session follow this list. They are the ones CodeAlta gives every model it drives; this is how they apply to you:");
+        builder.AppendLine();
+        builder.Append($"- Tools of CodeAlta: a tool the instructions name `<name>` is `{Prefix}<name>` here.");
+        if (hasGateway)
         {
-            builder.AppendLine($"- The tools of CodeAlta are available through the MCP server `{ClaudeCodeLauncher.McpServerName}`: a tool the instructions below name `<name>` is `{ClaudeCodeLauncher.McpToolPrefix}<name>` here. For example the `alta` live tool is `{ClaudeCodeLauncher.McpToolPrefix}alta`. They are tools, not programs: `alta` cannot be run in a shell. A tool of that server that is not loaded yet is found with your tool search.");
+            builder.Append($" The `{GatewayTool}` live tool is `{Prefix}{GatewayTool}`, and `{GatewayTool} <command> ...` in the instructions is a call of that tool with those words as its `args` (what a command reads with `--stdin` goes in `stdin`), never a shell command.");
         }
 
-        builder.AppendLine("- CodeAlta's own file, search, web, shell and question tools (`read_file`, `view_image`, `list_dir`, `grep`, `webget`, `shell_command`, `write_file`, `replace_in_file`, `delete_file_or_dir`, `rename_file_or_dir`, `apply_patch`, `request_user_input`) are not part of this session. Where the instructions below mention them, use your own tools instead (Read, Glob, Grep, WebFetch, Bash, Edit, Write, AskUserQuestion).");
-        builder.AppendLine("- Permission prompts and questions are answered by the user or by the policy of CodeAlta.");
+        builder.AppendLine(" A tool that joins while a turn runs may not be in your tool list yet: your tool search loads it by that name.");
+        builder.AppendLine("- CodeAlta's own file, search, web, shell and question tools (`read_file`, `view_image`, `list_dir`, `grep`, `webget`, `shell_command`, `write_file`, `replace_in_file`, `delete_file_or_dir`, `rename_file_or_dir`, `apply_patch`, `request_user_input`) are not part of this session. Where the instructions mention them, do the same work with your own tools.");
+        if (hasGateway)
+        {
+            // Claude Code has a tool of its own for most of what CodeAlta does with its sessions, questions,
+            // skills, plans and notes. The instructions name the way of CodeAlta without saying it wins.
+            builder.AppendLine($"- What CodeAlta has its own way for, do its way: the user sees and manages it in the CodeAlta window. That is `{GatewayTool} session` for the child sessions and the delegation the user asks for (your own subagents stay yours, for your own work), `{GatewayTool} ask` for questions to the user, `{GatewayTool} skill` for the skills the instructions list, the plan mode and the plan files as the instructions describe them, `{GatewayTool} notes` and `{GatewayTool} reminder`.");
+            builder.AppendLine($"- Your own question tool reaches the user only in a run CodeAlta lets ask that way. When it is refused, `{GatewayTool} ask` is the way to ask, within the rules the instructions give for asking.");
+        }
+
+        builder.AppendLine("- Where the instructions differ from your defaults, for example on when to commit, follow the instructions: they are what the user set up in CodeAlta.");
+        builder.AppendLine("- Permission prompts are answered by the user or by the policy of CodeAlta.");
 
         var instructions = developerInstructions?.Trim();
         if (!string.IsNullOrEmpty(instructions))
         {
             builder.AppendLine();
-            builder.AppendLine("The instructions of CodeAlta for this session follow.");
+            builder.AppendLine("The instructions of CodeAlta for this session:");
             builder.AppendLine();
             builder.AppendLine(instructions);
         }
 
         return builder.ToString().TrimEnd();
     }
+
+    /// <summary>
+    /// Creates the note that tells a conversation what changed in the instructions of CodeAlta since it was
+    /// given them. Claude Code keeps the system prompt a conversation started with, so a change (another agent
+    /// prompt, an activated skill, tools that were turned on) is given with the prompt that follows it.
+    /// </summary>
+    /// <param name="previous">The instructions the conversation was given, or <see langword="null" /> when they are not known.</param>
+    /// <param name="current">The instructions of the prompt that starts.</param>
+    public static string CreateInstructionsUpdate(string? previous, string current)
+    {
+        ArgumentNullException.ThrowIfNull(current);
+
+        var builder = new StringBuilder();
+        builder.AppendLine(InstructionsUpdateOpening);
+        if (previous is null)
+        {
+            builder.AppendLine("The instructions of CodeAlta for this session are no longer the ones this conversation was given. This note is not a request of the user. The text below replaces all the instructions of CodeAlta you were given before, the `# CodeAlta` part of your system prompt and earlier notes like this one:");
+            builder.AppendLine();
+            builder.AppendLine(current.Trim());
+        }
+        else
+        {
+            // The parts are the paragraphs: what the text is made of does not have to be known to compare it.
+            var before = SplitParagraphs(previous);
+            var after = SplitParagraphs(current);
+            var kept = before.ToHashSet(StringComparer.Ordinal);
+            var present = after.ToHashSet(StringComparer.Ordinal);
+            var removed = before.Where(paragraph => !present.Contains(paragraph)).ToArray();
+            var added = after.Where(paragraph => !kept.Contains(paragraph)).ToArray();
+
+            builder.AppendLine("The instructions of CodeAlta for this session changed. This note is not a request of the user: it updates the `# CodeAlta` part of your system prompt, and earlier notes like this one, for what follows. What it does not name still applies.");
+            if (removed.Length > 0)
+            {
+                builder.AppendLine();
+                builder.AppendLine("These parts no longer apply (each is named by how it starts):");
+                foreach (var paragraph in removed)
+                {
+                    builder.Append("- ").AppendLine(FirstWords(paragraph));
+                }
+            }
+
+            if (added.Length > 0)
+            {
+                builder.AppendLine();
+                builder.AppendLine(removed.Length > 0 ? "These parts are new, or replace the ones above:" : "These parts are new:");
+                foreach (var paragraph in added)
+                {
+                    builder.AppendLine();
+                    builder.AppendLine(paragraph);
+                }
+            }
+        }
+
+        builder.Append("</codealta_instructions_update>");
+        return builder.ToString();
+    }
+
+    /// <summary>The value by which two versions of the instructions are told apart.</summary>
+    public static string HashInstructions(string instructions)
+        => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(instructions)), 0, 8);
 
     /// <summary>
     /// Renders the part of a session Claude Code did not take part in (another provider answered it), to give
@@ -203,6 +284,21 @@ internal static class ClaudeCodePrompts
         }
 
         return builder.Length == 0 ? result.Error ?? string.Empty : builder.ToString();
+    }
+
+    private static string[] SplitParagraphs(string text)
+        => [.. text.ReplaceLineEndings("\n").Split("\n\n", StringSplitOptions.RemoveEmptyEntries).Select(static paragraph => paragraph.Trim()).Where(static paragraph => paragraph.Length > 0)];
+
+    private static string FirstWords(string paragraph)
+    {
+        var line = paragraph.AsSpan();
+        var end = line.IndexOf('\n');
+        if (end >= 0)
+        {
+            line = line[..end];
+        }
+
+        return line.Length <= RemovedParagraphPreview ? line.ToString() : string.Concat(line[..RemovedParagraphPreview], " …");
     }
 
     private static void WriteTextBlock(Utf8JsonWriter writer, string text)
