@@ -42,13 +42,12 @@ export function closeApplicationWindow(): void {
 }
 
 /**
- * The application mark and name at the start of the title bar, followed by the workspace navigation
- * (`children`); the area around them moves the window.
+ * The application mark at the start of the title bar, followed by the workspace navigation (`children`);
+ * the area around them moves the window. The name is not written: the room goes to the navigation.
  */
 export function WindowBrand({ developer = false, children }: { developer?: boolean; children?: ReactNode }) {
   return <div className="window-brand" data-neoastra-drag-region>
-    <img className="window-brand-mark" src={logoUrl} alt="" draggable={false} />
-    <span className="window-brand-name">CodeAlta</span>
+    <img className="window-brand-mark" src={logoUrl} alt="CodeAlta" title="CodeAlta" draggable={false} />
     {developer && <span className="window-brand-tag">dev</span>}
     {children}
   </div>;

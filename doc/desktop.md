@@ -27,11 +27,12 @@ native services or create storage. Explicit catalog and scoped-owned options ret
 The main window opens centered at 80% of the primary work area on Windows; other platforms use a
 centered 1280×860 window until NeoAstra exposes display metrics.
 
-The window has no separate title bar: the page draws it. The CodeAlta mark and name sit at the top
-left, the session tabs continue the same strip, and the platform's minimize, maximize and close
+The window has no separate title bar: the page draws it. The CodeAlta mark sits at the top left
+with the buttons of the workspace beside it (the name is not written, so that these buttons keep their
+room in a narrow Explorer), the session tabs continue the same strip, and the platform's minimize, maximize and close
 buttons stay at the top right. Drag the mark or any empty part of a tab strip along the top edge to
 move the window, and double-click it to maximize or restore; tabs and buttons in that strip keep
-their own clicks and drags. With the Explorer hidden the tabs start right after the name. In a split
+their own clicks and drags. With the Explorer hidden the tabs start right after these buttons. In a split
 layout only the panes along the top edge are part of the title bar.
 
 The window appears with a **start-up screen**: the title strip with the mark and name, the logo and a

@@ -1377,7 +1377,9 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body {
 
 /* Chromeless window: the page draws the title bar. The application mark sits over the Explorer column and the
    session tab strips along the top edge continue it up to the window controls. */
-.ide-shell { --titlebar-height: var(--neoastra-titlebar-height, 38px); --titlebar-inset-end: var(--neoastra-titlebar-inset-right, 0px); --brand-width: 220px; --window-actions-width: 40px; }
+.ide-shell { --titlebar-height: var(--neoastra-titlebar-height, 38px); --titlebar-inset-end: var(--neoastra-titlebar-inset-right, 0px); --brand-width: calc(204px + var(--neoastra-titlebar-inset-left, 0px)); --window-actions-width: 40px; }
+/* The developer instance says so beside the mark: its navigation needs that much more room. */
+.ide-shell:has(.window-brand-tag) { --brand-width: calc(248px + var(--neoastra-titlebar-inset-left, 0px)); }
 .ide-shell .workspace-shell:has(> .window-controls) { --titlebar-inset-end: 138px; }
 .window-brand { grid-area: brand; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 0 6px 0 calc(11px + var(--neoastra-titlebar-inset-left, 0px)); overflow: hidden; background: var(--panel); white-space: nowrap; }
 .window-brand .activity-rail { display: flex; align-items: center; gap: 2px; margin-left: auto; }
@@ -1387,8 +1389,6 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body {
 .window-actions > .bp6-button { min-width: 28px; min-height: 28px; padding: 0; color: var(--muted); }
 .window-actions > .bp6-button:hover { color: var(--text); }
 .window-brand-mark { flex: none; width: 22px; height: 22px; }
-.window-brand-name { font-size: 13px; font-weight: 600; letter-spacing: .01em; }
-:root[data-neoastra-window-focused="false"] .window-brand-name { color: var(--muted); }
 /* Without the Explorer the mark keeps its name and the first tab strip starts after it. */
 .ide-shell .workspace-shell:not(.project-rail-open) .window-brand { position: absolute; z-index: 2; top: 0; left: 0; width: var(--brand-width); height: var(--titlebar-height); }
 .ide-shell .workspace-shell:not(.project-rail-open) .flexlayout__tabset_tabbar_outer[data-titlebar-start] { padding-left: var(--brand-width); }
