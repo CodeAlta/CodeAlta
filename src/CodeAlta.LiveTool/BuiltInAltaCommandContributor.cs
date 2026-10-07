@@ -149,6 +149,14 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             yield return CreateTaskCommand(context.Invocation);
             yield return CreatePlanCommand(context.Invocation);
         }
+
+        // The issues and the pull requests of projects, from the trackers the plugins of the host know.
+        if (context.Invocation.Services.Get<CodeAlta.Plugins.PluginRuntimeManager>() is not null)
+        {
+            yield return CreateIssueCommand(context.Invocation);
+            // Both names are written: one item, or the list of them.
+            yield return CreateIssueCommand(context.Invocation, "issues");
+        }
     }
 
     public IEnumerable<AltaCommandPolicy> GetCommandPolicies(AltaCommandContributionContext context)
@@ -165,9 +173,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var automations = context.Services.Get<IAltaAutomations>() is not null;
         var workshop = context.Services.Get<AltaPluginWorkshop>();
         var workItems = context.Services.Get<CodeAlta.Catalog.WorkItems.WorkItemService>() is not null;
-        if (!changes && !editor && !terminals && !automations && !workItems && workshop is null) return Policies;
+        var issues = context.Services.Get<CodeAlta.Plugins.PluginRuntimeManager>() is not null;
+        if (!changes && !editor && !terminals && !automations && !workItems && !issues && workshop is null) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
         if (workItems) policies.AddRange(WorkItemPolicies);
+        if (issues) policies.AddRange(IssuePolicies);
         if (workshop is not null) policies.AddRange(PluginWorkshopPolicies);
         if (workshop?.OpenEditor is not null) policies.Add(PluginOpenPolicy);
         if (changes) policies.Add(DiffShowPolicy);

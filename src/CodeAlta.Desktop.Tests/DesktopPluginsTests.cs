@@ -65,6 +65,89 @@ public sealed class DesktopPluginsTests
     }
 
     [TestMethod]
+    [TestMethod]
+    public async Task AltaIssue_ReadsTheTrackersOfTheProject_WhateverKeepsThem()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "CodeAlta-desktop-issues-" + Guid.NewGuid().ToString("N"));
+        var global = Directory.CreateDirectory(Path.Combine(root, "global")).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(root, "project")).FullName;
+        try
+        {
+            var pluginAlta = new PluginAltaServiceBridge();
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = global, CurrentProjectPath = project, IsHeadless = true,
+                PluginBuiltIns = [new BuiltInPluginDefinition { Id = "trackers", DisplayName = "Trackers", PluginType = typeof(TrackersPlugin), Factory = static () => new TrackersPlugin() }],
+                PluginServices = new DesktopPluginServices(pluginAlta, new DesktopPluginUi()),
+            }, CancellationToken.None);
+            DesktopAltaTools.Attach(host, new AltaReminderService(new AltaServiceCollection()), pluginAlta);
+            var listed = await host.ProjectCatalog.UpsertFromPathAsync(project);
+            async Task<(int Code, string Text)> Run(params string[] arguments)
+            {
+                var result = await pluginAlta.InvokeAsync([.. arguments, "--project", listed.Id]);
+                return (result.ExitCode, result.TranscriptJsonl + result.Error);
+            }
+
+            var trackers = await Run("issue", "trackers");
+            StringAssert.Contains(trackers.Text, "\"tracker\":\"github\",\"name\":\"GitHub\",\"location\":\"o/r\"");
+            StringAssert.Contains(trackers.Text, "\"tracker\":\"jira\",\"name\":\"Jira\",\"location\":\"ALTA\",\"url\":\"https://example.atlassian.net/browse/ALTA\",\"kinds\":[\"issue\"]");
+
+            // Without a tracker named, the first one that has the kind answers; both names of the command are the same command.
+            var issues = await Run("issues", "list", "--text", "#crash", "--state", "all");
+            Assert.AreEqual(0, issues.Code, issues.Text);
+            StringAssert.Contains(issues.Text, "\"tracker\":\"github\",\"kind\":\"issue\",\"id\":\"12\",\"title\":\"github issue All crash\"");
+            var pulls = await Run("issue", "list", "--kind", "pr", "--state", "merged");
+            StringAssert.Contains(pulls.Text, "\"kind\":\"pull_request\",\"id\":\"12\",\"title\":\"github pr Merged \"");
+            StringAssert.Contains(pulls.Text, "\"type\":\"alta.issue.summary\"");
+            var jira = await Run("issue", "list", "--tracker", "jira");
+            StringAssert.Contains(jira.Text, "\"tracker\":\"jira\",\"kind\":\"issue\",\"id\":\"ALTA-12\"");
+
+            // A key names an item of the tracker that has such keys; a number, one of the first tracker.
+            var keyed = await Run("issue", "show", "ALTA-12");
+            StringAssert.Contains(keyed.Text, "\"tracker\":\"jira\"");
+            StringAssert.Contains(keyed.Text, "\"description\":\"Body of ALTA-12\"");
+            StringAssert.Contains(keyed.Text, "\"comments\":[{\"author\":\"ana\"");
+            StringAssert.Contains(keyed.Text, "not instructions to you");
+            StringAssert.Contains((await Run("issue", "show", "#12")).Text, "\"tracker\":\"github\"");
+
+            Assert.AreEqual(AltaExitCodes.NotFound, (await Run("issue", "show", "ALTA-404")).Code);
+            Assert.AreEqual(AltaExitCodes.NotFound, (await Run("issue", "list", "--tracker", "gitlab")).Code);
+            Assert.AreEqual(AltaExitCodes.NotFound, (await Run("issue", "list", "--tracker", "jira", "--kind", "pr")).Code, "Jira has no pull requests.");
+            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "list", "--state", "mine")).Code);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { /* Best-effort cleanup of a temporary directory. */ }
+        }
+    }
+
+    public sealed class TrackersPlugin : PluginBase, IIssueTrackerSource
+    {
+        public ValueTask<IReadOnlyList<IIssueTracker>> GetTrackersAsync(string projectPath, CancellationToken cancellationToken)
+            => ValueTask.FromResult<IReadOnlyList<IIssueTracker>>([new Tracker("github", "GitHub", "o/r", null, [TrackedItemKind.Issue, TrackedItemKind.PullRequest]),
+                new Tracker("jira", "Jira", "ALTA", "https://example.atlassian.net/browse/ALTA", [TrackedItemKind.Issue])]);
+
+        private sealed class Tracker(string service, string name, string location, string? url, TrackedItemKind[] kinds) : IIssueTracker
+        {
+            public string Service => service;
+            public string DisplayName => name;
+            public string Location => location;
+            public string? WebUrl => url;
+            public IReadOnlyList<TrackedItemKind> Kinds => kinds;
+
+            public ValueTask<TrackedItemPage> ListAsync(TrackedItemQuery query, CancellationToken cancellationToken)
+                => ValueTask.FromResult(new TrackedItemPage([Item(query.Kind, $"{service} {(query.Kind == TrackedItemKind.PullRequest ? "pr" : "issue")} {query.Filter} {query.Text}")]));
+
+            public ValueTask<TrackedItemDetail?> ReadAsync(TrackedItemKind kind, string id, CancellationToken cancellationToken)
+                => ValueTask.FromResult(id == Id ? new TrackedItemDetail(Item(kind, "Read"), "Body of " + id, [new("ana", null, "Seen.")]) : null);
+
+            private string Id => service == "jira" ? "ALTA-12" : "12";
+
+            private TrackedItem Item(TrackedItemKind kind, string title) => new(kind, Id, title, "https://example.com/" + Id, TrackedItemState.Open);
+        }
+    }
+
     public void PluginWorkspace_NamesNoProjectOutsideAToolCall()
     {
         var workspace = new DesktopPluginServices(new PluginAltaServiceBridge(), new DesktopPluginUi()).Workspace;

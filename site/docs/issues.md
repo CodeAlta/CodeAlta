@@ -44,5 +44,13 @@ The session receives the title, the link and the description of the item. For a 
 **Open on GitHub** (or the name of the service) opens the item in your browser, and **Copy link** copies its address.
 
 ## In a prompt
+## For agents
+
+A session reads the same issues and pull requests with `alta issue`, wherever they are kept:
+
+```text
+Look at the open issues of this project and pick the ones we can close with the last release.
+```
+
 
 Type `#` in a prompt to insert a link to an issue or a pull request of the project. See the [Git plugin](plugins/git.md).
