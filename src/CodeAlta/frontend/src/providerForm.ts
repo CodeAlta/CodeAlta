@@ -35,12 +35,22 @@ export function validateProviderForm(form: ProviderForm, providers: readonly Pic
 /** The wire edit for a form: blank optional fields are sent as null, and an untouched secret is kept. */
 export function providerEdit(form: ProviderForm): GlobalConfigProviderEdit {
   const optional = (value: string) => value.trim() ? value.trim() : null;
+  // A provider that runs its own CLI takes none of the API fields: what another type left in the form is not sent.
+  const cli = runsOwnCli(form.type);
   return { key: form.key.trim().toLowerCase(), type: form.type, enabled: form.enabled, displayName: optional(form.displayName), model: optional(form.model),
-    reasoningEffort: optional(form.reasoningEffort), apiUrl: optional(form.apiUrl), apiKeyEnv: optional(form.apiKeyEnv),
-    apiKey: form.clearApiKey || !form.apiKey ? null : form.apiKey, clearApiKey: form.clearApiKey };
+    reasoningEffort: optional(form.reasoningEffort), apiUrl: cli ? null : optional(form.apiUrl), apiKeyEnv: cli ? null : optional(form.apiKeyEnv),
+    apiKey: cli || form.clearApiKey || !form.apiKey ? null : form.apiKey, clearApiKey: cli ? true : form.clearApiKey };
 }
 
 /** Provider types that sign in through their own account flow instead of an API key. */
 export function usesAccountSignIn(type: string): boolean {
   return type === "codex" || type === "copilot" || type === "xai";
+}
+
+/**
+ * Provider types that run a CLI the user installed and signed in to: CodeAlta has no key, no endpoint and no
+ * sign-in of its own for them.
+ */
+export function runsOwnCli(type: string): boolean {
+  return type === "claude-code";
 }

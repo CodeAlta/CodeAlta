@@ -4854,6 +4854,12 @@
   fr: "En attente"
   ja: "保留中"
   zh: "待处理"
+"Permission Mode":
+  de: "Berechtigungsmodus"
+  es: "Modo de permisos"
+  fr: "Mode de permission"
+  ja: "権限モード"
+  zh: "权限模式"
 "Permission Request":
   de: "Berechtigungsanfrage"
   es: "Solicitud de permiso"

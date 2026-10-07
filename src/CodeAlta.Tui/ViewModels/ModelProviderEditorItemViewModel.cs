@@ -31,6 +31,10 @@ internal sealed partial class ModelProviderEditorItemViewModel
         UseDefaultApiUrl = source.ApiUrl is null;
         GitHubEnterpriseUrl = source.GitHubEnterpriseUrl;
         UseDefaultGitHubEnterpriseUrl = source.GitHubEnterpriseUrl is null;
+        Command = source.Command;
+        UseDefaultCommand = source.Command is null;
+        PermissionMode = source.PermissionMode;
+        UseDefaultPermissionMode = source.PermissionMode is null;
         OrganizationId = source.OrganizationId;
         UseDefaultOrganizationId = source.OrganizationId is null;
         ProjectId = source.ProjectId;
@@ -134,6 +138,18 @@ internal sealed partial class ModelProviderEditorItemViewModel
     public partial bool UseDefaultGitHubEnterpriseUrl { get; set; }
 
     [Bindable]
+    public partial string? Command { get; set; }
+
+    [Bindable]
+    public partial bool UseDefaultCommand { get; set; }
+
+    [Bindable]
+    public partial string? PermissionMode { get; set; }
+
+    [Bindable]
+    public partial bool UseDefaultPermissionMode { get; set; }
+
+    [Bindable]
     public partial string? OrganizationId { get; set; }
 
     [Bindable]
@@ -232,6 +248,11 @@ internal sealed partial class ModelProviderEditorItemViewModel
         definition.ApiKeyEnv = supportsApiKeyField && !UseDefaultApiKeyEnv ? NormalizeText(ApiKeyEnv) : null;
         definition.ApiUrl = UseDefaultApiUrl ? null : NormalizeText(ApiUrl);
         definition.GitHubEnterpriseUrl = ProviderType == "copilot" && !UseDefaultGitHubEnterpriseUrl ? NormalizeText(GitHubEnterpriseUrl) : null;
+        // The settings of a provider that runs a CLI: the arguments are edited in the TOML of the provider.
+        var runsCli = ProviderType == "claude-code";
+        definition.Command = runsCli && !UseDefaultCommand ? NormalizeText(Command) : null;
+        definition.PermissionMode = runsCli && !UseDefaultPermissionMode ? NormalizeText(PermissionMode) : null;
+        definition.Arguments = runsCli ? definition.Arguments : null;
         definition.OrganizationId = UseDefaultOrganizationId ? null : NormalizeText(OrganizationId);
         definition.ProjectId = UseDefaultProjectId ? null : NormalizeText(ProjectId);
         definition.Project = UseDefaultProject ? null : NormalizeText(Project);
@@ -303,6 +324,10 @@ internal sealed partial class ModelProviderEditorItemViewModel
     partial void OnUseDefaultApiUrlChanged(bool value) => ClearTestResultOnEdit();
     partial void OnGitHubEnterpriseUrlChanged(string? value) => ClearTestResultOnEdit();
     partial void OnUseDefaultGitHubEnterpriseUrlChanged(bool value) => ClearTestResultOnEdit();
+    partial void OnCommandChanged(string? value) => ClearTestResultOnEdit();
+    partial void OnUseDefaultCommandChanged(bool value) => ClearTestResultOnEdit();
+    partial void OnPermissionModeChanged(string? value) => ClearTestResultOnEdit();
+    partial void OnUseDefaultPermissionModeChanged(bool value) => ClearTestResultOnEdit();
     partial void OnOrganizationIdChanged(string? value) => ClearTestResultOnEdit();
     partial void OnUseDefaultOrganizationIdChanged(bool value) => ClearTestResultOnEdit();
     partial void OnProjectIdChanged(string? value) => ClearTestResultOnEdit();
@@ -340,6 +365,9 @@ internal sealed partial class ModelProviderEditorItemViewModel
             ApiKeyEnv = definition.ApiKeyEnv,
             ApiUrl = definition.ApiUrl,
             NetworkTimeoutSeconds = definition.NetworkTimeoutSeconds,
+            Command = definition.Command,
+            Arguments = definition.Arguments is null ? null : [.. definition.Arguments],
+            PermissionMode = definition.PermissionMode,
             GitHubEnterpriseUrl = definition.GitHubEnterpriseUrl,
             GitHubTokenEnv = definition.GitHubTokenEnv,
             CopilotTokenEnv = definition.CopilotTokenEnv,

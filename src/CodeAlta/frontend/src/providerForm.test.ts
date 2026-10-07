@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { GlobalConfigProvider } from "#neoastra";
-import { providerEdit, providerForm, providerFormDirty, usesAccountSignIn, validateProviderForm } from "./providerForm";
+import { providerEdit, providerForm, providerFormDirty, runsOwnCli, usesAccountSignIn, validateProviderForm } from "./providerForm";
 
 const types = ["openai-chat", "anthropic", "codex"];
 const local: GlobalConfigProvider = { key: "local", type: "openai-chat", enabled: true, displayName: "Local", effectiveName: "Local", model: "model-a",
@@ -42,4 +42,19 @@ test("the wire edit sends blank fields as null and keeps an untouched secret", (
   assert.equal(cleared.clearApiKey, true);
   assert.equal(usesAccountSignIn("codex"), true);
   assert.equal(usesAccountSignIn("openai-chat"), false);
+});
+
+test("a provider that runs its own CLI sends no key and no endpoint", () => {
+  // The type was changed on a provider that had an endpoint and a stored key: neither belongs to the CLI.
+  const form = { ...providerForm(local, "local", types), type: "claude-code", apiKey: "typed-before", apiKeyEnv: "SOME_KEY" };
+  const edit = providerEdit(form);
+  assert.equal(edit.type, "claude-code");
+  assert.equal(edit.apiUrl, null);
+  assert.equal(edit.apiKeyEnv, null);
+  assert.equal(edit.apiKey, null);
+  assert.equal(edit.clearApiKey, true);
+  assert.equal(edit.model, "model-a");
+  assert.equal(runsOwnCli("claude-code"), true);
+  assert.equal(runsOwnCli("anthropic"), false);
+  assert.equal(usesAccountSignIn("claude-code"), false);
 });

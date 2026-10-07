@@ -35,6 +35,7 @@ internal sealed class ModelProvidersDialog
         new("google-genai", "Google GenAI"),
         new("vertex-ai", "Vertex AI"),
         new("mistral", "Mistral"),
+        new("claude-code", "Claude Code"),
     ];
 
     private static readonly ReasoningOption[] ReasoningOptions =
@@ -817,6 +818,16 @@ internal sealed class ModelProvidersDialog
         if (item.ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "codex" or "copilot" or "anthropic" or "google-genai" or "vertex-ai" or "xai" or "mistral")
         {
             AddTextRow(form, ref row, SR.T("Models.dev Id"), CreateDefaultTextField(bindings.ModelsDevProviderId, () => item.UseDefaultModelsDevProviderId), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultModelsDevProviderId));
+            AddTextRow(form, ref row, SR.T("Single Model Id"), CreateDefaultTextField(bindings.SingleModelId, () => item.UseDefaultSingleModelId), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultSingleModelId));
+            AddTextRow(form, ref row, SR.T("Models Include Regex"), CreateDefaultTextField(bindings.ModelsIncludeRegex, () => item.UseDefaultModelsIncludeRegex), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultModelsIncludeRegex));
+            AddCheckRow(form, ref row, SR.T("Model Order"), new CheckBox(SR.T("Sort models alphabetically")).IsChecked(bindings.SortModels), CreateSpacer());
+        }
+
+        if (item.ProviderType == "claude-code")
+        {
+            // The CLI of the user signs in by itself: there is no credential and no endpoint to enter.
+            AddTextRow(form, ref row, SR.T("Command"), CreateDefaultTextField(bindings.Command, () => item.UseDefaultCommand), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultCommand));
+            AddTextRow(form, ref row, SR.T("Permission Mode"), CreateDefaultTextField(bindings.PermissionMode, () => item.UseDefaultPermissionMode), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultPermissionMode));
             AddTextRow(form, ref row, SR.T("Single Model Id"), CreateDefaultTextField(bindings.SingleModelId, () => item.UseDefaultSingleModelId), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultSingleModelId));
             AddTextRow(form, ref row, SR.T("Models Include Regex"), CreateDefaultTextField(bindings.ModelsIncludeRegex, () => item.UseDefaultModelsIncludeRegex), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultModelsIncludeRegex));
             AddCheckRow(form, ref row, SR.T("Model Order"), new CheckBox(SR.T("Sort models alphabetically")).IsChecked(bindings.SortModels), CreateSpacer());

@@ -289,7 +289,7 @@ internal sealed class GlobalConfigService
 
     private const int MaximumProviders = 64;
     private static readonly ImmutableArray<string> ProviderTypes =
-        ["openai-chat", "openai-responses", "azure-openai", "anthropic", "google-genai", "vertex-ai", "mistral", "codex", "copilot", "xai"];
+        ["openai-chat", "openai-responses", "azure-openai", "anthropic", "google-genai", "vertex-ai", "mistral", "codex", "copilot", "xai", "claude-code"];
     private static readonly ImmutableArray<string> ReasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
     /// <summary>

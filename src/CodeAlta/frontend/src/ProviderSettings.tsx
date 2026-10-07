@@ -7,7 +7,7 @@ import { providerDefault } from "./providerSignIn";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import { configReadNotice, configSaveNotice, type ConfigNotice } from "./configEditor";
-import { providerEdit, providerForm, providerFormDirty, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
+import { providerEdit, providerForm, providerFormDirty, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
 import { GuidedTour, type GuidedTourStep } from "./GuidedTour";
 import { providerTourSteps, providerTourStorageKey, startsProviderTour } from "./providerTour";
 import { useShellLanguage } from "./shellLanguage";
@@ -207,9 +207,11 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
                 <option value="">{fallback("reasoningEffort") ? t("Default ({value})", { value: fallback("reasoningEffort")! }) : t("High when supported")}</option>
                 {[...new Set([...(form.reasoningEffort ? [form.reasoningEffort] : []), ...listing.reasoningEfforts])].map(effort => <option key={effort} value={effort}>{effort}</option>)}
               </HTMLSelect></FormGroup>
-            <FormGroup label={t("API URL")} labelFor="provider-url">
-              <DefaultedInput id="provider-url" value={form.apiUrl} fallback={fallback("apiUrl") ?? original?.effectiveApiUrl ?? null} disabled={busy} onChange={apiUrl => edit({ apiUrl })} /></FormGroup>
-            {usesAccountSignIn(form.type)
+            {!runsOwnCli(form.type) && <FormGroup label={t("API URL")} labelFor="provider-url">
+              <DefaultedInput id="provider-url" value={form.apiUrl} fallback={fallback("apiUrl") ?? original?.effectiveApiUrl ?? null} disabled={busy} onChange={apiUrl => edit({ apiUrl })} /></FormGroup>}
+            {runsOwnCli(form.type)
+              ? <Callout compact className="provider-settings-wide" icon={<AppIcon name="terminal" size={16} />}>{t("This provider runs the Claude Code CLI installed on this computer. It signs in by itself: run claude in a terminal and use /login. CodeAlta never handles its credentials. The executable path and the other settings are in the configuration file.")}</Callout>
+              : usesAccountSignIn(form.type)
               ? original && original.type === form.type
                 ? <ProviderAccount epoch={epoch} providerKey={original.key} api={login} blocked={dirty ? "Save before signing in." : null}
                   onChanged={() => { selectAfterLoad.current = original.key; setGeneration(value => value + 1); onApplied?.(); }} />
