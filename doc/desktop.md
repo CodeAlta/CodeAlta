@@ -714,7 +714,8 @@ The timeline is compact: every card has the same small padding and the rows are 
 alone. Consecutive tool calls of one run share a single **Tool calls** card, their tiles side by side
 (up to 60 per card); only something the timeline shows between two calls (an assistant message, a file
 change, a status row) starts a new card. Records that show nothing, such as usage updates or reasoning
-without text, do not.
+without text, do not. A call that starts is not in the journal yet: its tile joins the card of the calls
+of its run shown just before it, and stays there once the journal has it (`groupTimelineTools`).
 
 ### Tool calls
 

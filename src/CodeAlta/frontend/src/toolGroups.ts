@@ -11,8 +11,11 @@ export const toolGroupLimit = 60;
 // timeline shows between them (an assistant message, a file change, a status row) ends it.
 // Records that show nothing (raw transport snapshots, usage updates, tool output attached to
 // its call, reasoning without text) do not.
+// A call that starts is not in the journal yet. It joins the calls of its run that are shown just before it, so
+// that it appears where it stays: its tile does not start on a line of its own and jump into the group later.
 export function groupTimelineTools(rows: ReconciledRow[], entries: readonly HistoryEntry[]): TimelineGroup[] {
   const membership = new Map<string, string>();
+  const runs = new Map<string, string>();
   const shown = new Set<string>();
   for (const row of rows) if (row.source === "history" && row.item.category !== "tool") shown.add(row.item.key);
   let previous: string | null = null, segment = 0;
@@ -28,18 +31,23 @@ export function groupTimelineTools(rows: ReconciledRow[], entries: readonly Hist
     if (identity !== previous) segment++;
     previous = identity;
     membership.set(entry.offset, `${segment}:${identity}`);
+    runs.set(entry.offset, JSON.stringify([entry.providerId, entry.runId]));
   }
   const result: TimelineGroup[] = [];
-  let lastIdentity: string | undefined;
+  let lastIdentity: string | undefined, lastRun: string | undefined, lastLive = false;
   for (const row of rows) {
-    // Live tools have only a retained-update order. Keep that separate from journal chronology.
-    const identity = row.source === "history" && row.item.category === "tool" ? membership.get(row.item.key)
-      : row.source === "liveTool" && row.row.runId ? `live:${JSON.stringify([row.row.providerId, row.row.runId])}` : undefined;
+    const live = row.source === "liveTool";
+    const run = live ? row.row.runId ? JSON.stringify([row.row.providerId, row.row.runId]) : undefined
+      : row.source === "history" && row.item.category === "tool" ? runs.get(row.item.key) : undefined;
+    const identity = live ? run && `live:${run}` : row.source === "history" && row.item.category === "tool" ? membership.get(row.item.key) : undefined;
     const last = result.at(-1);
-    if (identity && identity === lastIdentity && last && last.rows.length < toolGroupLimit) {
+    // Two calls of the journal are grouped by what the journal says of them; a live call and a call beside it
+    // by their run alone, which is all a live call says.
+    const together = !!identity && (identity === lastIdentity || (live || lastLive) && !!run && run === lastRun);
+    if (together && last && last.rows.length < toolGroupLimit) {
       last.rows.push(row); last.tools = true;
-    } else result.push({ key: row.key, tools: row.source === "liveTool" || row.source === "history" && row.item.category === "tool", rows: [row] });
-    lastIdentity = identity;
+    } else result.push({ key: row.key, tools: live || row.source === "history" && row.item.category === "tool", rows: [row] });
+    lastIdentity = identity; lastRun = identity ? run : undefined; lastLive = live;
   }
   return result;
 }
