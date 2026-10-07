@@ -227,6 +227,20 @@ explicit; prefix cutting avoids splitting a well-formed surrogate pair. Session 
 remove even a running session and all its last-known status; reappearance starts a fresh window.
 No claim of complete active-session discovery should be made from this bounded display API.
 
+**Tool output.** A tool reports what it writes while it runs as `AgentContentDeltaEvent`s that no
+journal keeps (the `shell_command` tool sends each line of its standard output and error). The display
+window above does not carry them. `SessionRuntimeService.ToolOutput` (`RuntimeToolOutputProjection`)
+retains them per running call, so that a frontend that looks at a running call sees what it wrote and
+what it writes next: `ObserveAsync(sessionId, activityId)` yields the text so far, then each addition
+(coalesced: one update holds everything written since the previous one), and a last update when the call
+ends. A call is known from the first report of its activity or from its first output, by its activity
+identity (an output names its call by its own identity or by its parent activity; a long identity is
+compacted like in the display window). It leaves when its activity reports an end, when its finished
+output is published, when its run ends, or when a newer call needs its place. **16 calls** are retained
+at once, each with its newest **512 Ki UTF-16 units** (a reader that fell behind is restarted from what is
+kept), for **32 observers**. A call that is not retained yields the last update alone: its output is the
+one of its persisted record. This is display data only: no command, permission or completion authority.
+
 These are **retained payload/count bounds, not a total heap cap**: current text payload is at
 most 4,194,304 UTF-16 units (8 MiB of character storage), plus bounded identities, labels and
 collection overhead. Tool identity/name payload adds at most 1,792 units per session. Immutable arrays/strings are shared with snapshots. Consumers may retain

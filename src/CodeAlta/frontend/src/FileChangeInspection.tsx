@@ -56,7 +56,7 @@ export function FileChangeInspection({ changes, canInspect }: { changes: FileCha
           <AppWindowSurface storageKey="codealta.desktop.window.file-change.v1" title={row.path} titleId={`${id}-title`} preferredSize={viewport => ({ width: Math.min(980, viewport.width - 40), height: Math.min(700, viewport.height - 40) })}
             onClose={close} closeLabel={t("Close")}>
           <div className="file-dialog-summary"><span>{row.kind}</span>{row.counts && <span className="file-counts"><b>+{row.counts.added}</b> <em>-{row.counts.removed}</em></span>}</div>
-          {row.diff !== null ? <DiffPreview text={row.diff} /> : <p>{t("No supported per-file diff supplied; original record details remain available.")}</p>}
+          {row.diff !== null ? <DiffPreview text={row.diff} path={row.path} /> : <p>{t("No supported per-file diff supplied; original record details remain available.")}</p>}
         </AppWindowSurface></dialog>}
       </li>;
     })}</ul>

@@ -556,6 +556,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         async (sessionId, token) => await SessionFolderAsync(host, sessionId, token).ConfigureAwait(false)));
                     builder.AddMcpHostService(new McpHostService(mcp, McpTools, epoch));
                     builder.AddPromptImagesService(new PromptImagesService(host.WorkspaceReads, epoch));
+                    builder.AddToolCallsService(new ToolCallsService(host.WorkspaceReads, host.RuntimeService.ToolOutput, epoch));
                     builder.AddComposerStatusService(new ComposerStatusService(host.ProjectCatalog, epoch, roots.Home, host.PluginRuntime));
                     pluginCommands = pluginAlta is null ? new PluginUiService() : new PluginUiService(host.ProjectCatalog, host.PluginRuntime, pluginUi, epoch);
                     builder.AddPluginUiService(pluginCommands);
@@ -721,6 +722,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddTerminalsService(new TerminalsService());
             builder.AddAutomationsService(new AutomationsService());
             builder.AddPromptImagesService(new PromptImagesService());
+            builder.AddToolCallsService(new ToolCallsService());
             builder.AddComposerStatusService(new ComposerStatusService());
             builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
             builder.AddModelCatalogService(new ModelCatalogService());

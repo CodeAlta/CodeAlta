@@ -352,6 +352,7 @@ export const sessionPluginEvents = { read: unavailable };
 export const projectFiles = { read: unavailable, write: unavailable };
 export const projectGit = { status: unavailable };
 export const promptImages = { read: unavailable };
+export const toolCalls = { read: unavailable, observe: unavailable };
 export const composerStatus = { read: unavailable };
 export const sessionUserInput = {
   list: (request: { expectedHostEpoch: string; sessionId: string }) => new Promise(resolve => inputReads.push({ request, resolve })),

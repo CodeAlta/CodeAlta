@@ -12,6 +12,7 @@ internal sealed class SessionRuntimeEventPublisher(int capacity = BoundedRuntime
     private bool _readerActive;
 
     internal RuntimeDisplayProjection Display { get; } = new();
+    internal RuntimeToolOutputProjection ToolOutput { get; } = new();
     internal long DroppedCount => _events.DroppedCount;
 
     internal bool TryPublish(SessionRuntimeEvent runtimeEvent)
@@ -20,6 +21,7 @@ internal sealed class SessionRuntimeEventPublisher(int capacity = BoundedRuntime
         {
             if (_closed) return false;
             Display.Commit(runtimeEvent);
+            ToolOutput.Commit(runtimeEvent);
             return _events.TryPublish(runtimeEvent);
         }
     }
@@ -56,6 +58,7 @@ internal sealed class SessionRuntimeEventPublisher(int capacity = BoundedRuntime
             if (_closed) return;
             _closed = true;
             Display.Complete();
+            ToolOutput.Complete();
             _events.Complete();
         }
     }

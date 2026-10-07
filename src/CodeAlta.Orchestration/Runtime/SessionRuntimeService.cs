@@ -119,6 +119,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// <summary>Gets committed bounded live display state, independent of the original lossy event/effects stream.</summary>
     public RuntimeDisplayProjection Display => _events.Display;
 
+    /// <summary>Gets the output the running tool calls have written so far, which no journal keeps.</summary>
+    public RuntimeToolOutputProjection ToolOutput => _events.ToolOutput;
+
     /// <summary>
     /// Gets the skill catalog used when building instructions and activating skills.
     /// </summary>

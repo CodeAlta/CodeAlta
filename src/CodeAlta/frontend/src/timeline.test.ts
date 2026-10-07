@@ -8,7 +8,7 @@ type Entry = HistoryResponse["entries"][number];
 test("typed completed output retains authoritative totals with its exact activity", () => {
   const activity = entry({ eventType: "activity", kind: "ToolCall", activityId: "tool", phase: "Completed", name: "alta", text: null });
   const output = entry({ offset: "2", kind: "ToolOutput", parentActivityId: "tool", text: "bounded preview", textTruncated: true,
-    tool: { primary: null, isCommand: false, output: "bounded preview", outputLines: 27, outputBytes: 1434, fields: [], added: null, removed: null } });
+    tool: { primary: null, isCommand: false, output: "bounded preview", outputLines: 27, outputBytes: 1434, fields: [], added: null, removed: null, exitCode: null } });
   const items = buildTimelineItems([activity, output]);
   assert.equal(items.length, 1);
   assert.equal(items[0].toolOutputLines, 27);
@@ -41,23 +41,37 @@ test("TUI status-only updates do not become timeline cards", () => {
   assert.deepEqual(buildTimelineItems(["Idle", "UsageUpdated", "Shutdown"].map(kind => entry({ eventType: "sessionUpdate", kind }))), []);
 });
 
-test("persisted tool inspection projects only supplied structured fields without changing raw details", () => {
-  const details = '{"arguments":{"command":"<literal>\\n"},"result":{"content":"  output\\r\\n","detailedContent":"extra"},"error":{"message":"literal failure"}}';
-  const item = buildTimelineItems([entry({ eventType: "activity", kind: "ToolCall", name: "literal_tool", phase: "Started", details })])[0]!;
-  assert.equal(item.toolRecord?.fields.find(field => field.path === "result.content")?.text, "  output\r\n");
-  assert.equal(item.toolRecord?.raw, details);
-  assert.equal(item.details, formatDetails(details));
-});
+test("the records of a tool call make one row, with what its details and its live output are found by", () => {
+  const base = { eventType: "activity", kind: "ToolCall", activityId: "call", name: "shell_command", text: null } as const;
+  const requested = entry({ ...base, offset: "10", phase: "Requested", timestamp: "2026-09-22T10:00:00Z" });
+  const started = entry({ ...base, offset: "20", phase: "Started", timestamp: "2026-09-22T10:00:01Z" });
+  const [running, ...none] = buildTimelineItems([requested, started]);
+  assert.equal(none.length, 0, "A call that was requested and started is one row.");
+  assert.equal(running.toolPhase, "started");
+  assert.equal(running.timestamp, "2026-09-22T10:00:00Z", "The row stays where the call was requested.");
+  const identity = running.toolCall!;
+  assert.deepEqual([identity.providerId, identity.runId, identity.activityId, identity.kind, identity.name], ["provider", "run", "call", "ToolCall", "shell_command"]);
+  assert.deepEqual([identity.offset, identity.outputOffset, identity.startedAt, identity.endedAt], ["20", null, "2026-09-22T10:00:00Z", null]);
 
-test("tool inspection refuses ambiguous, malformed, oversized and truncated JSON", () => {
-  for (const details of ['{"arguments":1,"arguments":2}', '{"arguments":{"a":1,"\\u0061":2}}', '{', '[]', '{}',
-    '{"result":{"content":42}}', ' '.repeat(8193), '{"arguments":' + '['.repeat(33) + '0' + ']'.repeat(33) + '}']) {
-    const item = buildTimelineItems([entry({ eventType: "activity", kind: "ToolCall", details })])[0]!;
-    assert.equal(item.toolRecord, undefined);
-    assert.equal(item.details, formatDetails(details));
-  }
-  for (const patch of [{ detailsTruncated: true }, { eventType: "contentDelta" }, { kind: "Unknown" }])
-    assert.equal(buildTimelineItems([entry({ eventType: "activity", kind: "ToolCall", details: '{"arguments":{}}', ...patch })])[0]?.toolRecord, undefined);
+  const completed = entry({ ...base, offset: "40", phase: "Completed", timestamp: "2026-09-22T10:00:05Z" });
+  const output = entry({ offset: "30", kind: "ToolOutput", parentActivityId: "call", text: "exit_code: 1",
+    tool: { primary: null, isCommand: false, output: "failed", outputLines: 1, outputBytes: 6, fields: [], added: null, removed: null, exitCode: 1 } });
+  const [done, ...rest] = buildTimelineItems([requested, started, output, completed]);
+  assert.equal(rest.length, 0);
+  assert.equal(done.toolPhase, "completed");
+  assert.equal(done.toolExitCode, 1);
+  assert.equal(done.timestamp, "2026-09-22T10:00:00Z");
+  assert.deepEqual([done.toolCall!.offset, done.toolCall!.outputOffset, done.toolCall!.startedAt, done.toolCall!.endedAt],
+    ["40", "30", "2026-09-22T10:00:00Z", "2026-09-22T10:00:05Z"]);
+  // The same records give the same row: a tile that did not change is not drawn again.
+  assert.equal(buildTimelineItems([requested, started, output, completed])[0], done);
+  // A window that starts after the call was started does not know when it started.
+  assert.equal(buildTimelineItems([completed])[0].toolCall!.startedAt, null);
+  // A late report of the start does not replace the record that ended the call.
+  assert.equal(buildTimelineItems([requested, completed, started])[0].toolPhase, "completed");
+  // A file change is no tool call, and a live row has no record yet.
+  assert.equal(buildTimelineItems([entry({ ...base, kind: "FileChange", phase: "Completed" })])[0].toolCall, undefined);
+  assert.equal(buildTimelineItems([entry({ ...base, offset: JSON.stringify(["provider", "run", "call"]), phase: "Started" })])[0].toolCall!.offset, null);
 });
 
 test("file changes inspect supplied paths and count only validated per-file hunks without changing raw Copy", () => {
@@ -90,7 +104,7 @@ test("the images a tool gave the model get a card after the tile of its call", (
   const activity = entry({ eventType: "activity", kind: "ToolCall", activityId: "tool", phase: "Completed", name: "view_image", text: null });
   const output = entry({ offset: "2", kind: "ToolOutput", parentActivityId: "tool", text: "Viewed image shot.png.\n[Image: shot.png (image/png, 640x480)]",
     details: '{"toolName":"view_image"}', images,
-    tool: { primary: null, isCommand: false, output: "Viewed image shot.png.", outputLines: 2, outputBytes: 60, fields: [], added: null, removed: null } });
+    tool: { primary: null, isCommand: false, output: "Viewed image shot.png.", outputLines: 2, outputBytes: 60, fields: [], added: null, removed: null, exitCode: null } });
 
   const [tile, card, ...rest] = buildTimelineItems([activity, output]);
 
@@ -369,7 +383,7 @@ test("FileChange adds explicit unavailable projection while preserving legacy fi
         // plus the explicit unavailable projection for these truncated/missing records.
         const [generic] = buildTimelineItems([{ ...inputs[i], kind: "CommandExecution" }]);
         const kindLabel = inputs[i].kind === "FileChange" ? "File Change" : inputs[i].kind === "filechange" ? "Filechange" : "FILECHANGE";
-        assert.deepEqual(item, { ...generic, category: "file", icon: "file",
+        assert.deepEqual(item, { ...generic, toolCall: undefined, category: "file", icon: "file",
           subtitle: `${phase} · ${kindLabel}`, detailsLabel: "File change record details",
           fileChanges: { source: "", rows: [], partial: true } });
       });
@@ -407,10 +421,10 @@ test("details formatting and clipboard outcomes are deterministic", async () => 
 
 test("an edit shows the lines it added and removed, and its diff first among its fields", () => {
   const edit = entry({ eventType: "activity", kind: "ToolCall", phase: "Completed", name: "apply_patch", activityId: "edit", details: '{"toolName":"apply_patch"}',
-    tool: { primary: null, isCommand: false, output: "Patch applied:", outputLines: 2, outputBytes: 30, added: 2, removed: 1,
+    tool: { primary: null, isCommand: false, output: "Patch applied:", outputLines: 2, outputBytes: 30, added: 2, removed: 1, exitCode: null,
       fields: [{ path: "diff", text: "@@ -1 +1,2 @@\n-a\n+A\n+b\n", truncated: false }, { path: "arguments", text: "{}", truncated: false }] } });
   const read = entry({ offset: "2", eventType: "activity", kind: "ToolCall", phase: "Completed", name: "read_file", activityId: "read",
-    tool: { primary: "a.txt", isCommand: false, output: "a", outputLines: 1, outputBytes: 1, added: null, removed: null, fields: [] } });
+    tool: { primary: "a.txt", isCommand: false, output: "a", outputLines: 1, outputBytes: 1, added: null, removed: null, exitCode: null, fields: [] } });
   const [first, second] = buildTimelineItems([edit, read]);
   assert.deepEqual(first.toolChanges, { added: 2, removed: 1 });
   assert.equal(first.toolFields?.[0].path, "diff");

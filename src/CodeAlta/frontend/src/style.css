@@ -1,8 +1,5 @@
 .project-action-row { position: relative; }
 .project-list .project-actions-trigger { width: 30px; min-height: 30px; margin-left: auto; padding: 4px; }
-.app-dialog.tool-record-dialog { width: min(48rem, calc(100vw - 2rem)); max-height: 85dvh; overflow: auto; text-align: start; }
-.tool-record-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 35dvh; overflow: auto; }
-.tool-record-dialog code, .tool-record-dialog h2 { overflow-wrap: anywhere; }
 .prompt-image-attachments { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; padding: 4px 6px 6px; overflow-wrap: anywhere; }
 .prompt-image-attachments > p { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; }
 .prompt-image-tile { position: relative; }
@@ -750,9 +747,8 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .timeline-inline-preview { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 12px; }
 .ide-shell .message-body { min-width: 0; flex: 1; }
 .ide-shell .timeline-message .muted-text { font-size: var(--bp-typography-size-body-small); margin: 2px 0; }
-.timeline-details-dialog, .app-dialog.history-source, .app-dialog.tool-record-dialog { width: min(850px, calc(100vw - 32px)); max-height: 80dvh; overflow: hidden; }
-.app-dialog.tool-record-dialog { display: flex; }
-.timeline-details-dialog > header, .tool-record-dialog > header, .history-source > header { flex-shrink: 0; }
+.timeline-details-dialog, .app-dialog.history-source { width: min(850px, calc(100vw - 32px)); max-height: 80dvh; overflow: hidden; }
+.timeline-details-dialog > header, .history-source > header { flex-shrink: 0; }
 .dialog-panes { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: auto; }
 .dialog-panes .detail-pane { flex: 0 0 auto; max-height: 35dvh; overflow: auto; }
 .dialog-panes .detail-pane > h3 { margin: 0 0 8px; }
@@ -1172,8 +1168,6 @@ dialog:has(> .app-window) .dialog-panes .detail-pane:only-child { display: flex;
 dialog:has(> .app-window) .dialog-panes .detail-pane:only-child > :is(pre, .code-preview) { flex: 1 1 auto; min-height: 0; overflow: auto; }
 dialog:has(> .app-window) .file-dialog-summary { gap: 8px; }
 dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--text); text-transform: capitalize; }
-dialog.tool-record-dialog:has(> .app-window) .app-window-body > p:first-child code { padding: 2px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); font-size: 12.5px; }
-dialog:has(> .app-window) .tool-record-copy { align-self: flex-start; }
 
 .app-window-titlebar h2 > svg { vertical-align: -2px; margin-inline-end: 4px; color: var(--muted); }
 
@@ -1900,6 +1894,104 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .diff-preview-line[data-kind="removed"] .diff-preview-sign { color: var(--red); }
 .diff-preview-line[data-kind="note"] { color: var(--muted); font-style: italic; }
 .dialog-panes .detail-pane.detail-pane-diff { max-height: 60dvh; }
+
+/* The window of a tool call: a line of facts, then tabs. The view of the first tab fills the window. */
+dialog.tool-call-dialog:has(> .app-window) > .app-window > .app-window-body { gap: 8px; padding: 10px 14px 12px; overflow: hidden; }
+.tool-title { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; vertical-align: middle; }
+.app-window-titlebar h2 > .tool-title > svg { flex: none; margin: 0; color: var(--accent); }
+.tool-title-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--bp-typography-family-mono); font-size: 13px; }
+.tool-state.bp6-tag { flex: none; min-height: 18px; font-size: 11px; font-weight: 500; letter-spacing: 0; }
+.tool-state .activity-spinner { color: currentColor; }
+.tool-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; min-height: 22px; color: var(--muted); font-size: 12px; }
+.tool-fact { display: inline-flex; align-items: center; gap: 5px; min-width: 0; white-space: nowrap; }
+.tool-fact > svg { flex: none; }
+.tool-fact-path { flex: 1 1 180px; overflow: hidden; font-family: var(--bp-typography-family-mono); font-size: 11.5px; }
+/* A folder too long for its place loses its start: its last names say where the command ran. */
+.tool-fact-path > bdi { min-width: 0; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.tool-summary .bp6-tag { min-height: 18px; font-size: 11px; }
+.tool-summary .file-counts { font: 12px/16px var(--bp-typography-family-mono); }
+.tool-summary .file-counts b, .tool-file-header .file-counts b, .tool-file-tab .file-counts b { color: var(--green); font-weight: normal; }
+.tool-summary .file-counts em, .tool-file-header .file-counts em, .tool-file-tab .file-counts em { color: var(--red); font-style: normal; }
+.tool-error.bp6-callout { flex: none; font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-tabs.bp6-tabs { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.tool-tabs > .bp6-tab-list { flex: none; border-bottom: 1px solid var(--line); }
+.tool-tabs > .bp6-tab-list > .bp6-tab { font-size: 13px; line-height: 28px; }
+.tool-tabs > .bp6-tab-panel { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; margin-top: 10px; }
+.tool-panel { flex: 1 1 auto; display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0; overflow: auto; }
+.tool-panel:is([data-view="shell"], [data-view="read"], [data-view="edit"]) { overflow: hidden; }
+
+/* A command as it is typed, and the terminal that shows what it wrote. */
+.tool-command { flex: none; display: flex; align-items: flex-start; gap: 8px; padding: 7px 6px 7px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); }
+.tool-command-prompt { flex: none; color: var(--green); font: 13px/1.55 var(--bp-typography-family-mono); user-select: none; }
+dialog.tool-call-dialog .tool-command pre.tool-command-text { flex: 1 1 auto; min-width: 0; max-height: 8lh; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.55 var(--bp-typography-family-mono); }
+.tool-command-text:focus-visible, .tool-code:focus-visible, .tool-output:focus-visible, .tool-code-lines:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tool-copy.bp6-button { flex: none; min-width: 24px; min-height: 24px; padding: 0; color: var(--muted); }
+.tool-copy.bp6-button:hover { color: var(--text); }
+.tool-shell { flex: 1 1 auto; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.tool-terminal-frame { position: relative; flex: 1 1 auto; min-height: 140px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); overflow: hidden; }
+.tool-terminal, .output-terminal { position: absolute; inset: 0; }
+.output-terminal .xterm { height: 100%; padding: 8px 0 8px 12px; }
+.output-terminal .xterm-viewport { background-color: transparent !important; }
+.tool-empty, .tool-waiting, .tool-partial { margin: 0; color: var(--muted); font-size: 12.5px; }
+.tool-partial { flex: none; font-size: 11.5px; }
+.tool-terminal-frame > :is(.tool-empty, .tool-waiting) { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+
+/* A file: its name, then its lines with their numbers or the rows of its diff. */
+.tool-read, .tool-file { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.tool-file-header { flex: none; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px 6px 0 0; background: var(--panel-2); font-size: 12.5px; }
+.tool-file-header > strong { flex: 0 0 auto; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.tool-file-header > small { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11.5px; direction: rtl; text-align: left; }
+.tool-file-facts { flex: none; display: inline-flex; align-items: center; gap: 8px; margin-inline-start: auto; color: var(--muted); font-size: 11.5px; }
+.tool-file-header .file-counts { font: 12px/16px var(--bp-typography-family-mono); }
+.tool-code-lines { flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 6px 6px; background: var(--bg); font: 12px/1.6 "Cascadia Code", "SFMono-Regular", Consolas, monospace; tab-size: 4; }
+.tool-code-line { display: grid; grid-template-columns: calc(var(--tool-line-digits, 3) * 1ch + 2ch) minmax(0, 1fr); min-width: max-content; white-space: pre; }
+.tool-code-number { padding-right: 1ch; border-right: 1px solid var(--line); color: var(--muted); text-align: right; opacity: .75; user-select: none; }
+.tool-code-text { padding-left: 1ch; }
+.tool-file > .diff-preview { flex: 1 1 auto; min-height: 0; border-top: 0; border-radius: 0 0 6px 6px; }
+.tool-edit { flex: 1 1 auto; display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
+/* Several files: a tab per file on the left, the changes of the chosen one on the right. */
+.tool-edit-files.bp6-tabs { flex: 1 1 auto; display: flex; gap: 10px; min-width: 0; min-height: 0; }
+.tool-edit-files > .bp6-tab-list { flex: 0 0 clamp(160px, 27%, 280px); align-items: stretch; min-width: 0; overflow: hidden auto; }
+.tool-edit-files > .bp6-tab-list > .bp6-tab { display: flex; width: 100%; min-width: 0; padding: 0 8px; font-size: 12.5px; line-height: 28px; }
+.tool-edit-files > .bp6-tab-panel { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; margin: 0; padding: 0; }
+.tool-file-tab { flex: 1 1 auto; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tool-file-tab-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-file-tab .file-counts { flex: none; font: 11px/16px var(--bp-typography-family-mono); }
+
+/* Any other call: its arguments by name, then its result. */
+.tool-generic, .tool-details { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.tool-section { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tool-section > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 24px; }
+dialog.tool-call-dialog .app-window-body .tool-section > header > h3 { margin: 0; }
+dialog.tool-call-dialog .app-window-body .tool-section > header > h3[data-name] { font-family: var(--bp-typography-family-mono); letter-spacing: 0; text-transform: none; }
+dialog.tool-call-dialog .app-window-body :is(pre.tool-code, pre.tool-output) { margin: 0; padding: 8px 10px; overflow: auto; background: var(--bg); font: 12px/1.55 "Cascadia Code", "SFMono-Regular", Consolas, monospace; tab-size: 4; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-markdown { min-width: 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font-size: 13px; }
+.tool-markdown > .markdown-content > :first-child { margin-top: 0; }
+.tool-markdown > .markdown-content > :last-child { margin-bottom: 0; }
+.tool-code > code { padding: 0; border: 0; background: transparent; font: inherit; }
+.tool-arguments, .tool-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 12.5px; }
+.tool-arguments > div, .tool-facts > div { display: contents; }
+.tool-arguments dt, .tool-facts dt { color: var(--muted); }
+.tool-arguments dt, .tool-arguments dd, .tool-facts dd { font-family: var(--bp-typography-family-mono); font-size: 12px; }
+.tool-arguments dd, .tool-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.tool-record + .tool-record { margin-top: 8px; }
+dialog.tool-call-dialog .app-window-body .tool-record > h4 { margin: 0 0 4px; color: var(--muted); font: 600 11.5px/1.4 var(--bp-typography-family-mono); }
+.tool-listing { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 3px 14px; margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font-size: 12.5px; list-style: none; }
+.tool-listing > li { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.tool-listing > li > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-search { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.tool-search-rows { overflow: auto; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 6px 6px; background: var(--bg); font: 12px/1.6 "Cascadia Code", "SFMono-Regular", Consolas, monospace; tab-size: 4; }
+.tool-search-rows mark { border-radius: 2px; background: color-mix(in srgb, var(--yellow) 38%, transparent); color: inherit; }
+.tool-images { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.tool-image { margin: 0; }
+.tool-image img { display: block; max-width: 100%; max-height: 62dvh; border: 1px solid var(--line); border-radius: 6px; }
+.tool-image figcaption { margin-top: 4px; color: var(--muted); font-size: 11.5px; }
+.tool-image-missing { display: inline-flex; align-items: center; gap: 6px; padding: 18px; color: var(--muted); font-size: 12px; }
+.tool-paths { margin: 0; padding-left: 18px; font: 12px/1.6 var(--bp-typography-family-mono); overflow-wrap: anywhere; }
+/* A running call on its tile: the dots turn where the dot of its state is. */
+.tool-state-spinner { vertical-align: 0; margin-inline-end: 1px; }
+.ide-shell .tool-exit-code { color: var(--red); white-space: nowrap; }
+.tool-argument-preview[data-path] { direction: rtl; text-align: left; }
 .detail-pane-diff > h3 { display: flex; align-items: baseline; gap: 10px; }
 .ide-shell .tool-changes { font: var(--bp-typography-size-code-small)/var(--bp-typography-line-height-large) var(--bp-typography-family-mono); }
 .ide-shell .message-heading > .tool-changes { margin-inline: 2px 4px; }

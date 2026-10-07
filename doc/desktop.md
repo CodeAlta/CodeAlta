@@ -698,6 +698,58 @@ alone. Consecutive tool calls of one run share a single **Tool calls** card, the
 change, a status row) starts a new card. Records that show nothing, such as usage updates or reasoning
 without text, do not.
 
+### Tool calls
+
+A tool call has one tile from the moment it is requested to its end. The tile names the tool and what it
+works on (the command of a shell call or of an `alta` call, a path, a query, the first file of a patch, or
+its arguments on one line), then its state, and what it wrote. While the call runs, the tile turns its
+dots, counts the lines and the size of its output and shows its last line. A shell command that ended
+shows its exit code when it is not zero, and the first line it wrote rather than the header of its result.
+
+Clicking a tile opens the window of the call, which follows the call like the tile does: opened on a
+running call, it shows the output as it comes and the result when the call ends. Its title has the name of
+the tool and its state. Under it a line of facts: the time the call took, the exit code, the size of the
+output, the files and the lines changed, the timeout and the working folder. Then two tabs:
+
+- The first tab depends on the call. **Output**, for a command: the command as it is typed, with the colors
+  of its shell, and a terminal that shows what the command wrote (xterm, read-only: colors, carriage
+  returns, selection, `Ctrl+C` to copy, the scrolling keys). The standard error follows the standard output
+  under a rule. **File**, for a file that was read: its lines with their numbers, in the colors of its
+  language. **Changes**, for an edit: the diff of the file with the line numbers of both sides, highlighted;
+  a new file is shown as the file it is; a call that changed several files (`apply_patch`) has a tab per
+  file on the left, each with its counts. Before the record of an edit has a diff (the call is running, was
+  refused or failed), the changes are read from its arguments: the patch of `apply_patch`, the old and new
+  text of `replace_in_file`, the content of `write_file`. **Result**, for any other call: its arguments by
+  name (a short value on the line of its name, a long text or a structure in a block), the images it gave
+  the model, and its result. The result of `grep` is shown by file with what matched marked, the one of
+  `list_dir` as entries with their icons, JSON is formatted (the records an `alta` command writes, one per
+  line, each under its type), a text with fenced code blocks is rendered as Markdown, and any other text is
+  shown as it is. A failed call says its error once, above the tabs.
+- **Details** has what the records hold as they are: the tool, the kind of call, the provider, the run and
+  the call identity, when it started and ended, its arguments as JSON and the text of its result, each
+  with a copy button, and the files the call read and modified.
+
+Where the data comes from:
+
+- **The row.** The timeline folds the records of a call (requested, started, ended) into one row, at the
+  time of the first record, with the key `tool:[provider, run, activity]` (`reconcileTimeline`). The live
+  view (`display.observe`) learns of a phase before the journal is read again: the row shows the later of
+  the two. The host adds to the row of a call a summary (`HistoryToolProjection`): the primary text, the
+  lines and bytes of the output, the lines added and removed, and the exit code of a shell command.
+- **The record.** A history row is bounded, so its texts can be cut. The window reads the whole record
+  with `toolCalls.read(expectedEpoch, sessionId, offset, outputOffset)`: the journal offsets of the call's
+  newest activity record and of its output record, as the row has them. The reply has the command, the
+  working folder, the exit code and the error when the record states them, and three texts (the arguments
+  as JSON, the output, the diff), each as a part of at most 256 Ki UTF-16 units with its whole length; the
+  page continues a longer text with `part` and `position`, up to 4 Mi units, beyond which it says that the
+  rest is too long to show. The page keeps the last 24 records it read. Reading is not tied to a project.
+- **The live output.** A tool reports its output while it runs as content deltas that no journal keeps
+  (`shell_command` sends each line). The runtime retains them per running call
+  (`RuntimeToolOutputProjection`, see `doc/runtime.md`) and `toolCalls.observe(expectedEpoch, sessionId,
+  activityId)` streams them: what the call wrote so far, then each addition, in items of at most 64 Ki
+  units, until the call ends. The page opens one channel per running call that a tile or a window shows
+  and closes it with them. When the call ends, the window shows the output of its record.
+
 A **Compaction completed** row's **Details** shows what the terminal shows for a local compaction:
 context before and after with the ratio and the target, the messages summarized and kept, the
 summarizer's calls and budgets, what fed it (messages, tool calls and outputs, reasoning, files) and
@@ -828,18 +880,11 @@ follow normally. Whole-message Copy still captures the full retained Markdown, n
 Equivalent history refreshes preserve code focus, selection and position. This does not change
 Notes, live Markdown, or the separate diagnostic Wrap/details control.
 
-Tool and file cards keep available persisted diagnostic/output detail text behind their collapsed **Details**
-disclosure. Inside it, **Wrap lines** is on by default and can be switched per card with a pointer or keyboard;
-turning it off scrolls long lines inside the detail pane. This only changes how the already loaded plain text
-is displayed: Markdown and copied content remain unchanged, and omitted or shortened details remain marked.
-There is no request for missing output, additional history, or live provider data when opening or wrapping a card.
-Persisted FileChange activities label this disclosure **File change record details**, regardless of phase
-or command presence. This identifies the supplied record, not applied changes, a complete diff or file-navigation authority.
-Persisted ToolCall messages hidden by a primary command/query/path/prompt summary remain available inside
-that disclosure as **Supplied activity message**, and in full retained-source Copy. The exact bounded message
-is not interpreted as an output or verified outcome; existing phase labels and omission/shortening warnings
-remain unchanged. Failed/no-summary messages still appear in the body without duplication. Live tool cards
-continue to show only their supplied name, reported phase and identity.
+File cards keep available persisted diagnostic/output detail text behind their **Details** button. This
+only shows the already loaded plain text: there is no request for missing output, additional history, or
+live provider data when opening it. Persisted FileChange activities label it **File change record
+details**, regardless of phase or command presence. This identifies the supplied record, not applied
+changes, a complete diff or file-navigation authority. Tool calls have their own window (see "Tool calls").
 Following the loaded timeline stays at the latest visible bottom across layout-only changes. Wheel, scroll-key,
 scrollbar (including a held drag after a pause) and touch-drag navigation can still unfollow when it coincides
 with a detail layout change; merely
@@ -1389,11 +1434,11 @@ and merged like any tab.
 ### Edits in the timeline
 
 The tile of a tool call that edited files (`write_file`, `apply_patch`, `replace_in_file` and the like)
-shows the lines it added and removed, and its details open with the diff: a row per line with the line
-numbers of both sides, a header per file and a rule per hunk. The host takes both from the `diff` of the
-call's record (`HistoryToolProjection`): the lines are counted over the whole diff, and up to 16 Ki
-UTF-16 units of it are sent, cut at the end of a line. The files of a **Modified files** card open in
-the same view.
+shows the lines it added and removed, and its window opens on the changes (see "Tool calls"): a row per
+line with the line numbers of both sides and a rule per hunk, in the colors of the language of the file.
+The host takes the counts from the `diff` of the call's record (`HistoryToolProjection`): the lines are
+counted over the whole diff, and up to 16 Ki UTF-16 units of it are sent with the row, cut at the end of
+a line; the window reads the whole diff. The files of a **Modified files** card open in the same rows.
 
 ### Code editor
 

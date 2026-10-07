@@ -14,7 +14,7 @@ const unavailable: TimelineImageState = { status: "failed" };
  * One image of a message: its state (undefined while it is being read) and a way to read it again. Nothing is
  * read until `enabled`. The component keeps what it shows, so an image that leaves the cache stays on screen.
  */
-function useTimelineImage(source: TimelineImageSource | undefined, index: number, enabled: boolean): [TimelineImageState | undefined, () => void] {
+export function useTimelineImage(source: TimelineImageSource | undefined, index: number, enabled: boolean): [TimelineImageState | undefined, () => void] {
   const latest = useRef(source); latest.current = source;
   const key = source?.key;
   const [attempt, setAttempt] = useState(0);

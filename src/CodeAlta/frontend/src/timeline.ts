@@ -4,7 +4,6 @@ import type { IconName } from "./AppIcon";
 import { compactionDetailsMarkdown, splitCheckpointSummary } from "./compactionDetails";
 import { projectFileChanges, type FileChanges } from "./fileChanges";
 import { projectTimelineImages, type TimelineImage } from "./timelineImages";
-import { projectToolRecord, type ToolRecord } from "./toolRecords";
 
 export type HistoryEntry = HistoryResponse["entries"][number];
 
@@ -35,7 +34,8 @@ export type TimelineItem = Readonly<{
   fileChanges?: FileChanges;
   /** The images attached to a user message, or the ones a tool gave the model; their content is read by index. */
   images?: ReadonlyArray<TimelineImage>;
-  toolRecord?: ToolRecord;
+  /** What names a tool call: its row, its details and its live output are found by it. */
+  toolCall?: ToolCallIdentity;
   toolPhase?: string;
   toolOutput?: string | null;
   toolOutputLines?: number;
@@ -43,9 +43,22 @@ export type TimelineItem = Readonly<{
   toolFields?: NonNullable<HistoryEntry["tool"]>["fields"];
   /** The lines an edit added to and removed from files, when the record of the call has its diff. */
   toolChanges?: Readonly<{ added: number; removed: number }>;
+  /** The exit code of a command, when its record has one. */
+  toolExitCode?: number | null;
   /** True for a prompt another agent session delivered, shown without its routing envelope. */
   delegated?: boolean;
 }>;
+
+/**
+ * The identity of a tool call and where its records are. `offset` is the journal offset of its newest
+ * activity record and `outputOffset` the one of its output record; both are null for a call the journal has
+ * not shown yet. `startedAt` and `endedAt` are the times of its first record and of the record that ended it,
+ * when the loaded window has them.
+ */
+export type ToolCallIdentity = Readonly<{ providerId: string; runId: string | null; activityId: string; kind: string; name: string | null;
+  offset: string | null; outputOffset: string | null; startedAt: string | null; endedAt: string | null;
+  /** The images of the output record: they are read at `outputOffset`. */
+  images?: ReadonlyArray<TimelineImage> }>;
 
 type JsonObject = Record<string, unknown>;
 
@@ -53,7 +66,7 @@ type JsonObject = Record<string, unknown>;
 // refreshed. Remembering the item of a record keeps a long timeline cheap to rebuild and lets its rows
 // see that nothing changed.
 const presented = new WeakMap<HistoryEntry, TimelineItem>();
-const withOutput = new WeakMap<HistoryEntry, { output: HistoryEntry; item: TimelineItem }>();
+const folded = new WeakMap<HistoryEntry, { first: HistoryEntry; output: HistoryEntry | undefined; item: TimelineItem }>();
 function presentedItem(entry: HistoryEntry): TimelineItem {
   let item = presented.get(entry);
   if (!item) presented.set(entry, item = toTimelineItem(entry, false));
@@ -64,12 +77,15 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
   const completed = new Set(entries
     .filter(entry => entry.eventType === "contentCompleted" && entry.contentId)
     .map(entry => contentKey(entry)));
-  const terminalActivities = new Set(entries
-    .filter(entry => entry.eventType === "activity" && entry.activityId && isTerminalPhase(entry.phase))
-    .map(entry => activityKey(entry)));
-  const representedActivities = new Set(entries
-    .filter(entry => entry.eventType === "activity" && entry.activityId)
-    .map(entry => activityKey(entry)));
+  // The records of one call (requested, started, ended) make one row: its newest record, where its first one is.
+  const calls = new Map<string, { first: HistoryEntry; last: HistoryEntry }>();
+  for (const entry of entries) {
+    if (entry.eventType !== "activity" || !entry.activityId) continue;
+    const key = activityKey(entry), call = calls.get(key);
+    if (!call) calls.set(key, { first: entry, last: entry });
+    // A record that ended the call is not replaced by a late report of its start.
+    else if (!isTerminalPhase(call.last.phase) || isTerminalPhase(entry.phase)) call.last = entry;
+  }
   const deltas = new Map<string, TimelineItem>();
   const outputs = new Map<string, HistoryEntry>();
   for (const entry of entries) {
@@ -84,9 +100,8 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
     if (entry.eventType === "raw" || entry.eventType === "notes") continue;
     // These update the TUI's status/usage surfaces, not its conversation timeline.
     if (entry.eventType === "sessionUpdate" && !["warning", "reconnecting", "modelchanged", "compactionstarted", "compactioncompleted", "diffupdated"].includes(entry.kind?.toLowerCase() ?? "")) continue;
-    if (entry.eventType === "activity" && entry.activityId && !isTerminalPhase(entry.phase) && terminalActivities.has(activityKey(entry))) continue;
     if ((entry.eventType === "contentCompleted" || entry.eventType === "contentDelta") &&
-        isToolOutput(entry.kind) && entry.parentActivityId && representedActivities.has(parentActivityKey(entry))) {
+        isToolOutput(entry.kind) && entry.parentActivityId && calls.has(parentActivityKey(entry))) {
       // The text of an output is shown on the tile of its call; the images the model was given get a card.
       if (entry.eventType === "contentCompleted" && entry.images) { const card = presentedItem(entry); if (card.category === "image") result.push(card); }
       continue;
@@ -110,18 +125,29 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
       }
       continue;
     }
-    const item = presentedItem(entry);
-    const output = entry.eventType === "activity" ? outputs.get(activityKey(entry)) : undefined;
-    if (!output?.tool) { result.push(item); continue; }
-    // A typed completed output belongs to this exact session/provider/run/activity.
-    // Never count a bounded preview or aggregate retained streaming deltas as a total.
-    let combined = withOutput.get(entry);
-    if (combined?.output !== output) withOutput.set(entry, combined = { output, item: { ...item, toolOutput: output.tool.output, toolOutputLines: output.tool.outputLines,
-      toolOutputBytes: output.tool.outputBytes,
-      toolFields: [...(item.toolFields ?? []), { path: "content", text: output.text ?? "", truncated: output.textTruncated || output.bodyOmitted }] } });
-    result.push(combined.item);
+    const call = entry.eventType === "activity" && entry.activityId ? calls.get(activityKey(entry)) : undefined;
+    if (!call) { result.push(presentedItem(entry)); continue; }
+    if (entry === call.first) result.push(callItem(call.first, call.last, outputs.get(activityKey(entry))));
   }
   return result.filter(item => item.category !== "reasoning" || !!item.markdown?.trim());
+}
+
+// The row of a call: what its newest record says, at the time of its first one, with the output record of the
+// call when there is one. A typed completed output belongs to this exact session/provider/run/activity; a
+// bounded preview or retained streaming deltas are never counted as a total.
+function callItem(first: HistoryEntry, last: HistoryEntry, output: HistoryEntry | undefined): TimelineItem {
+  const known = folded.get(last);
+  if (known && known.first === first && known.output === output) return known.item;
+  const base = presentedItem(last);
+  const attached = output?.tool ? output : undefined;
+  const item: TimelineItem = { ...base, timestamp: first.timestamp,
+    toolCall: base.toolCall && { ...base.toolCall, outputOffset: attached?.offset ?? null, images: projectTimelineImages(attached?.images),
+      startedAt: isTerminalPhase(first.phase) ? null : first.timestamp, endedAt: isTerminalPhase(last.phase) ? last.timestamp : null },
+    ...attached ? { toolOutput: attached.tool!.output, toolOutputLines: attached.tool!.outputLines, toolOutputBytes: attached.tool!.outputBytes,
+      toolExitCode: attached.tool!.exitCode ?? base.toolExitCode,
+      toolFields: [...(base.toolFields ?? []), { path: "content", text: attached.text ?? "", truncated: attached.textTruncated || attached.bodyOmitted }] } : {} };
+  folded.set(last, { first, output, item });
+  return item;
 }
 
 function contentKey(entry: HistoryEntry): string {
@@ -269,13 +295,16 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     copyMarkdown,
     fileChanges: projectFileChanges(entry),
     images: category === "user" ? projectTimelineImages(entry.images) : category === "image" ? toolImages : undefined,
-    toolRecord: projectToolRecord(entry),
+    toolCall: entry.eventType === "activity" && entry.activityId && category === "tool" ? { providerId: entry.providerId, runId: entry.runId,
+      activityId: entry.activityId, kind, name: entry.name, offset: /^\d+$/.test(entry.offset) ? entry.offset : null, outputOffset: null,
+      startedAt: null, endedAt: null } : undefined,
     toolPhase: entry.eventType === "activity" ? entry.phase?.toLowerCase() : undefined,
     toolOutput: entry.tool?.output,
     toolOutputLines: entry.tool?.outputLines,
     toolOutputBytes: entry.tool?.outputBytes,
     toolFields: entry.tool?.fields,
     toolChanges: entry.tool?.added != null && entry.tool.removed != null ? { added: entry.tool.added, removed: entry.tool.removed } : undefined,
+    toolExitCode: entry.tool?.exitCode,
     delegated: delegated ? true : undefined,
   };
 }

@@ -75,22 +75,36 @@ Each pane has its own timeline and prompt. Tabs are workspace-wide: sessions fro
 
 ## Timeline cards
 
-{{ alta_shot "alta-desktop-tool-details.webp" "alta-tool-input-output-dialog.png" "Tool call details opened from the timeline" "Tool inputs and outputs stay inspectable: open a tool call to read its arguments and its output." }}
-
 {{ alta_shot "alta-desktop-modified-files.webp" "alta-modified-files.png" "Diff of a modified file opened from the timeline" "Modified-file cards summarize changed files and diff totals. Open a file to read its diff." }}
 
 Timeline entries are grouped so the important parts stay visible:
 
 - assistant messages render as Markdown;
 - reasoning and status messages explain what the agent is doing;
-- tool calls appear as compact tiles with expandable details; a call that edited files shows the lines it added and removed, and its details start with the diff;
-- tool results can be collapsed to avoid flooding the transcript;
+- tool calls appear as compact tiles, side by side;
 - the modified-files card summarizes per-file `+/-` diff totals and can show diff details;
 - statistics cards summarize timing, tools, usage, and other plugin-projected details.
 
 Use `F3` / `F4` to jump between previous and next user or assistant messages. Use `Ctrl+F3` to jump to the first message and `Ctrl+F4` to return to the bottom.
 
 The desktop timeline opens on the latest messages of a session. Use **Load previous messages** at the top to read earlier turns.
+
+### Tool calls
+
+{{ alta_shot "alta-desktop-tool-details.webp" "alta-tool-input-output-dialog.png" "Details of a tool call opened from the timeline" "Open a tool call to follow a command while it runs, or to read the file or the diff it worked on." }}
+
+A tool call has one tile, from its start to its end. The tile shows the tool, what it works on (a command, a file, a search), its state and what it wrote. While a command runs, its tile shows the last line it wrote.
+
+In CodeAlta Desktop, click a tile to open the window of the call. The window follows the call while it runs:
+
+- **A command** shows its command line and a terminal with its output, as it comes.
+- **A file that was read** shows its lines with their numbers, in the colors of its language.
+- **An edit** shows the diff of the file. A patch that changes several files has a tab per file.
+- **A search** shows its matches by file, and **any other tool** its arguments and its result.
+
+The line under the title says how long the call took, the exit code of a command, and the lines added and removed. The **Details** tab has the arguments and the result as the tool received and returned them.
+
+In the TUI, a tile opens a dialog with the details of the call and its output.
 
 ## Prompt editor and prompt queue
 

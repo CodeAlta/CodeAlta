@@ -127,6 +127,7 @@ const noAutomations = async () => ({ status: "unavailable", paused: false, scann
 export const automations = Object.freeze({ list: noAutomations, refresh: noAutomations, save: unavailable, delete: unavailable, setEnabled: unavailable,
   allow: unavailable, setPaused: unavailable, run: unavailable, runs: unavailable, preview: unavailable, watch: unavailable });
 export const promptImages = Object.freeze({ read: unavailable });
+export const toolCalls = Object.freeze({ read: unavailable, observe: unavailable });
 // The demo keeps the user's color schemes in the browser, where the desktop keeps a file for each.
 const demoSchemesKey = "codealta.demo.colorSchemes.v1";
 const noColors: ColorSchemeColors = { background: null, text: null, muted: null, accent: null, success: null, warning: null, danger: null };

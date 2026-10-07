@@ -39,14 +39,27 @@ test("a persisted completion replaces its matching live text, but not another ru
     .map(row => row.source), ["history", "history", "liveText"]);
 });
 
-test("a live replacement supersedes incomplete journal deltas and tool starts without hiding completed history", () => {
+test("a live replacement supersedes incomplete journal deltas, and a tool call keeps one row and one key while it runs", () => {
   const tool = { timestamp: null, sequence: null, providerId: "provider", runId: "run", activityId: "tool", phase: "Started", name: "Read", isNameTruncated: false };
   const view = session({ toolActivities: [tool] });
-  const rows = reconcileTimeline([entry({ eventType: "contentDelta" }), entry({ offset: "2", eventType: "activity",
-    kind: "ToolCall", activityId: "tool", contentId: null, phase: "Requested" })], view);
-  assert.deepEqual(rows.map(row => row.source), ["liveTool", "liveText"]);
-  assert.deepEqual(reconcileTimeline([entry({ offset: "2", eventType: "activity", kind: "ToolCall", activityId: "tool",
-    contentId: null, phase: "Completed" })], view).map(row => row.source), ["history", "liveText"]);
+  const key = 'tool:["provider","run","tool"]';
+  // Before the journal shows the call, the live view does.
+  assert.deepEqual(reconcileTimeline([], view).map(row => [row.source, row.key]), [["liveTool", key], ["liveText", 'text:["run","content","assistant"]']]);
+  // The record of the call takes the row: it says more than the live one, and the phase is the later of the two.
+  const requested = entry({ offset: "2", eventType: "activity", kind: "ToolCall", activityId: "tool", contentId: null, phase: "Requested" });
+  const rows = reconcileTimeline([entry({ eventType: "contentDelta" }), requested], view);
+  assert.deepEqual(rows.map(row => [row.source, row.key]), [["history", key], ["liveText", 'text:["run","content","assistant"]']]);
+  assert.equal(rows[0].source === "history" && rows[0].item.toolPhase, "started");
+  assert.equal(rows[0].source === "history" && rows[0].item.toolCall?.offset, "2");
+  // The same view gives the same row, so that its tile is not drawn again.
+  const again = reconcileTimeline([entry({ eventType: "contentDelta" }), requested], view);
+  assert.equal(again[0].source === "history" && rows[0].source === "history" && again[0].item === rows[0].item, true);
+  // The record that ended the call is not taken back by an older live phase, and the key is still the same without a live view.
+  const completed = entry({ offset: "3", eventType: "activity", kind: "ToolCall", activityId: "tool", contentId: null, phase: "Completed" });
+  const ended = reconcileTimeline([requested, completed], view);
+  assert.deepEqual(ended.map(row => [row.source, row.key]), [["history", key], ["liveText", 'text:["run","content","assistant"]']]);
+  assert.equal(ended[0].source === "history" && ended[0].item.toolPhase, "completed");
+  assert.deepEqual(reconcileTimeline([requested, completed], null).map(row => row.key), [key]);
 });
 
 test("no run identity never erases persisted content, and absent live state does not change history", () => {

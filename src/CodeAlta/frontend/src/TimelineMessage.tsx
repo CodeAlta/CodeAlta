@@ -6,11 +6,13 @@ import { writeMarkdown, type TimelineItem } from "./timeline";
 import { useShellLanguage } from "./shellLanguage";
 import { timelineTime } from "./sessionTime";
 import { FileChangeInspection } from "./FileChangeInspection";
-import { ToolRecordInspection } from "./ToolRecordInspection";
 import type { HistorySourceTarget } from "./HistorySource";
 import { TimelineDetails } from "./TimelineDetails";
 import { TimelineImages } from "./TimelineImageStrip";
 import type { TimelineImageSource } from "./timelineImages";
+import { ActivitySpinner } from "./ActivitySpinner";
+import { formatSize, toolState } from "./toolCall";
+import { useToolOutput, type ToolOutputs } from "./toolOutput";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
@@ -28,7 +30,11 @@ export function commandPreview(source: string): string {
 type TimelineMessageProps = { item: TimelineItem; canInspect?: () => boolean; toolTile?: boolean;
   historySource?: HistorySourceTarget; onOpenSource?: (target: HistorySourceTarget) => void;
   /** Reads the images of the item, when it has some. */
-  imageSource?: TimelineImageSource };
+  imageSource?: TimelineImageSource;
+  /** The key of the row, and what opens the window of a tool call: given the key and the button that asked. */
+  rowKey?: string; onOpenTool?: (rowKey: string, origin: HTMLButtonElement) => void;
+  /** The live output of the tool calls: the tile of a running call says what it writes. */
+  toolOutputs?: ToolOutputs };
 
 // A long timeline is rendered again on every page of history and every live update: a row whose item,
 // source range and image reader are the same has nothing to redo.
@@ -36,13 +42,18 @@ function sameMessage(previous: TimelineMessageProps, next: TimelineMessageProps)
   const before = previous.historySource, after = next.historySource;
   return previous.item === next.item && previous.toolTile === next.toolTile && previous.canInspect === next.canInspect
     && previous.onOpenSource === next.onOpenSource && previous.imageSource?.key === next.imageSource?.key
+    && previous.rowKey === next.rowKey && previous.onOpenTool === next.onOpenTool && previous.toolOutputs === next.toolOutputs
     && (before === after || !!before && !!after && before.start === after.start && before.end === after.end
       && before.revision.sessionId === after.revision.sessionId && before.revision.length === after.revision.length
       && before.revision.lastWriteUtcTicks === after.revision.lastWriteUtcTicks);
 }
 
-export const TimelineMessage = memo(function TimelineMessage({ item, canInspect, historySource, onOpenSource, toolTile = false, imageSource }: TimelineMessageProps) {
+export const TimelineMessage = memo(function TimelineMessage({ item, canInspect, historySource, onOpenSource, toolTile = false, imageSource,
+  rowKey, onOpenTool, toolOutputs }: TimelineMessageProps) {
   const { t, locale } = useShellLanguage();
+  const state = item.category === "tool" ? toolState(item.toolPhase) : null;
+  // A call that runs is followed: its tile says how much it wrote and its last line.
+  const live = useToolOutput(toolOutputs, item.toolCall?.activityId, toolTile && (state === "running" || state === "pending"));
   const timestamp = timelineTime(item.timestamp, locale);
   const toolTrigger = useRef<HTMLButtonElement>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
@@ -123,7 +134,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
   const excerpt = (item.summary || body || item.detailMarkdown || "").split(/\r?\n\s*\r?\n/)[0];
   const codePreview = item.category === "tool" && item.summaryIsCode
     ? commandPreview(excerpt) : null;
-  const toolOutput = item.toolOutput ?? item.toolRecord?.fields.find(field => ["result.content", "result.detailedContent", "output.body", "error.message"].includes(field.path))?.text;
+  const toolOutput = live?.last || item.toolOutput;
   const outcome = ({ completed: "Completed", failed: "Failed", canceled: "Canceled", requested: "Pending",
     started: "Running", progressed: "Running", selected: "Running", deselected: "Completed" } as Record<string, "Completed" | "Failed" | "Canceled" | "Pending" | "Running">)[item.toolPhase ?? ""];
   // Categories below have fixed UI titles in toTimelineItem; tool/provider names do not.
@@ -131,9 +142,14 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
     : item.category === "assistant" ? t("Assistant") : item.category === "notes" ? t("Notes") : item.category === "error" ? t("Error")
     : item.category === "reasoning" ? t(item.title === "Reasoning summary" ? "Reasoning summary" : "Reasoning") : item.title;
   const copyLabel = copyState === "copied" ? t("Copied") : copyState === "failed" ? t("Copy failed") : t("Copy {title} as Markdown", { title });
+  // A tool call has its own window, which the timeline holds: it follows the call while it runs. A row that is
+  // no call (an output whose call is not in the window) keeps the details of its record.
+  const callWindow = item.category === "tool" && !!item.toolCall && !!onOpenTool && !!rowKey;
   function openDetails(origin: HTMLButtonElement) {
-    if (current() && origin.isConnected && !origin.closest('[inert], [hidden]')
-      && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) setDetails({ item, origin, current: canInspect });
+    if (!current() || !origin.isConnected || origin.closest('[inert], [hidden]')
+      || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+    if (callWindow) onOpenTool!(rowKey!, origin);
+    else setDetails({ item, origin, current: canInspect });
   }
   return <article className={`message timeline-message message-${item.category}${compact ? " timeline-compact" : ""}`}
     onClick={event => {
@@ -146,15 +162,15 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
       <div className="message-heading">
         <span>{item.category === "tool" && hasDetails ? <button ref={toolTrigger} type="button" className="tool-tile-title" aria-haspopup="dialog"
           onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
-          onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}><span className="tool-state-dot" aria-hidden="true">●</span> <strong>{title}</strong></button>
+          onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}>{state === "running"
+            ? <ActivitySpinner size={10} className="tool-state-spinner" /> : <span className="tool-state-dot" aria-hidden="true">●</span>} <strong>{title}</strong></button>
           : item.category !== "reasoning" && <strong>{title}</strong>}{!toolTile && item.subtitle && <small>{item.subtitle === "Sending…" || item.subtitle === "Pending" || item.subtitle === "Failed" || item.subtitle === "Streaming" ? t(item.subtitle) : item.subtitle}</small>}</span>
         {compact && item.html ? <div className="timeline-inline-preview timeline-plugin-html"><PluginHtml html={item.html} pluginKey={item.pluginKey} /></div>
           : compact && excerpt && !toolTile && item.category !== "file" && <div className="timeline-inline-preview">{codePreview !== null ? <code>{codePreview}</code>
           : item.summary ? excerpt : <MarkdownContent source={excerpt} />}</div>}
         {!toolTile && item.toolChanges && <span className="file-counts tool-changes" title={t("Lines added and removed by this call")}><b>+{item.toolChanges.added}</b> <em>−{item.toolChanges.removed}</em></span>}
         <span className="message-actions">
-          {item.toolRecord && <ToolRecordInspection key={item.toolRecord.source} record={item.toolRecord} canInspect={canInspect} />}
-          {hasDetails && <button type="button" className="timeline-detail-trigger" aria-label={t("Details")} title={t("Details")} aria-haspopup="dialog"
+          {hasDetails && !callWindow && <button type="button" className="timeline-detail-trigger" aria-label={t("Details")} title={t("Details")} aria-haspopup="dialog"
             onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
             onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}><AppIcon name="info" size={15} /></button>}
           {item.copyMarkdown && <button type="button" className={`copy-markdown copy-${copyState}`} onClick={() => void copy()}
@@ -163,14 +179,19 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
         </span>
       </div>
       {toolTile && codePreview && <code className="tool-command-preview">{codePreview}</code>}
+      {/* A path too long for the tile loses its start: its last names say which file it is. */}
+      {toolTile && !codePreview && item.summary && (/[\\/]/.test(item.summary) && !/\s/.test(item.summary)
+        ? <div className="tool-argument-preview" data-path title={item.summary}><bdi>{item.summary}</bdi></div>
+        : <div className="tool-argument-preview">{commandPreview(item.summary)}</div>)}
       {toolTile && <div className="tool-result-summary">
         {outcome && <span className="tool-outcome">{t(outcome)}</span>}
+        {!!item.toolExitCode && <span className="tool-exit-code">{t("Exit code {code}", { code: item.toolExitCode })}</span>}
         {item.toolChanges && <span className="file-counts tool-changes" title={t("Lines added and removed by this call")}><b>+{item.toolChanges.added}</b> <em>−{item.toolChanges.removed}</em></span>}
-        {item.toolOutputBytes != null && item.toolOutputLines != null && <span className="tool-output-stats">{item.toolOutputLines}L · {(item.toolOutputBytes / 1024).toFixed(1)} KB</span>}
+        {live && live.total > 0 ? <span className="tool-output-stats">{live.lines}L · {formatSize(live.total)}</span>
+          : item.toolOutputBytes != null && item.toolOutputLines != null && <span className="tool-output-stats">{item.toolOutputLines}L · {(item.toolOutputBytes / 1024).toFixed(1)} KB</span>}
         {toolOutput && <span className="tool-result-preview" title={toolOutput.slice(0, 512)}>{commandPreview(toolOutput)}</span>}
       </div>}
       {!compact && item.summary && (item.summaryIsCode ? <code className="timeline-primary-code">{item.summary}</code> : <p className="timeline-summary">{item.summary}</p>)}
-      {toolTile && !codePreview && item.summary && <div className="tool-argument-preview">{commandPreview(item.summary)}</div>}
       {!compact && (body && longBody ? <>
         <button type="button" className="quiet-button long-message-toggle" aria-controls={bodyId}
           aria-expanded={expanded} disabled={!current()}

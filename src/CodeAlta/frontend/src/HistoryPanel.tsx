@@ -15,6 +15,10 @@ import { useShellLanguage } from "./shellLanguage";
 import { HistorySource, type HistorySourceTarget } from "./HistorySource";
 import type { OutgoingMessage } from "./sessionOperations";
 import { inlineImageSource, type TimelineImageReader, type TimelineImageSource } from "./timelineImages";
+import { ToolCallDialog } from "./ToolCallDialog";
+import type { ToolCallReader } from "./toolCallReader";
+import type { ToolOutputs } from "./toolOutput";
+import type { TimelineItem } from "./timeline";
 
 // The production caller supplies readTimeline (workspace.historyTimeline). The injection seam lets the mounted
 // browser fixture exercise this exact component with an isolated, revisioned test journal.
@@ -42,7 +46,7 @@ const noEntries: HistoryTimeline["entries"] = [];
  * changes, not on every page the panel reads, and each row only when its own item changed.
  */
 const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outgoing, onAcknowledgeOutgoing, pluginEvents, echoes: showEchoes, empty,
-  revision, sources, readImages, canInspect, onOpenSource }: {
+  revision, sources, readImages, readTool, toolOutputs, canInspect, onOpenSource }: {
   sessionId: string; rows: readonly ReconciledRow[]; entries: HistoryTimeline["entries"];
   outgoing: readonly OutgoingMessage[]; onAcknowledgeOutgoing?: (keys: readonly string[]) => void;
   pluginEvents?: readonly SessionPluginEvent[];
@@ -52,8 +56,22 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   empty: boolean;
   revision: HistoryTimeline["revision"] | null; sources: ReadonlyMap<string, NonNullable<HistoryTimeline["sources"]>[number]>;
   readImages?: TimelineImageReader; canInspect: () => boolean; onOpenSource: (target: HistorySourceTarget) => void;
+  /** Reads the whole record of a tool call, and follows what a running one writes. */
+  readTool?: ToolCallReader; toolOutputs?: ToolOutputs;
 }) {
   const { t } = useShellLanguage();
+  // The window of a tool call is held here, by the key of its row: the row changes while the call runs
+  // (a live row, then the records of the journal) and the window follows it.
+  const [openTool, setOpenTool] = useState<{ sessionId: string; key: string; origin: HTMLButtonElement } | null>(null);
+  const openedItem = useRef<TimelineItem | null>(null);
+  const openToolWindow = useCallback((key: string, origin: HTMLButtonElement) => { openedItem.current = null; setOpenTool({ sessionId, key, origin }); }, [sessionId]);
+  const closeToolWindow = useCallback(() => setOpenTool(current => {
+    const origin = current?.origin;
+    if (origin) requestAnimationFrame(() => {
+      if (origin.isConnected && !origin.closest('[inert], [hidden]') && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) origin.focus();
+    });
+    return null;
+  }), []);
   const items = rows.slice();
   // Match each echo to at most one new source message. Never deduplicate repeated
   // prompts against old history or use this display match to settle a Send intent.
@@ -92,6 +110,11 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   }
   orderTimelineRows(items);
   const groups = groupTimelineTools(items, entries);
+  const opened = openTool?.sessionId === sessionId ? items.find(row => row.key === openTool.key) : undefined;
+  if (opened) openedItem.current = opened.source === "history" ? opened.item : opened.source === "liveTool" ? liveToolItem(opened.row) : openedItem.current;
+  // A row that left the window (older history slid away) keeps its details open on what it last was.
+  const shownTool = openTool?.sessionId === sessionId ? openedItem.current : null;
+  const toolImages = shownTool?.toolCall?.images?.length && shownTool.toolCall.outputOffset ? readImages?.(shownTool.toolCall.outputOffset) : undefined;
   return <>
     {items.length === 0 && empty && <div className="empty-history">{t("No visible events in this history.")}</div>}
     <div className="messages">
@@ -105,10 +128,13 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
           })}</span></div>}
         {group.rows.map(item => item.source === "history" ? <TimelineMessage key={`${sessionId}:${item.key}`} item={item.item} canInspect={canInspect} toolTile={group.tools}
         imageSource={!item.item.images ? undefined : echoImages.get(item.key) ?? (item.item.eventType !== "plugin" ? readImages?.(item.item.key) : undefined)}
+        rowKey={item.key} onOpenTool={openToolWindow} toolOutputs={toolOutputs}
         onOpenSource={onOpenSource} historySource={revision && sources.has(item.item.key) ? { revision, ...sources.get(item.item.key)! } : undefined} />
-        : <TimelineMessage key={`${sessionId}:${item.key}`} item={item.source === "liveText" ? liveTextItem(item.row) : liveToolItem(item.row)} canInspect={canInspect} toolTile={group.tools} />)}
+        : <TimelineMessage key={`${sessionId}:${item.key}`} item={item.source === "liveText" ? liveTextItem(item.row) : liveToolItem(item.row)} canInspect={canInspect} toolTile={group.tools}
+          rowKey={item.key} onOpenTool={openToolWindow} toolOutputs={toolOutputs} />)}
       </div>)}
     </div>
+    {shownTool && <ToolCallDialog item={shownTool} reader={readTool} outputs={toolOutputs} imageSource={toolImages} current={canInspect} onClose={closeToolWindow} />}
   </>;
 });
 
@@ -117,7 +143,7 @@ function revisionOf(cursor: HistoryRequest["cursor"]): string | null {
 }
 
 export function History({ sessionId, observing = true, onNotesChange, onUsageChange, onSettled, onBeforeOlder, onAfterOlder, onNewerOmitted, onNavigationReset,
-  newestRequest, onNewestResult, live, read, readPluginEvents, readImages, canInspect, outgoing = [], onAcknowledgeOutgoing }: {
+  newestRequest, onNewestResult, live, read, readPluginEvents, readImages, readTool, toolOutputs, canInspect, outgoing = [], onAcknowledgeOutgoing }: {
   sessionId: string; onNotesChange: (markdown: string) => void; onSettled: () => void;
   /** Reports the newest persisted usage record text of the loaded window. */
   onUsageChange?: (text: string | null) => void;
@@ -132,6 +158,10 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
   readPluginEvents?: PluginEventsRead;
   /** Reads the images attached to the persisted user messages of this session. */
   readImages?: TimelineImageReader;
+  /** Reads the whole record of a tool call of this session. */
+  readTool?: ToolCallReader;
+  /** Follows what the running tool calls of this session write. */
+  toolOutputs?: ToolOutputs;
   canInspect?: () => boolean;
   outgoing?: readonly OutgoingMessage[];
   onAcknowledgeOutgoing?: (keys: readonly string[]) => void;
@@ -358,7 +388,7 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
     <TimelineRows sessionId={sessionId} rows={reconciled} entries={entries} outgoing={outgoing} onAcknowledgeOutgoing={onAcknowledgeOutgoing}
       pluginEvents={pluginCards?.sessionId === sessionId && timeline && !timeline.newerOmitted ? pluginCards.events : undefined}
       echoes={!timeline?.newerOmitted} empty={reconciled.length === 0 && current?.kind === "ready"} revision={timeline?.revision ?? null} sources={sources}
-      readImages={readImages} canInspect={inspectable} onOpenSource={openSource} />
+      readImages={readImages} readTool={readTool} toolOutputs={toolOutputs} canInspect={inspectable} onOpenSource={openSource} />
     {sourceTarget && sourceTarget.revision.sessionId === sessionId && <HistorySource key={JSON.stringify(sourceTarget)} target={sourceTarget}
       canInspect={() => sourceTarget.current() && (canInspect?.() ?? true)
         && JSON.stringify(sourceTarget.revision) === JSON.stringify(timeline?.revision)} onClose={() => setSourceTarget(null)} />}

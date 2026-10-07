@@ -6,11 +6,32 @@ export type ReconciledRow =
   | { source: "liveText"; key: string; row: SessionDisplayText }
   | { source: "liveTool"; key: string; row: SessionDisplayToolActivity };
 
+// A tool call has one key from its request to its end, whichever record or live row shows it: its tile and
+// its details stay mounted while it runs.
+function rowKey(item: TimelineItem): string {
+  return item.toolCall ? `tool:${toolKey(item.toolCall.providerId, item.toolCall.runId, item.toolCall.activityId)}` : `history:${item.key}`;
+}
+
+const phaseRank = (phase: string | undefined) => !phase || phase === "requested" ? 0
+  : ["completed", "failed", "canceled", "deselected"].includes(phase) ? 2 : 1;
+const livePhases = new WeakMap<TimelineItem, Map<string, TimelineItem>>();
+
+// The live view learns of a phase before the journal is read again: the row says the later of the two.
+function withLivePhase(item: TimelineItem, phase: string): TimelineItem {
+  const live = phase.toLowerCase();
+  if (phaseRank(live) <= phaseRank(item.toolPhase)) return item;
+  let known = livePhases.get(item);
+  if (!known) livePhases.set(item, known = new Map());
+  let shown = known.get(live);
+  if (!shown) known.set(live, shown = { ...item, toolPhase: live });
+  return shown;
+}
+
 // Source timestamps and first-publication sequences keep streaming rows in place.
 // Only a run-scoped, unambiguous match can replace a journal row.
 export function reconcileTimeline(entries: HistoryResponse["entries"], live: SessionDisplayView | null): ReconciledRow[] {
   const historical = buildTimelineItems(entries);
-  if (!live) return orderTimelineRows(historical.map(item => ({ source: "history", key: `history:${item.key}`, item })));
+  if (!live) return orderTimelineRows(historical.map(item => ({ source: "history", key: rowKey(item), item })));
   const providers = new Map<string, Set<string>>();
   for (const entry of entries) {
     if (!entry.runId || !entry.contentId || !entry.kind || !["contentDelta", "contentCompleted"].includes(entry.eventType)) continue;
@@ -30,9 +51,6 @@ export function reconcileTimeline(entries: HistoryResponse["entries"], live: Ses
     textMatches.has(textKey(entry.runId, entry.contentId, entry.kind ?? "")))
     .map(entry => textKey(entry.runId!, entry.contentId!, entry.kind!)));
   const activityMatches = new Map(live.toolActivities.filter(row => row.runId).map(row => [toolKey(row.providerId, row.runId!, row.activityId), row]));
-  const terminal = new Set(entries.filter(entry => entry.eventType === "activity" && entry.runId && entry.activityId &&
-    ["completed", "failed", "canceled"].includes(entry.phase?.toLowerCase() ?? ""))
-    .map(entry => toolKey(entry.providerId, entry.runId!, entry.activityId!)));
   const hidden = new Set<string>();
   const coveredText = new Set<string>();
   // Looked up by journal offset: a long window must not be searched once per record.
@@ -49,21 +67,21 @@ export function reconcileTimeline(entries: HistoryResponse["entries"], live: Ses
         else if (persisted.startsWith(row.text)) coveredText.add(key);
       }
     }
-    if (entry.eventType === "activity" && entry.runId && entry.activityId &&
-      activityMatches.has(toolKey(entry.providerId, entry.runId, entry.activityId)) &&
-      !terminal.has(toolKey(entry.providerId, entry.runId, entry.activityId))) hidden.add(entry.offset);
   }
+  // A call the journal shows keeps its row, which says more than the live one: the command, its output.
+  const journaled = new Set<string>();
   const result: ReconciledRow[] = historical.filter(item => !hidden.has(item.key))
     .map(item => {
       const entry = entryAt.get(item.key);
       const text = entry?.runId && entry.contentId ? textKey(entry.runId, entry.contentId, entry.kind ?? "") : null;
-      const tool = entry?.runId && entry.activityId ? toolKey(entry.providerId, entry.runId, entry.activityId) : null;
-      const key = text && textMatches.has(text) && (completed.has(text) || coveredText.has(text)) ? `text:${text}`
-        : tool && activityMatches.has(tool) && terminal.has(tool) ? `tool:${tool}` : `history:${item.key}`;
-      return { source: "history", key, item };
+      const call = item.toolCall?.runId ? toolKey(item.toolCall.providerId, item.toolCall.runId, item.toolCall.activityId) : null;
+      if (call) journaled.add(call);
+      const reported = call ? activityMatches.get(call) : undefined;
+      const key = text && textMatches.has(text) && (completed.has(text) || coveredText.has(text)) ? `text:${text}` : rowKey(item);
+      return { source: "history", key, item: reported ? withLivePhase(item, reported.phase) : item };
     });
   for (const row of live.toolActivities) {
-    if (row.runId && terminal.has(toolKey(row.providerId, row.runId, row.activityId))) continue;
+    if (row.runId && journaled.has(toolKey(row.providerId, row.runId, row.activityId))) continue;
     result.push({ source: "liveTool", key: `tool:${toolKey(row.providerId, row.runId, row.activityId)}`, row });
   }
   for (const row of live.text) {

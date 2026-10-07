@@ -19,6 +19,7 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     private readonly Func<AgentHistoryRevision, long, long, long, CancellationToken, Task<AgentHistorySourceChunk>>? _historySource;
     private readonly SessionViewJournalStore? _journals;
     private readonly Func<string, long, int, Task<PromptImageReadResult>>? _promptImage;
+    private readonly Func<string, long, CancellationToken, Task<AgentEvent?>>? _historyRecord;
     private readonly Func<string, CancellationToken, Task<string>> _notes = static (_, _) => Task.FromException<string>(new InvalidOperationException("Notes reader not configured."));
     private readonly HashSet<ReadOperation> _active = [];
     private bool _closed;
@@ -38,6 +39,7 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         _tailHistory = store.ReadHistoryTailPageAsync;
         _timelineHistory = store.ReadTimelinePageAsync;
         _historySource = store.ReadHistorySourceAsync;
+        _historyRecord = store.ReadHistoryRecordAsync;
         var images = new PromptImageAttachmentStore(projects.Options);
         _promptImage = (sessionId, offset, index) => ReadPromptImageCoreAsync(store, images, sessionId, offset, index);
     }
@@ -166,6 +168,23 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(revision.SessionId);
         return Admit(() => (_historySource ?? throw new InvalidOperationException("Source reader not configured."))
             (revision, start, end, offset, CancellationToken.None), cancellationToken);
+    }
+
+    /// <summary>Reads the one persisted event that starts at a journal offset through the same admitted/drained store owner.</summary>
+    /// <param name="sessionId">Selected durable session identity.</param>
+    /// <param name="offset">Starting byte offset of the record, as a history page reported it.</param>
+    /// <param name="cancellationToken">Cancels this wait, not an admitted underlying read.</param>
+    /// <returns>The event, or null when the record is blank.</returns>
+    /// <exception cref="ArgumentException">The session identity is blank.</exception>
+    /// <exception cref="ObjectDisposedException">Admission is closed.</exception>
+    /// <exception cref="InvalidOperationException">Admission is full or the route is not configured.</exception>
+    /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
+    /// <exception cref="AgentSessionHistoryException">The session is missing, the offset is no record boundary, or the record is too large or not readable.</exception>
+    public Task<AgentEvent?> ReadHistoryRecordAsync(string sessionId, long offset, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return Admit(() => (_historyRecord ?? throw new InvalidOperationException("Record reader not configured."))
+            (sessionId, offset, CancellationToken.None), cancellationToken);
     }
 
     /// <summary>Reads one image of a persisted user message or tool result through the same admitted/drained store owner.</summary>

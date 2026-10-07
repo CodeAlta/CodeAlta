@@ -49,11 +49,22 @@ test("a text that is no diff comes back as its lines; a very long one is cut", (
   assert.equal(long.at(-1)!.kind, "note");
 });
 
-test("the preview renders the lines as text, never as markup", () => {
+test("the preview renders the lines as text, never as markup, in the colors of the language of each file", () => {
   const html = renderToStaticMarkup(createElement(DiffPreview, { text: "diff --git a/<b>.ts b/<b>.ts\n@@ -1 +1 @@\n-<script>alert(1)</script>\n+<img src=x>" }));
+  // What the lines say is there as text, whatever the highlighter wraps: no element comes from a line.
+  const text = html.replace(/<[^>]+>/g, "").replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&amp;", "&");
   assert.ok(html.includes("&lt;b&gt;.ts"), html);
-  assert.ok(html.includes("&lt;script&gt;alert(1)&lt;/script&gt;") && html.includes("&lt;img src=x&gt;"), html);
-  assert.ok(!html.includes("<script>") && !html.includes("<img"), html);
+  assert.ok(text.includes("<script>alert(1)</script>") && text.includes("<img src=x>"), text);
+  assert.ok(!html.includes("<script") && !html.includes("<img"), html);
   assert.equal(html.match(/data-kind="added"/g)?.length, 1);
   assert.equal(html.match(/data-kind="removed"/g)?.length, 1);
+
+  // Each file has the colors of its own language; a diff without a file header takes the language of `path`.
+  const colored = renderToStaticMarkup(createElement(DiffPreview, { text: "diff --git a/a.cs b/a.cs\n@@ -1 +1 @@\n-var x = 1;\n+var y = 2; // two\ndiff --git a/notes.txt b/notes.txt\n@@ -1 +1 @@\n-var plain\n+text" }));
+  assert.equal(colored.match(/hljs-keyword/g)?.length, 2);
+  assert.equal(colored.match(/hljs-comment/g)?.length, 1);
+  assert.ok(colored.includes('<span class="diff-preview-text">var plain</span>'), "A file of no known language keeps its lines as they are.");
+  const single = renderToStaticMarkup(createElement(DiffPreview, { text: "@@ -1 +1 @@\n-var x = 1;\n+var y = 2;", path: "src/a.cs" }));
+  assert.equal(single.match(/hljs-keyword/g)?.length, 2);
+  assert.ok(!renderToStaticMarkup(createElement(DiffPreview, { text: "@@ -1 +1 @@\n-var x = 1;\n+var y = 2;" })).includes("hljs-"));
 });

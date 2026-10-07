@@ -14,8 +14,11 @@ internal static class HistoryToolProjection
         var details = activity.Details;
         var command = Text(details, "command") ?? Text(details, "arguments", "command") ?? Text(details, "input", "command");
         command ??= activity.Kind == AgentActivityKind.CommandExecution ? activity.Name : null;
+        // The `alta` tool takes its command line as an array: it is shown as the command it is.
+        command ??= AltaCommand(activity.Name, details);
         var primary = command ?? Text(details, "arguments", "path") ?? Text(details, "path")
-            ?? Text(details, "arguments", "query") ?? Text(details, "arguments", "pattern") ?? Text(details, "query") ?? Text(details, "arguments");
+            ?? Text(details, "arguments", "query") ?? Text(details, "arguments", "pattern") ?? Text(details, "query")
+            ?? Text(details, "arguments", "url") ?? Text(details, "arguments") ?? Files(details) ?? Arguments(Value(details, "arguments"));
         var output = Text(details, "aggregatedOutput") ?? Text(details, "result", "content")
             ?? Text(details, "error", "message") ?? Text(details, "output", "body") ?? Text(details, "result", "detailedContent")
             ?? Text(details, "output") ?? Text(details, "result");
@@ -67,11 +70,14 @@ internal static class HistoryToolProjection
 
     internal static HistoryToolSummary? ProjectOutput(string output, int budget, out int cost)
     {
-        var preview = Preview(output, 160);
+        // The result of a shell command is previewed and measured by what the command wrote, not by its header.
+        var shell = ShellCommandResult.Parse(output);
+        var written = shell is null ? output : shell.Stdout.Length == 0 ? shell.Stderr : shell.Stderr.Length == 0 ? shell.Stdout : $"{shell.Stdout}\n{shell.Stderr}";
+        var preview = Preview(written, 160);
         cost = 512 + 6 * (preview?.Length ?? 0);
         if (cost > budget) { cost = 0; return null; }
-        var (lines, bytes) = MeasureOutput(output);
-        return new(null, false, preview, lines, [], bytes);
+        var (lines, bytes) = MeasureOutput(written);
+        return new(null, false, preview, lines, [], bytes, ExitCode: shell?.ExitCode);
     }
 
     private static (int Lines, int? Bytes) MeasureOutput(string? output)
@@ -98,10 +104,61 @@ internal static class HistoryToolProjection
         return null;
     }
 
-    private static string? Text(JsonElement? value, params string[] path)
+    // `alta session list --json` for the arguments {"args": ["session", "list", "--json"]}.
+    private static string? AltaCommand(string? name, JsonElement? details)
+    {
+        if (!string.Equals(name, "alta", StringComparison.Ordinal) || Value(details, "arguments", "args") is not { ValueKind: JsonValueKind.Array } args) return null;
+        var line = new StringBuilder("alta");
+        foreach (var argument in args.EnumerateArray())
+        {
+            if (argument.ValueKind != JsonValueKind.String || line.Length > 512) return null;
+            var text = argument.GetString()!;
+            line.Append(' ').Append(text.Length > 0 && !text.Any(static character => char.IsWhiteSpace(character) || character is '"' or '\'')
+                ? text : string.Concat("\"", text.Replace("\"", "\\\"", StringComparison.Ordinal), "\""));
+        }
+        return line.ToString();
+    }
+
+    // The files a call changed or read, when it names them: the path of a single one, else the name of the
+    // first one and how many follow.
+    private static string? Files(JsonElement? details)
+    {
+        foreach (var property in new[] { "modifiedFiles", "readFiles" })
+        {
+            if (Value(details, property) is not { ValueKind: JsonValueKind.Array } files || files.GetArrayLength() == 0) continue;
+            if (files[0].ValueKind != JsonValueKind.String || files[0].GetString() is not { Length: > 0 } first) continue;
+            if (files.GetArrayLength() == 1) return first;
+            var name = first[(first.LastIndexOfAny(['/', '\\']) + 1)..];
+            return $"{(name.Length == 0 ? first : name)} (+{files.GetArrayLength() - 1})";
+        }
+        return null;
+    }
+
+    // The arguments of a call that names no command, path or query, on one line: `uid: 1_25, dblClick: false`.
+    private static string? Arguments(JsonElement? arguments)
+    {
+        if (arguments is not { ValueKind: JsonValueKind.Object } value) return null;
+        var line = new StringBuilder();
+        foreach (var property in value.EnumerateObject())
+        {
+            var text = property.Value.ValueKind switch
+            {
+                JsonValueKind.String => property.Value.GetString(),
+                JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => property.Value.GetRawText(),
+                _ => null,
+            };
+            if (string.IsNullOrWhiteSpace(text)) continue;
+            if (line.Length > 0) line.Append(", ");
+            line.Append(property.Name).Append(": ").Append(text.Length > 96 ? string.Concat(text.AsSpan(0, char.IsHighSurrogate(text[95]) ? 95 : 96), "…") : text);
+            if (line.Length > 256) break;
+        }
+        return line.Length == 0 ? null : line.ToString();
+    }
+
+    internal static string? Text(JsonElement? value, params string[] path)
         => Value(value, path) is { ValueKind: JsonValueKind.String } text ? text.GetString() : null;
 
-    private static JsonElement? Value(JsonElement? value, params string[] path)
+    internal static JsonElement? Value(JsonElement? value, params string[] path)
     {
         if (value is not { } current) return null;
         foreach (var part in path)
@@ -119,6 +176,40 @@ internal static class HistoryToolProjection
 
 /// <param name="Added">Lines the call added to files, when its record has a diff.</param>
 /// <param name="Removed">Lines the call removed from files, when its record has a diff.</param>
+/// <param name="ExitCode">The exit code of a shell command, when its result states one.</param>
 internal sealed record HistoryToolSummary(string? Primary, bool IsCommand, string? Output, int OutputLines, HistoryToolField[] Fields, int? OutputBytes,
-    int? Added = null, int? Removed = null);
+    int? Added = null, int? Removed = null, int? ExitCode = null);
 internal sealed record HistoryToolField(string Path, string Text, bool Truncated);
+
+/// <summary>
+/// The result of the <c>shell_command</c> tool as its text states it: <c>exit_code</c>, <c>working_directory</c>,
+/// then what the command wrote to its standard output and to its standard error.
+/// </summary>
+/// <param name="ExitCode">The exit code of the command.</param>
+/// <param name="WorkingDirectory">The folder the command ran in.</param>
+/// <param name="Stdout">What the command wrote to its standard output; empty when it wrote nothing.</param>
+/// <param name="Stderr">What the command wrote to its standard error; empty when it wrote nothing.</param>
+internal sealed record ShellCommandResult(int ExitCode, string WorkingDirectory, string Stdout, string Stderr)
+{
+    private const string Empty = "(empty)";
+
+    /// <summary>Reads the text of a result, or returns null when it does not have that form.</summary>
+    internal static ShellCommandResult? Parse(string? text)
+    {
+        if (text is null || !text.StartsWith("exit_code: ", StringComparison.Ordinal)) return null;
+        var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal);
+        var first = normalized.IndexOf('\n');
+        if (first < 0 || !int.TryParse(normalized.AsSpan(11, first - 11), System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out var exitCode)) return null;
+        var second = normalized.IndexOf('\n', first + 1);
+        const string directory = "working_directory: ", standardOutput = "stdout:\n", standardError = "\nstderr:\n";
+        if (second < 0 || string.CompareOrdinal(normalized, first + 1, directory, 0, directory.Length) != 0
+            || string.CompareOrdinal(normalized, second + 1, standardOutput, 0, standardOutput.Length) != 0) return null;
+        var body = second + 1 + standardOutput.Length;
+        // The last such line starts the standard error: a command that prints this line itself is not told apart.
+        var split = normalized.LastIndexOf(standardError, StringComparison.Ordinal);
+        if (split < body - 1) return null;
+        var output = normalized[body..Math.Max(body, split)];
+        var error = normalized[(split + standardError.Length)..];
+        return new(exitCode, normalized[(first + 1 + directory.Length)..second], output == Empty ? "" : output, error == Empty ? "" : error);
+    }
+}
