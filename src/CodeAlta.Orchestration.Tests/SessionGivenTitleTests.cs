@@ -10,8 +10,8 @@ namespace CodeAlta.Orchestration.Tests;
 /// The name a session was given stays, whichever frontend attaches the session again.
 /// </summary>
 /// <remarks>
-/// A frontend that lists the sessions itself, as the terminal UI does, names a session by the first line of its
-/// summary and attaches it with that line as its title.
+/// A frontend that lists the sessions itself, as the terminal UI does, gets a named session under its name, and a
+/// session that was never named under the first line of its summary, which is the title it is attached with.
 /// </remarks>
 [TestClass]
 public sealed class SessionGivenTitleTests
@@ -45,8 +45,9 @@ public sealed class SessionGivenTitleTests
             foreach (var (sessionId, name) in new[] { (named, "Nightly review"), (renamed, "Renamed"), (unnamed, (string?)null) })
             {
                 var listed = await ListedAsync(host, sessionId);
-                // The list names a session by what it last said.
-                Assert.AreEqual(AnsweringProvider.Answer, listed.Title);
+                // The list names a session by the name it was given, and one that was never named by what it last said:
+                // a parent session finds the sub-agents it created by the titles it gave them.
+                Assert.AreEqual(name ?? AnsweringProvider.Answer, listed.Title);
 
                 await host.RuntimeService.EnsureCoordinatorSessionAsync(listed, new SessionExecutionOptions
                 {

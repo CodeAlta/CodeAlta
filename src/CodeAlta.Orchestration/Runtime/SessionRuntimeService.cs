@@ -495,6 +495,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 continue;
             }
 
+            // A session that was named is listed under its name, not under the first line of its last answer: a
+            // parent finds its sub-agents by the titles it gave them.
+            if (GivenTitle(metadata, session, projects) is { } title) session.Title = title;
             if (metadata.ViewState is not null)
             {
                 ApplyCachedSessionLocalState(session, metadata.ViewState);

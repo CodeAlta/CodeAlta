@@ -4548,7 +4548,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
            string.Equals(context.Caller.SourceSessionId.Trim(), sessionId.Trim(), StringComparison.OrdinalIgnoreCase);
 
     private static bool ShouldDetachPromptSubmission(AltaCommandContext context)
-        => IsAgentCaller(context) || string.Equals(context.Caller.Kind, "reminder", StringComparison.OrdinalIgnoreCase);
+        => IsAgentCaller(context) || string.Equals(context.Caller.Kind, "reminder", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(context.Caller.Kind, "mcp", StringComparison.OrdinalIgnoreCase);
 
     private static async Task<bool> WaitForAgentSubmissionAckAsync(
         SessionRuntimeService runtime,

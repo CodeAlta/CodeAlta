@@ -3266,6 +3266,49 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionSend_FromAnMcpClient_HandsThePromptOverAndDoesNotEndTheRunWithTheCommand()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var ProviderId = new ModelProviderId("mcp-detach-send");
+        var sendBlocker = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var providerRuntime = new StatefulProviderRuntime(ProviderId) { SendBlocker = sendBlocker, PublishRunEventOnSend = true };
+        var runtime = CreateRuntime(options, providerRuntime);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new SessionViewCatalog(options))
+            .Add(runtime));
+        var caller = new AltaCallerIdentity { Kind = "mcp" };
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", ProviderId.Value], caller: caller).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+
+        try
+        {
+            // The command of an MCP client has a time limit: a send that waited for the run would end the run with it.
+            using var limit = new CancellationTokenSource();
+            var sendTask = dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "work that takes minutes"], caller: caller, cancellationToken: limit.Token).AsTask();
+            var completed = await Task.WhenAny(sendTask, Task.Delay(TimeSpan.FromMilliseconds(1800))).ConfigureAwait(false);
+
+            Assert.AreSame(sendTask, completed, "The send of an MCP client acknowledges the submission instead of waiting for the run.");
+            var sent = await sendTask.ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, sent.ExitCode);
+            var record = ReadJsonLines(sent.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.submitted");
+            Assert.IsTrue(record.GetProperty("detached").GetBoolean());
+            await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 1).ConfigureAwait(false);
+            await limit.CancelAsync().ConfigureAwait(false);
+            Assert.IsFalse(sendBlocker.Task.IsCompleted);
+            Assert.IsTrue(await runtime.HasActiveRunAsync((await runtime.TryGetActiveSessionDescriptorAsync(sessionId, CancellationToken.None).ConfigureAwait(false))!, CancellationToken.None).ConfigureAwait(false),
+                "The run goes on after the command that started it ended.");
+        }
+        finally
+        {
+            sendBlocker.TrySetResult();
+        }
+    }
+
+    [TestMethod]
     public async Task SessionSend_FromAgentCallerToOwnRunningSessionFailsFast()
     {
         using var root = TempDirectory.Create();
