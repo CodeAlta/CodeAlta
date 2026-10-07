@@ -1790,6 +1790,20 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .markdown-diagram { margin: 10px 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); overflow: auto; text-align: center; }
 .markdown-diagram > svg { max-width: 100%; height: auto; }
 .markdown-content pre[data-language]::before { content: attr(data-language); float: right; margin: -7px -5px 4px 12px; color: var(--muted); font: 10px/1.4 var(--bp-typography-family-default); letter-spacing: .04em; user-select: none; }
+/* The button of a code block copies its text. It stays in the corner while the block scrolls, and names the
+   language beside its icon, in place of the label above. */
+.markdown-content pre:has(> .markdown-copy)::before { content: none; }
+.markdown-content pre > .markdown-copy { position: sticky; top: -7px; float: right; display: inline-flex; align-items: center; gap: 6px; margin: -7px -7px 4px 12px; padding: 3px 5px; border: 0; border-radius: 5px; color: var(--muted); background: var(--panel-2); font: 10px/1.4 var(--bp-typography-family-default); letter-spacing: .04em; white-space: nowrap; cursor: pointer; user-select: none; }
+.markdown-content pre > .markdown-copy[data-language]::before { content: attr(data-language); }
+.markdown-content pre > .markdown-copy::after { content: ""; width: 13px; height: 13px; background: currentColor; opacity: .75;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='14' height='14' x='8' y='8' rx='2' ry='2'/%3E%3Cpath d='M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='14' height='14' x='8' y='8' rx='2' ry='2'/%3E%3Cpath d='M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'/%3E%3C/svg%3E") center / contain no-repeat; }
+.markdown-content pre > .markdown-copy:hover, .markdown-content pre > .markdown-copy:focus-visible { color: var(--text); background: color-mix(in srgb, var(--text) 12%, var(--panel-2)); }
+.markdown-content pre > .markdown-copy:hover::after, .markdown-content pre > .markdown-copy:focus-visible::after { opacity: 1; }
+.markdown-content pre > .markdown-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.markdown-content pre > .markdown-copy[data-copied]::after { opacity: 1; background: var(--green, #3dcc91);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E"); }
 
 /* Rename popover: the name of a project or a session, edited beside its row in the Explorer. */
 .rename-anchor { position: absolute; inset: 0; pointer-events: none; }

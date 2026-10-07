@@ -891,6 +891,14 @@ names (`cs`, `js`, `ts`, `sh`, `ps1`, `yml`, `jsonc`, `csproj`, ...). The block 
 its top right corner. A fence without a language, with an unknown one, or longer than 200,000
 characters stays plain. The colors follow the theme and the color scheme.
 
+**Copy button.** Every code block (fenced, indented, or an authored `pre` with a `code`) has a button
+in its top right corner that copies its text as it is written, without the last line end. It is drawn
+beside the language, stays in the corner while a long block scrolls, and shows a check for a moment
+once it copied. It is the one control inside rendered Markdown: `button.markdown-copy`, added by the
+renderer after sanitization with constant attributes and no content (`dressCopy` in
+`markdownBoundary.ts`); an authored button or class never passes the sanitizer. `MarkdownContent`
+handles its click. The values of a front matter have none.
+
 A `mermaid` fence is drawn as a diagram by Mermaid **11.17.2**, in the colors of the theme and color
 scheme, and drawn again when either changes. Text that is not a valid diagram, or is longer than
 20,000 characters, stays a code block labelled `mermaid`. A diagram is drawn shortly after its text

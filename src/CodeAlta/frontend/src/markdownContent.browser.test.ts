@@ -90,6 +90,9 @@ test("production MarkdownContent retains useful HTML without resource or app aut
       if (cases[i].id === "code") {
         assert.deepEqual(await evaluate("markdownFixture.codeCheck()"), ["<a>&\n", "indented\n", "raw <b>"]);
         assert.deepEqual(await evaluate("markdownFixture.state.copies"), [cases[i].source], "Copy retains CRLF and original markup");
+        // A block has a button of its own, which copies the block as it is written; an authored button is not one.
+        assert.deepEqual(await evaluate("markdownFixture.copyCheck()"), { blocks: 3, buttons: 3, languages: ["unknown-tool", null, "ts"], copied: ["<a>&"], marked: [true, false, false] });
+        await check();
       }
       if (cases[i].id === "front-matter") {
         // The entries are a table of names and values, built from the text: nothing of it is Markdown or HTML.

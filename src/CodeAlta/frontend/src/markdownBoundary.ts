@@ -7,8 +7,8 @@ import { createMarkdownParser, frontMatterEntries, splitFrontMatter } from "./ma
 export const alertKinds = ["note", "tip", "important", "warning", "caution"] as const;
 export type AlertKind = typeof alertKinds[number];
 /** The titles of the alerts, in the language of the window. */
-export type MarkdownLabels = Readonly<Record<AlertKind, string>>;
-const englishLabels: MarkdownLabels = { note: "Note", tip: "Tip", important: "Important", warning: "Warning", caution: "Caution" };
+export type MarkdownLabels = Readonly<Record<AlertKind, string> & { /** What the button of a code block says it does. */ copy?: string }>;
+const englishLabels: MarkdownLabels = { note: "Note", tip: "Tip", important: "Important", warning: "Warning", caution: "Caution", copy: "Copy" };
 
 /** How a text is rendered: a document is a file or a text written as one, whose lines are wrapped in its source. */
 export type MarkdownRenderOptions = Readonly<{ document?: boolean }>;
@@ -156,6 +156,22 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
       quote.setAttribute("data-alert", kind);
     }
   }
+  // A code block has a button that copies its text: an element of the renderer, with constant attributes and no
+  // content of its own. Authored HTML keeps no button and no class, so this one is always the renderer's. It names
+  // the language of the block, which it shows beside its icon.
+  function dressCopy(fragment: DocumentFragment) {
+    for (const pre of Array.from(fragment.querySelectorAll("pre"))) {
+      if (pre.children.length !== 1 || pre.firstElementChild?.tagName !== "CODE" || pre.closest(".markdown-front-matter")) continue;
+      const button = view.document.createElement("button");
+      button.type = "button";
+      button.className = "markdown-copy";
+      button.title = labels.copy ?? englishLabels.copy!;
+      button.setAttribute("aria-label", button.title);
+      const language = pre.getAttribute("data-language");
+      if (language) button.setAttribute("data-language", language);
+      pre.prepend(button);
+    }
+  }
   return (source: string, timelineCodeBlocks: boolean, undrawn?: string[], options: MarkdownRenderOptions = {}) => {
     try {
       const { frontMatter, body } = splitFrontMatter(source);
@@ -175,6 +191,7 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
         pre.className = "timeline-code"; pre.tabIndex = 0;
         pre.setAttribute("role", "region"); pre.setAttribute("aria-label", "Code block");
       }
+      dressCopy(fragment);
       const container = view.document.createElement("div");
       container.append(fragment);
       return container.innerHTML;

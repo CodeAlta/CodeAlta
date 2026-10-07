@@ -54,14 +54,19 @@ function render(source: string, timeline = true) {
 function snapshot() {
   const content = document.querySelector(".markdown-content")!;
   return { ...state, html: content?.innerHTML, text: content?.textContent, location: location.href, base: document.baseURI, frames: frames.length,
-    prohibited: content ? Array.from(content.querySelectorAll("script,style,img,picture,source,video,audio,track,iframe,link,base,meta,object,embed,svg,math,form,input,button,textarea,select")).map(e => e.outerHTML) : [],
+    prohibited: content ? Array.from(content.querySelectorAll("script,style,img,picture,source,video,audio,track,iframe,link,base,meta,object,embed,svg,math,form,input,button,textarea,select"))
+      .filter(e => !copyButton(e)).map(e => e.outerHTML) : [],
     attributes: content ? Array.from(content.querySelectorAll("*")).flatMap(e => Array.from(e.attributes).filter(a => /^on|^(style|id|name|data-.*|src|srcset|srcdoc|target|download|ping|action|formaction)$/i.test(a.name)
         // The renderer names a fenced block's language on its pre and colors its tokens with highlight.js spans.
-        && !(e.tagName === "PRE" && a.name === "data-language" && /^[a-z0-9_-]{1,32}$/.test(a.value))
+        && !((e.tagName === "PRE" || copyButton(e)) && a.name === "data-language" && /^[a-z0-9_-]{1,32}$/.test(a.value))
+        // The button of a code block says for a moment that it copied.
+        && !(copyButton(e) && a.name === "data-copied" && a.value === "true")
         // The renderer names the kind of an alert on its quote.
         && !(e.tagName === "BLOCKQUOTE" && e.className === "markdown-alert" && a.name === "data-alert" && /^(?:note|tip|important|warning|caution)$/.test(a.value))
       || /^(role|tabindex|aria-.*)$/.test(a.name) && !(e.tagName === "PRE" && e.className === "timeline-code"
         && (a.name === "role" && a.value === "region" || a.name === "tabindex" && a.value === "0" || a.name === "aria-label" && a.value === "Code block"))
+        // The button of a code block says what it does.
+        && !(copyButton(e) && a.name === "aria-label" && a.value === "Copy")
         // The box of a task says what it shows, and that it takes no input.
         && !(e.tagName === "SPAN" && e.className === "markdown-task" && !e.firstChild
           && (a.name === "role" && a.value === "checkbox" || a.name === "aria-checked" && /^(?:true|false)$/.test(a.value) || a.name === "aria-disabled" && a.value === "true"))
@@ -72,7 +77,10 @@ function snapshot() {
 }
 // The classes that the renderer gives its own elements. Authored HTML keeps none: see the "spoof" case.
 const rendererClasses: Record<string, readonly string[] | undefined> = { TABLE: ["markdown-front-matter"], DIV: ["markdown-front-matter"], LI: ["markdown-task-item"],
-  UL: ["markdown-task-list"], OL: ["markdown-task-list"], SPAN: ["markdown-task"], BLOCKQUOTE: ["markdown-alert"], P: ["markdown-alert-title"] };
+  UL: ["markdown-task-list"], OL: ["markdown-task-list"], SPAN: ["markdown-task"], BLOCKQUOTE: ["markdown-alert"], P: ["markdown-alert-title"], BUTTON: ["markdown-copy"] };
+// The one control of the renderer: the button of a code block, first in its block, with nothing in it.
+const copyButton = (e: Element) => e.tagName === "BUTTON" && e.className === "markdown-copy" && !e.firstChild && e.getAttribute("type") === "button"
+  && e.parentElement?.tagName === "PRE" && e.parentElement.firstElementChild === e && e.nextElementSibling?.tagName === "CODE";
 Object.assign(window, { markdownFixture: { state, cases, render, snapshot,
   // A document, as the code editor and the Skills page show one.
   renderDocument(source: string) { state.phase = "render"; flushSync(() => root.render(createElement(MarkdownContent, { key: "document", source, document: true }))); state.phase = "insert-deferred"; },
@@ -83,6 +91,14 @@ Object.assign(window, { markdownFixture: { state, cases, render, snapshot,
     const texts = Array.from(document.querySelectorAll(".markdown-content pre code")).map(e => e.textContent);
     (document.querySelector(".copy-markdown") as HTMLButtonElement).click();
     return texts;
+  },
+  // Every code block has the button of the renderer; pressing one copies the text of its block alone.
+  copyCheck() {
+    const before = state.copies.length;
+    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>(".markdown-content pre > button.markdown-copy"));
+    buttons[0]?.click();
+    return new Promise(resolve => setTimeout(() => resolve({ blocks: document.querySelectorAll(".markdown-content pre").length, buttons: buttons.length,
+      languages: buttons.map(button => button.getAttribute("data-language")), copied: state.copies.slice(before), marked: buttons.map(button => button.hasAttribute("data-copied")) }), 50));
   },
   memoCheck() {
     const source = '```txt\n' + 'line\n'.repeat(45) + '```'; render(source);

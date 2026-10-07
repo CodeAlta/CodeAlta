@@ -88,7 +88,7 @@ Each pane has its own timeline and prompt. Tabs are workspace-wide: sessions fro
 
 Timeline entries are grouped so the important parts stay visible:
 
-- assistant messages render as Markdown;
+- assistant messages render as Markdown; in CodeAlta Desktop, a code block has a copy button in its corner;
 - reasoning and status messages explain what the agent is doing;
 - tool calls appear as compact tiles, side by side;
 - the modified-files card summarizes per-file `+/-` diff totals and can show diff details;

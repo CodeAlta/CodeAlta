@@ -13,7 +13,7 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   // The renderer is made once for a language: the titles of the alerts are in it.
   const { locale } = useShellLanguage();
   const render = useMemo(() => createMarkdownRenderer(window, { note: translate(locale, "Note"), tip: translate(locale, "Tip"),
-    important: translate(locale, "Important"), warning: translate(locale, "Warning"), caution: translate(locale, "Caution") }), [locale]);
+    important: translate(locale, "Important"), warning: translate(locale, "Warning"), caution: translate(locale, "Caution"), copy: translate(locale, "Copy") }), [locale]);
   // Diagrams are drawn on the side, for the window's theme and color scheme, then found by the next render.
   const appearance = useSyncExternalStore(subscribeAppearance, appearanceKey);
   const [drawn, setDrawn] = useState(0);
@@ -63,7 +63,17 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   function suppressLink(event: { target: EventTarget; preventDefault(): void }) {
     if ((event.target as Element).closest("a")) event.preventDefault();
   }
-  return <div className="markdown-content" onClick={suppressLink} onAuxClick={suppressLink}
+  // The button of a code block copies the text of that block, as it is written, and says so for a moment.
+  function copyCode(event: { target: EventTarget }) {
+    const button = (event.target as Element).closest<HTMLElement>("button.markdown-copy");
+    const code = button?.parentElement?.querySelector(":scope > code");
+    if (!button || !code) return;
+    void navigator.clipboard?.writeText((code.textContent ?? "").replace(/\n$/, "")).then(() => {
+      button.setAttribute("data-copied", "true");
+      window.setTimeout(() => button.removeAttribute("data-copied"), 1400);
+    }, () => { /* The clipboard is unavailable: nothing was copied and nothing changes. */ });
+  }
+  return <div className="markdown-content" onClick={event => { suppressLink(event); copyCode(event); }} onAuxClick={suppressLink}
     onKeyDown={event => {
       if (event.key === "Enter") suppressLink(event);
       if (timelineCodeBlocks) scrollCode(event);
