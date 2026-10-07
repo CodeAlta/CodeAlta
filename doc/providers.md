@@ -89,6 +89,7 @@ Important behavior:
 | `google-genai` | `CodeAlta.Agent.GoogleGenAI` | Requires API key. Wraps SDK chat streaming through the agent runtime and supports model metadata enrichment. |
 | `vertex-ai` | `CodeAlta.Agent.GoogleGenAI` | Uses Vertex project/location settings instead of an API key. |
 | `mistral` | `CodeAlta.Agent.Mistral` | Requires API key. Uses Mistral chat completions with streaming, tool calls, multi-turn replay, and upstream model listing. |
+| `claude-code` | `CodeAlta.Agent.Claude` | Runs the Claude Code CLI the user installed and signed in to. No credential, endpoint or login of CodeAlta; see [Claude Code CLI provider](#claude-code-cli-claude-code-provider). |
 
 External ACP CLI adapters are no longer registered as model providers. Legacy `[acp]` config is ignored and preserved only as compatibility data.
 
@@ -244,6 +245,117 @@ The auth manager persists access + refresh tokens and auto-refreshes inside the 
 The bundled static fallback catalog ships `grok-4.3`, `grok-4`, and `grok-4-fast`. When endpoint discovery is enabled (`xai_endpoint_with_static_fallback` or `xai_endpoint`) the xAI `/v1/language-models` response is surfaced — image/video models are excluded at the source because they are not listed there. Each discovered model is tagged with reasoning-effort support inferred from the id (`grok-build*`, `grok-code*`, and `*non-reasoning*` ids are treated as non-reasoning, so `reasoning.effort` is not sent for them).
 
 Relevant config keys for `type = "xai"` include `auth_source`, `model_discovery`, `api_url`, `single_model_id`, `models_dev_provider_id`, `model_overrides`, `profile`, `compaction`, and `protocol_trace`.
+
+## Claude Code CLI `claude-code` provider
+
+`CodeAlta.Agent.Claude` runs CodeAlta sessions through the `claude` executable the user installed. It is not an API client: Anthropic's subscriptions are not reachable from a third-party application, and CodeAlta does not try. It starts the unmodified CLI as a child process and speaks the protocol of the Claude Agent SDKs with it (`-p --input-format stream-json --output-format stream-json`, one JSON object per line in both directions).
+
+### What CodeAlta does and does not do
+
+The provider follows Anthropic's conditions for running Claude Code from another product ([Legal and compliance](https://code.claude.com/docs/en/legal-and-compliance)):
+
+- The executable is the user's own installation. CodeAlta ships none, installs none and modifies none (`ClaudeCodeCliLocator`).
+- CodeAlta never sees a credential. The CLI signs in with what the user set up for it: `claude` then `/login`, an API key, or a cloud provider. There is no login flow, no token store and no `api_key`/`api_key_env`/`api_url` for this type (the configuration rejects them), and `ClaudeCodeLauncher` neither sets nor removes any authentication, endpoint or provider variable. It never passes `--bare`, which would restrict the CLI to API-key authentication.
+- Usage is billed by Anthropic to the account the CLI is signed in to. CodeAlta does not pay for, resell or route it.
+- Claude Code keeps its system prompt, its tools, its permission rules, its hooks and its settings. CodeAlta adds to them (`appendSystemPrompt`, an MCP server, one hook that only waits); it replaces none.
+- The UI names the provider for what it runs ("Claude Code"). It is one provider type among others, not a product or feature name of CodeAlta.
+
+The variables removed from the child's environment are only the marks of a Claude Code session CodeAlta itself may have been started from (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ID`, ...). `CLAUDE_AGENT_SDK_CLIENT_APP=codealta/<version>` names CodeAlta in the CLI's user agent.
+
+### A CLI that runs its own loop, behind a turn executor
+
+The CLI calls the model, runs its tools and calls the model again. `AgentSession` expects the opposite: an executor that answers one model call, after which the session runs the tool calls. `ClaudeCodeSession` presents the first as the second, so that the journal, the timeline, the queue, steering and the session catalog work as for any provider:
+
+```mermaid
+sequenceDiagram
+    participant Session as AgentSession
+    participant Executor as ClaudeCodeTurnExecutor / ClaudeCodeSession
+    participant CLI as claude (child process)
+
+    Session->>Executor: ExecuteTurnAsync (conversation)
+    Executor->>CLI: user message (only what the CLI has not seen)
+    CLI-->>Executor: stream_event deltas, assistant message with tool_use
+    Executor-->>Session: assistant message (text + tool calls)
+    Session->>Executor: ResolveTool(tool call)
+    Note over Session,Executor: the handler waits for the CLI
+    CLI-->>Executor: can_use_tool (permission prompt)
+    Executor->>Session: OnPermissionRequest
+    Executor-->>CLI: allow / deny
+    CLI-->>Executor: user message with tool_result
+    Executor-->>Session: tool result
+    Session->>Executor: ExecuteTurnAsync (next model call)
+    CLI-->>Executor: assistant text, then result
+    Executor-->>Session: final assistant message + usage
+```
+
+- Each `ExecuteTurnAsync` returns the next assistant message of the CLI. A message with tool calls is returned as soon as it is complete; one without is held until the CLI says whether the turn is over (`result`), so that a continuation after a Stop hook or a queued message is another turn of the same run.
+- `IAgentProviderToolHost.ResolveTool` gives `AgentSession` the definition that "runs" a tool call of such a message. For a tool of Claude Code (`Bash`, `Edit`, `Read`, ...) the handler waits for the `tool_result` the CLI writes. The session therefore emits the same `Requested`/`Started`/`Completed` activity events and records the same tool messages as for its own tools, under the names Claude Code uses.
+- The conversation in the request is not sent again. The CLI keeps the context of the session in its own transcript; the executor only sends the user messages it has not sent yet (the prompt, and steering inputs while a turn runs). `ProviderState` records the CLI session id and how much of the CodeAlta conversation it holds.
+- A session is resumed with `--resume <id>`. When the transcript is missing (another folder or machine, a cleaned profile), or when another provider wrote part of the conversation, the CLI starts a new conversation and receives a rendering of the recorded one as context (`<codealta_previous_conversation>`).
+- One process per session is kept between turns and closed after `IdleTimeout` (10 minutes); the next turn resumes. A change of model, reasoning effort or working folder restarts it the same way.
+
+### Tools of CodeAlta
+
+The tools of a session (`alta`, plugin tools, the tools of MCP servers CodeAlta connected) are offered to the CLI through an MCP server named `codealta` that is served over the control protocol (`"type": "sdk"`): no port is opened and the caller is the session. Claude sees them as `mcp__codealta__<name>`.
+
+A call of such a tool is returned to `AgentSession` under the tool's own name: the session runs the real handler (with its own permission requests, activity events and skill handling), and the wrapper returned by `ResolveTool` gives the result back to the CLI as the answer of the MCP `tools/call`. A tool registered during a run (`alta mcp activate`) reaches the CLI through `notifications/tools/list_changed`.
+
+CodeAlta's file, search, web, shell and question tools are not offered: Claude Code has its own (`ClaudeCodePrompts.ReplacedTools`).
+
+### Instructions
+
+Claude Code's system prompt stays. The developer instructions CodeAlta composes for the session (agent prompt, runtime context, tool guidance, skills, project context) are appended to it through the `appendSystemPrompt` field of the `initialize` request, after a short note that says where the session runs and how the tools of CodeAlta are named. CodeAlta's own system prompt is not sent. The CLI records its prompt once per conversation, so a later change of the instructions applies after its next compaction.
+
+### Permissions, questions and edits
+
+The CLI only prompts for what the user's Claude Code settings neither allow nor deny (`--permission-prompt-tool stdio`). A prompt is answered with the permission policy of the CodeAlta session:
+
+| Tool | Request | Notes |
+| --- | --- | --- |
+| `Bash`, `PowerShell` | `AgentCommandPermissionRequest` | Reviewed like `shell_command` when the session reviews commands. |
+| `Edit`, `MultiEdit`, `Write`, `NotebookEdit` | `AgentFileChangePermissionRequest` | As for CodeAlta's own edit tools. |
+| `AskUserQuestion` | `AgentUserInputRequest` | Answered through the question form when the run allows questions; otherwise the tool is told to proceed. |
+| `mcp__codealta__*` | none | The tool asks its own permission when the session runs it. |
+| any other | none (allowed) | CodeAlta gates commands and file changes only, as for its own tools. |
+
+"Allow for session" applies the rules the CLI proposed with the prompt (`updatedPermissions`). `permission_mode` of the provider sets the mode the CLI starts with.
+
+To show the change of an edit, `AgentSession` reads the file before and after the tool runs. The CLI does not wait for that by itself, so the provider registers one `PreToolUse` hook for the edit tools whose answer waits until the session starts the call. The hook never decides: it returns no decision, and the permissions of the CLI apply. It is released after 20 seconds at the latest.
+
+### Models, usage and compaction
+
+- Models come from the CLI: `ClaudeCodeModelCatalog` starts a short-lived process (`--no-session-persistence`), sends `initialize` and reads `models` and `account`. No model is called. The list is what the plan, the settings and the policies of the user allow, with the effort levels each model supports; `default` lets the CLI choose. Aliases (`default`, `opus`, `sonnet`, `haiku`) are the fallback when the CLI cannot be asked.
+- The probe fails with a message when the executable is not found or when the CLI has no way to authenticate (`account.tokenSource` and `apiKeySource` are `none` with the first-party API). It reports how the CLI authenticates (a plan or a provider), never an identity.
+- Usage is the usage of the last model request (what it read is what the context holds), the context window the CLI reports (`get_context_usage`, then `modelUsage`), the cost of the turn and the subscription limit events (`rate_limit_event`).
+- The CLI keeps and compacts its context. Local compaction is disabled for the provider, and a manual compaction sends `/compact` to the CLI (`IAgentProviderCompaction`).
+
+### Robustness
+
+The stream is treated as open-ended: a line that is not a JSON object, a message type, a `system` subtype, a stream event or a content block this version does not know is skipped; a control request it does not handle is answered with an error instead of being left waiting. A failed request is recognized by its meaning (`is_error`, the `error` of the assistant message), not by its subtype. Stopping a turn sends `interrupt`, waits for the CLI to be idle, and stops the process when it is not within `InterruptTimeout`; the conversation is resumable either way. `ClaudeCodeFakeCli` in the tests scripts the CLI, and `ClaudeCodeLiveCliTests` run against a real executable when `CODEALTA_TEST_CLAUDE_CLI` names one (`CODEALTA_TEST_CLAUDE_TURN=1` also runs a model turn with the account of that CLI).
+
+On Windows the provider runs a native `claude.exe` and refuses a `.cmd`/`.bat` shim, whose arguments cannot be escaped reliably for `cmd.exe`.
+
+### Configuration
+
+```toml
+[providers.claude-code]
+type = "claude-code"
+model = "sonnet"                       # optional; omit to let Claude Code choose
+reasoning_effort = "high"              # optional; low, medium, high, xhigh or max
+command = "~/.local/bin/claude"        # optional; default: `claude` on PATH or in an installer folder
+permission_mode = "default"            # optional; default, acceptEdits, plan, auto, dontAsk or bypassPermissions
+args = ["--add-dir", "/shared/specs"]  # optional; added to the command line
+```
+
+`single_model_id`, `models_include_regex` and `sort_models` apply as for other providers.
+
+### Limits
+
+- A prompt that starts with `/` is a slash command of Claude Code (`/compact`, `/context`, `/clear`).
+- The tool calls of a subagent are shown as the output of the `Agent` tool call that started it, not as tool calls of the session.
+- `ExitPlanMode` and tools other than commands and edits are allowed without a CodeAlta prompt.
+- Images and PDFs of a prompt are sent as attachments; other files are passed as text.
+- Changing the instructions or the tools during a conversation does not change the system prompt the CLI recorded.
 
 ## Anthropic, Google, and Mistral providers
 

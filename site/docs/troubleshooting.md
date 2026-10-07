@@ -73,6 +73,15 @@ If no provider is enabled, CodeAlta opens the provider setup automatically: the 
 
 For API-key providers, verify that the environment variable exists in the shell that launches CodeAlta. When the desktop app is started from the Start Menu or the applications menu, it sees the environment variables of your user session, not those of a terminal.
 
+## Claude Code is not found or not signed in
+
+The `claude-code` provider runs the Claude Code CLI you installed; CodeAlta has no sign-in for it.
+
+- **Claude Code was not found**: install it, or set `command` of the provider to the path of the executable. The desktop app started from the Dock or the Start menu does not have the `PATH` of your shell; CodeAlta also looks in `~/.local/bin`, Homebrew and npm folders. On Windows, install the native Claude Code (`irm https://claude.ai/install.ps1 | iex`): the `claude.cmd` of an npm installation is not run.
+- **Claude Code is not signed in**: run `claude` in a terminal, use `/login`, then use **Refresh** in the provider editor. `claude auth status` shows what the CLI is signed in with.
+- **A turn fails with a usage limit or a billing message**: the message comes from Claude Code and the account it uses. Limits are those of that account's plan.
+- **A resumed session starts without its context**: Claude Code keeps its transcript per folder under `~/.claude/projects`. When it is missing, CodeAlta starts a new Claude Code conversation and gives it the recorded conversation as context.
+
 ## Codex or Copilot login is pending
 
 In the TUI, the Model Providers dialog keeps browser sign-in and supported device-login instructions visible while authorization is pending. ChatGPT uses **Continue with ChatGPT** (browser only); Copilot and xAI also support device login. The current operation can be canceled from the dialog or with `Ctrl+G Ctrl+C`. Use `Ctrl+G Ctrl+U` / `Ctrl+G Ctrl+D` to copy the current login URL or device code. In the desktop app, use **Sign in with the browser** or **Sign in with a device code** on the provider in **Settings > Providers**.

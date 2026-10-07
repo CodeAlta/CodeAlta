@@ -203,6 +203,8 @@ Provider-runtime compatibility surfaces now use model-provider names. Do not rei
 
 Provider packages create model-provider runtimes and turn executors. The agent session runtime (`AgentRuntime`/`AgentSession`) replays journals, composes provider requests, executes turns, appends events, and can switch compatible providers by replaying canonical CodeAlta history.
 
+A provider whose model is reached through an agent CLI that runs its own tools (`claude-code`) is still a turn executor: it returns one assistant message per call and implements the internal `IAgentProviderToolHost` so that the session "runs" each tool call by waiting for the CLI, and `IAgentProviderCompaction` because the CLI keeps and compacts the context. See [Claude Code CLI provider](providers.md#claude-code-cli-claude-code-provider). Such a provider must not own sessions or journals of its own.
+
 ## Extension integration
 
 Extensions are trusted local code or files that the host explicitly discovers:
