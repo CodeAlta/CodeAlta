@@ -2205,6 +2205,12 @@ Switching to a session tab, by clicking it or with the tab keys, and creating, c
 puts the keyboard focus in that session's prompt, so typing can start at once. A code editor takes it
 in its text, or in its files when it shows no text. The window's own icon (Alt+Tab, task switcher) is `alta.ico`, shipped next to the executable.
 
+One editor of the window has the text focus. An editor writes what is typed, and runs the keys, in the
+editor that says it has the text focus, and it learns that it lost it from an event that the browser does
+not send while the window is in the background: the prompt of a tab that opened there would go on taking
+the text typed later in a file. When an editor takes the text focus, the others that still claim it are
+told that they lost it (`frontend/src/monaco/editorFocus.ts`), on every engine.
+
 The second stroke of a `Ctrl+G` chord works with or without `Ctrl` held. Shortcuts work while the
 prompt editor has focus; the ones marked "outside text" stay ordinary caret keys in text fields. An
 open window keeps the keyboard, except that the Settings window follows the commands that move to
