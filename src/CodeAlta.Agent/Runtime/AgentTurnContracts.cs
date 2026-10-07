@@ -23,6 +23,51 @@ internal interface IAgentProviderSessionCleanup
     ValueTask DisposeProviderSessionAsync(string sessionId);
 }
 
+/// <summary>
+/// The handlers of one run, given to a provider that runs tools itself.
+/// </summary>
+/// <param name="SessionId">The session of the run.</param>
+/// <param name="RunId">The run.</param>
+/// <param name="OnPermissionRequest">Asks the host whether a tool of the provider may run.</param>
+/// <param name="OnUserInputRequest">Asks the user a question of the provider, when the run can.</param>
+internal sealed record AgentProviderRunContext(
+    string SessionId,
+    AgentRunId RunId,
+    AgentPermissionRequestHandler OnPermissionRequest,
+    AgentUserInputRequestHandler? OnUserInputRequest);
+
+/// <summary>
+/// A turn executor whose provider runs tools itself (an agent CLI): the session still shows and records each
+/// tool call, but the definition that "runs" it comes from the executor.
+/// </summary>
+internal interface IAgentProviderToolHost
+{
+    /// <summary>
+    /// Gives the handlers of a run before its first turn.
+    /// </summary>
+    void AttachRun(AgentProviderRunContext context);
+
+    /// <summary>
+    /// Returns the definition that runs a tool call of a response of this executor, or
+    /// <see langword="null" /> to run <paramref name="registered" /> as it is.
+    /// </summary>
+    /// <param name="sessionId">The session of the call.</param>
+    /// <param name="toolCall">The tool call the executor returned.</param>
+    /// <param name="registered">The tool of the session with that name, when there is one.</param>
+    AgentToolDefinition? ResolveTool(string sessionId, AgentMessagePart.ToolCall toolCall, AgentToolDefinition? registered);
+}
+
+/// <summary>
+/// A turn executor whose provider keeps the context of a session and compacts it itself.
+/// </summary>
+internal interface IAgentProviderCompaction
+{
+    /// <summary>
+    /// Compacts the context the provider keeps for the session of <paramref name="request" />.
+    /// </summary>
+    Task<AgentCompactionOutcome> CompactAsync(AgentTurnRequest request, CancellationToken cancellationToken);
+}
+
 internal sealed record AgentTurnFailure(
     string Message,
     bool IsContextOverflow);

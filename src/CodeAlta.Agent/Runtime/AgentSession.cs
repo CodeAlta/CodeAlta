@@ -235,8 +235,14 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             };
             await _store.UpsertStateAsync(_state, linkedCts.Token).ConfigureAwait(false);
 
-            var allTools = AppendSendTools(BuildAvailableTools(options.OnPermissionRequest ?? _options.OnPermissionRequest,
-                options.OnUserInputRequest ?? _options.OnUserInputRequest, options.EnableUserInputTool), options.AdditionalTools);
+            var permissionRequestHandler = options.OnPermissionRequest ?? _options.OnPermissionRequest;
+            var userInputRequestHandler = options.OnUserInputRequest ?? _options.OnUserInputRequest;
+            var allTools = AppendSendTools(BuildAvailableTools(permissionRequestHandler,
+                userInputRequestHandler, options.EnableUserInputTool), options.AdditionalTools);
+            // A provider that runs tools itself answers its own permission prompts and questions through the run.
+            var providerToolHost = _turnExecutor as IAgentProviderToolHost;
+            providerToolHost?.AttachRun(new AgentProviderRunContext(SessionId, runId, permissionRequestHandler,
+                options.EnableUserInputTool ? userInputRequestHandler : null));
             var modelInfo = await ResolveModelInfoAsync(linkedCts.Token).ConfigureAwait(false);
             var toolMap = AgentToolBridge.CreateDefinitionMap(allTools);
             var runTools = new AgentRunTools(toolMap.Keys);
@@ -340,7 +346,13 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
                 foreach (var toolCall in toolCalls)
                 {
-                    if (!toolMap.TryGetValue(toolCall.Name, out var toolDefinition))
+                    toolMap.TryGetValue(toolCall.Name, out var toolDefinition);
+                    if (providerToolHost is not null)
+                    {
+                        toolDefinition = providerToolHost.ResolveTool(SessionId, toolCall, toolDefinition) ?? toolDefinition;
+                    }
+
+                    if (toolDefinition is null)
                     {
                         throw new InvalidOperationException($"Tool '{toolCall.Name}' was not registered for session '{SessionId}'.");
                     }
@@ -636,6 +648,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     {
         var instructionBundle = AgentInstructionComposer.Compose(_options, _state.LoadedSkills);
         var modelInfo = await ResolveModelInfoAsync(cancellationToken).ConfigureAwait(false);
+        if (_turnExecutor is IAgentProviderCompaction providerCompaction)
+        {
+            return await CompactProviderContextAsync(providerCompaction, instructionBundle, modelInfo, cancellationToken).ConfigureAwait(false);
+        }
+
         var outcome = await CompactCoreAsync(
                 trigger: AgentCompactionTrigger.Manual,
                 runId: null,
@@ -656,6 +673,66 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             TokensRemoved: outcome.TokensRemoved,
             PreCompactionTokens: outcome.PreCompactionTokens,
             PostCompactionTokens: outcome.PostCompactionTokens);
+    }
+
+    // The provider keeps the context of the session: it compacts it, and the journal keeps every message.
+    private async Task<AgentCompactionOutcome> CompactProviderContextAsync(
+        IAgentProviderCompaction providerCompaction,
+        AgentInstructionBundle instructionBundle,
+        AgentModelInfo? modelInfo,
+        CancellationToken cancellationToken)
+    {
+        var started = new AgentSessionUpdateEvent(
+            ProviderId,
+            SessionId,
+            DateTimeOffset.UtcNow,
+            null,
+            AgentSessionUpdateKind.CompactionStarted,
+            "Manual provider compaction started.");
+        await AppendEventsAsync([started], cancellationToken).ConfigureAwait(false);
+
+        AgentCompactionOutcome outcome;
+        try
+        {
+            var request = CreateTurnRequest(
+                new AgentRunId($"provider-compaction:{Guid.CreateVersion7()}"),
+                instructionBundle.SystemMessage,
+                CombineDeveloperInstructions(instructionBundle.DeveloperInstructions, instructionBundle.RuntimeContext),
+                modelInfo,
+                tools: []);
+            outcome = await providerCompaction.CompactAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            outcome = new AgentCompactionOutcome(false, ex.Message);
+        }
+
+        var usage = _state.Usage;
+        if (outcome is { Success: true, PostCompactionTokens: { } postCompactionTokens })
+        {
+            usage = AgentUsageFactory.AttachWindowEstimate(
+                usage,
+                modelInfo,
+                postCompactionTokens,
+                _conversation.Count,
+                DateTimeOffset.UtcNow,
+                "Active context window");
+            _state = _state with { Usage = usage, UpdatedAt = DateTimeOffset.UtcNow };
+            _summary = _summary with { Usage = usage, UpdatedAt = DateTimeOffset.UtcNow };
+            await _store.UpsertStateAsync(_state, cancellationToken).ConfigureAwait(false);
+            await _store.UpsertSessionAsync(_summary, cancellationToken).ConfigureAwait(false);
+        }
+
+        var completed = new AgentSessionUpdateEvent(
+            ProviderId,
+            SessionId,
+            DateTimeOffset.UtcNow,
+            null,
+            outcome.Success ? AgentSessionUpdateKind.CompactionCompleted : AgentSessionUpdateKind.Warning,
+            outcome.Message ?? (outcome.Success ? "Manual provider compaction completed." : "Manual provider compaction failed."),
+            Usage: outcome.Success ? usage : null);
+        await AppendEventsAsync([completed], cancellationToken).ConfigureAwait(false);
+        return outcome;
     }
 
     /// <inheritdoc />
@@ -3229,6 +3306,30 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 }
 
                 break;
+            // The file tools of an agent CLI that runs them itself (Claude Code): they name the file `file_path`.
+            case "Read":
+                if (GetPath(toolCall.Arguments, "file_path") is { Length: > 0 } providerReadPath)
+                {
+                    AddReadFile(Resolve(providerReadPath));
+                }
+
+                break;
+            case "Edit":
+            case "MultiEdit":
+            case "Write":
+                if (GetPath(toolCall.Arguments, "file_path") is { Length: > 0 } providerModifiedPath)
+                {
+                    AddModifiedFile(Resolve(providerModifiedPath));
+                }
+
+                break;
+            case "NotebookEdit":
+                if (GetPath(toolCall.Arguments, "notebook_path") is { Length: > 0 } providerNotebookPath)
+                {
+                    AddModifiedFile(Resolve(providerNotebookPath));
+                }
+
+                break;
             case "rename_file_or_dir":
                 if (GetPath(toolCall.Arguments, "old_path") is { Length: > 0 } oldPath)
                 {
@@ -3279,7 +3380,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             "replace_in_file" or
             "delete_file_or_dir" or
             "rename_file_or_dir" or
-            "apply_patch";
+            "apply_patch" or
+            "Edit" or
+            "MultiEdit" or
+            "Write" or
+            "NotebookEdit";
 
     private static bool IsSkillActivationTool(AgentMessagePart.ToolCall toolCall)
         => string.Equals(toolCall.Name, "codealta_skills_activate", StringComparison.Ordinal) ||

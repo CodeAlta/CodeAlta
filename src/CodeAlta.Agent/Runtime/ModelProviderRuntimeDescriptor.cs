@@ -88,6 +88,11 @@ public enum AgentTransportKind
     /// Mistral chat completions.
     /// </summary>
     MistralChat,
+
+    /// <summary>
+    /// The Claude Code CLI, driven over its stream-json input and output.
+    /// </summary>
+    ClaudeCodeCli,
 }
 
 /// <summary>
