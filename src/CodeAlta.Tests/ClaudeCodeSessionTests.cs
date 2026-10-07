@@ -317,6 +317,31 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public async Task TurnThatFailsAfterAnAnswer_KeepsTheAnswerAndReportsTheFailure()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        cli.OnUserMessage = static (process, user) =>
+        {
+            process.EmitInit();
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.TextBlock("Half of the work is done.")));
+            process.EmitResult(null, user, isError: true, subtype: "error_max_turns");
+            return Task.CompletedTask;
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(runtime, directory);
+        var events = Collect(session);
+
+        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("do it all") }).WaitAsync(Timeout));
+
+        StringAssert.Contains(failure.Message, "turn limit");
+        Assert.AreEqual(
+            "Half of the work is done.",
+            events.Snapshot().OfType<AgentContentCompletedEvent>().Single(static e => e.Kind == AgentContentKind.Assistant).Content);
+    }
+
+    [TestMethod]
     public async Task UnknownAndMalformedOutput_IsSkipped()
     {
         using var directory = TestTempDirectory.Create();

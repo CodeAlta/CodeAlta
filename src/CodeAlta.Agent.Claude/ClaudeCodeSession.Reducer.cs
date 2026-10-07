@@ -387,7 +387,15 @@ internal sealed partial class ClaudeCodeSession
         var subtype = ClaudeCodeJson.GetString(result, "subtype");
         if (ClaudeCodeJson.GetBoolean(result, "is_error") || (subtype is not null && subtype.StartsWith("error", StringComparison.Ordinal)))
         {
-            _held = null;
+            if (_held is { } answered)
+            {
+                // What the model answered before the turn failed (a turn or budget limit) is recorded first: the
+                // failure is reported by the next call.
+                _held = null;
+                _replay = @event;
+                return CreateResponse(answered, requiresFollowUp: true);
+            }
+
             throw CreateFailure(result, subtype);
         }
 
