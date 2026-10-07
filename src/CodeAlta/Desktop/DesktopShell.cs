@@ -32,7 +32,7 @@ internal enum DesktopCloseAction
 /// <c>entry-added</c> (the application was just added to the desktop's applications) and
 /// <c>sessions-changed</c> (something outside the window may have created or changed sessions).
 /// </summary>
-internal sealed record DesktopShellEvent(string Kind, int RunningSessions, int BusyTerminals = 0);
+internal sealed record DesktopShellEvent(string Kind, int RunningSessions, int BusyTerminals = 0, int SessionWidth = 0, string? SessionId = null);
 
 /// <summary>
 /// How the application lives beyond its window: an icon in the notification area (the menu bar on macOS, the
@@ -51,6 +51,8 @@ internal sealed class DesktopShell
     private readonly Action _exit;
     private readonly Lock _gate = new();
     private readonly List<Action<DesktopShellEvent>> _watchers = [];
+    // The width some sessions are shown with instead of the user's setting: what `alta appearance set` changes.
+    private readonly Dictionary<string, int> _sessionWidths = new(StringComparer.OrdinalIgnoreCase);
     private DesktopPreferences _preferences;
     private bool _tray;
     private bool _commands;
@@ -273,6 +275,79 @@ internal sealed class DesktopShell
         DesktopPreferences preferences;
         lock (_gate) preferences = _preferences = _preferences with { OnClose = value };
         preferences.Save(_dataRoot);
+    }
+
+    /// <summary>The most sessions that are shown with a width of their own at a time.</summary>
+    internal const int MaximumSessionWidths = 256;
+
+    /// <summary>The user's setting: the width of the conversations, in percent of the space of a session.</summary>
+    internal int SessionWidth { get { lock (_gate) return _preferences.SessionWidth; } }
+
+    /// <summary>
+    /// Changes the user's setting, keeps it, and tells the pages (a <c>session-width</c> notice without a session).
+    /// </summary>
+    /// <param name="value">The width, in percent.</param>
+    /// <param name="resized">The session the user resized, if any: it follows the setting again.</param>
+    /// <returns>False when the width is out of range: nothing changes.</returns>
+    internal bool SetSessionWidth(int value, string? resized = null)
+    {
+        if (!DesktopPreferences.IsSessionWidth(value)) return false;
+        DesktopPreferences? preferences = null;
+        var released = false;
+        lock (_gate)
+        {
+            if (_preferences.SessionWidth != value) preferences = _preferences = _preferences with { SessionWidth = value };
+            released = !string.IsNullOrWhiteSpace(resized) && _sessionWidths.Remove(resized.Trim());
+        }
+
+        if (preferences is not null)
+        {
+            preferences.Save(_dataRoot);
+            Publish(new("session-width", 0, SessionWidth: value));
+        }
+
+        if (released) Publish(new("session-width", 0, SessionId: resized!.Trim()));
+        return true;
+    }
+
+    /// <summary>The width one session is shown with instead of the user's setting; null when it follows the setting.</summary>
+    internal int? SessionWidthOf(string sessionId)
+    {
+        lock (_gate) return !string.IsNullOrWhiteSpace(sessionId) && _sessionWidths.TryGetValue(sessionId.Trim(), out var value) ? value : null;
+    }
+
+    /// <summary>The sessions that are shown with a width of their own.</summary>
+    internal IReadOnlyList<KeyValuePair<string, int>> SessionWidths()
+    {
+        lock (_gate) return [.. _sessionWidths];
+    }
+
+    /// <summary>
+    /// Changes the width one session is shown with, until the application exits or the user resizes that session,
+    /// and tells the pages (a <c>session-width</c> notice that names the session; a width of 0 says it follows the
+    /// user's setting again). The user's setting is not touched: two sessions never compete for it.
+    /// </summary>
+    /// <returns>False when the session is not named, the width is out of range, or too many sessions have one.</returns>
+    internal bool SetSessionWidthOf(string sessionId, int? value)
+    {
+        var id = sessionId?.Trim();
+        if (string.IsNullOrEmpty(id) || id.Length > 128 || id.Any(char.IsControl) || value is { } width && !DesktopPreferences.IsSessionWidth(width)) return false;
+        lock (_gate)
+        {
+            if (value is null)
+            {
+                if (!_sessionWidths.Remove(id)) return true;
+            }
+            else
+            {
+                if (_sessionWidths.TryGetValue(id, out var current) && current == value) return true;
+                if (!_sessionWidths.ContainsKey(id) && _sessionWidths.Count >= MaximumSessionWidths) return false;
+                _sessionWidths[id] = value.Value;
+            }
+        }
+
+        Publish(new("session-width", 0, SessionWidth: value ?? 0, SessionId: id));
+        return true;
     }
 
     /// <summary>Whether the MCP server of the application is turned on.</summary>

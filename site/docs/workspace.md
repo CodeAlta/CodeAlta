@@ -121,6 +121,14 @@ In the TUI, a tile opens a dialog with the details of the call and its output.
 
 Press `Enter` to send and `Shift+Enter` for a new line. If the selected session is busy, `Enter` adds the prompt to the waiting list instead of dropping it. Queued prompts can be edited, repeated, steered immediately when supported, deleted, or cleared with `F10`.
 
+### Width of the conversation (desktop)
+
+Drag the left or the right edge of the prompt to make the conversation narrower or wider. Both edges move together, so the prompt and the timeline stay centered. Double-click an edge to take the whole width again.
+
+The width is the same for every session. **Settings > Appearance > Width of the conversation** shows it as a percentage and resets it.
+
+An agent can change the width of its own session when you ask it to, for example "show this conversation at 70%". That only changes how that session is shown, not your setting.
+
 The agent prompt selector chooses the agent prompt profile for the current draft/session. Built-in prompts appear first, followed by global `~/.alta/prompts/agents` prompts and project `.alta/prompts/agents` prompts. Global/project prompts with the same file id override lower-precedence prompts; see [Agent Prompts]({{site.basepath}}/docs/prompts/).
 
 In the desktop app, the agent prompt, provider, model and reasoning effort are in one picker at the left of the prompt bar. It lists the models of the provider and the reasoning efforts of the selected model. The prompt bar also shows the project folder, the git branch and the lines added and removed since the last commit. These numbers follow the changes made outside CodeAlta too. Click them to open the [changes of the project](#changes-desktop).
@@ -361,6 +369,7 @@ The **Appearance** page sets:
 - **Darker dark theme**, for deeper backgrounds in the dark theme with the same text and accents;
 - one of 13 color schemes, each with a dark, a darker and a light variant, or a color scheme of your own;
 - how projects are sorted and how many recent sessions are listed per project;
+- the width of the conversation, as a percentage of the space of a session;
 - what closing the window does: ask, keep CodeAlta running in the notification area, or exit.
 
 <div class="row g-3 my-4">

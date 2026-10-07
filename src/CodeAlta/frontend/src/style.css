@@ -2108,3 +2108,22 @@ dialog.tool-call-dialog .app-window-body .tool-record > h4 { margin: 0 0 4px; co
 .detail-pane-diff > h3 { display: flex; align-items: baseline; gap: 10px; }
 .ide-shell .tool-changes { font: var(--bp-typography-size-code-small)/var(--bp-typography-line-height-large) var(--bp-typography-family-mono); }
 .ide-shell .message-heading > .tool-changes { margin-inline: 2px 4px; }
+
+/* The width of a conversation: the timeline and the prompt of a session take a part of its space, in the middle.
+   `--session-width` is the user's setting, on the root; a session shown with a width of its own has it on its
+   workspace. A narrow pane keeps a conversation one can read: at least 520px, or all of it. */
+.session-workspace { --session-inset: calc((100% - max(var(--session-width, 100%), min(100%, 520px))) / 2); }
+.session-workspace .timeline-scroll { padding-inline: var(--session-inset) calc(8px + var(--session-inset)); }
+.session-workspace > .composer-resize-bar { margin-inline: calc(4px + var(--session-inset)); }
+.session-workspace > .composer-region { position: relative; padding-inline: var(--session-inset); }
+.ide-shell .session-workspace > .composer-region { padding-inline: calc(8px + var(--session-inset)); }
+/* The grips of the prompt: a slim line at each of its edges, shown when the pointer or the keyboard is on it. */
+.session-width-grip { position: absolute; z-index: 3; top: 6px; bottom: 6px; width: 9px; cursor: ew-resize; touch-action: none; outline: none; }
+.session-width-grip[data-side="left"] { left: var(--session-inset); }
+.session-width-grip[data-side="right"] { right: var(--session-inset); }
+.session-width-grip::before { content: ""; position: absolute; top: 20%; bottom: 20%; left: 3px; width: 3px; border-radius: 3px; background: var(--accent); opacity: 0; transition: opacity .12s ease; }
+.session-width-grip:hover::before, .session-width-grip:active::before, .session-width-grip:focus-visible::before { opacity: .85; }
+.settings-session-width { display: flex; flex: none; align-items: center; gap: 12px; width: 340px; max-width: 100%; }
+.settings-session-width > .bp6-slider { flex: 1 1 auto; min-width: 140px; height: 16px; margin-inline: 8px; }
+.settings-session-width > .bp6-button { flex: none; white-space: nowrap; }
+.settings-session-width > output { flex: none; min-width: 4ch; text-align: end; color: var(--muted); font-variant-numeric: tabular-nums; }

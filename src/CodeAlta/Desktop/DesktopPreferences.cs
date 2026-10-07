@@ -24,8 +24,21 @@ internal enum DesktopCloseBehavior
 /// </summary>
 /// <param name="OnClose">What closing the window does.</param>
 /// <param name="McpServer">Whether the MCP server of the application runs: other applications drive the window through it.</param>
-internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool McpServer = true)
+/// <param name="SessionWidth">
+/// The width of the conversations, in percent of the space of a session: the host keeps it because the
+/// <c>alta appearance</c> commands read and change it.
+/// </param>
+internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool McpServer = true, int SessionWidth = DesktopPreferences.DefaultSessionWidth)
 {
+    /// <summary>The least width of a conversation, in percent.</summary>
+    internal const int MinimumSessionWidth = CodeAlta.LiveTool.IAltaAppearance.MinimumSessionWidth;
+
+    /// <summary>The width of a conversation that takes the whole space of a session.</summary>
+    internal const int DefaultSessionWidth = CodeAlta.LiveTool.IAltaAppearance.DefaultSessionWidth;
+
+    /// <summary>Whether a number is a width that can be kept.</summary>
+    internal static bool IsSessionWidth(int value) => value is >= MinimumSessionWidth and <= DefaultSessionWidth;
+
     private const string FileName = "preferences.json";
     private const int MaximumFileBytes = 4096;
 
@@ -46,11 +59,14 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
             if (root.ValueKind != JsonValueKind.Object) return Default;
             // The server runs unless it was turned off: a file written before it existed says nothing about it.
             var server = !(root.TryGetProperty("mcpServer", out var running) && running.ValueKind == JsonValueKind.False);
+            // The whole space unless the file says otherwise, with a width that is one.
+            var width = root.TryGetProperty("sessionWidth", out var wide) && wide.ValueKind == JsonValueKind.Number && wide.TryGetInt32(out var percent) && IsSessionWidth(percent)
+                ? percent : DefaultSessionWidth;
             if (root.TryGetProperty("onClose", out var value) && value.ValueKind == JsonValueKind.String && TryParse(value.GetString(), out var behavior))
-                return new(behavior, server);
+                return new(behavior, server, width);
             // Written before the question existed, by the switch of the settings: the user had chosen.
             return root.TryGetProperty("closeToTray", out var kept) && kept.ValueKind is JsonValueKind.True or JsonValueKind.False
-                ? new(kept.GetBoolean() ? DesktopCloseBehavior.KeepRunning : DesktopCloseBehavior.Exit, server) : Default with { McpServer = server };
+                ? new(kept.GetBoolean() ? DesktopCloseBehavior.KeepRunning : DesktopCloseBehavior.Exit, server, width) : Default with { McpServer = server, SessionWidth = width };
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException)
         {
@@ -68,7 +84,8 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
             var path = Path.Combine(dataRoot, FileName);
             var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             // The server runs unless the file says otherwise: only the choice to turn it off is written.
-            File.WriteAllText(temporary, "{\"onClose\":\"" + Name(OnClose) + "\"" + (McpServer ? "" : ",\"mcpServer\":false") + "}");
+            File.WriteAllText(temporary, "{\"onClose\":\"" + Name(OnClose) + "\"" + (McpServer ? "" : ",\"mcpServer\":false")
+                + (SessionWidth == DefaultSessionWidth ? "" : ",\"sessionWidth\":" + SessionWidth.ToString(System.Globalization.CultureInfo.InvariantCulture)) + "}");
             File.Move(temporary, path, overwrite: true);
             return true;
         }

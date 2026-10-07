@@ -1028,6 +1028,20 @@ Show/Hide projects button use the same live preferences; changes apply immediate
 saved only to this WebView's local storage (theme, darker, colorScheme, projectSort, projectRail and projectTree v1 keys).
 The user's own color schemes are files of the profile (see below).
 
+**Width of the conversation.** The timeline and the prompt of a session take a percentage of its space, in
+the middle (`--session-width`, read by `.session-workspace` as an inset of the timeline and of the composer;
+a narrow pane keeps at least 520 px, or all of it). The user's setting is one value for every session, from 40
+to 100, kept by the host in `preferences.json` (`sessionWidth`, written only when it is not 100): the host
+keeps it because `alta appearance` reads it. It is changed by dragging an edge of the prompt
+(`SessionWidthGrips`: both edges move, the pointer sets the width to the percent, a double click or Home
+resets it, the arrow keys change it by 5), or with the slider of **Settings → Appearance**, which also resets
+it; `desktopShell.setSessionWidth` writes it and every page is told with a `session-width` notice. A session
+can be shown with a width of its own, which `alta appearance set --session-width` gives it: the host holds
+these in memory (`DesktopShell.SetSessionWidthOf`, 256 sessions at most), lists them in
+`desktopShell.preferences` and tells the pages with a `session-width` notice that names the session. Such a
+session has `--session-width` on its own workspace. Resizing it by its grips changes the user's setting and
+releases the session.
+
 The rows of the page follow the width of their card, not of the window: the Settings window has a size of
 its own. A control is beside the name of its row while there is room for both, and goes below it, over the
 width of the row, when the card is narrow (a container query on the card, at 480 px). A switch stays beside

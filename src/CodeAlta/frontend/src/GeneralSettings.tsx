@@ -1,10 +1,11 @@
 import type { ComponentProps } from "react";
-import { Button, ButtonGroup, Card, HTMLSelect, Switch } from "@blueprintjs/core";
+import { Button, ButtonGroup, Card, HTMLSelect, Slider, Switch } from "@blueprintjs/core";
 import { AppIcon, type IconName } from "./AppIcon";
 import { ColorSchemeSettings } from "./ColorSchemeSettings";
 import type { ProjectSort } from "./explorer/projectRail";
 import { SettingsField as Field } from "./SettingsField";
 import { themeLabel, themes, type Theme, type PreferenceNotices } from "./windowPreferences";
+import { clampSessionWidth, defaultSessionWidth, minimumSessionWidth, sessionWidthStep } from "./sessionWidth";
 import { useShellLanguage } from "./shellLanguage";
 import { locales, languageNames, preferenceNotice } from "./localization";
 import { closeBehavior, closeBehaviorLabel, closeBehaviors, keepRunningPlace, type CloseBehavior } from "./desktopShell";
@@ -12,7 +13,7 @@ import { closeBehavior, closeBehaviorLabel, closeBehaviors, keepRunningPlace, ty
 /** The icon of each theme choice, shared with the title-bar switch. */
 export const themeIcons: Readonly<Record<Theme, IconName>> = { dark: "themeDark", light: "themeLight", system: "themeSystem" };
 
-export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, sort, setSort, desktopCollapsed, setDesktopCollapsed, notices, recentSessionCount, setRecentSessionCount, closing }: {
+export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, sort, setSort, desktopCollapsed, setDesktopCollapsed, notices, recentSessionCount, setRecentSessionCount, sessionWidth, setSessionWidth, closing }: {
   theme: Theme;
   setTheme: (value: Theme) => void;
   /** Whether the dark theme is the darker one. */
@@ -26,6 +27,9 @@ export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, s
   setDesktopCollapsed: (value: boolean) => void;
   recentSessionCount: number;
   setRecentSessionCount: (value: number) => void;
+  /** How much of the space of a session its timeline and its prompt take, in percent; absent where it cannot be set. */
+  sessionWidth?: number;
+  setSessionWidth?: (value: number) => void;
   /** What closing the window does; absent where the application cannot stay anywhere without it. */
   closing?: { behavior: CloseBehavior; platform: string; set: (value: CloseBehavior) => void } | null;
   notices: PreferenceNotices;
@@ -63,6 +67,15 @@ export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, s
         {Array.from({ length: 50 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}
       </HTMLSelect>
     </Field>
+    {sessionWidth !== undefined && setSessionWidth && <Field label={t("Width of the conversation")}>
+      <div className="settings-session-width">
+        <Slider min={minimumSessionWidth} max={defaultSessionWidth} stepSize={sessionWidthStep} labelRenderer={false}
+          value={clampSessionWidth(sessionWidth)} onChange={value => { if (value !== sessionWidth) setSessionWidth(value); }}
+          handleHtmlProps={{ "aria-label": t("Width of the conversation") }} />
+        <output>{sessionWidth}%</output>
+        <Button variant="minimal" size="small" disabled={sessionWidth === defaultSessionWidth} onClick={() => setSessionWidth(defaultSessionWidth)}>{t("Reset")}</Button>
+      </div>
+    </Field>}
     <Field label={t("Collapse desktop project rail")} htmlFor="settings-rail-collapsed"
       notice={notices.rail && <p role="status" className="notice" data-diagnostic={notices.rail}>{preferenceNotice(locale, "Desktop projects", locale === "en" ? "expanded" : t("Show projects"), notices.rail)}</p>}>
       <Switch id="settings-rail-collapsed" className="settings-checkbox" checked={desktopCollapsed} onChange={event => setDesktopCollapsed(event.currentTarget.checked)} />

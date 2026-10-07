@@ -97,8 +97,12 @@ public sealed class DesktopShellTests
         Assert.AreEqual("unavailable", service.Hide(new()).Status);
         Assert.AreEqual("unavailable", service.Exit(new(Confirmed: true)).Status);
         // What the page reads: the names of the generated client.
-        Assert.AreEqual("""{"status":"unavailable","onClose":"ask","canKeepRunning":false,"platform":"windows","entryAdded":false}""",
+        // Without a shell the width of the conversations is the whole space, and asking for another keeps it.
+        Assert.AreEqual(("unavailable", 100), (service.SetSessionWidth(new(70, "session-1")).Status, service.SetSessionWidth(new(70)).SessionWidth));
+        Assert.AreEqual("""{"status":"unavailable","onClose":"ask","canKeepRunning":false,"platform":"windows","entryAdded":false,"sessionWidth":100,"sessionWidths":null}""",
             JsonSerializer.Serialize(service.Preferences(new()) with { Platform = "windows" }, DesktopJsonContext.Default.DesktopShellPreferences));
+        Assert.AreEqual("""{"kind":"session-width","runningSessions":0,"busyTerminals":0,"sessionWidth":60,"sessionId":"session-1"}""",
+            JsonSerializer.Serialize(new DesktopShellEvent("session-width", 0, SessionWidth: 60, SessionId: "session-1"), DesktopJsonContext.Default.DesktopShellEvent));
     }
 
     [TestMethod]

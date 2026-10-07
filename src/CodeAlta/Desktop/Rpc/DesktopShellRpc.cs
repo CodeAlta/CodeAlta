@@ -47,6 +47,19 @@ internal sealed class DesktopShellService
     }
 
     /// <summary>
+    /// Changes the user's setting for the width of the conversations, in percent of the space of a session (40 to
+    /// 100). A width out of range changes nothing. The session the user resized follows the setting again. Every
+    /// page is told with <c>session-width</c> notices of <see cref="Watch"/>.
+    /// </summary>
+    [NeoRpcMethod("setSessionWidth")]
+    public DesktopShellPreferences SetSessionWidth(DesktopShellSessionWidthRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _shell?.SetSessionWidth(request.Percent, request.SessionId);
+        return Current();
+    }
+
+    /// <summary>
     /// Hides the window and leaves the application running: the answer to the <c>confirm-close</c> notice of
     /// <see cref="Watch"/>.
     /// </summary>
@@ -118,12 +131,14 @@ internal sealed class DesktopShellService
 
     private DesktopShellPreferences Current() => _shell is null
         ? new("unavailable", DesktopPreferences.Name(DesktopCloseBehavior.Ask), false, Platform, false)
-        : new("ok", DesktopPreferences.Name(_shell.OnClose), _shell.CanHide, Platform, _shell.EntryAdded);
+        : new("ok", DesktopPreferences.Name(_shell.OnClose), _shell.CanHide, Platform, _shell.EntryAdded, _shell.SessionWidth,
+            [.. _shell.SessionWidths().Select(static pair => new DesktopShellSessionWidth(pair.Key, pair.Value))]);
 
     private static string Platform => OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
 }
 
 internal sealed record DesktopShellRequest;
+
 
 /// <param name="OnClose"><c>ask</c>, <c>keep</c> or <c>exit</c>.</param>
 internal sealed record DesktopShellOnCloseRequest(string? OnClose);
@@ -156,4 +171,14 @@ internal sealed record DesktopShellExitResponse(string Status);
 /// <param name="CanKeepRunning">The platform has somewhere for the application to stay (a tray icon, the Dock).</param>
 /// <param name="Platform"><c>windows</c>, <c>macos</c> or <c>linux</c>: what that place is called.</param>
 /// <param name="EntryAdded">This start added the application to the desktop's applications.</param>
-internal sealed record DesktopShellPreferences(string Status, string OnClose, bool CanKeepRunning, string Platform, bool EntryAdded);
+/// <param name="SessionWidth">The user's setting: the width of the conversations, in percent of the space of a session.</param>
+/// <param name="SessionWidths">The sessions that are shown with a width of their own, set by an <c>alta appearance</c> command.</param>
+internal sealed record DesktopShellPreferences(string Status, string OnClose, bool CanKeepRunning, string Platform, bool EntryAdded,
+    int SessionWidth = DesktopPreferences.DefaultSessionWidth, DesktopShellSessionWidth[]? SessionWidths = null);
+
+/// <summary>The width one session is shown with instead of the user's setting.</summary>
+internal sealed record DesktopShellSessionWidth(string SessionId, int Percent);
+
+/// <param name="Percent">The width of the conversations, from 40 to 100.</param>
+/// <param name="SessionId">The session the user resized, when there is one: it follows the setting again.</param>
+internal sealed record DesktopShellSessionWidthRequest(int Percent, string? SessionId = null);

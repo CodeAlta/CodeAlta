@@ -136,6 +136,8 @@ import { persistTerminalLook, restoreTerminalLook, terminalLookKey, type Termina
 import { applicationKey, terminalsOf } from "./terminal/terminals";
 import { ExplorerSessions, SessionRowTitle, sessionRowIndent } from "./explorer/ExplorerSessions";
 import { SessionLinksContext, type SessionLinks } from "./SessionReference";
+import { SessionWidthContext, SessionWidthGrips, useSessionWidthStyle, type SessionWidthControl } from "./SessionWidthGrips";
+import { applySessionWidth, defaultSessionWidth, sessionWidthsOf, validSessionWidth, withSessionWidth } from "./sessionWidth";
 import { collapseAllScopes, emptyProjectTree, expandScope, globalScope, isExpanded, isFavorite, persistProjectTree, projectTreeKey, restoreProjectTree, scopeKey,
   setFavorite, toggleScope, type ProjectTree } from "./explorer/projectTree";
 import { defaultIdeWidth, maximumIdeWidth, minimumIdeWidth, parseIdeWidth, persistIdeWidth, resizeIdeWidth } from "./ideWidth";
@@ -820,6 +822,10 @@ function App() {
   // How the application lives beyond its window: whether closing it leaves CodeAlta running, and the host's
   // requests to exit (Exit in the tray) or to ask before an exit that stops running sessions.
   const [shellPreferences, setShellPreferences] = useState<DesktopShellPreferences | null>(null);
+  // The width of the conversations: the user's setting, and the sessions an alta command gave a width of their own.
+  const [sessionWidth, setSessionWidthValue] = useState(defaultSessionWidth);
+  const [sessionWidths, setSessionWidths] = useState<ReadonlyMap<string, number>>(() => new Map());
+  useLayoutEffect(() => { applySessionWidth(document.documentElement, sessionWidth); }, [sessionWidth]);
   const [exitQuestionFor, setExitQuestionFor] = useState<Readonly<{ sessions: number; terminals: number }> | null>(null);
   // Closing the window asks, until the answer is remembered, whether CodeAlta keeps running behind its icon.
   // A question about an exit already on screen is answered first.
@@ -879,6 +885,8 @@ function App() {
       .then(value => {
         if (abort.signal.aborted || value.status !== "ok") return;
         setShellPreferences(value);
+        if (validSessionWidth(value.sessionWidth)) setSessionWidthValue(value.sessionWidth);
+        setSessionWidths(sessionWidthsOf(value.sessionWidths));
         currentPlatform.current = value.platform;
         if (value.entryAdded) announceEntry(value.platform);
       }, () => { /* No shell: the window is the application. */ });
@@ -892,6 +900,11 @@ function App() {
           else if (notice.kind === "confirm-close" && !exitPending.current) setCloseQuestion(true);
           // An application that drives CodeAlta through its MCP server creates sessions without the window asking.
           else if (notice.kind === "sessions-changed") readSessionList.current();
+          // The width changed: the user's setting, or the width of one session (an alta command, or a drag that released it).
+          else if (notice.kind === "session-width") {
+            if (notice.sessionId) setSessionWidths(current => withSessionWidth(current, notice.sessionId!, notice.sessionWidth));
+            else if (validSessionWidth(notice.sessionWidth)) setSessionWidthValue(notice.sessionWidth);
+          }
           // A plugin was built again, started or stopped while the application runs.
           else if (notice.kind === "plugins-changed") { setPluginRevision(value => value + 1); window.dispatchEvent(new Event(pluginsChangedEvent)); }
         }
@@ -899,6 +912,15 @@ function App() {
     })();
     return () => abort.abort();
   }, [status?.hostEpoch]);
+  // The user's setting; the session that was resized, if any, follows it again. A window without a shell keeps it for itself.
+  const [setSessionWidth] = useState(() => (value: number, resizedSessionId?: string | null) => {
+    if (!validSessionWidth(value)) return;
+    setSessionWidthValue(value);
+    if (resizedSessionId) setSessionWidths(current => withSessionWidth(current, resizedSessionId, 0));
+    void desktopShell.setSessionWidth({ percent: value, sessionId: resizedSessionId ?? null }, { timeoutMilliseconds: 8_000 })
+      .catch(() => { /* The window shows what was asked. */ });
+  });
+  const sessionWidthControl = useMemo<SessionWidthControl>(() => ({ width: sessionWidth, widths: sessionWidths, setWidth: setSessionWidth }), [sessionWidth, sessionWidths, setSessionWidth]);
   function setOnClose(onClose: CloseBehavior) {
     setShellPreferences(current => current && { ...current, onClose });
     void desktopShell.setOnClose({ onClose }, { timeoutMilliseconds: 8_000 })
@@ -2158,7 +2180,7 @@ function App() {
   const newPromptDisabled = creatingBusy || creationLocked || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !snapshot
     || !!selectedProject?.archived || projectId !== null && !selectedProject || (!localDraft.text.trim() && !localImages.images.length)
     || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim());
-  return <ShellLanguageContext.Provider value={language}><PluginUiContext.Provider value={pluginUiValue}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
+  return <ShellLanguageContext.Provider value={language}><PluginUiContext.Provider value={pluginUiValue}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
     {(hostSilent || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {hostSilent && <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
         <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button></div>}
@@ -2471,6 +2493,7 @@ function App() {
     {settingsOpen && <SettingsOverlay section={settingsSection} onSection={navigate} onClose={closeSettings}>
       {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, darker, setDarker,
         schemes: { colorScheme, setColorScheme, shownScheme, variant, customSchemes, library: schemeLibrary, preview: appearancePreview, platform: demoMode ? null : shellPreferences?.platform ?? null }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); },
+        sessionWidth, setSessionWidth,
         closing: shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, set: setOnClose } : null }} />
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}
         update={owned ? appUpdateResult : undefined} onOpenReleaseNotes={openReleaseNotes} onInstallUpdate={installUpdate} />
@@ -2596,7 +2619,7 @@ function App() {
       onPrompt={request => ["send", "enqueue", "steer", "compact"].includes(request.mode ?? "")
         && askPluginComposer(request.mode as PluginComposerRequest["kind"], request.sessionId ?? null, request.text ?? null).result}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></SessionListRefreshContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginUiContext.Provider></ShellLanguageContext.Provider>;
+  </div></SessionListRefreshContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginUiContext.Provider></ShellLanguageContext.Provider>;
 }
 
 // Native modal matches the other shell dialogs: showModal supplies inert background,
@@ -2853,10 +2876,11 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
     [toolRecords, pluginEpoch, session.id]);
   const toolOutputs = useMemo(() => pluginEpoch === null ? undefined : toolRecords.outputs.session(pluginEpoch, session.id),
     [toolRecords, pluginEpoch, session.id]);
+  const ownWidth = useSessionWidthStyle(session.id);
   const infoControl = <Button ref={infoTrigger} variant="minimal" className="session-info-trigger" icon={<AppIcon name="info" size={16} />}
     aria-label={t("Session info")} title={`${t("Session info")} (Ctrl+G, Ctrl+T)`} aria-haspopup="dialog" aria-expanded={infoOpen}
     onClick={openInfo} />;
-  return <div className="session-workspace" data-active={active} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
+  return <div className="session-workspace" data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       lifetime={infoLifetime} canRead={() => !!mutation?.capability.canMutate()}
       target={ownedSession && !demoMode && mutation?.capability.canMutate() ? runtimeTarget(snapshot, { sessionId: session.id, projectId: selectedProjectId, path: session.workspacePath }, status?.hostEpoch ?? undefined) : null} />}
@@ -2903,6 +2927,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
         </div>
         <div ref={composer.regionRef} className={`composer-region${composer.height === undefined || askMode !== "none" ? "" : " resized"}`} data-ask={askMode}
           style={composer.height === undefined || askMode !== "none" ? undefined : { height: composer.height }}>
+        <SessionWidthGrips sessionId={session.id} />
         <div className="ask-form-slot" ref={setAskFormSlot} hidden={askMode === "none"} />
         <SessionComposerGate snapshot={snapshot} projectId={selectedProjectId} session={session} chrome={chrome}
           epoch={ownedHost ? status!.hostEpoch! : null}

@@ -371,6 +371,27 @@ A session that works in a git worktree has other files than the project folder, 
 editor shows: `alta editor open` answers `editor.worktree` (exit code 7) to it, unless it names the project
 with `--project`. `alta diff show` shows the changes of the worktree.
 
+## Appearance commands
+
+`alta appearance` reads how a session is shown in the CodeAlta Desktop window, and changes the view of one
+session. The settings of the window are the user's: no command writes them, so two sessions never compete
+for one.
+
+```text
+alta appearance get [--session <session-id>]
+alta appearance set --session-width <40-100|default> [--session <session-id>]
+```
+
+The session defaults to the calling one; a caller that is no session (an MCP client) names one for `set`.
+`--session-width` is the width of the conversation, in percent of the space of the session: its timeline and
+its prompt stay centered. The session is shown with it until the application exits or the user resizes that
+session by dragging an edge of its prompt; `default` follows the user's setting again. The commands emit
+`alta.appearance` or `alta.appearance.changed` with `sessionWidth` (what the session is shown with),
+`sessionWidthSource` (`user` or `session`), `userSessionWidth` (the setting) and the bounds.
+
+The group exists only where a host registers `IAltaAppearance`, which the desktop host does. More of the
+appearance will be added to the same group.
+
 ## Terminal commands
 
 `alta terminal` uses the terminals of the CodeAlta Desktop window: the shells the user sees in tabs and

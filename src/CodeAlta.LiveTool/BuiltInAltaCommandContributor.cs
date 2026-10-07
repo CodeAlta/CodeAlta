@@ -150,6 +150,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             yield return CreatePlanCommand(context.Invocation);
         }
 
+        // How the window looks: only a host with a window has the commands.
+        if (context.Invocation.Services.Get<IAltaAppearance>() is not null)
+        {
+            yield return CreateAppearanceCommand(context.Invocation);
+        }
+
         // The issues and the pull requests of projects, from the trackers the plugins of the host know.
         if (context.Invocation.Services.Get<CodeAlta.Plugins.PluginRuntimeManager>() is not null)
         {
@@ -174,8 +180,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var workshop = context.Services.Get<AltaPluginWorkshop>();
         var workItems = context.Services.Get<CodeAlta.Catalog.WorkItems.WorkItemService>() is not null;
         var issues = context.Services.Get<CodeAlta.Plugins.PluginRuntimeManager>() is not null;
-        if (!changes && !editor && !terminals && !automations && !workItems && !issues && workshop is null) return Policies;
+        var appearance = context.Services.Get<IAltaAppearance>() is not null;
+        if (!changes && !editor && !terminals && !automations && !workItems && !issues && !appearance && workshop is null) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
+        if (appearance) policies.AddRange(AppearancePolicies);
         if (workItems) policies.AddRange(WorkItemPolicies);
         if (issues) policies.AddRange(IssuePolicies);
         if (workshop is not null) policies.AddRange(PluginWorkshopPolicies);

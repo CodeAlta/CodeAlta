@@ -45,16 +45,17 @@ internal static class DesktopAltaTools
     /// <param name="worktrees">The worktrees <c>alta session create --worktree</c> creates; the commands make their own without it.</param>
     /// <param name="plugins">What <c>alta plugin</c> does with the source plugins of the host; without it the commands only list the active plugins.</param>
     /// <param name="workItems">The tasks and the plans the <c>alta task</c> and <c>alta plan</c> commands use; without them the commands do not exist.</param>
+    /// <param name="appearance">How the window looks, for the <c>alta appearance</c> commands; without it the commands do not exist.</param>
     /// <returns>The dispatcher of the commands, for the other callers of the host (its MCP server).</returns>
     /// <exception cref="ArgumentNullException">The host or the reminders are null.</exception>
     internal static AltaCommandDispatcher Attach(CodeAltaHost host, AltaReminderService reminders, PluginAltaServiceBridge? pluginAlta = null, IAltaChangesView? changes = null,
         IAltaEditorView? editor = null, IAltaTerminals? terminals = null, IAltaAutomations? automations = null,
         CodeAlta.Catalog.Worktrees.GitWorktreeService? worktrees = null, AltaPluginWorkshop? plugins = null,
-        CodeAlta.Catalog.WorkItems.WorkItemService? workItems = null)
+        CodeAlta.Catalog.WorkItems.WorkItemService? workItems = null, IAltaAppearance? appearance = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(reminders);
-        var dispatcher = Compose(host, reminders, changes, editor, terminals, automations, worktrees, plugins, workItems);
+        var dispatcher = Compose(host, reminders, changes, editor, terminals, automations, worktrees, plugins, workItems, appearance);
         pluginAlta?.SetDispatcher(dispatcher);
         host.Commands.SessionTools = CreateSessionTools(dispatcher);
         return dispatcher;
@@ -63,7 +64,7 @@ internal static class DesktopAltaTools
     /// <summary>Builds the dispatcher of the alta commands over a host's services.</summary>
     internal static AltaCommandDispatcher Compose(CodeAltaHost host, AltaReminderService reminders, IAltaChangesView? changes = null, IAltaEditorView? editor = null,
         IAltaTerminals? terminals = null, IAltaAutomations? automations = null, CodeAlta.Catalog.Worktrees.GitWorktreeService? worktrees = null,
-        AltaPluginWorkshop? plugins = null, CodeAlta.Catalog.WorkItems.WorkItemService? workItems = null)
+        AltaPluginWorkshop? plugins = null, CodeAlta.Catalog.WorkItems.WorkItemService? workItems = null, IAltaAppearance? appearance = null)
     {
         var permissions = host.RuntimeService.Permissions;
         var services = new AltaServiceCollection()
@@ -95,6 +96,7 @@ internal static class DesktopAltaTools
         if (worktrees is not null) services.Add(worktrees);
         if (plugins is not null) services.Add(plugins);
         if (workItems is not null) services.Add(workItems);
+        if (appearance is not null) services.Add(appearance);
         var registry = new AltaCommandRegistry();
         var dispatcher = new AltaCommandDispatcher(registry, services);
         services.Add(registry).Add(dispatcher);

@@ -2022,6 +2022,9 @@ export const messages = dictionary({
   "What a session is told when you ask it to create a pull request.": ["Lo que se le dice a una sesión cuando le pides crear una pull request.", "Ce qui est dit à une session quand vous lui demandez de créer une pull request.", "Was einer Sitzung gesagt wird, wenn du sie bittest, einen Pull Request zu erstellen.", "プルリクエストの作成を依頼したときにセッションへ伝える内容。", "当你要求会话创建拉取请求时告知它的内容。"],
   "Open the session {title}": ["Abrir la sesión {title}", "Ouvrir la session {title}", "Sitzung {title} öffnen", "セッション「{title}」を開く", "打开会话 {title}"],
   "{count} sub-agent(s)": ["{count} subagente(s)", "{count} sous-agent(s)", "{count} Sub-Agent(en)", "サブエージェント {count} 件", "{count} 个子代理"],
+  "Width of the conversation": ["Ancho de la conversación", "Largeur de la conversation", "Breite der Unterhaltung", "会話の幅", "对话宽度"],
+  "Drag to change the width of the conversation; double-click to reset": ["Arrastre para cambiar el ancho de la conversación; doble clic para restablecer", "Faites glisser pour changer la largeur de la conversation ; double-cliquez pour réinitialiser", "Ziehen, um die Breite der Unterhaltung zu ändern; Doppelklick zum Zurücksetzen", "ドラッグして会話の幅を変更、ダブルクリックでリセット", "拖动以更改对话宽度；双击重置"],
+  "Reset": ["Restablecer", "Réinitialiser", "Zurücksetzen", "リセット", "重置"],
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;
