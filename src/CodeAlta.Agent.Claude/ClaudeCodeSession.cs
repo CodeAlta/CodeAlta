@@ -112,6 +112,11 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             var newUserMessages = BindConversation(request);
             await EnsureConnectionAsync(request, cancellationToken).ConfigureAwait(false);
             await UpdateExposedToolsAsync(request.Tools).ConfigureAwait(false);
+            if (newUserMessages.Count > 0)
+            {
+                DropWhatTheCliDidOnItsOwn();
+            }
+
             await SendUserMessagesAsync(newUserMessages, cancellationToken).ConfigureAwait(false);
             var response = await ReadSegmentAsync(request, onUpdate, onSessionUpdate, cancellationToken).ConfigureAwait(false);
             if (!response.RequiresProviderFollowUp && response.AssistantMessage.Parts.All(static part => part is not AgentMessagePart.ToolCall))
@@ -432,6 +437,38 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         {
             await connection.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    // Between two runs the CLI can start a turn by itself (a background command of the previous turn ended, a
+    // scheduled prompt fired). What it wrote for a turn that is over is not the answer to the prompt that is sent
+    // now; it stays in the context of the CLI. A turn of its own that still runs is read with the run: the result of
+    // the CLI names the messages it answers.
+    private void DropWhatTheCliDidOnItsOwn()
+    {
+        bool startsRun;
+        lock (_gate)
+        {
+            startsRun = _outstandingUserMessages.Count == 0;
+        }
+
+        if (!startsRun || IsCliBusy || _eventReader is not { } reader)
+        {
+            return;
+        }
+
+        while (reader.TryRead(out var stale))
+        {
+            if (stale is ClosedEvent)
+            {
+                // The process ended while the session was idle: the turn that starts finds it out and resumes.
+                break;
+            }
+        }
+
+        _pending = null;
+        _held = null;
+        _replay = null;
+        _apiError = null;
     }
 
     private async Task SendUserMessagesAsync(IReadOnlyList<AgentConversationMessage> messages, CancellationToken cancellationToken)

@@ -63,6 +63,45 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task TurnTheCliRanOnItsOwnBetweenTwoPrompts_IsNotTheAnswerToTheNextOne()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var first = await ExecuteAsync(executor, CreateRequest([User("run it in the background")]));
+
+        // The background command of the first turn ends: Claude Code starts a turn by itself, with a tool call.
+        var process = cli.Last;
+        process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "session_state_changed", ["state"] = "running", ["session_id"] = process.SessionId });
+        process.EmitAssistant("msg_bg", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_bg", "Read", new JsonObject { ["file_path"] = "/tmp/out" })));
+        process.EmitToolResult("toolu_bg", "done");
+        process.EmitAssistant("msg_bg2", new JsonArray(ClaudeCodeFakeProcess.TextBlock("The background command finished.")));
+        process.Emit(new JsonObject
+        {
+            ["type"] = "result",
+            ["subtype"] = "success",
+            ["is_error"] = false,
+            ["result"] = "The background command finished.",
+            ["session_id"] = process.SessionId,
+            ["user_message_uuids"] = new JsonArray(),
+            ["origin"] = new JsonObject { ["kind"] = "task-notification" },
+        });
+        process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "session_state_changed", ["state"] = "idle", ["session_id"] = process.SessionId });
+        cli.OnUserMessage = static (fake, user) =>
+        {
+            fake.EmitTextTurn("msg_2", "second answer", user);
+            return Task.CompletedTask;
+        };
+
+        // The process answers a request only after it wrote the lines above: they were all read by then.
+        await process.McpAsync("ping");
+        var second = await ExecuteAsync(executor, CreateRequest([User("run it in the background"), first.AssistantMessage, User("second question")], first));
+
+        Assert.AreEqual("second answer", second.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+        Assert.IsFalse(second.RequiresProviderFollowUp);
+        Assert.AreSame(process, cli.Last, "The process is kept: only what it wrote on its own is dropped.");
+    }
+
+    [TestMethod]
     public async Task ChangeOfModel_RestartsTheCliAndResumesTheConversation()
     {
         var cli = new ClaudeCodeFakeCli();
@@ -172,14 +211,18 @@ public sealed class ClaudeCodeTurnExecutorTests
             process.EmitTextTurn("msg_2", "ok", user);
             return Task.CompletedTask;
         };
-        await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two")], first) with { Tools = [Tool("first_tool"), Tool("second_tool")] });
+        await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two")], first) with { Tools = [Tool("first_tool"), Tool("second_tool"), Tool("alta")] });
 
         var notification = cli.Last.Received.Single(static message =>
             message.GetProperty("type").GetString() == "control_request" &&
             message.GetProperty("request").GetProperty("subtype").GetString() == "mcp_message");
         Assert.AreEqual("notifications/tools/list_changed", notification.GetProperty("request").GetProperty("message").GetProperty("method").GetString());
-        var listed = (await cli.Last.McpAsync("tools/list")).GetProperty("result").GetProperty("tools").EnumerateArray().Select(static tool => tool.GetProperty("name").GetString()).ToArray();
-        CollectionAssert.AreEqual(new[] { "first_tool", "second_tool" }, listed);
+        var tools = (await cli.Last.McpAsync("tools/list")).GetProperty("result").GetProperty("tools").EnumerateArray().ToArray();
+        CollectionAssert.AreEqual(new[] { "first_tool", "second_tool", "alta" }, tools.Select(static tool => tool.GetProperty("name").GetString()).ToArray());
+
+        // Claude Code defers the tools of a server until the model searches for them, except the gateway of CodeAlta.
+        Assert.IsTrue(tools[2].GetProperty("_meta").GetProperty("anthropic/alwaysLoad").GetBoolean());
+        Assert.IsFalse(tools[0].TryGetProperty("_meta", out _));
     }
 
     [TestMethod]
@@ -267,8 +310,14 @@ public sealed class ClaudeCodeTurnExecutorTests
 
         Assert.AreEqual(91, response.Usage!.RateLimits!.Primary!.UsedPercent);
         Assert.AreEqual(0.01, response.Usage.LastOperation!.Cost);
-        Assert.AreEqual(2400, response.Usage.LastOperation.InputTokens);
+        // The input that was not cached, what was read from and written to the cache, and the output of the whole
+        // message: the statistics of a turn add them up.
+        Assert.AreEqual(100, response.Usage.LastOperation.InputTokens);
+        Assert.AreEqual(2000, response.Usage.LastOperation.CacheReadTokens);
+        Assert.AreEqual(300, response.Usage.LastOperation.CacheWriteTokens);
         Assert.AreEqual(2000, response.Usage.LastOperation.CachedInputTokens);
+        Assert.AreEqual(12, response.Usage.LastOperation.OutputTokens);
+        Assert.AreEqual(2412, response.Usage.Window!.CurrentTokens);
         Assert.IsTrue(updates.Any(static update => update.Kind == AgentSessionUpdateKind.Warning && update.Message.Contains("nearly reached", StringComparison.Ordinal)));
         Assert.IsTrue(updates.Any(static update => update.Kind == AgentSessionUpdateKind.Reconnecting && update.Message.Contains("retry 1/10", StringComparison.Ordinal)));
     }

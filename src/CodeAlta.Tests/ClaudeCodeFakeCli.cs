@@ -327,7 +327,7 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
                     ["input_tokens"] = 100,
                     ["cache_read_input_tokens"] = 2000,
                     ["cache_creation_input_tokens"] = 300,
-                    ["output_tokens"] = 12,
+                    ["output_tokens"] = 1,
                 },
             },
         };

@@ -40,6 +40,9 @@ internal sealed partial class ClaudeCodeSession
 
         public JsonElement? Usage { get; set; }
 
+        /// <summary>The output tokens of the whole message, which the stream gives when the message ends.</summary>
+        public long? OutputTokens { get; set; }
+
         public string? Model { get; set; }
     }
 
@@ -52,6 +55,7 @@ internal sealed partial class ClaudeCodeSession
     private (string Kind, string Text)? _apiError;
     private long? _contextWindow;
     private JsonElement? _lastUsage;
+    private long? _lastOutputTokens;
     private string? _lastModel;
     private AgentRateLimitSummary? _rateLimits;
 
@@ -196,6 +200,16 @@ internal sealed partial class ClaudeCodeSession
                                 cancellationToken)
                             .ConfigureAwait(false);
                     }
+                }
+
+                break;
+            case "message_delta":
+                // A block of the message is written with the tokens generated so far: the end of the message has them all.
+                if (_pending is { } ending &&
+                    ClaudeCodeJson.TryGetObject(stream, "usage", out var endUsage) &&
+                    ClaudeCodeJson.GetInt64(endUsage, "output_tokens") is { } outputTokens)
+                {
+                    ending.OutputTokens = outputTokens;
                 }
 
                 break;
@@ -540,6 +554,7 @@ internal sealed partial class ClaudeCodeSession
         if (segment.Usage is { } usage)
         {
             _lastUsage = usage;
+            _lastOutputTokens = segment.OutputTokens;
         }
 
         if (segment.Model is { } model)
@@ -577,10 +592,11 @@ internal sealed partial class ClaudeCodeSession
                 : new AgentSessionUsage(RateLimits: _rateLimits, Scope: AgentUsageScope.RateLimitOnly, Source: AgentUsageSource.ProviderUsage, UpdatedAt: DateTimeOffset.UtcNow);
         }
 
+        // `input_tokens` is what was not read from or written to the prompt cache: the request read all three.
         var input = ClaudeCodeJson.GetInt64(usage, "input_tokens") ?? 0;
         var cacheRead = ClaudeCodeJson.GetInt64(usage, "cache_read_input_tokens") ?? 0;
         var cacheWrite = ClaudeCodeJson.GetInt64(usage, "cache_creation_input_tokens") ?? 0;
-        var output = ClaudeCodeJson.GetInt64(usage, "output_tokens") ?? 0;
+        var output = _lastOutputTokens ?? ClaudeCodeJson.GetInt64(usage, "output_tokens") ?? 0;
         var current = input + cacheRead + cacheWrite + output;
         return new AgentSessionUsage(
             Window: new AgentWindowUsageSnapshot(
@@ -591,7 +607,7 @@ internal sealed partial class ClaudeCodeSession
                 TotalContextEnvelope: _contextWindow),
             LastOperation: new AgentOperationUsageSnapshot(
                 Model: _lastModel,
-                InputTokens: input + cacheRead + cacheWrite,
+                InputTokens: input,
                 OutputTokens: output,
                 CacheReadTokens: cacheRead,
                 CacheWriteTokens: cacheWrite,

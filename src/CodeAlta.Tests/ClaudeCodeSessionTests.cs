@@ -60,6 +60,7 @@ public sealed class ClaudeCodeSessionTests
         var appended = initialize.GetProperty("appendSystemPrompt").GetString()!;
         StringAssert.Contains(appended, "driven by CodeAlta");
         StringAssert.Contains(appended, "mcp__codealta__alta");
+        StringAssert.Contains(appended, "cannot be run in a shell");
         StringAssert.Contains(appended, "Be brief.");
         Assert.AreEqual("codealta", initialize.GetProperty("sdkMcpServers")[0].GetString());
         Assert.AreEqual("codealta_pre_edit", initialize.GetProperty("hooks").GetProperty("PreToolUse")[0].GetProperty("hookCallbackIds")[0].GetString());

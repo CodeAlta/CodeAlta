@@ -358,6 +358,15 @@ internal sealed partial class ClaudeCodeSession
                             writer.WriteEndObject();
                         }
 
+                        if (string.Equals(name, ClaudeCodePrompts.GatewayTool, StringComparison.Ordinal))
+                        {
+                            // Claude Code defers the tools of an MCP server until the model searches for them. The
+                            // gateway of CodeAlta is the tool its instructions name: it is there from the start.
+                            writer.WriteStartObject("_meta");
+                            writer.WriteBoolean("anthropic/alwaysLoad", true);
+                            writer.WriteEndObject();
+                        }
+
                         writer.WriteEndObject();
                     }
 

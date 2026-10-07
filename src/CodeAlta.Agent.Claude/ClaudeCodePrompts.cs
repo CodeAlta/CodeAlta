@@ -14,6 +14,9 @@ internal static class ClaudeCodePrompts
     private const int HistoryToolArgumentsLimit = 600;
     private const int HistoryToolResultLimit = 1_500;
 
+    /// <summary>The command gateway of CodeAlta, which its instructions name.</summary>
+    public const string GatewayTool = "alta";
+
     /// <summary>
     /// The tools of CodeAlta that Claude Code has its own version of: they are not offered to it a second time.
     /// </summary>
@@ -46,7 +49,7 @@ internal static class ClaudeCodePrompts
         builder.AppendLine();
         if (hasTools)
         {
-            builder.AppendLine($"- The tools of CodeAlta are available through the MCP server `{ClaudeCodeLauncher.McpServerName}`: a tool the instructions below name `<name>` is `{ClaudeCodeLauncher.McpToolPrefix}<name>` here. For example the `alta` live tool is `{ClaudeCodeLauncher.McpToolPrefix}alta`.");
+            builder.AppendLine($"- The tools of CodeAlta are available through the MCP server `{ClaudeCodeLauncher.McpServerName}`: a tool the instructions below name `<name>` is `{ClaudeCodeLauncher.McpToolPrefix}<name>` here. For example the `alta` live tool is `{ClaudeCodeLauncher.McpToolPrefix}alta`. They are tools, not programs: `alta` cannot be run in a shell. A tool of that server that is not loaded yet is found with your tool search.");
         }
 
         builder.AppendLine("- CodeAlta's own file, search, web, shell and question tools (`read_file`, `view_image`, `list_dir`, `grep`, `webget`, `shell_command`, `write_file`, `replace_in_file`, `delete_file_or_dir`, `rename_file_or_dir`, `apply_patch`, `request_user_input`) are not part of this session. Where the instructions below mention them, use your own tools instead (Read, Glob, Grep, WebFetch, Bash, Edit, Write, AskUserQuestion).");

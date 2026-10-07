@@ -302,6 +302,8 @@ A call of such a tool is returned to `AgentSession` under the tool's own name: t
 
 CodeAlta's file, search, web, shell and question tools are not offered: Claude Code has its own (`ClaudeCodePrompts.ReplacedTools`).
 
+Claude Code defers the tools of an MCP server until the model searches for them. The `alta` gateway, which the instructions of CodeAlta name, is listed with `_meta["anthropic/alwaysLoad"]` so that it is there from the first request; the other tools of the session are found with the tool search of the CLI, which keeps a large set of plugin or MCP tools out of the context until one is needed.
+
 ### Instructions
 
 Claude Code's system prompt stays. The developer instructions CodeAlta composes for the session (agent prompt, runtime context, tool guidance, skills, project context) are appended to it through the `appendSystemPrompt` field of the `initialize` request, after a short note that says where the session runs and how the tools of CodeAlta are named. CodeAlta's own system prompt is not sent. The CLI records its prompt once per conversation, so a later change of the instructions applies after its next compaction.
@@ -327,7 +329,7 @@ To show the change of an edit, `AgentSession` reads the file before and after th
 - Models come from the CLI: `ClaudeCodeModelCatalog` starts a short-lived process (`--no-session-persistence`), sends `initialize` and reads `models` and `account`. No model is called. The list is what the plan, the settings and the policies of the user allow, with the effort levels each model supports; `default` lets the CLI choose. Aliases (`default`, `opus`, `sonnet`, `haiku`) are the fallback when the CLI cannot be asked. `--effort` is passed only for a level the CLI lists for the model.
 - The probe fails with a message when the executable is not found or when the CLI says it is signed out (`account.tokenSource` is `none` and it names no API key source). A signed-in CLI names its plan and no token source; anything the probe does not recognize is tried, and a turn tells. The probe reports how the CLI authenticates (a plan or a provider), never an identity.
 - The CLI writes the thinking blocks of the model empty unless it is asked for their summary: the provider passes `--thinking-display summarized`, so that the timeline shows the reasoning as for other providers, and starts again without the option for a CLI that predates it.
-- Usage is the usage of the last model request (what it read is what the context holds), the context window the CLI reports (`get_context_usage`, then `modelUsage`), the cost of the turn and the subscription limit events (`rate_limit_event`).
+- Usage is the usage of the last model request, the context window the CLI reports (`get_context_usage`, then `modelUsage`), the cost of the turn and the subscription limit events (`rate_limit_event`). The window holds what the request read and wrote. The operation keeps the three inputs apart, as the statistics expect: `InputTokens` is the input that was not cached, `CacheReadTokens` and `CacheWriteTokens` what was read from and written to the prompt cache. The output tokens are those of the whole message (`message_delta`): the assistant line of a block only has the tokens generated so far.
 - The CLI keeps and compacts its context. Local compaction is disabled for the provider, and a manual compaction sends `/compact` to the CLI (`IAgentProviderCompaction`).
 
 ### Robustness
@@ -353,6 +355,8 @@ args = ["--add-dir", "/shared/specs"]  # optional; added to the command line
 ### Limits
 
 - A prompt that starts with `/` is a slash command of Claude Code (`/compact`, `/context`, `/clear`).
+- Claude Code can start a turn by itself between two prompts: a command it ran in the background ended, a scheduled prompt fired. CodeAlta has no run to show it in. What the CLI wrote for such a turn is dropped when the next prompt is sent (it stays in the context of the CLI); a turn of its own that still runs then is read with the run.
+- A tool call that was running when a run is stopped stays shown as running, as for any provider: the session records no end for it.
 - The tool calls of a subagent are shown as the output of the `Agent` tool call that started it, not as tool calls of the session.
 - `ExitPlanMode` and tools other than commands and edits are allowed without a CodeAlta prompt.
 - Images and PDFs of a prompt are sent as attachments; other files are passed as text.
