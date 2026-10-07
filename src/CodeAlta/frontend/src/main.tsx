@@ -23,7 +23,7 @@ import {
   type ReminderListResponse,
   type ReminderDetailRequest,
   type ConfigurationSnapshot, type WorkspaceSession, type WorkspaceSnapshot,
-  desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations,
+  desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workItems as workItemsApi,
 } from "#neoastra";
 import { loadWorkspace, sessionListSignature, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
@@ -37,11 +37,11 @@ import { sessionTabPresentation } from "./sessionTabLayout";
 import { createReferencePopupLifetime } from "./referencePopup";
 import { SessionBrowser } from "./SavedSessionBrowser";
 import { ProjectArchiveDialog } from "./ProjectArchiveDialog";
-import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./runtimeObservations";
+import { sessionRunning, createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./runtimeObservations";
 import { createProjectArchive } from "./projectArchive";
 import { browserActivation } from "./sessionBrowser";
 import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, automationsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type TabKind, type TabPosition } from "./fileTabs";
+import { activateFileTab, automationsTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type TabKind, type TabPosition } from "./fileTabs";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
 import { OpenFileDialog } from "./editor/OpenFileDialog";
@@ -121,6 +121,13 @@ import { createAutomationsHub } from "./automations/automationsHub";
 import { AutomationsPanel } from "./automations/AutomationsPanel";
 import { SessionOrigin } from "./automations/SessionOrigin";
 import { sessionOrigin } from "./automations/automations";
+import { createWorkItemsHub } from "./workItems/workItemsHub";
+import { WorkItemsPanel, type WorkItemsFocus } from "./workItems/WorkItemsPanel";
+import { WorkItemCards } from "./workItems/WorkItemCards";
+import { WorkItemsBadge } from "./workItems/WorkItemsBadge";
+import { WorkItemSettings } from "./workItems/WorkItemSettings";
+import { startWorkItem, type WorkStartSession } from "./workItems/startWorkItem";
+import { carriedBy, readingOrder, sessionCards, workCounts, workItemKey, workItems, type WorkItem, type WorkStart } from "./workItems/workItems";
 import { TerminalList } from "./terminal/TerminalList";
 import { persistTerminalLook, restoreTerminalLook, terminalLookKey, type TerminalLook } from "./terminal/terminalLook";
 import { applicationKey, terminalsOf } from "./terminal/terminals";
@@ -168,6 +175,7 @@ import "./editor/editor.css";
 import "./explorer/explorer.css";
 import "./terminal/terminal.css";
 import "./automations/automations.css";
+import "./workItems/workItems.css";
 import "./worktrees/worktrees.css";
 import "./mcpHost/mcpHost.css";
 
@@ -176,7 +184,7 @@ type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; e
   latestReady: () => boolean; latest: () => void; cancelLatest: () => void }>;
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
-type View = "workspace" | "appearance" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "mcpHost";
+type View = "workspace" | "appearance" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "mcpHost";
 type SettingsSection = Exclude<View, "workspace">;
 const paneLayoutStorageKey = "codealta.desktop.panes.v1";
 
@@ -239,10 +247,12 @@ function App() {
       publishWorkspaceState({ kind: "ready", snapshot: fresh });
     }).catch(() => {}).finally(() => { sessionListRead.current = false; });
   };
+  // A run that ends may have written a plan or proposed a task: the work items are read again too.
+  const refreshWorkItems = useRef(() => {});
   const noteRunActivity = (id: string, running: boolean | null) => {
     const was = liveRuns.current.has(id);
     if (running) liveRuns.current.add(id); else liveRuns.current.delete(id);
-    if (was && !running) readSessionList.current();
+    if (was && !running) { readSessionList.current(); refreshWorkItems.current(); }
   };
   useEffect(() => {
     const timer = setInterval(() => { if (liveRuns.current.size > 0) readSessionList.current(); }, 10_000);
@@ -1166,6 +1176,36 @@ function App() {
     const session = shown.sessions.find(candidate => candidate.id === id);
     if (session) selectProject(session.scopeKind === "project" ? session.projectId : null, session.id);
   }
+  // The tasks agents propose and the plans of the projects: this window lists them and is told when they change.
+  const [workHub] = useState(() => createWorkItemsHub(workItemsApi));
+  useEffect(() => terminalEpoch ? workHub.connect(terminalEpoch) : undefined, [workHub, terminalEpoch]);
+  const workState = useSyncExternalStore(workHub.subscribe, workHub.getSnapshot);
+  refreshWorkItems.current = () => void workHub.refresh();
+  // The Explorer does not wait for them: they are read a few projects at a time, the ones used last first.
+  const workOrder = useMemo(() => snapshot ? readingOrder(snapshot.projects, snapshot.sessions, null) : null, [snapshot]);
+  useEffect(() => { if (workOrder) workHub.setProjects(workOrder); }, [workHub, workOrder]);
+  const workSessionIds = useMemo(() => new Set(snapshot?.sessions.map(session => session.id) ?? []), [snapshot]);
+  const work = useMemo(() => workItems(workState.projects, workSessionIds), [workState.projects, workSessionIds]);
+  const observedRuns = useSyncExternalStore(runtimeObservations.subscribe, runtimeObservations.getSnapshot);
+  const runningSessionIds = useMemo(() => new Set((snapshot?.sessions ?? []).filter(session => sessionRunning(observedRuns,
+    { projectId: session.scopeKind === "project" ? session.projectId : null, sessionId: session.id, path: session.workspacePath })).map(session => session.id)), [snapshot, observedRuns]);
+  const workByProject = useMemo(() => workCounts(work, runningSessionIds), [work, runningSessionIds]);
+  const [workFocus, setWorkFocus] = useState<WorkItemsFocus | null>(null);
+  const [workBusy, setWorkBusy] = useState<ReadonlySet<string>>(new Set());
+  function openWorkItems(focus: WorkItemsFocus | null = null) {
+    if (focus) setWorkFocus(focus);
+    openFile(workItemsTab);
+  }
+  // Starts the work of a task or a plan: in a new session, or in the session that shows it.
+  async function startWork(item: WorkItem, start: WorkStart, session: WorkStartSession | null) {
+    const key = workItemKey(item);
+    setWorkBusy(value => new Set(value).add(key));
+    try {
+      return await startWorkItem({ hub: workHub, composer: (kind, id, text, agent) => askPluginComposer(kind, id, text ?? null, agent ?? null),
+        openSession: id => void openAutomationSession(id),
+        refuse: (message, detail) => showToast({ message: message ? t(message) : detail ?? t("The work did not start."), intent: "danger", icon: "error", timeout: 8000 }) }, item, start, session);
+    } finally { setWorkBusy(value => { const next = new Set(value); next.delete(key); return next; }); }
+  }
   function showTerminal(terminal: TerminalItem) { openFile(terminalTab(terminal)); }
   const showTerminalLatest = useRef(showTerminal); showTerminalLatest.current = showTerminal;
   // A session can ask for the tab of a terminal to be shown.
@@ -1361,7 +1401,7 @@ function App() {
       case "reopenTab": return tabs.closed.length + fileTabs.closed.length > 0;
       case "editFile": case "projectEditor": return view === "workspace" && !!editedProject();
       case "newTerminal": return view === "workspace" && !!terminalOrigin();
-      case "automations": return owned;
+      case "automations": case "workItems": return owned;
       case "refreshStatuses": return owned && tabs.open.length > 0;
       case "newSession": return owned && !!snapshot && !selectedProject?.archived;
       case "renameProject": return owned && !!selectedProject && !selectedProject.archived;
@@ -1392,6 +1432,7 @@ function App() {
       case "projectEditor": openProjectEditor(); break;
       case "newTerminal": { const origin = terminalOrigin(); if (origin) void createTerminal(origin.projectId, origin.sessionId); break; }
       case "automations": openAutomations(); break;
+      case "workItems": openWorkItems(); break;
       case "newSession": selectProject(projectId); requestAnimationFrame(() => document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt")?.focus()); break;
       case "focusSidebar": runShortcut("focusProjects"); break;
       case "focusAskFile": visibleAsk(".ask-file-review")?.dispatchEvent(new CustomEvent("codealta-ask-file-focus")); break;
@@ -1631,6 +1672,8 @@ function App() {
       <SessionDraftBadge active={draftIndicators.visible(session.id, sessionId)} />
       {snapshot && <RunningSessionBadge controls={runtimeObservationControls()} tab={{ projectId: scope, sessionId: session.id, path: session.workspacePath }} />}
       <ReminderBadge count={activeReminders?.get(session.id) ?? 0} />
+      {carriedBy(work, session.id).length > 0 && <span className="session-work-mark" role="img" aria-label={t("Carries out a work item")}
+        title={carriedBy(work, session.id).map(item => item.title).join("\n")}><AppIcon name="task" size={12} /></span>}
       <WorktreeBadge session={session} />
       <span className="session-meta"><span>{session.providerKey ?? t("No provider")}</span><SessionTime value={session.updatedAt} now={clock} /></span>
     </>;
@@ -2125,6 +2168,9 @@ function App() {
             <Button variant="minimal" size="small" icon={<AppIcon name="search" size={16} />} aria-label={t("Search")} aria-haspopup="dialog" title={`${t("Search")} (Ctrl+P)`} onClick={() => openSearch()} />
             <Button variant="minimal" size="small" icon={<AppIcon name="automation" size={16} />} className="activity-automations" disabled={!owned}
               active={!!fileTabs.active && isAutomationsTab(fileTabs.active)} aria-label={t("Automations")} title={`${t("Automations")} (Ctrl+G, Ctrl+M)`} onClick={() => openAutomations()} />
+            <Button variant="minimal" size="small" icon={<AppIcon name="task" size={16} />} className="activity-work" disabled={!owned}
+              active={!!fileTabs.active && isWorkItemsTab(fileTabs.active)} aria-label={t("Work items")} title={`${t("Work items")} (Ctrl+G, Ctrl+I)`} onClick={() => openWorkItems()}>
+              {work.some(item => item.stage === "todo") && <span className="activity-work-dot" aria-hidden="true" />}</Button>
             <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={16} />} className="activity-settings" aria-label={t("Settings & extensions")} title={t("Settings & extensions")} onClick={() => navigate("appearance")} />
           </nav>
         </WindowBrand>
@@ -2171,7 +2217,8 @@ function App() {
             terminals={owned ? { count: id => terminalsOf(terminalList, id).length, create: project => void createTerminal(project.id) } : undefined}
             changes={owned ? { open: id => fileTabs.open.some(tab => isChangesTab(tab) && tab.projectId === id), show: project => showChanges(project) } : undefined}
             activity={id => <><RunningSessionBadge controls={runtimeObservationControls()} projectId={id} />
-              <ReminderBadge count={activeReminders ? scopeReminderCount(activeReminders, snapshot, id) : 0} /></>}
+              <ReminderBadge count={activeReminders ? scopeReminderCount(activeReminders, snapshot, id) : 0} />
+              {id !== null && <WorkItemsBadge counts={workByProject.get(id)} onOpen={owned ? () => openWorkItems({ projectId: id }) : undefined} />}</>}
             canRename={owned} renameBusy={projectRenameBusy || !mutation?.capability.canMutate()} onRename={() => void beginProjectRename()}
             renaming={projectRenaming && projectRenameTarget ? { id: projectRenameTarget.id, form: <RenamePopover label={t("Project name")}
               value={projectRenameName} onChange={setProjectRenameName} busy={projectRenameBusy} disabled={projectRenameLocked || projectRenameConflict}
@@ -2305,7 +2352,11 @@ function App() {
                 origin={row.automationId ? (() => {
                   const origin = sessionOrigin(row.id, row.automationId, automationState.items, automationState.runs, t);
                   return <SessionOrigin name={origin.name} summary={origin.summary} onOpen={owned ? () => openAutomations(origin.id) : undefined} />;
-                })() : undefined} onRunActivity={running => { runtimeObservations.setLive(tab, running); noteRunActivity(tab.sessionId, running); }} notesReader={owners.notesReader} observing={visible && view === "workspace" && !settingsOpen}
+                })() : undefined}
+                workCards={owned && workState.settings.notify ? <WorkItemCards hub={workHub} items={sessionCards(work, row.id)} preferredStart={workState.settings.start} busy={workBusy}
+                  onStart={(item, start) => void startWork(item, start, { id: row.id, workingDirectory: row.workspacePath })}
+                  onOpenList={item => openWorkItems({ projectId: item.projectId, key: workItemKey(item) })} /> : undefined}
+                onRunActivity={running => { runtimeObservations.setLive(tab, running); noteRunActivity(tab.sessionId, running); }} notesReader={owners.notesReader} observing={visible && view === "workspace" && !settingsOpen}
                 active={tab.sessionId === sessionId} notesToggle={notesVisible} onActivate={() => { if (sessionId !== tab.sessionId || fileTabs.active) selectSessionTab(tab); }}
                 infoTrigger={sessionInfoTrigger} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger}
                 infoLifetime={{ revision: 0, current: () => !!currentSnapshot.current && !!resolveSessionTab(currentSnapshot.current, tab)
@@ -2335,7 +2386,14 @@ function App() {
             }} reopen={() => tabCommand("reopenTab")}
             files={fileTabs} fileDirty={tab => fileEditors.dirty(fileTabKey(tab))} selectFile={activateFile} closeFile={tab => closeFile(tab)}
             terminal={id => terminalList.find(terminal => terminal.id === id)}
-            renderFile={(tab, visible) => isAutomationsTab(tab)
+            renderFile={(tab, visible) => isWorkItemsTab(tab)
+              ? <WorkItemsPanel key={fileTabKey(tab)} hub={workHub} projects={snapshot?.projects.filter(project => !project.archived) ?? []} sessions={snapshot?.sessions ?? []}
+                runningSessions={runningSessionIds} projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null}
+                visible={visible && view === "workspace" && !settingsOpen} focus={workFocus} onFocused={() => setWorkFocus(null)}
+                onActivate={() => activateFile(tab)} onStart={(item, start) => startWork(item, start, null)} onOpenSession={id => void openAutomationSession(id)}
+                onOpenFile={(id, file) => { const project = snapshot?.projects.find(candidate => candidate.id === id); if (project) openEditor(project, { path: file, line: null, column: null, explorer: null }); }}
+                onOpenSettings={() => navigate("workItems")} />
+              : isAutomationsTab(tab)
               ? <AutomationsPanel key={fileTabKey(tab)} hub={automationsHub} projects={snapshot?.projects.filter(project => !project.archived) ?? []} sessions={snapshot?.sessions ?? []}
                 projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null} epoch={!status ? undefined : owned ? status.hostEpoch : null}
                 providers={configurationState.snapshot?.providerRuntimeAvailable ? [...configurationState.snapshot.providers].filter(provider => provider.enabled).sort((a, b) => Number(b.isDefault) - Number(a.isDefault)) : []}
@@ -2400,6 +2458,7 @@ function App() {
         onEdit={owned ? folder => { closeSettings(); openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true }); } : undefined} />
       : settingsSection === "worktrees" ? <WorktreeSettings epoch={owned ? status!.hostEpoch : null}
         pick={owned ? initial => pickFolder(desktopShell.pickFolder, t("Folder for worktrees"), initial) : undefined} />
+      : settingsSection === "workItems" ? <WorkItemSettings hub={workHub} />
       : settingsSection === "mcpHost" ? <McpHostSettings epoch={owned ? status!.hostEpoch : null} developer={status?.developerMode ?? false} />
       : settingsSection === "skills" ? <SkillSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject}
         onEdit={owned ? folder => { closeSettings(); openSkillEditor(folder); } : undefined} />
@@ -2529,7 +2588,7 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
   const destinations: readonly [MessageKey, readonly [SettingsSection, MessageKey, IconName][]][] = [
     ["Personalization", [["appearance", "Appearance", "palette"]]],
     ["Agent & models", [["providers", "Providers", "provider"], ["models", "Models", "model"], ["prompts", "Agent prompts", "assistant"], ["skills", "Skills", "skill"],
-      ["worktrees", "Worktrees", "worktree"]]],
+      ["worktrees", "Worktrees", "worktree"], ["workItems", "Work items", "task"]]],
     ["Extensions", [["plugins", "Plugins", "plugin"], ["mcp", "MCP Servers", "server"]]],
     ["Advanced", [["config", "Configuration file", "config"], ["mcpHost", "CodeAlta MCP", "remote"]]],
     ["Diagnostics", [["logs", "Application Logs", "logs"], ["about", "About", "info"]]],
@@ -2630,13 +2689,15 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   }, [epoch, id, name, path, archived, sessionId, regions, showChanges, openTerminal, refreshSessions, worktreePath, worktreeName, worktreeMissing, place]);
 }
 
-function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin }: {
+function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards }: {
   /** Reports whether the session is working while its panel watches it. */
   onRunActivity?: (running: boolean | null) => void;
   /** A draft prompt to send once this session's composer holds it. */
   autoSend?: { text: string; consume: () => void } | null;
   /** What started the session when it was not the user, shown above its timeline. */
   origin?: ReactNode;
+  /** The work items the session proposes, shown over the top right corner of its timeline. */
+  workCards?: ReactNode;
   /** Active reminders of this session as last reported by the host; null while unknown. */
   activeReminderCount?: number | null;
   notesReader: ReturnType<typeof createNotesReader>;
@@ -2804,6 +2865,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
         </div>
         <SessionNotesOverlay observing={observing} sessionId={session.id} epoch={ownedSession ? status?.hostEpoch : undefined} capability={mutation?.capability}
           fallbackMarkdown={historyNotes} toggle={active ? notesToggle : undefined} reader={notesReader} />
+        {workCards}
         </div>
         {!timeline.following && <button type="button" className="timeline-bottom-button" onClick={() => { newest.cancel(); timeline.jump(); }}><AppIcon name="arrowDown" size={14} />{t(newerOmitted ? "Bottom of retained window (not newest)" : "Jump to latest visible")}</button>}
         {/* Message navigation is announced to assistive technology only: nothing is written above the prompt. */}

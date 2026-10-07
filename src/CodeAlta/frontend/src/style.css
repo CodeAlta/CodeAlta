@@ -1669,32 +1669,51 @@ button.project-context-changes:hover, button.project-context-changes:focus-visib
 .ask-comment > header .bp6-button { margin-left: auto; }
 .ask-comment-done { display: inline-flex; color: var(--green) !important; }
 .ask-comment textarea { min-height: 30px; max-height: 168px; font-size: 13px; line-height: 1.4; }
-.ask-form { flex: 1 1 auto; align-content: flex-start; min-height: 0; overflow-y: auto; }
-.ask-form .ask-tabs { flex: 0 0 100%; min-width: 0; }
-.ask-form .ask-tabs .bp6-tab-list { flex-wrap: wrap; column-gap: 16px; }
-.ask-form .ask-tabs .bp6-tab { font-size: 13px; line-height: 26px; }
-.ask-form .ask-question { padding-left: 0; }
-.ask-form .ask-question h4 { margin: 0; font-size: 13px; font-weight: 600; }
-.ask-form .ask-choices { display: grid; gap: 2px; }
-.ask-form .ask-choice-number { color: var(--muted); font-variant-numeric: tabular-nums; }
-.ask-form .ask-freeform textarea { min-height: 30px; }
-.ask-actions { flex: 0 0 100%; display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
-.ask-actions .ask-hint { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+/* The questions of an ask: what is asked in large, the choices as cards, the steps of several questions above. */
+.ask-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; margin: 0; padding: 12px 14px 10px; border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line-strong)); border-radius: 12px; background: var(--panel); }
+.ask-form { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.ask-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; min-width: 0; }
+.ask-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); white-space: nowrap; }
+.ask-steps { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.ask-steps button { display: inline-flex; align-items: center; gap: 6px; max-width: 240px; padding: 3px 10px 3px 4px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+.ask-steps button:hover:not(:disabled) { border-color: var(--line-strong); color: var(--text); }
+.ask-steps button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ask-steps button[data-state="current"] { border-color: var(--accent); color: var(--text); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.ask-steps button[data-state="seen"] { color: var(--text); }
+.ask-step-mark { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; background: var(--panel-3); }
+.ask-steps button[data-state="current"] .ask-step-mark { background: var(--accent); color: var(--bg); }
+.ask-steps button[data-state="seen"] .ask-step-mark { background: color-mix(in srgb, var(--green) 26%, transparent); color: var(--green); }
+.ask-step-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-question { display: grid; gap: 8px; overflow-wrap: anywhere; }
+.ask-question h4 { margin: 0; font-size: 15px; font-weight: 650; line-height: 1.4; }
+.ask-question p { margin: 0; }
+.ask-question .detail { color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.ask-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; margin-top: 2px; }
+.ask-choice { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); cursor: pointer; transition: border-color 120ms, background 120ms; }
+.ask-choice:hover { border-color: var(--line-strong); }
+.ask-choice:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ask-choice[data-selected] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel-2)); box-shadow: 0 0 0 1px var(--accent); }
+.ask-form:disabled .ask-choice { cursor: default; opacity: .7; }
+.ask-choice-number { display: grid; place-items: center; min-width: 20px; height: 20px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; background: var(--panel); }
+.ask-choice[data-selected] .ask-choice-number { border-color: var(--accent); color: var(--accent); }
+.ask-choice-text { display: grid; gap: 2px; min-width: 0; }
+.ask-choice-text strong { font-size: 13px; font-weight: 600; }
+.ask-choice-text small { font-size: 12px; line-height: 1.45; color: var(--muted); }
+.ask-choice-check { display: inline-flex; color: var(--accent); visibility: hidden; }
+.ask-choice[data-selected] .ask-choice-check { visibility: visible; }
+.ask-freeform { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
+.ask-freeform textarea { min-height: 34px; max-height: 220px; }
+.ask-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; padding-top: 8px; border-top: 1px solid var(--line); }
+.ask-actions .ask-hint { flex: 1 1 auto; display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.ask-hint kbd { margin-left: 6px; padding: 0 5px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 4px; font: inherit; font-size: 10.5px; color: var(--text); background: var(--panel-2); }
+.ask-hint kbd:first-child { margin-left: 0; }
 .ask-confirmation .detail { color: var(--muted); }
 .timeline-scroll > section.ask-panel:not(.conversation):not(.live-indicator) { margin: 6px 12px 8px; padding: 0; border: 0; border-radius: 0; background: transparent; }
-.ask-card { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; margin: 0; padding: 8px 12px 10px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line-strong)); border-left-width: 3px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
-.ask-card > .ask-card-header, .ask-card > .ask-question { flex: 0 0 100%; min-width: 0; }
-.ask-card-header { display: flex; align-items: center; gap: 8px; color: var(--accent); }
-.ask-card-header h4 { flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; color: var(--text); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.ask-card .ask-question-navigation { flex: 0 0 auto; margin: 0; gap: 2px; color: var(--muted); }
-.ask-card .ask-question-navigation small { margin-right: 4px; font-variant-numeric: tabular-nums; }
-.ask-question { display: grid; gap: 6px; padding-left: 23px; overflow-wrap: anywhere; }
-.ask-question p { margin: 0; }
-.ask-choices { display: flex; flex-wrap: wrap; gap: 4px 20px; margin-top: 2px; }
-.ask-choices .bp6-control { margin: 0; }
-.ask-freeform { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
-.ask-freeform textarea { min-height: 56px; max-height: 220px; }
-.ask-card > .ask-answer { order: 2; }
+/* The file under review as a reader sees it, before its source. */
+.ask-file-surface[hidden] { display: none; }
+.ask-file-view { flex: 0 0 auto; }
+.ask-file-reader { flex: 1 1 0; min-width: 0; min-height: 0; overflow: auto; padding: 18px clamp(16px, 6%, 64px) 40px; outline: none; }
+.ask-file-reader > .markdown-content { max-width: 880px; margin-inline: auto; }
 .ask-draft-recovery > header, .ask-unsettled { display: flex; align-items: center; gap: 6px; }
 .ask-draft-recovery > header strong { flex: 1 1 auto; font-size: 12px; }
 .ask-draft-recovery p { margin: 4px 0 0; }

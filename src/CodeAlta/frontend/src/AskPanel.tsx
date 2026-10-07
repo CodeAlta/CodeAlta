@@ -7,7 +7,7 @@ import { showAskDetails } from "./workspacePresentation";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
 import { ObservationStatus } from "./ObservationStatus";
-import { Button, Dialog, DialogBody, DialogFooter, Radio, RadioGroup, Tab, Tabs, TextArea } from "@blueprintjs/core";
+import { Button, Dialog, DialogBody, DialogFooter, TextArea } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import { showToast } from "./appToaster";
 import { AskFileReview, type AskFileReviewHandle } from "./AskFileReview";
@@ -241,7 +241,13 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
     const key = event.key.toLowerCase();
     const text = target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && target.type !== "radio");
     const handled = () => { event.preventDefault(); event.stopPropagation(); };
-    if (event.ctrlKey && !event.shiftKey && (key === "n" || key === "p")) {
+    const options = head.request.questions[questionIndex]?.choices.length ?? 0;
+    if (!text && !event.ctrlKey && !event.shiftKey && /^[1-9]$/.test(event.key) && Number(event.key) <= options && !target.closest('[role="tablist"]')) {
+      const value = Number(event.key) - 1;
+      edit(current => ({ ...current, choices: { ...current.choices, [questionIndex]: [value] } }));
+      form.current?.querySelector<HTMLElement>(`[data-ask-question] input[value="${value}"]`)?.focus();
+      handled();
+    } else if (event.ctrlKey && !event.shiftKey && (key === "n" || key === "p")) {
       if (!event.repeat) show(questionIndex + (key === "n" ? 1 : -1), target);
       handled();
     } else if (!event.ctrlKey && !event.shiftKey && !text && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
@@ -275,31 +281,47 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
   const question = head?.request.questions[questionIndex];
   const choice = question ? selectedChoice(question, active?.choices[questionIndex]) : null;
   const remaining = submitStep(seen, questionIndex, count).kind === "show";
+  const choose = (value: number) => edit(current => ({ ...current, choices: { ...current.choices, [questionIndex]: [value] } }));
   const questions = asking && head && question ? <fieldset className="ask-card ask-form" ref={form} disabled={blocked} onKeyDown={formKey} data-ask-keys="">
     <legend className="sr-only">{t("Original ask {id} · {state}", { id: head.handle.askId, state: t("pending") })}</legend>
-    <Tabs id={`ask-${head.handle.askId}`} className="ask-tabs" selectedTabId={questionIndex} renderActiveTabPanelOnly
-      onChange={(next, _previous, event) => { show(Number(next), event?.currentTarget instanceof HTMLElement ? event.currentTarget : null); }}>
-      {head.request.questions.map((item, index) => <Tab key={index} id={index} disabled={blocked} title={questionTabTitle(item.title, index, count)} />)}
-    </Tabs>
+    <header className="ask-head">
+      <span className="ask-badge"><AppIcon name="ask" size={14} />{t(count === 1 ? "A question for you" : "Questions for you")}</span>
+      {count > 1 && <ol className="ask-steps" role="tablist" aria-label={t("Questions")} onKeyDown={event => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        show(questionIndex + (event.key === "ArrowRight" ? 1 : -1), event.target instanceof HTMLElement ? event.target : null);
+        event.preventDefault(); event.stopPropagation();
+      }}>
+        {head.request.questions.map((item, index) => <li key={index}>
+          <button type="button" role="tab" aria-selected={index === questionIndex} aria-label={questionTabTitle(item.title, index, count)} title={item.title} disabled={blocked}
+            tabIndex={index === questionIndex ? 0 : -1} data-state={index === questionIndex ? "current" : seen.has(index) ? "seen" : "ahead"}
+            onClick={event => { show(index, event.currentTarget); }}>
+            <span className="ask-step-mark">{index !== questionIndex && seen.has(index) ? <AppIcon name="check" size={12} /> : index + 1}</span>
+            <span className="ask-step-title">{item.title}</span>
+          </button></li>)}
+      </ol>}
+    </header>
     <div className="ask-question" data-ask-question={questionIndex} role="group" aria-label={question.title}>
       <h4>{question.question}</h4>{question.description && <p className="detail">{question.description}</p>}
-      {question.choices.length > 0 && <RadioGroup className="ask-choices" selectedValue={choice ?? undefined} onChange={event => {
-        const value = Number(event.currentTarget.value);
-        edit(current => ({ ...current, choices: { ...current.choices, [questionIndex]: [value] } }));
-      }}>{question.choices.map((item, choiceIndex) => <Radio key={choiceIndex} value={choiceIndex}>
-        <span className="ask-choice-number">{choiceIndex + 1}.</span> {item.title}{item.description && <span className="detail"> — {item.description}</span>}
-      </Radio>)}</RadioGroup>}
-      {question.freeform && <label className="ask-freeform">{question.freeform.title}<TextArea fill autoResize rows={1} maxLength={8192} aria-label={question.freeform.title ?? t("Answer")} value={active?.text[questionIndex] ?? ""}
+      {question.choices.length > 0 && <div className="ask-choices" role="radiogroup" aria-label={question.title}>
+        {question.choices.map((item, choiceIndex) => <label key={choiceIndex} className="ask-choice" data-selected={choice === choiceIndex || undefined}>
+          <input type="radio" className="sr-only" name={`ask-${head.handle.askId}-${questionIndex}`} value={choiceIndex} checked={choice === choiceIndex} disabled={blocked}
+            onChange={() => choose(choiceIndex)} />
+          <span className="ask-choice-number" aria-hidden="true">{choiceIndex + 1}</span>
+          <span className="ask-choice-text"><strong>{item.title}</strong>{item.description && <small>{item.description}</small>}</span>
+          <span className="ask-choice-check" aria-hidden="true"><AppIcon name="check" size={14} /></span>
+        </label>)}
+      </div>}
+      {question.freeform && <label className="ask-freeform"><span>{question.freeform.title ?? t("Answer")}</span><TextArea fill autoResize rows={1} maxLength={8192} aria-label={question.freeform.title ?? t("Answer")} value={active?.text[questionIndex] ?? ""}
         placeholder={question.freeform.placeholder ?? undefined} onChange={event => { const value = event.target.value; edit(current => ({ ...current,
           text: { ...current.text, [questionIndex]: value } })); }} /></label>}
     </div>
     <footer className="ask-actions">
-      <small className="ask-hint">{t(reviewing ? "Enter next/submit · Shift+Enter new line · Ctrl+N/P questions · Ctrl+G Ctrl+E file · Esc cancel"
-        : "Enter next/submit · Shift+Enter new line · Ctrl+N/P questions · Esc cancel")}</small>
-      {reviewing && <Button size="small" variant="minimal" icon={<AppIcon name="fileText" size={14} />} text={t("Review file")} onClick={() => review.current?.focus()} />}
+      <small className="ask-hint"><kbd>Enter</kbd>{t(remaining ? "next" : "send")}{question.choices.length > 1 && <><kbd>1</kbd>–<kbd>{Math.min(question.choices.length, 9)}</kbd>{t("choose")}</>}<kbd>Esc</kbd>{t("cancel")}</small>
+      {reviewing && <Button size="small" variant="minimal" icon={<AppIcon name="fileText" size={14} />} text={t("Review file")} title="Ctrl+G Ctrl+E" onClick={() => review.current?.focus()} />}
       <Button size="small" variant="minimal" disabled={reading || !pageUsable} text={t("Cancel")} onClick={requestCancel} />
+      {count > 1 && <Button size="small" variant="outlined" disabled={questionIndex === 0} icon={<AppIcon name="chevronLeft" size={14} />} text={t("Back")} onClick={event => { show(questionIndex - 1, event.currentTarget); }} />}
       <Button className="ask-answer" intent="primary" size="small" disabled={reading || !pageUsable} text={t(remaining ? "Next" : "Submit")}
-        onClick={event => submitOrAdvance(event.currentTarget)} />
+        endIcon={<AppIcon name={remaining ? "chevronRight" : "send"} size={14} />} onClick={event => submitOrAdvance(event.currentTarget)} />
     </footer>
   </fieldset> : null;
   const dialog = confirmation && <Dialog isOpen className="ask-confirmation" title={t(confirmation === "submitUnsaved" ? "Submit Ask" : "Cancel Ask")}

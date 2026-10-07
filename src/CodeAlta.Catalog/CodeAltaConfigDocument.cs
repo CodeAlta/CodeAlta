@@ -36,6 +36,54 @@ public sealed class CodeAltaConfigDocument
     /// </summary>
     [JsonPropertyName("worktrees")]
     public CodeAltaWorktreeSettingsDocument? Worktrees { get; set; }
+
+    /// <summary>
+    /// Gets or sets the choices for work items: the tasks agents propose, and plans. Read from the user's file only.
+    /// </summary>
+    [JsonPropertyName("work_items")]
+    public CodeAltaWorkItemSettingsDocument? WorkItems { get; set; }
+}
+
+/// <summary>
+/// Represents the choices for work items: the tasks agents propose, and plans.
+/// </summary>
+public sealed class CodeAltaWorkItemSettingsDocument
+{
+    /// <summary>
+    /// Gets or sets whether agents may propose follow-up tasks; true when absent.
+    /// </summary>
+    [JsonPropertyName("propose")]
+    public bool? Propose { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether a session shows the tasks and plans it proposed as cards; true when absent.
+    /// </summary>
+    [JsonPropertyName("notify")]
+    public bool? Notify { get; set; }
+
+    /// <summary>
+    /// Gets or sets what becomes of a completed task: <c>delete</c> (the default) or <c>keep</c>.
+    /// </summary>
+    [JsonPropertyName("completed_tasks")]
+    public string? CompletedTasks { get; set; }
+
+    /// <summary>
+    /// Gets or sets what becomes of a dismissed task: <c>delete</c> (the default) or <c>keep</c>.
+    /// </summary>
+    [JsonPropertyName("dismissed_tasks")]
+    public string? DismissedTasks { get; set; }
+
+    /// <summary>
+    /// Gets or sets what becomes of a plan once it is done: <c>keep</c> (the default) or <c>delete</c>.
+    /// </summary>
+    [JsonPropertyName("completed_plans")]
+    public string? CompletedPlans { get; set; }
+
+    /// <summary>
+    /// Gets or sets the way of starting that comes first: <c>worktree</c> (the default), <c>session</c> or <c>here</c>.
+    /// </summary>
+    [JsonPropertyName("start")]
+    public string? Start { get; set; }
 }
 
 /// <summary>

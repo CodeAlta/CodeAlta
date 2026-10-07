@@ -8,7 +8,7 @@ import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
 import { resolveSessionTab, type SessionTab, type SessionTabs as Tabs } from "./sessionTabs";
 import { SessionTabActivity, type RuntimeObservationControls } from "./RuntimeObservation";
 import { createSessionTabModel, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction } from "./sessionTabLayout";
-import { emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isPluginTab, isSkillTab, isTerminalTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
+import { emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isPluginTab, isSkillTab, isTerminalTab, isWorkItemsTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { terminalTabLabel } from "./terminal/terminals";
 import { useSessionTabDrag } from "./useSessionTabDrag";
@@ -38,6 +38,7 @@ export function FileTabLabel({ tab, project, dirty, terminal }: {
       {mark && <span className="terminal-tab-mark" data-kind={mark[0]} role="img" title={mark[1]} aria-label={mark[1]} />}</span>;
   }
   if (isAutomationsTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Automations")}>{t("Automations")}</span></span>;
+  if (isWorkItemsTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Work items")}>{t("Work items")}</span></span>;
   const name = t(isChangesTab(tab) ? "Changes" : isPluginTab(tab) ? "Plugin" : isSkillTab(tab) ? "Skill" : "Editor");
   return <span className="session-tab-title"><span className="session-tab-label" title={`${name} · ${project}\n${tab.projectPath}`}>
     {name} <span className="session-tab-project">{project}</span></span>
@@ -101,6 +102,7 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
   const shownTerminal = (file: FileTab) => isTerminalTab(file) && file.terminalId ? terminal?.(file.terminalId) : undefined;
   const fileLabel = (file: FileTab) => {
     if (isAutomationsTab(file)) return t("Automations");
+    if (isWorkItemsTab(file)) return t("Work items");
     if (!isTerminalTab(file)) return `${t(isChangesTab(file) ? "Changes" : isPluginTab(file) ? "Plugin" : isSkillTab(file) ? "Skill" : "Editor")} · ${projectName(file)}`;
     const shown = shownTerminal(file);
     return shown ? terminalTabLabel(shown, t("Terminal")) : t("Terminal");
@@ -212,6 +214,7 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
           const look = isTerminalTab(file) ? { icon: "terminal" as const, tone: shown && !shown.running ? "muted" : "green" }
             : isChangesTab(file) ? { icon: "changes" as const, tone: "orange" }
             : isAutomationsTab(file) ? { icon: "automation" as const, tone: "gold" }
+            : isWorkItemsTab(file) ? { icon: "task" as const, tone: "teal" }
             : isPluginTab(file) ? { icon: "plugin" as const, tone: "purple" }
             : isSkillTab(file) ? { icon: "skill" as const, tone: "teal" } : { icon: "code" as const, tone: "azure" };
           // A terminal whose shell runs a command shows it where its icon is.

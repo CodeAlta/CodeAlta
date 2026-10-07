@@ -96,6 +96,8 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | `editor` | Show the files of a project to the user in the code editor. Only in CodeAlta Desktop. |
 | `terminal` | List, create, read, type in, rename, show and close the terminals of the window. Only in CodeAlta Desktop. |
 | `automation` | List, create, run, enable, disable and delete automations, and find the one that started a session. Only in CodeAlta Desktop. |
+| `task` | List, show, propose, start, complete, set aside, dismiss and remove the follow-up tasks of a project. |
+| `plan` | List and show the plans of a project, set the status of one, remove one. |
 | `ui` | Give the calling session the tools that see and drive the window, or take them back. Only in CodeAlta Desktop (a plugin root, see below). |
 
 `note` is a compatibility alias for `notes`. Prefer the plural `notes` group because it names the sidebar panel and the single sticky notes document. `skills activate` and `skills_activate` are compatibility aliases for `skill activate`. Prefer the singular `skill` group in new prompts and docs.
@@ -487,6 +489,44 @@ called by a session that an automation started: such a session reads the automat
 The group exists only where a host registers its service (`IAltaAutomations`), which the desktop host
 does: in the terminal UI and the standalone tool it is not among the commands, their help or
 `alta tool list`.
+
+## Task and plan commands
+
+`alta task` and `alta plan` use the work items of a project: the follow-up tasks kept under
+`.alta/tasks/` and the plans kept under `.alta/plans/`. They are registered when the host has a
+`WorkItemService` (CodeAlta Desktop and CodeAlta TUI). The commands use the project of the calling
+session; `--project` names another one and `list --all` reads every project.
+
+```text
+alta task list [--project <project> | --all] [--status open|pending|later|in-progress|done|dismissed|all]
+alta task show <task-id> [--project <project>]
+alta task create --title <text> [--kind gap|problem|improvement] [--summary <text>] (--content <text> | --stdin) [--project <project>]
+alta task start|complete|later|reopen|dismiss|remove <task-id> [--project <project>]
+
+alta plan list [--project <project> | --all] [--status open|draft|approved|in-progress|blocked|done|all]
+alta plan show <plan-id> [--project <project>]
+alta plan status <plan-id> draft|approved|in-progress|done|blocked [--project <project>]
+alta plan remove <plan-id> [--project <project>]
+```
+
+- `task create` writes the file and records the calling session as the one that proposed it, so
+  CodeAlta Desktop shows it as a card of that session at once. The record `alta.task.created` carries
+  a `nextStep` that tells the agent the user decides, not the agent. It is refused with
+  `task.proposalsDisabled` when the user turned proposals off and with `task.tooManyProposals` when
+  the session already has five open proposals.
+- `task start` records the calling session as the one that does the task; `complete` and `dismiss`
+  delete the file, or write the status in it when the settings keep closed tasks; `later` and
+  `reopen` change the status; `remove` deletes the file whatever the settings say.
+- `plan status` changes the status in the front matter of the plan, or in the `- Status:` line of a
+  plan that has none, without rewriting the rest. `approved` from a session makes the plan a card of
+  that session; `in-progress` records the session as the one that carries it out. `done` deletes
+  the file instead when the settings do not keep completed plans, and answers `alta.plan.removed`
+  with a message that says so. A session that works in a git worktree which has the plan reads and
+  updates that copy.
+- The ids are the names of the files without `.md`. Records are `alta.task`, `alta.task.created`,
+  `alta.task.changed`, `alta.plan`, `alta.plan.changed` and `alta.plan.removed`.
+
+The list and show commands are read-only; the others are mutating.
 
 ## Skill commands
 

@@ -590,6 +590,11 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
       if (request.kind === "state") { request.state = { sessionId, draftText: latestText.current, busy: composerBusy }; request.result = true; return; }
       if (invalidEpoch || pending) return;
       const value = request.text ?? "";
+      // A prompt that names its agent prompt goes with it or not at all: a plan is carried out by the default one.
+      if (request.agentPromptId && (request.kind === "send" || request.kind === "enqueue") && selected?.agentPromptId !== request.agentPromptId) {
+        if (selectionDisabled || !activeChoices?.prompts.some(prompt => prompt.id === request.agentPromptId)) return;
+        select("agentPromptId", request.agentPromptId);
+      }
       if (request.kind === "draft") { editText(value); request.result = true; }
       else if (request.kind === "enqueue") request.result = stagePrompt("Queue", value, []);
       else if (request.kind === "steer" && composerBusy) request.result = stagePrompt("Steer", value, []);

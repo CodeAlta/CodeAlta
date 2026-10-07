@@ -593,15 +593,23 @@ review. This is how the **Plan** agent prompt ends a planning turn: it saves the
 `.alta/plans/` and asks for its review together with the questions that remain. The ask opens once the
 run that asked has ended, as in the terminal UI:
 
-- **The questions take the place of the prompt.** Each question is a tab (`Title →`, the last one
-  `Title ✓`) with its text, its description, its choices as a single selection (numbered, the first one
+- **The questions take the place of the prompt.** With several questions, a row of numbered steps
+  names them: the one that is shown, the ones that were seen (a check mark) and the ones to come; a
+  step is a button that goes to its question. A question shows its text, its description and its
+  choices as cards of a single selection (a number, the label, the description; the first one
   selected) and, when the ask allows one, a text answer. `Enter` and the button go to the next
-  question that was not shown yet (**Next**) and send once all were shown (**Submit**); `Shift+Enter`
-  is a new line in a text answer. `Ctrl+N` / `Ctrl+P` and, outside text, `Left` / `Right` change the
-  question; `Up` / `Down` change the choice. A question may be left without an answer.
-- **A file to review takes the place of the timeline.** It is the file's source in an editor, with
-  line numbers, the highlighting of its type and wrapped lines, under a header `File context: <path>`
-  (` *` while it has unsaved edits). `Ctrl+K`, the **Comment** button or a click in the margin beside a
+  question that was not shown yet (**Next**) and send once all were shown (**Submit**); **Back**
+  returns to the previous one; `Shift+Enter` is a new line in a text answer. Outside text, a digit
+  `1`–`9` selects the choice of that number, `Up` / `Down` change the choice and `Left` / `Right` the
+  question, as `Ctrl+N` / `Ctrl+P` do everywhere. A question may be left without an answer. The
+  sources are `frontend/src/AskPanel.tsx` and `AskFileReview.tsx`.
+- **A file to review takes the place of the timeline.** Under a header `File context: <path>` (` *`
+  while it has unsaved edits), a Markdown file opens as it reads: **Read** renders it with the
+  Markdown of the timeline (headings, tables, highlighted code, `mermaid` diagrams), which is how a
+  plan is reviewed. **Source and comments** shows the source of the file in an editor, with line
+  numbers, the highlighting of its type and wrapped lines; a file that is not Markdown has only that
+  view. The comments and the unsaved edits are kept when the view changes, and **Read** shows the
+  text as it is edited. In the source, `Ctrl+K`, the **Comment** button or a click in the margin beside a
   line adds a comment on that line: a **User Comment** box under the line, one per line, marked in the
   margin. In a comment `Esc` finishes it (a check mark shows it is done), `Ctrl+D` deletes it and
   `Ctrl+N` / `Ctrl+P` go to the next and previous comment; **Clear comments** removes them all. The
@@ -2051,6 +2059,90 @@ The prompt of a run is one of the commands the host keeps a receipt of, with the
 the reminders. A run is refused, before a session is created for it, only while as many commands are
 pending as the host keeps (256); it runs again at its next trigger.
 
+## Work items
+
+A **work item** is something left to do in a project: a **task** an agent proposed, or a **plan**
+written in Plan mode. Both are Markdown files of the project; the window shows them where the user
+decides on them, and lists them in one tab. The sources are `CodeAlta.Catalog/WorkItems/` (files,
+settings, the store of the links), `Desktop/WorkItems/WorkItemRunner.cs` and
+`Desktop/Rpc/WorkItemsRpc.cs` (host), `frontend/src/workItems/` (page), and
+`BuiltInAltaCommandContributor.WorkItems.cs` (`alta task`, `alta plan`; see `doc/live-tool.md`).
+
+- **Tasks.** A task is one specific piece of work beside what a session was asked: a gap, a problem
+  or an improvement the agent found and verified. The **Default** agent prompt tells the agent when to
+  propose one (before it ends its turn, never for what belongs to the request, never as a list of
+  ideas) and to leave the decision to the user. A task is `<project>/.alta/tasks/yyyy-mm-dd-<slug>.md`:
+
+  ```markdown
+  ---
+  title: "Report why the model list is empty"
+  kind: gap            # gap | problem | improvement
+  status: pending      # pending | later | done | dismissed
+  created: 2026-10-07
+  summary: "The Models page shows nothing for a provider that failed. It should say why."
+  ---
+
+  ## Why
+  ...
+  ```
+
+  A title holds 160 characters, a summary 600, a description 16,384. A session has at most five open
+  proposals and a project 300 tasks; the command says so when it refuses.
+- **Plans.** A plan is `<project>/.alta/plans/yyyy-mm-dd-<slug>.md`, with a front matter of `title`,
+  `status` (`draft`, `approved`, `in-progress`, `done`, `blocked`), `created` and `summary`. A plan
+  written without a front matter is read as before: its title is its first heading, and its status,
+  date and summary come from its `- Status:`, `- Created:` and `- Task:` lines (a status that is a
+  sentence is shown as written, beside the status it stands for). Changing the status of such a plan
+  rewrites that one line. Only the first 16 KiB of a plan are read for the list.
+- **What is not in the files.** Which session proposed an item, which one carries it out, and whether
+  the user put its card away are facts of this machine: they are kept in `work_items.json` of the
+  state folder, at most 2,000 of them, never in the repository. A link to a session that no longer
+  exists counts for nothing.
+- **Cards of a session.** A session shows, in its top right corner, what it proposed and the user has
+  not decided on: its pending tasks, and its plans once they are approved (`alta plan status <id>
+  approved`, which the Plan prompt runs after the review). One card is shown at a time, the plan
+  first: what it is, its title, the kind of finding and the summary, **Details** (the whole text in a
+  window, rendered), and with several cards a count with previous and next. The card can be folded
+  into a chip. The choices are **Start in a new worktree**, **Start in a new session**, **Do it in
+  this session**, **Later** and, for a task, **Dismiss**; the way of starting chosen in the settings
+  is the first, primary button. **Later** on a plan only puts the card away.
+- **Starting.** *A new worktree* and *a new session* are started by the host (`WorkItemRunner`, like
+  an automation run): it creates the worktree from the head of the project when asked, creates a
+  session named after the item with the provider, model and effort of the session that showed it,
+  and sends it the prompt with the Default agent. *This session* goes through the composer of the
+  session: the host returns the prompt and the page sends it, or queues it when the session is busy,
+  so it runs after the current work; a plan switches the session to the Default agent for that
+  prompt. If the session does not take the prompt, nobody is recorded as carrying the item out. The
+  prompt of a task carries its description and ends with `alta task complete <id>`; the prompt of a
+  plan names its file, or tells a session whose worktree does not have the file to read it with
+  `alta plan show`.
+- **The tab.** The checklist of the activity bar (with a dot while something waits), **Work items**
+  in the search of the window, `Ctrl+G` then `Ctrl+I`, `/work_items`, and the mark of a project open
+  one tab. Its toolbar filters by kind, by project and by text; **To do**, **In progress**, **Later**
+  and **Closed** are tabs with their counts. The list is grouped by project, plans first; the item
+  that is selected is read on the right, rendered, with its status, the session that carries it out
+  (a link to it), the ways of starting it, **Mark done**, **Later** / **Put back**, **Dismiss**,
+  **Open file** and **Remove** (which asks first). A plan whose file says `in-progress` is in
+  progress even with no session recorded.
+- **In the Explorer.** A project shows the number of its work items to do, with a pulsing dot while
+  a session that is working carries one out; the session that carries an item out has a mark too.
+- **Reading does not hold the window.** The projects and the sessions are shown without the work
+  items. The page then asks for them a few projects at a time (3, then 6, 12, 24…), the selected
+  project first and then the ones whose sessions were used last, and shows what it has after each
+  answer. An empty list is said to be empty only once every project was read. The host tells the page
+  when a file or a link changed (`workItems.watch`), and a turn that ends reads again.
+- **Settings.** **Settings > Work items** edits the `[work_items]` table of the configuration of the
+  user: whether agents propose tasks (`propose`; off, `alta task create` from a session is refused),
+  whether sessions show the cards (`notify`), what happens to the file of a task that is completed or
+  dismissed (`completed_tasks`, `dismissed_tasks`: `delete`, the default, or `keep`, which writes the
+  status in the file and lists it under **Closed**), what happens to a plan once it is done
+  (`completed_plans`: `keep`, the default, or `delete`), and the way of starting that comes first
+  (`start`: `worktree`, `session` or `here`). A value that is the default is not written. A plan that
+  is deleted when done is the copy the session works on: in a worktree, the copy of the project goes
+  when the branch is merged, and until then the plan is listed without a card.
+- **Limits.** A reading names at most 32 projects and returns at most 100 tasks and 100 plans for
+  each; the text of an item is cut at 200 KiB. CodeAlta TUI has the two commands and no cards or tab.
+
 ## UI tools
 
 A session can see and drive the window it runs in. The tools are those of
@@ -2200,6 +2292,7 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | ``Ctrl+` ``, `Ctrl+G` then `Ctrl+J` | New terminal (`/terminal`) in the folder of the session or of the project |
 | In a terminal: `Ctrl+C`, `Ctrl+V`, `Ctrl+F`, `Ctrl+Home` / `Ctrl+End` | Copy the selection (or interrupt the program), paste, find, top / bottom |
 | `Ctrl+G` then `Ctrl+M` | Automations (`/automations`) |
+| `Ctrl+G` then `Ctrl+I` | Work items (`/work_items`) |
 | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+PageUp` / `Ctrl+PageDown`) | Previous / next tab |
 | `Ctrl+W` (also `Ctrl+Shift+W`, which a terminal leaves to the application), `Ctrl+Shift+T` | Close tab, reopen the last closed tab |
 | `Enter`, `Ctrl+Enter`, `Shift+Enter` | Send (queued while a turn runs), steer the running turn, new line |

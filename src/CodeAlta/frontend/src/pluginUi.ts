@@ -35,11 +35,12 @@ export const PluginUiContext = createContext<PluginUiValue>({ epoch: null, proje
  * A request the shell addresses to the composer of a session, as a `codealta:plugin` window event: to read
  * its draft and state before a plugin command runs (`state`), or to do what a plugin asked (`send`,
  * `enqueue`, `steer`, `compact`, `draft`). `sessionId` null means the composer of the focused pane. The
- * composer that takes the request sets `handled`, and `result` when it did what was asked.
+ * composer that takes the request sets `handled`, and `result` when it did what was asked. `agentPromptId`
+ * names the agent prompt a `send` or an `enqueue` goes with, when it is not the one the composer shows.
  */
 export type PluginComposerRequest = {
   kind: "state" | "send" | "enqueue" | "steer" | "compact" | "draft";
-  sessionId: string | null; text: string | null;
+  sessionId: string | null; text: string | null; agentPromptId?: string | null;
   handled: boolean; result: boolean;
   state: { sessionId: string; draftText: string; busy: boolean } | null;
 };
@@ -48,8 +49,8 @@ export const pluginComposerEvent = "codealta:plugin";
 export const pluginsChangedEvent = "codealta:plugins-changed";
 
 /** Sends a request to the composer it names and returns it with the composer's answer. */
-export function askPluginComposer(kind: PluginComposerRequest["kind"], sessionId: string | null, text: string | null = null): PluginComposerRequest {
-  const request: PluginComposerRequest = { kind, sessionId, text, handled: false, result: false, state: null };
+export function askPluginComposer(kind: PluginComposerRequest["kind"], sessionId: string | null, text: string | null = null, agentPromptId: string | null = null): PluginComposerRequest {
+  const request: PluginComposerRequest = { kind, sessionId, text, agentPromptId, handled: false, result: false, state: null };
   window.dispatchEvent(new CustomEvent(pluginComposerEvent, { detail: request }));
   return request;
 }

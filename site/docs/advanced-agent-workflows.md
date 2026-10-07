@@ -66,6 +66,7 @@ The exact command set depends on the host, active plugins, and session context. 
 | `skill` (`skills`, `skills_activate`) | List, show, and activate CodeAlta-managed skills. | “If an IL decompile skill is available, activate it for this session before inspecting the assembly.” | Activation injects skill context into a session; aliases exist for compatibility, but new prompts should prefer `skill`. |
 | `diff`, `editor` | Show the changes of a project, or a file in the code editor, to the user. | “Open the file you changed at the line of the fix.” | CodeAlta Desktop only. They only change what the window shows. |
 | `terminal` | List, create, read, type in and close the terminals of the window. | “Start the dev server in a terminal and tell me when it is ready.” | CodeAlta Desktop only. Typing in a terminal runs commands; closing one ends what runs in it. |
+| `task`, `plan` | List, read and update the [work items](work-items.md) of a project: propose a follow-up task, mark one done, set the status of a plan. | “List the open tasks of this project and do the first one.” | A proposed task is shown to you at once. Completing or dismissing a task deletes its file, and a completed plan is kept, unless the settings say otherwise. |
 | `automation` | List, create, run, enable, disable and delete [automations](automations.md), and find the one that started the session. | “Create an automation that reviews the open pull requests every morning at 9.” | CodeAlta Desktop only. An automation keeps starting sessions until it is disabled or deleted. |
 | `plugin` | Inspect the plugins and look their API up. In CodeAlta Desktop, also create, build and reload a source plugin while the app runs. | “Write a plugin that shows the current git branch beside the prompt.” | Building a plugin runs its code. See [Plugin development](plugins/developers.md#ask-an-agent-to-write-it). |
 | `mcp` | Inspect, configure, activate, search, describe, or call configured MCP server tools. | “Activate the memory MCP server and summarize the graph.” | Plugin-contributed. Server add/remove changes JSON config; enable/disable changes TOML policy; an activated server's tools are usable in the same turn and stay for the session. |
@@ -84,7 +85,7 @@ Plan mode is useful when the work is broad enough that you want review before ed
 Use Plan mode for this task. Inspect the relevant files, write an implementation-ready plan under .alta/plans/, and ask me to review it before execution.
 ```
 
-After you approve the plan, the agent can switch back to Default and queue an execution prompt for the same session:
+After you approve the plan, CodeAlta Desktop shows it as a card of the session: start it in a new worktree, in this session or in a new session, or keep it for later. In CodeAlta TUI, tell the session to execute it:
 
 ```text
 Execute the approved plan at .alta/plans/2026-06-04-website-agent-workflow-docs.md.
@@ -118,7 +119,7 @@ Use structured asks when an answer materially changes scope, safety, cost, crede
 Before editing, ask me whether to update only website docs or both website and internal docs. Include a short description for each choice.
 ```
 
-After queuing an ask, the agent should stop and wait. CodeAlta presents the questions in the session UI and sends your answers back as the next prompt.
+After queuing an ask, the agent should stop and wait. CodeAlta presents the questions in the session, one at a time with their choices, and sends your answers back as the next prompt.
 
 ### Delegate read-only research
 

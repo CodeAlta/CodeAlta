@@ -128,7 +128,9 @@ internal sealed class CodeAltaFrontendComposition
             .Add<IAltaAskService>(askService)
             .Add<IAltaNotesService>(notesService)
             .Add<IReadOnlyList<ModelProviderDescriptor>>(providerDescriptors)
-            .Add<IAltaSessionToolProviderPolicy>(new AltaSessionToolProviderPolicy());
+            .Add<IAltaSessionToolProviderPolicy>(new AltaSessionToolProviderPolicy())
+            // The tasks and the plans of the projects, for `alta task` and `alta plan`. The desktop application shows them.
+            .Add(new CodeAlta.Catalog.WorkItems.WorkItemService(configStore, catalogOptions.StateRoot));
         if (modelProviderRegistry is not null)
         {
             altaServices.Add(modelProviderRegistry);

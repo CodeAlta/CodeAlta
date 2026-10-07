@@ -362,4 +362,13 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 [JsonSerializable(typeof(AutomationRunsResponse))]
 [JsonSerializable(typeof(AutomationPreviewResponse))]
 [JsonSerializable(typeof(AutomationsEvent))]
+[JsonSerializable(typeof(WorkItemsRequest))]
+[JsonSerializable(typeof(WorkItemsListResponse))]
+[JsonSerializable(typeof(WorkItemRequest))]
+[JsonSerializable(typeof(WorkItemReadResponse))]
+[JsonSerializable(typeof(WorkItemActionRequest))]
+[JsonSerializable(typeof(WorkItemActionResponse))]
+[JsonSerializable(typeof(WorkItemsSettingsRequest))]
+[JsonSerializable(typeof(WorkItemsSettingsResponse))]
+[JsonSerializable(typeof(WorkItemsEvent))]
 internal sealed partial class DesktopJsonContext : JsonSerializerContext;

@@ -142,6 +142,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         {
             yield return CreateAutomationCommand(context.Invocation);
         }
+
+        // The tasks and the plans of projects, in a host that keeps them.
+        if (context.Invocation.Services.Get<CodeAlta.Catalog.WorkItems.WorkItemService>() is not null)
+        {
+            yield return CreateTaskCommand(context.Invocation);
+            yield return CreatePlanCommand(context.Invocation);
+        }
     }
 
     public IEnumerable<AltaCommandPolicy> GetCommandPolicies(AltaCommandContributionContext context)
@@ -157,8 +164,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var terminals = context.Services.Get<IAltaTerminals>() is not null;
         var automations = context.Services.Get<IAltaAutomations>() is not null;
         var workshop = context.Services.Get<AltaPluginWorkshop>();
-        if (!changes && !editor && !terminals && !automations && workshop is null) return Policies;
+        var workItems = context.Services.Get<CodeAlta.Catalog.WorkItems.WorkItemService>() is not null;
+        if (!changes && !editor && !terminals && !automations && !workItems && workshop is null) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
+        if (workItems) policies.AddRange(WorkItemPolicies);
         if (workshop is not null) policies.AddRange(PluginWorkshopPolicies);
         if (workshop?.OpenEditor is not null) policies.Add(PluginOpenPolicy);
         if (changes) policies.Add(DiffShowPolicy);

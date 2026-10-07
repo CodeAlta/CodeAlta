@@ -531,6 +531,31 @@ public sealed class CodeAltaConfigStore
     }
 
     /// <summary>
+    /// Persists the choices for tasks and plans, in the user's configuration file. A choice that is the default
+    /// is not written.
+    /// </summary>
+    /// <param name="settings">The choices.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="settings"/> is null.</exception>
+    public void SaveGlobalWorkItemSettings(WorkItems.WorkItemSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        var defaults = WorkItems.WorkItemSettings.Default;
+        var document = LoadGlobal();
+        NormalizeDocument(document);
+        var tasks = new CodeAltaWorkItemSettingsDocument
+        {
+            Propose = settings.Propose == defaults.Propose ? null : settings.Propose,
+            Notify = settings.Notify == defaults.Notify ? null : settings.Notify,
+            CompletedTasks = settings.CompletedTasks == defaults.CompletedTasks ? null : WorkItems.WorkItemSettings.NameOf(settings.CompletedTasks),
+            DismissedTasks = settings.DismissedTasks == defaults.DismissedTasks ? null : WorkItems.WorkItemSettings.NameOf(settings.DismissedTasks),
+            CompletedPlans = settings.CompletedPlans == defaults.CompletedPlans ? null : WorkItems.WorkItemSettings.NameOf(settings.CompletedPlans),
+            Start = settings.Start == defaults.Start ? null : WorkItems.WorkItemSettings.NameOf(settings.Start),
+        };
+        document.WorkItems = tasks is { Propose: null, Notify: null, CompletedTasks: null, DismissedTasks: null, CompletedPlans: null, Start: null } ? null : tasks;
+        SaveDocument(_options.ConfigPath, document);
+    }
+
+    /// <summary>
     /// Loads globally configured provider definitions.
     /// </summary>
     /// <param name="includeDisabled"><see langword="true"/> to include disabled definitions.</param>

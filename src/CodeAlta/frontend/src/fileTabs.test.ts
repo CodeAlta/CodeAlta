@@ -3,7 +3,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
-import { activateFileTab, automationsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isPluginTab, isReadOnlyTab, isSkillTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
+import { activateFileTab, automationsTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isPluginTab, isReadOnlyTab, isSkillTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
   persistFileTabs, pluginEditorTab, pluginFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, skillFolderPrefix,
   skillReadOnly, terminalTab, type FileTab } from "./fileTabs";
 import { FileTabLabel } from "./SessionTabStrip";
@@ -146,6 +146,24 @@ test("an editor tab is labeled with its project and marks unsaved edits in every
     const changed = render(changes(), true);
     assert.ok(changed.includes(translate(locale, "Changes")) && changed.includes("&lt;Project&gt;"), changed);
     assert.ok(!changed.includes("session-tab-dirty"), "The changes hold no edit.");
+  }
+});
+
+test("the work items have one tab, of no project, that outlives the projects and is kept for the next start", () => {
+  assert.deepEqual(workItemsTab, { projectId: "", projectPath: "", view: "workItems" });
+  assert.ok(isWorkItemsTab(workItemsTab) && !isWorkItemsTab(automationsTab) && !isAutomationsTab(workItemsTab) && !isEditorTab(workItemsTab));
+  const state = openFileTab(openFileTab(openFileTab(emptyFileTabs(), editor()), automationsTab), workItemsTab);
+  assert.equal(state.active, workItemsTab);
+  assert.equal(openFileTab(state, { ...workItemsTab }).open.length, 3, "Asked again, the one that is open is shown.");
+  assert.deepEqual(reconcileFileTabs(state, { ...catalog, projects: [] }), { open: [automationsTab, workItemsTab], active: workItemsTab, closed: [] });
+  let stored = "";
+  persistFileTabs(value => { stored = value; }, state);
+  assert.deepEqual(restoreFileTabs(() => stored), { ...state, closed: [] });
+  assert.equal(restoreFileTabs(() => JSON.stringify({ version: 1, open: [{ projectId: "p", projectPath: "/p", view: "workItems" }], active: null })), null);
+  for (const locale of locales) {
+    const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: () => assert.fail("rendering must not dispatch") } },
+      createElement(FileTabLabel, { tab: workItemsTab, project: "", dirty: false })));
+    assert.ok(html.includes(translate(locale, "Work items")), html);
   }
 });
 

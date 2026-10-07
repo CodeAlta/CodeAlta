@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { Button, Callout, Classes, NonIdealState, TextArea } from "@blueprintjs/core";
+import { Button, Callout, Classes, NonIdealState, SegmentedControl, TextArea } from "@blueprintjs/core";
 import { projectFiles } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import { addComment, commentsFit, editComment, finishComment, moveComments, neighbourComment, orderedComments, reviewSnapshot, type ReviewComment } from "./askReview";
 import { fileAppearance } from "./fileAppearance";
+import { MarkdownContent } from "./MarkdownContent";
 import { canSaveFile, fileConflictDismissed, fileEdited, fileLoaded, fileLoading, fileSaved, fileSaveUnknown, fileSaving, initialFileEditorState,
   maximumFileLength } from "./editor/fileEditorState";
 import { fileLanguage } from "./monaco/fileLanguage";
@@ -30,10 +31,10 @@ export type AskFileReviewHandle = Readonly<{
 type Zone = { zoneId: string | null; zone: monaco.editor.IViewZone; decoration: string | null };
 
 /**
- * The file an ask gives for review (a plan, usually), in place of the timeline while the ask is open. It is
- * the file's source in an editor: the user comments on lines (Ctrl+K, or the margin beside a line), each
- * comment being a box under its line, and can edit and save the file (Ctrl+S). Comments stay on their lines
- * while the file is edited.
+ * The file an ask gives for review (a plan, usually), in place of the timeline while the ask is open. A
+ * Markdown file is first shown as a reader sees it; its source is one click away. In the source the user
+ * comments on lines (Ctrl+K, or the margin beside a line), each comment being a box under its line, and can
+ * edit and save the file (Ctrl+S). Comments stay on their lines while the file is edited.
  */
 export function AskFileReview({ epoch, projectId, path, disabled = false, handle, onLeave, api = projectFiles }: {
   epoch: string; projectId: string | null;
@@ -52,6 +53,11 @@ export function AskFileReview({ epoch, projectId, path, disabled = false, handle
   const [comments, setComments] = useState<readonly ReviewComment[]>([]);
   const [saved, setSaved] = useState(false);
   const [instance, setInstance] = useState<monaco.editor.IStandaloneCodeEditor | null>(null);
+  // A Markdown file is read before it is commented: the source is where the comments go.
+  const readable = /\.(md|markdown)$/i.test(path);
+  const [view, setView] = useState<"read" | "source">(readable ? "read" : "source");
+  const reading = readable && view === "read";
+  const reader = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLElement>(null);
   const nextId = useRef(0);
@@ -205,6 +211,7 @@ export function AskFileReview({ epoch, projectId, path, disabled = false, handle
 
   function commentOn(line: number) {
     if (latest.current.disabled) return;
+    setView("source");
     const id = ++nextId.current;
     const added = addComment(latest.current.comments, line, id);
     if (!added) return;
@@ -255,17 +262,19 @@ export function AskFileReview({ epoch, projectId, path, disabled = false, handle
     dirty: () => latest.current.state.dirty,
     fits: () => commentsFit(latest.current.comments),
     save: () => saveLatest.current(),
-    focus: () => instance?.focus(),
+    focus: () => { if (reading) reader.current?.focus(); else instance?.focus(); },
   };
   useEffect(() => () => { if (handle) handle.current = null; }, [handle]);
   // "Go to Ask File" (Ctrl+G Ctrl+E) reaches the editor through its element.
   useEffect(() => {
     const node = root.current;
     if (!node) return;
-    const focus = () => instance?.focus();
+    const focus = () => { if (reading) reader.current?.focus(); else instance?.focus(); };
     node.addEventListener("codealta-ask-file-focus", focus);
     return () => node.removeEventListener("codealta-ask-file-focus", focus);
-  }, [instance]);
+  }, [instance, reading]);
+  // The editor was hidden while the file was read: it takes its place again, and the keyboard.
+  useEffect(() => { if (!reading && instance) { instance.layout(); instance.focus(); } }, [reading, instance]);
 
   const look = fileAppearance(path, false);
   const written = comments.filter(comment => comment.text.trim()).length;
@@ -275,6 +284,8 @@ export function AskFileReview({ epoch, projectId, path, disabled = false, handle
       <span className="file-tab-icon" data-file-tone={look.tone}><AppIcon name={look.icon} size={14} /></span>
       <strong title={path}>{t("File context: {path}", { path })}{state.dirty ? " *" : ""}</strong>
       {busy && <ActivitySpinner size={12} />}
+      {readable && <SegmentedControl className="ask-file-view" size="small" value={view} onValueChange={value => setView(value as "read" | "source")}
+        options={[{ value: "read", label: t("Read") }, { value: "source", label: t("Source and comments") }]} />}
       <span className="ask-file-count">{t(written === 1 ? "{count} comment" : "{count} comments", { count: written })}</span>
       <Button size="small" variant="minimal" icon={<AppIcon name="notes" size={14} />} disabled={!instance || disabled} title={`${t("Add line comment")} (Ctrl+K)`}
         onClick={() => commentOn(instance?.getPosition()?.lineNumber ?? 1)}>{t("Comment")}</Button>
@@ -293,7 +304,10 @@ export function AskFileReview({ epoch, projectId, path, disabled = false, handle
     </Callout>}
     {!state.conflict && state.notice && <Callout className="file-editor-notice" intent={state.notice.intent} compact role="alert">{t(state.notice.key)}</Callout>}
     {!commentsFit(comments) && <Callout className="file-editor-notice" intent="warning" compact role="alert">{t("The comments are too long to send in one answer.")}</Callout>}
-    {ready ? <div className={`ask-file-surface code-editor ${Classes.MONOSPACE_TEXT}`} ref={host} />
+    {ready && reading && <div className="ask-file-reader" ref={reader} tabIndex={0} onKeyDown={event => {
+      if (event.key === "Escape" && !event.ctrlKey && !event.altKey && !event.shiftKey && onLeave) { event.preventDefault(); onLeave(); }
+    }}><div className="markdown-content"><MarkdownContent source={state.content} document /></div></div>}
+    {ready ? <div className={`ask-file-surface code-editor ${Classes.MONOSPACE_TEXT}`} ref={host} hidden={reading} />
       : state.phase === "loading" ? <NonIdealState className="file-editor-empty" icon={<ActivitySpinner size={28} />} title={t("Loading…")} />
       : <NonIdealState className="file-editor-empty" icon={<AppIcon name={look.icon} size={36} />} title={path}
         description={t(state.failure ?? "The file could not be read.")}

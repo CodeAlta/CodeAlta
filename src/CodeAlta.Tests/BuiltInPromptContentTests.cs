@@ -27,18 +27,20 @@ public sealed class BuiltInPromptContentTests
         StringAssert.Contains(plan.Body, "use the exact `description` field on questions and choices");
         StringAssert.Contains(plan.Body, "alta session current");
         StringAssert.Contains(plan.Body, "alta session send <current-session-id> --queue-if-busy --stdin");
-        StringAssert.Contains(plan.Body, "enqueue the execution turn with `--queue-if-busy`");
         StringAssert.Contains(plan.Body, "--same-model-as <session-id>");
         StringAssert.Contains(plan.Body, "--model-ref");
         StringAssert.Contains(plan.Body, "only when the user explicitly asks for delegation or sub-sessions");
         StringAssert.Contains(plan.Body, "all relevant child and descendant work");
-        StringAssert.Contains(plan.Body, "over-compression across nesting levels");
-        StringAssert.Contains(plan.Body, "\"description\": \"Review the attached plan file before CodeAlta starts implementation.\"");
-        StringAssert.Contains(plan.Body, "\"description\": \"Approve the plan and hand off to Default/build mode for execution.\"");
         StringAssert.Contains(plan.Body, "alta session set_agent --prompt-id default");
-        Assert.IsFalse(plan.Body.Contains("Do not call `alta session send` to the current/calling session", StringComparison.Ordinal));
-        Assert.IsFalse(plan.Body.Contains("\"description\": \"Approve the plan; Plan mode must immediately run `alta session set_agent --prompt-id default` and stop.\"", StringComparison.Ordinal));
-        StringAssert.Contains(plan.Body, "- [ ] <small, ordered implementation step");
+        // The plan is a document for a reader: its front matter lists it, and its approval is told to CodeAlta, which shows it.
+        StringAssert.Contains(plan.Body, "Who reads the plan");
+        StringAssert.Contains(plan.Body, "status: draft");
+        StringAssert.Contains(plan.Body, "summary: <one or two sentences");
+        StringAssert.Contains(plan.Body, "```mermaid");
+        StringAssert.Contains(plan.Body, "alta plan status <plan-id> approved");
+        StringAssert.Contains(plan.Body, "Do not start the work and do not hand off by yourself");
+        Assert.IsFalse(plan.Body.Contains("Switch to Default and execute", StringComparison.Ordinal), "The user chooses where an approved plan is carried out, on its card.");
+        StringAssert.Contains(plan.Body, "- [ ] 1. <A step a builder can do and check on its own");
     }
 
     [TestMethod]
@@ -75,6 +77,15 @@ public sealed class BuiltInPromptContentTests
         StringAssert.Contains(defaultPrompt.Body, "--model-ref");
         StringAssert.Contains(defaultPrompt.Body, "alta reminder create --duration 00:05:00");
         StringAssert.Contains(defaultPrompt.Body, "alta session set_agent --prompt-id plan");
+        // Follow-up tasks: proposed for what was found and verified beside the request, never started by the session.
+        StringAssert.Contains(defaultPrompt.Description!, "proposing follow-up tasks");
+        StringAssert.Contains(defaultPrompt.Body, "unrelated to the current request");
+        StringAssert.Contains(defaultPrompt.Body, "Most turns propose nothing");
+        StringAssert.Contains(defaultPrompt.Body, "alta task list");
+        StringAssert.Contains(defaultPrompt.Body, "alta task create --title");
+        StringAssert.Contains(defaultPrompt.Body, "Do not start a task you proposed");
+        StringAssert.Contains(defaultPrompt.Body, "alta task complete <id>");
+        StringAssert.Contains(defaultPrompt.Body, "alta plan status <plan-id> done");
     }
 
     private static IReadOnlyList<AgentPromptDescriptor> ListBuiltInPrompts(string userCodeAltaRoot)

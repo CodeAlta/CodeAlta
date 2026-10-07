@@ -101,12 +101,12 @@ CodeAlta ships two built-in agent prompts:
 {.table}
 | Mode | Prompt id | Best for | What it does |
 |---|---|---|---|
-| **Default** | `default` | Normal implementation/build work | Inspects relevant files, edits when implementation is feasible, verifies, self-reviews diffs, reports concrete outcomes, and executes approved plan files. |
-| **Plan** | `plan` | Larger or riskier tasks where you want a plan before edits | Researches read-only, writes an implementation-ready Markdown plan under `.alta/plans/`, asks for review, and can hand off to Default when approved. |
+| **Default** | `default` | Normal implementation/build work | Inspects relevant files, edits when implementation is feasible, verifies, self-reviews diffs, reports concrete outcomes, executes approved plan files, and proposes [follow-up tasks](work-items.md) for what it found beside the request. |
+| **Plan** | `plan` | Larger or riskier tasks where you want a plan before edits | Researches read-only, writes a readable Markdown plan under `.alta/plans/` and asks for review. Once you approve it, you choose where it is carried out. |
 
 <figure class="my-4">
   <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-plan-mode.png" alt="CodeAlta Plan mode session showing a saved plan and review workflow" loading="lazy">
-  <figcaption class="small text-secondary mt-2">Plan mode is an agent prompt profile: it researches, writes a plan file, keeps the plan reviewable, and hands off to Default only after approval.</figcaption>
+  <figcaption class="small text-secondary mt-2">Plan mode is an agent prompt profile: it researches, writes a plan file and asks for your review. The work starts only when you say where.</figcaption>
 </figure>
 
 > [!IMPORTANT]
@@ -122,6 +122,8 @@ then write an implementation-ready plan before any source edits.
 ```text
 Execute the approved plan at .alta/plans/2026-06-04-workflow-docs.md.
 ```
+
+A plan starts with what changes and why, shows examples and diagrams where they help, then lists the steps. In CodeAlta Desktop an approved plan is shown as a card of the session, where you start it in a new worktree, in the same session or in a new session, or keep it for later. See [Work items](work-items.md).
 
 If git is active and `.alta/plans/` is not ignored, the built-in prompts treat plan files as repository artifacts: Plan keeps the saved plan current, and Default keeps it synchronized with implementation progress.
 

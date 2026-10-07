@@ -470,9 +470,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // a session do it with an alta command.
                 if (pluginAlta is not null) host.PluginRuntime.Changed += (_, _) => shell.NotifyPluginsChanged();
                 var pluginWorkshop = pluginAlta is null || options.ReviewOwnedCommandPermissions ? null : DesktopPlugins.Workshop(host.PluginRuntime, editorView);
+                // The tasks and the plans of the projects: files of each project, and the sessions of this instance that proposed or run them.
+                var workItems = new CodeAlta.Catalog.WorkItems.WorkItemService(worktreeConfig, host.CatalogOptions.StateRoot);
                 var altaCommands = DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
                     new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
-                    new DesktopAltaAutomations(automations, host.ProjectCatalog), worktrees, pluginWorkshop);
+                    new DesktopAltaAutomations(automations, host.ProjectCatalog), worktrees, pluginWorkshop, workItems);
                 // The clients of the MCP server run the same commands, as callers that belong to no session.
                 Volatile.Write(ref altaTool, Mcp.DesktopMcpTools.Alta(altaCommands, roots.Project, shell.NotifySessionsChanged));
                 uiSessions.WorkFolder = (sessionId, token) => SessionFolderAsync(host, sessionId, token);
@@ -542,6 +544,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddModelCatalogService(providers);
                     builder.AddReminderService(reminders);
                     builder.AddAutomationsService(new AutomationsService(automations, host.ProjectCatalog, epoch));
+                    builder.AddWorkItemsService(new WorkItemsService(workItems, host.ProjectCatalog, new WorkItems.WorkItemRunner(host, workItems, worktrees), epoch));
                     gitIssues = new GitIssuesService(host.ProjectCatalog, epoch);
                     builder.AddGitIssuesService(gitIssues);
                     builder.AddSessionOperationsService(operations);
@@ -723,6 +726,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddMcpHostService(new McpHostService());
             builder.AddTerminalsService(new TerminalsService());
             builder.AddAutomationsService(new AutomationsService());
+            builder.AddWorkItemsService(new WorkItemsService());
             builder.AddPromptImagesService(new PromptImagesService());
             builder.AddToolCallsService(new ToolCallsService());
             builder.AddComposerStatusService(new ComposerStatusService());
