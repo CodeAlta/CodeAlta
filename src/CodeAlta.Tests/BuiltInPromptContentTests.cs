@@ -29,7 +29,13 @@ public sealed class BuiltInPromptContentTests
         StringAssert.Contains(plan.Body, "alta session send <current-session-id> --queue-if-busy --stdin");
         StringAssert.Contains(plan.Body, "--same-model-as <session-id>");
         StringAssert.Contains(plan.Body, "--model-ref");
-        StringAssert.Contains(plan.Body, "only when the user explicitly asks for delegation or sub-sessions");
+        // Children are the planner's own call: one for each area of a broad plan, none for a small one, no chain.
+        StringAssert.Contains(plan.Body, "explore them in parallel with read-only child sessions");
+        StringAssert.Contains(plan.Body, "a small plan needs no child session");
+        StringAssert.Contains(plan.Body, "without being asked");
+        StringAssert.Contains(plan.Body, "never hand the exploration to a single child");
+        StringAssert.Contains(plan.Body, "--reasoning low");
+        Assert.IsFalse(plan.Body.Contains("only when the user explicitly asks", StringComparison.Ordinal));
         StringAssert.Contains(plan.Body, "all relevant child and descendant work");
         StringAssert.Contains(plan.Body, "alta session set_agent --prompt-id default");
         // The plan is a document for a reader: its front matter lists it, and its approval is told to CodeAlta, which shows it.
@@ -68,8 +74,14 @@ public sealed class BuiltInPromptContentTests
         StringAssert.Contains(defaultPrompt.Body, "GitHub-style blockquotes");
         StringAssert.Contains(defaultPrompt.Body, "commit the plan update with the implementation step it records");
         StringAssert.Contains(defaultPrompt.Body, "one writing child at a time");
-        StringAssert.Contains(defaultPrompt.Body, "only when the user explicitly asks for delegation or sub-sessions");
-        StringAssert.Contains(defaultPrompt.Body, "complexity alone is not permission");
+        // Sub-agents are the agent's own call: one for each independent part, direct work when the task is small, no chain of single children.
+        StringAssert.Contains(defaultPrompt.Body, "Delegating is a normal way to work");
+        StringAssert.Contains(defaultPrompt.Body, "without being asked");
+        StringAssert.Contains(defaultPrompt.Body, "as many sub-agents as there are independent parts");
+        StringAssert.Contains(defaultPrompt.Body, "Work directly when the task is small or does not split");
+        StringAssert.Contains(defaultPrompt.Body, "never your task or most of it to a single child");
+        StringAssert.Contains(defaultPrompt.Body, "--reasoning low");
+        Assert.IsFalse(defaultPrompt.Body.Contains("only when the user explicitly asks for delegation", StringComparison.Ordinal));
         StringAssert.Contains(defaultPrompt.Body, "Implementation children that write files must run sequentially");
         StringAssert.Contains(defaultPrompt.Body, "all relevant child and descendant work");
         StringAssert.Contains(defaultPrompt.Body, "over-compression across nesting levels");
