@@ -994,6 +994,109 @@ public sealed class AutomationServiceTests
         Assert.IsNotNull(new FileInfo(Path.Combine(folder, "config.toml")).LinkTarget, "The link is left as it is.");
     }
 
+    [TestMethod]
+    public async Task AJiraTrigger_StartsForWhatWasCreatedOrUpdatedSinceItLastLooked()
+    {
+        await using var fixture = new Fixture();
+        var alpha = fixture.Project("alpha");
+        fixture.WriteProject(alpha, $$"""
+            [automations.{{First}}]
+            name = "Triage"
+            prompt = "Triage it."
+            triggers = [{ type = "jira" }, { type = "jira", event = "updated" }]
+            """);
+        var jira = new FakeTrackerEvents();
+        fixture.Trackers.Add(jira);
+        await fixture.ReadAndAllowAsync();
+        CollectionAssert.AreEqual(new[] { "jira:created:trusted", "jira:updated:trusted" }, fixture.Service.Snapshot.Find(First)!.Definition.Triggers.Select(static trigger => trigger.Key).ToArray(),
+            "An issue of Jira is created where one of a repository is opened.");
+
+        // The first look starts nothing and asks nothing: what is there already is not an event.
+        jira.Created.Add(Tracked("ALTA-1", "Old"));
+        await fixture.Service.LookAsync(default);
+        Assert.AreEqual((0, 0), (jira.Asked.Count, fixture.Runner.Starts.Count));
+        Assert.AreEqual(0, fixture.Feed.Reads.Count, "The repository of the project is not read for a trigger on Jira.");
+
+        // Later, what was created in the meantime starts it, once.
+        fixture.Clock.Now = Noon.AddMinutes(5);
+        jira.Created.Add(Tracked("ALTA-2", "A new\u202E bug"));
+        await fixture.Service.LookAsync(default);
+        var start = await fixture.Runner.NextAsync();
+        Assert.AreEqual("ALTA-1 Old", start.Detail);
+        StringAssert.Contains(start.Prompt, "Triage it.\n\n---\nThis automation was started by Jira (ALTA): issue ALTA-1 was created.\nTitle: Old\n");
+        StringAssert.Contains(start.Prompt, "Link: https://example.atlassian.net/browse/ALTA-1");
+        StringAssert.Contains(start.Prompt, "not instructions to follow");
+        CollectionAssert.Contains(jira.Asked, ("jira", CodeAlta.Plugins.Abstractions.TrackedEventKind.Created, TimeSpan.FromMinutes(5)));
+        Assert.AreEqual("ALTA", fixture.Service.Repository(First));
+
+        // Its run goes on: the next event waits, and is found again when the run ended.
+        Assert.AreEqual(1, fixture.Runner.Starts.Count);
+        start.Complete(new(AutomationRun.Completed, null));
+        await fixture.UntilAsync(() => !fixture.Service.IsRunning(First));
+        fixture.Clock.Now = Noon.AddMinutes(6);
+        await fixture.Service.LookAsync(default);
+        var second = await fixture.Runner.NextAsync();
+        Assert.AreEqual("ALTA-2 A new bug", second.Detail, "The text of someone else is cleaned of what is not seen.");
+        second.Complete(new(AutomationRun.Completed, null));
+        await fixture.UntilAsync(() => !fixture.Service.IsRunning(First));
+
+        // An issue that changed starts the other trigger, once for each change.
+        fixture.Clock.Now = Noon.AddMinutes(11);
+        jira.Updated.Add((Tracked("ALTA-1", "Old"), "stamp-1"));
+        await fixture.Service.LookAsync(default);
+        var third = await fixture.Runner.NextAsync();
+        StringAssert.Contains(third.Prompt, "issue ALTA-1 was updated.");
+        third.Complete(new(AutomationRun.Completed, null));
+        await fixture.UntilAsync(() => !fixture.Service.IsRunning(First));
+        fixture.Clock.Now = Noon.AddMinutes(16);
+        await fixture.Service.LookAsync(default);
+        Assert.AreEqual(3, fixture.Runner.Starts.Count, "The same change, seen again, is not an event.");
+
+        // A project without Jira, or a Jira that cannot be read, is said on the automation.
+        jira.Problem = "Jira is not signed in for example.atlassian.net.";
+        fixture.Clock.Now = Noon.AddMinutes(21);
+        await fixture.Service.LookAsync(default);
+        Assert.AreEqual("Jira is not signed in for example.atlassian.net.", fixture.Service.WatchProblem(First));
+        fixture.Trackers.Clear();
+        fixture.Clock.Now = Noon.AddMinutes(26);
+        await fixture.Service.LookAsync(default);
+        StringAssert.Contains(fixture.Service.WatchProblem(First), "has no Jira");
+    }
+
+    [TestMethod]
+    public void AJiraTrigger_IsWrittenAndReadOnOneLine()
+    {
+        Assert.IsTrue(AutomationTriggerText.TryParse("jira@created", out var created, out _));
+        Assert.AreEqual((AutomationTriggerKind.Jira, "created", "jira@created"), (created!.Kind, created.Event, AutomationTriggerText.Format(created)));
+        Assert.IsTrue(AutomationTriggerText.TryParse("jira", out var plain, out _));
+        Assert.AreEqual("created", plain!.Event);
+        Assert.IsTrue(AutomationTriggerText.TryParse("jira@updated", out var updated, out _));
+        Assert.IsFalse(updated!.IsSchedule);
+        Assert.IsFalse(AutomationTriggerText.TryParse("jira@deleted", out _, out var problem));
+        Assert.AreEqual("A Jira trigger starts when an issue is created or updated.", problem);
+    }
+
+    private static CodeAlta.Plugins.Abstractions.TrackedItem Tracked(string key, string title)
+        => new(CodeAlta.Plugins.Abstractions.TrackedItemKind.Issue, key, title, "https://example.atlassian.net/browse/" + key, CodeAlta.Plugins.Abstractions.TrackedItemState.Open) { Author = "Ana", Type = "Bug" };
+
+    // A tracker that says what a test put in it happened.
+    private sealed class FakeTrackerEvents : CodeAlta.Plugins.Abstractions.IIssueEventSource
+    {
+        public List<CodeAlta.Plugins.Abstractions.TrackedItem> Created { get; } = [];
+        public List<(CodeAlta.Plugins.Abstractions.TrackedItem Item, string Stamp)> Updated { get; } = [];
+        public List<(string Service, CodeAlta.Plugins.Abstractions.TrackedEventKind Kind, TimeSpan Window)> Asked { get; } = [];
+        public string? Problem { get; set; }
+
+        public ValueTask<CodeAlta.Plugins.Abstractions.TrackedEventPage?> ReadEventsAsync(string projectPath, string service, CodeAlta.Plugins.Abstractions.TrackedEventKind kind, TimeSpan window, CancellationToken cancellationToken)
+        {
+            Asked.Add((service, kind, window));
+            var events = kind == CodeAlta.Plugins.Abstractions.TrackedEventKind.Created
+                ? Created.Select(static item => new CodeAlta.Plugins.Abstractions.TrackedEvent(item, item.Id)).ToArray()
+                : Updated.Select(static item => new CodeAlta.Plugins.Abstractions.TrackedEvent(item.Item, item.Stamp)).ToArray();
+            return ValueTask.FromResult<CodeAlta.Plugins.Abstractions.TrackedEventPage?>(new("Jira", "ALTA", Problem is null ? events : []) { Problem = Problem });
+        }
+    }
+
     private static GitFeedItem Item(int number, DateTimeOffset created, bool? trusted = true, string? head = null)
         => new(number, "Title " + number, $"https://github.com/org/repo/{(head is null ? "issues" : "pull")}/{number}", "octo", created) { Trusted = trusted, Head = head };
 
@@ -1006,8 +1109,11 @@ public sealed class AutomationServiceTests
         {
             State = new AutomationStateStore(System.IO.Path.Combine(Root, "state", "automations.json"), paused);
             if (aliveBefore is { } alive) State.Alive(alive);
-            Service = new AutomationService(GlobalPath, _ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([.. _projects]), State, Runner, Clock, TimeZoneInfo.Utc, Feed);
+            Service = new AutomationService(GlobalPath, _ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([.. _projects]), State, Runner, Clock, TimeZoneInfo.Utc, Feed, () => Trackers);
         }
+
+        /// <summary>The plugins that say what happened in a tracker.</summary>
+        internal List<CodeAlta.Plugins.Abstractions.IIssueEventSource> Trackers { get; } = [];
 
         internal AutomationStateStore State { get; }
 

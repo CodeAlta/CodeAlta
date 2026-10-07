@@ -26,11 +26,11 @@ test("the plugins that ship with CodeAlta come first and are on until configurat
   const rows = pluginRows([entry("notes", { name: "Notes", description: "Keeps notes." }), entry("bare", { name: "" }),
     entry("git", { kind: "BuiltIn", enabled: false, folder: null, path: null, loadable: false })], english);
   assert.deepEqual(rows.map(row => [row.id, row.name, row.enabled, row.builtIn]),
-    [["mcp", "MCP", true, true], ["git", "Git", false, true], ["statistics", "Statistics", true, true], ["ui", "UI tools", true, true], ["notes", "Notes", true, false], ["bare", "bare", true, false]]);
+    [["mcp", "MCP", true, true], ["git", "Git", false, true], ["jira", "Jira", true, true], ["statistics", "Statistics", true, true], ["ui", "UI tools", true, true], ["notes", "Notes", true, false], ["bare", "bare", true, false]]);
   assert.equal(rows[0].entry, null);
   assert.equal(rows[1].entry?.id, "git");
-  assert.equal(rows[4].description, "Keeps notes.");
-  assert.deepEqual(pluginRows([], english).map(row => row.id), ["mcp", "git", "statistics", "ui"]);
+  assert.equal(rows[5].description, "Keeps notes.");
+  assert.deepEqual(pluginRows([], english).map(row => row.id), ["mcp", "git", "jira", "statistics", "ui"]);
 });
 
 test("a source plugin that is on is built again and opened in the code editor from its row, in every language", () => {

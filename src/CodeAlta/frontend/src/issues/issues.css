@@ -4,7 +4,8 @@
 .issues-page { --issue-open: #2da44e; --issue-done: #8957e5; --issue-closed: #cf222e; --issue-draft: var(--muted); }
 :root:not([data-theme="light"]) .issues-page { --issue-open: #3fb950; --issue-done: #a371f7; --issue-closed: #f85149; }
 .issues-emblem { background: linear-gradient(135deg, #3fb950, #2f81f7); }
-.issues-toolbar { grid-template-columns: auto auto auto minmax(140px, 280px); }
+.issues-toolbar { display: flex; flex-wrap: wrap; align-items: center; }
+.issues-toolbar > .bp6-input-group { flex: 0 1 300px; min-width: 200px; }
 .issues-source { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; max-width: 320px; font-size: 12.5px; white-space: nowrap; }
 .issues-source > strong { font-weight: 600; }
 .issues-source > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-family: var(--bp-typography-family-mono); font-size: 12px; }
@@ -51,7 +52,6 @@
 .issue-window-body > .work-window-actions { display: grid; gap: 10px; }
 
 @container (max-width: 860px) {
-  .issues-toolbar { grid-template-columns: minmax(0, 1fr); }
-  .issues-toolbar > .bp6-segmented-control { justify-self: start; }
+  .issues-toolbar > .bp6-input-group { flex: 1 1 100%; }
   .issue-heading { padding-left: 0; }
 }

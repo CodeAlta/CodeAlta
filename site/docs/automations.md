@@ -40,6 +40,7 @@ The session starts with nothing but your prompt: say what to look at and what to
 | Cron | When a cron expression matches, for example `0 9 * * 1-5`. |
 | Issue | When an issue is opened in the repository of the project. |
 | Pull request | When a pull request is opened, or when it receives commits. |
+| Jira issue | When an issue of the Jira project is created, or when it is updated. |
 
 An automation can have several triggers. Times are read on the clock of your computer.
 
@@ -48,6 +49,7 @@ An automation can have several triggers. Times are read on the clock of your com
 - They work with GitHub, GitLab and Azure DevOps, with the [sign-in of the issue picker](plugins/git.md#sign-in-for-issue-lookup).
 - CodeAlta looks at the repository every five minutes. The automation shows the repository it watches.
 - An automation runs for the issues and pull requests of the members of the repository. Choose **by anyone** to run for every author.
+- The **Jira issue** trigger needs the [Jira plugin](plugins/jira.md) turned on for the project.
 
 ## Follow the runs
 

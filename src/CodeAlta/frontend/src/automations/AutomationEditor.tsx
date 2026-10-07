@@ -74,7 +74,10 @@ function TriggerRow({ hub, trigger, disabled, onChange, onRemove }: {
         <option value="opened">{t("is opened")}</option><option value="updated">{t("receives commits")}</option>
       </HTMLSelect>}
       {trigger.type === "issue" && <span>{t("is opened")}</span>}
-      {!schedule(trigger) && <HTMLSelect value={trigger.authors} disabled={disabled} aria-label={t("Authors")} onChange={event => set({ authors: event.target.value })}>
+      {trigger.type === "jira" && <HTMLSelect value={trigger.event === "updated" ? "updated" : "created"} disabled={disabled} aria-label={t("Event")} onChange={event => set({ event: event.target.value })}>
+        <option value="created">{t("is created")}</option><option value="updated">{t("is updated")}</option>
+      </HTMLSelect>}
+      {!schedule(trigger) && trigger.type !== "jira" && <HTMLSelect value={trigger.authors} disabled={disabled} aria-label={t("Authors")} onChange={event => set({ authors: event.target.value })}>
         <option value="trusted">{t("by a member")}</option><option value="anyone">{t("by anyone")}</option>
       </HTMLSelect>}
       {schedule(trigger) && <TriggerPreview hub={hub} trigger={trigger} />}

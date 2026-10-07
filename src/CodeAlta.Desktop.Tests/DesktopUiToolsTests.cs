@@ -239,9 +239,9 @@ public sealed class DesktopUiToolsTests
         var ui = new FakeUi(temp.Path);
         var sessions = new DesktopUiSessions();
 
-        CollectionAssert.AreEqual(new[] { "git", "mcp", "statistics", "ui" }, DesktopPlugins.ForWindow(ui, sessions, reviewsCommands: false).Select(static plugin => plugin.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { "git", "jira", "mcp", "statistics", "ui" }, DesktopPlugins.ForWindow(ui, sessions, reviewsCommands: false).Select(static plugin => plugin.Id).ToArray());
         // A session that drives the window could answer the review itself.
-        CollectionAssert.AreEqual(new[] { "git", "mcp", "statistics" }, DesktopPlugins.ForWindow(ui, sessions, reviewsCommands: true).Select(static plugin => plugin.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { "git", "jira", "mcp", "statistics" }, DesktopPlugins.ForWindow(ui, sessions, reviewsCommands: true).Select(static plugin => plugin.Id).ToArray());
         var definition = DesktopPlugins.ForWindow(ui, sessions, reviewsCommands: false)[^1];
         Assert.AreEqual(typeof(DesktopUiPlugin), definition.PluginType);
         Assert.IsInstanceOfType<DesktopUiPlugin>(definition.Factory());

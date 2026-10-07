@@ -16,13 +16,14 @@ public sealed class DesktopPluginsTests
     public void BuiltIns_AreTheTerminalPluginsWithoutTheirTerminalPresentation()
     {
         // The ids are what [plugins.<id>] in the configuration names, in both frontends.
-        CollectionAssert.AreEqual(new[] { "git", "mcp", "statistics" }, DesktopPlugins.BuiltIns.Select(static plugin => plugin.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { "git", "jira", "mcp", "statistics" }, DesktopPlugins.BuiltIns.Select(static plugin => plugin.Id).ToArray());
         foreach (var definition in DesktopPlugins.BuiltIns)
         {
             var plugin = definition.Factory();
             Assert.AreEqual(definition.PluginType, plugin.GetType());
             // The terminal's dialogs and pickers are commands and prompt-editor contributions of its own composition.
-            Assert.AreEqual(0, plugin.GetCommands().Count());
+            // Jira has two commands of its own, for both applications: signing in, and its status.
+            Assert.AreEqual(definition.Id == "jira" ? 2 : 0, plugin.GetCommands().Count());
             Assert.AreEqual(0, plugin.GetPromptEditorContributions().Count());
         }
     }
@@ -64,7 +65,6 @@ public sealed class DesktopPluginsTests
         }
     }
 
-    [TestMethod]
     [TestMethod]
     public async Task AltaIssue_ReadsTheTrackersOfTheProject_WhateverKeepsThem()
     {
@@ -148,6 +148,7 @@ public sealed class DesktopPluginsTests
         }
     }
 
+    [TestMethod]
     public void PluginWorkspace_NamesNoProjectOutsideAToolCall()
     {
         var workspace = new DesktopPluginServices(new PluginAltaServiceBridge(), new DesktopPluginUi()).Workspace;

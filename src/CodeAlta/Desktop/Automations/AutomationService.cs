@@ -80,9 +80,12 @@ internal sealed partial class AutomationService : IAsyncDisposable
     /// <param name="time">The clock.</param>
     /// <param name="zone">The time zone the schedules are read in.</param>
     /// <param name="feed">Reads the repositories for the event triggers, and is disposed with the service; null when they are not watched.</param>
+    /// <param name="trackers">Gives the plugins that say what happened in a tracker, as they are active when asked; null when there are none.</param>
     internal AutomationService(string globalConfigPath, Func<CancellationToken, Task<IReadOnlyList<ProjectDescriptor>>> projects,
-        AutomationStateStore state, IAutomationRunner runner, TimeProvider time, TimeZoneInfo zone, IAutomationFeed? feed = null)
+        AutomationStateStore state, IAutomationRunner runner, TimeProvider time, TimeZoneInfo zone, IAutomationFeed? feed = null,
+        Func<IReadOnlyList<CodeAlta.Plugins.Abstractions.IIssueEventSource>>? trackers = null)
     {
+        _trackers = trackers;
         ArgumentException.ThrowIfNullOrWhiteSpace(globalConfigPath);
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentNullException.ThrowIfNull(state);

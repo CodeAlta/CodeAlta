@@ -89,6 +89,10 @@ internal static class AutomationConfig
                 if (!AutomationSchedule.TryCreate(trigger, out _, out var error)) return error;
                 if (trigger.Expression is { Length: > AutomationTrigger.MaximumExpressionLength }) return "The cron expression is too long.";
             }
+            else if (trigger.IsTracker)
+            {
+                if (trigger.Event is not ("created" or "updated")) return "A Jira trigger starts when an issue is created or updated.";
+            }
             else if (trigger.Event is not ("opened" or "updated") || trigger is { Kind: AutomationTriggerKind.Issue, Event: "updated" })
             {
                 return trigger.Kind == AutomationTriggerKind.Issue ? "An issue trigger starts when an issue is opened." : "A pull request trigger starts when one is opened or updated.";
@@ -258,7 +262,7 @@ internal static class AutomationConfig
         if (!TryText(table, "type", out var type, out problem)) return false;
         if (!AutomationTrigger.TryParseKind(type, out var kind))
         {
-            problem = $"'{type}' is not a trigger: hourly, daily, weekly, cron, issue or pull_request.";
+            problem = $"'{type}' is not a trigger: hourly, daily, weekly, cron, issue, pull_request or jira.";
             return false;
         }
 
@@ -307,7 +311,8 @@ internal static class AutomationConfig
             At = times,
             Days = weekDays,
             Expression = kind == AutomationTriggerKind.Cron ? string.Join(' ', (expression ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)) : null,
-            Event = (@event ?? "opened").Trim().ToLowerInvariant(),
+            // An issue of Jira is created where one of a repository is opened: both words are read for it.
+            Event = (@event ?? (kind == AutomationTriggerKind.Jira ? "created" : "opened")).Trim().ToLowerInvariant() is var read && kind == AutomationTriggerKind.Jira && read == "opened" ? "created" : read,
             Authors = authors?.Trim().ToLowerInvariant() == "anyone" ? AutomationAuthors.Anyone : AutomationAuthors.Trusted,
         };
         return true;

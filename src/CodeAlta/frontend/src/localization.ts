@@ -267,7 +267,8 @@ export const messages = dictionary({
   "No skill matches the filter.": ["Ninguna habilidad coincide con el filtro.", "Aucune compétence ne correspond au filtre.", "Kein Skill entspricht dem Filter.", "条件に一致するスキルはありません。", "没有符合筛选条件的技能。"],
   "No skills were found.": ["No se encontraron habilidades.", "Aucune compétence trouvée.", "Keine Skills gefunden.", "スキルが見つかりませんでした。", "未找到技能。"],
   "Connects Model Context Protocol servers and exposes their tools.": ["Conecta servidores Model Context Protocol y expone sus herramientas.", "Connecte les serveurs Model Context Protocol et expose leurs outils.", "Verbindet Model-Context-Protocol-Server und stellt deren Werkzeuge bereit.", "Model Context Protocol サーバーに接続し、そのツールを公開します。", "连接 Model Context Protocol 服务器并提供其工具。"],
-  "Issue picker for GitHub, GitLab and Azure DevOps repositories, and their CLIs when available.": ["Selector de incidencias para repositorios de GitHub, GitLab y Azure DevOps, y sus CLI cuando están disponibles.", "Sélecteur de tickets pour les dépôts GitHub, GitLab et Azure DevOps, et leurs CLI lorsqu'elles sont disponibles.", "Issue-Auswahl für GitHub-, GitLab- und Azure-DevOps-Repositories und deren CLIs, sofern verfügbar.", "GitHub、GitLab、Azure DevOps リポジトリ用の Issue ピッカーと、利用可能な場合はそれぞれの CLI。", "用于 GitHub、GitLab 和 Azure DevOps 仓库的 Issue 选择器，以及可用时的相应 CLI。"],
+  "Issues and pull requests of GitHub, GitLab, Azure DevOps and Bitbucket repositories, and their CLIs when available.": ["Incidencias y pull requests de repositorios de GitHub, GitLab, Azure DevOps y Bitbucket, y sus CLI cuando están disponibles.", "Tickets et pull requests des dépôts GitHub, GitLab, Azure DevOps et Bitbucket, et leurs CLI lorsqu'elles sont disponibles.", "Issues und Pull Requests von GitHub-, GitLab-, Azure-DevOps- und Bitbucket-Repositories sowie deren CLIs, sofern verfügbar.", "GitHub、GitLab、Azure DevOps、Bitbucket のリポジトリの Issue とプルリクエスト、および利用可能な場合はそれらの CLI。", "GitHub、GitLab、Azure DevOps 和 Bitbucket 仓库的议题与拉取请求，以及可用时的相应 CLI。"],
+  "The issues of a Jira project, for the projects whose configuration names one.": ["Las incidencias de un proyecto de Jira, para los proyectos cuya configuración indica uno.", "Les tickets d'un projet Jira, pour les projets dont la configuration en nomme un.", "Die Vorgänge eines Jira-Projekts, für Projekte, deren Konfiguration eines nennt.", "設定で Jira プロジェクトを指定しているプロジェクト向けの、その課題。", "Jira 项目的事务，适用于在配置中指定了 Jira 项目的项目。"],
   "Tools an agent sees and drives this window with, when its session asks for them.": [
     "Herramientas con las que un agente ve y controla esta ventana, cuando su sesión las solicita.",
     "Outils avec lesquels un agent voit et pilote cette fenêtre, lorsque sa session les demande.",
@@ -1991,6 +1992,11 @@ export const messages = dictionary({
   "Work item": ["Elemento de trabajo", "Élément de travail", "Arbeitselement", "作業項目", "工作项"],
   "opened {when}": ["abierto {when}", "ouvert {when}", "geöffnet {when}", "{when}に作成", "创建于 {when}"],
   "updated {when}": ["actualizado {when}", "mis à jour {when}", "aktualisiert {when}", "{when}に更新", "更新于 {when}"],
+  "Jira issue": ["Incidencia de Jira", "Ticket Jira", "Jira-Vorgang", "Jira の課題", "Jira 事务"],
+  "When a Jira issue is created": ["Cuando se crea una incidencia de Jira", "Quand un ticket Jira est créé", "Wenn ein Jira-Vorgang erstellt wird", "Jira の課題が作成されたとき", "创建 Jira 事务时"],
+  "When a Jira issue is updated": ["Cuando se actualiza una incidencia de Jira", "Quand un ticket Jira est mis à jour", "Wenn ein Jira-Vorgang aktualisiert wird", "Jira の課題が更新されたとき", "更新 Jira 事务时"],
+  "is created": ["se crea", "est créé", "erstellt wird", "が作成されたとき", "被创建"],
+  "is updated": ["se actualiza", "est mis à jour", "aktualisiert wird", "が更新されたとき", "被更新"],
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

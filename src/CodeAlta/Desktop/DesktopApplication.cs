@@ -463,7 +463,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // instance starts paused, so that it does not run again what the normal one already runs.
                 automations = new Automations.AutomationService(host.CatalogOptions.ConfigPath, token => host.ProjectCatalog.LoadAsync(token),
                     new Automations.AutomationStateStore(Path.Combine(host.CatalogOptions.StateRoot, "automations.json"), pausedByDefault: options.Developer),
-                    new Automations.AutomationRunner(host), TimeProvider.System, TimeZoneInfo.Local, new Automations.GitAutomationFeed());
+                    new Automations.AutomationRunner(host), TimeProvider.System, TimeZoneInfo.Local, new Automations.GitAutomationFeed(),
+                    () => [.. (host.PluginRuntime?.ActivePlugins ?? []).Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugins.Abstractions.IIssueEventSource>()]);
                 // A host that has the user review the commands of its sessions lets no session type in a terminal.
                 // A host that started its plugins builds one again while it runs, and tells the page when it did. Building
                 // and loading a plugin runs code: a host that has the user review the commands of its sessions does not let

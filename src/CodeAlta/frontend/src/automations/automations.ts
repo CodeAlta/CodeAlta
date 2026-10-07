@@ -5,8 +5,8 @@ import type { IconName } from "../AppIcon";
 import type { Locale, MessageKey } from "../localization";
 
 export type Translate = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => string;
-export type TriggerType = "hourly" | "daily" | "weekly" | "cron" | "issue" | "pull_request";
-export const triggerTypes: readonly TriggerType[] = ["hourly", "daily", "weekly", "cron", "issue", "pull_request"];
+export type TriggerType = "hourly" | "daily" | "weekly" | "cron" | "issue" | "pull_request" | "jira";
+export const triggerTypes: readonly TriggerType[] = ["hourly", "daily", "weekly", "cron", "issue", "pull_request", "jira"];
 /** The days as the host names them, Monday first as a week is shown. */
 export const weekDays = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 export const maximumTriggers = 8;
@@ -14,10 +14,10 @@ export const maximumNameLength = 120;
 export const maximumPromptLength = 32768;
 
 const typeLabels: Readonly<Record<TriggerType, MessageKey>> = {
-  hourly: "Hourly", daily: "Daily", weekly: "Weekly", cron: "Cron", issue: "Issue", pull_request: "Pull request",
+  hourly: "Hourly", daily: "Daily", weekly: "Weekly", cron: "Cron", issue: "Issue", pull_request: "Pull request", jira: "Jira issue",
 };
 const typeIcons: Readonly<Record<TriggerType, IconName>> = {
-  hourly: "repeat", daily: "sun", weekly: "calendar", cron: "terminal", issue: "issueOpen", pull_request: "pullRequest",
+  hourly: "repeat", daily: "sun", weekly: "calendar", cron: "terminal", issue: "issueOpen", pull_request: "pullRequest", jira: "list",
 };
 
 export const triggerLabel = (type: string): MessageKey => typeLabels[type as TriggerType] ?? "Manual";
@@ -32,12 +32,13 @@ export function triggerTone(type: string | undefined): string {
     case "cron": return "teal";
     case "issue": return "green";
     case "pull_request": return "orange";
+    case "jira": return "blue";
     default: return "muted";
   }
 }
 
 /** Whether a trigger is a time on the clock, as opposed to an event of the repository of a project. */
-export const isSchedule = (trigger: Readonly<{ type: string }>): boolean => trigger.type !== "issue" && trigger.type !== "pull_request";
+export const isSchedule = (trigger: Readonly<{ type: string }>): boolean => trigger.type !== "issue" && trigger.type !== "pull_request" && trigger.type !== "jira";
 
 /**
  * Whether an automation waits for the user before its triggers start it: it came with the configuration of its
@@ -48,7 +49,7 @@ export const waitsToBeAllowed = (item: Readonly<{ allowed: boolean; triggers: re
 /** A trigger with the values a new one of its kind starts with. */
 export function newTrigger(type: TriggerType): AutomationTriggerItem {
   return { type, minute: 0, every: 1, at: type === "daily" || type === "weekly" ? ["09:00"] : [], days: type === "weekly" ? ["mon"] : [],
-    expression: type === "cron" ? "0 9 * * 1-5" : null, event: "opened", authors: "trusted" };
+    expression: type === "cron" ? "0 9 * * 1-5" : null, event: type === "jira" ? "created" : "opened", authors: "trusted" };
 }
 
 /** The name of a day in the language of the page, short: "Mon". */
@@ -76,6 +77,7 @@ export function describeTrigger(trigger: AutomationTriggerItem, t: Translate, lo
     case "cron": return t("Cron {expression}", { expression: trigger.expression ?? "" });
     case "issue": return t("When an issue is opened");
     case "pull_request": return t(trigger.event === "updated" ? "When a pull request is updated" : "When a pull request is opened");
+    case "jira": return t(trigger.event === "updated" ? "When a Jira issue is updated" : "When a Jira issue is created");
     default: return trigger.type;
   }
 }

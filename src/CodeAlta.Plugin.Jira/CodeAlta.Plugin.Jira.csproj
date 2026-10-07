@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>Built-in Jira plugin for CodeAlta: the issues of a Jira project, through the Atlassian CLI.</Description>
+    <Authors>Alexandre Mutel</Authors>
+    <PackageTags>codealta;plugin;jira;atlassian;issues;agentic;ai</PackageTags>
+    <PackageProjectUrl>https://github.com/xoofx/CodeAlta</PackageProjectUrl>
+    <PackageLicenseExpression>BSD-2-Clause</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Tomlyn" />
+    <PackageReference Include="XenoAtom.Logging" />
+    <ProjectReference Include="..\CodeAlta.Plugins.Abstractions\CodeAlta.Plugins.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CodeAlta.Tests" />
+    <InternalsVisibleTo Include="CodeAlta.Desktop.Tests" />
+    <InternalsVisibleTo Include="alta" />
+  </ItemGroup>
+</Project>

@@ -90,7 +90,7 @@ internal sealed class DesktopAltaAutomations(AutomationService automations, Proj
 /// <summary>
 /// A trigger on one line, as the <c>alta automation</c> commands show and take it: <c>daily@09:00,17:30</c>,
 /// <c>hourly@15</c>, <c>hourly@15/2</c>, <c>weekly@mon,thu@08:30</c>, <c>cron@0 9 * * 1-5</c>, <c>issue@opened</c>,
-/// <c>pull_request@updated</c>, the last two with <c>+anyone</c> for items of any author.
+/// <c>pull_request@updated</c>, the last two with <c>+anyone</c> for items of any author, <c>jira@created</c>, <c>jira@updated</c>.
 /// </summary>
 internal static class AutomationTriggerText
 {
@@ -120,7 +120,7 @@ internal static class AutomationTriggerText
         if (name == "pr") name = "pull_request";
         if (!AutomationTrigger.TryParseKind(name, out var kind))
         {
-            problem = $"'{text}' is not a trigger. Write daily@09:00, hourly@15, weekly@mon,thu@08:30, cron@0 9 * * 1-5, issue@opened or pull_request@opened.";
+            problem = $"'{text}' is not a trigger. Write daily@09:00, hourly@15, weekly@mon,thu@08:30, cron@0 9 * * 1-5, issue@opened, pull_request@opened or jira@created.";
             return false;
         }
 
@@ -171,6 +171,7 @@ internal static class AutomationTriggerText
             default:
                 var anyone = rest.EndsWith("+anyone", StringComparison.OrdinalIgnoreCase);
                 var @event = (anyone ? rest[..^"+anyone".Length] : rest).Trim().ToLowerInvariant();
+                if (kind == AutomationTriggerKind.Jira) @event = @event is "" or "opened" ? "created" : @event;
                 trigger = new(kind) { Event = @event.Length == 0 ? "opened" : @event, Authors = anyone ? AutomationAuthors.Anyone : AutomationAuthors.Trusted };
                 break;
         }

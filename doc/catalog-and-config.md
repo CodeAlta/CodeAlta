@@ -14,7 +14,7 @@ CodeAlta keeps user-owned durable state under a global root and project-local `.
 | `checkouts/` | `ProjectCatalog` helpers | Default checkout root used by catalog planning APIs. |
 | `machines/` | Catalog model | Machine-specific override profile root. |
 | `agents/` | Catalog model | File-backed agent-definition root used by host-owned coordinator setup. |
-| `cache/` | Process/runtime services | Machine-local cache root, including `cache.sqlite3` session-listing projections, refreshed model metadata, and plugin build cache. |
+| `cache/` | Process/runtime services | Machine-local cache root, including `cache.sqlite3` session-listing projections, refreshed model metadata, plugin build cache, and `jira/acli/`, where the Jira plugin downloads the Atlassian CLI. |
 | `sessions/` | Agent session runtime and session catalog | Date-sharded session journals and optional protocol traces. |
 | `saved_prompts/` | Catalog `PromptDraftStore` | Unsent session and global/project new-session text drafts. |
 | `ui-state.yaml` | Catalog UI-state store | Open/selected sessions, project preferences, theme/navigator settings, frontend layouts and shared logical tab descriptors. |
@@ -63,7 +63,7 @@ Project-local CodeAlta state lives under `<project>/.alta/`:
 
 | Path | Purpose |
 | --- | --- |
-| `<project>/.alta/config.toml` | Project-local config overrides, and the automations of CodeAlta Desktop that are kept with the project. |
+| `<project>/.alta/config.toml` | Project-local config overrides, the automations of CodeAlta Desktop that are kept with the project, and `[plugins.jira]` (`site`, `project`, optionally `email` and `token_env`), which turns the Jira plugin on for the project. |
 | `<project>/.alta/mcp.json` | Project-local MCP server connection definitions. |
 | `<project>/.alta/plugins/<package-id>/plugin.cs` | Project-scoped trusted source plugin packages. The generated `.gitignore` of the folder keeps the generated build files out of the repository. |
 | `<project>/.alta/plugin-data/<plugin key>/` | What a plugin stores for the project with `Services.State`. |

@@ -97,6 +97,8 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | `terminal` | List, create, read, type in, rename, show and close the terminals of the window. Only in CodeAlta Desktop. |
 | `automation` | List, create, run, enable, disable and delete automations, and find the one that started a session. Only in CodeAlta Desktop. |
 | `task` | List, show, propose, start, complete, set aside, dismiss and remove the follow-up tasks of a project. |
+| `issue` | List and read the issues and the pull requests of a project, from the trackers of its plugins (GitHub, GitLab, Azure DevOps, Bitbucket, Jira). `issues` is the same command. |
+| `jira` | Set up the Jira of a project and change its issues: status, login, create, comment, transition, assign (a plugin root). |
 | `plan` | List and show the plans of a project, set the status of one, remove one. |
 | `ui` | Give the calling session the tools that see and drive the window, or take them back. Only in CodeAlta Desktop (a plugin root, see below). |
 
@@ -527,6 +529,44 @@ alta plan remove <plan-id> [--project <project>]
   `alta.task.changed`, `alta.plan`, `alta.plan.changed` and `alta.plan.removed`.
 
 The list and show commands are read-only; the others are mutating.
+
+## Issue commands
+
+`alta issue` reads the issues and the pull requests of a project without the agent having to know where they are
+kept. It is registered when the host has a plugin runtime; the trackers are those the active plugins give for the
+project (`IIssueTrackerSource`): the Git plugin for the hosting service of the repository, the Jira plugin for a
+Jira project. `alta issues` is the same command.
+
+```text
+alta issue trackers [--project <project>]
+alta issue list [--project <project>] [--tracker <service>] [--kind issue|pr] [--state open|closed|merged|all] [--text <words>] [--limit <n>]
+alta issue show <id> [--project <project>] [--tracker <service>] [--kind issue|pr]
+```
+
+- `trackers` writes one `alta.issue.tracker` per tracker: its service (`github`, `gitlab`, `azure_devops`,
+  `bitbucket`, `jira`), what it is of, its address and the kinds it has.
+- `list` asks the tracker named, or the first that has the kind, and writes one `alta.issue` per item (kind, id,
+  title, url, state, the status, type and priority the tracker names, author, assignees, labels, dates, branches of
+  a pull request), then `alta.issue.summary` with a `problem` when the tracker could not answer and `needsSignIn`
+  when signing in is what it takes. 30 items by default, 100 at most.
+- `show` adds the description (64 KiB at most), the comments and a note that they are what other people wrote. A
+  key such as `ALTA-12` is asked of every tracker of the project that has the kind; a number, of the first.
+- The commands only read. Changes are the business of the tool of the service: `gh`, `glab`, `az`, or `alta jira`.
+
+`alta jira` is a plugin root of the Jira plugin, for what is Jira's alone:
+
+```text
+alta jira status
+alta jira login
+alta jira create --summary <text> [--type Task|Bug|Story|...] [--description <text> | --stdin] [--label <label>]...
+alta jira comment <key> (--body <text> | --stdin)
+alta jira transition <key> <status>
+alta jira assign <key> <email|@me>
+```
+
+`status` makes Jira ready (the CLI, the account) and says what is missing; `login` runs the browser sign-in of the
+CLI and waits five minutes at most. The others change an issue and answer its key and address. A project that
+does not name its Jira answers `jira.notConfigured`.
 
 ## Skill commands
 

@@ -173,3 +173,47 @@ public interface IIssueTrackerSource
     /// <returns>The trackers, or none when the plugin has nothing for this folder.</returns>
     ValueTask<IReadOnlyList<IIssueTracker>> GetTrackersAsync(string projectPath, CancellationToken cancellationToken);
 }
+
+/// <summary>What happened to an item of a tracker.</summary>
+public enum TrackedEventKind
+{
+    /// <summary>The item was created.</summary>
+    Created,
+
+    /// <summary>The item changed after it was created.</summary>
+    Updated,
+}
+
+/// <summary>An item of a tracker that was created or changed.</summary>
+/// <param name="Item">The item, as a list shows it.</param>
+/// <param name="Stamp">
+/// A text that changes each time the item does (the time of its last change): the same item with the same stamp is
+/// the same event, seen again.
+/// </param>
+public sealed record TrackedEvent(TrackedItem Item, string Stamp);
+
+/// <summary>What a tracker answers when it is asked what happened lately.</summary>
+/// <param name="DisplayName">The name of the service as its users write it.</param>
+/// <param name="Location">What the tracker is of.</param>
+/// <param name="Events">The events, the oldest first.</param>
+public sealed record TrackedEventPage(string DisplayName, string Location, IReadOnlyList<TrackedEvent> Events)
+{
+    /// <summary>Gets why the tracker could not say what happened, in words for the user; null when it could.</summary>
+    public string? Problem { get; init; }
+}
+
+/// <summary>
+/// Implemented by a plugin whose tracker can say what happened lately, so that automations start on it: the
+/// application asks the plugins that implement it for the events of a service in a project.
+/// </summary>
+public interface IIssueEventSource
+{
+    /// <summary>Reads what happened in the tracker of a project during the last while.</summary>
+    /// <param name="projectPath">The folder of the project.</param>
+    /// <param name="service">The service the events are asked of, by its <see cref="IIssueTracker.Service"/> name.</param>
+    /// <param name="kind">What kind of event.</param>
+    /// <param name="window">How far back to look.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The events; null when the plugin has no tracker of this service for this project.</returns>
+    ValueTask<TrackedEventPage?> ReadEventsAsync(string projectPath, string service, TrackedEventKind kind, TimeSpan window, CancellationToken cancellationToken);
+}

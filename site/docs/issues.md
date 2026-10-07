@@ -6,7 +6,7 @@ title: Issues and pull requests
 
 CodeAlta Desktop shows the issues and the pull requests of a project where you work, and starts a session on one of them in a click.
 
-It finds the service from the git remote of the project. Nothing has to be configured.
+It finds the service from the git remote of the project. Nothing has to be configured, except for Jira.
 
 {.table}
 | Service | Issues | Pull requests | Sign-in |
@@ -15,6 +15,7 @@ It finds the service from the git remote of the project. Nothing has to be confi
 | GitLab | Issues | Merge requests | `glab auth login`, or `GITLAB_TOKEN` |
 | Azure DevOps | Work items | Pull requests | `az login`, or `AZURE_DEVOPS_EXT_PAT` |
 | Bitbucket | Issues | Pull requests | `BITBUCKET_ACCESS_TOKEN` |
+| Jira | Issues | | The [Jira plugin](plugins/jira.md) |
 
 A public repository is read without signing in. A private one needs the sign-in of its service.
 
@@ -27,7 +28,7 @@ Open it with the issue icon of the activity bar, or with `Ctrl+G Ctrl+B`.
 - Type words or a number to filter the list.
 - Select an item to read its description and its comments. Double-click it, or use the expand button, to read it in a larger window.
 
-A project can have more than one tracker, when a plugin adds one: choose the tracker beside the project.
+A project that keeps its code on one service and its issues in Jira shows both: choose the tracker beside the project.
 
 ## Work on an item
 
@@ -43,7 +44,6 @@ The session receives the title, the link and the description of the item. For a 
 
 **Open on GitHub** (or the name of the service) opens the item in your browser, and **Copy link** copies its address.
 
-## In a prompt
 ## For agents
 
 A session reads the same issues and pull requests with `alta issue`, wherever they are kept:
@@ -52,5 +52,6 @@ A session reads the same issues and pull requests with `alta issue`, wherever th
 Look at the open issues of this project and pick the ones we can close with the last release.
 ```
 
+## In a prompt
 
 Type `#` in a prompt to insert a link to an issue or a pull request of the project. See the [Git plugin](plugins/git.md).

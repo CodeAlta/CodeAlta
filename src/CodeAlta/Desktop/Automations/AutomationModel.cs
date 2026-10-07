@@ -24,6 +24,9 @@ internal enum AutomationTriggerKind
 
     /// <summary>When a pull request of the project's repository is opened or receives commits.</summary>
     PullRequest,
+
+    /// <summary>When an issue of the project's Jira is created or updated.</summary>
+    Jira,
 }
 
 /// <summary>Whose issues and pull requests start an automation.</summary>
@@ -85,19 +88,25 @@ internal sealed record AutomationTrigger(AutomationTriggerKind Kind)
     /// <summary><see cref="AutomationTriggerKind.Cron"/>: the expression as written.</summary>
     public string? Expression { get; init; }
 
-    /// <summary>An event trigger: <c>opened</c>, or <c>updated</c> for a pull request that receives commits.</summary>
+    /// <summary>
+    /// An event trigger: <c>opened</c>, or <c>updated</c> for a pull request that receives commits; <c>created</c> or
+    /// <c>updated</c> for an issue of Jira.
+    /// </summary>
     public string Event { get; init; } = "opened";
 
     /// <summary>An event trigger: whose items start the automation.</summary>
     public AutomationAuthors Authors { get; init; }
 
     /// <summary>Whether the trigger is a schedule, as opposed to an event of the repository.</summary>
-    public bool IsSchedule => Kind is not (AutomationTriggerKind.Issue or AutomationTriggerKind.PullRequest);
+    public bool IsSchedule => Kind is not (AutomationTriggerKind.Issue or AutomationTriggerKind.PullRequest or AutomationTriggerKind.Jira);
+
+    /// <summary>Whether the trigger watches a tracker a plugin gives, as opposed to the hosted repository of the project.</summary>
+    public bool IsTracker => Kind == AutomationTriggerKind.Jira;
 
     /// <summary>The name of the kind in a configuration file.</summary>
     public string KindName => KindNames[(int)Kind];
 
-    private static readonly string[] KindNames = ["hourly", "daily", "weekly", "cron", "issue", "pull_request"];
+    private static readonly string[] KindNames = ["hourly", "daily", "weekly", "cron", "issue", "pull_request", "jira"];
 
     /// <summary>Reads the name of a kind from a configuration file.</summary>
     internal static bool TryParseKind(string? name, out AutomationTriggerKind kind)

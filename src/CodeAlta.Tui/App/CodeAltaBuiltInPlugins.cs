@@ -1,6 +1,7 @@
 using CodeAlta.Catalog;
 using CodeAlta.Plugin.Git;
 using CodeAlta.Plugin.Mcp;
+using CodeAlta.Plugin.Jira;
 using CodeAlta.Plugin.Statistics;
 using CodeAlta.Plugins;
 
@@ -30,6 +31,15 @@ internal static class CodeAltaBuiltInPlugins
             EnabledByDefault = true,
             PluginType = typeof(McpPlugin),
             Factory = static () => new McpPlugin(McpTerminalContributions.CreatePresentation),
+        });
+        registry.Add(new BuiltInPluginDefinition
+        {
+            Id = "jira",
+            DisplayName = "Jira",
+            Description = SR.T("The issues of a Jira project, for the projects whose configuration names one."),
+            EnabledByDefault = true,
+            PluginType = typeof(JiraPlugin),
+            Factory = static () => new JiraPlugin(),
         });
         registry.Add(new BuiltInPluginDefinition
         {

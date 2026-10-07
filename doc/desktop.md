@@ -1966,6 +1966,7 @@ sessions of its own. Automations exist in CodeAlta Desktop only. The sources are
     { type = "cron", expression = "0 9 * * 1-5" },
     { type = "issue", event = "opened" },
     { type = "pull_request", event = "updated", authors = "anyone" },
+    { type = "jira", event = "created" },
   ]
   prompt = '''
   Triage the issues opened since yesterday.
@@ -2016,6 +2017,13 @@ sessions of its own. Automations exist in CodeAlta Desktop only. The sources are
   or says why it sees nothing (no repository, no sign-in, no access). A reading lists the 30 newest
   issues, or the 100 pull requests that changed last: the commits of a pull request are noticed from
   the second time it is listed.
+- **Events of Jira.** `jira` (`created`, or `updated`) watches the Jira project of the project of the
+  automation, through the plugin that knows it (`IIssueEventSource`, the Jira plugin). The trigger starts from
+  the moment it is first looked at; each later look asks what was created, or updated, since the last one, a
+  day back at most, and starts the automation once for each issue created and once for each change of an
+  issue. Its authors are the people of the Jira project, so every event starts it. The prompt is followed by
+  the service and the project, the key of the issue, its title, type, status, author and link. The card names
+  the Jira project, or says why nothing is seen: the project names no Jira, or nobody is signed in.
 - **What is missed.** An automation runs while CodeAlta is open. A time that passed more than two
   minutes ago (the application was closed, the computer slept) is not run later, and what happened in a
   repository meanwhile starts nothing. With `catch_up = true` a missed schedule runs once at the next
@@ -2155,6 +2163,10 @@ issue icon of the activity bar, **Issues** in the search of the window, `Ctrl+G`
 The sources are `CodeAlta.Plugins.Abstractions/PluginIssueTracking.cs` (the model), `CodeAlta.Plugin.Git/GitHostTracker.cs`
 (the hosting services), `Desktop/Rpc/IssuesRpc.cs` (host) and `frontend/src/issues/` (page).
 
+- **Jira** is a tracker of the projects that name one (`[plugins.jira]`, see `doc/plugins.md`): its issues have keys
+  (`ALTA-12`), a type, a priority and the status of their workflow, shown beside the state. Its rows have no date,
+  which the search of the Atlassian CLI does not give. When the CLI is being downloaded or nobody is signed in, the
+  list says so in place of the items.
 - **Trackers.** A tracker is an `IIssueTracker`: a service name (`github`, `gitlab`, `azure_devops`, `bitbucket`,
   `jira`), what it is of (`owner/repository`, or the key of a project), the kinds of items it has, a listing and
   the reading of one item. A plugin that knows trackers implements `IIssueTrackerSource`

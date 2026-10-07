@@ -1,6 +1,7 @@
 using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugin.Git;
 using CodeAlta.Plugin.Mcp;
+using CodeAlta.Plugin.Jira;
 using CodeAlta.Plugin.Statistics;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
@@ -27,6 +28,12 @@ internal static class DesktopPlugins
             Id = "git", DisplayName = "Git",
             Description = "Exposes the GitHub, GitLab and Azure DevOps CLIs (gh, glab, az) to sessions when they are available.",
             PluginType = typeof(GitPlugin), Factory = static () => new GitPlugin(),
+        },
+        new()
+        {
+            Id = "jira", DisplayName = "Jira",
+            Description = "The issues of a Jira project, for the projects whose configuration names one.",
+            PluginType = typeof(JiraPlugin), Factory = static () => new JiraPlugin(),
         },
         new()
         {

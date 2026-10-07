@@ -1,6 +1,7 @@
 doc:
   - {path: readme.md, title: "<i class='bi bi-puzzle' aria-hidden='true'></i> Overview"}
   - {path: git.md, title: "Git"}
+  - {path: jira.md, title: "Jira"}
   - {path: mcp.md, title: "MCP"}
   - {path: statistics.md, title: "Statistics"}
   - {path: developers.md, title: "For developers"}

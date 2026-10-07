@@ -38,11 +38,11 @@ test("a trigger reads as a sentence, and several as one line", () => {
 });
 
 test("each kind of trigger has its label, icon and color; a run by hand has its own", () => {
-  assert.deepEqual(triggerTypes.map(type => english(triggerLabel(type))), ["Hourly", "Daily", "Weekly", "Cron", "Issue", "Pull request"]);
+  assert.deepEqual(triggerTypes.map(type => english(triggerLabel(type))), ["Hourly", "Daily", "Weekly", "Cron", "Issue", "Pull request", "Jira issue"]);
   assert.equal(new Set(triggerTypes.map(triggerIcon)).size, triggerTypes.length);
   assert.equal(new Set(triggerTypes.map(triggerTone)).size, triggerTypes.length);
   assert.deepEqual([triggerIcon(undefined), triggerTone(undefined), english(triggerLabel("unknown"))], ["hand", "muted", "Manual"]);
-  assert.deepEqual(triggerTypes.filter(type => !isSchedule({ type })), ["issue", "pull_request"]);
+  assert.deepEqual(triggerTypes.filter(type => !isSchedule({ type })), ["issue", "pull_request", "jira"]);
   assert.deepEqual([runTone("running"), runTone("completed"), runTone("failed"), runTone("skipped"), runTone("interrupted")], ["running", "ok", "failed", "muted", "muted"]);
   assert.deepEqual(["running", "completed", "failed", "cancelled", "interrupted", "skipped", "later"].map(status => english(runStatusLabel(status))),
     ["Running", "Completed", "Failed", "Cancelled", "Interrupted", "Skipped", "Unknown"]);

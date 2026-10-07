@@ -11,7 +11,8 @@ import type { MessageKey } from "./localization";
 // lists them only once configuration names them.
 const builtIn: readonly { id: string; name: string; description: MessageKey }[] = [
   { id: "mcp", name: "MCP", description: "Connects Model Context Protocol servers and exposes their tools." },
-  { id: "git", name: "Git", description: "Issue picker for GitHub, GitLab and Azure DevOps repositories, and their CLIs when available." },
+  { id: "git", name: "Git", description: "Issues and pull requests of GitHub, GitLab, Azure DevOps and Bitbucket repositories, and their CLIs when available." },
+  { id: "jira", name: "Jira", description: "The issues of a Jira project, for the projects whose configuration names one." },
   { id: "statistics", name: "Statistics", description: "Per-turn and session statistics." },
   { id: "ui", name: "UI tools", description: "Tools an agent sees and drives this window with, when its session asks for them." },
 ];

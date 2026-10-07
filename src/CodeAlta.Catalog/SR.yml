@@ -1626,6 +1626,12 @@
   fr: "Connecte CodeAlta aux serveurs Model Context Protocol configurés."
   ja: "設定済みの Model Context Protocol サーバーに CodeAlta を接続します。"
   zh: "将 CodeAlta 连接到已配置的模型上下文协议服务器。"
+"The issues of a Jira project, for the projects whose configuration names one.":
+  de: "Die Vorgänge eines Jira-Projekts, für Projekte, deren Konfiguration eines nennt."
+  es: "Las incidencias de un proyecto de Jira, para los proyectos cuya configuración indica uno."
+  fr: "Les tickets d'un projet Jira, pour les projets dont la configuration en nomme un."
+  ja: "設定で Jira プロジェクトを指定しているプロジェクト向けの、その課題。"
+  zh: "Jira 项目的事务，适用于在配置中指定了 Jira 项目的项目。"
 "Context":
   de: "Kontext"
   es: "Contexto"
