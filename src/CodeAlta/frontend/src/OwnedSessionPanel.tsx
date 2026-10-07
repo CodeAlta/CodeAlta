@@ -13,7 +13,7 @@ import { modelCatalog, sessionOperations as sessions, type ConfigurationSnapshot
 import { activateSessionModels } from "./activateSessionModels";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, outgoingKey, refreshSubmissions, type SubmissionResult, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
-import { captureCompaction, type createCompactionSubmissions } from "./sessionCompaction";
+import { captureCompaction, hasPendingCompaction, watchCompaction, type CompactionWatch, type createCompactionSubmissions } from "./sessionCompaction";
 import { captureAbortRun, type createAbortRunSubmissions } from "./sessionAbortRun";
 import { captureQueue, captureQueueCancellation, queueReceiptPhases, queueCancellationStatus, type createQueueSubmissions } from "./sessionQueue";
 import type { createRuntimeStateReader, RuntimeState } from "./runtimeState";
@@ -218,6 +218,7 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
   const [message, setMessage] = useState("Ready to send to this owned session.");
   const [page, setPage] = useState<SessionReceiptPage>();
   const [submittedThinking, setSubmittedThinking] = useState<{ key: string; runId: string | null } | null>(null);
+  const [submittedCompact, setSubmittedCompact] = useState<CompactionWatch | null>(null);
   const [runtimeState, setRuntimeState] = useState<RuntimeState>();
   const observedProvider = runtimeState?.kind === "ready" ? runtimeState.snapshot.entry?.providerKey : undefined;
   const observedTransition = runtimeState?.kind === "ready" ? runtimeState.snapshot.coordinatorTransitionInProgress : undefined;
@@ -289,6 +290,7 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
       ? "A retained exact cancellation request exists. Refresh submissions or explicitly retry its original key and run after the previous wait settles."
       : "Refresh runtime state explicitly before targeting cancellation.");
     setSubmittedThinking(null);
+    setSubmittedCompact(null);
     setMessage(submissions.pending(sessionId) || submissions.aborts(sessionId).length
       ? "Retained Send/Abort intent exists. Refresh receipts manually or retry the exact request after its original waiter settles."
       : "Ready to send to this owned session.");
@@ -368,6 +370,13 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
     else if (!runId && submittedThinking.runId) setSubmittedThinking(null);
   }, [page, runtimeState, invalidEpoch, sessionId, submittedThinking]);
   const composerBusy = !invalidEpoch && (!!retainedSend?.inFlight || !!submittedThinking || runActive);
+  useEffect(() => {
+    if (!submittedCompact) return;
+    const next = invalidEpoch ? null : watchCompaction(submittedCompact, sessionId, page);
+    if (next !== submittedCompact) setSubmittedCompact(next);
+  }, [page, invalidEpoch, sessionId, submittedCompact]);
+  // Presentation only, like the run above: the host decides what a compaction refuses.
+  const compacting = !invalidEpoch && (!!pendingCompact?.inFlight || !!submittedCompact || hasPendingCompaction(sessionId, page));
   const thinkingSeconds = useThinkingElapsed(composerBusy);
   const runActivity = useRef(onRunActivity); runActivity.current = onRunActivity;
   useEffect(() => {
@@ -699,8 +708,13 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
     const request = retained?.request ?? captureCompaction(epoch, sessionId, observedTarget, crypto.randomUUID());
     if (!request || !capability.canSubmit(request)) return;
     setCompactMessage("Idle compaction admission pending…");
+    const key = request.clientRequestId;
+    setSubmittedCompact({ key, listed: false });
     void compaction.submit(request, signal, capability, result => {
       observeEpoch(result);
+      // An admission that is not known leaves the receipts to say whether a compaction is going on.
+      if (result.status !== "accepted" && result.status !== "replay" || result.receipt?.state === "terminal")
+        setSubmittedCompact(current => current?.key === key ? null : current);
       setCompactMessage(result.status === "accepted" || result.status === "replay"
         ? "Compaction attempt accepted. Refresh submissions for its settled outcome; busy requires a new explicit action, not replay."
         : result.status === "busy" ? "Compaction: busy. This attempt cannot be retried; refresh runtime state for a new explicit attempt."
@@ -838,9 +852,10 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
       <div className="composer-queue-row"><AppIcon name="queue" size={15} /><span className="composer-queue-preview">{pendingQueue.request.text}</span>
         <Button icon={<AppIcon name="refresh" size={14} />} aria-label={t("Retry exact request")} disabled={invalidEpoch || pendingQueue.inFlight} onClick={() => queueTextInHost(false)} /></div>}
     {!expanded && attachmentStrip}
-    <ComposerSurface busy={composerBusy} status={<>
-      {composerBusy ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure ? "error" : "prompt"} size={14} />}
+    <ComposerSurface busy={composerBusy || compacting} status={<>
+      {composerBusy || compacting ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure ? "error" : "prompt"} size={14} />}
       {composerBusy ? thinkingSeconds > 0 ? t("Thinking for {elapsed}...", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
+        : compacting ? t("Compacting…")
         : !invalidEpoch && sendFailure ? sendFailure : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : "Prompt ready")}</>}
     expandedEditor={expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
     editor={{ id: active ? "session-prompt" : `session-prompt-${sessionId}`, ref: promptInput, onPaste: pasteImages, label: t("Message"), value: pending?.request.text ?? text, disabled: !!pending || invalidEpoch || expanded,
@@ -904,7 +919,7 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
       {infoControl}
       {usageTarget && <SessionUsageInspector key={JSON.stringify(usageTarget)} target={usageTarget} capability={capability} persisted={persistedUsage}
         provider={selected?.providerKey ?? observedProvider ?? null} model={selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : null}
-        refreshKey={`${observing}:${composerBusy}:${runtimeState?.kind === "ready" ? runtimeState.snapshot.entry?.activeRunId ?? "" : ""}:${liveState?.snapshot?.revision ?? ""}`} />}
+        refreshKey={`${observing}:${composerBusy}:${compacting}:${runtimeState?.kind === "ready" ? runtimeState.snapshot.entry?.activeRunId ?? "" : ""}:${liveState?.snapshot?.revision ?? ""}`} />}
       {onOpenReminders && <Button ref={remindersTrigger} variant="minimal" icon={<AppIcon name="reminder" size={16} />} data-reminder-count=""
         disabled={invalidEpoch} aria-label={reminderLabel} title={`${reminderLabel} (Ctrl+G, Ctrl+D)`}
         onClick={onOpenReminders}><span className="reminder-count" aria-hidden="true">{observedReminderCount ?? "?"}</span></Button>}
@@ -921,7 +936,7 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
         <AppIcon name="queue" size={16} /></Button>}
       <Button ref={compactTrigger} variant="minimal" onClick={compact}
         data-epoch={epoch} data-session-id={sessionId} data-project-id={projectId ?? ""}
-        disabled={invalidEpoch || !!pendingCompact?.inFlight || (pendingCompact
+        disabled={invalidEpoch || compacting || (pendingCompact
           ? !capability.canSubmit(pendingCompact.request) : !availableCompact || !capability.canSubmit(availableCompact))}
         aria-label={pendingCompact ? t("Retry exact compaction request for attachment {attachment}", { attachment: pendingCompact.request.expectedAttachmentGeneration }) : t("Compact observed idle attachment")}
         title={pendingCompact ? `${t("Manual retry of exact compaction:")} ${t("epoch")} ${pendingCompact.request.expectedEpoch}, ${t("session")} ${pendingCompact.request.sessionId}, ${t("runtime")} ${pendingCompact.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingCompact.request.expectedAttachmentGeneration}, ${t("request")} ${pendingCompact.request.clientRequestId}`

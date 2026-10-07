@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SessionAdmission, SessionCompactRequest, SessionReceiptPage, SessionRuntimeStateResponse } from "#neoastra";
 import { createMutationCapability } from "./sessionOperations";
-import { captureCompaction, createCompactionSubmissions } from "./sessionCompaction";
+import { captureCompaction, createCompactionSubmissions, hasPendingCompaction, watchCompaction } from "./sessionCompaction";
 
 const observation: SessionRuntimeStateResponse = {
   status: "ok", hostEpoch: "epoch", sessionId: "session", runtimeInstanceId: "runtime", coordinatorTransitionInProgress: false,
@@ -145,4 +145,33 @@ test("a compaction key whose receipt the host no longer keeps is a definite answ
   await store.submit(original, signal, capability, value => published.push(value.status));
   assert.deepEqual(published, ["expired"]);
   assert.equal(store.pending("session"), undefined);
+});
+
+test("a pending Compact receipt of the session is what says a compaction is going on", () => {
+  assert.equal(hasPendingCompaction("session", page()), true);
+  assert.equal(hasPendingCompaction("session", undefined), false);
+  assert.equal(hasPendingCompaction("other", page()), false);
+  assert.equal(hasPendingCompaction("session", page("Send")), false);
+  assert.equal(hasPendingCompaction("session", { ...page(), status: "unavailable" }), false);
+  const settled = page();
+  assert.equal(hasPendingCompaction("session", { ...settled, rows: [{ ...settled.rows[0], state: "terminal", outcome: "Completed" }] }), false);
+});
+
+test("a submitted compaction is followed from its submission to the end its receipt reports", () => {
+  const submitted = { key: "key", listed: false };
+  const empty: SessionReceiptPage = { status: "ok", epoch: "epoch", next: null, rows: [] };
+  const terminal: SessionReceiptPage = { ...empty, rows: [{ ...page().rows[0], state: "terminal", outcome: "Completed" }] };
+  // A page read before the admission, or one that could not be read, says nothing of the compaction.
+  assert.equal(watchCompaction(submitted, "session", undefined), submitted);
+  assert.equal(watchCompaction(submitted, "session", empty), submitted);
+  assert.equal(watchCompaction(submitted, "session", { ...terminal, status: "unavailable" }), submitted);
+  assert.equal(watchCompaction(submitted, "session", page("Compact", "other")), submitted);
+  assert.equal(watchCompaction(submitted, "session", page("Send")), submitted);
+  const listed = watchCompaction(submitted, "session", page());
+  assert.deepEqual(listed, { key: "key", listed: true });
+  assert.equal(watchCompaction(listed!, "session", page()), listed);
+  // The end: a settled receipt, also one never seen pending, or a receipt that is no longer listed.
+  assert.equal(watchCompaction(listed!, "session", terminal), null);
+  assert.equal(watchCompaction(submitted, "session", terminal), null);
+  assert.equal(watchCompaction(listed!, "session", empty), null);
 });

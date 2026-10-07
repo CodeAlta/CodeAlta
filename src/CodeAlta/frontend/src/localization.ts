@@ -478,6 +478,7 @@ export const messages = dictionary({
   "Unverified": ["Sin verificar", "Non vérifié", "Unbestätigt", "未確認", "未验证"],
   "Prompt ready": ["Prompt listo", "Prompt prêt", "Prompt bereit", "入力できます", "提示词就绪"],
   "Sending…": ["Enviando…", "Envoi…", "Wird gesendet…", "送信中…", "正在发送…"],
+  "Compacting…": ["Compactando…", "Compactage…", "Komprimiert…", "コンパクト化中…", "正在压缩…"],
   "Thinking…": ["Pensando…", "Réflexion…", "Denkt nach…", "思考中…", "思考中…"],
   "Load previous messages": ["Cargar mensajes anteriores", "Charger les messages précédents", "Frühere Nachrichten laden", "以前のメッセージを読み込む", "加载之前的消息"],
   "Escape / Ctrl+Enter close · Enter new line · Draft preserved; nothing is sent.": ["Escape / Ctrl+Enter cierran · Enter nueva línea · Borrador conservado; no se envía nada.", "Échap / Ctrl+Entrée ferment · Entrée nouvelle ligne · Brouillon conservé ; rien n’est envoyé.", "Escape / Strg+Enter schließen · Enter neue Zeile · Entwurf bleibt erhalten; nichts wird gesendet.", "Escape / Ctrl+Enterで閉じる · Enterで改行 · 下書きを保持し、送信しません。", "Escape / Ctrl+Enter 关闭 · Enter 换行 · 保留下稿；不会发送。"],

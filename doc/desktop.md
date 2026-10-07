@@ -511,7 +511,10 @@ kept and shown as **Unverified**; settings change again once a listed model is c
 The provider indicator is a compact active-provider count, green when ready and orange when
 providers fail or are unsupported. Owned startup initializes the configured providers, as in
 the TUI; inventory reads themselves do not probe. Compaction has a persistent icon, disabled
-until an idle attachment is verified. Send and Stop occupy one slot, not two adjacent buttons.
+until an idle attachment is verified. While a compaction runs, the status line above the prompt
+shows **Compacting…** with the activity spinner and the icon is disabled: a compaction is not a
+run, so the status follows its receipt, which stays pending until the provider ends it. The context
+meter is read again when it ends. Send and Stop occupy one slot, not two adjacent buttons.
 Missed background reads retain receipts and ask drafts and recover on the next observation;
 prolonged unavailability shows a small status indicator rather than raw timeline diagnostics.
 

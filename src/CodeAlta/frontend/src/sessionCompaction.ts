@@ -21,6 +21,23 @@ function matches(request: SessionCompactRequest, row: SessionReceiptView): boole
   return row.kind === "Compact" && row.clientRequestId === request.clientRequestId && row.sessionId === request.sessionId;
 }
 
+// A compaction is not a run: its receipt, pending until the host ends it, is what says one is still going on.
+export function hasPendingCompaction(sessionId: string, page: SessionReceiptPage | undefined): boolean {
+  return page?.status === "ok" && page.rows.some(row => row.kind === "Compact" && row.sessionId === sessionId && row.state === "pending");
+}
+
+/** A compaction this composer submitted, followed until the receipts report its end. */
+export type CompactionWatch = Readonly<{ key: string; listed: boolean }>;
+
+// Covers the time between the submission and the first page that lists its receipt: a page read before
+// the admission does not end the watch. Returns the same watch when the page says nothing new, null at the end.
+export function watchCompaction(watch: CompactionWatch, sessionId: string, page: SessionReceiptPage | undefined): CompactionWatch | null {
+  if (page?.status !== "ok") return watch;
+  const row = page.rows.find(item => item.kind === "Compact" && item.sessionId === sessionId && item.clientRequestId === watch.key);
+  if (!row) return watch.listed ? null : watch;
+  return row.state === "terminal" ? null : watch.listed ? watch : { ...watch, listed: true };
+}
+
 // App-owned bounded retention survives selection loss/remount. No automatic retry or refresh.
 export function createCompactionSubmissions(invoke: (request: SessionCompactRequest, options: WaitOptions) => Promise<SessionAdmission>) {
   const pending = new Map<string, Pending>();
