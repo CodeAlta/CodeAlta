@@ -20,7 +20,9 @@ namespace CodeAlta.Desktop.Rpc;
 /// path. The path must stay inside the folder: a rooted path, a drive or stream name, a parent segment and
 /// any link (reparse point) between the folder and the entry are refused as <c>outside_root</c>. The folder of
 /// the project itself is never renamed or deleted. Where a request names a project it can name the folder of a
-/// source plugin instead (<see cref="PluginFolder"/>): the editor then works in that folder, by the same rules.
+/// source plugin (<see cref="PluginFolder"/>) or of a skill (<see cref="SkillFolder"/>) instead: the editor then
+/// works in that folder, by the same rules. The folder of a built-in skill, or of a skill that a plugin brings,
+/// is only read: its files are reported as read-only, and a change is answered as <c>read_only</c>.
 /// </remarks>
 [NeoRpcService("projectFiles", Version = 1)]
 internal sealed class ProjectFilesService
@@ -51,6 +53,7 @@ internal sealed class ProjectFilesService
     private readonly string? _epoch;
     private readonly IProjectFileSearchService? _search;
     private readonly DesktopEditorView? _view;
+    private readonly SkillFolders? _skills;
     private readonly IDesktopFileTrash _trash;
     private readonly Func<string, bool> _reveal;
     private readonly TextFileCodec _textFiles = new();
@@ -80,10 +83,11 @@ internal sealed class ProjectFilesService
     /// <param name="view">The requests of <c>alta editor open</c> for the window, or null when there are none.</param>
     /// <param name="trash">Where deleted entries go; the trash of the system by default.</param>
     /// <param name="reveal">Shows an entry in the file manager; the one of the system by default.</param>
+    /// <param name="skills">Finds the folder of a skill that a request names, or null when no skill is edited.</param>
     /// <exception cref="ArgumentNullException"><paramref name="projects"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="epoch"/> is blank.</exception>
     internal ProjectFilesService(ProjectCatalog projects, string epoch, IProjectFileSearchService? search = null, DesktopEditorView? view = null,
-        IDesktopFileTrash? trash = null, Func<string, bool>? reveal = null)
+        IDesktopFileTrash? trash = null, Func<string, bool>? reveal = null, SkillFolders? skills = null)
     {
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
@@ -91,6 +95,7 @@ internal sealed class ProjectFilesService
         _epoch = epoch;
         _search = search;
         _view = view;
+        _skills = skills;
         _trash = trash ?? new DesktopFileTrash();
         _reveal = reveal ?? DesktopFileReveal.Show;
     }
@@ -125,7 +130,7 @@ internal sealed class ProjectFilesService
             var length = snapshot.Encoding.GetPreamble().Length + (long)snapshot.Encoding.GetByteCount(snapshot.Text);
             if (length > MaximumFileBytes) return Refused("too_large", length);
             if (snapshot.Text.Contains('\0')) return Refused("binary");
-            var readOnly = (File.GetAttributes(full) & FileAttributes.ReadOnly) != 0;
+            var readOnly = ReadOnlyFolder(request.ProjectId) || (File.GetAttributes(full) & FileAttributes.ReadOnly) != 0;
             // A file read again because it changed on disk was not opened again.
             if (!request.Reload) await RecordUsageAsync(root, path!).ConfigureAwait(false);
             return new("ok", path, snapshot.Text, snapshot.Revision.ContentHash, readOnly, (int)length, stamp, EncodingName(snapshot.Encoding, snapshot.HasByteOrderMark));
@@ -177,7 +182,7 @@ internal sealed class ProjectFilesService
                 var snapshot = await _textFiles.LoadAsync(full, cancellationToken).ConfigureAwait(false);
                 if (snapshot.Text.Contains('\0')) return Refused("binary");
                 var current = snapshot.Revision.ContentHash;
-                if ((File.GetAttributes(full) & FileAttributes.ReadOnly) != 0) return Refused("read_only", current);
+                if (ReadOnlyFolder(request.ProjectId) || (File.GetAttributes(full) & FileAttributes.ReadOnly) != 0) return Refused("read_only", current);
                 // Another editor (the TUI, an agent, a text editor) changed the file since it was read.
                 if (!request.Overwrite && !string.Equals(current, request.ExpectedRevision, StringComparison.Ordinal)) return Refused("conflict", current);
                 if (snapshot.Encoding.GetPreamble().Length + (long)snapshot.Encoding.GetByteCount(request.Content) > MaximumFileBytes) return Refused("too_large");
@@ -250,10 +255,11 @@ internal sealed class ProjectFilesService
         var (status, root) = await OpenAsync(request.ExpectedEpoch, request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (root is null) return Refused(status);
         if (request.Paths is not { Count: > 0 and <= MaximumStatFiles } paths) return Refused("invalid");
+        var readOnly = ReadOnlyFolder(request.ProjectId);
         var files = await Task.Run(() =>
         {
             var result = new ProjectFileStat[paths.Count];
-            for (var index = 0; index < result.Length; index++) result[index] = Stat(root, paths[index]);
+            for (var index = 0; index < result.Length; index++) result[index] = Stat(root, paths[index], readOnly);
             return result;
         }, cancellationToken).ConfigureAwait(false);
         return new("ok", request.ProjectId, files);
@@ -274,6 +280,7 @@ internal sealed class ProjectFilesService
         if (request.ProjectId is null) return Refused("invalid");
         var named = Normalize(request.Path, out path);
         if (named != "ok") return Refused(named);
+        if (ReadOnlyFolder(request.ProjectId)) return Refused("read_only");
         var project = await RootAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Root is not { } root) return Refused(project.Status);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -312,6 +319,7 @@ internal sealed class ProjectFilesService
         if (named != "ok") return Refused(named);
         named = Normalize(request.NewPath, out path);
         if (named != "ok") return Refused(named);
+        if (ReadOnlyFolder(request.ProjectId)) return Refused("read_only");
         var project = await RootAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Root is not { } root) return Refused(project.Status);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -368,6 +376,7 @@ internal sealed class ProjectFilesService
         if (request.ProjectId is null) return Refused("invalid");
         var named = Normalize(request.Path, out path);
         if (named != "ok") return Refused(named);
+        if (ReadOnlyFolder(request.ProjectId)) return Refused("read_only");
         var project = await RootAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Root is not { } root) return Refused(project.Status);
         try
@@ -631,11 +640,15 @@ internal sealed class ProjectFilesService
         return (project.Status, project.Root);
     }
 
-    // The folder a request names: the one of a project of the catalog, or the one of a source plugin.
+    // The folder a request names: the one of a project of the catalog, of a source plugin, or of a skill.
     private Task<(string Status, string? Root)> RootAsync(string projectId, CancellationToken cancellationToken)
-        => PluginFolder.TryParse(projectId, out var folder)
-            ? folder.ResolveAsync(_projects!, cancellationToken)
+        => PluginFolder.TryParse(projectId, out var folder) ? folder.ResolveAsync(_projects!, cancellationToken)
+            : SkillFolder.TryParse(projectId, out var skill)
+                ? _skills?.ResolveAsync(skill, cancellationToken) ?? Task.FromResult<(string Status, string? Root)>(("unknown_project", null))
             : SettingsProjectScope.ResolveAsync(_projects!, projectId, cancellationToken);
+
+    // Whether a request names a folder that is only read: nothing is created, changed or removed in it.
+    private static bool ReadOnlyFolder(string? projectId) => SkillFolder.TryParse(projectId, out var skill) && skill.ReadOnly;
 
     private ProjectFileFolder ListFolder(string root, ProjectFileFolderQuery query, bool includeIgnored, CancellationToken cancellationToken)
     {
@@ -698,7 +711,7 @@ internal sealed class ProjectFilesService
         return Convert.ToHexStringLower(hash.GetHashAndReset().AsSpan(0, 8));
     }
 
-    private static ProjectFileStat Stat(string root, string? requested)
+    private static ProjectFileStat Stat(string root, string? requested, bool readOnlyFolder)
     {
         var named = Normalize(requested, out var path);
         if (named != "ok") return new(requested ?? string.Empty, named, null, 0, false);
@@ -707,7 +720,7 @@ internal sealed class ProjectFilesService
             var located = Locate(root, path!, EntryKind.File, out var full, out _);
             if (located != "ok") return new(path!, located, null, 0, false);
             var info = new FileInfo(full);
-            return new(path!, "ok", Stamp(info), (int)Math.Min(info.Length, int.MaxValue), (info.Attributes & FileAttributes.ReadOnly) != 0);
+            return new(path!, "ok", Stamp(info), (int)Math.Min(info.Length, int.MaxValue), readOnlyFolder || (info.Attributes & FileAttributes.ReadOnly) != 0);
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {

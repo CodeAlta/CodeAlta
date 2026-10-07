@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button, Card, CardList, FormGroup, InputGroup, NonIdealState, PopoverNext, Switch, Tag } from "@blueprintjs/core";
 import { skills, type SkillsDetailResponse, type SkillsEntry } from "#neoastra";
 import { AppIcon } from "./AppIcon";
+import { skillReadOnly } from "./fileTabs";
 import { MarkdownContent } from "./MarkdownContent";
 import { skillInstructions } from "./skillDetail";
 import { ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
@@ -13,9 +14,16 @@ const sourceLabels: Record<string, MessageKey> = { ProjectAlta: "Project", Proje
 
 const skillKey = (skill: Pick<SkillsEntry, "name" | "source">) => `${skill.source}:${skill.name}`;
 
-// What the selected skill is, where it lives and what its SKILL.md tells the agent.
-function SkillDetail({ skill, detail, failed }: { skill: SkillsEntry; detail: SkillsDetailResponse | undefined; failed: boolean }) {
+/** The folder of a skill, as the code editor opens on it: the id the host gave it, its path and the name of the skill. */
+export type SkillFolder = Readonly<{ id: string; path: string; name: string }>;
+
+/**
+ * What the selected skill is, where it lives and what its SKILL.md tells the agent. Its folder opens in the code
+ * editor: to be edited when the skill is one of the user or of a project, to be read otherwise.
+ */
+export function SkillDetail({ skill, detail, failed, onEdit }: { skill: SkillsEntry; detail: SkillsDetailResponse | undefined; failed: boolean; onEdit?: (folder: SkillFolder) => void }) {
   const { t } = useShellLanguage();
+  const readOnly = skillReadOnly(skill.source);
   const facts: [MessageKey, string | null | undefined][] = !detail ? [] : [
     ["Skill file", detail.skillFilePath], ["Overridden by", detail.shadowedBy], ["License", detail.license],
     ["Compatibility", detail.compatibility], ["Allowed tools", detail.allowedTools]];
@@ -26,7 +34,11 @@ function SkillDetail({ skill, detail, failed }: { skill: SkillsEntry; detail: Sk
         <Tag minimal round intent={skill.enabled ? "success" : "none"}>{t(skill.enabled ? "Enabled" : "Disabled")}</Tag>
         {detail && !detail.modelVisible && skill.enabled && <Tag minimal round intent="warning">{t("Not offered to the model")}</Tag>}
         {skill.shadowed && <Tag minimal round intent="warning">{t("Overridden")}</Tag>}
-        {!skill.valid && <Tag minimal round intent="danger">{t("Invalid")}</Tag>}</span></header>
+        {!skill.valid && <Tag minimal round intent="danger">{t("Invalid")}</Tag>}
+        {detail?.folder && detail.skillRootPath && onEdit && <Button size="small" icon={<AppIcon name="code" size={15} />}
+          aria-label={t(readOnly ? "View the files of {name}" : "Edit {name}", { name: skill.title || skill.name })}
+          title={t(readOnly ? "Open in the code editor" : "Edit in the code editor")}
+          onClick={() => onEdit({ id: detail.folder!, path: detail.skillRootPath!, name: skill.name })}>{t(readOnly ? "View files" : "Edit")}</Button>}</span></header>
     <p className="skill-detail-description">{skill.description}</p>
     {failed && <p role="alert" className="error-text">{t("The skill details could not be read.")}</p>}
     {detail && <>
@@ -44,8 +56,16 @@ function SkillDetail({ skill, detail, failed }: { skill: SkillsEntry; detail: Sk
   </section>;
 }
 
-/** Settings page for skills: one list with an enable switch per skill, the selected skill's details, bulk actions and skill creation. */
-export function SkillSettings({ epoch, project, api = skills }: { epoch: string | null; project: SettingsProject; api?: typeof skills }) {
+/**
+ * Settings page for skills: one list with an enable switch per skill, the selected skill's details, bulk actions and
+ * skill creation. The folder of a skill is opened in the code editor, and so is the one of a skill that was created.
+ */
+export function SkillSettings({ epoch, project, onEdit, api = skills }: {
+  epoch: string | null; project: SettingsProject;
+  /** Opens the folder of a skill in the code editor. */
+  onEdit?: (folder: SkillFolder) => void;
+  api?: typeof skills;
+}) {
   const { t } = useShellLanguage();
   const projectId = project?.id ?? null;
   const { listing, loading, busy, notice, setNotice, reload, mutate } = useSettingsEditor(
@@ -87,6 +107,7 @@ export function SkillSettings({ epoch, project, api = skills }: { epoch: string 
       const failure = settingsFailure(result.status, result.message);
       setNotice(failure ?? { key: "Skill created. Edit its SKILL.md to add instructions.", intent: "success" });
       if (!failure) { setDraft(null); reload(); }
+      if (!failure && result.folder && result.path) onEdit?.({ id: result.folder, path: result.path, name: result.name ?? draft.name.trim() });
     } catch { setNotice(settingsFailure("write_failed")); }
   }
 
@@ -124,7 +145,7 @@ export function SkillSettings({ epoch, project, api = skills }: { epoch: string 
           </Card>)}
           {shown.length === 0 && <Card><span className="bp6-text-muted">{t(all.length ? "No skill matches the filter." : "No skills were found.")}</span></Card>}
         </CardList>
-        {selected ? <SkillDetail skill={selected} detail={shownDetail?.value ?? undefined} failed={shownDetail?.value === null} />
+        {selected ? <SkillDetail skill={selected} detail={shownDetail?.value ?? undefined} failed={shownDetail?.value === null} onEdit={onEdit} />
           : <NonIdealState icon={<AppIcon name="skill" size={32} />} title={t("No skills were found.")} />}
       </div>
     </>}

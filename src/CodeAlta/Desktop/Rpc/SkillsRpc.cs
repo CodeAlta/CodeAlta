@@ -7,7 +7,7 @@ namespace CodeAlta.Desktop.Rpc;
 /// <summary>
 /// Lists the skills discovered for the global scope and an optional project, saves their name-based
 /// enablement in the global or project configuration, and scaffolds new skills: the operations of the
-/// terminal's skills manager.
+/// terminal's skills manager. A skill is also named by the id of its folder, which the code editor opens on.
 /// </summary>
 [NeoRpcService("skills", Version = 1)]
 internal sealed class SkillsService
@@ -27,6 +27,7 @@ internal sealed class SkillsService
     internal const int MaximumContentLength = 64 * 1024;
     private readonly ProjectCatalog? _projects;
     private readonly SkillManagementService? _management;
+    private readonly SkillFolders? _folders;
     private readonly string? _epoch;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -50,8 +51,12 @@ internal sealed class SkillsService
         _projects = projects;
         // A platform without a profile folder reports it as empty: that omits the common root, it is not an error.
         _management = new SkillManagementService(catalog, projects.Options.GlobalRoot, string.IsNullOrWhiteSpace(userProfileRoot) ? null : userProfileRoot);
+        _folders = new SkillFolders(projects, _management);
         _epoch = epoch;
     }
+
+    /// <summary>Finds the folders of the skills this service lists; null without an owned host.</summary>
+    internal SkillFolders? Folders => _folders;
 
     /// <summary>Lists every discovered skill, including disabled, invalid and shadowed ones.</summary>
     [NeoRpcMethod("list")]
@@ -84,7 +89,7 @@ internal sealed class SkillsService
 
     /// <summary>
     /// Describes one listed skill: where it lives, why it is or is not offered to the model, its validation
-    /// diagnostics, its related files and the text of its <c>SKILL.md</c>.
+    /// diagnostics, its related files, the text of its <c>SKILL.md</c>, and the id of its folder for the code editor.
     /// </summary>
     [NeoRpcMethod("detail")]
     public async Task<SkillsDetailResponse> DetailAsync(SkillsDetailRequest request, CancellationToken cancellationToken)
@@ -122,7 +127,7 @@ internal sealed class SkillsService
                 content, truncated || content is null && file.Exists,
                 [.. related.Take(MaximumRelatedFiles).Select(static item => new SkillsRelatedFile(Bound(item.Category, 64), Bound(item.RelativePath, 512)))],
                 [.. skill.Diagnostics.Take(MaximumDiagnostics).Select(static item => new SkillsDiagnostic(item.Severity.ToString(), Bound(item.Code, 64), Bound(item.Message, MaximumMessageLength)))],
-                Math.Max(0, related.Count - MaximumRelatedFiles));
+                Math.Max(0, related.Count - MaximumRelatedFiles), SkillFolders.IdOf(skill, request.ProjectId, project.Root));
         }
         catch (InvalidDataException)
         {
@@ -150,7 +155,10 @@ internal sealed class SkillsService
         return SetAsync(request.ExpectedEpoch, request.ProjectId, request.Scope, request.Names, request.Enabled, cancellationToken);
     }
 
-    /// <summary>Creates a new skill folder with a <c>SKILL.md</c> scaffold in the global or project skills root.</summary>
+    /// <summary>
+    /// Creates a new skill folder with a <c>SKILL.md</c> scaffold in the global or project skills root, and names
+    /// that folder for the code editor.
+    /// </summary>
     [NeoRpcMethod("create")]
     public async Task<SkillsCreateResponse> CreateAsync(SkillsCreateRequest request, CancellationToken cancellationToken)
     {
@@ -168,7 +176,8 @@ internal sealed class SkillsService
         {
             var created = await _management.CreateSkillAsync(projectScope ? SkillCreationTargetKind.ProjectCodeAlta : SkillCreationTargetKind.UserCodeAlta,
                 projectScope ? project.Root : null, request.Name, request.Description, CancellationToken.None).ConfigureAwait(false);
-            return new("ok", created.Name, null);
+            var folder = new SkillFolder(projectScope ? request.ProjectId : null, projectScope ? SkillSourceKind.ProjectAlta : SkillSourceKind.UserAlta, created.Name);
+            return new("ok", created.Name, null, folder.Id, Path.GetDirectoryName(created.SkillFilePath));
         }
         catch (ArgumentException exception)
         {
@@ -258,15 +267,18 @@ internal sealed record SkillsDetailRequest(string? ExpectedEpoch, string? Projec
 
 /// <summary>
 /// The detail of one skill. <c>Content</c> is the <c>SKILL.md</c> text, cut at 64 Ki characters
-/// (<c>ContentTruncated</c>) and null when the file is larger than 256 KiB or gone.
+/// (<c>ContentTruncated</c>) and null when the file is larger than 256 KiB or gone. <c>Folder</c> is the id that
+/// names the folder of the skill (<c>SkillRootPath</c>) where the code editor names a project; the folder of a
+/// skill whose source is <c>Builtin</c> or <c>Plugin</c> is only read.
 /// </summary>
 internal sealed record SkillsDetailResponse(string Status, string? Name, string? Source, string? SkillFilePath, string? SkillRootPath, string? SourceId,
     string? ShadowedBy, bool ModelVisible, string? License, string? Compatibility, string? AllowedTools, string? Content, bool ContentTruncated,
-    IReadOnlyList<SkillsRelatedFile> RelatedFiles, IReadOnlyList<SkillsDiagnostic> Diagnostics, int RelatedFilesOmitted);
+    IReadOnlyList<SkillsRelatedFile> RelatedFiles, IReadOnlyList<SkillsDiagnostic> Diagnostics, int RelatedFilesOmitted, string? Folder = null);
 internal sealed record SkillsRelatedFile(string Category, string Path);
 internal sealed record SkillsDiagnostic(string Severity, string Code, string Message);
 internal sealed record SkillsSetEnabledRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? Name, bool Enabled);
 internal sealed record SkillsSetAllEnabledRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, IReadOnlyList<string>? Names, bool Enabled);
 internal sealed record SkillsMutationResponse(string Status, int Changed, string? Message);
 internal sealed record SkillsCreateRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? Name, string? Description);
-internal sealed record SkillsCreateResponse(string Status, string? Name, string? Message);
+/// <summary>The skill that was created: its name, and the id and the path of its folder for the code editor.</summary>
+internal sealed record SkillsCreateResponse(string Status, string? Name, string? Message, string? Folder = null, string? Path = null);

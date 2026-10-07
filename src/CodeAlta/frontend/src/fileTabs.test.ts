@@ -3,8 +3,9 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
-import { activateFileTab, automationsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isEditorTab, isPluginTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
-  persistFileTabs, pluginEditorTab, pluginFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, terminalTab, type FileTab } from "./fileTabs";
+import { activateFileTab, automationsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isPluginTab, isReadOnlyTab, isSkillTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
+  persistFileTabs, pluginEditorTab, pluginFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, skillFolderPrefix,
+  skillReadOnly, terminalTab, type FileTab } from "./fileTabs";
 import { FileTabLabel } from "./SessionTabStrip";
 import { ShellLanguageContext } from "./shellLanguage";
 import { locales, translate } from "./localization";
@@ -167,6 +168,45 @@ test("the automations have one tab, of no project, that outlives the projects an
     const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: () => assert.fail("rendering must not dispatch") } },
       createElement(FileTabLabel, { tab: automationsTab, project: "", dirty: false })));
     assert.ok(html.includes(translate(locale, "Automations")) && !html.includes("session-tab-dirty"), html);
+  }
+});
+
+test("the code editor on the folder of a skill has a tab that names the skill, and a folder that is not the user's is only read", () => {
+  const skill = skillEditorTab({ id: "skill:global:UserCommon:release-notes", path: "/home/.agents/skills/release-notes", name: "release-notes" });
+  assert.deepEqual(skill, { projectId: "skill:global:UserCommon:release-notes", projectPath: "/home/.agents/skills/release-notes", view: "editor", name: "release-notes" });
+  assert.ok(skill.projectId.startsWith(skillFolderPrefix));
+  assert.ok(isSkillTab(skill) && isEditorTab(skill) && isFolderTab(skill) && !isPluginTab(skill) && !isSkillTab(editor()) && !isSkillTab(changes("skill:global:UserAlta:a")) && !isFolderTab(editor()));
+  assert.ok(isFolderTab(pluginEditorTab({ id: "plugin:global:notes", path: "/home/.alta/plugins/notes", name: "notes" })));
+  // One tab for a skill, beside the tabs of the projects; the same name from another source or project is another folder.
+  const state = openFileTab(openFileTab(emptyFileTabs(), editor()), skill);
+  assert.deepEqual(names(state.open), ["editor:p", "editor:skill:global:UserCommon:release-notes"]);
+  assert.equal(openFileTab(state, { ...skill }).open.length, 2, "Asked again, the one that is open is shown.");
+  assert.notEqual(fileNodeId(skill), fileNodeId(skillEditorTab({ id: "skill:project:p:ProjectAlta:release-notes", path: "/p/.alta/skills/release-notes", name: "release-notes" })));
+  // The folder is no project of the workspace: the tab stays when the projects go, and is kept for the next start.
+  assert.equal(resolveFileTab(catalog, skill), undefined);
+  assert.deepEqual(reconcileFileTabs(state, { ...catalog, projects: [] }), { open: [skill], active: skill, closed: [] });
+  let stored = "";
+  persistFileTabs(value => { stored = value; }, state);
+  assert.deepEqual(restoreFileTabs(() => stored), { ...state, closed: [] });
+  for (const tab of [{ ...skill, name: undefined }, { ...skill, name: "" }, { ...skill, view: "changes" }, { ...skill, view: undefined, path: "SKILL.md" }])
+    assert.equal(restoreFileTabs(() => JSON.stringify({ version: 1, open: [tab], active: null })), null, JSON.stringify(tab));
+  // The id says where the skill comes from: the skills of the user and of a project are edited, the others are read.
+  for (const source of ["UserAlta", "UserCommon", "ProjectAlta", "ProjectCommon"]) {
+    assert.equal(skillReadOnly(source), false, source);
+    assert.equal(isReadOnlyTab(skillEditorTab({ id: `skill:global:${source}:a`, path: "/a", name: "a" })), false, source);
+    assert.equal(isReadOnlyTab(skillEditorTab({ id: `skill:project:p:${source}:a:b`, path: "/a", name: "a:b" })), false, source);
+  }
+  for (const source of ["Builtin", "Plugin", "Temporary", "Other"]) {
+    assert.equal(skillReadOnly(source), true, source);
+    assert.equal(isReadOnlyTab(skillEditorTab({ id: `skill:global:${source}:a`, path: "/a", name: "a" })), true, source);
+    assert.equal(isReadOnlyTab(skillEditorTab({ id: `skill:project:p:${source}:UserAlta`, path: "/a", name: "UserAlta" })), true, source);
+  }
+  assert.equal(isReadOnlyTab(skillEditorTab({ id: "skill:unknown", path: "/a", name: "a" })), true, "An id that is not understood is not written to.");
+  assert.ok(!isReadOnlyTab(editor()) && !isReadOnlyTab(changes()) && !isReadOnlyTab(pluginEditorTab({ id: "plugin:global:notes", path: "/n", name: "notes" })));
+  for (const locale of locales) {
+    const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: () => assert.fail("rendering must not dispatch") } },
+      createElement(FileTabLabel, { tab: skill, project: "release-notes", dirty: true })));
+    assert.ok(html.includes(translate(locale, "Skill")) && html.includes("release-notes") && html.includes(translate(locale, "Unsaved changes")), html);
   }
 });
 

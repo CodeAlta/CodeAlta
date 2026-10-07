@@ -6,7 +6,7 @@ import { AppIcon } from "../AppIcon";
 import { showToast } from "../appToaster";
 import { changeListReply } from "../changes/projectChanges";
 import { fileAppearance } from "../fileAppearance";
-import { fileTabKey, isPluginTab, type FileTab } from "../fileTabs";
+import { fileTabKey, isFolderTab, isReadOnlyTab, type FileTab } from "../fileTabs";
 import type { MessageKey } from "../localization";
 import { MarkdownContent } from "../MarkdownContent";
 import { SessionTabMenu, type SessionMenuEntry } from "../SessionTabMenu";
@@ -96,6 +96,8 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
   const [closing, setClosing] = useState<Readonly<{ paths: readonly string[]; busy: boolean }> | null>(null);
   const [deleting, setDeleting] = useState<Deleting | null>(null);
   const [menu, setMenu] = useState<Readonly<{ at: Point; anchor: HTMLElement; title: string; items: SessionMenuEntry[] }> | null>(null);
+  // The folder of a built-in skill, or of a skill of a plugin: its files are shown, and the host changes none.
+  const readOnlyFolder = isReadOnlyTab(tab);
   const [narrow, setNarrow] = useState(false);
 
   const root = useRef<HTMLElement>(null);
@@ -219,9 +221,9 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
     return () => { window.removeEventListener("focus", focused); window.clearInterval(timer); };
   }, [visible, epoch, side, tree.expanded, preferences.ignored]);
 
-  // The git status of the files, for the colors and letters of the tree. The folder of a plugin has none to ask for.
+  // The git status of the files, for the colors and letters of the tree. The folder of a plugin or of a skill has none to ask for.
   useEffect(() => {
-    if (!visible || !epoch || side !== "files" || isPluginTab(tab)) return;
+    if (!visible || !epoch || side !== "files" || isFolderTab(tab)) return;
     const abort = new AbortController();
     let known: string | null = null, running = false;
     const read = () => {
@@ -528,14 +530,18 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
 
   function entryMenu(row: ExplorerEntry | null, at: Point) {
     const folder = row ? row.directory ? row.path : parentTreePath(row.path) : "";
-    const items: SessionMenuEntry[] = [
-      ...(row && !row.directory ? [{ key: "open", label: t("Open"), icon: "fileGeneric" as const, onSelect: () => open(row.path, { keep: true, focus: true }) }, { key: "d0", divider: true as const }] : []),
+    // Nothing is created, renamed or deleted in a folder that is only read.
+    const changes: SessionMenuEntry[] = readOnlyFolder ? [] : [
       { key: "file", label: `${t("New file")}…`, icon: "newFile", onSelect: () => startCreate(folder, false) },
       { key: "folder", label: `${t("New folder")}…`, icon: "newFolder", onSelect: () => startCreate(folder, true) },
       ...(row ? [{ key: "d1", divider: true as const },
         { key: "rename", label: `${t("Rename")}…`, icon: "edit" as const, onSelect: () => setEdit({ parent: parentTreePath(row.path), directory: row.directory, path: row.path }) },
         { key: "delete", label: `${t("Delete")}…`, icon: "trash" as const, danger: true, onSelect: () => askDelete(row.path, row.directory) }] : []),
       { key: "d2", divider: true },
+    ];
+    const items: SessionMenuEntry[] = [
+      ...(row && !row.directory ? [{ key: "open", label: t("Open"), icon: "fileGeneric" as const, onSelect: () => open(row.path, { keep: true, focus: true }) }, { key: "d0", divider: true as const }] : []),
+      ...changes,
       { key: "path", label: t("Copy path"), icon: "copy", onSelect: () => copy(absolute(row?.path ?? "")) },
       ...(row ? [{ key: "relative", label: t("Copy relative path"), icon: "copy" as const, onSelect: () => copy(row.path) }] : []),
       ...(capabilities.reveal ? [{ key: "reveal", label: revealLabel, icon: "openExternal" as const, onSelect: () => reveal(row?.path ?? "") }] : []),
@@ -639,8 +645,8 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
         {side === "files" && <header className="editor-side-header">
           <strong className="editor-side-title" title={tab.projectPath}>{projectName ?? t("Unavailable project")}</strong>
           <span className="editor-side-actions">
-            <Button variant="minimal" size="small" icon={<AppIcon name="newFile" size={15} />} aria-label={t("New file")} title={t("New file")} disabled={!epoch} onClick={() => createHere(false)} />
-            <Button variant="minimal" size="small" icon={<AppIcon name="newFolder" size={15} />} aria-label={t("New folder")} title={t("New folder")} disabled={!epoch} onClick={() => createHere(true)} />
+            {!readOnlyFolder && <Button variant="minimal" size="small" icon={<AppIcon name="newFile" size={15} />} aria-label={t("New file")} title={t("New file")} disabled={!epoch} onClick={() => createHere(false)} />}
+            {!readOnlyFolder && <Button variant="minimal" size="small" icon={<AppIcon name="newFolder" size={15} />} aria-label={t("New folder")} title={t("New folder")} disabled={!epoch} onClick={() => createHere(true)} />}
             <Button variant="minimal" size="small" icon={<AppIcon name="collapseAll" size={15} />} aria-label={t("Collapse all folders")} title={t("Collapse all folders")}
               disabled={!tree.expanded.size} onClick={() => setTree(collapseTree)} />
             <PopoverNext placement="bottom-end" content={<Menu>
@@ -662,8 +668,8 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
           : <EditorExplorer tree={tree} rows={rows} selected={selected} active={activePath} decorations={decorations} label={t("Files")} handle={explorer}
               onSelect={setSelected} onOpen={(path, keep) => open(path, { keep, focus: keep })} onToggle={path => setTree(current => toggleTreeFolder(current, path))}
               onCommit={(value, typed) => void commit(value, typed)} onCancel={() => { setEdit(null); focusFiles(); }} onMenu={entryMenu}
-              onAction={(action, row) => action === "delete" ? askDelete(row.path, row.directory) : setEdit({ parent: parentTreePath(row.path), directory: row.directory, path: row.path })}
-              onMove={(path, folder) => void rename(path, joinTreePath(folder, treeBaseName(path)))} />}
+              onAction={(action, row) => { if (readOnlyFolder) return; if (action === "delete") askDelete(row.path, row.directory); else setEdit({ parent: parentTreePath(row.path), directory: row.directory, path: row.path }); }}
+              onMove={(path, folder) => { if (!readOnlyFolder) void rename(path, joinTreePath(folder, treeBaseName(path))); }} />}
       </aside>
       <div className="editor-side-splitter" role="separator" aria-orientation="vertical" aria-label={t("Resize the files")} onPointerDown={resize}
         onDoubleClick={() => prefer({ width: 264 })} />

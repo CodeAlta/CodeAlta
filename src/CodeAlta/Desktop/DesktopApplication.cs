@@ -532,8 +532,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddMcpServersService(mcpServers);
                     builder.AddAgentPromptsService(new AgentPromptsService(host.ProjectCatalog, epoch));
                     // The standard launch has no explicit discovery home: common skills come from the profile, like the TUI.
-                    builder.AddSkillsService(new SkillsService(host.ProjectCatalog, host.SkillCatalog,
-                        roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), epoch));
+                    var skills = new SkillsService(host.ProjectCatalog, host.SkillCatalog,
+                        roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), epoch);
+                    builder.AddSkillsService(skills);
                     builder.AddPluginsService(new PluginsService(host.ProjectCatalog, epoch, host.PluginRuntime));
                     builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
                     providers = new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch);
@@ -547,7 +548,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionAsksService(asks);
                     builder.AddSessionNotesService(new SessionNotesService(host.WorkspaceReads, host.RuntimeService, epoch));
                     builder.AddSessionPluginEventsService(new SessionPluginEventsService(host.WorkspaceReads, host.ProjectCatalog, epoch, host.PluginRuntime));
-                    builder.AddProjectFilesService(new ProjectFilesService(host.ProjectCatalog, epoch, host.ProjectFileSearchService, editorView));
+                    // The code editor also opens on the folder of a skill that the Skills page names.
+                    builder.AddProjectFilesService(new ProjectFilesService(host.ProjectCatalog, epoch, host.ProjectFileSearchService, editorView, skills: skills.Folders));
                     builder.AddProjectGitService(new ProjectGitService(host.ProjectCatalog, epoch, changesView));
                     builder.AddWorktreesService(new WorktreesService(worktrees, host.ProjectCatalog, worktreeConfig, host.RuntimeService.ListBusySessionFolders, epoch));
                     // A terminal opened from a session starts in the folder that session works in: its worktree

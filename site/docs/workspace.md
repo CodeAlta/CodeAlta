@@ -511,6 +511,8 @@ Open it with `Ctrl+G Ctrl+N`, `/plugins`, or `/plugin`. The TUI dialog shows dis
 
 Open it with `Ctrl+G Ctrl+K` or `/skills`. CodeAlta discovers Agent Skills-compatible `SKILL.md` packages from user and project locations. Skills management lets you inspect skills and their files, create a new skill, and enable or disable skills for the global `~/.alta/config.toml` or for the selected project's `.alta/config.toml`. Disabled skills remain inspectable but are not advertised to models and cannot be activated.
 
+A skill is a folder that can hold several files. In the desktop app, **Edit** opens the folder of the selected skill in a [code editor](#code-editor) tab, with its files on the left and `SKILL.md` open. A built-in skill, or one that a plugin brings, has **View files** instead: its files open read-only. **New skill** opens the skill it created the same way.
+
 In the TUI, compact `G` and `P` checkboxes set the global and project state of a skill, and bulk actions can enable, disable, or invert the currently shown skills. Enabled skills can also be activated for the session when the selected provider supports injected skill context.
 
 ## MCP servers

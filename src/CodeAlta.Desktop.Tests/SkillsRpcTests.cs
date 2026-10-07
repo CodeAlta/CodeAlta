@@ -197,31 +197,171 @@ public sealed class SkillsRpcTests
         Assert.AreEqual("unavailable", (await new SkillsService().DetailAsync(new(Epoch, null, "alpha", "UserAlta"), default)).Status);
     }
 
+    [TestMethod]
+    public void TheFolderOfASkill_IsNamedByAnId_ThatSaysWhereTheSkillComesFrom()
+    {
+        Assert.AreEqual("skill:global:UserAlta:alpha", new SkillFolder(null, SkillSourceKind.UserAlta, "alpha").Id);
+        Assert.AreEqual("skill:project:p1:ProjectCommon:beta", new SkillFolder("p1", SkillSourceKind.ProjectCommon, "beta").Id);
+        Assert.IsTrue(SkillFolder.TryParse("skill:global:UserAlta:alpha", out var user));
+        Assert.AreEqual(new SkillFolder(null, SkillSourceKind.UserAlta, "alpha"), user);
+        Assert.IsTrue(SkillFolder.TryParse("skill:project:p1:ProjectCommon:beta", out var local));
+        Assert.AreEqual(new SkillFolder("p1", SkillSourceKind.ProjectCommon, "beta"), local);
+        // The name is the last part of an id: it keeps its colons.
+        Assert.IsTrue(SkillFolder.TryParse("skill:global:Plugin:pack:tool", out var named));
+        Assert.AreEqual(new SkillFolder(null, SkillSourceKind.Plugin, "pack:tool"), named);
+
+        // The skills of the user and of a project are written to; every other one is only read.
+        foreach (var source in Enum.GetValues<SkillSourceKind>())
+        {
+            var written = source is SkillSourceKind.ProjectAlta or SkillSourceKind.ProjectCommon or SkillSourceKind.UserAlta or SkillSourceKind.UserCommon;
+            Assert.AreEqual(!written, new SkillFolder(null, source, "a").ReadOnly, source.ToString());
+        }
+
+        // The id of a project, the id of a plugin folder, a source that is none, and a name that is none are not such ids.
+        foreach (var other in new[] { null, "", "p1", "skill:", "skill:global:", "skill:global:UserAlta", "skill:global:UserAlta:", "skill:global:useralta:a",
+            "skill:global:3:a", "skill:global:Nowhere:a", "skill:global::a", "skill:project:UserAlta:a", "skill:project::UserAlta:a", "skill:other:UserAlta:a",
+            "plugin:global:notes", "skill:global:UserAlta:a\nb", "skill:global:UserAlta:" + new string('x', 129) })
+        {
+            Assert.IsFalse(SkillFolder.TryParse(other, out _), other);
+        }
+    }
+
+    [TestMethod]
+    public async Task Detail_NamesTheFolderOfTheSkill_AndCreate_TheFolderItMade()
+    {
+        using var fixture = await Fixture.CreateAsync(builtin: true);
+        var project = fixture.Project.Id;
+        // A skill of the user has one id, asked with a project or without; a skill of a project is found with its project.
+        Assert.AreEqual("skill:global:UserAlta:alpha", (await fixture.Service.DetailAsync(new(Epoch, null, "alpha", "UserAlta"), default)).Folder);
+        Assert.AreEqual("skill:global:UserAlta:alpha", (await fixture.Service.DetailAsync(new(Epoch, project, "alpha", "UserAlta"), default)).Folder);
+        Assert.AreEqual($"skill:project:{project}:ProjectAlta:beta", (await fixture.Service.DetailAsync(new(Epoch, project, "beta", "ProjectAlta"), default)).Folder);
+        var builtin = await fixture.Service.DetailAsync(new(Epoch, project, "gamma", "Builtin"), default);
+        Assert.AreEqual(("skill:global:Builtin:gamma", Path.Combine(fixture.BuiltinRoot, "gamma")), (builtin.Folder, builtin.SkillRootPath));
+        Assert.IsNull((await fixture.Service.DetailAsync(new(Epoch, null, "missing", "UserAlta"), default)).Folder);
+
+        var created = await fixture.Service.CreateAsync(new(Epoch, null, "Global", "release-notes", "Writes release notes"), default);
+        Assert.AreEqual(("skill:global:UserAlta:release-notes", Path.Combine(fixture.GlobalRoot, "skills", "release-notes")), (created.Folder, created.Path));
+        var local = await fixture.Service.CreateAsync(new(Epoch, project, "Project", "local-skill", "Project only"), default);
+        Assert.AreEqual(($"skill:project:{project}:ProjectAlta:local-skill", Path.Combine(fixture.ProjectPath, ".alta", "skills", "local-skill")), (local.Folder, local.Path));
+        var again = await fixture.Service.CreateAsync(new(Epoch, null, "Global", "release-notes", "Again"), default);
+        Assert.AreEqual(("conflict", (string?)null, (string?)null), (again.Status, again.Folder, again.Path));
+        // The folder that was named is the one the detail of the new skill names.
+        Assert.AreEqual(created.Folder, (await fixture.Service.DetailAsync(new(Epoch, null, "release-notes", "UserAlta"), default)).Folder);
+    }
+
+    [TestMethod]
+    public async Task TheCodeEditor_WorksInTheFolderOfASkill_AndOnlyReadsOneThatIsNotOfTheUserOrOfAProject()
+    {
+        using var fixture = await Fixture.CreateAsync(builtin: true);
+        var files = new ProjectFilesService(fixture.Projects, Epoch, skills: fixture.Service.Folders);
+        const string User = "skill:global:UserAlta:alpha";
+        var root = Path.Combine(fixture.GlobalRoot, "skills", "alpha");
+        Directory.CreateDirectory(Path.Combine(root, "scripts"));
+        File.WriteAllText(Path.Combine(root, "scripts", "run.ps1"), "Write-Output 1\n");
+
+        var listed = await files.ListAsync(new(Epoch, User, [new("", null)], false), default);
+        Assert.AreEqual("ok", listed.Status);
+        CollectionAssert.AreEquivalent(new[] { "scripts", "SKILL.md" }, listed.Folders.Single().Entries.Select(static entry => entry.Name).ToArray());
+        var read = await files.ReadAsync(new(Epoch, User, "SKILL.md"), default);
+        Assert.AreEqual("ok", read.Status);
+        Assert.IsFalse(read.ReadOnly);
+        StringAssert.Contains(read.Content, "# alpha");
+        Assert.AreEqual("ok", (await files.WriteAsync(new(Epoch, User, "SKILL.md", read.Content + "\nMore.\n", read.Revision, false), default)).Status);
+        StringAssert.Contains(File.ReadAllText(Path.Combine(root, "SKILL.md")), "More.");
+        Assert.AreEqual("ok", (await files.CreateAsync(new(Epoch, User, "references/notes.md", false), default)).Status);
+        Assert.AreEqual("ok", (await files.RenameAsync(new(Epoch, User, "references/notes.md", "references/guide.md"), default)).Status);
+        Assert.IsTrue(File.Exists(Path.Combine(root, "references", "guide.md")));
+        Assert.AreEqual("ok", (await files.DeleteAsync(new(Epoch, User, "references/guide.md", true), default)).Status);
+        Assert.IsFalse((await files.StatAsync(new(Epoch, User, ["SKILL.md"]), default)).Files.Single().ReadOnly);
+
+        // The skill of a project is found with its project, and is written to as well.
+        var local = $"skill:project:{fixture.Project.Id}:ProjectAlta:beta";
+        var beta = await files.ReadAsync(new(Epoch, local, "SKILL.md"), default);
+        Assert.AreEqual(("ok", false), (beta.Status, beta.ReadOnly));
+        Assert.AreEqual("ok", (await files.CreateAsync(new(Epoch, local, "notes.md", false), default)).Status);
+        Assert.IsTrue(File.Exists(Path.Combine(fixture.ProjectPath, ".alta", "skills", "beta", "notes.md")));
+
+        // The folder is the limit, and an id names a skill that is found: no other folder is reached through one.
+        Assert.AreEqual("outside_root", (await files.ReadAsync(new(Epoch, User, "../../config.toml"), default)).Status);
+        Assert.AreEqual("project_unavailable", (await files.ReadAsync(new(Epoch, "skill:global:UserAlta:gone", "SKILL.md"), default)).Status);
+        Assert.AreEqual("project_unavailable", (await files.ReadAsync(new(Epoch, "skill:global:UserCommon:alpha", "SKILL.md"), default)).Status);
+        Assert.AreEqual("project_unavailable", (await files.ReadAsync(new(Epoch, "skill:global:ProjectAlta:beta", "SKILL.md"), default)).Status);
+        Assert.AreEqual("unknown_project", (await files.ReadAsync(new(Epoch, "skill:project:no-such-project:ProjectAlta:beta", "SKILL.md"), default)).Status);
+        // A name is compared with the names of the skills, never made into a path.
+        Assert.AreEqual("project_unavailable", (await files.ReadAsync(new(Epoch, "skill:global:UserAlta:../alpha", "SKILL.md"), default)).Status);
+        Assert.AreEqual("unknown_project", (await new ProjectFilesService(fixture.Projects, Epoch).ReadAsync(new(Epoch, User, "SKILL.md"), default)).Status,
+            "A host that names no skill opens none.");
+
+        // A built-in skill is read, and nothing of it is changed.
+        const string Builtin = "skill:global:Builtin:gamma";
+        var folder = Path.Combine(fixture.BuiltinRoot, "gamma");
+        var before = File.ReadAllText(Path.Combine(folder, "SKILL.md"));
+        var shown = await files.ReadAsync(new(Epoch, Builtin, "SKILL.md"), default);
+        Assert.AreEqual(("ok", true, before), (shown.Status, shown.ReadOnly, shown.Content));
+        Assert.IsTrue((await files.StatAsync(new(Epoch, Builtin, ["SKILL.md"]), default)).Files.Single().ReadOnly);
+        var refused = await files.WriteAsync(new(Epoch, Builtin, "SKILL.md", "changed", shown.Revision, false), default);
+        Assert.AreEqual(("read_only", shown.Revision), (refused.Status, refused.Revision));
+        Assert.AreEqual("read_only", (await files.WriteAsync(new(Epoch, Builtin, "SKILL.md", "changed", null, true), default)).Status);
+        Assert.AreEqual("read_only", (await files.CreateAsync(new(Epoch, Builtin, "new.md", false), default)).Status);
+        Assert.AreEqual("read_only", (await files.CreateAsync(new(Epoch, Builtin, "scripts", true), default)).Status);
+        Assert.AreEqual("read_only", (await files.RenameAsync(new(Epoch, Builtin, "SKILL.md", "OTHER.md"), default)).Status);
+        Assert.AreEqual("read_only", (await files.DeleteAsync(new(Epoch, Builtin, "SKILL.md", true), default)).Status);
+        Assert.AreEqual("read_only", (await files.DeleteAsync(new(Epoch, Builtin, "SKILL.md", false), default)).Status);
+        Assert.AreEqual(before, File.ReadAllText(Path.Combine(folder, "SKILL.md")));
+        CollectionAssert.AreEqual(new[] { "SKILL.md" }, Directory.GetFileSystemEntries(folder).Select(Path.GetFileName).ToArray());
+    }
+
+    [TestMethod]
+    public async Task TheFolderOfASkill_IsFoundAgain_OnceItsFileIsGone()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var folders = fixture.Service.Folders!;
+        var alpha = new SkillFolder(null, SkillSourceKind.UserAlta, "alpha");
+        var root = Path.Combine(fixture.GlobalRoot, "skills", "alpha");
+        Assert.AreEqual(("ok", root), await folders.ResolveAsync(alpha, default));
+        // The folder that was found is the answer while its skill file is there, and no longer once it is gone.
+        Assert.AreEqual(("ok", root), await folders.ResolveAsync(alpha, default));
+        Directory.Delete(root, recursive: true);
+        Assert.AreEqual(("project_unavailable", (string?)null), await folders.ResolveAsync(alpha, default));
+
+        // A skill of a project is not answered for a project that is not known, even after it was found.
+        var beta = new SkillFolder(fixture.Project.Id, SkillSourceKind.ProjectAlta, "beta");
+        Assert.AreEqual(("ok", Path.Combine(fixture.ProjectPath, ".alta", "skills", "beta")), await folders.ResolveAsync(beta, default));
+        Assert.AreEqual(("unknown_project", (string?)null), await folders.ResolveAsync(beta with { ProjectId = "no-such-project" }, default));
+    }
+
     private sealed class Fixture : IDisposable
     {
         private readonly string _root;
 
-        private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project)
+        private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project, bool builtin)
         {
             _root = root;
             Projects = projects;
             Project = project;
             WriteSkill(Path.Combine(GlobalRoot, "skills"), "alpha", "Alpha workflow");
             WriteSkill(Path.Combine(ProjectPath, ".alta", "skills"), "beta", "Beta workflow");
-            // No built-in or plugin roots: the listing is exactly what the fixture wrote.
-            var catalog = new SkillCatalog([new ProjectCodeAltaSkillRootProvider(), new ProjectCommonSkillRootProvider(),
-                new UserCodeAltaSkillRootProvider(), new UserCommonSkillRootProvider()]);
-            Service = new SkillsService(projects, catalog, Path.Combine(root, "home"), Epoch);
+            // No plugin roots, and a built-in root only when a test asks for it: the listing is exactly what the fixture wrote.
+            List<ISkillRootProvider> providers = [new ProjectCodeAltaSkillRootProvider(), new ProjectCommonSkillRootProvider(),
+                new UserCodeAltaSkillRootProvider(), new UserCommonSkillRootProvider()];
+            if (builtin)
+            {
+                WriteSkill(BuiltinRoot, "gamma", "Gamma workflow");
+                providers.Add(new BuiltInCodeAltaSkillRootProvider(BuiltinRoot));
+            }
+
+            Service = new SkillsService(projects, new SkillCatalog(providers), Path.Combine(root, "home"), Epoch);
         }
 
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(bool builtin = false)
         {
             var root = Path.Combine(Path.GetTempPath(), "CodeAlta-skills-" + Guid.NewGuid().ToString("N"));
             var projects = new ProjectCatalog(new CatalogOptions { GlobalRoot = Directory.CreateDirectory(Path.Combine(root, "home", ".alta")).FullName });
             var project = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "project")).FullName);
-            return new Fixture(root, projects, project);
+            return new Fixture(root, projects, project, builtin);
         }
 
+        public string BuiltinRoot => Path.Combine(_root, "builtin");
         public ProjectCatalog Projects { get; }
         public ProjectDescriptor Project { get; }
         public SkillsService Service { get; }

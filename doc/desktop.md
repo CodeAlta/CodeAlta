@@ -1285,6 +1285,10 @@ which creates `<name>/SKILL.md` under the global or project skills folder. Selec
 details beside the list: source and state, the path of its `SKILL.md`, the skill that overrides it,
 license, compatibility and allowed tools when declared, related files, validation diagnostics, and the
 instructions of the `SKILL.md` rendered as Markdown (the first 64 Ki characters of a file up to 256 KiB).
+A skill is a folder that can hold several files: the button of the details opens that folder in the code
+editor, on its `SKILL.md` and with its files (see "The folder of a plugin or of a skill"). It is **Edit** for
+a skill of the user or of a project, and **View files** for a built-in skill and for a skill that a plugin
+brings, whose folder is only read. **New skill** opens the folder it created the same way.
 The **Models** section's table fills the page height. The **Plugins** Settings
 section has a switch per plugin, including the built-in MCP, Git, Statistics and UI tools plugins. The
 switch of a source plugin applies at once: the plugin is built and started, or stopped. The switch of a
@@ -1459,14 +1463,25 @@ It is opened in three ways:
 - `alta editor open` does the same for an agent (see `doc/live-tool.md`), and **Open file** in a Changes tab
   opens the file there.
 
-The editor also opens on the folder of a source plugin, which is no project of the catalog: **Edit in the
-code editor** in **Settings > Plugins**, the plugin a **New plugin** just created, and `alta plugin open` for an agent. Its
+**The folder of a plugin or of a skill.** The editor also opens on the folder of a source plugin, which is
+no project of the catalog: **Edit in the code editor** in **Settings > Plugins**, the plugin a **New plugin**
+just created, and `alta plugin open` for an agent. Its
 tab is labeled **Plugin** and the id of the plugin, with the plugin icon. The tab names the folder by an
 id the host gives and resolves itself, `plugin:global:<package>` or `plugin:project:<project id>:<package>`
 (`PluginFolder`), where a project tab has the id of its project: every `projectFiles` call of the editor
 works unchanged inside that folder, and nowhere else. A package name is one folder name, so an id cannot
 name a path outside the plugin folder. Such a tab has no git status and no Changes, and it is kept across
 restarts like the editors of projects; when the folder is gone its editor says so.
+
+The folder of a skill opens the same way from **Settings > Skills**, in a tab labeled **Skill** and the
+name of the skill, with the skill icon. Its id is `skill:global:<source>:<name>`, or
+`skill:project:<project id>:<source>:<name>` for a skill that a project brings (`SkillFolder`): the source is
+the one the Skills page shows (`UserAlta`, `UserCommon`, `ProjectAlta`, `ProjectCommon`, `Plugin`,
+`Builtin`). The host finds the folder among the skills it discovers (`SkillFolders`), by that name and
+source: a name is compared with the names of the skills and is never made into a path. The folder of a skill
+of the user or of a project is edited like a project. The folder of a built-in skill, or of a skill of a
+plugin, is only read: the host reports its files as read-only and answers a write, a creation, a rename and
+a deletion with `read_only`, and the editor offers none of them.
 
 The project is the one of the code editor or the Changes tab in front, otherwise the selected project. The
 editor needs an owned host and a project that is not archived. Editor tabs close, reopen, cycle, drag and split
