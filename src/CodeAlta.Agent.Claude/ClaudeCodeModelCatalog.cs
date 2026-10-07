@@ -81,7 +81,9 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
             }
 
             var inspection = await InspectCoreAsync(cancellationToken).ConfigureAwait(false);
-            _cached = inspection;
+
+            // A signed-out answer is not kept: the user signs in in a terminal and tests the provider again.
+            _cached = inspection.IsSignedIn ? inspection : null;
             _cachedAt = DateTimeOffset.UtcNow;
             return inspection;
         }

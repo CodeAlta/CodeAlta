@@ -220,6 +220,21 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [TestMethod]
+    public async Task Probe_AsksAgainAfterASignedOutCli()
+    {
+        var cli = new ClaudeCodeFakeCli { SignedIn = false };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        Assert.AreEqual(ModelProviderAvailability.Failed, (await runtime.ProbeAsync()).Availability);
+
+        // The user signs in in a terminal and tests the provider again: the answer of before is not the one to give.
+        cli.SignedIn = true;
+        var probe = await runtime.ProbeAsync();
+
+        Assert.AreEqual(ModelProviderAvailability.Ready, probe.Availability);
+        Assert.AreEqual(2, cli.Processes.Count, "A signed-out answer is not kept.");
+    }
+
+    [TestMethod]
     public async Task Probe_ReportsAMissingCli()
     {
         var options = new ClaudeCodeModelProviderRuntimeOptions
