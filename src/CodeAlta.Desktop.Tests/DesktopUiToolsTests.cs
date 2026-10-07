@@ -80,19 +80,6 @@ public sealed class DesktopUiToolsTests
     }
 
     [TestMethod]
-    public void APage_GetsTheSizeItIsAskedFor_OnADisplayThatScales()
-    {
-        // The automation adds the pixels of the window less the size of the page: at 150%, a page asked for 1600
-        // shows 1650, and asking for 1575 gives it 1600 (1575 + 2475 - 1650 = 2400 pixels of the screen).
-        Assert.AreEqual(1575, DesktopUiAutomation.FitRequest(1600, 1650, 1.5));
-        Assert.AreEqual(963, DesktopUiAutomation.FitRequest(1000, 1075, 1.5));
-        // A page that has its size, and a display that does not scale, change nothing.
-        Assert.AreEqual(1600, DesktopUiAutomation.FitRequest(1600, 1600, 1.5));
-        Assert.AreEqual(1600, DesktopUiAutomation.FitRequest(1600, 1720, 1));
-        Assert.AreEqual(2000, DesktopUiAutomation.FitRequest(1600, 1200, 2));
-    }
-
-    [TestMethod]
     public async Task AgentTools_GiveTheModelTheTextAndThePicturesOfATool_AndSaveWhereTheSessionWorks()
     {
         using var temp = new TempFolder();

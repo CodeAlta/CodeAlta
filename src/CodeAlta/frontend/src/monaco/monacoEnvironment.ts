@@ -26,13 +26,10 @@ import "monaco-editor/features/suggest/register.js";
 import "monaco-editor/features/codicon/register.js";
 import EditorWorker from "monaco-editor/editor/editor.worker.js?worker";
 import { shellColor } from "../shellColors";
-import { installAutomationTyping } from "./automationTyping";
 import { installEditorFocus } from "./editorFocus";
 
 // Vite emits a same-origin worker: no CDN, inline script, eval or blob CSP exception.
 globalThis.MonacoEnvironment = Object.freeze({ getWorker: () => new EditorWorker() });
-// The UI tools write in every editor of the page.
-installAutomationTyping(monaco);
 // One editor of the page has the text focus, also when the browser announced no change of focus.
 installEditorFocus(monaco);
 

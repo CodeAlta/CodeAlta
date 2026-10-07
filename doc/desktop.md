@@ -2046,8 +2046,7 @@ A session can see and drive the window it runs in. The tools are those of
 [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp), with the same names, arguments
 and result text, so that a model that knows them uses these unchanged. They come from the browser automation
 of NeoAstra (`NeoAutomation`), which works inside the page with DOM APIs and is the same on WebView2,
-WKWebView and WebKitGTK. The sources are in `Desktop/Ui/` (the tools and their plugin) and
-`frontend/src/monaco/automationTyping.ts` (text in the editors).
+WKWebView and WebKitGTK. The sources are in `Desktop/Ui/` (the tools and their plugin).
 
 - **The tools.** `take_snapshot` (the elements of the page as text, each with a `uid`), `take_screenshot`,
   `click`, `click_at`, `hover`, `drag`, `fill`, `fill_form`, `type_text`, `press_key`, `upload_file`,
@@ -2079,13 +2078,17 @@ WKWebView and WebKitGTK. The sources are in `Desktop/Ui/` (the tools and their p
 - **Images.** A screenshot goes to the model with the text of the result, as any image a tool returns: the
   timeline shows it in an **Image read** card (see "Images a tool gives the model").
 - **Editors.** The prompt and the code editors are Monaco editors, which take their text from the browser's
-  own text input (EditContext). No event of a tool feeds it. The page therefore types the characters of
-  such key events itself, and replaces the text of an editor when `fill` names one (the event
-  `codealta:fill`, sent by the host when the automation says that the element cannot be filled). What the
-  user types never goes through this.
-- **Window size.** `resize_page` gives the page the size it is asked for. The automation adds what the window
-  has beyond the page, counting the window in the pixels of the screen and the page in its own: on a display
-  that scales, the host asks again with a size corrected by what the page shows.
+  own text input (EditContext) where the engine has one. The automation writes there as the engine does.
+  `type_text` and `press_key` go through the editor as typing does, key by key: the editor closes the bracket
+  or the quote that is opened and indents a new line. `fill` replaces the whole text of an editor in one
+  change and leaves it as given, with the line endings of the editor: it is the tool for a text of several
+  lines or for code.
+- **A window in the background.** The tools work on a window that is not in front. The browser announces no
+  change of focus there, so the automation tells the page which element has it before it sends keys, and the
+  editors keep the text focus with one of them (see "Commands, help and keyboard shortcuts").
+- **Window size.** `resize_page` gives the page the size it is asked for, in CSS pixels, also on a display
+  that scales. A window that cannot take the size, because its screen ends or because it has a least size,
+  leaves the page as near to it as it gets, and the result says which size the page has.
 - **Limits.** Those of the automation: input is dispatched as DOM events (`isTrusted` is false), so CSS
   `:hover` does not apply and a native popup does not open; the caption buttons of the title bar are not part
   of the page; a screenshot needs a visible window on Windows. Sessions run at the same time against one
