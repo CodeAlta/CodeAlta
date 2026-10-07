@@ -11,6 +11,11 @@ internal sealed record ClaudeCodeCliResolution(string? Path, string? Error)
 }
 
 /// <summary>
+/// No Claude Code executable that CodeAlta runs was found: the message says where it was looked for and what to do.
+/// </summary>
+internal sealed class ClaudeCodeNotFoundException(string message) : InvalidOperationException(message);
+
+/// <summary>
 /// The machine the executable is looked for on. Tests describe another one.
 /// </summary>
 internal sealed record ClaudeCodeCliEnvironment(

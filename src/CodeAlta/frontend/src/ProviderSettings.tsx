@@ -7,7 +7,7 @@ import { providerDefault } from "./providerSignIn";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import { configReadNotice, configSaveNotice, type ConfigNotice } from "./configEditor";
-import { providerEdit, providerForm, providerFormDirty, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
+import { providerEdit, providerForm, providerFormDirty, providerProblem, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
 import { GuidedTour, type GuidedTourStep } from "./GuidedTour";
 import { providerTourSteps, providerTourStorageKey, startsProviderTour } from "./providerTour";
 import { useShellLanguage } from "./shellLanguage";
@@ -147,8 +147,10 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
       if (!alive.current) return;
       if (reply.status === "ok" && reply.epoch === epoch) {
         setAvailability(current => new Map(current).set(original.key.toLowerCase(), reply.availability));
-        setNotice({ key: "Completed test for {id}: {availability}. This is provider initialization, not an authentication guarantee.",
-          parameters: { id: original.key, availability: reply.availability }, intent: reply.availability === "Ready" ? "success" : "warning" });
+        const cause = providerProblem(reply.reason);
+        setNotice(cause ? { key: cause, intent: "warning" }
+          : { key: "Completed test for {id}: {availability}. This is provider initialization, not an authentication guarantee.",
+            parameters: { id: original.key, availability: reply.availability }, intent: reply.availability === "Ready" ? "success" : "warning" });
       } else setNotice({ key: reply.status === "busy" ? "A provider test is already running. Try again after it settles." : "Provider test could not be confirmed.", intent: "warning" });
     } catch { if (alive.current) setNotice({ key: "Provider test could not be confirmed.", intent: "warning" }); }
     finally { if (alive.current) setProbing(false); }

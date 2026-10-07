@@ -193,8 +193,44 @@ public sealed class ModelCatalogRpcTests
         var result = await service.Probe(new("epoch", "failure"), default);
         Assert.AreEqual("ok", result.Status);
         Assert.AreEqual("Failed", result.Availability);
+        Assert.IsNull(result.Reason, "A failure the page has no text for gives no reason.");
         Assert.IsFalse(JsonSerializer.Serialize(result).Contains("private.example", StringComparison.Ordinal));
         Assert.IsFalse(JsonSerializer.Serialize(service.Providers(new("epoch"))).Contains("private.example", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task FailedProbeNamesAKnownReasonWithoutItsMessage()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var signedOut = new ModelProviderDescriptor(new("signed-out"), "Signed out");
+        registry.RegisterOrReplace(signedOut, () => new ResultRuntime(signedOut, new ModelProviderProbeResult
+        {
+            ProviderId = signedOut.ProviderId, Availability = ModelProviderAvailability.Failed,
+            StatusMessage = "private provider diagnostic", ErrorCategory = "claude-code-signed-out",
+        }));
+        var other = new ModelProviderDescriptor(new("other"), "Other");
+        registry.RegisterOrReplace(other, () => new ResultRuntime(other, new ModelProviderProbeResult
+        {
+            ProviderId = other.ProviderId, Availability = ModelProviderAvailability.Failed,
+            StatusMessage = "private provider diagnostic", ErrorCategory = "https://private.example/unknown-category",
+        }));
+        var ready = new ModelProviderDescriptor(new("ready"), "Ready");
+        registry.RegisterOrReplace(ready, () => new ResultRuntime(ready, new ModelProviderProbeResult
+        {
+            ProviderId = ready.ProviderId, Availability = ModelProviderAvailability.Ready, ErrorCategory = "claude-code-signed-out",
+        }));
+        var service = new ModelCatalogService(registry, new ModelProviderInitializationService(registry), "epoch");
+
+        var result = await service.Probe(new("epoch", "signed-out"), default);
+        Assert.AreEqual("Failed", result.Availability);
+        Assert.AreEqual("claude-code-signed-out", result.Reason);
+        Assert.IsFalse(JsonSerializer.Serialize(result).Contains("private", StringComparison.Ordinal));
+
+        var unknown = await service.Probe(new("epoch", "other"), default);
+        Assert.AreEqual("Failed", unknown.Availability);
+        Assert.IsNull(unknown.Reason);
+        Assert.IsFalse(JsonSerializer.Serialize(unknown).Contains("private", StringComparison.Ordinal));
+        Assert.IsNull((await service.Probe(new("epoch", "ready"), default)).Reason, "A provider that is ready has no reason to give.");
     }
 
     [TestMethod]
@@ -228,6 +264,18 @@ public sealed class ModelCatalogRpcTests
             count(); entered.TrySetResult(); await release.Task;
             return new ModelProviderProbeResult { ProviderId = descriptor.ProviderId };
         }
+        public IModelProviderTurnExecutor CreateTurnExecutor() => throw new AssertFailedException("No turns.");
+        public Task<IAgentSession> CreateSessionAsync(AgentSessionCreateOptions options, CancellationToken token = default) => throw new AssertFailedException("No sessions.");
+        public Task<IAgentSession> ResumeSessionAsync(string id, AgentSessionResumeOptions options, CancellationToken token = default) => throw new AssertFailedException("No sessions.");
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class ResultRuntime(ModelProviderDescriptor descriptor, ModelProviderProbeResult result) : IModelProviderSessionRuntime
+    {
+        public ModelProviderDescriptor Descriptor => descriptor;
+        public Task StartAsync(CancellationToken token = default) => Task.CompletedTask;
+        public Task StopAsync(CancellationToken token = default) => Task.CompletedTask;
+        public Task<ModelProviderProbeResult> ProbeAsync(CancellationToken token = default) => Task.FromResult(result);
         public IModelProviderTurnExecutor CreateTurnExecutor() => throw new AssertFailedException("No turns.");
         public Task<IAgentSession> CreateSessionAsync(AgentSessionCreateOptions options, CancellationToken token = default) => throw new AssertFailedException("No sessions.");
         public Task<IAgentSession> ResumeSessionAsync(string id, AgentSessionResumeOptions options, CancellationToken token = default) => throw new AssertFailedException("No sessions.");

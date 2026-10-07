@@ -247,8 +247,26 @@ public sealed class ClaudeCodeProviderTests
         var probe = await runtime.ProbeAsync();
 
         Assert.AreEqual(ModelProviderAvailability.Failed, probe.Availability);
-        Assert.AreEqual("claude-code-unavailable", probe.ErrorCategory);
+        Assert.AreEqual("claude-code-not-found", probe.ErrorCategory);
         StringAssert.Contains(probe.StatusMessage, "was not found");
+    }
+
+    [TestMethod]
+    public async Task Probe_ReportsACliThatDoesNotStart()
+    {
+        var options = new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = "claude-code",
+            ResolveCli = static () => new ClaudeCodeCliResolution("/fake/bin/claude", null),
+            TransportFactory = new FailingTransportFactory(),
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(options);
+
+        var probe = await runtime.ProbeAsync();
+
+        Assert.AreEqual(ModelProviderAvailability.Failed, probe.Availability);
+        Assert.AreEqual("claude-code-unavailable", probe.ErrorCategory, "An executable that is there and does not run is not a missing one.");
+        StringAssert.Contains(probe.StatusMessage, "could not be started");
     }
 
     [TestMethod]
@@ -349,6 +367,12 @@ public sealed class ClaudeCodeProviderTests
         StringAssert.Contains(preamble, "[assistant]\nfixed");
         Assert.IsFalse(preamble.Contains("thinking", StringComparison.Ordinal), "The reasoning of another model is not passed on.");
         Assert.IsNull(ClaudeCodePrompts.CreateHistoryPreamble([]));
+    }
+
+    private sealed class FailingTransportFactory : IClaudeCodeTransportFactory
+    {
+        public IClaudeCodeTransport Start(ClaudeCodeLaunch launch)
+            => throw new InvalidOperationException($"Claude Code could not be started from '{launch.FileName}': access is denied.");
     }
 
     private static ClaudeCodeCliEnvironment CreateEnvironment(bool isWindows, string? path, params string[] files)

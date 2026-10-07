@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { GlobalConfigProvider } from "#neoastra";
-import { providerEdit, providerForm, providerFormDirty, runsOwnCli, usesAccountSignIn, validateProviderForm } from "./providerForm";
+import { providerEdit, providerForm, providerFormDirty, providerProblem, runsOwnCli, usesAccountSignIn, validateProviderForm } from "./providerForm";
 
 const types = ["openai-chat", "anthropic", "codex"];
 const local: GlobalConfigProvider = { key: "local", type: "openai-chat", enabled: true, displayName: "Local", effectiveName: "Local", model: "model-a",
@@ -57,4 +57,13 @@ test("a provider that runs its own CLI sends no key and no endpoint", () => {
   assert.equal(runsOwnCli("claude-code"), true);
   assert.equal(runsOwnCli("anthropic"), false);
   assert.equal(usesAccountSignIn("claude-code"), false);
+});
+
+test("a failed test says what to do when the host names its reason", () => {
+  assert.match(providerProblem("claude-code-signed-out") ?? "", /\/login/);
+  assert.match(providerProblem("claude-code-not-found") ?? "", /not found.*Install/);
+  assert.match(providerProblem("claude-code-unavailable") ?? "", /did not start/);
+  assert.equal(providerProblem("something-else"), null);
+  assert.equal(providerProblem(null), null);
+  assert.equal(providerProblem(undefined), null, "a host that gives no reason keeps the plain result");
 });

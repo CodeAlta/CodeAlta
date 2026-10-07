@@ -98,7 +98,7 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
         var resolution = _options.ResolveCli?.Invoke() ?? ClaudeCodeCliLocator.Resolve(_options.Command);
         if (resolution.Path is null)
         {
-            throw new InvalidOperationException(resolution.Error ?? "Claude Code was not found.");
+            throw new ClaudeCodeNotFoundException(resolution.Error ?? "Claude Code was not found.");
         }
 
         // Nothing of the conversation is used: the process works in the profile of the user and saves no session.

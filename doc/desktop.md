@@ -1190,7 +1190,9 @@ default model and **cached** host initialization availability. Opening the secti
 does not probe. **Test selected provider** explicitly starts only that enabled provider through
 the shared initialization service; it can use configured provider storage or network in an owned
 launch. The result is a completed initialization/probe, not proof of authentication or a live
-connection, and arbitrary provider error messages/URLs/categories are not shown. An abandoned
+connection, and arbitrary provider error messages/URLs/categories are not shown. A failed test
+whose cause is one of a fixed list (`reason` of the `probe` response: `claude-code-signed-out`,
+`claude-code-not-found`, `claude-code-unavailable`) shows the page's own text for it, which says what to do. An abandoned
 probe is still joined by the host before disposal; do not assume its outcome from a timed-out
 browser request. Catalog-only mode lists saved descriptors read-only without runtime tests.
 When the application starts without any enabled model provider, which is how a new profile starts,

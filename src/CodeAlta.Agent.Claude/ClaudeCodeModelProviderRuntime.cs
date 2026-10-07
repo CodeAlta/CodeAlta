@@ -117,7 +117,8 @@ public sealed class ClaudeCodeModelProviderRuntime : IAgentModelProviderRuntime
                 ProviderId = Descriptor.ProviderId,
                 Availability = ModelProviderAvailability.Failed,
                 StatusMessage = ex.Message,
-                ErrorCategory = "claude-code-unavailable",
+                // A missing executable is installed; one that does not run or answer is looked at in a terminal.
+                ErrorCategory = ex is ClaudeCodeNotFoundException ? "claude-code-not-found" : "claude-code-unavailable",
             };
         }
 

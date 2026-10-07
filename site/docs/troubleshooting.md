@@ -78,7 +78,7 @@ For API-key providers, verify that the environment variable exists in the shell 
 The `claude-code` provider runs the Claude Code CLI you installed; CodeAlta has no sign-in for it.
 
 - **Claude Code was not found**: install it, or set `command` of the provider to the path of the executable. The desktop app started from the Dock or the Start menu does not have the `PATH` of your shell; CodeAlta also looks in `~/.local/bin`, Homebrew and npm folders. On Windows, install the native Claude Code (`irm https://claude.ai/install.ps1 | iex`): the `claude.cmd` of an npm installation is not run.
-- **Claude Code is not signed in**: run `claude` in a terminal, use `/login`, then use **Refresh** in the provider editor. `claude auth status` shows what the CLI is signed in with.
+- **Claude Code is not signed in**: the test of the provider says so. Run `claude` in a terminal, use `/login`, then use **Test selected provider** in CodeAlta Desktop, or **Refresh** in the provider editor of CodeAlta TUI. `claude auth status` shows what the CLI is signed in with. Being signed in to the Claude desktop application does not sign in the CLI.
 - **A turn fails with a usage limit or a billing message**: the message comes from Claude Code and the account it uses. Limits are those of that account's plan.
 - **A resumed session starts without its context**: Claude Code keeps its transcript per folder under `~/.claude/projects`. When it is missing, CodeAlta starts a new Claude Code conversation and gives it the recorded conversation as context.
 

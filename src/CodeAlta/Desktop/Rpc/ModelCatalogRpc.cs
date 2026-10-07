@@ -101,7 +101,7 @@ internal sealed class ModelCatalogService(
             await initialization!.RefreshProviderAsync(descriptor.ProviderId, CancellationToken.None).ConfigureAwait(false);
             var state = initialization.CurrentStates.FirstOrDefault(value => value.ProviderId == descriptor.ProviderId);
             result = state is null ? new("probe_failed", epoch, descriptor.ProviderId.Value, "Unknown")
-                : new("ok", epoch, descriptor.ProviderId.Value, state.Availability.ToString());
+                : new("ok", epoch, descriptor.ProviderId.Value, state.Availability.ToString()) { Reason = Reason(state) };
         }
         catch (Exception) { result = new("probe_failed", epoch, descriptor.ProviderId.Value, "Unknown"); }
         completion.TrySetResult(result);
@@ -155,6 +155,18 @@ internal sealed class ModelCatalogService(
         catch (OperationCanceledException) { throw; }
         catch (Exception) { return new("read_failed", epoch, descriptor.ProviderId.Value, "Unknown", [], false); }
     }
+
+    // Why a provider is not ready, as one of the codes the page has a text for: the message of the provider stays here.
+    private static string? Reason(ModelProviderStateSnapshot state)
+        => state.Availability is ModelProviderAvailability.Failed or ModelProviderAvailability.Unsupported
+            ? state.ErrorCategory switch
+            {
+                "claude-code-signed-out" => "claude-code-signed-out",
+                "claude-code-not-found" => "claude-code-not-found",
+                "claude-code-unavailable" => "claude-code-unavailable",
+                _ => null,
+            }
+            : null;
 
     private string? CheckEpoch(string expected) => epoch is null || registry is null || initialization is null ? "unconfigured"
         : !ValidId(expected) ? "invalid_request" : !string.Equals(expected, epoch, StringComparison.Ordinal) ? "stale_epoch" : null;
@@ -226,7 +238,10 @@ internal sealed record ModelCatalogProvider(string Id, string Name, bool Enabled
     public DateTimeOffset? ObservedAt { get; init; }
 }
 internal sealed record ModelCatalogProbeRequest(string ExpectedEpoch, string ProviderId);
-internal sealed record ModelCatalogProbeResponse(string Status, string? Epoch, string? ProviderId, string Availability);
+internal sealed record ModelCatalogProbeResponse(string Status, string? Epoch, string? ProviderId, string Availability)
+{
+    public string? Reason { get; init; }
+}
 internal sealed record ModelCatalogModelsRequest(string ExpectedEpoch, string ProviderId);
 internal sealed record ModelCatalogModelsResponse(string Status, string? Epoch, string? ProviderId, string Availability, IReadOnlyList<ModelCatalogModel> Models, bool Truncated);
 internal sealed record ModelCatalogModel(string Id, string Name, string? Description, IReadOnlyList<string> Efforts, string? DefaultEffort,
