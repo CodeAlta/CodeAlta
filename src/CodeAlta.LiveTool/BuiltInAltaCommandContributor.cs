@@ -94,6 +94,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Mutating("prompt edit", requiresRuntime: false, supportsCatalogOnlyContext: true),
         Read("plugin list"),
         Read("plugin status"),
+        Read("plugin api", requiresRuntime: false, supportsCatalogOnlyContext: true),
     ];
 
     // They change nothing but what the window shows.
@@ -155,8 +156,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var editor = context.Services.Get<IAltaEditorView>() is not null;
         var terminals = context.Services.Get<IAltaTerminals>() is not null;
         var automations = context.Services.Get<IAltaAutomations>() is not null;
-        if (!changes && !editor && !terminals && !automations) return Policies;
+        var workshop = context.Services.Get<AltaPluginWorkshop>();
+        if (!changes && !editor && !terminals && !automations && workshop is null) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
+        if (workshop is not null) policies.AddRange(PluginWorkshopPolicies);
+        if (workshop?.OpenEditor is not null) policies.Add(PluginOpenPolicy);
         if (changes) policies.Add(DiffShowPolicy);
         if (editor) policies.Add(EditorOpenPolicy);
         if (terminals) policies.AddRange(TerminalPolicies);
@@ -945,7 +949,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         group.Add(CreateSkillListCommand(context));
         group.Add(CreateSkillShowCommand(context));
         group.Add(CreateSkillActivateCommand(context, "activate"));
-        AddHelpText(group, "Examples: `alta skill list`; `alta skill show <skill-name>`; `alta skill activate <skill-name> --session <session-id>`.");
+        AddHelpText(group, "Examples: `alta skill list`; `alta skill show <skill-name>`; `alta skill activate <skill-name>` for your own session; `alta skill activate <skill-name> --session <session-id>` for another one.");
         return group;
     }
 
@@ -989,7 +993,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         string? sessionId = null;
         var command = Leaf(name, name == "skills_activate" ? "Compatibility skill activation command." : "Activate a CodeAlta-managed skill for a session.");
         command.Add("<skill-name>", "Skill name.", value => skillName = value);
-        command.Add("session=", "Target session/session id.", value => sessionId = value);
+        command.Add("session=", "Target session id. Defaults to the calling session.", value => sessionId = value);
         command.Add(async (_, _) => await HandleSkillActivateAsync(context, skillName, sessionId).ConfigureAwait(false));
         return command;
     }
@@ -1343,32 +1347,6 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             command.Add("content=", "Replacement file content. Prefer --stdin for multi-line prompt files.", value => options.Content = value);
             command.Add("stdin", "Read replacement file content from stdin.", value => options.UseStdin = value is not null);
         }
-    }
-
-    private static Command CreatePluginCommand(AltaCommandContext context)
-    {
-        var group = Group("plugin", "Inspect loaded/discovered plugins.");
-        group.Add(CreatePluginListCommand(context));
-        group.Add(CreatePluginStatusCommand(context));
-        return group;
-    }
-
-    private static Command CreatePluginListCommand(AltaCommandContext context)
-    {
-        var detailed = false;
-        var command = Leaf("list", "List plugin runtime summaries.");
-        command.Add("detailed", "Emit one detailed plugin record per runtime instead of compact plugin refs.", value => detailed = value is not null);
-        command.Add((_, _) => HandlePluginList(context, detailed));
-        return command;
-    }
-
-    private static Command CreatePluginStatusCommand(AltaCommandContext context)
-    {
-        string? runtimeKey = null;
-        var command = Leaf("status", "Show one plugin runtime summary.");
-        command.Add("<runtime-key>", "Plugin runtime key.", value => runtimeKey = value);
-        command.Add((_, _) => HandlePluginStatus(context, runtimeKey));
-        return command;
     }
 
     private static Command Group(string name, string description)
@@ -3171,9 +3149,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return UsageError(context, "usage.missingSkill", "Skill name is required.", "alta skill activate");
         }
 
-        if (string.IsNullOrWhiteSpace(sessionId))
+        // A session that activates a skill means itself.
+        sessionId = NormalizeOptionalText(sessionId) ?? NormalizeOptionalText(context.Caller.SourceSessionId);
+        if (sessionId is null)
         {
-            return UsageError(context, "usage.missingSession", "--session <session-id> is required.", "alta skill activate");
+            return UsageError(context, "usage.missingSession", "--session <session-id> is required outside a session.", "alta skill activate");
         }
 
         if (!context.TryGetRequired<SessionRuntimeService>(nameof(SessionRuntimeService), out var runtime))
@@ -3387,43 +3367,6 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         WriteModelSelection(context, "alta.model.selection", result.Selection!, sessionId: null, options.PromptId);
         return AltaExitCodes.Success;
-    }
-
-    private static ValueTask<int> HandlePluginList(AltaCommandContext context, bool detailed)
-    {
-        var catalog = context.Services.Get<IAltaPluginCatalog>();
-        var plugins = catalog?.ListPlugins() ?? [];
-        if (!detailed)
-        {
-            WritePluginRefs(context, plugins);
-            return ValueTask.FromResult(AltaExitCodes.Success);
-        }
-
-        foreach (var plugin in plugins)
-        {
-            WritePlugin(context, "alta.plugin.item", plugin);
-        }
-
-        WriteSummary(context, "alta.plugin.summary", plugins.Count, truncated: false);
-        return ValueTask.FromResult(AltaExitCodes.Success);
-    }
-
-    private static ValueTask<int> HandlePluginStatus(AltaCommandContext context, string? runtimeKey)
-    {
-        if (string.IsNullOrWhiteSpace(runtimeKey))
-        {
-            return ValueTask.FromResult(UsageError(context, "usage.missingPlugin", "Plugin runtime key is required.", "alta plugin status"));
-        }
-
-        var catalog = context.Services.Get<IAltaPluginCatalog>();
-        var plugin = catalog?.GetPlugin(runtimeKey);
-        if (plugin is null)
-        {
-            return ValueTask.FromResult(NotFound(context, "plugin.notFound", $"Plugin '{runtimeKey}' was not found."));
-        }
-
-        WritePlugin(context, "alta.plugin.status", plugin);
-        return ValueTask.FromResult(AltaExitCodes.Success);
     }
 
     private static async ValueTask<int> HandleNotesGetAsync(AltaCommandContext context)
@@ -5458,33 +5401,6 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static bool ContainsOrdinalIgnoreCase(string? value, string text)
         => value?.Contains(text, StringComparison.OrdinalIgnoreCase) == true;
-
-    private static void WritePlugin(AltaCommandContext context, string type, AltaPluginSummary plugin)
-    {
-        AltaJsonlWriter.WriteRecord(context.Stdout, new
-        {
-            type,
-            version = 1,
-            correlationId = context.CorrelationId,
-            plugin.RuntimeKey,
-            plugin.DisplayName,
-            pluginVersion = plugin.Version,
-            plugin.Scope,
-            plugin.State,
-            plugin.Diagnostics,
-        });
-    }
-
-    private static void WritePluginRefs(AltaCommandContext context, IReadOnlyList<AltaPluginSummary> plugins)
-        => AltaJsonlWriter.WriteRecord(context.Stdout, new
-        {
-            type = "alta.plugin.refs",
-            plugins = plugins.Select(static plugin => new
-            {
-                runtimeKey = plugin.RuntimeKey,
-                state = plugin.State,
-            }).ToArray(),
-        });
 
     private static void WriteSummary(AltaCommandContext context, string type, int count, bool truncated)
     {

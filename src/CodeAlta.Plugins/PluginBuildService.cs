@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Plugins;
@@ -109,6 +111,12 @@ public sealed record PluginBuildResult
     /// <summary>Gets runtime diagnostics raised by build orchestration.</summary>
     public IReadOnlyList<PluginRuntimeDiagnostic> RuntimeDiagnostics { get; init; } = [];
 
+    /// <summary>Gets when the build ended, or when the up-to-date output was found.</summary>
+    public DateTimeOffset CompletedAt { get; init; } = DateTimeOffset.UtcNow;
+
+    /// <summary>Gets how long the build process ran; null when none was started.</summary>
+    public TimeSpan? Duration { get; init; }
+
     /// <summary>
     /// Creates a structured build summary suitable for plugin status descriptors and management UI.
     /// </summary>
@@ -180,7 +188,7 @@ public sealed record PluginBuildSummary
 /// <summary>
 /// Runs <c>dotnet build plugin.cs</c> for source plugin packages and resolves the output from CodeAlta-generated build output.
 /// </summary>
-public sealed class PluginBuildService : IPluginBuildService
+public sealed partial class PluginBuildService : IPluginBuildService
 {
     private readonly PluginBuildManifestStore? _manifestStore;
     private readonly PluginBuildLockService? _buildLockService;
@@ -277,6 +285,7 @@ public sealed class PluginBuildService : IPluginBuildService
         var outputBuilder = new StringBuilder();
         var errorBuilder = new StringBuilder();
         int? exitCode = null;
+        var started = Stopwatch.GetTimestamp();
         process.OutputDataReceived += (_, args) =>
         {
             if (args.Data is not null)
@@ -338,6 +347,7 @@ public sealed class PluginBuildService : IPluginBuildService
 
         var standardOutput = outputBuilder.ToString();
         var standardError = errorBuilder.ToString();
+        diagnostics.AddRange(ParseDiagnostics(standardOutput, package.PackageDirectory));
         AddTargetPathMessages(targetOutputs, standardOutput);
         if (exitCode != 0 && LooksLikeFileBasedBuildIsUnsupported(standardOutput, standardError))
         {
@@ -370,8 +380,84 @@ public sealed class PluginBuildService : IPluginBuildService
             RuntimeDiagnostics = runtimeDiagnostics,
             StandardOutput = standardOutput,
             StandardError = standardError,
+            Duration = Stopwatch.GetElapsedTime(started),
         };
     }
+
+    /// <summary>
+    /// Reads the errors and the warnings of the compiler, of MSBuild and of NuGet from the output of a build:
+    /// lines such as <c>C:\plugins\notes\plugin.cs(6,27): error CS0103: … [project]</c>. A file of the package is
+    /// named by its path in the package folder. A line that the build prints twice is kept once.
+    /// </summary>
+    /// <param name="output">The standard output of the build.</param>
+    /// <param name="packageDirectory">The folder of the package.</param>
+    /// <returns>The diagnostics, in the order of the output.</returns>
+    internal static IReadOnlyList<PluginBuildDiagnostic> ParseDiagnostics(string output, string packageDirectory)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageDirectory);
+        var diagnostics = new List<PluginBuildDiagnostic>();
+        var seen = new HashSet<(string?, int, int, string?, string)>();
+        foreach (var raw in output.Split('\n'))
+        {
+            var match = BuildDiagnosticLine().Match(raw.Trim());
+            if (!match.Success) continue;
+            var message = match.Groups["message"].Value.Trim();
+            string? project = null;
+            var at = message.EndsWith(']') ? message.LastIndexOf(" [", StringComparison.Ordinal) : -1;
+            if (at >= 0)
+            {
+                project = message[(at + 2)..^1];
+                message = message[..at].TrimEnd();
+            }
+
+            var origin = match.Groups["origin"].Value.Trim();
+            var line = 0;
+            var column = 0;
+            if (BuildDiagnosticLocation().Match(origin) is { Success: true } location)
+            {
+                origin = location.Groups["file"].Value.Trim();
+                line = int.Parse(location.Groups["line"].Value, CultureInfo.InvariantCulture);
+                if (location.Groups["column"].Success) column = int.Parse(location.Groups["column"].Value, CultureInfo.InvariantCulture);
+            }
+
+            // "CSC", "MSBUILD" and an empty origin name the tool, not a file.
+            var file = origin.Length == 0 || origin.IndexOfAny(['\\', '/', '.']) < 0 ? null : RelativeToPackage(origin, packageDirectory);
+            var diagnostic = new PluginBuildDiagnostic
+            {
+                Severity = match.Groups["severity"].Value == "error" ? PluginDiagnosticSeverity.Error : PluginDiagnosticSeverity.Warning,
+                Code = match.Groups["code"].Value,
+                Message = message,
+                File = file,
+                LineNumber = line,
+                ColumnNumber = column,
+                ProjectFile = project,
+            };
+            if (seen.Add((diagnostic.File, line, column, diagnostic.Code, message))) diagnostics.Add(diagnostic);
+        }
+
+        return diagnostics;
+    }
+
+    private static string RelativeToPackage(string file, string packageDirectory)
+    {
+        try
+        {
+            if (!Path.IsPathFullyQualified(file)) return file.Replace('\\', '/');
+            var relative = Path.GetRelativePath(packageDirectory, file);
+            return relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative) ? file : relative.Replace('\\', '/');
+        }
+        catch (ArgumentException)
+        {
+            return file;
+        }
+    }
+
+    [GeneratedRegex(@"^(?<origin>.*?)\s*:\s*(?<severity>error|warning)\s+(?<code>[A-Za-z]{1,10}\d{1,6})\s*:\s*(?<message>.*)$", RegexOptions.CultureInvariant)]
+    private static partial Regex BuildDiagnosticLine();
+
+    [GeneratedRegex(@"^(?<file>.+)\((?<line>\d+)(?:,(?<column>\d+))?(?:,\d+,\d+)?\)$", RegexOptions.CultureInvariant)]
+    private static partial Regex BuildDiagnosticLocation();
 
     internal static ProcessStartInfo CreateFileBuildStartInfo(SourcePluginPackage package)
     {
@@ -784,6 +870,26 @@ public sealed class PluginBuildManifestStore
         var scope = package.Root.Scope.ToString().ToLowerInvariant();
         var rootHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(package.Root.RootPath))).ToLowerInvariant();
         return Path.Combine(_cacheRoot, "plugins", "build", scope, rootHash, package.PackageId, "manifest.json");
+    }
+
+    /// <summary>
+    /// One value for the source of a package as it is on disk: its entry file and the files that file includes.
+    /// It changes when one of them changes.
+    /// </summary>
+    /// <param name="package">The package.</param>
+    /// <returns>The value, or null when a source file cannot be read.</returns>
+    internal static string? ComputeSourceStamp(SourcePluginPackage package)
+    {
+        ArgumentNullException.ThrowIfNull(package);
+        try
+        {
+            var text = string.Join('\n', ComputeSourceInputHashes(package).OrderBy(static pair => pair.Key, StringComparer.Ordinal).Select(static pair => pair.Key + "=" + pair.Value));
+            return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private static IReadOnlyDictionary<string, string> ComputeSourceInputHashes(SourcePluginPackage package)

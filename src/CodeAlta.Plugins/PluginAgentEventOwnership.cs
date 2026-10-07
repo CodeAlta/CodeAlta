@@ -86,6 +86,10 @@ public sealed partial class ActivePluginInstance
     private readonly List<PluginRuntimeDiagnostic> _deactivationDiagnostics = [];
     internal IReadOnlyList<PluginRuntimeDiagnostic> DeactivationDiagnostics => _deactivationDiagnostics;
 
+    // False for the previous version of a package that is built again: its load context is asked to unload and
+    // left to the collector, without the forced collections that verify it.
+    internal bool VerifiesUnload { get; set; } = true;
+
     /// <summary>Gets bounded event admission statistics for this activation, including stale-snapshot rejection.</summary>
     public PluginAgentEventAdmissionSnapshot AgentEventAdmission
     {
@@ -208,7 +212,8 @@ public sealed partial class ActivePluginInstance
         await QuiesceAgentEventsAsync().ConfigureAwait(false);
         // A fault leaves the instance, context, CTS and load context retained; no finally-release.
         await DeactivateAndReleaseInstanceAsync().ConfigureAwait(false);
-        VerifyUnload(_deactivationDiagnostics);
+        if (VerifiesUnload) VerifyUnload(_deactivationDiagnostics);
+        else _ = DetachLoadContext();
         _lifetime.Dispose();
     }
 
@@ -242,6 +247,9 @@ public sealed partial class PluginRuntimeManager
 {
     private readonly AsyncLocal<PluginOwnedOperation?> _startScope = new AsyncLocal<PluginOwnedOperation?>();
     private PluginOwnedOperation? _ownedStart;
+    private PluginOwnedOperation? _ownedChange;
+    // Previous versions of packages that were built again and whose deactivation has not ended.
+    private readonly List<ActivePluginInstance> _retired = [];
     private PluginOwnedOperation? _eventDrain;
     private PluginOwnedOperation? _ownedDeactivation;
     private bool _eventAdmissionClosed;
@@ -264,6 +272,31 @@ public sealed partial class PluginRuntimeManager
                 finally { _startScope.Value = previous; }
             }, captureContext: true);
             _ownedStart = operation;
+        }
+        operation.Launch();
+        return operation.Work;
+    }
+
+    // A change after the start (a package built again, started or stopped) is owned like the start. Its caller
+    // runs one at a time; none is admitted before the start ended or once event admission is closed; and the
+    // close joins the one in flight before any dependency is released.
+    internal Task RunOwnedChangeAsync(Func<Task> body)
+    {
+        PluginOwnedOperation? operation = null;
+        lock (_lock)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_ownedStart is not { Work.IsCompletedSuccessfully: true })
+                throw new InvalidOperationException("The plugin runtime has not started.");
+            if (_eventAdmissionClosed) throw new InvalidOperationException("The plugin runtime is closing.");
+            operation = new PluginOwnedOperation(async () =>
+            {
+                var previous = _startScope.Value;
+                _startScope.Value = operation;
+                try { await body().ConfigureAwait(false); }
+                finally { _startScope.Value = previous; }
+            });
+            _ownedChange = operation;
         }
         operation.Launch();
         return operation.Work;
@@ -293,9 +326,9 @@ public sealed partial class PluginRuntimeManager
         ActivePluginInstance[] active;
         lock (_lock)
         {
-            if (_startScope.Value is { } start && ReferenceEquals(start, _ownedStart) && !start.Work.IsCompleted)
+            if (_startScope.Value is { } start && (ReferenceEquals(start, _ownedStart) || ReferenceEquals(start, _ownedChange)) && !start.Work.IsCompleted)
                 throw new InvalidOperationException("Plugin startup cannot await its own dependency release.");
-            active = [.. _activePlugins];
+            active = [.. _activePlugins, .. _retired];
         }
         foreach (var plugin in active) plugin.ThrowIfAgentEventSelfJoin();
     }
@@ -323,15 +356,18 @@ public sealed partial class PluginRuntimeManager
     private async Task QuiesceManagerCoreAsync()
     {
         PluginOwnedOperation? startup;
+        PluginOwnedOperation? change;
         ActivePluginInstance[] early;
-        lock (_lock) { startup = _ownedStart; early = [.. _activePlugins]; }
+        lock (_lock) { startup = _ownedStart; change = _ownedChange; early = [.. _activePlugins, .. _retired]; }
         // Start existing controls before joining startup, which can itself be awaiting a plugin task.
         var earlyControls = early.Select(plugin => new PluginOwnedOperation(plugin.QuiesceAgentEventsAsync)).ToArray();
         foreach (var control in earlyControls) control.Launch();
         var startupFailure = startup is null ? null : await startup.Outcome.ConfigureAwait(false);
+        // A change in flight bounds its own late acquisitions the same way; its failure belongs to its caller.
+        if (change is not null) await change.Outcome.ConfigureAwait(false);
         ActivePluginInstance[] all;
         PluginOwnedOperation[] lateControls;
-        lock (_lock) { all = [.. _activePlugins]; lateControls = [.. _lateEventControls]; }
+        lock (_lock) { all = [.. _activePlugins, .. _retired]; lateControls = [.. _lateEventControls]; }
         var controls = all.Select(plugin => new PluginOwnedOperation(plugin.QuiesceAgentEventsAsync)).ToArray();
         foreach (var control in controls) control.Launch();
         // Startup's terminal outcome bounds late acquisitions. Join every wrapper and its observer too,
@@ -355,13 +391,13 @@ public sealed partial class PluginRuntimeManager
             {
                 await QuiesceAgentEventsAsync().ConfigureAwait(false);
                 ActivePluginInstance[] active;
-                lock (_lock) active = [.. _activePlugins];
+                lock (_lock) active = [.. _retired, .. _activePlugins];
                 foreach (var plugin in active.Reverse())
                 {
                     await plugin.DeactivateOriginalAsync().ConfigureAwait(false);
                     _diagnostics.AddRange(plugin.DeactivationDiagnostics);
                 }
-                lock (_lock) _activePlugins.Clear();
+                lock (_lock) { _activePlugins.Clear(); _retired.Clear(); }
             });
         }
         operation.Launch();

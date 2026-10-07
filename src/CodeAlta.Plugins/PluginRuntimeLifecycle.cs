@@ -208,13 +208,19 @@ public sealed class PluginRuntimeActivator
             var logger = LogManager.GetLogger($"CodeAlta.Plugin.{discoveredType.Descriptor.RuntimeKey}");
             var lifetime = new PluginActivationLifetime(cancellationToken);
             var taskService = new PluginRuntimeTaskService(lifetime.Token);
+            var hostServices = options.Services ?? new NoopPluginServices(logger);
+            // A host that keeps no plugin data of its own gives each plugin a folder in the CodeAlta home.
+            var state = hostServices.State is NoopPluginStateStore && !string.IsNullOrWhiteSpace(options.HostInfo.UserDataDirectory)
+                ? new PluginFileStateStore(Path.Combine(options.HostInfo.UserDataDirectory, "plugin-data"), discoveredType.Descriptor.RuntimeKey, sourcePackage?.Root.ProjectPath, hostServices)
+                : null;
             var services = new PluginRuntimeServices(
                 logger,
                 discoveredType.Descriptor.RuntimeKey,
                 sourcePackage?.Root.Scope ?? PluginScope.Global,
                 sourcePackage?.Root.ProjectId,
-                options.Services ?? new NoopPluginServices(logger),
-                taskService);
+                hostServices,
+                taskService,
+                state);
             var context = new PluginRuntimeContext
             {
                 Plugin = discoveredType.Descriptor,

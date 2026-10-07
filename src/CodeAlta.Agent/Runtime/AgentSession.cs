@@ -247,7 +247,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 // this request offers them, so the model goes on in the same turn.
                 if (runTools.Take() is { Count: > 0 } addedTools)
                 {
-                    allTools = [.. allTools, .. addedTools];
+                    // A tool registered again under a name of the run (a plugin that was built again) takes its place.
+                    var names = addedTools.Select(static tool => AgentToolBridge.GetRegisteredToolName(tool.Spec.Name)).ToHashSet(StringComparer.Ordinal);
+                    allTools = [.. allTools.Where(tool => !names.Contains(AgentToolBridge.GetRegisteredToolName(tool.Spec.Name))), .. addedTools];
                     toolMap = AgentToolBridge.CreateDefinitionMap(allTools);
                 }
 

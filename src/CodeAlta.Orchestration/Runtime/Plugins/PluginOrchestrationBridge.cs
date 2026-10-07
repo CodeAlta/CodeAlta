@@ -95,6 +95,27 @@ public sealed class PluginOrchestrationBridge
         => _adapter.GetAgentTools(MarkHeadless(options));
 
     /// <summary>
+    /// Returns the agent tools that plugins contribute to a scope, as a run gets them: each one runs the tool call
+    /// hooks of the plugins. A turn that is running registers them to use, at once, the tools of a plugin that
+    /// was just started or built again.
+    /// </summary>
+    /// <param name="options">Operation scope options.</param>
+    /// <param name="pluginRuntimeKeys">The plugins whose tools are returned; null for those of every plugin.</param>
+    /// <returns>The tools, ready for a run.</returns>
+    public IReadOnlyList<AgentToolDefinition> CreateAgentTools(PluginAdapterOperationOptions? options = null, IReadOnlyCollection<string>? pluginRuntimeKeys = null)
+    {
+        var effectiveOptions = MarkHeadless(options);
+        // The tools the scope is given, then those of the plugins that were asked for.
+        var applicable = _adapter.GetAgentTools(effectiveOptions);
+        return [.. _adapter.GetContributions<PluginAgentToolContribution>(PluginPoint.AgentTool, effectiveOptions)
+            .Where(registration => pluginRuntimeKeys is null || pluginRuntimeKeys.Contains(registration.Handle.PluginRuntimeKey))
+            .Select(static registration => registration.Contribution)
+            .OfType<PluginAgentToolContribution>()
+            .Where(tool => applicable.Contains(tool))
+            .Select(tool => WrapPluginTool(tool.Definition, effectiveOptions, contributed: true))];
+    }
+
+    /// <summary>
     /// Builds per-run plugin prompt and tool augmentation for a headless orchestration run.
     /// </summary>
     /// <param name="executionOptions">The current session execution options.</param>
@@ -293,7 +314,7 @@ public sealed class PluginOrchestrationBridge
 
         foreach (var contribution in _adapter.GetAgentTools(options))
         {
-            tools.Add(WrapPluginTool(contribution.Definition, options));
+            tools.Add(WrapPluginTool(contribution.Definition, options, contributed: true));
         }
 
         return tools.Count == 0 ? null : tools;
@@ -333,14 +354,24 @@ public sealed class PluginOrchestrationBridge
         return tools.Count == 0 ? null : tools;
     }
 
-    private AgentToolDefinition WrapPluginTool(AgentToolDefinition definition, PluginAdapterOperationOptions options)
+    // A session keeps the tools it was given while they look the same (name, description, parameters). A plugin
+    // that is built again has a new tool that looks the same: a contributed tool is the one its plugin has when it
+    // is called, never the tool of a version that was stopped.
+    private AgentToolDefinition WrapPluginTool(AgentToolDefinition given, PluginAdapterOperationOptions options, bool contributed = false)
     {
-        return definition with
+        return given with
         {
             Handler = async (invocation, cancellationToken) =>
             {
                 // Scoped to this call: an async method's changes to the flow do not reach its caller.
                 ToolOperation.Value = options;
+                var definition = contributed ? CurrentTool(given, options) : given;
+                if (definition is null)
+                {
+                    var stopped = $"The plugin that provides the tool '{given.Spec.Name}' is not running.";
+                    return new AgentToolResult(false, [new AgentToolResultItem.Text(stopped)], stopped);
+                }
+
                 var activePlugins = _getActivePlugins();
                 if (activePlugins.Count == 0)
                 {
@@ -364,6 +395,18 @@ public sealed class PluginOrchestrationBridge
                     : result;
             },
         };
+    }
+
+    private AgentToolDefinition? CurrentTool(AgentToolDefinition given, PluginAdapterOperationOptions options)
+    {
+        AgentToolDefinition? named = null;
+        foreach (var contribution in _adapter.GetAgentTools(options))
+        {
+            if (ReferenceEquals(contribution.Definition, given)) return given;
+            if (named is null && string.Equals(contribution.Definition.Spec.Name, given.Spec.Name, StringComparison.Ordinal)) named = contribution.Definition;
+        }
+
+        return named;
     }
 
     private static string? ExtractText(AgentInput input)

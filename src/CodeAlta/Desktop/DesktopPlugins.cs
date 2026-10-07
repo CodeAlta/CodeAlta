@@ -61,6 +61,23 @@ internal static class DesktopPlugins
     }
 
     /// <summary>
+    /// What <c>alta plugin</c> does with the source plugins of a window: it builds one again while the host runs,
+    /// and shows the folder of one in the code editor.
+    /// </summary>
+    /// <param name="runtime">The plugin runtime of the host.</param>
+    /// <param name="editor">Where the window is asked to open its code editor.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="runtime"/> or <paramref name="editor"/> is null.</exception>
+    internal static CodeAlta.LiveTool.AltaPluginWorkshop Workshop(PluginRuntimeManager runtime, DesktopEditorView editor)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        ArgumentNullException.ThrowIfNull(editor);
+        return new(runtime)
+        {
+            OpenEditor = (package, file, line, column) => editor.OpenFolder(PluginFolder.Of(package, projectId: null), package.PackageDirectory, file, line, column),
+        };
+    }
+
+    /// <summary>
     /// Whether the user turned plugins off for this launch (<c>CODEALTA_DISABLE_PLUGINS=1</c>): no plugin is
     /// built, loaded or activated, the built-in ones included.
     /// </summary>

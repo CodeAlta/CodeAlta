@@ -16,7 +16,7 @@ Plugin-contributed skill roots are included through plugin resource contribution
 
 Use `.alta/skills/` when a skill depends on CodeAlta behavior. The `.agents/skills/` roots are common `SKILL.md` roots that CodeAlta can read without making them CodeAlta-owned.
 
-CodeAlta ships a built-in `codealta-plugin-runtime` skill with plugin authoring and troubleshooting guidance plus sample plugin folders.
+CodeAlta ships a built-in `codealta-plugin-runtime` skill with plugin authoring and troubleshooting guidance plus sample plugin folders. It is written for an agent that works on a plugin from a session: which `alta plugin` command creates, builds, reloads and inspects a plugin, how to look at the window with the UI tools, how to look the API up, and one section for each kind of contribution.
 
 ## `SKILL.md` format
 
@@ -97,8 +97,10 @@ Managed sessions with the `alta` live tool use the singular `skill` command grou
 ```text
 alta skill list [--project <id|slug|path>]
 alta skill show <skill-name> [--project <id|slug|path>]
-alta skill activate <skill-name> --session <session-id>
+alta skill activate <skill-name> [--session <session-id>]
 ```
+
+`--session` defaults to the calling session; a caller that belongs to no session names one.
 
 `alta skills activate` and `alta skills_activate` remain aliases for existing prompt text; prefer `alta skill activate` in new guidance. Disabled skills are hidden from `list`/`show`, and activation uses the same enablement-enforced runtime path as the UI before recording the activation in the session journal.
 

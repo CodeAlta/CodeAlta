@@ -252,7 +252,7 @@ public sealed class PluginAssemblyLoader
         {
             loadContext = new PluginAssemblyLoadContext(outputAssemblyPath, _authoringProfile, _hostSharedAssemblyNames);
             loadContext.ValidateMainAssembly(outputAssemblyPath);
-            var assembly = loadContext.LoadFromAssemblyPath(outputAssemblyPath);
+            var assembly = LoadFromMemory(loadContext, outputAssemblyPath);
             return new PluginAssemblyLoadResult
             {
                 Package = buildResult.Package,
@@ -261,7 +261,7 @@ public sealed class PluginAssemblyLoader
                 Assembly = assembly,
             };
         }
-        catch (Exception ex) when (ex is FileLoadException or FileNotFoundException or BadImageFormatException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or BadImageFormatException)
         {
             loadContext?.Unload();
             return new PluginAssemblyLoadResult
@@ -279,6 +279,19 @@ public sealed class PluginAssemblyLoader
                 ],
             };
         }
+    }
+
+    // The assembly of a package is built again to the same file while this version runs, and a file that a
+    // load context maps stays locked on Windows until the context is collected. So the plugin assembly is
+    // read into memory, with its symbols for the line numbers of a stack trace. Its private dependencies keep
+    // their files: a build copies them only when they change.
+    private static Assembly LoadFromMemory(PluginAssemblyLoadContext loadContext, string assemblyPath)
+    {
+        using var image = new MemoryStream(File.ReadAllBytes(assemblyPath), writable: false);
+        var symbolsPath = Path.ChangeExtension(assemblyPath, ".pdb");
+        if (!File.Exists(symbolsPath)) return loadContext.LoadFromStream(image);
+        using var symbols = new MemoryStream(File.ReadAllBytes(symbolsPath), writable: false);
+        return loadContext.LoadFromStream(image, symbols);
     }
 
     /// <summary>

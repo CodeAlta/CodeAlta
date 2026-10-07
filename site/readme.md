@@ -234,7 +234,7 @@ altatui</code></pre>
     </div>
     <div class="alta-card">
       <h3><span class="alta-icon" style="--accent: #a3e635; --accent-2: #06b6d4;"><i class="bi bi-puzzle"></i></span> Plugins</h3>
-      <p>Extend the host with trusted local .NET plugins when prompts and configuration are not enough.</p>
+      <p>Extend the host with trusted local .NET plugins when prompts and configuration are not enough. In the desktop app, an agent writes one for you and reloads it while the app runs.</p>
       <a href="{{site.basepath}}/docs/plugins/" class="stretched-link" aria-label="Plugins"></a>
     </div>
   </div>

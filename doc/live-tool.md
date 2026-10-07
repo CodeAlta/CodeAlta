@@ -91,7 +91,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | `provider` | List configured providers and provider model refs. |
 | `model` | List, show, and resolve model refs. |
 | `prompt` | List, inspect, create, edit, and select file-backed agent or system prompts. |
-| `plugin` | Inspect active plugin runtime state. |
+| `plugin` | List and inspect the plugins and look their API up. In CodeAlta Desktop, also create, build and reload source plugins. |
 | `diff` | Show the changed files of a project to the user. Only in CodeAlta Desktop. |
 | `editor` | Show the files of a project to the user in the code editor. Only in CodeAlta Desktop. |
 | `terminal` | List, create, read, type in, rename, show and close the terminals of the window. Only in CodeAlta Desktop. |
@@ -494,10 +494,43 @@ does: in the terminal UI and the standalone tool it is not among the commands, t
 alta skill list --project <project>
 alta skill list --project <project> --detailed
 alta skill show <skill-name>
-alta skill activate <skill-name> --session <session-id>
+alta skill activate <skill-name> [--session <session-id>]
 ```
 
-Activation uses the same runtime path as the UI. It injects skill context into the target agent-runtime session when the session and skill are available.
+Without `--session`, a session activates the skill for itself. Activation uses the same runtime path as the UI. It injects skill context into the target agent-runtime session when the session and skill are available.
+
+## Plugin commands
+
+`alta plugin` inspects the plugins of the host. In CodeAlta Desktop it also creates, builds and reloads source plugins while the application runs, so a session writes a plugin and tries it in the same turn. The built-in `codealta-plugin-runtime` skill says how a plugin is written.
+
+| Command | What it does |
+| --- | --- |
+| `alta plugin list [--detailed]` | The plugins, the built-in ones included: id, `scope` (`builtin`, `global`, `project`) and `state` (`running`, `failed`, `disabled`, `unsupported`, `stopped`). |
+| `alta plugin status <plugin>` | One plugin: its folder, its state, whether its source changed since it was loaded, what it contributes, its last build and its diagnostics. |
+| `alta plugin api [<name>]` | The plugin API of the running version: every type, the types whose name has a word, or one type with its members and their summaries. A name that is not in the API is answered with the names that are close to it. |
+| `alta plugin create <id> [--project] [--name <name>] [--description <text>] [--no-start]` | Writes a first `plugin.cs` and a `README.md` in a new folder, then builds and starts the plugin. The plugin is global unless `--project` is given. |
+| `alta plugin build <plugin> [--force]` | Builds without loading: says whether the source compiles. |
+| `alta plugin reload <plugin> [--force]` | Builds, then replaces the running plugin by the new build, or starts it. |
+| `alta plugin refresh` | Applies what changed on disk and in the configuration: starts the new plugins, reloads those whose source changed, stops those that were removed or turned off. |
+| `alta plugin open <plugin> [--file <path>] [--line <n>] [--column <n>]` | Shows the folder of the plugin to the user in the code editor of the window, on a file (`plugin.cs` by default). |
+
+`<plugin>` is the id of a plugin (the folder name of a source plugin) or a runtime key. `--global` and `--project` choose between a global and a project plugin of the same id.
+
+`list`, `status` and `api` exist in every host. The other commands exist where the host registers an `AltaPluginWorkshop`: CodeAlta Desktop, when its plugins are started and the commands of its sessions are not reviewed by the user (building a plugin runs its code). `open` also needs the window. A project plugin is one of the folder CodeAlta was started in: `create --project` from a session of another project is refused with `plugin.otherProject`.
+
+Records are `alta.plugin.refs` (list), `alta.plugin.item` and `alta.plugin.summary` (list `--detailed`), `alta.plugin.status`, `alta.plugin.created`, `alta.plugin.build`, `alta.plugin.reload`, `alta.plugin.refresh`, `alta.plugin.opened`, `alta.plugin.api` and `alta.plugin.api.index`. The record of a source plugin has:
+
+- `id`, `scope`, `state`, `enabled`, `directory`, `file` (the `plugin.cs` to edit), `readme` and `sourceChanged`;
+- `plugins`: the running plugins of the package, each with its `runtimeKey`, `displayName`, `pluginVersion` and, for `status`, `create` and `reload`, its `contributions` (`point` and `name`);
+- `build`: `succeeded`, `upToDate`, `at`, `durationMs`, `errors`, `warnings` and `diagnostics`, the messages of the compiler with `severity`, `code`, `message`, `file`, `line` and `column` (40 at most, then `truncated`); the end of the build output is added when a build failed without such a message;
+- `diagnostics`: what the runtime recorded for the package (the 12 most recent);
+- `change` (create and reload): `started`, `reloaded`, `unchanged`, `buildFailed`, `startFailed` or `disabled`;
+- `agentTools` (create and reload): the names of the agent tools of the plugin, and `available`, which is `now` when they were registered in the turn of the calling session and `next_prompt` otherwise;
+- `next`: what to do next, in one sentence.
+
+`reload` exits with 0 only when the plugin runs, and `build` only when the source compiles. When a build fails, the plugin that ran keeps running. `create` exits with 0 once the files are written; its `change` says whether the plugin started. `refresh` lists the packages that changed with their `change`, and counts the others in `unchanged`.
+
+Errors: `plugin.notFound`, `plugin.ambiguous`, `plugin.exists`, `usage.missingPlugin`, `usage.invalidPlugin`, `plugin.otherProject`, `plugin.noProject`, `plugin.writeFailed`, `plugin.unavailable`, `plugin.apiNotFound`, `file.notFound` and `view.unavailable`.
 
 ## Plugin command roots
 

@@ -67,7 +67,7 @@ The desktop application (`src/CodeAlta`) and the terminal application (`src/Code
 
 **Portable results with an HTML form.** `PluginRenderResult.Html`, `PluginDerivedSessionEvent.Html`, `PluginDerivedSessionEventDetailSection.Html`, `PluginDynamicDerivedSessionEventContent.Html` and `PluginDialogRequest.Html` carry a fragment for the desktop application. The desktop shows the richest form (`Html`, then `Markdown`, then `Text`) and never a terminal visual; the terminal ignores `Html`. `PluginDialogRequest.OnAction` handles the actions of an HTML dialog and returns `PluginDialogActionResult` (keep open, new HTML, or close with a button name); `PluginDialogResponse.Values` holds the named fields.
 
-**HTML fragments are data, not code.** The page sanitizes a fragment with DOMPurify (`frontend/src/pluginHtmlSanitizer.ts`): an allow-list of text, structure and form elements, a per-element allow-list of attributes, `alta-*` classes only, and `http(s)` links that are shown and never followed. Scripts, styles, event handlers, images, frames and forms are removed. Buttons, inputs, tables, tags and callouts then get Blueprint classes. A fragment reaches the application only through attributes that `PluginHtml.tsx` handles by event delegation: `data-alta-command` runs a plugin command by name (the fragment's own plugin first), `data-alta-action` with `data-alta-value` raises a dialog action, and named fields are collected into `Values`. `PluginHtml` in the abstractions has the attribute and class names and the `Encode`, `CommandButton` and `ActionButton` helpers.
+**HTML fragments are data, not code.** The page sanitizes a fragment with DOMPurify (`frontend/src/pluginHtmlSanitizer.ts`): an allow-list of text, structure and form elements, a per-element allow-list of attributes, `alta-*` classes only, and `http(s)` links that are shown and never followed. Scripts, styles, event handlers, images, frames and forms are removed. Buttons, inputs, tables, tags and callouts then get Blueprint classes. A fragment reaches the application only through attributes that `PluginHtml.tsx` handles by event delegation: `data-alta-command` runs a plugin command by name (the fragment's own plugin first), `data-alta-action` with `data-alta-value` raises a dialog action, and named fields are collected into `Values`. `PluginHtml` in the abstractions has the attribute and class names (rows and stacks, `alta-grow` for the element that takes the free width, `alta-field` for a label above its field, `alta-card`, tags, callouts, tones) and the `Encode`, `CommandButton` and `ActionButton` helpers. A plugin has no JavaScript in the window: the page runs the application's own scripts only, and what a fragment does goes through its plugin's C# handlers.
 
 **Desktop services.** `DesktopPluginUi` implements `IPluginUiService`, `IPluginSessionService` and `IPluginPromptService`. It is a broker: a request becomes a `PluginUiEvent` that the page reads from the `pluginUi.watch` channel, and the page answers with `pluginUi.respond` or `pluginUi.dialogAction`. Notifications raised before the page watches are kept (32 at most) and open dialogs are replayed to a page that reloads. The pane a command was started from (project, session, busy state, prompt draft) is an `AsyncLocal` scope, so `SelectedSessionId`, `DraftText` and the prompt operations address that pane. Prompts are sent by the page's own composer, so they are shown, recorded and refused like prompts the user types. `PluginUiService` (`pluginUi` RPC) lists commands, pickers and region content, starts commands (`invokeCommand` answers `started`; the outcome arrives on the watch channel because a command can wait in a dialog) and searches pickers. `ComposerStatusService` returns status items with the command an item names, and `SessionPluginEventsService` adds the cards of other plugins to the Statistics cards. The MCP status content is left out of the regions because the status line already shows it with its link to Settings.
 
@@ -79,7 +79,7 @@ The desktop application (`src/CodeAlta`) and the terminal application (`src/Code
 
 **Key bindings on the desktop.** The page accepts one stroke, or `Ctrl+G` followed by a second stroke, and gives the window's own commands precedence. A binding it cannot route leaves the command in the palette without a shortcut.
 
-**Limits.** Prompt attachments (`AddAttachmentAsync`) are not implemented in either application. Terminal prompt-editor attachments and native renderers written with `PluginTui` are terminal-only by design. The desktop reads region content every ten seconds and on focus, and timeline cards when a turn ends or older history is loaded. The built-in MCP and Git plugins contribute no command to the desktop: its window has its own MCP page and issue picker.
+**Limits.** Prompt attachments (`AddAttachmentAsync`) are not implemented in either application. Terminal prompt-editor attachments and native renderers written with `PluginTui` are terminal-only by design. Prompt processors (`GetPromptProcessors`, `OnPromptSubmittingAsync`), compaction contributions and command-line contributions are used by the terminal application only. `OnToolCallAsync` and `OnToolResultAsync` see the calls of the tools that plugins contribute, not those of the built-in tools. The desktop reads region content and status items every ten seconds, when the window gets the focus, when a command or a dialog action of a plugin ends (the `refresh` event of `pluginUi.watch`) and when plugins are started, replaced or stopped (the `plugins-changed` shell notice); it reads timeline cards when a turn ends or older history is loaded. The built-in MCP and Git plugins contribute no command to the desktop: its window has its own MCP page and issue picker.
 
 ## Portable region content and terminal rendering (pre-release migration)
 
@@ -157,6 +157,10 @@ For each plugin root, CodeAlta owns generated root-level build files:
 
 The generated `global.json` selects the .NET 10 SDK used for file-based C# builds. CodeAlta invokes `dotnet build plugin.cs` from the plugin package directory and records the resolved output assembly in a plugin build manifest for later loads. Source plugin packages should not contain their own root-level build files with the names above; the runtime diagnoses those files as unsupported for source-folder plugins.
 
+The generated properties set `PublishAot` to `false`: a plugin is a library that is loaded as it is, and the analysis for trimmed applications would otherwise warn about ordinary code such as `System.Text.Json` serialization. CodeAlta also writes a `.gitignore` in the plugin root that names the generated files and its lock file, so a project keeps its `.alta/plugins/<package-id>/` sources in its repository and nothing else; a `.gitignore` that is already there and was not generated is left as it is.
+
+A host loads the plugins of two folders: the global one, and the one of the project it was started in. The plugins of another project of the catalog are listed and edited, and are not loaded.
+
 Source plugins are trusted code. Building a plugin can execute SDK, NuGet, and MSBuild logic. Loading a plugin executes .NET code in the CodeAlta process through a collectible `AssemblyLoadContext`.
 
 ## Enablement and safe mode
@@ -191,12 +195,42 @@ The plugin runtime:
 7. creates plugin instances;
 8. initializes and activates plugins;
 9. materializes contribution records with runtime-owned handles;
-10. monitors source/config changes and emits diagnostics;
-11. cancels tracked plugin tasks and unloads contexts on shutdown or reload.
+10. cancels tracked plugin tasks and unloads contexts on shutdown.
 
-Runtime status separates plugin diagnostics from conversation history. Diagnostics include config, discovery, build, load, activation, contribution, callback, source-change, and unload records plus structured build summaries and unknown config entries.
+A contribution method is called once per activation: what it returns is what the plugin contributes until it is stopped or built again.
 
-Open plugin management with `Ctrl+G Ctrl+N` or the command palette (search for `plugins` or `plugin`). The dialog shows enablement, diagnostics, properties, contributions, and source/README actions. `--plugins-status` provides a headless discovery/config summary.
+Runtime status separates plugin diagnostics from conversation history. Diagnostics include config, discovery, build, load, activation, contribution, callback and unload records plus structured build summaries and unknown config entries. The store keeps 2048 diagnostics at most (`PluginRuntimeDiagnosticStore.MaximumCount`): the oldest failures of callbacks go first, so a status item that fails each time it is read does not push out what the builds said.
+
+In the terminal application, open plugin management with `Ctrl+G Ctrl+N` or the command palette (search for `plugins` or `plugin`). The dialog shows enablement, diagnostics, properties, contributions, and source/README actions. `altatui --plugins-status` provides a headless discovery/config summary. In the desktop application, the same is in Settings > Plugins; see `doc/desktop.md`.
+
+## Changing plugins while the application runs
+
+`PluginRuntimeManager` keeps the options it was started with (`StartOptions`, `Roots`) and changes one source package at a time afterwards (`PluginRuntimeReload.cs`). The desktop application uses it for its Plugins page and for the `alta plugin` commands of its sessions; the terminal application lists the packages and changes nothing.
+
+| Member | What it does |
+| --- | --- |
+| `GetPackages()` | The source packages of the plugin folders as they are on disk now, each a `PluginPackageStatus`: its state (`Running`, `Disabled`, `Failed`, `Unsupported`, `Stopped`), whether configuration lets it start, the descriptors of its active plugins, its last build in this run, `SourceChanged` and its diagnostics. |
+| `BuildPackageAsync(package, force)` | Builds without loading: the plugins that run keep running, and the result says whether the source on disk compiles. |
+| `ReloadPackageAsync(package, force)` | Builds, then replaces the running plugins of the package by those of the new build, or starts them. The `PluginPackageChange` of the result is `Started`, `Reloaded`, `BuildFailed`, `StartFailed`, `Disabled`, `Stopped` or `Unchanged`. |
+| `RefreshPackagesAsync()` | Applies what changed on disk and in the configuration since the plugins were started: starts the packages that are new or turned on, replaces those whose source changed, stops those that were removed or turned off. A package whose last build failed is built again only when its source changed. |
+| `Changed` | Raised after plugins were started, replaced or stopped, with the ids of their packages, so a host reads again what it keeps of the contributions (commands, shortcuts, pickers). |
+
+A reload keeps the application usable while a plugin is being written:
+
+1. The package is built first. When the build fails nothing else happens: the version that runs keeps running, and the result carries what the compiler reported.
+2. The running plugins of the package are deactivated and their contributions removed. They are given ten seconds; a version that does not stop is left to end by itself, with a warning, and the collection of its load context is not waited for, because the session that asked for the change may still hold one of its tools.
+3. The new assembly is read into memory with its symbols, so the build output is never locked and the next build writes over it.
+4. The plugins are activated, their startup hooks run, and the diagnostics of the package are replaced by those of this change. When none starts, the result is `StartFailed` and nothing of the package runs: the previous version was stopped at step 2.
+
+Changes run one at a time and are owned like the start, so closing the runtime waits for a change that is running. Once the build ended a change runs to its end whatever happens to its caller, and the plugins it starts do not depend on the caller's cancellation. A plugin callback that asks for a change of plugins is refused rather than left to wait for itself. A package whose plugin key is the key of a plugin that already runs is not started, with a diagnostic that names both packages. A package without a plugin class says so (it needs a public class that inherits `PluginBase` and has a public constructor without parameters).
+
+**Build diagnostics.** `PluginBuildResult.Diagnostics` holds the messages of the compiler as `PluginBuildDiagnostic` records (severity, code, message, file relative to the package, line, column), read from the MSBuild output by `PluginBuildService.ParseDiagnostics`. `CompletedAt` and `Duration` say when the build ended and how long it took. `PluginBuildManifestStore.ComputeSourceStamp` is the stamp of the sources that `SourceChanged` compares.
+
+**Tools of a session.** A session keeps the tools it was given while they look the same (name, description, parameters), so the tool of a plugin is bound when it is called: `PluginOrchestrationBridge` calls the tool that the plugin has at that moment, and the tool of a plugin that was stopped answers that its plugin is not running. `PluginOrchestrationBridge.CreateAgentTools(options, pluginRuntimeKeys)` returns the tools of some plugins as a run gets them, and `AgentRunTools.Set` registers tools in a running turn in place of those of the same names. `alta plugin reload` and `alta plugin create` use both, so the session that builds a plugin calls its new or changed tools in the same turn.
+
+**Creating a package.** `SourcePluginScaffold.Create(root, packageId, displayName, description)` writes `plugin.cs` (one command that says hello) and `README.md` in a new folder of a plugin root. A package id has 1 to 64 letters, digits, dots, dashes or underscores and starts with a letter or a digit. The plugin key is the id, and the class name is made from it (`my-notes` gives `MyNotesPlugin`).
+
+**API reference.** `PluginApiReference` describes the authoring API by reflection: the public types of `CodeAlta.Plugins.Abstractions` and `CodeAlta.Plugins.Tui`, and the `CodeAlta.Agent` types their signatures use. Each `PluginApiType` has its declaration, its members (inherited ones included), its derived types and the summaries of the XML documentation files shipped beside the application. `Find(query)` answers a type by its name, then the types whose name contains the text, then the types that have a member of that name. `Suggest(query)` answers a name that is not in the API with the types that share its last word (`PluginUiContext` gives the types named `...Context`). `alta plugin api` prints both, so an agent reads the API of the running version instead of guessing it.
 
 ## Host-selected startup feedback (pre-release migration)
 
@@ -226,7 +260,7 @@ The terminal implementation is `CodeAlta.Tui.Plugins.TerminalPluginStartupFeedba
 - compaction hooks;
 - UI contributions such as status rows, visuals, and renderers;
 - transient session/timeline projections (current APIs still use some legacy `Session` names);
-- resource roots for skills, system prompts, templates, themes, and MCP manifests;
+- resource roots (the hosts read the skill roots; the other kinds have no consumer yet);
 - plugin-lifetime background tasks through `IPluginTaskService`.
 
 Plugin shell commands are no-argument frontend activations. A `PluginCommandContribution` declares its name, label/description, placement (`ShellRoot`, `PromptEditor`, and/or `WorkspaceRoot`), command-palette/search metadata, visibility flags, optional shortcut, and availability rule. CodeAlta adapts each active contribution into the same internal shell command registry used by built-ins, so plugin commands can appear in help, the command palette, command bars, and shortcuts without frontend-specific registration code.
@@ -239,7 +273,7 @@ UI-only contributions remain frontend responsibilities. Headless hosts can ignor
 
 When a plugin constructs a `XenoAtom.Terminal.UI.Controls.Dialog` directly, use `CodeAlta.Plugins.Tui.PluginDialogLayout.ApplyResponsiveSize(...)` with a deferred bounds delegate (for example, `() => PluginDialogLayout.ResolveDialogBounds(anchor)`) so the dialog keeps the same centered, responsive sizing behavior as built-in dialogs, including cases where the dialog is sized after it is attached to the app.
 
-`PluginDialogRequest` retains neutral text, selection, button and metadata fields. For native custom content, migrate `PluginUi.CustomDialog(title, visual)` to `PluginTui.CustomDialog(title, visual)` and `PluginDialogRequest.Content` to `PluginTerminalDialogRequest.Content`. These APIs describe requests; they do not install a dialog presenter. Currently the generic dialog operations have only the no-op service implementation: `HasInteractiveUi` is false, `ShowDialogAsync` validates/cancels but does not present anything, and `ShowDialogForResultAsync` returns null when unsupported. Completion is not proof of presentation. Existing MCP/Git native dialogs use their separate terminal paths.
+`PluginDialogRequest` retains neutral text, selection, button and metadata fields. For native custom content, migrate `PluginUi.CustomDialog(title, visual)` to `PluginTui.CustomDialog(title, visual)` and `PluginDialogRequest.Content` to `PluginTerminalDialogRequest.Content`. These APIs describe requests; the application presents them (`DesktopPluginUi` and `TerminalPluginUi`, above). A host without a window has the no-op service: `HasInteractiveUi` is false, `ShowDialogAsync` validates and presents nothing, and `ShowDialogForResultAsync` returns null, so completion is not proof of presentation.
 
 ## Prompt and instruction processing
 
@@ -277,6 +311,8 @@ var result = await Services.Alta.InvokeAsync(
 
 The service returns the same flattened JSONL transcript shape used by agent live-tool calls, plus exit code, truncation status, and error summary. Project-scoped plugin invocations inherit project scope and working directory by default.
 
+The built-in `alta plugin` root is how a session works on plugins: `list`, `status` and `api` in every host, and `create`, `build`, `reload`, `refresh` and `open` in the desktop application. The built-in `codealta-plugin-runtime` skill tells an agent how to use them, with samples for each kind of contribution.
+
 See [`alta` live tool](live-tool.md) for command behavior.
 
 ## Resource contributions
@@ -301,7 +337,7 @@ Relative paths are resolved from the plugin package directory. Project-scoped pl
 
 Plugins can contribute transient derived timeline cards through `GetSessionEventProjections()` (legacy API name). Projections are replayed from canonical normalized event history and can also run live as new events arrive. They may provide Markdown fallback content, XenoAtom visuals, collapsed detail sections, and dynamic content that starts with a placeholder and refreshes after background computation.
 
-Projection output is not written to canonical conversation history. Store plugin-owned durable state through `IPluginStateStore` when a plugin needs persistence.
+Projection output is not written to canonical conversation history. Store plugin-owned durable state through `IPluginStateStore` (`Services.State`) when a plugin needs persistence.
 
 The neutral `PluginDerivedSessionEvent`, `PluginDerivedSessionEventDetailSection` and
 `PluginDynamicDerivedSessionEventContent` expose Markdown, details, identities and change
@@ -322,6 +358,18 @@ clears the previous native factory. This preserves existing behavior rather than
 notification or resource ownership. `Payload` remains an opaque in-process object, **not a
 desktop wire schema**. This contract split does not add desktop transient projection
 rendering, terminal-free builtin loading, or background-task/unload guarantees.
+
+## Plugin data
+
+`Services.State` (`IPluginStateStore`) reads, writes and deletes named JSON items in one of three scopes. Unless the host supplies its own store, the runtime gives each plugin a `PluginFileStateStore`:
+
+| Scope | Folder |
+| --- | --- |
+| `PluginStateScope.User` | `~/.alta/plugin-data/<plugin key>/` |
+| `PluginStateScope.Project` | `<project>/.alta/plugin-data/<plugin key>/`: the project of a project plugin, or the project the host has selected for a global plugin |
+| `PluginStateScope.Session` | `~/.alta/plugin-data/<plugin key>/sessions/<session id>/`: the session the host has selected |
+
+An item is the file `<name>.json` (a name with or without the extension is the same item). The plugin key is made a folder name (`plugin:notes` gives `plugin_notes`). A name that is not a file name is refused with `ArgumentException`, and a scope without its project or session with `InvalidOperationException`. A missing or unreadable item reads as the default value; reading creates nothing. A write goes to a temporary file that is moved over the item.
 
 ## Background tasks and unload
 
@@ -382,7 +430,7 @@ The presentation borrows callbacks over the same already-built turn. Portable su
 ## Troubleshooting
 
 - **Missing SDK:** source plugins require the .NET 10 SDK selected by the generated plugin-root `global.json`. If `dotnet build plugin.cs` is treated as a project build, install the required SDK or start with safe mode.
-- **Build failures:** the terminal shows concise live build progress in the console; the desktop names the plugin on its start-up screen, raises a notice and shows the first error under the plugin in Settings > Plugins. Both write detailed diagnostics plus stdout/stderr tails to the log.
+- **Build failures:** the terminal shows concise live build progress in the console; the desktop names the plugin on its start-up screen, raises a notice and shows the errors of the compiler under the plugin in Settings > Plugins. Both write detailed diagnostics plus stdout/stderr tails to the log. In a session, `alta plugin status <id>` returns the same errors with their file, line and column.
 - **Dependency load failures:** CodeAlta assemblies and shared authoring dependencies resolve from the host load context. Plugin-owned package dependencies must be copied by the SDK so the plugin load context can resolve them from the plugin output folder.
 - **Broken plugin:** start with `CODEALTA_DISABLE_PLUGINS=1` (both applications), or `--no-plugins` / `--plugin-safe-mode` (terminal), then disable or edit the plugin package.
 - **Unload delays:** ensure the plugin cancels tracked work and does not keep static references or unmanaged resources alive.

@@ -55,7 +55,7 @@ Open plugin management with `Ctrl+G Ctrl+N`, `/plugins`, or `/plugin`.
 
 {{ alta_shot "alta-desktop-plugins.webp" "alta-plugins.png" "Plugin management with the list of plugins" "Plugin management lists the plugins of the global and project scopes and lets you enable or disable them." }}
 
-The desktop **Plugins** page of Settings lists the plugins with a switch to enable or disable each one. A change applies at the next start. A plugin that failed to build shows its error there, and a plugin made for the TUI only is marked as not supported.
+The desktop **Plugins** page of Settings lists the plugins with a switch to enable or disable each one. A source plugin starts or stops at once; a built-in plugin follows at the next start. A source plugin also has a button to build and reload it while CodeAlta runs and one to edit it in the code editor, and **New plugin** creates one. A plugin that failed to build shows the compiler errors there, and a plugin made for the TUI only is marked as not supported.
 
 The TUI dialog shows:
 
@@ -74,11 +74,13 @@ altatui --plugins-status
 
 ## Plugins in both apps
 
-CodeAlta Desktop and CodeAlta TUI load the same built-in and source plugins. Agent tools, instructions for agents, `alta` commands, prompt processing, commands, keyboard shortcuts, status items, dialogs, prompt pickers and timeline cards work in both.
+CodeAlta Desktop and CodeAlta TUI load the same built-in and source plugins. Agent tools, instructions for agents, `alta` commands, commands, keyboard shortcuts, status items, dialogs, prompt pickers and timeline cards work in both.
 
 Each app shows plugin user interface its own way: the desktop app with its own components and HTML fragments from the plugin, the TUI with terminal controls. A plugin can also be made for one app only; the other app then does not start it.
 
 A source plugin is built when CodeAlta starts. The desktop start-up screen names the plugin being built, and the TUI shows the build in the console before its interface. When a build fails, the desktop app shows a notice and the error in **Settings > Plugins**; the TUI prints it and lists it in `/plugins`.
+
+CodeAlta Desktop also builds a source plugin again while it runs, from **Settings > Plugins** or from a session. An agent can write a plugin for you: see [Plugin development](developers.md#ask-an-agent-to-write-it).
 
 ## Source plugins
 
@@ -87,7 +89,8 @@ Dynamic source plugins are discovered from:
 - `~/.alta/plugins/<package-id>/plugin.cs` for global plugins;
 - `<project>/.alta/plugins/<package-id>/plugin.cs` for project-scoped plugins.
 
-Project-scoped plugins apply only to the matching project. Global plugins apply
+Project-scoped plugins apply only to the matching project, and are loaded when
+CodeAlta is started in it. Global plugins apply
 across workspaces. For source-plugin layout, examples, contribution points,
 resource roots, prompt editor attachments, `alta` command integration, and safe
 authoring guidance, see [Plugin development](developers.md).

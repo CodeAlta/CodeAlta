@@ -223,6 +223,7 @@ internal sealed class PluginRuntimeServices : IPluginServices
     private const string UnresolvedProjectScopeId = "__codealta_unresolved_project_scope__";
 
     private readonly IPluginServices _inner;
+    private readonly IPluginStateStore? _state;
 
     public PluginRuntimeServices(
         Logger logger,
@@ -230,7 +231,8 @@ internal sealed class PluginRuntimeServices : IPluginServices
         PluginScope scope,
         string? scopeProjectId,
         IPluginServices inner,
-        IPluginTaskService tasks)
+        IPluginTaskService tasks,
+        IPluginStateStore? state = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginRuntimeKey);
@@ -238,6 +240,7 @@ internal sealed class PluginRuntimeServices : IPluginServices
         ArgumentNullException.ThrowIfNull(tasks);
         Logger = logger;
         _inner = inner;
+        _state = state;
         Tasks = tasks;
         Alta = new PluginRuntimeAltaService(pluginRuntimeKey, scope, scopeProjectId, inner.Alta);
     }
@@ -246,7 +249,8 @@ internal sealed class PluginRuntimeServices : IPluginServices
 
     public IPluginUiService Ui => _inner.Ui;
 
-    public IPluginStateStore State => _inner.State;
+    // The store of the host when it has one; else the files of this plugin.
+    public IPluginStateStore State => _state ?? _inner.State;
 
     public IPluginWorkspaceService Workspace => _inner.Workspace;
 

@@ -4,7 +4,7 @@ title: For developers
 
 # Plugin development
 
-A source plugin is one C# file that CodeAlta builds and loads when it starts. The same plugin runs in CodeAlta Desktop and in CodeAlta TUI.
+A source plugin is one C# file that CodeAlta builds and loads. CodeAlta Desktop builds it again while it runs, so a change shows at once. The same plugin runs in CodeAlta Desktop and in CodeAlta TUI.
 
 > [!WARNING]
 > Build and load only plugins you trust. Building runs the .NET SDK, NuGet and MSBuild; loading runs the plugin's code inside CodeAlta.
@@ -12,11 +12,41 @@ A source plugin is one C# file that CodeAlta builds and loads when it starts. Th
 > [!IMPORTANT]
 > The plugin API can change between CodeAlta releases.
 
-CodeAlta ships a `codealta-plugin-runtime` skill with this guidance and with sample plugins. Ask an agent to "write a CodeAlta plugin that…" and it uses the skill.
+## Ask an agent to write it
+
+In CodeAlta Desktop, ask a session in your own words:
+
+```text
+Write a plugin for this project that shows the current git branch beside the prompt, with a command that lists the last ten commits in a dialog.
+```
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-plugin-agent.webp" alt="A session of CodeAlta Desktop that wrote a plugin: its request, the tool calls of the agent, the dialog of the new command with the last ten commits, and the git branch beside the prompt" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A session wrote this plugin: the dialog of its command, and the branch beside the prompt.</figcaption>
+</figure>
+
+Say *for this project* to keep the plugin in the project, under `.alta/plugins`. Otherwise it is for all your projects, under `~/.alta/plugins`.
+
+The agent reads the `codealta-plugin-runtime` skill, which ships with CodeAlta and has this guidance with sample plugins. Then it works with the `alta plugin` commands of its session:
+
+{.table}
+| Command | What it does |
+|---|---|
+| `alta plugin create <id>` | Writes a first `plugin.cs`, builds it and starts it. `--project` makes a plugin of one project. |
+| `alta plugin reload <id>` | Builds the file again and replaces the plugin that runs. A build that fails returns the compiler errors, and the version that ran keeps running. |
+| `alta plugin status <id>` | Shows the state of the plugin, its last build, what it adds and the errors it raised. |
+| `alta plugin api <name>` | Shows a type of the plugin API with its members. |
+| `alta plugin open <id>` | Shows the plugin to you in the code editor. |
+
+The agent calls a tool its plugin adds in the same turn. With the [UI tools](../ui-tools.md), it also runs the command of the plugin in the window and checks what it shows.
+
+CodeAlta TUI loads plugins when it starts: there the agent writes the file and you restart. The commands that build a plugin are not given to the sessions of a CodeAlta Desktop that reviews their commands.
 
 ## Create a plugin
 
-Create one folder per plugin, with a `plugin.cs` file:
+In CodeAlta Desktop, open **Settings > Plugins** and click **New plugin**. Enter an id: CodeAlta creates the folder with a first `plugin.cs`, starts the plugin and opens it in the code editor.
+
+You can also create the folder yourself. A plugin is one folder with a `plugin.cs` file:
 
 {.table}
 | Scope | File |
@@ -43,7 +73,7 @@ public sealed class HelloPlugin : PluginBase
 }
 ```
 
-Restart CodeAlta. It builds the plugin, loads it, and `/hello` appears in the command palette.
+In CodeAlta Desktop, click **Build and reload** on the row of the plugin in **Settings > Plugins**: CodeAlta builds the plugin and loads it, and `/hello` appears in the command palette. In CodeAlta TUI, restart.
 
 A plugin is a public class that inherits `PluginBase` and has a public parameterless constructor. The `[Plugin]` attribute is optional. One file can declare several plugins.
 
@@ -51,10 +81,37 @@ A plugin is a public class that inherits `PluginBase` and has a public parameter
 
 - It runs `dotnet build plugin.cs` with the .NET 10 SDK. No project file is needed.
 - It writes `Directory.Build.props`, `Directory.Build.targets`, `Directory.Packages.props` and `global.json` in the plugin root. Do not create or edit them.
+- It writes a `.gitignore` beside them, so a project keeps only the sources of its plugins in git.
 - It references `CodeAlta.Plugins.Abstractions`, `CodeAlta.Plugins.Tui` and the `XenoAtom.Terminal.UI` packages for you, in both apps.
-- It rebuilds a plugin whose source changed at the next start.
+- When it starts, it builds again a plugin whose source changed.
 
 Add NuGet packages with `#:package Name@Version` at the top of `plugin.cs`, and more source files with `#:include`. An optional `README.md` beside `plugin.cs` describes the plugin in the plugin list.
+
+A project plugin is loaded when CodeAlta is started in that project.
+
+## Edit, build and reload
+
+In CodeAlta Desktop, **Settings > Plugins** is where you work on a source plugin.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-plugins.webp" alt="The Plugins page of Settings with a source plugin, its Reload and Edit buttons, and New plugin" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The last row is a source plugin, with a button to build and reload it and one to edit it.</figcaption>
+</figure>
+
+The row of a source plugin has two buttons and a switch:
+
+- **Build and reload** builds the plugin and replaces the one that runs. Its commands, shortcuts, status items and pickers change at once.
+- **Edit in the code editor** opens the folder of the plugin in the code editor, in a **Plugin** tab.
+- The switch starts or stops the plugin at once.
+
+When a build fails, the page shows the compiler errors under the plugin, with their line, and the version that ran keeps running. **Source changed** marks a plugin whose file is not the one that runs.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-plugin-editor.webp" alt="The code editor of CodeAlta Desktop opened on the folder of a plugin, in a Plugin tab" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The folder of a plugin in the code editor.</figcaption>
+</figure>
+
+A reload starts the plugin again: the fields of its class are new. Keep data with `Services.State` (see [Lifecycle, background work and data](#lifecycle-background-work-and-data)).
 
 ## One plugin, two apps
 
@@ -85,22 +142,27 @@ The desktop app ignores terminal controls and the TUI ignores HTML, so a result 
 Override only the methods the plugin needs.
 
 {.table}
-| Method | Adds |
-|---|---|
-| `GetCommands()` | Commands for the palette, the `/` menu and shortcuts |
-| `GetUiContributions()` | Status items and content around the prompt |
-| `GetPromptPickers()` | A picker opened by a character typed in the prompt |
-| `GetSessionEventProjections()` | Cards in the session timeline |
-| `GetAgentTools()` | Tools the model can call |
-| `GetAltaCommands()` | Commands under the in-session `alta` tool |
-| `GetSystemPromptContributions()` | Text added to the system or developer prompt |
-| `GetPromptProcessors()`, `GetInstructionProcessors()` | Changes to the user prompt or to the final instructions |
-| `GetCompactionContributions()` | Hooks for session compaction |
-| `GetResources()` | Skill, prompt and template folders of the package |
-| `GetStartupContributions()`, `GetCommandLineContributions()` | Early startup hooks and command-line commands |
-| `OnBeforeAgentRunAsync`, `OnToolCallAsync`, `OnToolResultAsync`, `OnAgentEventAsync` | Observation and changes while a session runs |
+| Method | Adds | Desktop | TUI |
+|---|---|---|---|
+| `GetCommands()` | Commands for the palette, the `/` menu and shortcuts | yes | yes |
+| `GetUiContributions()` | Status items and content around the prompt | yes | yes |
+| `GetPromptPickers()` | A picker opened by a character typed in the prompt | yes | yes |
+| `GetSessionEventProjections()` | Cards in the session timeline | yes | yes |
+| `GetAgentTools()` | Tools the model can call | yes | yes |
+| `GetAltaCommands()` | Commands under the in-session `alta` tool | yes | yes |
+| `GetSystemPromptContributions()` | Text added to the system or developer prompt | yes | yes |
+| `GetInstructionProcessors()` | Changes to the final instructions of a session | yes | yes |
+| `GetResources()` | Skills shipped with the plugin | yes | yes |
+| `OnBeforeAgentRunAsync` | Tools and messages for one run; can cancel the run | yes | yes |
+| `OnAgentEventAsync` | Sees the events of the sessions | yes | yes |
+| `OnToolCallAsync`, `OnToolResultAsync` | Sees and changes the calls of the tools that plugins add | yes | yes |
+| `GetPromptProcessors()` | Changes a prompt before it is sent | no | yes |
+| `GetCompactionContributions()` | Hooks of a manual compaction | no | yes |
+| `GetCommandLineContributions()` | Commands of the `altatui` command line | no | yes |
 
-The factories `Command`, `PluginUi`, `PluginTui`, `Prompt`, `AgentTool`, `Resources` and `Startup` build the common contributions.
+A contribution method is called once when the plugin starts. The factories `Command`, `PluginUi`, `PluginTui`, `Prompt`, `AgentTool`, `Resources` and `Startup` build the common contributions.
+
+To look a type up, ask a session for `alta plugin api <name>`: it prints the type with its members, from the version of CodeAlta that runs.
 
 ## Commands
 
@@ -142,9 +204,17 @@ var response = await context.Ui.ShowDialogForResultAsync(request, cancellationTo
 
 ## HTML fragments in the desktop app
 
-A fragment is plain HTML that CodeAlta inserts in its window. Before that, CodeAlta sanitizes it and gives buttons, fields and tables the look of the app.
+A fragment is plain HTML that CodeAlta inserts in its window. Before that, CodeAlta sanitizes it and gives its elements the look of the app's own components:
 
-Nothing in a fragment runs: scripts, styles, event handlers, images and forms are removed, and links are shown but not followed. A fragment cannot call the app's code. It asks the window to act with attributes:
+{.table}
+| Write | Shown as |
+|---|---|
+| `<button>` | A button of the app; with a tone class, in that tone |
+| `<input>`, `<textarea>`, `<select>` | A field of the app |
+| `<table>` | A compact table |
+| `class="alta-tag"`, `class="alta-callout"`, `class="alta-card"` | A tag, a callout, a card |
+
+A plugin has no JavaScript in the window, and creates no component of the app: its code is C#. Nothing in a fragment runs: scripts, styles, event handlers, images and forms are removed, and links are shown but not followed. A fragment asks the window to act with attributes, and the plugin answers in C#:
 
 {.table}
 | Attribute | Effect |
@@ -170,9 +240,12 @@ Classes you can use:
 | Class | Effect |
 |---|---|
 | `alta-row`, `alta-column` | Lay out children in a row or a column |
+| `alta-grow` | In a row, takes the space that is left: a field beside a button |
+| `alta-field` | On a `label`: the label above its field, which takes the width |
 | `alta-primary`, `alta-success`, `alta-warning`, `alta-danger`, `alta-muted` | Tone of a button, a tag, a callout or text |
 | `alta-tag` | A small rounded label |
 | `alta-callout` | A highlighted block |
+| `alta-card` | A bordered block |
 
 Other classes are removed. Allowed elements are text and structure (`p`, `div`, `span`, headings, lists, `table`, `pre`, `code`, `details`, `a`, …) and fields (`button`, `input`, `select`, `textarea`, `label`, `fieldset`, `progress`, `meter`).
 
@@ -229,7 +302,9 @@ Keep the `EventId` stable for the same turn so the card is updated, not duplicat
 
 ## Agent tools and `alta` commands
 
-`GetAgentTools()` adds tools the model can call: wrap an `AgentToolDefinition` with `AgentTool.Create`. `OnToolCallAsync` and `OnToolResultAsync` can observe or change any tool call.
+`GetAgentTools()` adds tools the model can call: wrap an `AgentToolDefinition` with `AgentTool.Create`. `OnToolCallAsync` and `OnToolResultAsync` see and change the calls of the tools that plugins add.
+
+A session has the tools of a plugin from its next prompt. The session that created or reloaded the plugin has them in the same turn.
 
 `GetAltaCommands()` adds commands under the in-session `alta` tool. A plugin can also run `alta` commands:
 
@@ -242,7 +317,7 @@ The result has the JSONL output, the exit code and an error summary.
 ## Prompts and instructions
 
 - `GetSystemPromptContributions()` adds text to the system or developer prompt: `Prompt.Developer("…")`.
-- `GetPromptProcessors()` can change or cancel the user's prompt before it is sent.
+- `GetPromptProcessors()` can change or cancel the user's prompt before it is sent, in CodeAlta TUI.
 - `GetInstructionProcessors()` can change the final instructions after CodeAlta has composed them. CodeAlta records which plugin changed them.
 
 Keep added text short: it uses model context on every turn.
@@ -258,12 +333,19 @@ public override IEnumerable<PluginResourceContribution> GetResources()
 
 Paths are relative to the plugin folder. The resources of a project plugin apply to that project only.
 
-## Lifecycle, background work and state
+## Lifecycle, background work and data
 
 Override `InitializeAsync`, `OnActivatedAsync`, `OnDeactivatingAsync` and `DisposeAsync` only when the plugin owns something to set up or release.
 
-- Start background work with `Tasks.Run(...)` so CodeAlta can cancel it when the plugin unloads. Do not use an untracked `Task.Run`.
-- `Services.State` stores plugin data.
+- Start background work with `Tasks.Run(...)` so CodeAlta can cancel it when the plugin is reloaded or unloaded. Do not use an untracked `Task.Run`.
+- `Services.State` keeps the data of the plugin as JSON, between runs and reloads:
+
+  ```csharp
+  var notes = await Services.State.ReadJsonAsync<List<string>>(PluginStateScope.User, "notes", cancellationToken) ?? [];
+  await Services.State.WriteJsonAsync(PluginStateScope.User, "notes", notes, cancellationToken);
+  ```
+
+  `PluginStateScope.User` stores under `~/.alta/plugin-data/`, and `PluginStateScope.Project` under `<project>/.alta/plugin-data/`.
 - `Logger` writes to the CodeAlta log.
 - Do not keep static references to host objects, and do not put secrets in plugin source.
 
@@ -273,9 +355,11 @@ Override `InitializeAsync`, `OnActivatedAsync`, `OnDeactivatingAsync` and `Dispo
 | | Desktop | TUI |
 |---|---|---|
 | While it builds | The start-up screen names the plugin being built | The console shows the build before the interface |
-| Build or load failure | A notice at start, and the error under the plugin in **Settings > Plugins** | The error in the console and in `/plugins` |
+| Build or load failure | A notice at start, and the compiler errors under the plugin in **Settings > Plugins** | The error in the console and in `/plugins` |
 | Not supported in this app | Marked in **Settings > Plugins** | Listed in `/plugins` |
 | Full log | **Settings > Application Logs** | `~/.alta/logs/codealta.log` |
+
+In a session, `alta plugin status <id>` returns the same errors with their file, line and column.
 
 Disable one plugin in the plugin list or in the configuration:
 
@@ -293,8 +377,13 @@ The `codealta-plugin-runtime` skill ships complete plugins that CodeAlta's tests
 {.table}
 | Sample | Shows |
 |---|---|
+| `todo` | A complete plugin: commands, an HTML dialog with actions, a status item, a picker, tools, an `alta` command, prompt text, saved data |
 | `hello-command` | A command |
 | `desktop-and-terminal` | One plugin for both apps: portable dialogs, an HTML dialog with actions, a status item, content above the prompt, a prompt picker |
+| `saved-data` | Data kept between runs with `Services.State` |
+| `agent-tool` | A tool the model calls |
+| `alta-command` | A command of the `alta` tool |
+| `timeline-card` | A card in the timeline, computed from the events of a session |
 | `ui-status`, `ui-all-regions` | Status items and content in every region |
 | `prompt-guidance` | Text added to the prompt |
 | `instruction-path-normalizer` | A change to the final instructions |

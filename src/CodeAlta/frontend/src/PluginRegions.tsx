@@ -2,14 +2,14 @@ import { useEffect, useState } from "react";
 import type { PluginUiScopeRequest } from "#neoastra";
 import { MarkdownContent } from "./MarkdownContent";
 import { PluginHtml } from "./PluginHtml";
-import { pluginRegions, samePluginRegions, type PluginRegionView } from "./pluginUi";
+import { pluginRegions, pluginsChangedEvent, samePluginRegions, type PluginRegionView } from "./pluginUi";
 
 const refreshMilliseconds = 10_000;
 type Read = (request: PluginUiScopeRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<unknown>;
 
 /**
  * What plugins show around the prompt of a pane, read like the status items: when the composer appears,
- * every ten seconds while it stays and when the window gets the focus back.
+ * every ten seconds while it stays, when the window gets the focus back and when the plugins change.
  */
 export function usePluginRegions(epoch: string | null, projectId: string | null, sessionId: string | null, read: Read): readonly PluginRegionView[] {
   const [shown, setShown] = useState<{ projectId: string | null; sessionId: string | null; items: readonly PluginRegionView[] }>();
@@ -31,7 +31,8 @@ export function usePluginRegions(epoch: string | null, projectId: string | null,
     refresh();
     const timer = window.setInterval(refresh, refreshMilliseconds);
     window.addEventListener("focus", refresh);
-    return () => { abort.abort(); window.clearInterval(timer); window.removeEventListener("focus", refresh); };
+    window.addEventListener(pluginsChangedEvent, refresh);
+    return () => { abort.abort(); window.clearInterval(timer); window.removeEventListener("focus", refresh); window.removeEventListener(pluginsChangedEvent, refresh); };
   }, [epoch, projectId, sessionId, read]);
   return epoch && shown?.projectId === projectId && shown.sessionId === sessionId ? shown.items : [];
 }

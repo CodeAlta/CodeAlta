@@ -19,7 +19,8 @@ namespace CodeAlta.Desktop.Rpc;
 /// A file is addressed by a project id and a path relative to that project's folder, never by an absolute
 /// path. The path must stay inside the folder: a rooted path, a drive or stream name, a parent segment and
 /// any link (reparse point) between the folder and the entry are refused as <c>outside_root</c>. The folder of
-/// the project itself is never renamed or deleted.
+/// the project itself is never renamed or deleted. Where a request names a project it can name the folder of a
+/// source plugin instead (<see cref="PluginFolder"/>): the editor then works in that folder, by the same rules.
 /// </remarks>
 [NeoRpcService("projectFiles", Version = 1)]
 internal sealed class ProjectFilesService
@@ -107,7 +108,7 @@ internal sealed class ProjectFilesService
         if (request.ProjectId is null) return Refused("invalid");
         var named = Normalize(request.Path, out path);
         if (named != "ok") return Refused(named);
-        var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
+        var project = await RootAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Root is not { } root) return Refused(project.Status);
         try
         {
@@ -161,7 +162,7 @@ internal sealed class ProjectFilesService
         if (named != "ok") return Refused(named);
         // Every supported encoding needs at least one byte for each UTF-16 unit.
         if (request.Content.Length > MaximumFileBytes) return Refused("too_large");
-        var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
+        var project = await RootAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Root is not { } root) return Refused(project.Status);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         var writing = false;
@@ -273,7 +274,7 @@ internal sealed class ProjectFilesService
         if (request.ProjectId is null) return Refused("invalid");
         var named = Normalize(request.Path, out path);
         if (named != "ok") return Refused(named);
-        var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
+        var project = await RootAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Root is not { } root) return Refused(project.Status);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -311,7 +312,7 @@ internal sealed class ProjectFilesService
         if (named != "ok") return Refused(named);
         named = Normalize(request.NewPath, out path);
         if (named != "ok") return Refused(named);
-        var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
+        var project = await RootAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Root is not { } root) return Refused(project.Status);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         var from = string.Empty;
@@ -367,7 +368,7 @@ internal sealed class ProjectFilesService
         if (request.ProjectId is null) return Refused("invalid");
         var named = Normalize(request.Path, out path);
         if (named != "ok") return Refused(named);
-        var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
+        var project = await RootAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Root is not { } root) return Refused(project.Status);
         try
         {
@@ -416,7 +417,7 @@ internal sealed class ProjectFilesService
         if (request.ProjectId is null) return Refused("invalid");
         var named = Normalize(request.Path, out path);
         if (named != "ok") return Refused(named);
-        var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
+        var project = await RootAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Root is not { } root) return Refused(project.Status);
         try
         {
@@ -626,9 +627,15 @@ internal sealed class ProjectFilesService
         if (_projects is null) return ("unavailable", null);
         if (!string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal)) return ("stale_epoch", null);
         if (projectId is null) return ("invalid", null);
-        var project = await SettingsProjectScope.ResolveAsync(_projects, projectId, cancellationToken).ConfigureAwait(false);
+        var project = await RootAsync(projectId, cancellationToken).ConfigureAwait(false);
         return (project.Status, project.Root);
     }
+
+    // The folder a request names: the one of a project of the catalog, or the one of a source plugin.
+    private Task<(string Status, string? Root)> RootAsync(string projectId, CancellationToken cancellationToken)
+        => PluginFolder.TryParse(projectId, out var folder)
+            ? folder.ResolveAsync(_projects!, cancellationToken)
+            : SettingsProjectScope.ResolveAsync(_projects!, projectId, cancellationToken);
 
     private ProjectFileFolder ListFolder(string root, ProjectFileFolderQuery query, bool includeIgnored, CancellationToken cancellationToken)
     {
@@ -1009,9 +1016,11 @@ internal sealed record ProjectFileSearchEvent(string Kind, string Status, string
 /// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>
 internal sealed record ProjectFileWatchRequest(string? ExpectedEpoch);
 
-/// <summary>A request to open the code editor of a project.</summary>
-/// <param name="ProjectId">The project.</param>
+/// <summary>A request to open the code editor of a project, or of the folder of a source plugin.</summary>
+/// <param name="ProjectId">The project, or the id of the folder of a plugin.</param>
 /// <param name="Path">The file to open, relative to the project folder; null to show the project's files.</param>
 /// <param name="Line">The 1-based line to go to.</param>
 /// <param name="Column">The 1-based column on that line.</param>
-internal sealed record ProjectFileShowEvent(string ProjectId, string? Path, int? Line, int? Column);
+/// <param name="Name">For the folder of a plugin, the name its tab shows; null for a project.</param>
+/// <param name="Root">For the folder of a plugin, its path, which the tab shows; null for a project.</param>
+internal sealed record ProjectFileShowEvent(string ProjectId, string? Path, int? Line, int? Column, string? Name = null, string? Root = null);

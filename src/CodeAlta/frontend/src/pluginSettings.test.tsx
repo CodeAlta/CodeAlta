@@ -1,0 +1,106 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import type { PluginsEntry } from "#neoastra";
+import { locales, translate } from "./localization";
+import { PluginRows, pluginFailure, pluginRows } from "./PluginSettings";
+import { ShellLanguageContext } from "./shellLanguage";
+
+const never = () => assert.fail("rendering must not act");
+const entry = (id: string, change: Partial<PluginsEntry> = {}): PluginsEntry => ({
+  id, name: id, description: null, kind: "Source", scope: "Global", state: "Enabled", enabled: true, enabledGlobal: null, enabledProject: null,
+  runtime: "running", runtimeMessage: null, folder: `plugin:global:${id}`, path: `/home/.alta/plugins/${id}`, loadable: true, changed: false, errors: null, ...change,
+});
+const english = (key: Parameters<typeof translate>[1]) => translate("en", key);
+function render(listed: readonly PluginsEntry[], change: { locale?: typeof locales[number]; edit?: boolean; disabled?: boolean } = {}) {
+  const locale = change.locale ?? "en";
+  return renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } },
+    createElement(PluginRows, { rows: pluginRows(listed, key => translate(locale, key)), disabled: change.disabled ?? false, onToggle: never, onReload: never,
+      onEdit: change.edit === false ? undefined : never })));
+}
+const cards = (html: string) => html.split('<div class="bp6-card').slice(1);
+const card = (html: string, name: string) => cards(html).find(value => value.includes(`<strong>${name}</strong>`)) ?? assert.fail(`no row for ${name}`);
+
+test("the plugins that ship with CodeAlta come first and are on until configuration says otherwise", () => {
+  const rows = pluginRows([entry("notes", { name: "Notes", description: "Keeps notes." }), entry("bare", { name: "" }),
+    entry("git", { kind: "BuiltIn", enabled: false, folder: null, path: null, loadable: false })], english);
+  assert.deepEqual(rows.map(row => [row.id, row.name, row.enabled, row.builtIn]),
+    [["mcp", "MCP", true, true], ["git", "Git", false, true], ["statistics", "Statistics", true, true], ["ui", "UI tools", true, true], ["notes", "Notes", true, false], ["bare", "bare", true, false]]);
+  assert.equal(rows[0].entry, null);
+  assert.equal(rows[1].entry?.id, "git");
+  assert.equal(rows[4].description, "Keeps notes.");
+  assert.deepEqual(pluginRows([], english).map(row => row.id), ["mcp", "git", "statistics", "ui"]);
+});
+
+test("a source plugin that is on is built again and opened in the code editor from its row, in every language", () => {
+  for (const locale of locales) {
+    const html = render([entry("notes", { name: "Notes" }), entry("off", { enabled: false, state: "Disabled", runtime: null }),
+      entry("local", { scope: "Project", folder: "plugin:project:p:local", loadable: false })], { locale });
+    const notes = card(html, "Notes");
+    assert.ok(notes.includes(`aria-label="${translate(locale, "Reload {name}", { name: "Notes" })}"`) && notes.includes(`title="${translate(locale, "Build and reload")}"`), notes);
+    assert.ok(notes.includes(`aria-label="${translate(locale, "Edit {name}", { name: "Notes" })}"`) && notes.includes(`title="${translate(locale, "Edit in the code editor")}"`), notes);
+    assert.ok(notes.includes(`>${translate(locale, "User")}<`), notes);
+    // A plugin that is turned off is edited, and is not built: turning it on builds it.
+    const off = card(html, "off");
+    assert.ok(off.includes(translate(locale, "Edit {name}", { name: "off" })) && !off.includes(translate(locale, "Reload {name}", { name: "off" })), off);
+    // A plugin of a project the application was not started in is edited, and is not loaded here.
+    const local = card(html, "local");
+    assert.ok(local.includes(`>${translate(locale, "Project")}<`) && local.includes(translate(locale, "Edit {name}", { name: "local" })), local);
+    assert.ok(!local.includes(translate(locale, "Reload {name}", { name: "local" })), local);
+    // The plugins that ship with CodeAlta have a switch and nothing else.
+    const mcp = card(html, "MCP");
+    assert.ok(mcp.includes(`>${translate(locale, "Built-in")}<`) && mcp.includes(translate(locale, "Enable {name}", { name: "MCP" })), mcp);
+    assert.ok(!mcp.includes(translate(locale, "Edit {name}", { name: "MCP" })) && !mcp.includes(translate(locale, "Reload {name}", { name: "MCP" })), mcp);
+  }
+});
+
+test("a row says what the running application did with its plugin and what the compiler reported", () => {
+  const html = render([
+    entry("fine"),
+    entry("edited", { changed: true }),
+    entry("broken", { changed: true, errors: ["plugin.cs(12,5): error CS0103: The name 'x' does not exist", "plugin.cs(20,1): error CS1002: ; expected"], runtimeMessage: "Plugin build failed." }),
+    entry("dead", { state: "Failed", runtime: "failed", runtimeMessage: "Plugin activation failed: <boom>", changed: true }),
+    entry("new", { runtime: "stopped" }),
+    entry("terminal", { runtime: "unsupported" }),
+  ]);
+  const fine = card(html, "fine");
+  assert.ok(!fine.includes("plugin-failure") && !fine.includes("Source changed") && !fine.includes("Not started"), fine);
+  assert.ok(card(html, "edited").includes(">Source changed<"));
+  // The version that runs keeps running: the row shows each error of the build, where it is, and not the summary.
+  const broken = card(html, "broken");
+  assert.equal(broken.split('class="plugin-failure"').length - 1, 2, broken);
+  assert.ok(broken.includes("plugin.cs(12,5): error CS0103: The name &#x27;x&#x27; does not exist") && !broken.includes("Plugin build failed."), broken);
+  assert.ok(broken.includes(">Source changed<") && broken.includes('aria-label="Reload broken"'), broken);
+  // A plugin that did not start says why once, and is not said to have a changed source: nothing of it runs.
+  const dead = card(html, "dead");
+  assert.ok(dead.includes("Plugin activation failed: &lt;boom&gt;") && dead.includes(">Failed<") && !dead.includes("Source changed"), dead);
+  assert.equal(dead.split(">Failed<").length - 1, 1, dead);
+  assert.ok(card(html, "new").includes(">Not started<"));
+  assert.ok(card(html, "terminal").includes(">Not supported in the desktop application<"));
+});
+
+test("a page that opens no editor has no edit button, and a change under way disables the others", () => {
+  const closed = render([entry("notes")], { edit: false });
+  assert.ok(!closed.includes("Edit notes") && closed.includes("Reload notes"), closed);
+  const busy = card(render([entry("notes")], { disabled: true }), "notes");
+  assert.match(busy, /<button[^>]*disabled=""[^>]*aria-label="Reload notes"|<button[^>]*aria-label="Reload notes"[^>]*disabled=""/);
+  assert.match(busy, /<input[^>]*disabled=""[^>]*aria-label="Enable notes"|<input[^>]*aria-label="Enable notes"[^>]*disabled=""/);
+});
+
+test("a change that did not succeed says why in the words of plugins", () => {
+  assert.equal(pluginFailure("ok"), null);
+  assert.deepEqual(pluginFailure("build_failed", "plugin.cs(3,1): error CS1002: ; expected"),
+    { key: "The plugin was not built. The version that was running keeps running.", intent: "danger", detail: "plugin.cs(3,1): error CS1002: ; expected" });
+  assert.deepEqual(pluginFailure("start_failed"), { key: "The plugin was built and did not start.", intent: "danger", detail: null });
+  assert.deepEqual(pluginFailure("not_loaded"), { key: "CodeAlta loads the plugins of the project it was started in.", intent: "warning" });
+  assert.deepEqual(pluginFailure("disabled"), { key: "The plugin is turned off.", intent: "warning" });
+  assert.deepEqual(pluginFailure("exists"), { key: "A plugin with this id already exists.", intent: "warning" });
+  assert.deepEqual(pluginFailure("unknown"), pluginFailure("not_found"));
+  // Every notice of the page is a message of the application, in each of its languages.
+  for (const status of ["build_failed", "start_failed", "not_loaded", "disabled", "exists", "unknown", "unavailable", "stale", "write_failed", "invalid_request"]) {
+    const notice = pluginFailure(status);
+    assert.ok(notice, status);
+    for (const locale of locales) assert.ok(translate(locale, notice.key).length > 0, `${status} in ${locale}`);
+  }
+});

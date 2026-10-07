@@ -83,18 +83,18 @@ public sealed class DesktopPluginStartupTests
     {
         var unsupported = PluginRuntimeManager.CreateUnsupportedFrontendDiagnostic(
             new PluginDescriptor { RuntimeKey = "source:TerminalOnly", TypeName = "TerminalOnly", AssemblyName = "plugin", Frontends = PluginFrontends.Terminal }, PluginFrontends.Desktop, "terminal-only", null)!;
-        PluginRuntimeDiagnostic[] diagnostics =
-        [
-            PluginRuntimeDiagnostic.Info(PluginRuntimeDiagnosticSource.Build, "Plugin build finished.", "good"),
-            PluginRuntimeDiagnostic.Error(PluginRuntimeDiagnosticSource.Build, "Plugin build failed: plugin.cs(6,27): error CS0103: The name\r\n'x' does not exist", "broken"),
-            unsupported,
-        ];
+        var built = PluginRuntimeDiagnostic.Info(PluginRuntimeDiagnosticSource.Build, "Plugin build finished.", "notes");
+        var broken = PluginRuntimeDiagnostic.Error(PluginRuntimeDiagnosticSource.Build, "Plugin build failed: plugin.cs(6,27): error CS0103: The name\r\n'x' does not exist", "notes");
+        const string Reason = "Plugin build failed: plugin.cs(6,27): error CS0103: The name'x' does not exist";
+        static PluginPackageStatus Status(PluginPackageState state, params PluginRuntimeDiagnostic[] diagnostics) => new() { Package = Package("notes"), State = state, Diagnostics = diagnostics };
 
-        Assert.AreEqual(("running", (string?)null), PluginsService.RuntimeState("good", ["Good"], diagnostics));
-        Assert.AreEqual(("failed", (string?)"Plugin build failed: plugin.cs(6,27): error CS0103: The name'x' does not exist"), PluginsService.RuntimeState("broken", ["good"], diagnostics));
-        Assert.AreEqual(("unsupported", (string?)null), PluginsService.RuntimeState("terminal-only", ["good"], diagnostics));
-        // Enabled after the host started: nothing is known about it.
-        Assert.AreEqual(("stopped", (string?)null), PluginsService.RuntimeState("new", ["good"], diagnostics));
+        Assert.AreEqual(("running", (string?)null), PluginsService.RuntimeState(Status(PluginPackageState.Running, built)));
+        Assert.AreEqual(("failed", (string?)Reason), PluginsService.RuntimeState(Status(PluginPackageState.Failed, built, broken)));
+        // A plugin that still runs says why its new source was not loaded.
+        Assert.AreEqual(("running", (string?)Reason), PluginsService.RuntimeState(Status(PluginPackageState.Running, broken)));
+        Assert.AreEqual(("unsupported", (string?)null), PluginsService.RuntimeState(Status(PluginPackageState.Unsupported, unsupported)));
+        // Created or turned on after the host started: nothing was done with it.
+        Assert.AreEqual(("stopped", (string?)null), PluginsService.RuntimeState(Status(PluginPackageState.Stopped)));
     }
 
     private static SourcePluginPackage Package(string id)

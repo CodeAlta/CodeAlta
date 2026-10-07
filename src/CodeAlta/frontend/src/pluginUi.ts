@@ -44,6 +44,8 @@ export type PluginComposerRequest = {
   state: { sessionId: string; draftText: string; busy: boolean } | null;
 };
 export const pluginComposerEvent = "codealta:plugin";
+/** Raised on the window when the host started, replaced or stopped plugins, or ran one of their commands: what they show is read again. */
+export const pluginsChangedEvent = "codealta:plugins-changed";
 
 /** Sends a request to the composer it names and returns it with the composer's answer. */
 export function askPluginComposer(kind: PluginComposerRequest["kind"], sessionId: string | null, text: string | null = null): PluginComposerRequest {

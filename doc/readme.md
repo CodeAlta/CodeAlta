@@ -41,7 +41,7 @@ Read the documents in this order when onboarding or reviewing architecture-sensi
 | 5 | [`alta` live tool](live-tool.md) | In-process command registry, JSONL output contract, session control commands, queueing, delegated work, and plugin commands. |
 | 6 | [MCP support](mcp.md) | Fixed MCP config paths, JSON/TOML overlay rules, controlled direct MCP tools, `alta mcp` commands, runtime behavior, and dialog/status surfaces. |
 | 7 | [ACP integration](acp.md) | Current ACP protocol-library status, legacy config preservation, and future server-adapter direction. |
-| 8 | [Plugins](plugins.md) | Trusted source plugins, public authoring API, runtime build/load flow, contributions, safe mode, and built-in plugins. |
+| 8 | [Plugins](plugins.md) | Trusted source plugins, public authoring API, runtime build/load flow, building and reloading a plugin while the application runs, plugin data, contributions, safe mode, and built-in plugins. |
 | 9 | [Skills](skills.md) | Filesystem `SKILL.md` discovery, validation, precedence, UI/live-tool activation, and runtime injection. |
 | 10 | [Orchestration actor model](orchestration-actor-model.md) | Internal mailbox/actor ownership rules for runtime mutation and event backpressure. |
 | 11 | [CodeAlta Desktop](desktop.md) | Desktop window, workspace, composer, timeline, Settings pages, host RPC services, and isolated-root launches. |

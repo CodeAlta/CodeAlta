@@ -1241,12 +1241,33 @@ details beside the list: source and state, the path of its `SKILL.md`, the skill
 license, compatibility and allowed tools when declared, related files, validation diagnostics, and the
 instructions of the `SKILL.md` rendered as Markdown (the first 64 Ki characters of a file up to 256 KiB).
 The **Models** section's table fills the page height. The **Plugins** Settings
-section has a switch per plugin, including the built-in MCP, Git and Statistics plugins; a change
-applies the next time CodeAlta starts, except for the Statistics rows described below, which follow
-the switch from their next read on. With an unarchived project selected, both pages can store a
-change globally or for that project. Every Settings section has its own icon in the sidebar.
-The Plugins page also shows the state of each plugin in the running host: running, failed with the
-first compiler error, not supported in this application, or stopped.
+section has a switch per plugin, including the built-in MCP, Git, Statistics and UI tools plugins. The
+switch of a source plugin applies at once: the plugin is built and started, or stopped. The switch of a
+built-in plugin applies the next time CodeAlta starts, except for the Statistics rows described below,
+which follow the switch from their next read on. With an unarchived project selected, both pages can
+store a change globally or for that project. Every Settings section has its own icon in the sidebar.
+
+The row of a source plugin (`PluginRows` in `PluginSettings.tsx`) also has:
+
+- what the running host did with it: nothing for a plugin that runs, **Failed** with the reason,
+  **Not supported in the desktop application**, or **Not started**;
+- the errors of the compiler from its last build, each with its file, line and column, while the version
+  that was built before keeps running;
+- **Source changed**, when the `plugin.cs` on disk is not the one that runs;
+- **Build and reload**, while the plugin is turned on and is one this host loads;
+- **Edit in the code editor**, which opens the folder of the plugin in the code editor (see "Code editor").
+
+**New plugin** asks for an id and a description, writes a first `plugin.cs` and a `README.md` in the
+global plugin folder or in the one of the selected project, starts the plugin and opens its folder in
+the code editor. The page reads its list again when the host starts, replaces or stops a plugin.
+
+The `plugins` RPC behind the page: `list` returns each plugin with `folder` (the id of its folder for
+the code editor), `path`, `loadable` (this host loads it: a plugin of a project the application was
+not started in is listed and edited, not loaded), `changed`, `errors`, `runtime` and
+`runtimeMessage`; `setEnabled` answers `applied` when the running host followed; `reload` answers
+`ok`, `build_failed` (with the first error), `start_failed`, `disabled`, `not_loaded`, `unknown` or
+`unavailable`; `create` answers the folder id, the path and the name of the new plugin, or `exists`
+and `invalid`.
 
 ## Plugins
 
@@ -1271,6 +1292,12 @@ window's page loads:
   [Plugins](plugins.md#two-applications-desktop-and-terminal).
 - A build or load failure raises one notice at start and shows the error under the plugin in
   **Settings > Plugins**.
+- A source plugin is built again and replaced while the application runs, from **Settings > Plugins**
+  or by a session (`alta plugin reload`, see "Plugins written by a session" below). The host tells the
+  page (`plugins-changed`, a notice of the shell): the page reads the commands, shortcuts and pickers of
+  the plugins again, and what they show around the prompt. A command or a dialog action of a plugin that
+  ends does the same for what the plugins show (`refresh`, an event of `pluginUi.watch`), so a status
+  item follows the command that changed it.
 - Every Send asks the plugins what they add to the run, exactly as `alta session send` does, so a
   session gets the same tools and instructions from the window and from another session. When that
   changes between two sends (a server was activated), the next Send replaces the session's provider
@@ -1280,6 +1307,31 @@ window's page loads:
 Sessions of the desktop host have the same `alta` tool as in the terminal: notes, sessions and
 sub-sessions, reminders, skills, projects, providers, models and prompts, and the commands of the
 active plugins (`alta mcp`, `alta statistics`).
+
+### Plugins written by a session
+
+A session of the window writes a plugin and tries it without a restart. `DesktopPlugins.Workshop` gives
+the `alta` tool an `AltaPluginWorkshop` over the plugin runtime of the host, which adds
+`alta plugin create`, `build`, `reload`, `refresh` and `open` to `list`, `status` and `api` (see
+`doc/live-tool.md`, Plugin commands):
+
+- `create` writes the first `plugin.cs` and starts it; `reload` builds the source again and replaces the
+  running plugin. A build that fails returns the errors of the compiler with file, line and column, and
+  leaves the running version in place.
+- The agent tools of the plugin are registered in the turn that built it (`AgentRunTools.Set`), so the
+  session calls them at once. A session that already had a tool of the plugin calls the new version: a
+  plugin tool is bound when it is called.
+- `open` shows the folder of the plugin to the user in the code editor.
+- With the UI tools (see "UI tools") the session looks at what its plugin shows in the window: it runs
+  the command, reads the dialog in a snapshot and clicks in it.
+
+Building a plugin runs its code in the application, so these commands are not given to the sessions of a
+host that reviews their commands (`--review-owned-command-permissions`), and not to the explicit-root
+launch, which starts no plugin. The built-in `codealta-plugin-runtime` skill is what tells an agent how to do all this; a
+session reads it with `alta skill activate codealta-plugin-runtime`.
+
+`Services.State` of a plugin stores its data as JSON files: `~/.alta/plugin-data/<plugin key>/` for the
+user, `<project>/.alta/plugin-data/<plugin key>/` for a project (see `doc/plugins.md`, Plugin data).
 
 - `alta notes set` writes the session's notes; the **Notes** window at the top right of the session
   opens with them.
@@ -1360,6 +1412,15 @@ It is opened in three ways:
   one of its files holds unsaved edits.
 - `alta editor open` does the same for an agent (see `doc/live-tool.md`), and **Open file** in a Changes tab
   opens the file there.
+
+The editor also opens on the folder of a source plugin, which is no project of the catalog: **Edit in the
+code editor** in **Settings > Plugins**, the plugin a **New plugin** just created, and `alta plugin open` for an agent. Its
+tab is labeled **Plugin** and the id of the plugin, with the plugin icon. The tab names the folder by an
+id the host gives and resolves itself, `plugin:global:<package>` or `plugin:project:<project id>:<package>`
+(`PluginFolder`), where a project tab has the id of its project: every `projectFiles` call of the editor
+works unchanged inside that folder, and nowhere else. A package name is one folder name, so an id cannot
+name a path outside the plugin folder. Such a tab has no git status and no Changes, and it is kept across
+restarts like the editors of projects; when the folder is gone its editor says so.
 
 The project is the one of the code editor or the Changes tab in front, otherwise the selected project. The
 editor needs an owned host and a project that is not archived. Editor tabs close, reopen, cycle, drag and split
@@ -1509,7 +1570,9 @@ itself.
   stops the search. A text or a .NET regular expression is matched line by
   line, in text files of at most 1 MiB; a search reports at most 2000 matches in 500 files, 200 in one
   file, and gives up a line that takes more than a second.
-- `watch` is the channel through which `alta editor open` reaches the page.
+- `watch` is the channel through which `alta editor open` and `alta plugin open` reach the page. Its
+  `show` event has the project id, the file, the line and the column; for the folder of a plugin the id
+  is the folder id, with the name of the plugin and its path, which the page needs to open a tab for it.
 
 `composerStatus.read` returns the plugin status items of a composer for a project id (or none) and
 a session id (or none): each has the plugin id, a name, a label, a text, a tone (`info`, `success`,

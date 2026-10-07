@@ -80,6 +80,7 @@ export function createPluginHtmlSanitizer(view: Window & typeof globalThis) {
       else if (tag === "a") { element.setAttribute("rel", "noreferrer noopener"); element.setAttribute("target", "_blank"); }
       if (own.includes("alta-tag")) { add("bp6-tag", "bp6-minimal", "bp6-round"); if (intent) add(`bp6-intent-${intent}`); }
       if (own.includes("alta-callout")) { add("bp6-callout", "bp6-compact"); if (intent) add(`bp6-intent-${intent}`); }
+      if (own.includes("alta-card")) add("bp6-card", "bp6-compact");
       if (own.includes("alta-muted")) add("bp6-text-muted");
     }
   }

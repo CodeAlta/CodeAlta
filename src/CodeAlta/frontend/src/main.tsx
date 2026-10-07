@@ -39,7 +39,7 @@ import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./
 import { createProjectArchive } from "./projectArchive";
 import { browserActivation } from "./sessionBrowser";
 import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, automationsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, terminalTab, type FileTab, type TabKind, type TabPosition } from "./fileTabs";
+import { activateFileTab, automationsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isPluginTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, terminalTab, type FileTab, type TabKind, type TabPosition } from "./fileTabs";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
 import { OpenFileDialog } from "./editor/OpenFileDialog";
@@ -153,7 +153,7 @@ import { CommandPalette } from "./CommandPalette";
 import { PluginUiHost } from "./PluginUiHost";
 import { PluginRegionSlot } from "./PluginRegions";
 import { askPluginComposer, noPluginContributions, pluginCommandAvailable, pluginContributions, pluginKeymap, PluginUiContext, resolvePluginKey,
-  findPluginCommand, type PluginComposerRequest, type PluginContributionsView, type PluginPane, type PluginUiValue } from "./pluginUi";
+  findPluginCommand, type PluginComposerRequest, type PluginContributionsView, type PluginPane, type PluginUiValue, pluginsChangedEvent } from "./pluginUi";
 import { CommandHelp } from "./CommandHelp";
 import { resolveCommandKey, type CommandId } from "./commandRegistry";
 import { createPaletteFocusRestoration } from "./paletteActions";
@@ -717,6 +717,12 @@ function App() {
     openFile(editorTab(project));
   }
   const openEditorLatest = useRef(openEditor); openEditorLatest.current = openEditor;
+  // The code editor on the folder of a source plugin: from Settings, or asked by an agent with `alta plugin open`.
+  function openPluginEditor(folder: Readonly<{ id: string; path: string; name: string }>, request: EditorRequest) {
+    setEditorRequests(current => new Map(current).set(folder.id, request));
+    openFile(pluginEditorTab(folder));
+  }
+  const openPluginEditorLatest = useRef(openPluginEditor); openPluginEditorLatest.current = openPluginEditor;
   // An agent asks for the editor of a project with `alta editor open`.
   useEffect(() => {
     const epoch = status?.hostEpoch;
@@ -726,8 +732,13 @@ function App() {
       try {
         for await (const request of await projectFiles.watch({ expectedEpoch: epoch }, { signal: abort.signal })) {
           if (abort.signal.aborted) return;
+          const asked = { path: request.path, line: request.line, column: request.column, explorer: request.path === null ? true : null };
+          if (request.projectId.startsWith(pluginFolderPrefix)) {
+            if (request.name && request.root) openPluginEditorLatest.current({ id: request.projectId, path: request.root, name: request.name }, asked);
+            continue;
+          }
           const project = currentSnapshot.current?.projects.find(value => value.id === request.projectId && !value.archived);
-          if (project) openEditorLatest.current(project, { path: request.path, line: request.line, column: request.column, explorer: request.path === null ? true : null });
+          if (project) openEditorLatest.current(project, asked);
         }
       } catch { /* The bridge is gone: the editor still opens from the window. */ }
     })();
@@ -862,6 +873,8 @@ function App() {
           else if (notice.kind === "confirm-close" && !exitPending.current) setCloseQuestion(true);
           // An application that drives CodeAlta through its MCP server creates sessions without the window asking.
           else if (notice.kind === "sessions-changed") readSessionList.current();
+          // A plugin was built again, started or stopped while the application runs.
+          else if (notice.kind === "plugins-changed") { setPluginRevision(value => value + 1); window.dispatchEvent(new Event(pluginsChangedEvent)); }
         }
       } catch { /* The bridge is gone; the window's own close still works. */ }
     })();
@@ -1279,6 +1292,7 @@ function App() {
   // What plugins contribute for the selected project: their commands and shortcuts, and their prompt pickers.
   const pluginEpoch = owned ? status?.hostEpoch ?? null : null;
   const pluginProjectId = projectId ?? null;
+  const [pluginRevision, setPluginRevision] = useState(0);
   useEffect(() => {
     if (!pluginEpoch) { setPluginContributed(noPluginContributions); return; }
     const abort = new AbortController();
@@ -1286,7 +1300,7 @@ function App() {
       .then(reply => { if (!abort.signal.aborted) setPluginContributed(pluginContributions(reply, pluginProjectId) ?? noPluginContributions); },
         () => { if (!abort.signal.aborted) setPluginContributed(noPluginContributions); });
     return () => abort.abort();
-  }, [pluginEpoch, pluginProjectId]);
+  }, [pluginEpoch, pluginProjectId, pluginRevision]);
   // A plugin command runs for a pane: the one named, or the focused one. Its composer says what it holds.
   function runPluginCommand(commandId: string, pane?: Partial<PluginPane>) {
     const command = pluginContributed.commands.find(value => value.id === commandId);
@@ -2337,8 +2351,8 @@ function App() {
                 visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)}
                 onOpenFile={path => openEditor({ id: tab.projectId, path: tab.projectPath }, { path, line: null, column: null, explorer: null })} />
               : <ProjectEditor key={fileTabKey(tab)} tab={tab} editors={fileEditors} request={editorRequests.get(tab.projectId)}
-              projectName={snapshot?.projects.find(project => project.id === tab.projectId)?.name} platform={shellPreferences?.platform ?? "windows"}
-              epoch={!status ? undefined : owned ? status.hostEpoch : null} onPickFile={openFilePicker}
+              projectName={tab.name ?? snapshot?.projects.find(project => project.id === tab.projectId)?.name} platform={shellPreferences?.platform ?? "windows"}
+              epoch={!status ? undefined : owned ? status.hostEpoch : null} onPickFile={isPluginTab(tab) ? undefined : openFilePicker}
               visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)} />}>
           <div id="active-session-content" className="active-session-content">
           {error && <div className="banner banner-error" role="alert">{error}</div>}
@@ -2380,7 +2394,8 @@ function App() {
         closing: shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, set: setOnClose } : null }} />
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}
         update={owned ? appUpdateResult : undefined} onOpenReleaseNotes={openReleaseNotes} onInstallUpdate={installUpdate} />
-      : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
+      : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} revision={pluginRevision}
+        onEdit={owned ? folder => { closeSettings(); openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true }); } : undefined} />
       : settingsSection === "worktrees" ? <WorktreeSettings epoch={owned ? status!.hostEpoch : null}
         pick={owned ? initial => pickFolder(desktopShell.pickFolder, t("Folder for worktrees"), initial) : undefined} />
       : settingsSection === "mcpHost" ? <McpHostSettings epoch={owned ? status!.hostEpoch : null} developer={status?.developerMode ?? false} />

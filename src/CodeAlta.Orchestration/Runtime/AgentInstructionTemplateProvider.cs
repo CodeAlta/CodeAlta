@@ -189,7 +189,7 @@ public sealed class AgentInstructionTemplateProvider
         var builder = new StringBuilder();
         builder.AppendLine("Filesystem skills are available for this session.");
         builder.AppendLine("Activate a skill only when it clearly matches the current task.");
-        builder.AppendLine("When the `alta` live tool is available, inspect skills with `alta skill list`/`alta skill show` and activate with `alta skill activate <skill-name> --session <session-id>`; prefer the singular `skill` group over compatibility aliases.");
+        builder.AppendLine("When the `alta` live tool is available, inspect skills with `alta skill list`/`alta skill show` and activate with `alta skill activate <skill-name>`; prefer the singular `skill` group over compatibility aliases.");
         if (preferredSkills.Count > 0)
         {
             builder.AppendLine("");

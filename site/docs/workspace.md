@@ -169,6 +169,7 @@ CodeAlta Desktop has a code editor for each project: one tab that holds the file
 
 - Click the `</>` button of a project in the sidebar, press `Ctrl+E` `Ctrl+E`, or run `/editor` to open it with the files of the project.
 - Press `Ctrl+E`, or run `/edit`, to open a single file. `Ctrl+B` shows or hides the files.
+- **Edit in the code editor** on a plugin of **Settings > Plugins** opens the same editor on the folder of that plugin. See [Plugin development]({{site.basepath}}/docs/plugins/developers/#edit-build-and-reload).
 
 ### Files
 
@@ -488,7 +489,7 @@ Closing the desktop window asks whether CodeAlta keeps running or exits. **Keep 
 
 {{ alta_shot "alta-desktop-plugins.webp" "alta-plugins.png" "Plugin management" "Plugin management lists built-in and source plugins and lets you enable or disable them." }}
 
-Open it with `Ctrl+G Ctrl+N`, `/plugins`, or `/plugin`. The TUI dialog shows discovered global and project plugins, state, diagnostics, contributions, and actions for source or README files. The desktop **Plugins** page lists the plugins of the global and project scopes with a switch to enable or disable each one. See [Plugins]({{site.basepath}}/docs/plugins/).
+Open it with `Ctrl+G Ctrl+N`, `/plugins`, or `/plugin`. The TUI dialog shows discovered global and project plugins, state, diagnostics, contributions, and actions for source or README files. The desktop **Plugins** page lists the plugins of the global and project scopes with a switch to enable or disable each one. A source plugin has a button to build and reload it while CodeAlta runs and one to edit it in the code editor; **New plugin** creates one. See [Plugins]({{site.basepath}}/docs/plugins/).
 
 ## Skills management
 

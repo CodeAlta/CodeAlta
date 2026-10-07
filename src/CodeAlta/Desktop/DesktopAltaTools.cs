@@ -27,6 +27,10 @@ namespace CodeAlta.Desktop;
 /// The commands of the host's active plugins (<c>alta mcp</c>, <c>alta statistics</c>) are part of the tool,
 /// and sessions that alta commands send to get the same plugin tools and instructions as sends from the window.
 /// </para>
+/// <para>
+/// A host that started its plugins lets <c>alta plugin</c> create a source plugin, build it and replace it while
+/// the host runs, and open its folder in the code editor of the window.
+/// </para>
 /// </remarks>
 internal static class DesktopAltaTools
 {
@@ -39,15 +43,16 @@ internal static class DesktopAltaTools
     /// <param name="terminals">The terminals the <c>alta terminal</c> commands use; without them the commands do not exist.</param>
     /// <param name="automations">The automations the <c>alta automation</c> commands use; without them the commands do not exist.</param>
     /// <param name="worktrees">The worktrees <c>alta session create --worktree</c> creates; the commands make their own without it.</param>
+    /// <param name="plugins">What <c>alta plugin</c> does with the source plugins of the host; without it the commands only list the active plugins.</param>
     /// <returns>The dispatcher of the commands, for the other callers of the host (its MCP server).</returns>
     /// <exception cref="ArgumentNullException">The host or the reminders are null.</exception>
     internal static AltaCommandDispatcher Attach(CodeAltaHost host, AltaReminderService reminders, PluginAltaServiceBridge? pluginAlta = null, IAltaChangesView? changes = null,
         IAltaEditorView? editor = null, IAltaTerminals? terminals = null, IAltaAutomations? automations = null,
-        CodeAlta.Catalog.Worktrees.GitWorktreeService? worktrees = null)
+        CodeAlta.Catalog.Worktrees.GitWorktreeService? worktrees = null, AltaPluginWorkshop? plugins = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(reminders);
-        var dispatcher = Compose(host, reminders, changes, editor, terminals, automations, worktrees);
+        var dispatcher = Compose(host, reminders, changes, editor, terminals, automations, worktrees, plugins);
         pluginAlta?.SetDispatcher(dispatcher);
         host.Commands.SessionTools = CreateSessionTools(dispatcher);
         return dispatcher;
@@ -55,7 +60,8 @@ internal static class DesktopAltaTools
 
     /// <summary>Builds the dispatcher of the alta commands over a host's services.</summary>
     internal static AltaCommandDispatcher Compose(CodeAltaHost host, AltaReminderService reminders, IAltaChangesView? changes = null, IAltaEditorView? editor = null,
-        IAltaTerminals? terminals = null, IAltaAutomations? automations = null, CodeAlta.Catalog.Worktrees.GitWorktreeService? worktrees = null)
+        IAltaTerminals? terminals = null, IAltaAutomations? automations = null, CodeAlta.Catalog.Worktrees.GitWorktreeService? worktrees = null,
+        AltaPluginWorkshop? plugins = null)
     {
         var permissions = host.RuntimeService.Permissions;
         var services = new AltaServiceCollection()
@@ -78,12 +84,14 @@ internal static class DesktopAltaTools
             .Add(reminders)
             // The plugins as they are when a command runs; without an active plugin both add nothing.
             .Add<IAltaPluginCatalog>(new RuntimeAltaPluginCatalog(host.PluginRuntime))
+            .Add(host.PluginRuntime)
             .AddPluginRuntimeHooks(host.PluginRuntime);
         if (changes is not null) services.Add(changes);
         if (editor is not null) services.Add(editor);
         if (terminals is not null) services.Add(terminals);
         if (automations is not null) services.Add(automations);
         if (worktrees is not null) services.Add(worktrees);
+        if (plugins is not null) services.Add(plugins);
         var registry = new AltaCommandRegistry();
         var dispatcher = new AltaCommandDispatcher(registry, services);
         services.Add(registry).Add(dispatcher);

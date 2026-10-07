@@ -136,6 +136,8 @@ internal sealed class CodeAltaFrontendComposition
         if (pluginHostBridge?.Runtime is { } pluginRuntime)
         {
             altaServices.Add<IAltaPluginCatalog>(new RuntimeAltaPluginCatalog(pluginRuntime));
+            // The packages of the plugin folders, with what was done with each: `alta plugin list` and `status`.
+            altaServices.Add(pluginRuntime);
             altaServices.AddPluginRuntimeHooks(pluginRuntime);
         }
 

@@ -127,6 +127,12 @@ internal sealed class DesktopShell
     /// </summary>
     internal void NotifySessionsChanged() => Publish(new("sessions-changed", 0));
 
+    /// <summary>
+    /// Tells the page that the plugins of a package were started, replaced or stopped: it reads again their
+    /// commands, their shortcuts, their pickers and what they show.
+    /// </summary>
+    internal void NotifyPluginsChanged() => Publish(new("plugins-changed", 0));
+
     /// <summary>Whether the tray icon exists: without it a hidden window could not be brought back.</summary>
     internal bool TrayAvailable { get { lock (_gate) return _tray; } }
 

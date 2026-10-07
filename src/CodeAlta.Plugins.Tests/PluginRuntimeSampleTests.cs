@@ -15,6 +15,11 @@ public sealed class PluginRuntimeSampleTests
         "instruction-path-normalizer",
         "multi-plugin-assembly",
         "desktop-and-terminal",
+        "agent-tool",
+        "alta-command",
+        "timeline-card",
+        "saved-data",
+        "todo",
     ];
 
     [TestMethod]

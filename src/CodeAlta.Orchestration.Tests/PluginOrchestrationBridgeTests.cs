@@ -54,6 +54,48 @@ public sealed class PluginOrchestrationBridgeTests
     }
 
     [TestMethod]
+    public async Task ATool_OfAPluginThatIsBuiltAgain_CallsTheVersionThatRuns()
+    {
+        var registry = new PluginContributionRegistry();
+        static PluginAgentToolContribution Tool(string name, string version) => new()
+        {
+            Definition = new AgentToolDefinition(
+                new AgentToolSpec(name, "Says which version runs.", JsonDocument.Parse("{}").RootElement.Clone()),
+                (_, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text(version)]))),
+        };
+        static PluginDescriptor Plugin(string key) => new() { RuntimeKey = key, TypeName = "Plugin", AssemblyName = "plugin" };
+        void Start(string key, int generation, params PluginAgentToolContribution[] tools)
+            => registry.Register(Plugin(key), PluginScope.Global, scopeProjectId: null, scopeProjectPath: null, PluginPoint.AgentTool, tools, generation);
+        static async Task<string> CallAsync(AgentToolDefinition tool)
+        {
+            var result = await tool.Handler(new AgentToolInvocation(new ModelProviderId("provider-1"), "session-1", "call-1", tool.Spec.Name, JsonDocument.Parse("{}").RootElement.Clone()), CancellationToken.None);
+            return (result.Success ? "ok: " : "failed: ") + string.Concat(result.Items.OfType<AgentToolResultItem.Text>().Select(static item => item.Value));
+        }
+
+        Start("plugin:notes", 1, Tool("note_version", "v1"), Tool("note_count", "three"));
+        Start("plugin:other", 1, Tool("other_tool", "other"));
+        var bridge = CreateBridge(registry);
+
+        // The tools of one plugin, as a run gets them; and those of every plugin.
+        var tools = bridge.CreateAgentTools(pluginRuntimeKeys: ["plugin:notes"]);
+        CollectionAssert.AreEqual(new[] { "note_version", "note_count" }, tools.Select(static tool => tool.Spec.Name).ToArray());
+        Assert.AreEqual(3, bridge.CreateAgentTools().Count);
+        Assert.AreEqual(0, bridge.CreateAgentTools(pluginRuntimeKeys: []).Count);
+        Assert.AreEqual("ok: v1", await CallAsync(tools[0]));
+
+        // The plugin is built again. A session keeps the tool it was given, which looks the same: it calls the new one.
+        registry.RemoveByPlugin("plugin:notes");
+        Start("plugin:notes", 2, Tool("note_version", "v2"));
+        Assert.AreEqual("ok: v2", await CallAsync(tools[0]));
+        Assert.AreEqual("ok: v2", await CallAsync(bridge.CreateAgentTools(pluginRuntimeKeys: ["plugin:notes"]).Single()));
+
+        // A tool the new version no longer has, and the tools of a plugin that was stopped, say so.
+        Assert.AreEqual("failed: The plugin that provides the tool 'note_count' is not running.", await CallAsync(tools[1]));
+        registry.RemoveByPlugin("plugin:notes");
+        Assert.AreEqual("failed: The plugin that provides the tool 'note_version' is not running.", await CallAsync(tools[0]));
+    }
+
+    [TestMethod]
     public async Task RunCompactionAsync_ReturnsEmptyResultWhenNoCompactionContributionsApply()
     {
         var bridge = CreateBridge(new PluginContributionRegistry());

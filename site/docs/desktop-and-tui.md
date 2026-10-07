@@ -161,6 +161,7 @@ When a new version is available, the desktop app shows a notice with **Update an
 | Queue every prompt, also when idle | **Enqueue until idle** in the Send options | **AlwaysQueue** checkbox |
 | Tool permissions | Always approved automatically | Approved automatically by default; can be reviewed |
 | Plugin dialogs and content | The app's own components, with HTML fragments from the plugin | Terminal controls |
+| Work on a plugin | Create, edit and reload it while the app runs, from **Settings > Plugins** or by asking an agent | Built when the app starts |
 | Updates | **Update and restart** | Shows the command to run |
 | Font | No requirement | Nerd Font required |
 | Copy the UI as an image | Not available | `Ctrl+F12` |

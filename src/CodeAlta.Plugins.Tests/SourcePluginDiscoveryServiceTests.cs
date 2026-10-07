@@ -39,6 +39,32 @@ public sealed class SourcePluginDiscoveryServiceTests
     }
 
     [TestMethod]
+    public void TheReadmeOfAPackage_IsNamedAsItIsOnDisk()
+    {
+        using var temp = new TestTempDirectory();
+        string Package(string id, params string[] files)
+        {
+            var directory = Directory.CreateDirectory(Path.Combine(temp.Path, id)).FullName;
+            File.WriteAllText(Path.Combine(directory, "plugin.cs"), "public sealed class Plugin {}");
+            foreach (var file in files) File.WriteAllText(Path.Combine(directory, file), "# " + id);
+            return directory;
+        }
+
+        // What `alta plugin create` writes, a name in another case, and a package without one.
+        var upper = Package("upper", "README.md", "notes.md");
+        var mixed = Package("mixed", "Readme.md");
+        Package("none", "readme.txt");
+
+        var packages = new SourcePluginDiscoveryService().Discover(new PluginRoot { RootPath = temp.Path, Scope = PluginScope.Global })
+            .ToDictionary(static package => package.PackageId, static package => package.Sidecars.ReadmePath);
+
+        // The exact name: a path in another case opens the file on Windows and names no file for git.
+        Assert.AreEqual(Path.Combine(upper, "README.md"), packages["upper"]);
+        Assert.AreEqual(Path.Combine(mixed, "Readme.md"), packages["mixed"]);
+        Assert.IsNull(packages["none"]);
+    }
+
+    [TestMethod]
     public void DiscoverReturnsEmptyForEmptyRoot()
     {
         using var temp = new TestTempDirectory();

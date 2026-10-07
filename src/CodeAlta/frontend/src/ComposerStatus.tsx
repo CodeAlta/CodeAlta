@@ -3,7 +3,7 @@ import { Button } from "@blueprintjs/core";
 import type { ComposerStatusRequest } from "#neoastra";
 import { AppIcon, type IconName } from "./AppIcon";
 import { composerStatusItems, sameComposerStatus, type ComposerStatusView } from "./pluginStatus";
-import { PluginUiContext } from "./pluginUi";
+import { PluginUiContext, pluginsChangedEvent } from "./pluginUi";
 import { settingsNavigation } from "./settingsNavigation";
 import { useShellLanguage } from "./shellLanguage";
 
@@ -14,8 +14,9 @@ const icons: Readonly<Record<string, IconName>> = { mcp: "server" };
 /**
  * The plugin status items at the end of the composer's status line (the MCP servers and the tools the
  * session activated, for example). They are read when the composer appears, every ten seconds while it
- * stays and when the window gets the focus back, so a change made in Settings or by a run shows up without
- * a reload. An item that names a Settings page opens it; one that names a plugin command runs it.
+ * stays, when the window gets the focus back and when the plugins change, so a change made in Settings or by
+ * a run shows up without a reload. An item that names a Settings page opens it; one that names a plugin
+ * command runs it.
  */
 export function ComposerStatus({ epoch, projectId, sessionId, read }: { epoch: string | null; projectId: string | null; sessionId: string | null; read: Read }) {
   const { t } = useShellLanguage();
@@ -39,7 +40,8 @@ export function ComposerStatus({ epoch, projectId, sessionId, read }: { epoch: s
     refresh();
     const timer = window.setInterval(refresh, refreshMilliseconds);
     window.addEventListener("focus", refresh);
-    return () => { abort.abort(); window.clearInterval(timer); window.removeEventListener("focus", refresh); };
+    window.addEventListener(pluginsChangedEvent, refresh);
+    return () => { abort.abort(); window.clearInterval(timer); window.removeEventListener("focus", refresh); window.removeEventListener(pluginsChangedEvent, refresh); };
   }, [epoch, projectId, sessionId, read]);
   const items = epoch && shown?.projectId === projectId && shown.sessionId === sessionId ? shown.items : [];
   if (items.length === 0) return null;

@@ -259,6 +259,7 @@ internal sealed class PluginUiService
         if (request.RequestId is not { Length: > 0 and <= 64 } || request.Action is not { Length: > 0 and <= MaximumLabelUnits }
             || request.Value is { Length: > MaximumFieldUnits } || !ValidFields(request.Values)) return new("invalid_request", null, false);
         var (status, html, closed) = await _ui.ActionAsync(request.RequestId, request.Action, request.Value, request.Values, cancellationToken).ConfigureAwait(false);
+        _ui.Refresh();
         return new(status, html, closed);
     }
 
@@ -303,6 +304,11 @@ internal sealed class PluginUiService
         catch (Exception exception)
         {
             LogManager.GetLogger("CodeAlta.Desktop.Plugins").Error(exception, $"Plugin command '{command.Name}' failed");
+        }
+        finally
+        {
+            // What the plugin shows usually changed with what its command did.
+            ui.Refresh();
         }
     }
 
@@ -393,7 +399,8 @@ internal sealed record PluginUiWatchRequest(string? ExpectedEpoch);
 /// </summary>
 /// <param name="Kind">
 /// <c>notify</c> (a message), <c>ask</c> (a dialog to show and answer), <c>close</c> (a request that no longer
-/// waits), <c>prompt</c> (send, queue or steer a prompt, or compact; to answer) or <c>draft</c> (replace a prompt draft).
+/// waits), <c>prompt</c> (send, queue or steer a prompt, or compact; to answer), <c>draft</c> (replace a prompt draft)
+/// or <c>refresh</c> (read again what plugins show: a command or a dialog action of a plugin ended).
 /// </param>
 internal sealed record PluginUiEvent(string Kind)
 {

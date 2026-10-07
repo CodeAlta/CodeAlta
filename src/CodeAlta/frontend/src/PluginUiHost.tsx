@@ -5,6 +5,7 @@ import { AppWindow } from "./AppWindow";
 import { showToast } from "./appToaster";
 import { PluginHtml } from "./PluginHtml";
 import { collectPluginFields } from "./pluginHtmlSanitizer";
+import { pluginsChangedEvent } from "./pluginUi";
 import { useShellLanguage } from "./shellLanguage";
 
 type Api = Pick<typeof pluginUi, "watch" | "respond" | "dialogAction">;
@@ -45,6 +46,9 @@ export function PluginUiHost({ epoch, onPrompt, onDraft, api = pluginUi }: {
             answer({ requestId, button: taken ? "ok" : null, cancelled: !taken, text: null, selectedIndex: null, values: null });
           } else if (event.kind === "draft") {
             handlers.current.onDraft(event);
+          } else if (event.kind === "refresh") {
+            // A command or a dialog action of a plugin ended: its status items and its content follow at once.
+            window.dispatchEvent(new Event(pluginsChangedEvent));
           }
         }
       } catch { /* The channel ended: watch again below, unless the window is going away. */ }

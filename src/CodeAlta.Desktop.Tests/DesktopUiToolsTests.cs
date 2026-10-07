@@ -317,7 +317,7 @@ public sealed class DesktopUiToolsTests
     private static Task<AgentToolResult> Invoke(IReadOnlyList<AgentToolDefinition> tools, string name, string sessionId, string arguments)
         => tools.Single(tool => tool.Spec.Name == name).Handler(new AgentToolInvocation(new ModelProviderId("provider"), sessionId, "call", name, Json(arguments)), CancellationToken.None);
 
-    private static async Task SendAsync(CodeAltaHost host, SessionViewDescriptor session, string text)
+    internal static async Task SendAsync(CodeAltaHost host, SessionViewDescriptor session, string text)
     {
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), session.SessionId, text)).Receipt;
         Assert.IsNotNull(receipt);
@@ -328,17 +328,17 @@ public sealed class DesktopUiToolsTests
         while (await host.RuntimeService.HasActiveRunAsync(session, timeout.Token)) await Task.Delay(20, timeout.Token);
     }
 
-    private static Func<AgentTurnRequest, AgentTurnResponse> Call(string tool, string arguments)
+    internal static Func<AgentTurnRequest, AgentTurnResponse> Call(string tool, string arguments)
         => _ => new AgentTurnResponse
         {
             AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.ToolCall("call-" + Guid.NewGuid().ToString("N"), tool, Json(arguments))]),
         };
 
-    private static Func<AgentTurnRequest, AgentTurnResponse> Say(string text)
+    internal static Func<AgentTurnRequest, AgentTurnResponse> Say(string text)
         => _ => new AgentTurnResponse { AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text(text)]) };
 
     /// <summary>What the model was offered and told in one of its requests, and the result of the tool it called before.</summary>
-    private sealed record Request(string[] Tools, string Instructions, string? LastToolResult);
+    internal sealed record Request(string[] Tools, string Instructions, string? LastToolResult);
 
     // The window of the tests: it has a few tools, records what is asked of them and answers what a test says.
     private sealed class FakeUi : IDesktopUi
@@ -371,7 +371,7 @@ public sealed class DesktopUiToolsTests
     }
 
     // A model that says and calls what a test scripted, and records what it was offered.
-    private sealed class ScriptedProvider : IAgentModelProviderRuntime, IModelProviderTurnExecutor
+    internal sealed class ScriptedProvider : IAgentModelProviderRuntime, IModelProviderTurnExecutor
     {
         private readonly Queue<Func<AgentTurnRequest, AgentTurnResponse>> _steps = new();
 

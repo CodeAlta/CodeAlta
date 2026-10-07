@@ -142,10 +142,22 @@ public sealed partial class SourcePluginDiscoveryService
 
     private static SourcePluginSidecars DiscoverSidecars(string packageDirectory)
     {
-        string? ExistingFile(string name)
+        // The file as it is named on disk: where names ignore case, a path written in another case opens the
+        // file and names none for git or for another system. Of several, the lowercase one, as before.
+        string? Readme()
         {
-            var path = Path.Combine(packageDirectory, name);
-            return File.Exists(path) ? Path.GetFullPath(path) : null;
+            try
+            {
+                return Directory.EnumerateFiles(packageDirectory, "*.md", SearchOption.TopDirectoryOnly)
+                    .Where(static path => string.Equals(Path.GetFileName(path), "readme.md", StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(static path => Path.GetFileName(path), StringComparer.Ordinal)
+                    .Select(Path.GetFullPath)
+                    .FirstOrDefault();
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
         }
 
         string? ExistingDirectory(string name)
@@ -156,7 +168,7 @@ public sealed partial class SourcePluginDiscoveryService
 
         return new SourcePluginSidecars
         {
-            ReadmePath = ExistingFile("readme.md") ?? ExistingFile("README.md"),
+            ReadmePath = Readme(),
             SkillsDirectory = ExistingDirectory("skills"),
             PromptsDirectory = ExistingDirectory("prompts"),
             TemplatesDirectory = ExistingDirectory("templates"),

@@ -8,6 +8,30 @@ namespace CodeAlta.Plugins.Tests;
 public sealed class PluginRootBuildFileGeneratorTests
 {
     [TestMethod]
+    public async Task ThePluginFolder_KeepsItsGeneratedFilesOutOfARepository_AndBuildsWithoutTrimmingWarnings()
+    {
+        using var temp = new TestTempDirectory();
+        var root = new PluginRoot { RootPath = Path.Combine(temp.Path, "plugins"), Scope = CodeAlta.Plugins.Abstractions.PluginScope.Project };
+        var options = new PluginRootBuildFileOptions { CodeAltaExeFolder = temp.Path, GlobalJsonContent = "{ }" };
+        var ignore = Path.Combine(root.RootPath, PluginRootBuildFileGenerator.IgnoreFileName);
+
+        var first = await new PluginRootBuildFileGenerator().GenerateAsync(root, options);
+
+        Assert.IsTrue(first.Succeeded);
+        Assert.AreEqual(4, first.WrittenFiles.Count, "The ignore file is not one of the build files.");
+        var lines = File.ReadAllLines(ignore);
+        CollectionAssert.AreEqual(new[] { "/Directory.Build.props", "/Directory.Build.targets", "/Directory.Packages.props", "/global.json", "/.codealta.plugins.lock" }, lines.Skip(1).ToArray());
+        // A plugin is a library that is loaded as it is: the analysis for trimmed applications says nothing about it.
+        StringAssert.Contains(File.ReadAllText(Path.Combine(root.RootPath, "Directory.Build.props")), "<PublishAot>false</PublishAot>");
+
+        // An ignore file of the user stays as it is, and the folder still builds.
+        File.WriteAllText(ignore, "bin/\n");
+        var second = await new PluginRootBuildFileGenerator().GenerateAsync(root, options);
+        Assert.IsTrue(second.Succeeded);
+        Assert.AreEqual("bin/\n", File.ReadAllText(ignore));
+    }
+
+    [TestMethod]
     public async Task GenerateAsyncWritesDeterministicGeneratedFiles()
     {
         using var temp = new TestTempDirectory();

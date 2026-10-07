@@ -6,7 +6,7 @@ import { AppIcon } from "../AppIcon";
 import { showToast } from "../appToaster";
 import { changeListReply } from "../changes/projectChanges";
 import { fileAppearance } from "../fileAppearance";
-import { fileTabKey, type FileTab } from "../fileTabs";
+import { fileTabKey, isPluginTab, type FileTab } from "../fileTabs";
 import type { MessageKey } from "../localization";
 import { MarkdownContent } from "../MarkdownContent";
 import { SessionTabMenu, type SessionMenuEntry } from "../SessionTabMenu";
@@ -219,9 +219,9 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
     return () => { window.removeEventListener("focus", focused); window.clearInterval(timer); };
   }, [visible, epoch, side, tree.expanded, preferences.ignored]);
 
-  // The git status of the files, for the colors and letters of the tree.
+  // The git status of the files, for the colors and letters of the tree. The folder of a plugin has none to ask for.
   useEffect(() => {
-    if (!visible || !epoch || side !== "files") return;
+    if (!visible || !epoch || side !== "files" || isPluginTab(tab)) return;
     const abort = new AbortController();
     let known: string | null = null, running = false;
     const read = () => {

@@ -18,7 +18,8 @@ CodeAlta keeps user-owned durable state under a global root and project-local `.
 | `sessions/` | Agent session runtime and session catalog | Date-sharded session journals and optional protocol traces. |
 | `saved_prompts/` | Catalog `PromptDraftStore` | Unsent session and global/project new-session text drafts. |
 | `ui-state.yaml` | Catalog UI-state store | Open/selected sessions, project preferences, theme/navigator settings, frontend layouts and shared logical tab descriptors. |
-| `plugins/` | Plugin runtime | User-scoped source plugin packages. |
+| `plugins/` | Plugin runtime | User-scoped source plugin packages, with the build files and the `.gitignore` CodeAlta generates beside them. |
+| `plugin-data/` | Plugin runtime | What plugins store with `Services.State`: one folder for each plugin, one JSON file for each item. |
 | `skills/` | Skill catalog | User-scoped CodeAlta skill roots. |
 | `worktrees/` | `GitWorktreeService` | The git worktrees CodeAlta creates for sessions, unless the user chose another place: one folder for each project, and in it one folder for each worktree (see `doc/desktop.md`). |
 | `color-schemes/` | Desktop `ColorSchemesService` | The user's color schemes of the desktop window, one JSON file each (see `doc/desktop.md`). |
@@ -33,7 +34,7 @@ that other computers can reach (see `doc/desktop.md`, MCP server).
 
 `CatalogOptions.StateRoot` is the root of what one running instance alone writes: `sessions/` (journals and prompt-image copies), `cache/cache.sqlite3`, `ui-state.yaml`, `saved_prompts/`, `automations.json` and the legacy `threads/internal/`. It defaults to the global root, so the layout above is unchanged for the normal instance, whose lock is `~/.alta/alta.lock`.
 
-The developer instance (`alta --dev`, `altatui --dev`; `CodeAltaInstanceProfile` in `CodeAlta.Hosting`) keeps the same global root and sets the state root to `~/.alta/dev/`. It therefore shares `config.toml`, `auth/`, `mcp.json`, `projects/`, `prompts/`, `skills/`, `plugins/`, `color-schemes/` and the rest of `cache/`, and writes its sessions, session cache, view state, drafts, terminal logs (`dev/logs/`) and lock (`dev/alta.lock`) apart, which lets it run beside the normal instance. The desktop developer instance also uses its own WebView data root (`CodeAlta/desktop-dev` under the local application-data directory). A host with a separate state root does not refresh the coordinator `AGENTS.md` of the global root; it only creates it when missing. The first time it runs, its `ui-state.yaml` starts from the normal instance's per-project provider/model preferences and navigator settings (`SessionViewCatalog.SeedViewStateFromAsync`); open sessions, selection and layouts are not copied, and later changes on either side stay separate.
+The developer instance (`alta --dev`, `altatui --dev`; `CodeAltaInstanceProfile` in `CodeAlta.Hosting`) keeps the same global root and sets the state root to `~/.alta/dev/`. It therefore shares `config.toml`, `auth/`, `mcp.json`, `projects/`, `prompts/`, `skills/`, `plugins/`, `plugin-data/`, `color-schemes/` and the rest of `cache/`, and writes its sessions, session cache, view state, drafts, terminal logs (`dev/logs/`) and lock (`dev/alta.lock`) apart, which lets it run beside the normal instance. The desktop developer instance also uses its own WebView data root (`CodeAlta/desktop-dev` under the local application-data directory). A host with a separate state root does not refresh the coordinator `AGENTS.md` of the global root; it only creates it when missing. The first time it runs, its `ui-state.yaml` starts from the normal instance's per-project provider/model preferences and navigator settings (`SessionViewCatalog.SeedViewStateFromAsync`); open sessions, selection and layouts are not copied, and later changes on either side stay separate.
 
 Shared files keep their existing guarantees between the two instances: Codex credentials are refreshed under a cross-process file lock; `config.toml`, the project descriptors and the Copilot/xAI token files are whole-file writes without one, so the last writer wins. Optional provider protocol traces stay under the global root's `sessions/traces/`, one file per session id.
 
@@ -63,7 +64,8 @@ Project-local CodeAlta state lives under `<project>/.alta/`:
 | --- | --- |
 | `<project>/.alta/config.toml` | Project-local config overrides, and the automations of CodeAlta Desktop that are kept with the project. |
 | `<project>/.alta/mcp.json` | Project-local MCP server connection definitions. |
-| `<project>/.alta/plugins/<package-id>/plugin.cs` | Project-scoped trusted source plugin packages. |
+| `<project>/.alta/plugins/<package-id>/plugin.cs` | Project-scoped trusted source plugin packages. The generated `.gitignore` of the folder keeps the generated build files out of the repository. |
+| `<project>/.alta/plugin-data/<plugin key>/` | What a plugin stores for the project with `Services.State`. |
 | `<project>/.alta/skills/<skill-name>/SKILL.md` | Project-scoped skills. |
 | `<repository>/.alta/worktrees/<name>/` | The git worktrees of the project, when the user chose to keep them inside the repository. The folder holds a `.gitignore` of one line (`*`), so git ignores it. |
 
@@ -242,7 +244,7 @@ Unlike the general-purpose codec, prompt management conservatively rejects exist
 
 ## Plugin and skill state
 
-Source plugins are discovered from user and project roots and are enabled by default unless disabled in config or safe mode is active. CodeAlta owns generated plugin-root build files and plugin build manifests under its roots; plugin package directories should contain only package-owned source/content files.
+Source plugins are discovered from user and project roots and are enabled by default unless disabled in config or safe mode is active. CodeAlta owns generated plugin-root build files and plugin build manifests under its roots; plugin package directories should contain only package-owned source/content files. In CodeAlta Desktop a change of a source plugin's enablement is applied to the running application; see `doc/plugins.md`, Changing plugins while the application runs.
 
 Skills are plain directories containing `SKILL.md` plus optional helper files. Discovery validates metadata, applies precedence/shadowing and config enablement, and reads resources without executing scripts. Disabled skills remain visible in the management UI, but are not advertised to models and cannot be activated through UI, runtime, or live-tool paths.
 

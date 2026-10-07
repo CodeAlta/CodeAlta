@@ -144,6 +144,18 @@ internal sealed class DesktopPluginUi : IPluginUiService, IPluginSessionService,
         return ValueTask.CompletedTask;
     }
 
+    /// <summary>
+    /// Tells the page that what plugins show may have changed (a command or a dialog action of a plugin ended):
+    /// it reads their status items and their content again. A page that is not there reads them when it arrives.
+    /// </summary>
+    internal void Refresh()
+    {
+        lock (_gate)
+        {
+            if (!_closed && _watcher is { } watcher) watcher(new PluginUiEvent("refresh"));
+        }
+    }
+
     /// <summary>Shows a notification with the tone of a problem.</summary>
     internal void NotifyProblem(string message)
         => Post(new PluginUiEvent("notify") { Message = Cut(message, MaximumMessageUnits), Tone = "warning" });

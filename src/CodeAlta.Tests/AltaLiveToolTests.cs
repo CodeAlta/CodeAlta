@@ -3647,6 +3647,14 @@ public sealed class AltaLiveToolTests
             var activated = ReadJsonLines(result.Stdout).Single(line => line.GetProperty("type").GetString() == "alta.skill.activated");
             Assert.AreEqual("sample-skill", activated.GetProperty("skillName").GetString());
             StringAssert.Contains(activated.GetProperty("payload").GetString(), "Active run activation skill.");
+
+            // A session that names no session means itself; a caller that belongs to none has to name one.
+            var own = await dispatcher.InvokeAsync(["skill", "activate", "sample-skill"], caller: caller).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, own.ExitCode, own.Stderr);
+            Assert.AreEqual(sessionId, ReadJsonLines(own.Stdout).Single(line => line.GetProperty("type").GetString() == "alta.skill.activated").GetProperty("sessionId").GetString());
+            var none = await dispatcher.InvokeAsync(["skill", "activate", "sample-skill"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Usage, none.ExitCode);
+            StringAssert.Contains(none.Stdout + none.Stderr, "usage.missingSession");
         }
         finally
         {

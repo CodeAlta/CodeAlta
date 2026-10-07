@@ -114,6 +114,30 @@ public sealed class PluginUiRpcTests
     }
 
     [TestMethod]
+    public async Task ACommandOrADialogActionThatEnded_TellsThePageToReadAgainWhatPluginsShow()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var commands = (await fixture.Service.ContributionsAsync(new(Epoch, fixture.Project.Id), default)).Commands;
+        string Id(string name) => commands.Single(command => command.Name == name).Id;
+
+        // The status item of a plugin usually shows what its command just changed, whether the command ended well or not.
+        await fixture.Service.InvokeCommandAsync(new(Epoch, Id("hello"), fixture.Project.Id, null, false, null), default);
+        Assert.AreEqual("hello ran", (await fixture.NextAsync("notify")).Message);
+        await fixture.NextAsync("refresh");
+        await fixture.Service.InvokeCommandAsync(new(Epoch, Id("fail"), fixture.Project.Id, null, false, null), default);
+        await fixture.NextAsync("refresh");
+
+        // So does an action of a dialog that stays open.
+        await fixture.Service.InvokeCommandAsync(new(Epoch, Id("form"), fixture.Project.Id, null, false, null), default);
+        var form = await fixture.NextAsync("ask");
+        var action = await fixture.Service.DialogActionAsync(new(form.RequestId, "count", null, null), default);
+        Assert.AreEqual(("ok", "<b>1</b>", false), (action.Status, action.Html, action.Closed));
+        await fixture.NextAsync("refresh");
+        Assert.AreEqual("ok", fixture.Service.Respond(new(form.RequestId, "ok", false, null, null, null)).Status);
+        await fixture.NextAsync("refresh");
+    }
+
+    [TestMethod]
     public async Task SearchPicker_ReturnsTheItemsOfThePlugin()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -275,6 +299,15 @@ public sealed class PluginUiRpcTests
             yield return Command.Shell("ask", "Asks.", static async (context, cancellationToken) =>
                 PluginCommandResult.Message(await context.Ui.ConfirmAsync("Fixture", "Continue?", cancellationToken) ? "confirmed" : "refused"));
             yield return Command.Shell("fail", "Fails.", static (_, _) => throw new InvalidOperationException("secret"));
+            yield return Command.Shell("form", "Counts in a dialog.", static async (context, cancellationToken) =>
+            {
+                var count = 0;
+                await context.Ui.ShowDialogForResultAsync(PluginUi.HtmlDialog("Form", "<b>0</b>", new PluginDialogButton { Name = "ok", Label = "Close", IsDefault = true }) with
+                {
+                    OnAction = (_, _) => ValueTask.FromResult(PluginDialogActionResult.Update($"<b>{++count}</b>")),
+                }, cancellationToken);
+                return PluginCommandResult.Handled;
+            });
             yield return Command.Shell("hidden", "Placed nowhere.", static (_, _) => ValueTask.FromResult(PluginCommandResult.Handled)) with { Placement = PluginCommandPlacement.None };
         }
 

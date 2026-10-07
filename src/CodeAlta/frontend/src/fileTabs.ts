@@ -6,9 +6,10 @@ import type { WorkspaceSnapshot } from "#neoastra";
  * (`view: "terminal"`). A project has one editor and one changes tab at most, and a tab for each terminal shown.
  * The tab of a terminal names the terminal; its project is empty for a terminal of no project, and its path
  * is the folder the terminal started in. The automations of the application have one tab, of no project
- * (`view: "automations"`).
+ * (`view: "automations"`). The code editor also opens on the folder of a source plugin: its tab names that
+ * folder where a tab names a project, and carries the name of the plugin.
  */
-export type FileTab = Readonly<{ projectId: string; projectPath: string; view: "editor" | "changes" | "terminal" | "automations"; terminalId?: string }>;
+export type FileTab = Readonly<{ projectId: string; projectPath: string; view: "editor" | "changes" | "terminal" | "automations"; terminalId?: string; name?: string }>;
 export type FileTabs = Readonly<{ open: readonly FileTab[]; active: FileTab | null; closed: readonly FileTab[] }>;
 export const fileTabsKey = "codealta.desktop.fileTabs.v1";
 export const fileTabLimit = 32;
@@ -27,6 +28,12 @@ export const terminalTab = (terminal: Readonly<{ id: string; projectId: string |
 export const changesTab = (project: Readonly<{ id: string; path: string }>): FileTab => ({ projectId: project.id, projectPath: project.path, view: "changes" });
 /** The tab of a project's code editor. */
 export const editorTab = (project: Readonly<{ id: string; path: string }>): FileTab => ({ projectId: project.id, projectPath: project.path, view: "editor" });
+/** What the id of the folder of a source plugin starts with. The host gives the id, and finds the folder from it. */
+export const pluginFolderPrefix = "plugin:";
+/** The tab of the code editor on the folder of a source plugin. */
+export const pluginEditorTab = (folder: Readonly<{ id: string; path: string; name: string }>): FileTab =>
+  ({ projectId: folder.id, projectPath: folder.path, view: "editor", name: folder.name });
+export const isPluginTab = (tab: FileTab) => tab.view === "editor" && tab.projectId.startsWith(pluginFolderPrefix);
 export const fileNodeId = (tab: FileTab) => `file:${fileTabKey(tab)}`;
 export const sameFileTab = (a: FileTab | null, b: FileTab | null) => a === b || !!a && !!b && fileTabKey(a) === fileTabKey(b);
 
@@ -69,7 +76,8 @@ export function activateFileTab(state: FileTabs, tab: FileTab | null): FileTabs 
  * The tab of a terminal lasts as long as its terminal: see {@link reconcileTerminalTabs}.
  */
 export function reconcileFileTabs(state: FileTabs, snapshot: WorkspaceSnapshot): FileTabs {
-  const lasting = (tab: FileTab) => isTerminalTab(tab) || isAutomationsTab(tab) || resolveFileTab(snapshot, tab);
+  // The folder of a plugin is not a project of the workspace: its editor says so itself when the folder is gone.
+  const lasting = (tab: FileTab) => isTerminalTab(tab) || isAutomationsTab(tab) || isPluginTab(tab) || resolveFileTab(snapshot, tab);
   const open = state.open.filter(lasting);
   const closed = state.closed.filter(lasting);
   const active = open.find(tab => sameFileTab(tab, state.active)) ?? null;
@@ -101,7 +109,7 @@ export function cycleTab(sessions: number, files: number, current: TabPosition, 
   return next === 0 ? { kind: "draft" } : next <= sessions ? { kind: "session", index: next - 1 } : { kind: "file", index: next - 1 - sessions };
 }
 
-type StoredTab = { projectId?: unknown; projectPath?: unknown; path?: unknown; view?: unknown };
+type StoredTab = { projectId?: unknown; projectPath?: unknown; path?: unknown; view?: unknown; name?: unknown };
 const text = (field: unknown, limit: number): field is string => typeof field === "string" && field.length > 0 && field.length <= limit;
 // A tab as it was stored: of the editor or the changes, or, from before the editor had tabs of its own, of one file.
 function storedTab(value: unknown): { tab: FileTab; file: string | null } | null {
@@ -110,6 +118,8 @@ function storedTab(value: unknown): { tab: FileTab; file: string | null } | null
   if (stored.view === "automations") return stored.projectId === "" && stored.projectPath === "" ? { tab: automationsTab, file: null } : null;
   if (!text(stored.projectId, 256) || !text(stored.projectPath, 4096)) return null;
   const project = { id: stored.projectId, path: stored.projectPath };
+  if (stored.projectId.startsWith(pluginFolderPrefix))
+    return stored.view === "editor" && stored.path === undefined && text(stored.name, 128) ? { tab: pluginEditorTab({ ...project, name: stored.name }), file: null } : null;
   if (stored.view === "changes" || stored.view === "editor")
     return stored.path === undefined || stored.path === "" ? { tab: stored.view === "changes" ? changesTab(project) : editorTab(project), file: null } : null;
   return stored.view === undefined && text(stored.path, 1024) ? { tab: editorTab(project), file: stored.path } : null;

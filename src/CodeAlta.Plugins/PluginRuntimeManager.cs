@@ -142,17 +142,14 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
         var diagnostics = new List<PluginRuntimeDiagnostic>();
         var activePlugins = new List<ActivePluginInstance>();
         var buildResults = new List<PluginBuildResult>();
-        var catalogOptions = new CatalogOptions { GlobalRoot = options.GlobalRoot };
-        var configStore = new CodeAltaConfigStore(catalogOptions);
-        var projectRoot = options.ProjectContext?.ProjectPath;
-        var projectConfigPath = string.IsNullOrWhiteSpace(projectRoot)
-            ? null
-            : Path.Combine(projectRoot, ".alta", "config.toml");
-        var configLoad = PluginRuntimeConfigResolver.LoadValidatedConfig(
-            configStore,
-            catalogOptions.ConfigPath,
-            projectConfigPath,
-            projectRoot);
+        var hostInfo = CreateHostInfo(options);
+        lock (_lock)
+        {
+            _options = options;
+            _hostInfo = hostInfo;
+        }
+
+        var configLoad = LoadConfig(options);
         diagnostics.AddRange(configLoad.Diagnostics);
         if (!configLoad.Succeeded)
         {
@@ -167,7 +164,6 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
 
         var globalConfig = configLoad.GlobalConfig!;
         var projectConfig = configLoad.ProjectConfig;
-        var hostInfo = CreateHostInfo(options);
         var activator = new PluginRuntimeActivator(_registry);
 
         foreach (var builtIn in options.BuiltIns)
@@ -247,13 +243,7 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
             }
 
             liveStatus?.MarkPreparing();
-            var generationOptions = new PluginRootBuildFileOptions
-            {
-                AuthoringProfile = options.AuthoringProfile,
-                CodeAltaExeFolder = AppContext.BaseDirectory,
-                GlobalJsonContent = ResolveGlobalJsonContent(),
-                PackageVersions = ResolvePackageVersions(),
-            };
+            var generationOptions = CreateBuildFileOptions(options);
             var successfulRoots = new List<string>();
             foreach (var root in plan.BuildRequests.Select(static request => request.Package.Root).DistinctBy(static root => root.RootPath, StringComparer.OrdinalIgnoreCase))
             {
@@ -291,47 +281,17 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
 
             liveStatus?.MarkBuildsCompleted();
             liveStatus?.MarkActivating();
-            var loader = new PluginAssemblyLoader(options.AuthoringProfile);
-            var typeDiscovery = new PluginTypeDiscoveryService();
             foreach (var buildResult in buildResults)
             {
+                RememberBuild(buildResult);
                 diagnostics.AddRange(buildResult.RuntimeDiagnostics);
                 if (!buildResult.Succeeded)
                 {
                     continue;
                 }
 
-                var load = loader.Load(buildResult);
-                diagnostics.AddRange(load.Diagnostics);
-                if (!load.Succeeded)
-                {
-                    continue;
-                }
-
-                var discovery = typeDiscovery.DiscoverWithDiagnostics(load.Assembly!, buildResult.Package.PackageDirectory, buildResult.Package.Sidecars.ReadmePath);
-                diagnostics.AddRange(discovery.Diagnostics);
-                foreach (var discovered in discovery.Plugins)
-                {
-                    if (CreateUnsupportedFrontendDiagnostic(discovered.Descriptor, options.Frontend, buildResult.Package.PackageId, buildResult.Package.PackageDirectory) is { } unsupported)
-                    {
-                        diagnostics.Add(unsupported);
-                        continue;
-                    }
-
-                    var activation = await activator.ActivateAsync(
-                            discovered,
-                            buildResult.Package,
-                            load.LoadContext,
-                            new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, ActivationGeneration = ++_activationGeneration },
-                            token)
-                        .ConfigureAwait(false);
-                    if (activation.ActivePlugin is not null)
-                    {
-                        OwnActivation(activation.ActivePlugin);
-                        activePlugins.Add(activation.ActivePlugin);
-                    }
-                    diagnostics.AddRange(activation.Diagnostics);
-                }
+                var stamp = PluginBuildManifestStore.ComputeSourceStamp(buildResult.Package);
+                activePlugins.AddRange(await LoadAndActivateAsync(options, hostInfo, buildResult, stamp, diagnostics, token).ConfigureAwait(false));
             }
         }
     }

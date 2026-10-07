@@ -126,6 +126,28 @@ public sealed partial class McpRuntimeServiceTests
         Assert.ThrowsExactly<ArgumentNullException>(() => runTools.Add(null!));
     }
 
+    [TestMethod]
+    public void RunTools_SetGivesTheRunTheLastToolOfAName()
+    {
+        static AgentToolDefinition Tool(string name, string version) => new(
+            new AgentToolSpec(name, version, JsonSerializer.SerializeToElement(new { type = "object", properties = new { } })),
+            (_, _) => Task.FromResult(new AgentToolResult(true, [])));
+        // A run that starts with a tool of its session, and that was given another one since its last request.
+        var runTools = new AgentRunTools(["given"]);
+        runTools.Add([Tool("one", "first")]);
+
+        CollectionAssert.AreEqual(new[] { "one", "given", "two" }, runTools.Set([Tool("one", "second"), Tool("given", "new"), Tool("two", "only")]).ToArray());
+        CollectionAssert.AreEqual(new[] { "second", "new", "only" }, runTools.Take()!.Select(static tool => tool.Spec.Description).ToArray());
+        Assert.IsNull(runTools.Take());
+
+        // Set again once the run has taken them: the run is given the tool again, and takes it in place of the one it has.
+        runTools.Set([Tool("one", "third")]);
+        Assert.AreEqual("third", runTools.Take()!.Single().Spec.Description);
+        Assert.IsTrue(runTools.Contains("two"));
+        Assert.ThrowsExactly<ArgumentNullException>(() => runTools.Set(null!));
+        Assert.ThrowsExactly<ArgumentNullException>(() => runTools.Set([null!]));
+    }
+
     // First request: calls `activate`. Second: calls the tool the activation registered. Then: answers.
     private sealed class ActivatingProvider : IAgentModelProviderRuntime, IModelProviderTurnExecutor
     {

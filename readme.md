@@ -35,7 +35,7 @@ See [Getting Started](https://codealta.github.io/docs/getting-started/) for requ
 - **UI tools and MCP server**: in CodeAlta Desktop, an agent sees and drives the window, and other applications do the same through its MCP server.
 - **The models you already have**: subscriptions and API keys for OpenAI, Anthropic, Google, Mistral, xAI, Azure OpenAI, and OpenAI-compatible servers.
 - **Everything the agent did**: tool calls, file diffs, and context usage are in the timeline and open with their details.
-- **Extensions**: agent prompts, MCP servers, skills, and trusted local .NET plugins.
+- **Extensions**: agent prompts, MCP servers, skills, and trusted local .NET plugins, which an agent can write and reload while CodeAlta Desktop runs.
 
 <p align="center">
   <img src="site/img/alta-home.png" alt="CodeAlta TUI with the projects sidebar, a session timeline, and the prompt editor" width="920">

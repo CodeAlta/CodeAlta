@@ -47,6 +47,34 @@ public sealed class AgentRunTools
         return added;
     }
 
+    /// <summary>
+    /// Registers tools for the rest of the run, each in place of the registered tool of its name: a plugin that
+    /// was built again gives the run the new version of its tools.
+    /// </summary>
+    /// <param name="tools">The tools to register.</param>
+    /// <returns>The names of the tools.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="tools"/> or one of its items is null.</exception>
+    public IReadOnlyList<string> Set(IReadOnlyList<AgentToolDefinition> tools)
+    {
+        ArgumentNullException.ThrowIfNull(tools);
+        var names = new List<string>(tools.Count);
+        lock (_gate)
+        {
+            foreach (var tool in tools)
+            {
+                ArgumentNullException.ThrowIfNull(tool);
+                var name = AgentToolBridge.GetRegisteredToolName(tool.Spec.Name);
+                _names.Add(name);
+                // The last one registered for a name is the one the run takes.
+                (_added ??= []).RemoveAll(pending => string.Equals(AgentToolBridge.GetRegisteredToolName(pending.Spec.Name), name, StringComparison.Ordinal));
+                _added.Add(tool);
+                names.Add(tool.Spec.Name);
+            }
+        }
+
+        return names;
+    }
+
     /// <summary>Whether a tool of this name is registered for the run.</summary>
     /// <exception cref="ArgumentException"><paramref name="toolName"/> is blank.</exception>
     public bool Contains(string toolName)

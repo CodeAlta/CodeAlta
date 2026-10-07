@@ -7,6 +7,9 @@ namespace CodeAlta.Plugins;
 /// </summary>
 public sealed class PluginRuntimeDiagnosticStore
 {
+    /// <summary>The most diagnostics kept. Beyond it the oldest failures of callbacks go first, then the oldest of all.</summary>
+    public const int MaximumCount = 2048;
+
     private readonly object _gate = new();
     private readonly List<PluginRuntimeDiagnostic> _diagnostics = [];
 
@@ -21,7 +24,20 @@ public sealed class PluginRuntimeDiagnosticStore
         lock (_gate)
         {
             _diagnostics.Add(diagnostic);
+            Trim();
         }
+    }
+
+    // A callback that fails each time the host asks (a status item, every few seconds) must not grow the store
+    // for as long as the application runs. What the start and the builds said is kept the longest.
+    private void Trim()
+    {
+        var excess = _diagnostics.Count - MaximumCount;
+        if (excess <= 0) return;
+        // A quarter at once, so that a full store is not trimmed at each addition.
+        var remove = excess + MaximumCount / 4;
+        _diagnostics.RemoveAll(diagnostic => diagnostic.Source == PluginRuntimeDiagnosticSource.Callback && remove-- > 0);
+        if (_diagnostics.Count > MaximumCount) _diagnostics.RemoveRange(0, _diagnostics.Count - MaximumCount);
     }
 
     /// <summary>
@@ -35,6 +51,7 @@ public sealed class PluginRuntimeDiagnosticStore
         lock (_gate)
         {
             _diagnostics.AddRange(diagnostics.Where(static diagnostic => diagnostic is not null));
+            Trim();
         }
     }
 
@@ -90,6 +107,21 @@ public sealed class PluginRuntimeDiagnosticStore
         lock (_gate)
         {
             return _diagnostics.Where(diagnostic => diagnostic.Severity >= minimumSeverity).ToArray();
+        }
+    }
+
+    /// <summary>
+    /// Removes the diagnostics a condition selects: those of a package whose plugins are replaced.
+    /// </summary>
+    /// <param name="match">Says whether a diagnostic is removed.</param>
+    /// <returns>The number of diagnostics removed.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="match"/> is <see langword="null"/>.</exception>
+    public int RemoveWhere(Predicate<PluginRuntimeDiagnostic> match)
+    {
+        ArgumentNullException.ThrowIfNull(match);
+        lock (_gate)
+        {
+            return _diagnostics.RemoveAll(match);
         }
     }
 

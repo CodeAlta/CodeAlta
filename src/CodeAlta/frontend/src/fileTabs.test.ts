@@ -3,8 +3,8 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
-import { activateFileTab, automationsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isEditorTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
-  persistFileTabs, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, terminalTab, type FileTab } from "./fileTabs";
+import { activateFileTab, automationsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isEditorTab, isPluginTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
+  persistFileTabs, pluginEditorTab, pluginFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, terminalTab, type FileTab } from "./fileTabs";
 import { FileTabLabel } from "./SessionTabStrip";
 import { ShellLanguageContext } from "./shellLanguage";
 import { locales, translate } from "./localization";
@@ -167,6 +167,36 @@ test("the automations have one tab, of no project, that outlives the projects an
     const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: () => assert.fail("rendering must not dispatch") } },
       createElement(FileTabLabel, { tab: automationsTab, project: "", dirty: false })));
     assert.ok(html.includes(translate(locale, "Automations")) && !html.includes("session-tab-dirty"), html);
+  }
+});
+
+test("the code editor on the folder of a plugin has a tab that names the plugin, outlives the projects and is kept for the next start", () => {
+  const plugin = pluginEditorTab({ id: "plugin:global:notes", path: "/home/.alta/plugins/notes", name: "notes" });
+  assert.deepEqual(plugin, { projectId: "plugin:global:notes", projectPath: "/home/.alta/plugins/notes", view: "editor", name: "notes" });
+  assert.ok(plugin.projectId.startsWith(pluginFolderPrefix));
+  assert.ok(isPluginTab(plugin) && isEditorTab(plugin) && !isPluginTab(editor()) && !isPluginTab(changes("plugin:global:notes")) && !isPluginTab(automationsTab));
+  // One tab for a folder, beside the tabs of the projects.
+  const state = openFileTab(openFileTab(emptyFileTabs(), editor()), plugin);
+  assert.deepEqual(names(state.open), ["editor:p", "editor:plugin:global:notes"]);
+  assert.equal(openFileTab(state, { ...plugin }).open.length, 2, "Asked again, the one that is open is shown.");
+  assert.notEqual(fileNodeId(plugin), fileNodeId(pluginEditorTab({ id: "plugin:project:p:notes", path: "/p/.alta/plugins/notes", name: "notes" })));
+  // The folder is no project of the workspace: the tab stays when the projects go, and its editor says when the folder is gone.
+  assert.equal(resolveFileTab(catalog, plugin), undefined);
+  assert.deepEqual(reconcileFileTabs(state, { ...catalog, projects: [] }), { open: [plugin], active: plugin, closed: [] });
+  assert.equal(reconcileTerminalTabs(state, new Set()), state);
+  let stored = "";
+  persistFileTabs(value => { stored = value; }, state);
+  assert.deepEqual(restoreFileTabs(() => stored), { ...state, closed: [] });
+  assert.equal(restoreLegacyFiles(() => stored).size, 0);
+  // A stored tab on such a folder is the editor, with the name it shows; anything else restores nothing.
+  for (const tab of [{ ...plugin, name: undefined }, { ...plugin, name: "" }, { ...plugin, name: 4 }, { ...plugin, name: "x".repeat(129) }, { ...plugin, view: "changes" }, { ...plugin, view: undefined, path: "plugin.cs" }])
+    assert.equal(restoreFileTabs(() => JSON.stringify({ version: 1, open: [tab], active: null })), null, JSON.stringify(tab));
+  for (const locale of locales) {
+    const render = (dirty: boolean) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: () => assert.fail("rendering must not dispatch") } },
+      createElement(FileTabLabel, { tab: plugin, project: "notes", dirty })));
+    const html = render(true);
+    assert.ok(html.includes(translate(locale, "Plugin")) && html.includes("notes") && html.includes(translate(locale, "Unsaved changes")), html);
+    assert.ok(!render(false).includes("session-tab-dirty"));
   }
 });
 

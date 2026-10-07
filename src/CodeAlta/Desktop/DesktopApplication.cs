@@ -466,9 +466,14 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     new Automations.AutomationStateStore(Path.Combine(host.CatalogOptions.StateRoot, "automations.json"), pausedByDefault: options.Developer),
                     new Automations.AutomationRunner(host), TimeProvider.System, TimeZoneInfo.Local, new Automations.GitAutomationFeed());
                 // A host that has the user review the commands of its sessions lets no session type in a terminal.
+                // A host that started its plugins builds one again while it runs, and tells the page when it did. Building
+                // and loading a plugin runs code: a host that has the user review the commands of its sessions does not let
+                // a session do it with an alta command.
+                if (pluginAlta is not null) host.PluginRuntime.Changed += (_, _) => shell.NotifyPluginsChanged();
+                var pluginWorkshop = pluginAlta is null || options.ReviewOwnedCommandPermissions ? null : DesktopPlugins.Workshop(host.PluginRuntime, editorView);
                 var altaCommands = DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
                     new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
-                    new DesktopAltaAutomations(automations, host.ProjectCatalog), worktrees);
+                    new DesktopAltaAutomations(automations, host.ProjectCatalog), worktrees, pluginWorkshop);
                 // The clients of the MCP server run the same commands, as callers that belong to no session.
                 Volatile.Write(ref altaTool, Mcp.DesktopMcpTools.Alta(altaCommands, roots.Project, shell.NotifySessionsChanged));
                 uiSessions.WorkFolder = (sessionId, token) => SessionFolderAsync(host, sessionId, token);

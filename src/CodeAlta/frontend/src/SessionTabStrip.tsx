@@ -8,7 +8,7 @@ import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
 import { resolveSessionTab, type SessionTab, type SessionTabs as Tabs } from "./sessionTabs";
 import { SessionTabActivity, type RuntimeObservationControls } from "./RuntimeObservation";
 import { createSessionTabModel, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction } from "./sessionTabLayout";
-import { emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isTerminalTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
+import { emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isPluginTab, isTerminalTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { terminalTabLabel } from "./terminal/terminals";
 import { useSessionTabDrag } from "./useSessionTabDrag";
@@ -38,7 +38,7 @@ export function FileTabLabel({ tab, project, dirty, terminal }: {
       {mark && <span className="terminal-tab-mark" data-kind={mark[0]} role="img" title={mark[1]} aria-label={mark[1]} />}</span>;
   }
   if (isAutomationsTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Automations")}>{t("Automations")}</span></span>;
-  const name = t(isChangesTab(tab) ? "Changes" : "Editor");
+  const name = t(isChangesTab(tab) ? "Changes" : isPluginTab(tab) ? "Plugin" : "Editor");
   return <span className="session-tab-title"><span className="session-tab-label" title={`${name} · ${project}\n${tab.projectPath}`}>
     {name} <span className="session-tab-project">{project}</span></span>
     {dirty && !isChangesTab(tab) && <span className="session-tab-dirty" role="img" title={t("Unsaved changes")} aria-label={t("Unsaved changes")} />}</span>;
@@ -97,11 +97,11 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
   }, []);
   const label = (tab: SessionTab | null) => tab ? `${plainTitle(snapshot && resolveSessionTab(snapshot, tab)?.title || t("Unavailable session"))} - ${
     tab.projectId === null ? t("Chat") : snapshot?.projects.find(project => project.id === tab.projectId)?.name ?? t("Unavailable project")}` : newSessionLabel ?? t("New session");
-  const projectName = (file: FileTab) => snapshot?.projects.find(project => project.id === file.projectId)?.name ?? t("Unavailable project");
+  const projectName = (file: FileTab) => file.name ?? snapshot?.projects.find(project => project.id === file.projectId)?.name ?? t("Unavailable project");
   const shownTerminal = (file: FileTab) => isTerminalTab(file) && file.terminalId ? terminal?.(file.terminalId) : undefined;
   const fileLabel = (file: FileTab) => {
     if (isAutomationsTab(file)) return t("Automations");
-    if (!isTerminalTab(file)) return `${t(isChangesTab(file) ? "Changes" : "Editor")} · ${projectName(file)}`;
+    if (!isTerminalTab(file)) return `${t(isChangesTab(file) ? "Changes" : isPluginTab(file) ? "Plugin" : "Editor")} · ${projectName(file)}`;
     const shown = shownTerminal(file);
     return shown ? terminalTabLabel(shown, t("Terminal")) : t("Terminal");
   };
@@ -211,7 +211,8 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
           const shown = shownTerminal(file);
           const look = isTerminalTab(file) ? { icon: "terminal" as const, tone: shown && !shown.running ? "muted" : "green" }
             : isChangesTab(file) ? { icon: "changes" as const, tone: "orange" }
-            : isAutomationsTab(file) ? { icon: "automation" as const, tone: "gold" } : { icon: "code" as const, tone: "azure" };
+            : isAutomationsTab(file) ? { icon: "automation" as const, tone: "gold" }
+            : isPluginTab(file) ? { icon: "plugin" as const, tone: "purple" } : { icon: "code" as const, tone: "azure" };
           // A terminal whose shell runs a command shows it where its icon is.
           values.leading = shown?.running && shown.busy ? <span className="file-tab-icon" data-file-tone={look.tone}><ActivitySpinner size={13} /></span>
             : <span className="file-tab-icon" data-file-tone={look.tone}><AppIcon name={look.icon} size={14} /></span>;

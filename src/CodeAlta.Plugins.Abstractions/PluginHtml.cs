@@ -55,6 +55,15 @@ public static class PluginHtml
     /// <summary>Class of a container that lays its children out in a column.</summary>
     public const string ColumnClass = "alta-column";
 
+    /// <summary>Marks an element of a row that takes the space the others leave: a field beside a button.</summary>
+    public const string GrowClass = "alta-grow";
+
+    /// <summary>Marks a label that is shown above the field it contains, which takes the width.</summary>
+    public const string FieldClass = "alta-field";
+
+    /// <summary>Marks a block shown as a card: a bordered panel.</summary>
+    public const string CardClass = "alta-card";
+
     /// <summary>Encodes text so that it can be placed in a fragment as content or as an attribute value.</summary>
     /// <param name="text">The text to encode; <see langword="null"/> is encoded as an empty string.</param>
     /// <returns>The encoded text.</returns>
