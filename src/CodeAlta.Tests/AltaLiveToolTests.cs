@@ -2085,6 +2085,179 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionCreate_InANewWorktree_ReportsWhereItWorks_AndTheSessionsItCreatesWorkThereToo()
+    {
+        using var root = TempDirectory.Create();
+        try
+        {
+            var projectPath = Path.Combine(root.Path, "project");
+            var plainPath = Path.Combine(root.Path, "plain");
+            Directory.CreateDirectory(projectPath);
+            Directory.CreateDirectory(plainPath);
+            if (!TryCreateRepository(projectPath))
+            {
+                Assert.Inconclusive("git is not installed.");
+            }
+
+            var options = new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "global") };
+            Directory.CreateDirectory(options.GlobalRoot);
+            var projectCatalog = new ProjectCatalog(options);
+            var project = await projectCatalog.UpsertFromPathAsync(projectPath).ConfigureAwait(false);
+            var plain = await projectCatalog.UpsertFromPathAsync(plainPath).ConfigureAwait(false);
+            var ProviderId = new ModelProviderId("worktree-create");
+            var providerRuntime = new StatefulProviderRuntime(ProviderId);
+            var runtime = CreateRuntime(options, providerRuntime);
+            await using var _ = runtime.ConfigureAwait(false);
+            var dispatcher = CreateDispatcher(new AltaServiceCollection()
+                .Add(options)
+                .Add(projectCatalog)
+                .Add(new SessionViewCatalog(options))
+                .Add(runtime));
+            static JsonElement Created(string output) => ReadJsonLines(output).Single(static line => line.GetProperty("type").GetString() == "alta.session.created");
+
+            var first = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--title", "Tree", "--worktree", "--model-ref", $"{ProviderId.Value}:gpt-tree@low"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+            Assert.AreEqual(AltaExitCodes.Success, first.ExitCode, first.Stdout + first.Stderr);
+            var record = Created(first.Stdout);
+            var sessionId = record.GetProperty("sessionId").GetString()!;
+            var worktree = record.GetProperty("worktreeDirectory").GetString()!;
+            // The worktree is a folder of its own under the catalog, on a branch named after it; the session stays one of its project.
+            Assert.IsTrue(Directory.Exists(worktree));
+            Assert.AreEqual(Path.Combine(options.WorktreesRoot, project.Slug), Path.GetDirectoryName(worktree));
+            Assert.AreEqual("alta/" + Path.GetFileName(worktree), record.GetProperty("worktreeBranch").GetString());
+            Assert.AreEqual(projectPath, record.GetProperty("workingDirectory").GetString());
+            Assert.AreEqual(project.Id, record.GetProperty("projectId").GetString());
+            Assert.IsTrue(File.Exists(Path.Combine(worktree, "readme.md")));
+            Assert.AreEqual(projectPath, providerRuntime.CreatedOptions[^1].WorkingDirectory);
+            Assert.AreEqual(worktree, providerRuntime.CreatedOptions[^1].WorktreeDirectory);
+
+            // Every record of a session says where it works.
+            var info = await dispatcher.InvokeAsync(["session", "info", sessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, info.ExitCode, info.Stdout + info.Stderr);
+            Assert.IsTrue(ReadJsonLines(info.Stdout).Any(line => line.TryGetProperty("worktreeDirectory", out var folder) && folder.GetString() == worktree));
+            var listed = await dispatcher.InvokeAsync(["session", "list", "--project", project.Id], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            var item = ReadJsonLines(listed.Stdout).Single(line => line.GetProperty("type").GetString() == "alta.session.item" && line.GetProperty("sessionId").GetString() == sessionId);
+            Assert.AreEqual(worktree, item.GetProperty("worktreeDirectory").GetString());
+            Assert.AreEqual(projectPath, item.GetProperty("workingDirectory").GetString());
+            var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = sessionId, SourceProjectId = project.Id, SourceAgentId = "agent-1" };
+            var current = await dispatcher.InvokeAsync(["session", "current"], caller: caller).ConfigureAwait(false);
+            Assert.AreEqual(worktree, ReadJsonLines(current.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.current").GetProperty("worktreeDirectory").GetString());
+
+            // A session created by a session that works in a worktree works in that same worktree: no other one is made.
+            var child = Created((await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--title", "Child"], caller: caller).ConfigureAwait(false)).Stdout);
+            Assert.AreEqual(worktree, child.GetProperty("worktreeDirectory").GetString());
+            Assert.IsFalse(child.TryGetProperty("worktreeBranch", out JsonElement _));
+            Assert.AreEqual(sessionId, child.GetProperty("parentSessionId").GetString());
+            Assert.AreEqual(worktree, providerRuntime.CreatedOptions[^1].WorktreeDirectory);
+            // Unless it is sent to the folder of the project, or given a worktree of its own.
+            var apart = Created((await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--title", "Apart", "--no-worktree"], caller: caller).ConfigureAwait(false)).Stdout);
+            Assert.IsFalse(apart.TryGetProperty("worktreeDirectory", out JsonElement _));
+            Assert.IsNull(providerRuntime.CreatedOptions[^1].WorktreeDirectory);
+            var own = Created((await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--title", "Own", "--worktree", "--base", "main"], caller: caller).ConfigureAwait(false)).Stdout);
+            Assert.AreNotEqual(worktree, own.GetProperty("worktreeDirectory").GetString());
+            Assert.IsTrue(Directory.Exists(own.GetProperty("worktreeDirectory").GetString()));
+            // A session of another project does not work in a checkout of this one.
+            var elsewhere = Created((await dispatcher.InvokeAsync(["session", "create", "--project", plain.Id, "--title", "Elsewhere", "--provider", ProviderId.Value], caller: caller).ConfigureAwait(false)).Stdout);
+            Assert.IsFalse(elsewhere.TryGetProperty("worktreeDirectory", out JsonElement _));
+            // A session of no session works in the folder of its project.
+            var alone = Created((await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--title", "Alone", "--provider", ProviderId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false)).Stdout);
+            Assert.IsFalse(alone.TryGetProperty("worktreeDirectory", out JsonElement _));
+
+            // What cannot be: a worktree without a project, a base without a worktree, both ways at once, a folder that is in no repository.
+            var sessions = providerRuntime.CreatedOptions.Count;
+            foreach (var (args, code) in new (string[], string)[]
+                     {
+                         (["session", "create", "--global", "--worktree", "--provider", ProviderId.Value], "usage.worktreeWithoutProject"),
+                         (["session", "create", "--project", project.Id, "--base", "main", "--provider", ProviderId.Value], "usage.invalidBase"),
+                         (["session", "create", "--project", project.Id, "--worktree", "--base=--force", "--provider", ProviderId.Value], "usage.invalidBase"),
+                         (["session", "create", "--project", project.Id, "--worktree", "--no-worktree", "--provider", ProviderId.Value], "usage.worktreeConflict"),
+                     })
+            {
+                var refused = await dispatcher.InvokeAsync(args, caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+                Assert.AreEqual(AltaExitCodes.Usage, refused.ExitCode, string.Join(' ', args));
+                StringAssert.Contains(refused.Stdout + refused.Stderr, code);
+            }
+
+            var outside = await dispatcher.InvokeAsync(["session", "create", "--project", plain.Id, "--worktree", "--provider", ProviderId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Failure, outside.ExitCode);
+            StringAssert.Contains(outside.Stdout + outside.Stderr, "worktree.not_repository");
+            var missing = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--worktree", "--base", "no-such-branch", "--provider", ProviderId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Failure, missing.ExitCode);
+            StringAssert.Contains(missing.Stdout + missing.Stderr, "worktree.invalid");
+            Assert.AreEqual(sessions, providerRuntime.CreatedOptions.Count, "A command that was refused created a session.");
+
+            // Once the worktree is gone the records no longer name it.
+            MakeWritable(worktree);
+            Directory.Delete(worktree, recursive: true);
+            var after = await dispatcher.InvokeAsync(["session", "info", sessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.IsFalse(ReadJsonLines(after.Stdout).Any(static line => line.TryGetProperty("worktreeDirectory", out JsonElement _)));
+            var currentAfter = await dispatcher.InvokeAsync(["session", "current"], caller: caller).ConfigureAwait(false);
+            Assert.IsFalse(ReadJsonLines(currentAfter.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.current").TryGetProperty("worktreeDirectory", out JsonElement _));
+        }
+        finally
+        {
+            // Git marks its objects read-only: the folder is deleted with the test.
+            MakeWritable(root.Path);
+        }
+    }
+
+    private static void MakeWritable(string folder)
+    {
+        if (!Directory.Exists(folder))
+        {
+            return;
+        }
+
+        foreach (var file in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories))
+        {
+            File.SetAttributes(file, FileAttributes.Normal);
+        }
+    }
+
+    // A repository with one commit on `main`, made with the git on the path; false when there is none.
+    private static bool TryCreateRepository(string folder)
+    {
+        static void Git(string folder, params string[] arguments)
+        {
+            var start = new System.Diagnostics.ProcessStartInfo("git") { WorkingDirectory = folder, RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true };
+            foreach (var argument in arguments)
+            {
+                start.ArgumentList.Add(argument);
+            }
+
+            foreach (var inherited in new[] { "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE" })
+            {
+                start.Environment.Remove(inherited);
+            }
+
+            using var process = System.Diagnostics.Process.Start(start)!;
+            var error = process.StandardError.ReadToEndAsync();
+            process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+            Assert.AreEqual(0, process.ExitCode, $"git {string.Join(' ', arguments)}: {error.Result}");
+        }
+
+        try
+        {
+            Git(folder, "init", "-q", "-b", "main");
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
+
+        foreach (var (name, value) in new[] { ("user.name", "Test"), ("user.email", "test@example.invalid"), ("core.autocrlf", "false"), ("commit.gpgsign", "false") })
+        {
+            Git(folder, "config", name, value);
+        }
+
+        File.WriteAllText(Path.Combine(folder, "readme.md"), "one");
+        Git(folder, "add", "-A");
+        Git(folder, "commit", "-q", "-m", "one");
+        return true;
+    }
+
+    [TestMethod]
     public async Task SessionCreate_ExplicitParentMustExistAndCanCrossTargetScope()
     {
         using var root = TempDirectory.Create();

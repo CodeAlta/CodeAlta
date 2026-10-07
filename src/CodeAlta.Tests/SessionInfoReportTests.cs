@@ -148,5 +148,9 @@ public sealed class SessionInfoReportTests
         StringAssert.Contains(markdown, "Total messages: 4");
         StringAssert.Contains(markdown, "File size: 2.0 KiB");
         StringAssert.Contains(markdown, "code-review");
+        // A session that works in the folder of its project names no worktree; one that works in a worktree does.
+        Assert.IsFalse(markdown.Contains("Git worktree", StringComparison.Ordinal));
+        StringAssert.Contains(SessionInfoFormatter.BuildMarkdown(report with { WorktreeDirectory = @"C:\trees\codealta\quiet-heron" }),
+            @"- Git worktree: `C:\trees\codealta\quiet-heron`");
     }
 }

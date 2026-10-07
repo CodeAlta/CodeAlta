@@ -21,7 +21,7 @@ const run = (id: string, change: Partial<AutomationRunItem> = {}): AutomationRun
   ({ id, automationId: "a", name: "Nightly", sessionId: null, projectId: "p", startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "daily", detail: null, status: "completed", message: null, ...change });
 const projects: WorkspaceProject[] = [{ id: "p", name: "Alpha", path: "/p", archived: false }];
 const session = (id: string): WorkspaceSession => ({
-  messageCount: null, automationId: "a", createdAt: null, id, title: "Nightly", fullTitle: "Nightly", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: "p",
+  messageCount: null, automationId: "a", worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, createdAt: null, id, title: "Nightly", fullTitle: "Nightly", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: "p",
   lineageIssue: null, workspacePath: "/p", providerKey: "codex", updatedAt: "2026-10-06T12:00:00Z",
 });
 

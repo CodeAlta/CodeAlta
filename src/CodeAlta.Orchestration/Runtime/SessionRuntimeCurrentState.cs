@@ -2,6 +2,12 @@ using CodeAlta.Agent;
 
 namespace CodeAlta.Orchestration.Runtime;
 
+/// <summary>A session that is at work, and the folder it works in.</summary>
+/// <param name="SessionId">The session.</param>
+/// <param name="Folder">The folder its tools run in.</param>
+/// <param name="Worktree">Whether that folder is a git worktree of its project, not the folder of the project.</param>
+public sealed record SessionWorkFolder(string SessionId, string Folder, bool Worktree);
+
 /// <summary>Immutable point-in-time facts known to this runtime, not provider quiescence or recoverable history.</summary>
 /// <param name="RuntimeInstanceId">Identity of this runtime instance, independent of Display epochs.</param>
 /// <param name="SessionId">The queried durable session identifier.</param>

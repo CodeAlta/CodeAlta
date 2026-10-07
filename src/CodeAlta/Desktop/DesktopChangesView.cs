@@ -13,12 +13,13 @@ internal sealed class DesktopChangesView : IAltaChangesView
     private readonly List<Action<ProjectGitShowEvent>> _watchers = [];
 
     /// <inheritdoc />
-    public bool Show(string projectId, string? path)
+    public bool Show(string projectId, string? path, string? worktree = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
         Action<ProjectGitShowEvent>[] watchers;
         lock (_gate) watchers = [.. _watchers];
-        foreach (var watcher in watchers) watcher(new(projectId, string.IsNullOrWhiteSpace(path) ? null : path));
+        foreach (var watcher in watchers)
+            watcher(new(projectId, string.IsNullOrWhiteSpace(path) ? null : path, string.IsNullOrWhiteSpace(worktree) ? null : worktree));
         return watchers.Length > 0;
     }
 

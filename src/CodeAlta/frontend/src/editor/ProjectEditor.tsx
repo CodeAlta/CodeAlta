@@ -227,7 +227,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
     const read = () => {
       if (running || document.visibilityState === "hidden") return;
       running = true;
-      void git.changes({ expectedEpoch: epoch, projectId: tab.projectId, comparison: "head", commit: null, knownRevision: known }, { signal: abort.signal, timeoutMilliseconds: 30_000 })
+      void git.changes({ expectedEpoch: epoch, projectId: tab.projectId, comparison: "head", commit: null, worktree: null, knownRevision: known }, { signal: abort.signal, timeoutMilliseconds: 30_000 })
         .then(reply => changeListReply(reply, tab.projectId, known), () => null)
         .then(reply => {
           if (abort.signal.aborted || !reply || reply.kind === "unchanged") return;

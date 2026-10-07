@@ -51,10 +51,23 @@ public sealed class SessionViewDescriptor
     public AltaActorProvenance? CreatedBy { get; set; }
 
     /// <summary>
-    /// Gets or sets the session working directory.
+    /// Gets or sets the session working directory: the folder the session belongs to, which is the folder of its
+    /// project for a project session. It names the session's project and does not change.
     /// </summary>
     [JsonPropertyName("working_directory")]
     public string WorkingDirectory { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the git worktree the session works in, when it does not work in
+    /// <see cref="WorkingDirectory"/>: a separate checkout of the project's repository, where the agent reads,
+    /// writes and runs commands. Null for a session that works in the folder of its project.
+    /// </summary>
+    /// <remarks>
+    /// It is what the session records. A worktree can be removed at any time: the session works there only while
+    /// the folder exists, and no longer records it once it has continued in the folder of its project.
+    /// </remarks>
+    [JsonPropertyName("worktree_dir")]
+    public string? WorktreeDirectory { get; set; }
 
     /// <summary>
     /// Gets or sets the session title.

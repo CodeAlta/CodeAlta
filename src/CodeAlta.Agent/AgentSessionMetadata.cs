@@ -21,6 +21,7 @@ namespace CodeAlta.Agent;
 /// <param name="CreatedBySessionId">Optional session identifier that created this session.</param>
 /// <param name="CreatedByRunId">Optional run identifier that created this session.</param>
 /// <param name="ViewState">Optional cached session-view state projection.</param>
+/// <param name="WorktreePath">Optional git worktree the session works in, when it is not its workspace path.</param>
 public sealed record AgentSessionMetadata(
     string SessionId,
     DateTimeOffset CreatedAt,
@@ -37,7 +38,8 @@ public sealed record AgentSessionMetadata(
     string? ParentSessionId = null,
     string? CreatedBySessionId = null,
     AgentRunId? CreatedByRunId = null,
-    AgentSessionViewStateMetadata? ViewState = null);
+    AgentSessionViewStateMetadata? ViewState = null,
+    string? WorktreePath = null);
 
 /// <summary>
 /// Describes cached CodeAlta-local session view state associated with a persisted agent session.

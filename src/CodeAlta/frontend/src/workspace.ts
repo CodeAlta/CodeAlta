@@ -43,7 +43,8 @@ export function sessionsForProject(snapshot: WorkspaceSnapshot, projectId: strin
  */
 export function sessionListSignature(snapshot: WorkspaceSnapshot): string {
   return JSON.stringify([snapshot.projects.map(project => [project.id, project.name, project.path, project.archived]),
-    snapshot.sessions.map(session => [session.id, session.title, session.parentSessionId, session.scopeKind, session.projectId, session.workspacePath])
+    snapshot.sessions.map(session => [session.id, session.title, session.parentSessionId, session.scopeKind, session.projectId, session.workspacePath,
+      session.worktreePath, session.worktreeMissing])
       .sort((a, b) => String(a[0]).localeCompare(String(b[0])))]);
 }
 

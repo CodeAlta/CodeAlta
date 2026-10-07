@@ -110,9 +110,22 @@ internal sealed partial class WorkspaceService
         return (projects.Where(project => Exists(project.ProjectPath)).ToArray(), sessions.Where(session => Exists(session.WorkspacePath)).ToArray());
     }
 
+    /// <summary>
+    /// Looks at the folder a session records as its worktree: the checkout it is in, the name of that checkout,
+    /// and whether the folder is gone.
+    /// </summary>
+    internal static (string Root, string Name, bool Missing) DescribeWorktree(string folder)
+    {
+        var missing = !Directory.Exists(folder);
+        // A folder that is gone is in no checkout any more: the nearest one above it would be another one.
+        var root = (missing ? null : CodeAlta.Catalog.Worktrees.GitWorktreeService.FindCheckoutRoot(folder)) ?? Path.TrimEndingDirectorySeparator(folder);
+        return (root, Path.GetFileName(root) is { Length: > 0 } name ? name : root, missing);
+    }
+
     internal static WorkspaceSnapshot ProjectSnapshot(
         IReadOnlyList<ProjectDescriptor> projects, IReadOnlyList<AgentSessionMetadata> sessions,
-        IReadOnlyDictionary<string, SessionViewJournalHeader>? headers = null)
+        IReadOnlyDictionary<string, SessionViewJournalHeader>? headers = null,
+        Func<string, (string Root, string Name, bool Missing)>? worktree = null)
     {
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentNullException.ThrowIfNull(sessions);
@@ -167,6 +180,15 @@ internal sealed partial class WorkspaceService
             string? scopeKind = null;
             string? projectId = null;
             string? automationId = null;
+            // The worktree the session works in, as the session records it: it is shown also once its folder is
+            // gone, until the session continues in the folder of its project.
+            string? worktreePath = null, worktreeRoot = null, worktreeName = null;
+            var worktreeMissing = false;
+            if (session.WorktreePath is { Length: > 0 and <= 4096 } recorded && !string.IsNullOrWhiteSpace(recorded) && !recorded.Any(char.IsControl))
+            {
+                (worktreeRoot, worktreeName, worktreeMissing) = (worktree ?? DescribeWorktree)(recorded);
+                worktreePath = recorded;
+            }
             if (headers?.TryGetValue(session.SessionId, out var header) == true && header.SessionId == session.SessionId
                 && header.CreatedAt == session.CreatedAt && header.WorkingDirectory == session.WorkspacePath)
             {
@@ -182,13 +204,14 @@ internal sealed partial class WorkspaceService
                 }
             }
             var cost = 512 + 64 + 6 * (session.SessionId.Length + title.Length + fullTitle.Length + (parent?.Length ?? 0)
-                + (session.WorkspacePath?.Length ?? 0) + (session.ProviderKey?.Length ?? 0) + (projectId?.Length ?? 0) + (automationId?.Length ?? 0));
+                + (session.WorkspacePath?.Length ?? 0) + (session.ProviderKey?.Length ?? 0) + (projectId?.Length ?? 0) + (automationId?.Length ?? 0)
+                + (worktreePath?.Length ?? 0) + (worktreeRoot?.Length ?? 0) + (worktreeName?.Length ?? 0));
             if (cost > remaining) break;
             remaining -= cost;
             displayedSessions.Add(new WorkspaceSession(session.SessionId, title, session.WorkspacePath, session.ProviderKey, session.UpdatedAt,
                 fullTitle, sourceTitle.Length > 4096, parent, scopeKind, projectId, lineageIssue,
                 session.CreatedAt.Year > 1 ? session.CreatedAt : null, session.ViewState?.MessageCount is >= 0 ? session.ViewState.MessageCount : null,
-                automationId));
+                automationId, worktreePath, worktreeRoot, worktreeName, worktreeMissing));
         }
         return new WorkspaceSnapshot(true, displayedProjects.ToArray(), displayedSessions.ToArray(),
             displayedProjects.Count < projects.Count, displayedSessions.Count < sessions.Count, shortened);
@@ -243,4 +266,5 @@ internal sealed record WorkspaceSnapshot(bool Configured, WorkspaceProject[] Pro
 internal sealed record WorkspaceProject(string Id, string Name, string Path, bool Archived);
 internal sealed record WorkspaceSession(string Id, string Title, string? WorkspacePath, string? ProviderKey, DateTimeOffset UpdatedAt,
     string FullTitle, bool FullTitleTruncated, string? ParentSessionId, string? ScopeKind, string? ProjectId, string? LineageIssue,
-    DateTimeOffset? CreatedAt, int? MessageCount = null, string? AutomationId = null);
+    DateTimeOffset? CreatedAt, int? MessageCount = null, string? AutomationId = null,
+    string? WorktreePath = null, string? WorktreeRoot = null, string? WorktreeName = null, bool WorktreeMissing = false);

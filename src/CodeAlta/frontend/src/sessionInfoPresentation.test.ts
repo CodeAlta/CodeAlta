@@ -6,7 +6,7 @@ import type { SessionInfoView } from "./sessionInfo";
 
 test("inspection translations have six-locale labels while canonical Copy keeps literal data and bounds", () => {
   const info: SessionInfoView = { id: "Unknown", title: "Saved metadata", titleTruncated: true, scope: "Global",
-    scopeWarning: "literal warning", path: "/Saved metadata/<file>", provider: "Unknown", updatedAt: null, createdAt: null, canCopyId: true };
+    scopeWarning: "literal warning", path: "/Saved metadata/<file>", worktree: null, provider: "Unknown", updatedAt: null, createdAt: null, canCopyId: true };
   const observations = { runtime: [["Observation", "raw backend error <literal>"], ["Observed model / reasoning", "Unknown / High"]] as const,
     usage: [["Observation", "no_observation"]] as const };
   const canonical = canonicalInfoCopy(info, false, observations)!;

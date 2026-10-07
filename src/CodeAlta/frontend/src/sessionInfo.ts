@@ -8,6 +8,8 @@ export type SessionInfoView = Readonly<{
   scope: string;
   scopeWarning: string | null;
   path: string | null;
+  /** The git worktree the session works in, and whether its folder is gone; null for the folder of the project. */
+  worktree: Readonly<{ path: string; missing: boolean }> | null;
   provider: string | null;
   updatedAt: string | null;
   createdAt: string | null;
@@ -29,7 +31,7 @@ export function sessionInfoView(snapshot: WorkspaceSnapshot, session: WorkspaceS
     && snapshot.sessions.some(value => value === session);
   if (!unique) return {
     id: session.id, title: "Unverified", titleTruncated: false, scope: "Unverified: ambiguous session identity",
-    scopeWarning: null, path: null, provider: null, updatedAt: null, createdAt: null, canCopyId: false,
+    scopeWarning: null, path: null, worktree: null, provider: null, updatedAt: null, createdAt: null, canCopyId: false,
   };
 
   const project = session.scopeKind === "project" && session.projectId && session.workspacePath
@@ -50,6 +52,7 @@ export function sessionInfoView(snapshot: WorkspaceSnapshot, session: WorkspaceS
     id: session.id, title: title?.trim() ? title : "Not recorded",
     titleTruncated: session.fullTitleTruncated || !!session.fullTitle && session.fullTitle !== title,
     scope, scopeWarning, path: session.workspacePath?.trim() ? session.workspacePath : null,
+    worktree: session.worktreePath?.trim() ? { path: session.worktreePath, missing: session.worktreeMissing === true } : null,
     provider: session.providerKey?.trim() ? session.providerKey : null,
     updatedAt, createdAt: typeof session.createdAt === "string" && recordedDate(session.createdAt) ? session.createdAt : null,
     canCopyId: true,

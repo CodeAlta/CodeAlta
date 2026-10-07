@@ -8,8 +8,10 @@ import { welcomeLogo } from "./welcomeLogo";
 
 const noChrome: ComposerChromeValue = {};
 
-export function NewSessionWorkspace({ project, preferredHeight, onHeight, chrome, children }: {
+export function NewSessionWorkspace({ project, worktree = false, preferredHeight, onHeight, chrome, children }: {
   project?: WorkspaceProject; preferredHeight?: number; onHeight: (height: number | undefined) => void; children: ReactNode;
+  /** The next session of the project works in a new git worktree, not in the folder of the project. */
+  worktree?: boolean;
   /** Shown around the composer: the working folder, the MCP status. */
   chrome?: ComposerChromeValue;
 }) {
@@ -22,7 +24,8 @@ export function NewSessionWorkspace({ project, preferredHeight, onHeight, chrome
         <div className="blank-project-logo" role="img" aria-label="CodeAlta">
           <LogoWord text={logo.code} /><LogoWord text={logo.alta} className="logo-alta" />
         </div>
-        <p className="welcome-subtitle">{project ? t("Next session will start in {project} from folder {folder}.", { project: project.name, folder: project.path })
+        <p className="welcome-subtitle">{project ? worktree ? t("Next session will start in {project}, in a new git worktree.", { project: project.name })
+          : t("Next session will start in {project} from folder {folder}.", { project: project.name, folder: project.path })
           : t("Ready for a new chat, in no project.")}</p>
         <p>{project ? t("Use the prompt below to start a new session for {project}.", { project: project.name })
           : t("Use the prompt below to start a new chat.")}</p>

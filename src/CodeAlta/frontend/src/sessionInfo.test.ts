@@ -7,7 +7,7 @@ import { SessionInfoDialog } from "./SessionInfoDialog";
 import { copySessionId, dismissSessionInfoOnKey, restoreSessionInfoFocus, selectedSessionInfoAvailable, sessionInfoCopyFeedback, sessionInfoView } from "./sessionInfo";
 
 const session: WorkspaceSession = {
-  messageCount: null, automationId: null, createdAt: null, id: "session-1", title: "Recorded title", fullTitle: "Recorded title", fullTitleTruncated: false,
+  messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, createdAt: null, id: "session-1", title: "Recorded title", fullTitle: "Recorded title", fullTitleTruncated: false,
   parentSessionId: null, scopeKind: "project", projectId: "p", lineageIssue: null,
   workspacePath: "/exact/p", providerKey: "recorded-provider", updatedAt: "2026-09-23T01:02:03+00:00",
 };
@@ -38,7 +38,7 @@ test("exact selected project identity/path renders only recorded snapshot metada
   const info = sessionInfoView(snapshot, session, "p");
   assert.deepEqual(info, {
     id: "session-1", title: "Recorded title", titleTruncated: false, scope: "Project: Recorded project",
-    scopeWarning: null, path: "/exact/p", provider: "recorded-provider",
+    scopeWarning: null, path: "/exact/p", worktree: null, provider: "recorded-provider",
     updatedAt: "2026-09-23T01:02:03+00:00", createdAt: null, canCopyId: true,
   });
   const html = renderToStaticMarkup(createElement(SessionInfoDialog, { info, demo: false, onClose: () => {} }));
@@ -48,6 +48,22 @@ test("exact selected project identity/path renders only recorded snapshot metada
   assert.match(html, /Copy session ID/);
   assert.match(html, /Unavailable: recorded-only, archived, demo or unverified scope/);
   assert.doesNotMatch(html, /Observed active run/);
+});
+
+test("a session that works in a git worktree names it, and says when its folder is gone", () => {
+  const inWorktree = { ...session, worktreePath: "/trees/p/quiet-heron", worktreeRoot: "/trees/p/quiet-heron", worktreeName: "quiet-heron" };
+  const info = sessionInfoView({ ...snapshot, sessions: [inWorktree] }, inWorktree, "p");
+  assert.deepEqual(info.worktree, { path: "/trees/p/quiet-heron", missing: false });
+  // The session still belongs to its project: the folder it records is the one of the project.
+  assert.equal(info.scope, "Project: Recorded project");
+  assert.equal(info.path, "/exact/p");
+  const html = renderToStaticMarkup(createElement(SessionInfoDialog, { info, demo: false, onClose: () => {} }));
+  assert.match(html, /<dt>Git worktree<\/dt><dd>\/trees\/p\/quiet-heron<\/dd>/);
+  const gone = { ...inWorktree, worktreeMissing: true };
+  const missing = sessionInfoView({ ...snapshot, sessions: [gone] }, gone, "p");
+  assert.deepEqual(missing.worktree, { path: "/trees/p/quiet-heron", missing: true });
+  assert.match(renderToStaticMarkup(createElement(SessionInfoDialog, { info: missing, demo: false, onClose: () => {} })),
+    /<dt>Git worktree<\/dt><dd>\/trees\/p\/quiet-heron<small>The folder of this worktree is gone/);
 });
 
 test("global persists even when its working path equals a project; unknown or mismatched scope is not inferred", () => {

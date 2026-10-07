@@ -41,6 +41,12 @@ public sealed class CatalogOptions
     public string CheckoutsRoot => Path.Combine(GlobalRoot, "checkouts");
 
     /// <summary>
+    /// Gets the folder the git worktrees CodeAlta creates go to by default: one folder for each project, and in
+    /// it one folder for each worktree.
+    /// </summary>
+    public string WorktreesRoot => Path.Combine(GlobalRoot, "worktrees");
+
+    /// <summary>
     /// Gets the projects root path under the global catalog.
     /// </summary>
     public string ProjectsRoot => Path.Combine(GlobalRoot, "projects");

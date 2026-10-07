@@ -104,6 +104,11 @@ internal static class SessionInfoFormatter
         AppendMarkdownLabel(builder, SR.T("Provider"), report.ProviderName);
         builder.Append("- ").Append(SR.T("Session ID")).Append(": `").Append(report.SessionId).AppendLine("`");
         builder.Append("- ").Append(SR.T("Working directory")).Append(": `").Append(report.WorkingDirectory).AppendLine("`");
+        if (report.WorktreeDirectory is { } worktree)
+        {
+            builder.Append("- ").Append(SR.T("Git worktree")).Append(": `").Append(worktree).AppendLine("`");
+        }
+
         AppendMarkdownLabel(builder, SR.T("Model"), report.ModelName ?? SR.T("(default model)"));
         AppendMarkdownLabel(builder, SR.T("Reasoning"), report.ReasoningEffort?.ToString() ?? SR.T("(default)"));
     }

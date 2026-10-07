@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { createMutationCapability } from "./sessionOperations";
-import { createSessionCreation, createdSessionSelection, sessionCreationMessage } from "./sessionCreation";
+import { createSessionCreation, createdSessionSelection, sessionCreationMessage, worktreeCreationMessage } from "./sessionCreation";
 
 const epoch = "11111111-1111-4111-8111-111111111111";
 const other = "22222222-2222-4222-8222-222222222222";
@@ -11,7 +11,8 @@ const global = { scope: "global" as const };
 const reply = (status: string, scope: string | null = "project", projectId: string | null = project.projectId,
   projectPath: string | null = project.projectPath, hostEpoch: string | null = epoch,
   sessionId: string | null = "draft-1", workspacePath: string | null = project.projectPath) =>
-  ({ status, scope, projectId, projectPath, hostEpoch, sessionId, workspacePath, providerId: null });
+  ({ status, scope, projectId, projectPath, hostEpoch, sessionId, workspacePath, providerId: null, worktreePath: null as string | null,
+    reason: null as string | null, message: null as string | null });
 const empty: WorkspaceSnapshot = { configured: true, projects: [], sessions: [], projectsTruncated: false,
   sessionsTruncated: false, displayTextTruncated: false };
 
@@ -41,15 +42,15 @@ test("exact selected project and global requests produce switchable persisted ca
   const globalResult = await create(epoch, global, null, capability);
   assert.equal(globalResult.kind, "created");
   assert.deepEqual(calls, [
-    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: "My draft", providerId: null },
-    { expectedHostEpoch: epoch, scope: "global", projectId: null, projectPath: null, title: null, providerId: null },
+    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: "My draft", providerId: null, worktree: false, baseBranch: null },
+    { expectedHostEpoch: epoch, scope: "global", projectId: null, projectPath: null, title: null, providerId: null, worktree: false, baseBranch: null },
   ]);
   if (projectResult.kind !== "created" || globalResult.kind !== "created") throw new Error("Expected created results");
   const snapshot: WorkspaceSnapshot = { ...empty,
     projects: [{ id: project.projectId, path: project.projectPath, name: "Project", archived: false }],
     sessions: [
-      { messageCount: null, automationId: null, createdAt: null, id: "draft-1", title: "My draft", fullTitle: "My draft", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: project.projectId, lineageIssue: null, workspacePath: project.projectPath, providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" },
-      { messageCount: null, automationId: null, createdAt: null, id: "global-1", title: "Global Session", fullTitle: "Global Session", fullTitleTruncated: false, parentSessionId: null, scopeKind: "global", projectId: null, lineageIssue: null, workspacePath: "C:\\test-owned\\global", providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" },
+      { messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, createdAt: null, id: "draft-1", title: "My draft", fullTitle: "My draft", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: project.projectId, lineageIssue: null, workspacePath: project.projectPath, providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" },
+      { messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, createdAt: null, id: "global-1", title: "Global Session", fullTitle: "Global Session", fullTitleTruncated: false, parentSessionId: null, scopeKind: "global", projectId: null, lineageIssue: null, workspacePath: "C:\\test-owned\\global", providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" },
     ],
   };
   assert.deepEqual(createdSessionSelection(snapshot, projectResult), { projectId: project.projectId, sessionId: "draft-1" });
@@ -95,4 +96,41 @@ test("duplicate admission and uncertain or mismatched outcome never silently ret
   const mismatchedRefusal = createSessionCreation(async () => reply("project_missing", "project", "different"));
   assert.deepEqual(await mismatchedRefusal(epoch, project, null, capability), { kind: "error", code: "create_unconfirmed" });
   assert.match(sessionCreationMessage("create_unconfirmed"), /no automatic retry/i);
+});
+
+test("a session in a new worktree names its base, waits for git, and a refusal of git is definite", async () => {
+  const worktree = "C:\\test-owned\\worktrees\\project\\quiet-heron";
+  const calls: { request: unknown; timeout: number }[] = [];
+  let answer = { ...reply("ok"), worktreePath: worktree as string | null };
+  const create = createSessionCreation(async (request, options) => { calls.push({ request, timeout: options.timeoutMilliseconds }); return answer; });
+  const capability = createMutationCapability(epoch);
+
+  const created = await create(epoch, project, null, capability, null, { worktree: true, base: "main" });
+  assert.deepEqual(created, { kind: "created", target: project, id: "draft-1", path: project.projectPath, providerId: null, worktreePath: worktree });
+  assert.deepEqual(calls, [{ request: { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null,
+    providerId: null, worktree: true, baseBranch: "main" }, timeout: 600_000 }]);
+
+  // The place of a project that chose none is its folder: nothing is asked of git.
+  answer = reply("ok");
+  assert.equal((await create(epoch, project, null, capability, null, { worktree: false, base: "ignored" })).kind, "created");
+  assert.deepEqual((calls[1].request as { worktree: boolean; baseBranch: string | null }).baseBranch, null);
+  assert.equal(calls[1].timeout, 10_000);
+
+  // What was asked and what was created must agree: a worktree that was not asked for, or one that is missing.
+  answer = { ...reply("ok"), worktreePath: worktree };
+  assert.deepEqual(await create(epoch, project, null, capability), { kind: "error", code: "create_unconfirmed" });
+  answer = reply("ok");
+  assert.deepEqual(await create(epoch, project, null, capability, null, { worktree: true, base: null }), { kind: "error", code: "create_unconfirmed" });
+
+  answer = { ...reply("worktree_failed", "project", project.projectId, project.projectPath, epoch, null, null), reason: "no_commit", message: "fatal: not a valid object name" };
+  assert.deepEqual(await create(epoch, project, null, capability, null, { worktree: true, base: null }),
+    { kind: "error", code: "worktree_failed", reason: "no_commit", message: "fatal: not a valid object name" });
+  assert.match(worktreeCreationMessage("no_commit", null), /no commit yet/);
+  assert.match(worktreeCreationMessage("failed", " fatal: boom "), /Git could not create the worktree\. fatal: boom$/);
+
+  // A worktree is a checkout of a project, and its base is a name.
+  const count = calls.length;
+  assert.deepEqual(await create(epoch, global, null, capability, null, { worktree: true, base: null }), { kind: "error", code: "invalid_scope" });
+  assert.deepEqual(await create(epoch, project, null, capability, null, { worktree: true, base: " main" }), { kind: "error", code: "invalid_scope" });
+  assert.equal(calls.length, count);
 });

@@ -415,7 +415,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             if (!closeRequested.Task.IsCompleted)
             {
                 var epoch = Guid.NewGuid().ToString("D");
-                workspace = new WorkspaceService(host, epoch);
+                // The git worktrees sessions can work in: created with a session, listed and removed from the changes of a project.
+                var worktreeConfig = new CodeAltaConfigStore(host.CatalogOptions);
+                var worktrees = new CodeAlta.Catalog.Worktrees.GitWorktreeService(host.CatalogOptions, worktreeConfig);
+                workspace = new WorkspaceService(host, epoch, worktrees);
                 operations = new SessionOperationsService(host.Commands, epoch);
                 asks = new SessionAsksService(host.Commands.Asks, epoch);
                 reminders = new ReminderService(host.WorkspaceReads, host.Commands, epoch);
@@ -431,7 +434,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // A host that has the user review the commands of its sessions lets no session type in a terminal.
                 DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
                     new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
-                    new DesktopAltaAutomations(automations, host.ProjectCatalog));
+                    new DesktopAltaAutomations(automations, host.ProjectCatalog), worktrees);
                 automations.Start();
                 workspacePrepared.TrySetResult();
                 {
@@ -505,10 +508,14 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionPluginEventsService(new SessionPluginEventsService(host.WorkspaceReads, host.ProjectCatalog, epoch, host.PluginRuntime));
                     builder.AddProjectFilesService(new ProjectFilesService(host.ProjectCatalog, epoch, host.ProjectFileSearchService, editorView));
                     builder.AddProjectGitService(new ProjectGitService(host.ProjectCatalog, epoch, changesView));
-                    // A terminal opened from a session starts in the folder that session works in.
+                    builder.AddWorktreesService(new WorktreesService(worktrees, host.ProjectCatalog, worktreeConfig, host.RuntimeService.ListBusySessionFolders, epoch));
+                    // A terminal opened from a session starts in the folder that session works in: its worktree
+                    // while that folder is there, the folder of its project otherwise.
                     builder.AddTerminalsService(new TerminalsService(terminals, host.ProjectCatalog, epoch, async (sessionId, token) =>
                         (await host.WorkspaceReads.ReadSnapshotAsync(token).ConfigureAwait(false)).Sessions
-                            .FirstOrDefault(session => string.Equals(session.SessionId, sessionId, StringComparison.Ordinal))?.WorkspacePath));
+                            .FirstOrDefault(session => string.Equals(session.SessionId, sessionId, StringComparison.Ordinal)) is { } session
+                            ? !string.IsNullOrWhiteSpace(session.WorktreePath) && Directory.Exists(session.WorktreePath) ? session.WorktreePath : session.WorkspacePath
+                            : null));
                     builder.AddPromptImagesService(new PromptImagesService(host.WorkspaceReads, epoch));
                     builder.AddComposerStatusService(new ComposerStatusService(host.ProjectCatalog, epoch, roots.Home, host.PluginRuntime));
                     pluginCommands = pluginAlta is null ? new PluginUiService() : new PluginUiService(host.ProjectCatalog, host.PluginRuntime, pluginUi, epoch);
@@ -657,6 +664,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddPluginUiService(new PluginUiService());
             builder.AddProjectFilesService(new ProjectFilesService());
             builder.AddProjectGitService(new ProjectGitService());
+            builder.AddWorktreesService(new WorktreesService());
             builder.AddTerminalsService(new TerminalsService());
             builder.AddAutomationsService(new AutomationsService());
             builder.AddPromptImagesService(new PromptImagesService());

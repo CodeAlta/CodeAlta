@@ -1301,6 +1301,9 @@ reopens, cycles and is restored like an editor tab, and several can be open. It 
 tab it was asked from, or in the pane that already holds a changes tab; from there it is dragged, split
 and merged like any tab.
 
+- A repository that has git worktrees lists its checkouts above the files, and the tab shows the one
+  that is selected; the branch of the header opens the branches the checkout can move to (see
+  [Worktrees](#worktrees)).
 - The header names the project, the work tree and the branch, what is compared when it is not the
   uncommitted changes, the number of files and the lines added and removed. **Auto-refresh** reads the
   lists every five seconds while the tab is shown; the refresh button reads them now. A list that did
@@ -1510,6 +1513,10 @@ knows of the session (the servers it activated and their tool counts); the read 
 server. Without a running MCP plugin (explicit roots, `CODEALTA_DISABLE_PLUGINS=1`) the item describes
 the configuration alone and its tools read `tools not loaded`.
 
+Every request of `projectGit` can name a `worktree`: the folder of the project in a git worktree of its
+repository. It is then answered for that checkout, when the folder is one of the project's own repository
+(`worktree_missing` otherwise; see [Worktrees](#worktrees)).
+
 `projectGit.status` returns the branch of the repository containing the project folder and how much
 its work tree differs from the last commit. Archived projects are answered too.
 
@@ -1658,6 +1665,97 @@ Agents use the same terminals with `alta terminal` (see `doc/live-tool.md`): the
 read its screen or its last lines, type in it and wait for the command to end, rename it, show its tab
 and close it. A host started with `--review-owned-command-permissions` lets no session type in a
 terminal, since what is typed in a shell is a command nobody reviewed.
+
+## Worktrees
+
+A session of a project works in the folder of the project, or in a **git worktree** of it: a second
+checkout of the same repository, in a folder of its own and on a branch of its own. Several sessions
+then change the same project at the same time without stepping on each other, and the folder of the
+project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names, location, git),
+`Desktop/Rpc/WorktreesRpc.cs` (host) and `frontend/src/worktrees/` (page).
+
+- **A session stays one of its project.** The folder a session records as its working directory is the
+  folder of its project, whatever checkout it works in: that folder is what ties a session to its
+  project everywhere (the lists, the tabs, the scope of a send). The worktree is recorded beside it
+  (`worktreeDirectory` in the summary of the session, `worktree_dir` in a session view), and is where
+  the tools of the agent run, where its `alta` commands and its file references resolve paths, where its
+  terminal opens, and what its composer reads the branch and the changes from. Prompts, skills, MCP
+  servers and the configuration of the project are still those of the project.
+- **Where a new session works.** The composer of a new session, for a project that is in a git
+  repository, has a chip beside the folder: **Project folder** or **New worktree**. It opens the two
+  places, what a worktree starts from (the commit the folder of the project is on, or a branch) and the
+  folder it is created in. The choice is kept for each project in `codealta.desktop.workPlaces.v1`. A
+  new worktree is created when the first message is sent, before the session:
+  `git worktree add --no-track -b alta/<name> <folder> <commit>`. It starts from a commit, so what is
+  not committed in the folder of the project is not in it. When git creates none (no repository, no
+  commit, a branch that is gone) no session is created and the draft says why; where none can ever be
+  made (no repository, no git) the choice goes back to the folder of the project. The chip is offered
+  where the folder is in a repository, and stays visible as long as a worktree is chosen.
+- **Names.** A worktree gets a name of two words, such as `quiet-heron`, `amber-denali` or
+  `brisk-zephyr` (`WorktreeNames`: 275 adjectives and 604 nouns, 166,100 names). A name that is taken,
+  as a folder or as a branch, is drawn again, and then numbered. Its branch is `alta/<name>`.
+- **Where worktrees go.** Settings > **Worktrees** chooses it, in the configuration of the user:
+
+  ```toml
+  [worktrees]
+  location = "custom"        # "global" (the default, not written), "project" or "custom"
+  folder = "D:/worktrees"    # for "custom": an absolute folder; a leading `~` is the folder of the user
+  ```
+
+  `global` is `~/.alta/worktrees/<project>/<name>`, `project` is `<repository>/.alta/worktrees/<name>`
+  and `custom` is `<folder>/<project>/<name>`. Inside a repository the folder holds a `.gitignore` of
+  one line (`*`), written with the first worktree: git ignores the folder, and no tracked file is
+  touched. The setting is for the worktrees to come: the ones that exist stay where they are. It is read
+  from the file of the user only, never from the file of a project.
+- **A project below the root of its repository.** A worktree is a checkout of the whole repository; the
+  session works in the folder of its project inside it (`<worktree>/src/app` for a project `src/app`).
+- **How it shows.** A worktree has a color of its own (turquoise) wherever it appears. The composer
+  shows the name of the project, then the worktree with its folder, then its branch; a row of the
+  session lists has a tree mark, with the name and the folder as its tooltip; Session info has a **Git
+  worktree** row; the Changes tab names the worktree in its header. The agent is told the same: the
+  runtime context of its instructions names the worktree as its working directory and as the root of the
+  project, and says that the main checkout of the project is to be left as it is. The instruction files
+  of the repository (`AGENTS.md` and the like) are read from the worktree; a file that only the main
+  checkout has (one that git does not track) and the files above the repository apply as before.
+- **A worktree that is gone.** A worktree can be removed at any time, from the Changes tab or from a
+  terminal. The composer asks for the branch every two seconds: when the folder is gone the list of
+  sessions is read again, and the session shows its worktree struck through, as **removed**. The next
+  message is then answered in the folder of the project: the session no longer records the worktree,
+  and is told that the folder it worked in is gone. Whether the folder exists is looked at when a
+  session is listed and each time it is about to work; it is never remembered.
+- **Changes tab.** A repository with more than one checkout lists them above the files, under
+  **Worktrees**: the folder of the project first, then each worktree with its branch and the number of
+  sessions that work in it. A row shows the changes and the commits of its checkout. The changes button
+  and the worktree chip of a session open the tab on its worktree, and so does `alta diff show` called
+  by a session that works in one. The trash button of a row removes the worktree
+  (`git worktree remove`), after a confirmation that names its folder. A worktree with changes that are
+  not committed asks a second time before it is removed with them. The branch `alta/<name>` goes with
+  its worktree unless it holds commits that no other branch has: it is then kept, and the tab says so.
+  The folder that held the worktrees of the project goes with the last one, and so does
+  `~/.alta/worktrees` once it is empty; a folder the user chose stays. The folder of the project is
+  never removed. In a pane narrower than 760 pixels the checkouts are above the files, beside the
+  history.
+- **Branches.** The branch in the composer and in the header of the Changes tab is a button: it lists
+  the local branches, the ones with the newest commits first, then the branches of the remotes that
+  have no local branch yet, and offers to create the branch that is typed. A branch another checkout is
+  on is shown with that checkout and cannot be chosen: git gives a branch to one checkout at a time.
+  What git refuses (changes that would be overwritten) is shown as git said it.
+- **While a session works.** A checkout a session is at work in is neither removed nor moved to another
+  branch: its row has no trash button, its branches are disabled, and the host answers `in_use`
+  whatever the page asks. "At work" is a run in progress or a queued message being sent; an idle session
+  does not keep its worktree.
+- **Code editor.** The code editor of a project shows the folder of the project, not a worktree: for a
+  worktree the Changes tab has no **Open file**, and `alta editor open` refuses a session that works in
+  one (`editor.worktree`) instead of showing the project's copy of a file under the same name.
+- **Agents.** `alta session create --worktree` creates a session in a new worktree, and a session that
+  works in a worktree gives it to the sessions it creates (see `doc/live-tool.md`).
+- **Host API.** `workspace.createSession` takes `worktree` and `baseBranch`, and answers
+  `worktree_failed` with a `reason` (`not_repository`, `no_commit`, `invalid`, `git_unavailable`,
+  `timeout`, `failed`) and the message of git. A session of `workspace.snapshot` has `worktreePath`,
+  `worktreeRoot`, `worktreeName` and `worktreeMissing`. The `worktrees` service has `list`, `remove`,
+  `branches`, `switch`, `settings` and `saveSettings`. The requests of `projectGit` take a `worktree`:
+  only a folder of the project's own repository is read (two checkouts of one repository share their
+  git folder), anything else is `worktree_missing`.
 
 ## Automations
 

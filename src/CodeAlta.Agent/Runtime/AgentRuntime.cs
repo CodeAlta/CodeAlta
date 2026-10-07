@@ -187,6 +187,7 @@ public sealed class AgentRuntime : IAsyncDisposable
             ReasoningEffort = options.ReasoningEffort,
             AgentPromptId = NormalizeOptionalText(options.AgentPromptId),
             WorkingDirectory = options.WorkingDirectory,
+            WorktreeDirectory = options.LeaveWorktree ? null : NormalizeOptionalText(options.WorktreeDirectory),
             Title = NormalizeOptionalText(options.Title),
             Summary = null,
             ParentSessionId = NormalizeOptionalText(options.ParentSessionId),
@@ -362,6 +363,7 @@ public sealed class AgentRuntime : IAsyncDisposable
             ReasoningEffort = options.ReasoningEffort,
             AgentPromptId = NormalizeOptionalText(options.AgentPromptId) ?? summary.AgentPromptId,
             WorkingDirectory = string.IsNullOrWhiteSpace(options.WorkingDirectory) ? summary.WorkingDirectory : options.WorkingDirectory,
+            WorktreeDirectory = ResumedWorktree(summary, options),
             Title = string.IsNullOrWhiteSpace(options.Title) ? summary.Title : options.Title.Trim(),
             UpdatedAt = updatedAt,
         };
@@ -389,9 +391,14 @@ public sealed class AgentRuntime : IAsyncDisposable
             ReasoningEffort = options.ReasoningEffort ?? summary.ReasoningEffort,
             AgentPromptId = NormalizeOptionalText(options.AgentPromptId) ?? summary.AgentPromptId,
             WorkingDirectory = string.IsNullOrWhiteSpace(options.WorkingDirectory) ? summary.WorkingDirectory : options.WorkingDirectory,
+            WorktreeDirectory = ResumedWorktree(summary, options),
             Title = string.IsNullOrWhiteSpace(options.Title) ? summary.Title : options.Title.Trim(),
         };
     }
+
+    // A resume that names no worktree keeps the one the session has: only leaving it takes the session out of it.
+    private static string? ResumedWorktree(AgentSessionSummary summary, AgentSessionResumeOptions options)
+        => options.LeaveWorktree ? null : NormalizeOptionalText(options.WorktreeDirectory) ?? summary.WorktreeDirectory;
 
     private static string? NormalizeOptionalText(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

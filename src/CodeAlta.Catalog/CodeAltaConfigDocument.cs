@@ -30,6 +30,32 @@ public sealed class CodeAltaConfigDocument
     /// </summary>
     [JsonPropertyName("plugins")]
     public Dictionary<string, CodeAltaPluginSettingsDocument>? Plugins { get; set; }
+
+    /// <summary>
+    /// Gets or sets where the git worktrees CodeAlta creates are placed. Read from the user's file only.
+    /// </summary>
+    [JsonPropertyName("worktrees")]
+    public CodeAltaWorktreeSettingsDocument? Worktrees { get; set; }
+}
+
+/// <summary>
+/// Represents the choice of where the git worktrees CodeAlta creates are placed.
+/// </summary>
+public sealed class CodeAltaWorktreeSettingsDocument
+{
+    /// <summary>
+    /// Gets or sets the kind of place: <c>global</c> (under the CodeAlta folder of the user, the default),
+    /// <c>project</c> (inside the repository, ignored by git) or <c>custom</c> (under <see cref="Folder"/>).
+    /// </summary>
+    [JsonPropertyName("location")]
+    public string? Location { get; set; }
+
+    /// <summary>
+    /// Gets or sets the folder of the <c>custom</c> location: an absolute path, in which a leading <c>~</c>
+    /// stands for the folder of the user.
+    /// </summary>
+    [JsonPropertyName("folder")]
+    public string? Folder { get; set; }
 }
 
 /// <summary>

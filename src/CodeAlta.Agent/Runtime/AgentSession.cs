@@ -213,7 +213,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 await run.Start.RunAsync(lifecycle, runId, linkedCts.Token).ConfigureAwait(false);
             }
             linkedCts.Token.ThrowIfCancellationRequested();
-            var fileChangeTracker = new AgentTurnFileChangeTracker(_summary.WorkingDirectory);
+            var fileChangeTracker = new AgentTurnFileChangeTracker(_summary.ExecutionDirectory);
             var instructionBundle = AgentInstructionComposer.Compose(_options, GetPromptIntegratedLoadedSkills());
             var requestDeveloperInstructions = CombineDeveloperInstructions(
                 instructionBundle.DeveloperInstructions,
@@ -358,16 +358,16 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                         null,
                         toolCall.Name,
                         null,
-                        CreateToolCallDetails(toolCall, _summary.WorkingDirectory));
+                        CreateToolCallDetails(toolCall, _summary.ExecutionDirectory));
                     await AppendEventsAsync([started], linkedCts.Token).ConfigureAwait(false);
 
                     using var progressGate = new SemaphoreSlim(1, 1);
                     var toolOutputContentId = $"{toolCall.CallId}:output";
-                    var trackedModifiedFiles = GetTrackedFileMutationPaths(toolCall, _summary.WorkingDirectory);
+                    var trackedModifiedFiles = GetTrackedFileMutationPaths(toolCall, _summary.ExecutionDirectory);
                     AgentTurnFileChangeTracker? toolFileChangeTracker = null;
                     if (trackedModifiedFiles.Count > 0)
                     {
-                        toolFileChangeTracker = new AgentTurnFileChangeTracker(_summary.WorkingDirectory);
+                        toolFileChangeTracker = new AgentTurnFileChangeTracker(_summary.ExecutionDirectory);
                         await toolFileChangeTracker.CaptureBeforeAsync(trackedModifiedFiles, linkedCts.Token).ConfigureAwait(false);
                         await fileChangeTracker.CaptureBeforeAsync(trackedModifiedFiles, linkedCts.Token).ConfigureAwait(false);
                     }
@@ -457,7 +457,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                         null,
                         toolCall.Name,
                         result.Error,
-                        CreateToolResultDetails(toolCall, result, _summary.WorkingDirectory, toolDiff));
+                        CreateToolResultDetails(toolCall, result, _summary.ExecutionDirectory, toolDiff));
                     var rawToolEvent = new AgentRawEvent(
                         ProviderId,
                         SessionId,
@@ -495,7 +495,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                         toolOutputContentId,
                         toolCall.CallId,
                         RenderToolResult(result),
-                        CreateToolResultDetails(toolCall, result, _summary.WorkingDirectory, toolDiff));
+                        CreateToolResultDetails(toolCall, result, _summary.ExecutionDirectory, toolDiff));
                     var events = rawSkillActivationEvent is null
                         ? new AgentEvent[] { rawToolEvent, completed, toolOutputText }
                         : [rawToolEvent, rawSkillActivationEvent, completed, toolOutputText];
@@ -1009,7 +1009,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             {
                 ProviderId = ProviderId,
                 SessionId = SessionId,
-                WorkingDirectory = _summary.WorkingDirectory,
+                WorkingDirectory = _summary.ExecutionDirectory,
                 OnPermissionRequest = permissionRequestHandler,
                 OnUserInputRequest = userInputRequestHandler,
                 EnableUserInputTool = enableUserInputTool,
@@ -1089,7 +1089,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             RunId = runId,
             ModelId = _summary.ModelId ?? _options.Model,
             ModelInfo = modelInfo,
-            WorkingDirectory = _summary.WorkingDirectory,
+            WorkingDirectory = _summary.ExecutionDirectory,
             SystemMessage = systemMessage,
             DeveloperInstructions = developerInstructions,
             ReasoningEffort = _options.ReasoningEffort,
@@ -1464,7 +1464,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                         null,
                         toolCall.Name,
                         null,
-                        CreateToolCallDetails(toolCall, _summary.WorkingDirectory)));
+                        CreateToolCallDetails(toolCall, _summary.ExecutionDirectory)));
                     break;
             }
         }
@@ -2135,7 +2135,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     SessionId,
                     _summary.ModelId ?? _options.Model,
                     modelInfo,
-                    _summary.WorkingDirectory,
+                    _summary.ExecutionDirectory,
                     _state,
                     preparation,
                     _history,
@@ -2233,7 +2233,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                         SessionId,
                         _summary.ModelId ?? _options.Model,
                         modelInfo,
-                        _summary.WorkingDirectory,
+                        _summary.ExecutionDirectory,
                         _state,
                         summaryResult,
                         latestUserRequest,

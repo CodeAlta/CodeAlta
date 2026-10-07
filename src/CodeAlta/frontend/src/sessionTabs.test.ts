@@ -14,7 +14,7 @@ const catalog: WorkspaceSnapshot = { configured: true, projectsTruncated: false,
   { id: "one", workspacePath: "/p", scopeKind: "project", projectId: "p" },
   { id: "two", workspacePath: "/p", scopeKind: "project", projectId: "p" },
   { id: "global", workspacePath: null, scopeKind: "global", projectId: null },
-].map(row => ({ ...row, messageCount: null, automationId: null, title: row.id, fullTitle: row.id, fullTitleTruncated: false, createdAt: null,
+].map(row => ({ ...row, messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, title: row.id, fullTitle: row.id, fullTitleTruncated: false, createdAt: null,
   updatedAt: "2026-09-26T00:00:00Z", parentSessionId: null, lineageIssue: null, providerKey: null })) };
 
 test("six-locale Flex tab labels keep English-like user titles and identities literal without dispatch", () => {

@@ -13,7 +13,7 @@ import { ProjectRailRows, type ProjectTreeView } from "./ProjectRailRows";
 const never = () => assert.fail("rendering must not act");
 const project = (id: string, name: string, archived = false): WorkspaceProject => ({ id, name, path: `/${id}`, archived });
 const session = (id: string, projectId: string | null, parentSessionId: string | null = null): WorkspaceSession => ({
-  messageCount: null, automationId: null, createdAt: null, id, title: `title of ${id}`, fullTitle: `title of ${id}`, fullTitleTruncated: false, parentSessionId,
+  messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, createdAt: null, id, title: `title of ${id}`, fullTitle: `title of ${id}`, fullTitleTruncated: false, parentSessionId,
   scopeKind: projectId === null ? "global" : "project", projectId, lineageIssue: null, workspacePath: projectId === null ? "/home" : `/${projectId}`,
   providerKey: "codex", updatedAt: "2026-01-01T00:00:00Z",
 });

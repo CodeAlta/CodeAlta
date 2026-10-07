@@ -28,6 +28,7 @@ internal static class SessionInfoReportBuilder
             ProviderName: providerName,
             SessionId: session.SessionId,
             WorkingDirectory: session.WorkingDirectory,
+            WorktreeDirectory: !string.IsNullOrWhiteSpace(session.WorktreeDirectory) && Directory.Exists(session.WorktreeDirectory) ? session.WorktreeDirectory : null,
             ModelName: modelName,
             ReasoningEffort: reasoningEffort,
             CreatedAt: createdAt,

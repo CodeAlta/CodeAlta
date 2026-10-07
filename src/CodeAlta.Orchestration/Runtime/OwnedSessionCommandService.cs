@@ -59,19 +59,26 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         if (scope is null || query is null || query.Length > 256 || query.Any(char.IsControl)) return new("invalid_request", [], false);
         var project = await ResolveReferenceProjectAsync(scope, cancellationToken).ConfigureAwait(false);
         if (!ReferenceScopeMatches(scope, project)) return new("scope_missing", [], false);
+        var root = project!.ProjectPath;
         if (sessionId is not null)
         {
             var session = await _runtime.ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
-            if (session is null || session.SessionId != sessionId || session.ProjectRef != project!.Id || session.WorkingDirectory != project.ProjectPath)
+            if (session is null || session.SessionId != sessionId || session.ProjectRef != project.Id || session.WorkingDirectory != project.ProjectPath)
                 return new("scope_missing", [], false);
+            root = WorkFolder(session, project);
         }
         lock (_gate) { if (_closed || _retained) return new("closed", [], false); }
-        if (_indexedReferences is null) return _references.Search(project!.ProjectPath, query, cancellationToken);
-        try { return await _indexedReferences.SearchAsync(project!.ProjectPath, query, cancellationToken).ConfigureAwait(false); }
+        if (_indexedReferences is null) return _references.Search(root, query, cancellationToken);
+        try { return await _indexedReferences.SearchAsync(root, query, cancellationToken).ConfigureAwait(false); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         // The index is a convenience: an unreadable folder still gets the bounded scan's answer.
-        catch (Exception) { return _references.Search(project!.ProjectPath, query, cancellationToken); }
+        catch (Exception) { return _references.Search(root, query, cancellationToken); }
     }
+
+    // The folder a session of a project works in: its worktree while that folder exists, the folder of the
+    // project otherwise. It is where its files are read from, its references resolved and its tools run.
+    private static string WorkFolder(SessionViewDescriptor session, ProjectDescriptor project)
+        => SessionRuntimeService.ExistingWorktree(session.WorktreeDirectory) ?? project.ProjectPath;
 
     private static bool ReferenceScopeMatches(OwnedProjectReferenceScope scope, ProjectDescriptor? project)
         => project is { Archived: false } && project.Id == scope.ProjectId && project.ProjectPath == scope.ProjectPath;
@@ -88,14 +95,16 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         if (scope is null || text is null || text.Length > 32768) return new("invalid_request", [], false);
         var project = await ResolveReferenceProjectAsync(scope, cancellationToken).ConfigureAwait(false);
         if (!ReferenceScopeMatches(scope, project)) return new("scope_missing", [], false);
+        var root = project!.ProjectPath;
         if (sessionId is not null)
         {
             var session = await _runtime.ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
-            if (session is null || session.SessionId != sessionId || session.ProjectRef != project!.Id || session.WorkingDirectory != project.ProjectPath)
+            if (session is null || session.SessionId != sessionId || session.ProjectRef != project.Id || session.WorkingDirectory != project.ProjectPath)
                 return new("scope_missing", [], false);
+            root = WorkFolder(session, project);
         }
         lock (_gate) { if (_closed || _retained) return new("closed", [], false); }
-        return _references.Observe(text, project!.ProjectPath, cancellationToken);
+        return _references.Observe(text, root, cancellationToken);
     }
 
     private async Task<ProjectDescriptor?> ResolveReferenceProjectAsync(OwnedProjectReferenceScope scope, CancellationToken token)
@@ -164,26 +173,32 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     /// <param name="provider">An enabled provider selected from the host registry.</param>
     /// <param name="title">An optional validated title.</param>
     /// <param name="createdBy">Who creates the session when it is not the user, such as an automation; recorded with the session.</param>
+    /// <param name="worktreeDirectory">
+    /// The git worktree a project session works in, an existing folder; null for a session that works in the
+    /// folder of its project.
+    /// </param>
     /// <returns>The persisted session descriptor.</returns>
     /// <exception cref="ArgumentNullException">The provider is null.</exception>
-    /// <exception cref="ArgumentException">The provider is disabled or the project is invalid.</exception>
+    /// <exception cref="ArgumentException">The provider is disabled, the project is invalid, or a worktree is named without a project.</exception>
     /// <exception cref="ObjectDisposedException">The host command owner is closing.</exception>
     public Task<SessionViewDescriptor> CreateDraftSessionAsync(ProjectDescriptor? project, ModelProviderDescriptor provider, string? title,
-        AltaActorProvenance? createdBy = null)
+        AltaActorProvenance? createdBy = null, string? worktreeDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(provider);
         if (!provider.IsEnabled) throw new ArgumentException("An enabled provider is required.", nameof(provider));
+        if (worktreeDirectory is not null && (project is null || !Path.IsPathFullyQualified(worktreeDirectory)))
+            throw new ArgumentException("A worktree is the absolute folder of a project session.", nameof(worktreeDirectory));
         lock (_gate) { if (_closed || _retained) throw new ObjectDisposedException(nameof(OwnedSessionCommandService)); }
         var directory = project?.ProjectPath ?? _catalog.GlobalRoot;
         var policy = SessionExecutionPolicy.CapturePreferred(provider.ProviderId, directory,
             project is null ? [] : [directory], project, provider.DefaultModelId, provider.DefaultReasoningEffort, null);
-        var options = SessionExecutionPolicy.BuildOptions(policy, ToolsFor(null, project?.Id, directory, provider.ProviderId.Value),
+        var options = SessionExecutionPolicy.BuildOptions(policy, ToolsFor(null, project?.Id, worktreeDirectory ?? directory, provider.ProviderId.Value),
             _runtime.Permissions.OwnedDefaultPermissionHandler, _runtime.Permissions.OwnedDefaultUserInputHandler);
         return Plugins is null ? Create(options) : CreateWithPluginsAsync(Plugins, options);
 
         Task<SessionViewDescriptor> Create(SessionExecutionOptions options)
             => project is null ? _runtime.CreateGlobalSessionAsync(options, title, null, createdBy, CancellationToken.None)
-                : _runtime.CreateProjectSessionAsync(project, options, title, null, createdBy, CancellationToken.None);
+                : _runtime.CreateProjectSessionAsync(project, options, title, null, createdBy, worktreeDirectory, CancellationToken.None);
 
         // With what plugins give every run of this scope, so the first send keeps this attachment.
         async Task<SessionViewDescriptor> CreateWithPluginsAsync(PluginOrchestrationBridge plugins, SessionExecutionOptions options)
@@ -816,7 +831,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                     || session.WorkingDirectory != project!.ProjectPath || session.SessionId != operation.SessionId) return null;
                 // Once per admitted original, before any provider creation. Replays retain the
                 // original receipt/work and never resolve mutable filesystem metadata again.
-                input = _references.Resolve(operation.Request.Text, project.ProjectPath, operation.Execution.Token);
+                input = _references.Resolve(operation.Request.Text, WorkFolder(session, project), operation.Execution.Token);
             }
             // Preserve exact empty request identity without inventing a textual provider prompt.
             if (operation.Request.Text.Length == 0) input = new AgentInput([]);
@@ -855,7 +870,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 session, project, _catalog.GlobalRoot, default, modelId, effort,
                 selection?.AgentPromptId ?? session.AgentPromptId);
             var options = SessionExecutionPolicy.BuildOptions(
-                policy, ToolsFor(session.SessionId, project?.Id, project?.ProjectPath ?? _catalog.GlobalRoot, session.ResolvedProviderKey),
+                policy, ToolsFor(session.SessionId, project?.Id, project is null ? _catalog.GlobalRoot : WorkFolder(session, project), session.ResolvedProviderKey),
                 _runtime.Permissions.OwnedDefaultPermissionHandler,
                 _runtime.Permissions.OwnedDefaultUserInputHandler);
             if (Plugins is not null)

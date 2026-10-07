@@ -255,6 +255,69 @@ public sealed class SystemPromptInfrastructureTests
     }
 
     [TestMethod]
+    public void SystemPromptBuilder_NamesTheWorktreeASessionWorksIn_AndReadsItsInstructionFiles()
+    {
+        using var temp = TempDirectory.Create();
+        var appBase = Path.Combine(temp.Path, "app");
+        // The project is a folder below the root of its repository; a file above the repository applies to both checkouts.
+        var repository = Path.Combine(temp.Path, "work", "repository");
+        var projectRoot = Path.Combine(repository, "src", "app");
+        var worktreeRoot = Path.Combine(temp.Path, "trees", "quiet-heron");
+        var worktree = Path.Combine(worktreeRoot, "src", "app");
+        Directory.CreateDirectory(Path.Combine(repository, ".git"));
+        Directory.CreateDirectory(projectRoot);
+        Directory.CreateDirectory(worktree);
+        File.WriteAllText(Path.Combine(worktreeRoot, ".git"), "gitdir: " + Path.Combine(repository, ".git", "worktrees", "quiet-heron"));
+        File.WriteAllText(Path.Combine(temp.Path, "work", "AGENTS.md"), "Above the repository.");
+        File.WriteAllText(Path.Combine(repository, "AGENTS.md"), "Repository, main checkout.");
+        File.WriteAllText(Path.Combine(worktreeRoot, "AGENTS.md"), "Repository, worktree.");
+        // Not tracked by git: only the main checkout has it.
+        File.WriteAllText(Path.Combine(projectRoot, "AGENTS.md"), "Project folder, main checkout only.");
+        WriteSystem(appBase, "default", "Built-in default system.");
+        WritePrompt(appBase, "default", "Default", "default", "Built-in default prompt.");
+        var builder = new SystemPromptBuilder(new FileSystemPromptContentLocator(appBase));
+
+        SystemPromptBundle Build(string? worktreeDirectory) => builder.Build(new SystemPromptBuildRequest
+        {
+            ProviderKey = "codex",
+            ProviderType = "codex",
+            ProtocolFamily = "codex",
+            Session = new SessionViewDescriptor
+            {
+                SessionId = "session-1",
+                ProviderId = "codex",
+                ProviderKey = "codex",
+                WorkingDirectory = projectRoot,
+                WorktreeDirectory = worktreeDirectory,
+                Kind = SessionViewKind.ProjectSession,
+            },
+            Project = new ProjectDescriptor { Id = "project-1", Slug = "project-1", DisplayName = "Project 1", ProjectPath = projectRoot },
+            PartOptionsOverride = new PartialSystemPromptPartOptions(Skills: false, ProjectContext: true, RuntimeContext: true, ToolGuidance: false),
+        });
+
+        var inWorktree = Build(worktree).DeveloperInstructions!;
+        StringAssert.Contains(inWorktree, $"- Current working directory: `{worktree}`");
+        StringAssert.Contains(inWorktree, $"- Project root: `{worktree}`");
+        StringAssert.Contains(inWorktree, $"- Git worktree: the working directory is a git worktree of the project, a checkout of its own with its own branch. The main checkout of the project is `{projectRoot}`");
+        // The files of the repository come from the worktree; what only the main checkout has, and what is above the repository, stay.
+        StringAssert.Contains(inWorktree, "Above the repository.");
+        StringAssert.Contains(inWorktree, "Repository, worktree.");
+        StringAssert.Contains(inWorktree, "Project folder, main checkout only.");
+        Assert.IsFalse(inWorktree.Contains("Repository, main checkout.", StringComparison.Ordinal));
+
+        var inProject = Build(null).DeveloperInstructions!;
+        StringAssert.Contains(inProject, $"- Current working directory: `{projectRoot}`");
+        StringAssert.Contains(inProject, "Repository, main checkout.");
+        Assert.IsFalse(inProject.Contains("Git worktree", StringComparison.Ordinal));
+        Assert.IsFalse(inProject.Contains("Repository, worktree.", StringComparison.Ordinal));
+
+        // A worktree whose folder is gone is not where the session works.
+        var gone = Build(Path.Combine(temp.Path, "trees", "gone", "src", "app")).DeveloperInstructions!;
+        StringAssert.Contains(gone, $"- Current working directory: `{projectRoot}`");
+        Assert.IsFalse(gone.Contains("Git worktree", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void SystemPromptBuilder_AppendsSystemAndAgentPromptResources()
     {
         using var temp = TempDirectory.Create();

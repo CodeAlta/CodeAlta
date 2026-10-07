@@ -20,6 +20,7 @@ CodeAlta keeps user-owned durable state under a global root and project-local `.
 | `ui-state.yaml` | Catalog UI-state store | Open/selected sessions, project preferences, theme/navigator settings, frontend layouts and shared logical tab descriptors. |
 | `plugins/` | Plugin runtime | User-scoped source plugin packages. |
 | `skills/` | Skill catalog | User-scoped CodeAlta skill roots. |
+| `worktrees/` | `GitWorktreeService` | The git worktrees CodeAlta creates for sessions, unless the user chose another place: one folder for each project, and in it one folder for each worktree (see `doc/desktop.md`). |
 | `color-schemes/` | Desktop `ColorSchemesService` | The user's color schemes of the desktop window, one JSON file each (see `doc/desktop.md`). |
 | `automations.json` | Desktop `AutomationStateStore` | What an instance remembers of the automations: whether they are paused, their runs, what the event triggers have seen and which automations of a project the user allowed (see `doc/desktop.md`). It is under the state root. |
 | `sessions/internal/` | Work-session catalog | Internal session linkage descriptors still read by the catalog. |
@@ -60,6 +61,7 @@ Project-local CodeAlta state lives under `<project>/.alta/`:
 | `<project>/.alta/mcp.json` | Project-local MCP server connection definitions. |
 | `<project>/.alta/plugins/<package-id>/plugin.cs` | Project-scoped trusted source plugin packages. |
 | `<project>/.alta/skills/<skill-name>/SKILL.md` | Project-scoped skills. |
+| `<repository>/.alta/worktrees/<name>/` | The git worktrees of the project, when the user chose to keep them inside the repository. The folder holds a `.gitignore` of one line (`*`), so git ignores it. |
 
 The skill catalog also reads `<project>/.agents/skills/` and `~/.agents/skills/` as common `SKILL.md` roots. Use `.alta` roots when the content depends on CodeAlta-specific behavior.
 
@@ -82,6 +84,10 @@ enabled = true
 
 [skills]
 disabled = ["ilspy-decompile"]
+
+[worktrees]
+location = "custom"
+folder = "D:/worktrees"
 ```
 
 `CodeAltaConfigDocument` maps these sections to:
@@ -89,13 +95,14 @@ disabled = ["ilspy-decompile"]
 - `chat`: chat-level defaults, currently the default provider key;
 - `providers`: configured model-provider documents keyed by provider key;
 - `skills`: skill enablement settings, currently normalized disabled skill names;
-- `plugins`: plugin enablement keyed by built-in id or source package id, plus plugin-owned policy such as `[plugins.mcp]`.
+- `plugins`: plugin enablement keyed by built-in id or source package id, plus plugin-owned policy such as `[plugins.mcp]`;
+- `worktrees`: where the git worktrees of sessions are created. `location` is `global` (under `~/.alta/worktrees`; the default, which is not written), `project` (inside the repository) or `custom` (under `folder`, an absolute path in which a leading `~` is the folder of the user). It is read from the file of the user only, with `WorktreeSettings.Read`; `folder` is kept when another location is chosen.
 
 `[automations.<guid>]` tables are the automations of CodeAlta Desktop, in the global file and in the file of a project. `CodeAltaConfigDocument` does not model them: the desktop reads and writes them apart (`AutomationConfig`, see `doc/desktop.md`), and the typed saves keep them like every other table they do not model. The check for the configuration shapes of older versions reads the keys of the file, not the text of its strings: a prompt may quote such a key.
 
 Legacy `[acp]` and `[acp.*]` blocks are no longer active configuration. `CodeAltaConfigStore` ignores them and keeps them when saving, like every other setting it does not model.
 
-**Typed saves keep what the document does not model.** `CodeAltaConfigDocument` models only part of the file: for a plugin it knows `enabled`, not the plugin-owned policy beside it. The typed save methods (`SaveGlobalProviderDefinitions`, `SaveGlobalProviderPreference`, `SaveGlobalDefaultProvider`, `SaveGlobalPluginEnabled`, `SaveProjectPluginEnabled`) therefore apply their changes to the table model of the existing file instead of replacing the file: a modeled key takes its new value or is removed when normalization drops it, and every other key or table stays, including `[plugins.mcp]` policy, `[plugins.mcp.servers.*]`, unknown top-level settings and unknown keys inside a provider that is kept. A provider that the save removes goes with its whole table. The file keeps its key order, its line endings and end-of-line comments; full-line comments and blank lines are not kept by these saves (the raw editor and skill enablement edits keep the text as it is).
+**Typed saves keep what the document does not model.** `CodeAltaConfigDocument` models only part of the file: for a plugin it knows `enabled`, not the plugin-owned policy beside it. The typed save methods (`SaveGlobalProviderDefinitions`, `SaveGlobalProviderPreference`, `SaveGlobalDefaultProvider`, `SaveGlobalPluginEnabled`, `SaveProjectPluginEnabled`, `SaveGlobalWorktreeSettings`) therefore apply their changes to the table model of the existing file instead of replacing the file: a modeled key takes its new value or is removed when normalization drops it, and every other key or table stays, including `[plugins.mcp]` policy, `[plugins.mcp.servers.*]`, unknown top-level settings and unknown keys inside a provider that is kept. A provider that the save removes goes with its whole table. The file keeps its key order, its line endings and end-of-line comments; full-line comments and blank lines are not kept by these saves (the raw editor and skill enablement edits keep the text as it is).
 
 Global config is loaded from `~/.alta/config.toml`. Project config is loaded from `<project>/.alta/config.toml` when a project scope is active. The provider-management UI edits the same global file and validates TOML before saving. During startup, `CodeAltaConfigStore` creates the bundled default template only when the global config file is missing; existing user config files are not reconciled with newly bundled defaults.
 
@@ -133,6 +140,8 @@ CodeAlta uses two related records for active work:
 
 - **Session-view descriptors** are catalog/runtime metadata for global, project, and internal session views. They carry title, project reference, provider/model/reasoning preferences, parent/created-by attribution, and last-active timestamps. Some persisted readers and file names still use `SessionView`/`SessionId` for legacy compatibility.
 - **Agent session journals** are CodeAlta-owned JSONL files under `~/.alta/sessions/yyyy/MM/dd/<session-id>.jsonl`. They contain replayable normalized `AgentEvent` records plus raw snapshot events for `local.sessionSummary`, `local.sessionState`, `codealta.sessionHeader`, and `codealta.sessionState`.
+
+**Where a session works.** The working directory of a session is the folder it belongs to: the folder of its project, or the global root for a chat. It is written once, in the header of the journal, and it is what ties a session to its project. A session that works in a git worktree records that folder beside it, as `worktreeDirectory` in `local.sessionSummary` (`AgentSessionSummary.WorktreeDirectory`, `AgentSessionMetadata.WorktreePath`, `SessionViewDescriptor.WorktreeDirectory`): the tools of the agent run there. Journals written before worktrees have no such value and read as sessions that work in their folder. The value is cleared when the session continues after its worktree was removed. The SQLite projection keeps the whole summary, so the cache needs no column for it.
 
 `SessionViewJournalStore` still reads and writes the legacy header/state event names in the same journal used by the agent runtime. This avoids maintaining separate provider-bound state files for the same session while preserving existing user data.
 

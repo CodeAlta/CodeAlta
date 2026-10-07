@@ -12,8 +12,8 @@ const reply = (status: string, overrides = {}) => ({ status, hostEpoch: epoch, s
   projectId: project.projectId, projectPath: project.projectPath, sessionId: "s1", title: status === "ok" ? "New" : null, ...overrides });
 const snapshot: WorkspaceSnapshot = { configured: true, projects: [{ id: "p1", name: "Project", path: project.projectPath, archived: false }],
   sessions: [
-    { messageCount: null, automationId: null, createdAt: null, id: "s1", title: "New", fullTitle: "New", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: "p1", lineageIssue: null, workspacePath: project.projectPath, providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" },
-    { messageCount: null, automationId: null, createdAt: null, id: "s2", title: "Untouched", fullTitle: "Untouched", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: "p1", lineageIssue: null, workspacePath: project.projectPath, providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" },
+    { messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, createdAt: null, id: "s1", title: "New", fullTitle: "New", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: "p1", lineageIssue: null, workspacePath: project.projectPath, providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" },
+    { messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, createdAt: null, id: "s2", title: "Untouched", fullTitle: "Untouched", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: "p1", lineageIssue: null, workspacePath: project.projectPath, providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" },
   ], projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false };
 
 test("exact owned rename response and refreshed catalog display cannot select a different session or project", async () => {

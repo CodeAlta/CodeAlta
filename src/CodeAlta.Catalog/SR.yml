@@ -3264,6 +3264,12 @@
   fr: "Général"
   ja: "一般"
   zh: "常规"
+"Git worktree":
+  de: "Git-Worktree"
+  es: "Worktree de git"
+  fr: "Worktree git"
+  ja: "Git ワークツリー"
+  zh: "Git 工作树"
 "GitHub":
   de: "GitHub"
   es: "GitHub"

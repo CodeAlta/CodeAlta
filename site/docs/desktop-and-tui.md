@@ -95,6 +95,10 @@ An automation sends a prompt by itself: every morning, every Friday, or when an 
   <figcaption class="small text-secondary mt-2">The automations of a project and when they run next.</figcaption>
 </figure>
 
+### Worktrees
+
+A session can work in its own git worktree, on its own branch, so that several sessions change the same project at the same time. See [Worktrees](worktrees.md).
+
 ### Review changes
 
 Click the `+` / `−` numbers in the prompt bar, or the changes button of a project in the sidebar, to open the Changes tab of the project. It lists the changed files and recent commits and shows a syntax-highlighted diff of the selected file. See [Changes](workspace.md#changes-desktop).
@@ -141,6 +145,7 @@ When a new version is available, the desktop app shows a notice with **Update an
 | Git changes | Changes tab with the changed files, recent commits and a diff | Not available |
 | Terminal | Terminals in tabs, listed in the sidebar; agents can use them | Not available |
 | Automations | Prompts that run on a schedule, on a new issue or pull request, or on demand | Not available |
+| Worktrees | Start a session in a new git worktree; list, remove and switch branches in the Changes tab | Sessions run in their worktree; not created or removed there |
 | Sessions of no project | **Chats**, first in the sidebar | **Global sessions** |
 | Favorite projects | Listed first in the sidebar | Not available |
 | Settings | One window with a page per area | One dialog per area |

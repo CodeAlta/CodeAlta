@@ -515,6 +515,19 @@ public sealed class CodeAltaConfigStore
     }
 
     /// <summary>
+    /// Persists where the git worktrees CodeAlta creates are placed, in the user's configuration file.
+    /// </summary>
+    /// <param name="location"><c>global</c>, <c>project</c> or <c>custom</c>; <c>global</c>, the default, is not written.</param>
+    /// <param name="folder">The folder of the <c>custom</c> location; it is kept when another location is chosen.</param>
+    public void SaveGlobalWorktreeSettings(string? location, string? folder)
+    {
+        var document = LoadGlobal();
+        NormalizeDocument(document);
+        document.Worktrees = new CodeAltaWorktreeSettingsDocument { Location = location, Folder = folder };
+        SaveDocument(_options.ConfigPath, document);
+    }
+
+    /// <summary>
     /// Loads globally configured provider definitions.
     /// </summary>
     /// <param name="includeDisabled"><see langword="true"/> to include disabled definitions.</param>
@@ -970,6 +983,18 @@ public sealed class CodeAltaConfigStore
                     StringComparer.OrdinalIgnoreCase);
 
             document.Providers = providers.Count == 0 ? null : providers;
+        }
+
+        if (document.Worktrees is { } worktrees)
+        {
+            // The default location is the absence of one; a folder is kept for when `custom` is chosen again.
+            var location = worktrees.Location?.Trim().ToLowerInvariant();
+            worktrees.Location = location is "project" or "custom" ? location : null;
+            worktrees.Folder = string.IsNullOrWhiteSpace(worktrees.Folder) ? null : worktrees.Folder.Trim();
+            if (worktrees.Location is null && worktrees.Folder is null)
+            {
+                document.Worktrees = null;
+            }
         }
 
         if (document.Skills is not null)

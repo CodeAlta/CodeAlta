@@ -66,15 +66,17 @@ internal sealed class SessionExecutionOptionsFactory
         var request = SessionExecutionPolicy.CaptureSession(
             session, _getProjectById(session.ProjectRef), _catalogOptions.GlobalRoot,
             tab.ProviderId, tab.ModelId, tab.ReasoningEffort, tab.AgentPromptId);
-        return BuildOptions(request, () => request.SessionId);
+        // The commands of a session that works in a git worktree resolve paths from there, while the folder exists.
+        return BuildOptions(request, () => request.SessionId,
+            () => !string.IsNullOrWhiteSpace(session.WorktreeDirectory) && Directory.Exists(session.WorktreeDirectory) ? session.WorktreeDirectory : request.WorkingDirectory);
     }
 
-    private SessionExecutionOptions BuildOptions(SessionExecutionRequest context, Func<string?>? sourceSessionIdProvider)
+    private SessionExecutionOptions BuildOptions(SessionExecutionRequest context, Func<string?>? sourceSessionIdProvider, Func<string?>? workFolder = null)
     {
         var sessionKey = context.SessionId ?? CreateTransientSessionKey(context.ProviderId, context.WorkingDirectory);
         return SessionExecutionPolicy.BuildOptions(
             context,
-            CreateAltaTools(sourceSessionIdProvider, () => context.ProjectId, () => context.WorkingDirectory),
+            CreateAltaTools(sourceSessionIdProvider, () => context.ProjectId, workFolder ?? (() => context.WorkingDirectory)),
             CreatePermissionHandler(sessionKey),
             (request, cancellationToken) => _userInputRequests.HandleAsync(sessionKey, request, cancellationToken));
     }

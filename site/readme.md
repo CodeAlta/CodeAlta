@@ -107,6 +107,7 @@ altatui</code></pre>
         <li>Session tabs you can drag, split and merge</li>
         <li>A code editor for each project, beside its sessions</li>
         <li>Terminals in tabs, which agents can use too</li>
+        <li>Worktrees: each session on its own branch, in its own folder</li>
         <li>Automations: prompts that run on a schedule or on a new issue</li>
         <li>All settings in one window</li>
         <li>Light and dark themes with 13 color schemes</li>

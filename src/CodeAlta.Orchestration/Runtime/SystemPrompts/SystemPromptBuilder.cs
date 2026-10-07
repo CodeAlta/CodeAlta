@@ -539,13 +539,23 @@ public sealed class SystemPromptBuilder
             $"- Platform: {GetPlatformLabel()}",
             $"- Default shell for shell commands: {GetDefaultShellLabel()}",
         };
-        var workingDirectory = NormalizeOptionalRoot(request.Session.WorkingDirectory) ?? NormalizeOptionalRoot(request.WorkingDirectory);
+        // A session in a git worktree works there: the folder of its project is then named as what it is, the
+        // main checkout, which is not where this session writes.
+        var worktree = ExistingWorktree(request.Session);
+        var workingDirectory = worktree ?? NormalizeOptionalRoot(request.Session.WorkingDirectory) ?? NormalizeOptionalRoot(request.WorkingDirectory);
         if (workingDirectory is not null)
         {
             lines.Add($"- Current working directory: {MarkdownCode(workingDirectory)}");
         }
 
-        if (projectRoot is not null)
+        if (worktree is not null)
+        {
+            lines.Add($"- Project root: {MarkdownCode(worktree)}");
+            lines.Add(projectRoot is null
+                ? "- Git worktree: the working directory is a git worktree, a checkout of its own with its own branch."
+                : $"- Git worktree: the working directory is a git worktree of the project, a checkout of its own with its own branch. The main checkout of the project is {MarkdownCode(projectRoot)}: work in the working directory, and leave the main checkout as it is unless asked.");
+        }
+        else if (projectRoot is not null)
         {
             lines.Add($"- Project root: {MarkdownCode(projectRoot)}");
         }
@@ -654,7 +664,9 @@ public sealed class SystemPromptBuilder
 
     private static string? BuildProjectContext(SystemPromptBuildRequest request, string? projectRoot, List<SystemPromptDiagnostic> diagnostics, out IReadOnlyList<string> files)
     {
-        var selectedFiles = EnumerateProjectInstructionFiles(request.Session.WorkingDirectory ?? request.WorkingDirectory, request.ProjectRoots.Count > 0 ? request.ProjectRoots : projectRoot is null ? [] : [projectRoot], request.DiscoveryScope);
+        var selectedFiles = InWorktree(
+            EnumerateProjectInstructionFiles(request.Session.WorkingDirectory ?? request.WorkingDirectory, request.ProjectRoots.Count > 0 ? request.ProjectRoots : projectRoot is null ? [] : [projectRoot], request.DiscoveryScope),
+            request.Session);
         files = selectedFiles;
         if (selectedFiles.Count == 0)
         {
@@ -692,6 +704,50 @@ public sealed class SystemPromptBuilder
 
         return builder.Length == 0 ? null : builder.ToString();
     }
+
+    // A session in a git worktree reads the instruction files of that checkout: a file of the project's own
+    // checkout gives way to the same file of the worktree, when the worktree has it (a file that git does not
+    // track is only in the main checkout). The files above the repository stay as they are.
+    private static IReadOnlyList<string> InWorktree(IReadOnlyList<string> files, SessionViewDescriptor session)
+    {
+        var worktree = ExistingWorktree(session);
+        var project = NormalizeOptionalRoot(session.WorkingDirectory);
+        if (worktree is null || project is null || files.Count == 0)
+        {
+            return files;
+        }
+
+        // The worktree folder of a session is the folder of its project in another checkout: the same path leads
+        // from the root of each checkout to it.
+        var (from, to) = (project, worktree);
+        var checkout = CodeAlta.Catalog.Worktrees.GitWorktreeService.FindCheckoutRoot(worktree);
+        var below = checkout is null ? "." : Path.GetRelativePath(checkout, worktree);
+        if (checkout is not null && below != "." && project.EndsWith(Path.DirectorySeparatorChar + below, PathComparison))
+        {
+            (from, to) = (project[..^(below.Length + 1)], checkout);
+        }
+
+        var mapped = new List<string>(files.Count);
+        var prefix = from + Path.DirectorySeparatorChar;
+        foreach (var file in files)
+        {
+            var candidate = file.StartsWith(prefix, PathComparison) ? Path.Combine(to, file[prefix.Length..]) : file;
+            candidate = File.Exists(candidate) ? candidate : file;
+            if (!mapped.Contains(candidate, StringComparer.OrdinalIgnoreCase))
+            {
+                mapped.Add(candidate);
+            }
+        }
+
+        return mapped;
+    }
+
+    private static StringComparison PathComparison
+        => OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+    // The worktree a session works in: the one it records, while its folder is there.
+    private static string? ExistingWorktree(SessionViewDescriptor session)
+        => NormalizeOptionalRoot(session.WorktreeDirectory) is { } worktree && Directory.Exists(worktree) ? worktree : null;
 
     private static IReadOnlyList<string> EnumerateProjectInstructionFiles(string? workingDirectory, IReadOnlyList<string> projectRoots, SessionDiscoveryScope? discoveryScope)
     {

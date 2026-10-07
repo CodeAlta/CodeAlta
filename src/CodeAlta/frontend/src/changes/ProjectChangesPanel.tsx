@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Button, ButtonGroup, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Switch } from "@blueprintjs/core";
-import { projectGit } from "#neoastra";
+import { projectGit, worktrees as worktreesApi, type WorkspaceSession } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
 import { CodeEditor } from "../monaco/CodeEditor";
@@ -14,16 +14,22 @@ import { changeBar, changeCommitsReply, changeContent, changeContentNotice, chan
   type ChangeContent, type ChangedFile, type ChangeList, type ChangeRow, type ChangeScope, type ChangesPreferences } from "./projectChanges";
 import { sessionTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
+import { BranchSwitcher } from "../worktrees/BranchSwitcher";
+import { WorktreeList } from "../worktrees/WorktreeList";
+import { sameFolder, worktreeSessions, worktreesReply, type Worktree } from "../worktrees/worktrees";
 
 const autoRefreshMilliseconds = 5000;
 const ignore = () => { };
 const modalOpen = () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]');
 // A refusal that will not go away by asking again: the list it replaces is no longer shown.
-const lasting = new Set(["not_repository", "unknown_project", "project_unavailable", "unavailable", "invalid"]);
+const lasting = new Set(["not_repository", "unknown_project", "project_unavailable", "unavailable", "invalid", "worktree_missing"]);
+// The same checkouts again draw nothing.
+const sameCheckouts = (a: readonly Worktree[] | null, b: readonly Worktree[] | null) => a === b || JSON.stringify(a) === JSON.stringify(b);
 
 const failures = {
   not_repository: "This folder is not in a git repository.",
   git_failed: "Git could not list the changes. Check that git is installed and that it trusts this folder.",
+  worktree_missing: "The worktree is no longer there.",
   unknown_project: "The project is no longer available.",
   project_unavailable: "The project is no longer available.",
   unavailable: "Changes cannot be read in this window.",
@@ -84,8 +90,13 @@ const CommitRow = memo(function CommitRow({ commit, selected, onSelect }: { comm
  * the uncommitted changes, everything since the base of the branch, or one of the recent commits. The lists
  * are read when the tab is shown, on demand and, while auto-refresh is on, every five seconds; a list that did
  * not change redraws nothing.
+ *
+ * A repository that has git worktrees lists its checkouts above the files: the folder of the project and each
+ * worktree. The tab shows the changes and the commits of the one that is selected, a worktree is removed from
+ * its row, and the branch in the header moves the checkout to another branch.
  */
-export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, onActivate, onOpenFile, request, api = projectGit }: {
+export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, onActivate, onOpenFile, request, sessions, onWorktreesChanged, api = projectGit,
+  trees = worktreesApi }: {
   tab: FileTab;
   /** The name of the project while it is still open; undefined once it is gone. */
   projectName: string | undefined;
@@ -97,9 +108,17 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   active: boolean; onActivate: () => void;
   /** Opens a file of the project (a project-relative path) in an editor tab. */
   onOpenFile: (path: string) => void;
-  /** The file an `alta diff show` asked for; a new object for each request. */
-  request?: Readonly<{ path: string | null }> | null;
+  /**
+   * The file an `alta diff show` asked for, and the checkout to show when one is named (null is the folder of
+   * the project); a new object for each request.
+   */
+  request?: Readonly<{ path: string | null; worktree?: string | null }> | null;
+  /** The sessions of the window: a worktree shows how many work in it. */
+  sessions?: readonly WorkspaceSession[];
+  /** A worktree was removed: what the sessions record is read again. */
+  onWorktreesChanged?: () => void;
   api?: Pick<typeof projectGit, "changes" | "file" | "commits">;
+  trees?: Pick<typeof worktreesApi, "list" | "remove" | "branches" | "switch">;
 }) {
   const { t, locale } = useShellLanguage();
   const [preferences, setPreferences] = useState(() => restoreChangesPreferences(() => localStorage.getItem(changesPreferencesKey)));
@@ -115,15 +134,26 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   const [content, setContent] = useState<{ key: string; listed: string; value: ChangeContent | null; failure: string | null } | null>(null);
   const [changes, setChanges] = useState<DiffEditorChanges>({ count: 0, current: 0 });
   const [copied, setCopied] = useState(false);
+  // The checkout that is shown: the folder of the project in one of its worktrees, or null for the folder of the project.
+  const [checkout, setCheckout] = useState<string | null>(null);
+  const [checkouts, setCheckouts] = useState<readonly Worktree[] | null>(null);
   const diff = useRef<DiffEditorHandle | null>(null);
   const rows = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLElement>(null);
   const reading = useRef(false), again = useRef(false);
   const scopeKey = changeScopeKey(scope);
   // What the last list was read for: another comparison never reuses its revision.
-  const latest = useRef({ list, scope, listed: scopeKey, selected, wanted: null as string | null, history, historyLimit, historyRead: 0 });
+  const latest = useRef({ list, scope, listed: scopeKey, selected, wanted: null as string | null, history, historyLimit, historyRead: 0, checkout });
   latest.current.list = list; latest.current.scope = scope; latest.current.selected = selected;
-  latest.current.history = history; latest.current.historyLimit = historyLimit;
+  latest.current.history = history; latest.current.historyLimit = historyLimit; latest.current.checkout = checkout;
+
+  // Shows another checkout: nothing of the one that was shown is kept.
+  function showCheckout(folder: string | null) {
+    if (folder === latest.current.checkout || folder !== null && sameFolder(folder, latest.current.checkout)) return;
+    latest.current.list = null; latest.current.history = null; latest.current.historyRead = 0; latest.current.wanted = null; latest.current.checkout = folder;
+    setCheckout(folder); setList(null); setHistory(null); setFailure(null); setSelected(null); setContent(null); setScope({ kind: "head" }); setFilter("");
+  }
+  const showCheckoutLatest = useRef(showCheckout); showCheckoutLatest.current = showCheckout;
 
   function update(change: Partial<ChangesPreferences>) {
     setPreferences(current => {
@@ -147,14 +177,26 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
       const known = latest.current.list && latest.current.listed === asked ? latest.current.list.revision : null;
       // The history is read beside the files: a commit made meanwhile shows up with the list it emptied.
       const limit = latest.current.historyLimit, knownHistory = latest.current.history && latest.current.historyRead === limit ? latest.current.history.revision : null;
-      void api.commits({ expectedEpoch: epoch, projectId: tab.projectId, limit, knownRevision: knownHistory }, { signal: abort.signal, timeoutMilliseconds: 30_000 })
+      // The checkouts are read with the files: a worktree made or removed meanwhile shows up with them.
+      void trees.list({ expectedEpoch: epoch, projectId: tab.projectId }, { signal: abort.signal, timeoutMilliseconds: 30_000 })
+        .then(reply => worktreesReply(reply, tab.projectId), () => "read_failed")
+        .then(value => {
+          if (abort.signal.aborted) return;
+          const next = typeof value === "string" ? null : value.worktrees;
+          setCheckouts(current => sameCheckouts(current, next) ? current : next);
+          // The worktree that was shown is gone: the folder of the project is shown again.
+          if (next && latest.current.checkout !== null && !next.some(worktree => !worktree.main && !worktree.missing && sameFolder(worktree.folder, latest.current.checkout)))
+            showCheckoutLatest.current(null);
+        });
+      void api.commits({ expectedEpoch: epoch, projectId: tab.projectId, limit, knownRevision: knownHistory, worktree: checkout }, { signal: abort.signal, timeoutMilliseconds: 30_000 })
         .then(reply => changeCommitsReply(reply, tab.projectId, knownHistory), () => null)
         .then(value => {
           if (abort.signal.aborted || !value || value === "unchanged") return;
           latest.current.history = value; latest.current.historyRead = limit;
           setHistory(value);
         });
-      void api.changes({ expectedEpoch: epoch, projectId: tab.projectId, comparison: scope.kind, commit: scope.kind === "commit" ? scope.id : null, knownRevision: known },
+      void api.changes({ expectedEpoch: epoch, projectId: tab.projectId, comparison: scope.kind, commit: scope.kind === "commit" ? scope.id : null, knownRevision: known,
+        worktree: checkout },
         { signal: abort.signal, timeoutMilliseconds: 30_000 })
         .then(reply => changeListReply(reply, tab.projectId, known), () => ({ kind: "failed" as const, status: "read_failed" }))
         .then(reply => {
@@ -182,8 +224,8 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
           if (again.current) { again.current = false; refresh.current(); }
         });
     };
-    return () => { abort.abort(); reading.current = false; refresh.current = () => { }; };
-  }, [api, epoch, tab.projectId]);
+    return () => { abort.abort(); reading.current = false; again.current = false; refresh.current = () => { }; };
+  }, [api, trees, epoch, tab.projectId, checkout]);
 
   useEffect(() => {
     if (!visible || !epoch) return;
@@ -193,10 +235,11 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
     const timer = preferences.autoRefresh
       ? window.setInterval(() => { if (document.visibilityState !== "hidden") refresh.current(); }, autoRefreshMilliseconds) : undefined;
     return () => { window.removeEventListener("focus", focused); window.clearInterval(timer); };
-  }, [visible, epoch, scopeKey, historyLimit, preferences.autoRefresh, tab.projectId]);
+  }, [visible, epoch, scopeKey, historyLimit, preferences.autoRefresh, tab.projectId, checkout]);
 
-  // A file an agent asked for is selected now, or once a list names it.
+  // A file an agent asked for is selected now, or once a list names it; a checkout that was asked for is shown.
   useEffect(() => {
+    if (request?.worktree !== undefined) showCheckoutLatest.current(request.worktree);
     const path = request?.path ?? null;
     if (path === null) return;
     if (latest.current.list?.files.some(file => file.path === path)) setSelected(path);
@@ -205,13 +248,14 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   }, [request]);
 
   const file = useMemo(() => list?.files.find(value => value.path === selected) ?? null, [list, selected]);
-  const contentKey = file ? JSON.stringify([scopeKey, file.path]) : null;
+  const contentKey = file ? JSON.stringify([checkout, scopeKey, file.path]) : null;
   // Both sides of the selected file, read again when the list says that one of them changed.
   useEffect(() => {
     if (!file || !contentKey || !epoch || !visible) return;
     if (content?.key === contentKey && (content.listed === file.revision || content.value?.revision === file.revision)) return;
     const abort = new AbortController();
-    void api.file({ expectedEpoch: epoch, projectId: tab.projectId, comparison: scope.kind, commit: scope.kind === "commit" ? scope.id : null, path: file.path },
+    void api.file({ expectedEpoch: epoch, projectId: tab.projectId, comparison: scope.kind, commit: scope.kind === "commit" ? scope.id : null, path: file.path,
+      worktree: checkout },
       { signal: abort.signal, timeoutMilliseconds: 30_000 })
       .then(reply => changeContent(reply, tab.projectId, file.path), () => "read_failed")
       .then(value => {
@@ -285,12 +329,29 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   const notice = current?.value ? changeContentNotice(current.value) : null;
   // While the next file is read the editor keeps the previous one, dimmed: it is not built again for each file.
   const compared = content?.value && !changeContentNotice(content.value) && (current || file) ? content.value : null;
-  const openable = file && list && file.status !== "deleted" ? projectRelativePath(list.prefix, file.path) : null;
+  // The code editor shows the folder of the project: a file of a worktree is not opened there under the same name.
+  const openable = file && list && checkout === null && file.status !== "deleted" ? projectRelativePath(list.prefix, file.path) : null;
   const look = file ? fileAppearance(file.path, false) : null;
   // A file that exists on one side only has nothing to put beside it.
   const oneSided = !!compared && (compared.originalState === "absent" || compared.modifiedState === "absent");
   const folders = layout === "tree" ? visibleRows.filter(row => row.kind === "folder") : [];
   const allCollapsed = folders.length > 0 && folders.every(row => row.kind === "folder" && row.collapsed);
+
+  // The checkouts of the repository, once it has a worktree: a repository without one shows nothing more than before.
+  const shownWorktree = checkout === null ? null : checkouts?.find(worktree => !worktree.main && sameFolder(worktree.folder, checkout)) ?? null;
+  const projectSessions = useMemo(() => (sessions ?? []).filter(session => session.projectId === tab.projectId), [sessions, tab.projectId]);
+  const worktreeRows = epoch && checkouts && checkouts.length > 1 && <WorktreeList epoch={epoch} projectId={tab.projectId} projectName={projectName ?? tab.projectPath}
+    worktrees={checkouts} selected={checkout} api={trees}
+    sessions={worktree => worktree.main ? 0 : worktreeSessions(projectSessions, worktree).length}
+    onSelect={worktree => showCheckout(worktree.main ? null : worktree.folder)}
+    onRemoved={worktree => {
+      if (sameFolder(worktree.folder, checkout)) showCheckout(null);
+      refresh.current(true);
+      onWorktreesChanged?.();
+    }} />;
+  const splitter = <div className="changes-splitter" role="separator" aria-orientation="vertical" aria-label={t("Resize the list of files")} onPointerDown={event => resize(event)}
+    onDoubleClick={() => update({ listWidth: 280 })} />;
+  const branchTitle = list ? t(list.detached ? "Detached at {branch}" : "Branch {branch}", { branch: list.branch }) : "";
 
   // What is compared: the uncommitted changes first, then the whole branch where it has a base, then the commits.
   const historyRows = history && history.commits.length > 0 && <>
@@ -323,10 +384,13 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
       <span className="changes-project" title={list?.root ?? tab.projectPath}>
         <span className="changes-project-icon"><AppIcon name="changes" size={15} /></span>
         <strong>{projectName ?? t("Unavailable project")}</strong>
-        <span className="changes-project-path">{list?.root ?? tab.projectPath}</span>
+        {shownWorktree && <span className="changes-worktree" title={shownWorktree.path}><AppIcon name="worktree" size={13} />{shownWorktree.name}</span>}
+        <span className="changes-project-path">{list?.root ?? shownWorktree?.path ?? tab.projectPath}</span>
       </span>
-      {list && <span className="changes-branch" title={t(list.detached ? "Detached at {branch}" : "Branch {branch}", { branch: list.branch })}>
-        <AppIcon name="branch" size={13} /><span>{list.branch}</span></span>}
+      {list && (epoch
+        ? <BranchSwitcher epoch={epoch} projectId={tab.projectId} worktree={checkout} className="changes-branch" placement="bottom-start" api={trees}
+          title={`${branchTitle}\n${t("Switch branch")}`} onSwitched={() => refresh.current(true)}><AppIcon name="branch" size={13} /><span>{list.branch}</span></BranchSwitcher>
+        : <span className="changes-branch" title={branchTitle}><AppIcon name="branch" size={13} /><span>{list.branch}</span></span>)}
       {scope.kind !== "head" && <span className="changes-scope" title={shownCommit ? `${shownCommit.shortId} · ${shownCommit.subject}` : undefined}>
         {scope.kind === "branch" ? t("Since {reference}", { reference: list?.baseReference ?? "" })
           : <><code>{shownCommit?.shortId ?? scope.id.slice(0, 7)}</code>{shownCommit && <span>{shownCommit.subject}</span>}</>}</span>}
@@ -340,18 +404,23 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
       <Button variant="minimal" size="small" className="changes-refresh" icon={busy ? <ActivitySpinner size={14} /> : <AppIcon name="refresh" size={14} />}
         aria-label={t("Refresh")} title={t("Refresh")} disabled={!epoch} onClick={() => refresh.current(true)} />
     </header>
-    {!list ? <NonIdealState className="changes-empty" icon={failure ? <AppIcon name="changes" size={36} /> : <ActivitySpinner size={28} />}
-        title={failure ? t("No changes to show") : t("Loading…")} description={failure ? t(failureText(failure)) : undefined}
-        action={failure ? <Button icon={<AppIcon name="refresh" size={15} />} disabled={!epoch} onClick={() => refresh.current(true)}>{t("Refresh")}</Button> : undefined} />
+    {!list ? (() => {
+        const state = <NonIdealState className="changes-empty" icon={failure ? <AppIcon name="changes" size={36} /> : <ActivitySpinner size={28} />}
+          title={failure ? t("No changes to show") : t("Loading…")} description={failure ? t(failureText(failure)) : undefined}
+          action={failure ? <Button icon={<AppIcon name="refresh" size={15} />} disabled={!epoch} onClick={() => refresh.current(true)}>{t("Refresh")}</Button> : undefined} />;
+        // The checkouts stay within reach while one of them has nothing to show.
+        return worktreeRows ? <div className="changes-body"><aside className="changes-files" style={{ width: preferences.listWidth }}>{worktreeRows}<div className="changes-rows" /></aside>
+          {splitter}{state}</div> : state;
+      })()
       : list.files.length === 0 ? <div className="changes-body">
-        {historyRows && <><aside className="changes-files" style={{ width: preferences.listWidth }}><div className="changes-rows" />{historyRows}</aside>
-          <div className="changes-splitter" role="separator" aria-orientation="vertical" aria-label={t("Resize the list of files")} onPointerDown={event => resize(event)}
-            onDoubleClick={() => update({ listWidth: 280 })} /></>}
+        {(historyRows || worktreeRows) && <><aside className="changes-files" style={{ width: preferences.listWidth }}>{worktreeRows}<div className="changes-rows" />{historyRows}</aside>
+          {splitter}</>}
         <NonIdealState className="changes-empty" icon={<AppIcon name="checked" size={36} />} title={t("No changes")}
           description={t(list.comparison === "commit" ? "This commit changed no file." : list.comparison === "branch" ? "The work tree matches the base of the branch."
             : "The work tree matches the last commit.")} /></div>
       : <div className="changes-body">
         <aside className="changes-files" style={{ width: preferences.listWidth }}>
+          {worktreeRows}
           <div className="changes-files-toolbar">
             <InputGroup className="changes-filter" size="small" type="search" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} placeholder={t("Filter files")}
               aria-label={t("Filter files")} value={filter} onValueChange={setFilter}
@@ -375,8 +444,7 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
           </div>
           {historyRows}
         </aside>
-        <div className="changes-splitter" role="separator" aria-orientation="vertical" aria-label={t("Resize the list of files")} onPointerDown={event => resize(event)}
-          onDoubleClick={() => update({ listWidth: 280 })} />
+        {splitter}
         <section className="changes-diff" aria-label={file?.path ?? t("Changes")}>
           {file && look && <div className="changes-diff-header">
             <span className="changes-status" data-status={file.status} title={t(changeLabel(file.status))}>{changeLetter(file.status)}</span>

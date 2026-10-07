@@ -70,6 +70,75 @@ public sealed class AgentRuntimeTests
     }
 
     [TestMethod]
+    public async Task AgentRuntime_SessionInAWorktree_RunsThereUntilItLeavesIt()
+    {
+        using var temp = TestTempDirectory.Create();
+        var project = Directory.CreateDirectory(Path.Combine(temp.Path, "project")).FullName;
+        var worktree = Directory.CreateDirectory(Path.Combine(temp.Path, "trees", "quiet-heron")).FullName;
+        var agentRuntime = CreateAgentRuntime(temp.Path, out var executor);
+        await agentRuntime.StartAsync().ConfigureAwait(false);
+        static Task<AgentPermissionDecision> Allow(AgentPermissionRequest request, CancellationToken cancellationToken)
+            => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
+        async Task<AgentSessionMetadata> ListedAsync() => (await CreateSessionStore(temp.Path).ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Single();
+
+        string sessionId;
+        await using (var created = await agentRuntime.CreateSessionAsync(new AgentSessionCreateOptions
+                     {
+                         ProviderKey = "openai", Model = "gpt-5.4", WorkingDirectory = project, WorktreeDirectory = worktree, OnPermissionRequest = Allow,
+                     }).ConfigureAwait(false))
+        {
+            sessionId = created.SessionId;
+            // The folder a session belongs to is not the folder it works in.
+            Assert.AreEqual(project, created.WorkspacePath);
+            _ = await created.SendAsync(new AgentSendOptions { Input = AgentInput.Text("one") }).ConfigureAwait(false);
+        }
+
+        Assert.AreEqual(worktree, executor.Requests[0].WorkingDirectory);
+        Assert.AreEqual((project, worktree), ((await ListedAsync().ConfigureAwait(false)).WorkspacePath, (await ListedAsync().ConfigureAwait(false)).WorktreePath));
+
+        // A resume that names no worktree keeps the one the session has.
+        await using (var resumed = await agentRuntime.ResumeSessionAsync(sessionId, new AgentSessionResumeOptions { WorkingDirectory = project, OnPermissionRequest = Allow }).ConfigureAwait(false))
+        {
+            _ = await resumed.SendAsync(new AgentSendOptions { Input = AgentInput.Text("two") }).ConfigureAwait(false);
+        }
+
+        Assert.AreEqual(worktree, executor.Requests[1].WorkingDirectory);
+        Assert.AreEqual(worktree, (await ListedAsync().ConfigureAwait(false)).WorktreePath);
+
+        // Leaving it sends the session back to the folder it belongs to, whatever worktree the resume names, and clears the record.
+        await using (var left = await agentRuntime.ResumeSessionAsync(sessionId, new AgentSessionResumeOptions
+                     {
+                         WorkingDirectory = project, WorktreeDirectory = worktree, LeaveWorktree = true, OnPermissionRequest = Allow,
+                     }).ConfigureAwait(false))
+        {
+            Assert.AreEqual(project, left.WorkspacePath);
+            _ = await left.SendAsync(new AgentSendOptions { Input = AgentInput.Text("three") }).ConfigureAwait(false);
+        }
+
+        Assert.AreEqual(project, executor.Requests[2].WorkingDirectory);
+        var listed = await ListedAsync().ConfigureAwait(false);
+        Assert.AreEqual((project, null), (listed.WorkspacePath, listed.WorktreePath));
+
+        // It stays there afterwards, and can be given a worktree again.
+        await using (var later = await agentRuntime.ResumeSessionAsync(sessionId, new AgentSessionResumeOptions { WorkingDirectory = project, OnPermissionRequest = Allow }).ConfigureAwait(false))
+        {
+            _ = await later.SendAsync(new AgentSendOptions { Input = AgentInput.Text("four") }).ConfigureAwait(false);
+        }
+
+        Assert.AreEqual(project, executor.Requests[3].WorkingDirectory);
+        await using (var again = await agentRuntime.ResumeSessionAsync(sessionId, new AgentSessionResumeOptions
+                     {
+                         WorkingDirectory = project, WorktreeDirectory = worktree, OnPermissionRequest = Allow,
+                     }).ConfigureAwait(false))
+        {
+            _ = await again.SendAsync(new AgentSendOptions { Input = AgentInput.Text("five") }).ConfigureAwait(false);
+        }
+
+        Assert.AreEqual(worktree, executor.Requests[4].WorkingDirectory);
+        Assert.AreEqual(worktree, (await ListedAsync().ConfigureAwait(false)).WorktreePath);
+    }
+
+    [TestMethod]
     public async Task AgentRuntime_CreateSession_UsesDefaultProviderWhenNotSpecified()
     {
         using var temp = TestTempDirectory.Create();

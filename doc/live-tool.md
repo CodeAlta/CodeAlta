@@ -139,6 +139,11 @@ alta session events <session-id> --kind assistant.message --fields timestamp,kin
 
 `alta session current` is the shortest way for an agent-invoked live-tool call to discover its own CodeAlta session id. It does not require a session catalog lookup; outside a caller with session context it returns a usage diagnostic.
 
+A session of a project works in the folder of the project or in a git worktree of it (see
+`doc/desktop.md`, Worktrees). The records of a session (`alta.session.current`, `alta.session.item`,
+`alta.session.created`) name the worktree as `worktreeDirectory` while its folder exists;
+`workingDirectory` stays the folder of the project, which is what ties a session to its project.
+
 Useful control commands:
 
 ```text
@@ -151,6 +156,22 @@ alta session queue <session-id> --message "Run this after the current turn."
 alta session steer <session-id> --message "Focus on the smallest fix."
 alta session abort <session-id> --reason "Superseded"
 alta session compact <session-id>
+```
+
+`alta session create --project <project> --worktree` creates the session in a new git worktree: a
+checkout of its own, in the folder the user chose for worktrees, on a new branch `alta/<name>`. It starts
+from the commit the folder of the project is on, or from `--base <branch-or-commit>`; what is not
+committed in the folder of the project is not in it. The record adds `worktreeDirectory` and
+`worktreeBranch`. A session created by a session that works in a worktree, for the same project, works
+in that same worktree; `--worktree` gives it one of its own and `--no-worktree` sends it to the folder
+of the project. When git creates no worktree the command fails with `worktree.not_repository`,
+`worktree.no_commit`, `worktree.invalid` (the base), `worktree.git_unavailable`, `worktree.timeout` or
+`worktree.failed`, and no session is created.
+
+```text
+alta session create --project <project> --worktree
+alta session create --project <project> --worktree --base main
+alta session create --project <project> --no-worktree
 ```
 
 Control commands acknowledge submission. They do not block until the target model finishes. If a session is busy, `send --queue-if-busy` and `session queue` persist queue items with caller attribution; the runtime drains at most one queued prompt when that session becomes idle.
@@ -309,7 +330,8 @@ alta diff show --project <project-id-or-slug-or-path>
 ```
 
 The project defaults to the one of the calling session, then to the catalog project of the cwd; an
-archived project is not shown. `--file` is a path relative to the repository root, selected when it is
+archived project is not shown. A session that works in a git worktree of its project is shown the
+changes of that worktree. `--file` is a path relative to the repository root, selected when it is
 one of the changed files. The command emits `alta.diff.shown` with the project and the file, or
 `view.unavailable` when no window is open.
 
@@ -339,6 +361,10 @@ no window is open.
 Like `diff`, the group exists only where a host registers its view (`IAltaEditorView`), which the desktop
 host does: in the terminal UI and the standalone tool it is not among the commands, their help or
 `alta tool list`.
+
+A session that works in a git worktree has other files than the project folder, which is what the code
+editor shows: `alta editor open` answers `editor.worktree` (exit code 7) to it, unless it names the project
+with `--project`. `alta diff show` shows the changes of the worktree.
 
 ## Terminal commands
 

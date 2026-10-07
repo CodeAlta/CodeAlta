@@ -238,6 +238,64 @@ public sealed class DesktopProjectGitChangesTests
         await foreach (var _ in service.WatchAsync(new("another"), default)) Assert.Fail("A stale page gets no request.");
     }
 
+    [TestMethod]
+    public async Task Changes_OfAWorktree_AreThoseOfThatCheckout()
+    {
+        using var repository = await Repository.CreateAsync();
+        repository.Write("a.txt", "one\n");
+        repository.Commit("first");
+        var worktree = Path.Combine(Path.GetDirectoryName(repository.Root)!, "trees", "quiet-heron");
+        repository.Git("worktree", "add", "-q", "-b", "alta/quiet-heron", worktree, "HEAD");
+        File.WriteAllText(Path.Combine(worktree, "a.txt"), "one\ntwo\n");
+        repository.Write("b.txt", "only in the folder of the project\n");
+
+        var inProject = await repository.Service.ChangesAsync(new ProjectGitChangesRequest(Epoch, repository.ProjectId, null, null), default);
+        var inWorktree = await repository.Service.ChangesAsync(new ProjectGitChangesRequest(Epoch, repository.ProjectId, null, null, Worktree: worktree), default);
+
+        // Each checkout has its own files and its own branch; both are answered for the same project.
+        Assert.AreEqual(("ok", repository.Root, "main", "b.txt"), (inProject.Status, inProject.Root, inProject.Branch, string.Join(',', inProject.Files!.Select(static file => file.Path))));
+        Assert.AreEqual(("ok", worktree, "alta/quiet-heron", "a.txt"), (inWorktree.Status, inWorktree.Root, inWorktree.Branch, string.Join(',', inWorktree.Files!.Select(static file => file.Path))));
+        Assert.AreEqual(repository.ProjectId, inWorktree.ProjectId);
+        Assert.AreNotEqual(inProject.Revision, inWorktree.Revision);
+        Assert.AreEqual(new ProjectGitStatusResponse("ok", repository.ProjectId, "alta/quiet-heron", false, 1, 0, 1), await repository.Service.StatusAsync(new(Epoch, repository.ProjectId, worktree), default));
+        var file = await repository.Service.FileAsync(new ProjectGitFileRequest(Epoch, repository.ProjectId, "head", "a.txt", Worktree: worktree), default);
+        Assert.AreEqual(("ok", "one\n", "one\ntwo\n"), (file.Status, file.Original, file.Modified));
+        Assert.AreEqual("not_changed", (await repository.Service.FileAsync(new ProjectGitFileRequest(Epoch, repository.ProjectId, "head", "b.txt", Worktree: worktree), default)).Status);
+        var commits = await repository.Service.CommitsAsync(new ProjectGitCommitsRequest(Epoch, repository.ProjectId, null, null, worktree), default);
+        Assert.AreEqual(("ok", "first"), (commits.Status, commits.Commits!.Single().Subject));
+
+        // A commit made in the worktree is in its history, and not in that of the folder of the project.
+        GitIn(worktree, "add", "-A");
+        GitIn(worktree, "commit", "-q", "-m", "second");
+        repository.Now += TimeSpan.FromMinutes(1);
+        CollectionAssert.AreEqual(new[] { "second", "first" }, (await repository.Service.CommitsAsync(new ProjectGitCommitsRequest(Epoch, repository.ProjectId, null, null, worktree), default)).Commits!.Select(static commit => commit.Subject).ToArray());
+        CollectionAssert.AreEqual(new[] { "first" }, (await repository.Service.CommitsAsync(new ProjectGitCommitsRequest(Epoch, repository.ProjectId, null, null), default)).Commits!.Select(static commit => commit.Subject).ToArray());
+
+        // Only a folder of the project's own repository is read, whatever a page names.
+        using var other = await Repository.CreateAsync();
+        other.Write("x.txt", "x\n");
+        other.Commit("other");
+        foreach (var (folder, refusal) in new[] { (other.Root, "worktree_missing"), (Path.Combine(worktree, "..", "nowhere"), "worktree_missing"), (Path.GetTempPath(), "worktree_missing"), ("trees/quiet-heron", "invalid"), ("", "invalid") })
+        {
+            Assert.AreEqual(refusal, (await repository.Service.StatusAsync(new(Epoch, repository.ProjectId, folder), default)).Status, folder);
+            Assert.AreEqual(ProjectGitChangesResponse.Refused(refusal), await repository.Service.ChangesAsync(new ProjectGitChangesRequest(Epoch, repository.ProjectId, null, null, Worktree: folder), default), folder);
+        }
+
+        void GitIn(string folder, params string[] arguments)
+        {
+            var start = new ProcessStartInfo("git") { WorkingDirectory = folder, RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true };
+            foreach (var argument in arguments) start.ArgumentList.Add(argument);
+            foreach (var (name, value) in new[] { ("GIT_AUTHOR_NAME", "Test"), ("GIT_AUTHOR_EMAIL", "test@example.invalid"), ("GIT_COMMITTER_NAME", "Test"), ("GIT_COMMITTER_EMAIL", "test@example.invalid") })
+                start.Environment[name] = value;
+            foreach (var inherited in new[] { "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE" }) start.Environment.Remove(inherited);
+            using var process = Process.Start(start)!;
+            var error = process.StandardError.ReadToEndAsync();
+            process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+            Assert.AreEqual(0, process.ExitCode, $"git {string.Join(' ', arguments)}: {error.Result}");
+        }
+    }
+
     private sealed class Repository : IDisposable
     {
         private readonly string _home;

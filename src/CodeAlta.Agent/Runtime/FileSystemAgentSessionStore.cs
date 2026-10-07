@@ -1395,7 +1395,8 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore, Ima
             ParentSessionId: summary.ParentSessionId,
             CreatedBySessionId: summary.CreatedBySessionId,
             CreatedByRunId: summary.CreatedByRunId,
-            ViewState: localState);
+            ViewState: localState,
+            WorktreePath: string.IsNullOrWhiteSpace(summary.WorktreeDirectory) ? null : summary.WorktreeDirectory);
 
     private void DeleteEmptySessionDirectories(string? directory)
     {

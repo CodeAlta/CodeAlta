@@ -373,6 +373,23 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         return descriptor;
     }
 
+    /// <summary>
+    /// Gets the git worktree a session works in, while its folder exists: null for a session that works in the
+    /// folder of its project, and for one that is not known.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Stops the reading.</param>
+    /// <returns>The folder of the worktree, or null.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is blank.</exception>
+    public async Task<string?> GetSessionWorktreeAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        // A session that is attached works where its attachment runs.
+        if (_entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated) return ExistingWorktree(entry.WorktreeDirectory);
+        var session = await ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        return ExistingWorktree(session?.WorktreeDirectory);
+    }
+
     internal async Task<SessionViewDescriptor?> ResolveOwnedSessionAsync(string sessionId, CancellationToken cancellationToken)
         => await AdmitAsync(() => ResolveOwnedSessionBodyAsync(sessionId, cancellationToken), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
 
@@ -830,10 +847,45 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         string? parentSessionId,
         AltaActorProvenance? createdBy,
         CancellationToken cancellationToken = default)
-        => await AdmitAsync(() => CreateProjectSessionOwnedBodyAsync(project, options, title, parentSessionId, createdBy, cancellationToken), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+        => await CreateProjectSessionAsync(project, options, title, parentSessionId, createdBy, worktreeDirectory: null, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Creates a new project session that works in a git worktree of its project, or in the folder of its
+    /// project, and returns its descriptor.
+    /// </summary>
+    /// <remarks>
+    /// The session belongs to its project whatever folder it works in: its working directory is the folder of
+    /// the project, and the worktree is recorded beside it. The worktree is an argument of the creation, never a
+    /// property of the options, so that nothing that copies options can lose it.
+    /// </remarks>
+    /// <param name="project">The project of the session.</param>
+    /// <param name="options">How the session runs; its working directory is the folder of the project.</param>
+    /// <param name="title">The title, or null for the name of the project.</param>
+    /// <param name="parentSessionId">The session that this one continues the work of, if any.</param>
+    /// <param name="createdBy">Who creates the session when it is not the user.</param>
+    /// <param name="worktreeDirectory">The folder of the project in a git worktree, which exists; null for the folder of the project.</param>
+    /// <param name="cancellationToken">Stops waiting.</param>
+    /// <returns>The descriptor of the session.</returns>
+    /// <exception cref="ArgumentException">
+    /// A supplied scoped working or project path is invalid or outside the instruction boundary, or the worktree is not an absolute folder.
+    /// </exception>
+    public async Task<SessionViewDescriptor> CreateProjectSessionAsync(
+        ProjectDescriptor project,
+        SessionExecutionOptions options,
+        string? title,
+        string? parentSessionId,
+        AltaActorProvenance? createdBy,
+        string? worktreeDirectory,
+        CancellationToken cancellationToken = default)
+    {
+        if (worktreeDirectory is not null && !Path.IsPathFullyQualified(worktreeDirectory))
+            throw new ArgumentException("A worktree is an absolute folder.", nameof(worktreeDirectory));
+        return await AdmitAsync(() => CreateProjectSessionOwnedBodyAsync(project, options, title, parentSessionId, createdBy, worktreeDirectory, cancellationToken), cancellationToken)
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     private async Task<SessionViewDescriptor> CreateProjectSessionOwnedBodyAsync(ProjectDescriptor project, SessionExecutionOptions options,
-        string? title, string? parentSessionId, AltaActorProvenance? createdBy, CancellationToken cancellationToken)
+        string? title, string? parentSessionId, AltaActorProvenance? createdBy, string? worktreeDirectory, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(options);
@@ -856,6 +908,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ProviderKey = options.ProviderKey ?? options.ProviderId.Value,
             ProjectRef = project.Id,
             WorkingDirectory = options.WorkingDirectory,
+            WorktreeDirectory = NormalizeOptionalText(worktreeDirectory),
             Title = string.IsNullOrWhiteSpace(title) ? project.DisplayName : title.Trim(),
             Status = SessionViewStatus.Draft,
             ParentSessionId = NormalizeOptionalText(parentSessionId),
@@ -986,13 +1039,18 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         _entries.TryGetValue(session.SessionId, out var existing);
         var prompt = (useExplicitPrompt ? null : NormalizeOptionalText(existing?.PendingAgentPromptId))
             ?? preparedPrompt ?? NormalizeOptionalText(options.AgentPromptId) ?? NormalizeOptionalText(session.AgentPromptId);
-        if (ownedCommand && existing is not null && !existing.Matches(options, prompt)
+        // An attachment runs in one folder. A session whose worktree is gone, or that was given one, is attached
+        // again where it works now; an attachment that is busy, or that this caller does not own, stays where it is.
+        var settled = existing is not null && (existing.HasActiveRun || existing.QueueDrainInProgress || (ownedCommand && !HasOwnedCommandDefaults(existing)));
+        var worktree = settled ? existing!.WorktreeDirectory : ExistingWorktree(session.WorktreeDirectory);
+        bool Reusable(RuntimeSessionEntry entry) => entry.Matches(options, prompt) && string.Equals(entry.WorktreeDirectory, worktree, StringComparison.Ordinal);
+        if (ownedCommand && existing is not null && !Reusable(existing)
             && (existing.HasActiveRun || existing.QueueDrainInProgress || !HasOwnedCommandDefaults(existing)))
             throw new InvalidOperationException("Cannot change configuration of an active or externally owned attachment.");
         // Carry a matching but incompatible entry to send admission without consuming its pending
         // prompt or updating the descriptor. Admission rechecks under the actor and owns rejection.
         if (ownedCommand && existing is not null && !existing.Attachment.IsRetiring
-            && !HasOwnedCommandDefaults(existing) && existing.Matches(options, prompt))
+            && !HasOwnedCommandDefaults(existing) && Reusable(existing))
             return new CoordinatorPreparation(existing, null);
         // Preserve validation/instruction-build-before-retirement behavior. The body is retained.
         ArgumentException.ThrowIfNullOrWhiteSpace(options.WorkingDirectory);
@@ -1001,7 +1059,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ValidateDiscoveryPaths(session, options, project);
         session.AgentPromptId = prompt;
         _instructionTemplateProvider.BuildCoordinatorInstructions(session, project, options.Model, prompt);
-        if (existing is not null && !existing.Attachment.IsRetiring && existing.Matches(options, prompt))
+        if (existing is not null && !existing.Attachment.IsRetiring && Reusable(existing))
         {
             existing.PendingAgentPromptId = null;
             return new CoordinatorPreparation(existing, null);
@@ -1071,13 +1129,22 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var project = await ResolveProjectAsync(session, cancellationToken).ConfigureAwait(false);
         ValidateDiscoveryPaths(session, options, project);
 
+        // The session works in its worktree while that folder exists. Once it is gone the session works in the
+        // folder of its project again, and no longer records the worktree. The instructions name the folder.
+        var recordedWorktree = NormalizeOptionalText(session.WorktreeDirectory);
+        var worktree = ExistingWorktree(recordedWorktree);
+        session.WorktreeDirectory = worktree;
+        // What the session said and did so far names the folder that is gone: it is told where it works now.
+        var worktreeGone = recordedWorktree is not null && worktree is null
+            ? $"The git worktree this session worked in, `{recordedWorktree}`, is no longer there. The session now works in the folder of the project, `{options.WorkingDirectory}`: use that folder, and not the one that is gone."
+            : null;
         var effectiveAgentPromptId = selectedPrompt;
         session.AgentPromptId = effectiveAgentPromptId;
         var instructions = _instructionTemplateProvider.BuildCoordinatorInstructions(session, project, options.Model, session.AgentPromptId);
         var agentPromptUsage = ResolveAgentPromptUsage(instructions.PromptBundle, project?.ProjectPath);
         var providerProviderId = new ModelProviderId(options.ProviderId.Value);
         var developerInstructions = instructions.DeveloperInstructions;
-        var additionalDeveloperInstructions = AppendPromptPart(BuildParentNotificationGuidance(session), options.AdditionalDeveloperInstructions);
+        var additionalDeveloperInstructions = AppendPromptPart(AppendPromptPart(BuildParentNotificationGuidance(session), worktreeGone), options.AdditionalDeveloperInstructions);
         var tools = options.Tools;
 
         AgentSessionHandleId sessionHandleId;
@@ -1133,6 +1200,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ReasoningEffort = options.ReasoningEffort,
             Streaming = true,
             WorkingDirectory = options.WorkingDirectory,
+            WorktreeDirectory = worktree,
+            LeaveWorktree = worktree is null,
             ProjectRoots = options.ProjectRoots,
             SystemMessage = systemMessage,
             DeveloperInstructions = finalDeveloperInstructions,
@@ -1176,6 +1245,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         session.ProviderId = options.ProviderId.Value;
         session.ProviderKey = options.ProviderKey ?? options.ProviderId.Value;
         session.WorkingDirectory = options.WorkingDirectory;
+        session.WorktreeDirectory = worktree;
         session.ModelId = options.Model;
         session.ReasoningEffort = options.ReasoningEffort;
         session.AgentPromptId = effectiveAgentPromptId ?? session.AgentPromptId;
@@ -1230,7 +1300,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             options.OnUserInputRequest,
             options.InstructionProcessor,
             projector,
-            attachment);
+            attachment)
+        {
+            WorktreeDirectory = worktree,
+        };
 
         projector.Entry = entry;
         var subscription = await _agentHub.SubscribeSessionEventsAsync(
@@ -1896,6 +1969,16 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// this instant may or may not be counted.
     /// </summary>
     public int CountActiveRuns() => _entries.Values.Count(static entry => !entry.IsTerminated && entry.HasActiveRun);
+
+    /// <summary>
+    /// Lists the sessions that are at work right now, each with the folder it works in: its worktree when it has
+    /// one, the folder of its project otherwise. Like <see cref="CountActiveRuns"/> it is a reading taken without
+    /// waiting for any session; it answers whether a checkout can be removed or moved to another branch.
+    /// </summary>
+    public IReadOnlyList<SessionWorkFolder> ListBusySessionFolders()
+        => [.. _entries.Values
+            .Where(static entry => !entry.IsTerminated && (entry.HasActiveRun || entry.QueueDrainInProgress))
+            .Select(static entry => new SessionWorkFolder(entry.SessionId, entry.WorktreeDirectory ?? entry.WorkingDirectory, entry.WorktreeDirectory is not null))];
 
     /// <summary>
     /// Returns whether the session's active coordinator session has an in-flight run.
@@ -2988,6 +3071,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 ProjectRef = entry.ProjectId,
                 ParentSessionId = entry.ParentSessionId,
                 WorkingDirectory = entry.WorkingDirectory,
+                WorktreeDirectory = entry.WorktreeDirectory,
                 Title = sessionId,
                 Status = SessionViewStatus.Active,
                 CreatedAt = now,
@@ -3085,6 +3169,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     ReasoningEffort = options.ReasoningEffort,
                     AgentPromptId = NormalizeOptionalText(session.AgentPromptId) ?? AgentPromptCatalog.DefaultPromptName,
                     WorkingDirectory = session.WorkingDirectory,
+                    WorktreeDirectory = NormalizeOptionalText(session.WorktreeDirectory),
                     Title = session.Title,
                     Summary = session.LatestSummary,
                     ParentSessionId = NormalizeOptionalText(session.ParentSessionId),
@@ -3095,6 +3180,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 cancellationToken)
             .ConfigureAwait(false);
     }
+
+    /// <summary>The worktree a session records, while its folder exists; null otherwise.</summary>
+    internal static string? ExistingWorktree(string? worktreeDirectory)
+        => string.IsNullOrWhiteSpace(worktreeDirectory) || !Directory.Exists(worktreeDirectory) ? null : worktreeDirectory;
 
     private static SessionExecutionOptions CreateParentDeliveryExecutionOptions(SessionViewDescriptor parent)
         => new()
@@ -3296,6 +3385,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ParentSessionId = session.ParentSessionId,
             CreatedBy = session.CreatedBy,
             WorkingDirectory = session.WorkingDirectory,
+            WorktreeDirectory = session.WorktreeDirectory,
             Title = session.Title,
             Status = session.Status,
             CreatedAt = session.CreatedAt,
@@ -3367,6 +3457,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ProviderKey = providerKey,
             ProjectRef = project.Id,
             WorkingDirectory = normalizedCwd,
+            // As recorded: whether the folder is still there is looked at where the session is about to work.
+            WorktreeDirectory = NormalizeOptionalText(session.WorktreePath),
             Title = BuildSessionTitle(session, project.DisplayName),
             Status = SessionViewStatus.Active,
             ParentSessionId = parentSessionId,
@@ -3657,6 +3749,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         public string WorkingDirectory { get; }
 
+        /// <summary>The git worktree this attachment runs in; null when it runs in <see cref="WorkingDirectory"/>.</summary>
+        public string? WorktreeDirectory { get; init; }
+
         public string? Model { get; }
 
         public AgentReasoningEffort? ReasoningEffort { get; }
@@ -3732,6 +3827,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 ParentSessionId = ParentSessionId,
                 CreatedBy = CreatedBy,
                 WorkingDirectory = WorkingDirectory,
+                WorktreeDirectory = WorktreeDirectory,
                 Title = Title,
                 Status = IsTerminated ? SessionViewStatus.Archived : Status,
                 CreatedAt = CreatedAt,

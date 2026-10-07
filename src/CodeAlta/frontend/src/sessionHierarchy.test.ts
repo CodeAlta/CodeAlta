@@ -6,7 +6,7 @@ import { limitSessionHierarchy } from "./recentSessions";
 
 const date = (day: number) => `2026-01-${String(day).padStart(2, "0")}T00:00:00Z`;
 const row = (id: string, parentSessionId: string | null = null, day = 1, title = id): WorkspaceSession => ({
-  messageCount: null, automationId: null, createdAt: null, id, title, fullTitle: title, fullTitleTruncated: false, parentSessionId, scopeKind: "project", projectId: "p1",
+  messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, createdAt: null, id, title, fullTitle: title, fullTitleTruncated: false, parentSessionId, scopeKind: "project", projectId: "p1",
   workspacePath: "/p1", lineageIssue: null, providerKey: "fixture", updatedAt: date(day),
 });
 

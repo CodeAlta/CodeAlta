@@ -18,7 +18,9 @@ internal sealed record SessionInfoReport(
     int? AssistantMessageCount,
     SessionInfoStorageLocation? StorageLocation,
     IReadOnlyList<SessionInfoFact> ProviderFacts,
-    IReadOnlyList<AgentLoadedSkillState> LoadedSkills);
+    IReadOnlyList<AgentLoadedSkillState> LoadedSkills,
+    // The git worktree the session works in, while its folder is there; null for the folder of its project.
+    string? WorktreeDirectory = null);
 
 internal sealed record SessionInfoStorageLocation(
     string Path,

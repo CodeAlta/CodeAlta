@@ -47,7 +47,7 @@ export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime
     setFeedback(null); setPending(false);
     unavailable(target && !demo ? "Not requested. Refresh explicitly." : "Unavailable: recorded-only, archived, demo or unverified scope.");
   }, [lifetime?.revision, target === null, target?.request.expectedHostEpoch, target?.request.scope, target?.request.projectId,
-    target?.request.projectPath, target?.request.createdAt, demo, info.id, info.createdAt, info.path, info.title,
+    target?.request.projectPath, target?.request.createdAt, demo, info.id, info.createdAt, info.path, info.worktree?.path, info.worktree?.missing, info.title,
     info.titleTruncated, info.scope, info.scopeWarning, info.provider, info.updatedAt, info.canCopyId]);
   function close() {
     if (closing.current) return;
@@ -131,6 +131,8 @@ export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime
       <div><dt>{t("Title")}</dt><dd>{info.title}{info.titleTruncated && <small>{t("Title shortened in the bounded snapshot.")}</small>}</dd></div>
       <div><dt>{t("Scope")}</dt><dd>{info.scope}{info.scopeWarning && <small>{info.scopeWarning}</small>}</dd></div>
       <div><dt>{t("Recorded working directory")}</dt><dd>{info.path ?? t("Not recorded or unverified")}</dd></div>
+      {info.worktree && <div><dt>{t("Git worktree")}</dt><dd>{info.worktree.path}
+        {info.worktree.missing && <small>{t("The folder of this worktree is gone: the session continues in the folder of the project.")}</small>}</dd></div>}
       <div><dt>{t("Provider")}</dt><dd>{info.provider ?? t("Not recorded or unverified")}</dd></div>
       <div><dt>{t("Saved update")}</dt><dd>{info.updatedAt ? recorded(info.updatedAt) : t("Not recorded or unverified")}</dd></div>
       <div><dt>{t("Recorded creation time")}</dt><dd>{info.createdAt ? recorded(info.createdAt) : t("Not recorded or unavailable")}</dd></div>

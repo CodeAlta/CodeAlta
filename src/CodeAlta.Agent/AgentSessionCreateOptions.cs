@@ -53,6 +53,19 @@ public class AgentSessionCreateOptions
     public string? WorkingDirectory { get; init; }
 
     /// <summary>
+    /// Gets or initializes the git worktree the session works in: tools run there and paths are resolved from
+    /// there, while <see cref="WorkingDirectory"/> stays the folder the session belongs to. When a session is
+    /// resumed, null keeps the worktree it has; <see cref="LeaveWorktree"/> takes it out of one.
+    /// </summary>
+    public string? WorktreeDirectory { get; init; }
+
+    /// <summary>
+    /// Gets or initializes whether a resumed session leaves its worktree: it works in
+    /// <see cref="WorkingDirectory"/> again, and the worktree is no longer recorded with it.
+    /// </summary>
+    public bool LeaveWorktree { get; init; }
+
+    /// <summary>
     /// Gets or initializes the project roots used for local instruction overlays.
     /// </summary>
     public IReadOnlyList<string> ProjectRoots { get; init; } = [];

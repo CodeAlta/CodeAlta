@@ -1,0 +1,92 @@
+/* A worktree has a color of its own wherever it shows: a session that works in one is never mistaken for one in the folder of its project. */
+:root { --worktree: var(--bp-palette-turquoise-4); --worktree-missing: var(--bp-palette-gold-4); }
+:root[data-theme="light"] { --worktree: var(--bp-palette-turquoise-2); --worktree-missing: var(--bp-palette-gold-2); }
+
+/* Where a session works: the chips beside the composer. What opens something keeps its width; the folders are what shortens. */
+.project-context > .bp6-popover-target, .project-context-folder > svg, .project-context-folder > strong, .project-context-folder:not(:has(> span)) { flex: none; }
+.project-context .project-context-worktree { flex: 0 1 auto; min-width: 0; overflow: hidden; padding: 1px 8px; border: 1px solid color-mix(in srgb, var(--worktree) 45%, transparent);
+  border-radius: 999px; background: color-mix(in srgb, var(--worktree) 12%, transparent); color: var(--text); }
+.project-context-worktree svg { flex: none; color: var(--worktree); }
+.project-context-worktree > strong { flex: none; font-weight: 600; }
+.project-context-worktree > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+/* A button of the composer has a look of its own: the worktree keeps its color in it. */
+.project-context button.project-context-worktree { display: inline-flex; align-items: center; gap: 5px; font: inherit; cursor: pointer;
+  border-color: color-mix(in srgb, var(--worktree) 45%, transparent); background: color-mix(in srgb, var(--worktree) 12%, transparent); }
+.project-context button.project-context-worktree:hover, .project-context button.project-context-worktree:focus-visible { border-color: var(--worktree); outline: none; }
+.project-context .project-context-worktree[data-missing] { border-color: color-mix(in srgb, var(--worktree-missing) 55%, transparent); background: color-mix(in srgb, var(--worktree-missing) 12%, transparent); }
+.project-context-worktree[data-missing] svg { color: var(--worktree-missing); }
+.project-context-worktree[data-missing] strong { text-decoration: line-through; }
+
+button.project-context-place, button.project-context-branch { display: inline-flex; align-items: center; gap: 5px; flex: none; margin: -2px -4px; padding: 1px 7px;
+  border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+button.project-context-place:hover, button.project-context-place:focus-visible, button.project-context-place[aria-expanded="true"],
+button.project-context-branch:hover, button.project-context-branch:focus-visible, button.project-context-branch[aria-expanded="true"] {
+  border-color: var(--line-strong); background: var(--panel-2); color: var(--text); outline: none; }
+button.project-context-place > span { color: var(--text); }
+button.project-context-place[data-worktree] { border-color: color-mix(in srgb, var(--worktree) 45%, transparent); background: color-mix(in srgb, var(--worktree) 12%, transparent); }
+button.project-context-place[data-worktree] > svg:first-child { color: var(--worktree); }
+button.project-context-branch > span { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+
+.work-place-form { display: grid; gap: 8px; width: min(420px, calc(100vw - 32px)); padding: 12px 14px; }
+.work-place-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 28px; font-size: 13px; }
+.work-place-row > span:first-child, .work-place-row > label { flex: none; color: var(--muted); }
+.work-place-row .bp6-html-select { min-width: 0; max-width: 260px; }
+.work-place-folder { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.work-place-folder code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; color: var(--text); font-size: 12px; }
+
+/* The branches a checkout can move to. */
+.branch-switcher { display: grid; gap: 6px; width: min(340px, calc(100vw - 32px)); padding: 8px; }
+.branch-switcher-list.bp6-menu { max-height: min(320px, 50vh); min-width: 0; padding: 0; overflow-y: auto; background: transparent; }
+.branch-switcher-list .bp6-menu-item-label { max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.branch-switcher-loading { display: grid; place-items: center; padding: 14px; }
+.branch-switcher-note { margin: 0; padding: 2px 4px; color: var(--muted); font-size: 12px; }
+.branch-switcher-failure { overflow-wrap: anywhere; font-size: 12px; }
+
+/* The mark of a session that works in a worktree, in the lists of sessions. */
+.session-worktree { display: inline-flex; align-items: center; flex: none; margin-left: 4px; color: var(--worktree); }
+.session-worktree[data-missing] { color: var(--worktree-missing); opacity: .8; }
+
+/* The checkouts of a repository, in the changes of a project. */
+.worktree-list { flex: none; display: flex; flex-direction: column; min-height: 0; max-height: 38%; border-bottom: 1px solid var(--line); }
+.worktree-list h3 { flex: none; margin: 0; padding: 8px 10px 4px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.worktree-rows { min-height: 0; padding: 0 4px 6px; overflow-y: auto; }
+.worktree-row { display: flex; align-items: center; gap: 2px; border-radius: 6px; }
+.worktree-row > button[role="option"] { display: flex; align-items: center; flex: 1 1 auto; gap: 8px; min-width: 0; padding: 4px 6px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.worktree-row > button[role="option"]:hover { background: var(--panel-2); }
+.worktree-row > button[role="option"][aria-selected="true"] { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.worktree-row > button[role="option"]:disabled { cursor: default; opacity: .65; }
+.worktree-row-icon { display: inline-flex; flex: none; color: var(--worktree); }
+.worktree-row[data-main] .worktree-row-icon { color: var(--muted); }
+.worktree-row[data-missing] .worktree-row-icon { color: var(--worktree-missing); }
+.worktree-row-text { display: grid; flex: 1 1 auto; min-width: 0; }
+.worktree-row-text strong { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.worktree-row[data-missing] .worktree-row-text strong { text-decoration: line-through; }
+.worktree-row-text small { display: flex; gap: 8px; min-width: 0; overflow: hidden; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.worktree-row-branch { display: inline-flex; align-items: center; gap: 3px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.worktree-row-busy { display: inline-flex; flex: none; }
+.worktree-row-remove.bp6-button { flex: none; opacity: 0; }
+.worktree-row:hover .worktree-row-remove.bp6-button, .worktree-row:focus-within .worktree-row-remove.bp6-button { opacity: 1; }
+.worktree-notice { margin: 0 8px 6px; overflow-wrap: anywhere; font-size: 12px; cursor: default; }
+.worktree-alert-path code { overflow-wrap: anywhere; font-size: 12px; }
+/* In half a window the files go above the diff: the checkouts are above the files, beside the history. */
+@container (max-width: 760px) {
+  .changes-files { display: grid; grid-template-columns: 55% minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .changes-files > .worktree-list { grid-column: 1; grid-row: 1; max-height: 188px; }
+  .changes-files > .changes-rows { grid-column: 1; grid-row: 2; }
+  .changes-files > .changes-history { grid-column: 2; grid-row: 1 / span 2; }
+}
+.changes-worktree { display: inline-flex; align-items: center; flex: none; gap: 5px; padding: 1px 8px; border: 1px solid color-mix(in srgb, var(--worktree) 45%, transparent);
+  border-radius: 999px; background: color-mix(in srgb, var(--worktree) 12%, transparent); font-size: 12px; }
+.changes-worktree svg { color: var(--worktree); }
+button.changes-branch { border: 1px solid transparent; border-radius: 999px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+button.changes-branch:hover, button.changes-branch:focus-visible, button.changes-branch[aria-expanded="true"] { border-color: var(--line-strong); background: var(--panel-2); outline: none; }
+
+/* Settings: where worktrees are created. */
+.worktree-settings-places { display: grid; gap: 4px; margin: 4px 0 10px; }
+.worktree-settings-place { display: inline-grid; gap: 2px; vertical-align: top; }
+.worktree-settings-place code { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.worktree-settings-place small { color: var(--muted); }
+/* The folder belongs to the last choice: it is drawn under it. */
+.worktree-settings-folder { display: flex; gap: 8px; max-width: 720px; margin-left: 26px; }
+.worktree-settings-folder .bp6-input-group { flex: 1 1 auto; }

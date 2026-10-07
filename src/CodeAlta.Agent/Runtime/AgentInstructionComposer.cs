@@ -18,7 +18,7 @@ internal static class AgentInstructionComposer
         var developerInstructionsInput = Normalize(options.DeveloperInstructions);
         var runtimeContext = options.InstructionsAlreadyComposed || ContainsSection(developerInstructionsInput, "# Runtime Context")
             ? string.Empty
-            : BuildRuntimeContextSection(options.WorkingDirectory, options.ProjectRoots);
+            : BuildRuntimeContextSection(ExecutionDirectory(options), options.ProjectRoots);
         var developerSections = new List<string>();
         if (!string.IsNullOrWhiteSpace(developerInstructionsInput))
         {
@@ -27,6 +27,8 @@ internal static class AgentInstructionComposer
 
         if (!options.InstructionsAlreadyComposed && !ContainsSection(developerInstructionsInput, "# Project Context"))
         {
+            // The folders above a worktree are not the project's: the files are looked for from the folder the session
+            // belongs to, as for a session that works there.
             foreach (var path in EnumerateAgentInstructionFiles(options.WorkingDirectory, options.ProjectRoots))
             {
                 var content = File.ReadAllText(path).Trim();
@@ -62,6 +64,10 @@ internal static class AgentInstructionComposer
 
     private static string? Normalize(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    // Where the session works: its worktree when it has one.
+    private static string? ExecutionDirectory(AgentSessionCreateOptions options)
+        => options.LeaveWorktree || string.IsNullOrWhiteSpace(options.WorktreeDirectory) ? options.WorkingDirectory : options.WorktreeDirectory;
 
     private static bool ContainsSection(string? value, string marker)
         => !string.IsNullOrWhiteSpace(value) && value.Contains(marker, StringComparison.OrdinalIgnoreCase);

@@ -43,6 +43,9 @@ internal sealed class ProjectGitService
     /// <summary>Longest branch name reported, in UTF-16 units.</summary>
     internal const int MaximumBranchLength = 256;
 
+    /// <summary>Longest folder of a worktree a request may name, in UTF-16 units.</summary>
+    internal const int MaximumWorktreeLength = 4096;
+
     /// <summary>The comparison with the last commit: what is not committed yet.</summary>
     internal const string HeadComparison = "head";
 
@@ -143,7 +146,7 @@ internal sealed class ProjectGitService
     public async Task<ProjectGitStatusResponse> StatusAsync(ProjectGitStatusRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var (repository, refusal) = await OpenAsync(request.ExpectedEpoch, request.ProjectId, cancellationToken).ConfigureAwait(false);
+        var (repository, refusal) = await OpenAsync(request.ExpectedEpoch, request.ProjectId, request.Worktree, cancellationToken).ConfigureAwait(false);
         if (repository is null) return new(refusal, null, null, false, null, null, null);
         var changes = await ChangesAsync(repository, null, cancellationToken).ConfigureAwait(false);
         return new("ok", repository.ProjectId, repository.Branch, repository.Detached, changes?.Insertions, changes?.Deletions, changes?.Files.Length);
@@ -157,7 +160,7 @@ internal sealed class ProjectGitService
     public async Task<ProjectGitChangesResponse> ChangesAsync(ProjectGitChangesRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var (repository, refusal) = await OpenAsync(request.ExpectedEpoch, request.ProjectId, cancellationToken).ConfigureAwait(false);
+        var (repository, refusal) = await OpenAsync(request.ExpectedEpoch, request.ProjectId, request.Worktree, cancellationToken).ConfigureAwait(false);
         if (repository is null) return ProjectGitChangesResponse.Refused(refusal);
         if (!ValidComparison(request.Comparison, request.Commit)) return ProjectGitChangesResponse.Refused("invalid");
         var branchBase = await BranchBaseAsync(repository, cancellationToken).ConfigureAwait(false);
@@ -186,7 +189,7 @@ internal sealed class ProjectGitService
     public async Task<ProjectGitCommitsResponse> CommitsAsync(ProjectGitCommitsRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var (repository, refusal) = await OpenAsync(request.ExpectedEpoch, request.ProjectId, cancellationToken).ConfigureAwait(false);
+        var (repository, refusal) = await OpenAsync(request.ExpectedEpoch, request.ProjectId, request.Worktree, cancellationToken).ConfigureAwait(false);
         if (repository is null) return new(refusal, null, null, null, false);
         var limit = Math.Clamp(request.Limit ?? DefaultCommits, 1, MaximumCommits);
         // One more than asked tells whether there are older ones. A repository without a commit has no history.
@@ -208,7 +211,7 @@ internal sealed class ProjectGitService
     public async Task<ProjectGitFileResponse> FileAsync(ProjectGitFileRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var (repository, refusal) = await OpenAsync(request.ExpectedEpoch, request.ProjectId, cancellationToken).ConfigureAwait(false);
+        var (repository, refusal) = await OpenAsync(request.ExpectedEpoch, request.ProjectId, request.Worktree, cancellationToken).ConfigureAwait(false);
         if (repository is null) return ProjectGitFileResponse.Refused(refusal);
         if (!ValidComparison(request.Comparison, request.Commit) || request.Path is not { Length: > 0 and <= 1024 } path)
             return ProjectGitFileResponse.Refused("invalid");
@@ -263,8 +266,9 @@ internal sealed class ProjectGitService
         await foreach (var value in requests.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false)) yield return value;
     }
 
-    // The repository of a project a request names, or why there is none to answer for.
-    private async Task<(Repository? Repository, string Refusal)> OpenAsync(string? expectedEpoch, string? requestedProject, CancellationToken cancellationToken)
+    // The repository of a project a request names, or why there is none to answer for. A request that names a
+    // worktree is answered for that checkout: the folder of the project in another checkout of its repository.
+    private async Task<(Repository? Repository, string Refusal)> OpenAsync(string? expectedEpoch, string? requestedProject, string? worktree, CancellationToken cancellationToken)
     {
         if (_projects is null || _run is null || _now is null) return (null, "unavailable");
         if (!string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal)) return (null, "stale_epoch");
@@ -274,6 +278,15 @@ internal sealed class ProjectGitService
         if (project.Root is not { } root) return (null, project.Status);
         try
         {
+            if (worktree is not null)
+            {
+                // Only a folder of the project's own repository is read, whatever the page names.
+                if (worktree.Length is 0 or > MaximumWorktreeLength || worktree.AsSpan().ContainsAnyInRange('\0', '\u001f') || !Path.IsPathFullyQualified(worktree))
+                    return (null, "invalid");
+                if (!Directory.Exists(worktree) || !CodeAlta.Catalog.Worktrees.GitWorktreeService.SameRepository(root, worktree)) return (null, "worktree_missing");
+                root = Path.GetFullPath(worktree);
+            }
+
             if (FindRepository(root) is not var (workTree, gitDirectory) || ReadBounded(Path.Combine(gitDirectory, "HEAD")) is not { } head)
                 return (null, "not_repository");
             if (!TryParseHead(head, out var branch, out var detached)) return (null, "read_failed");
@@ -662,7 +675,8 @@ internal sealed class ProjectGitService
 /// <summary>Asks for the git branch and change counts of a project.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>
 /// <param name="ProjectId">The project; required. An archived project is answered too.</param>
-internal sealed record ProjectGitStatusRequest(string? ExpectedEpoch, string? ProjectId);
+/// <param name="Worktree">The folder of the project in a worktree of its repository, to be answered for that checkout; the folder of the project when null.</param>
+internal sealed record ProjectGitStatusRequest(string? ExpectedEpoch, string? ProjectId, string? Worktree = null);
 
 /// <summary>
 /// <c>ok</c> with the branch, or one of <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid</c>,
@@ -690,7 +704,8 @@ internal sealed record ProjectGitStatusResponse(string Status, string? ProjectId
 /// With the comparison <c>commit</c>, the full id of the commit whose changes against its parent are listed;
 /// unset otherwise.
 /// </param>
-internal sealed record ProjectGitChangesRequest(string? ExpectedEpoch, string? ProjectId, string? Comparison, string? KnownRevision, string? Commit = null);
+internal sealed record ProjectGitChangesRequest(string? ExpectedEpoch, string? ProjectId, string? Comparison, string? KnownRevision, string? Commit = null,
+    string? Worktree = null);
 
 /// <summary>
 /// <c>ok</c> with the list, <c>unchanged</c> with the project and the revision only, <c>git_failed</c> with the
@@ -735,14 +750,15 @@ internal sealed record ProjectGitChange(string Path, string? OriginalPath, strin
 /// <param name="Comparison"><c>head</c> (the default) or <c>branch</c>, as for the list.</param>
 /// <param name="Path">The path of the file as the list gave it.</param>
 /// <param name="Commit">With the comparison <c>commit</c>, the full id of the commit; unset otherwise.</param>
-internal sealed record ProjectGitFileRequest(string? ExpectedEpoch, string? ProjectId, string? Comparison, string? Path, string? Commit = null);
+internal sealed record ProjectGitFileRequest(string? ExpectedEpoch, string? ProjectId, string? Comparison, string? Path, string? Commit = null,
+    string? Worktree = null);
 
 /// <summary>Asks for the newest commits of the current branch of a project's repository.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>
 /// <param name="ProjectId">The project; required.</param>
 /// <param name="Limit">How many commits; 20 when unset, at most 200.</param>
 /// <param name="KnownRevision">The revision of the list the page has; the same list is answered with <c>unchanged</c>.</param>
-internal sealed record ProjectGitCommitsRequest(string? ExpectedEpoch, string? ProjectId, int? Limit, string? KnownRevision);
+internal sealed record ProjectGitCommitsRequest(string? ExpectedEpoch, string? ProjectId, int? Limit, string? KnownRevision, string? Worktree = null);
 
 /// <summary>
 /// <c>ok</c> with the commits (none for a repository without a commit), <c>unchanged</c> with the revision only,
@@ -784,4 +800,4 @@ internal sealed record ProjectGitWatchRequest(string? ExpectedEpoch);
 /// <summary>A request of an agent (<c>alta diff show</c>) to show the changes of a project.</summary>
 /// <param name="ProjectId">The project.</param>
 /// <param name="Path">The file to select, relative to the work tree; null for the first one.</param>
-internal sealed record ProjectGitShowEvent(string ProjectId, string? Path);
+internal sealed record ProjectGitShowEvent(string ProjectId, string? Path, string? Worktree = null);

@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.Worktrees;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Plugins;
@@ -308,7 +309,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return UsageError(context, "usage.invalidFile", "The file must be a path relative to the repository root.", "alta diff show");
         }
 
-        if (!view.Show(project.Id, path))
+        // A session that works in a git worktree of the project is shown the changes of that checkout.
+        var worktree = NormalizeOptionalText(projectRef) is null ? CallerWorktree(context, project) : null;
+        if (!view.Show(project.Id, path, worktree))
         {
             AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "view.unavailable", AltaExitCodes.ServiceUnavailable,
                 "No CodeAlta window is open to show the changes.");
@@ -348,6 +351,35 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         group.Add(open);
         AddHelpText(group, "Example: `alta editor open --file readme.md` opens that file of the current project for the user.");
         return group;
+    }
+
+    // The folder the caller works in when it is a git worktree of the project: another checkout of its repository.
+    // A session that works in one calls from there; a caller in the folder of the project, or elsewhere, has none.
+    private static string? CallerWorktree(AltaCommandContext context, ProjectDescriptor project)
+    {
+        if (NormalizeOptionalText(context.Caller.SourceProjectId) is null || NormalizeOptionalText(context.Cwd) is not { } working)
+        {
+            return null;
+        }
+
+        try
+        {
+            if (!Path.IsPathFullyQualified(working) || !Directory.Exists(working))
+            {
+                return null;
+            }
+
+            var folder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(working));
+            var home = Path.TrimEndingDirectorySeparator(Path.GetFullPath(project.ProjectPath));
+            return !string.Equals(folder, home, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)
+                && GitWorktreeService.SameRepository(home, folder)
+                ? folder
+                : null;
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
     }
 
     private static async ValueTask<int> HandleEditorOpenAsync(AltaCommandContext context, string? projectRef, string? file, string? line, string? column)
@@ -392,6 +424,14 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             }
 
             columnNumber = number;
+        }
+
+        // The code editor shows the folder of the project. A session that works in a git worktree has other files
+        // there: showing the ones of the project under their names would show what the session did not write.
+        if (NormalizeOptionalText(projectRef) is null && CallerWorktree(context, project) is { } worktree)
+        {
+            return Unsupported(context, "editor.worktree",
+                $"The code editor shows the files of the project folder, and this session works in the git worktree '{worktree}'. Use `alta diff show` to show the changes of the worktree.");
         }
 
         // A file of the project folder: its relative path, or a full path that is inside the folder.
@@ -568,8 +608,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static Command CreateSessionCurrentCommand(AltaCommandContext context)
     {
-        var command = Leaf("current", "Show the calling agent's current session id.");
-        command.Add((_, _) => ValueTask.FromResult(HandleSessionCurrent(context)));
+        var command = Leaf("current", "Show the calling agent's current session id, and the git worktree it works in when it has one.");
+        command.Add(async (_, _) => await HandleSessionCurrentAsync(context).ConfigureAwait(false));
         AddHelpText(command, "Example: `alta session current` returns the current caller session id for an agent-invoked live-tool call.");
         return command;
     }
@@ -727,12 +767,21 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("title=", "Session title.", value => options.Title = value);
         command.Add("parent=", "Explicit parent session id for lineage.", value => options.ParentSessionId = value);
         command.Add("no-parent", "Suppress automatic parent assignment.", value => options.NoParent = value is not null);
+        command.Add("worktree", "Create a git worktree for the session: a checkout of its own, on a new branch `alta/<name>`.", value => options.Worktree = value is not null);
+        command.Add("base=", "Branch or commit a new worktree starts from. Defaults to the commit the project folder is on.", value => options.WorktreeBase = value);
+        command.Add("no-worktree", "Work in the project folder, also when the calling session works in a worktree.", value => options.NoWorktree = value is not null);
         command.Add(async (_, _) => await HandleSessionCreateAsync(context, options).ConfigureAwait(false));
         AddHelpText(
             command,
+            "A project session works in the project folder. With `--worktree` it works in a new git worktree instead,",
+            "which starts from a commit: what is not committed in the project folder is not in it.",
+            "A session created by a session that works in a worktree works in that same worktree, unless",
+            "`--worktree` gives it one of its own or `--no-worktree` sends it to the project folder.",
+            "The record names the folder as `worktreeDirectory`.",
             "Examples:",
             "  `alta session create --project CodeAlta --prompt-id default --reasoning low`",
             "  `alta session create --project CodeAlta --same-model-as <session-id>`",
+            "  `alta session create --project CodeAlta --worktree --base main`",
             "  `alta session create --global --model-ref codex:gpt-5.5@high`");
         return command;
     }
@@ -1406,7 +1455,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             : throw new CommandOptionException("Message kind must be note, request, handoff, or answer.", "--kind");
     }
 
-    private static int HandleSessionCurrent(AltaCommandContext context)
+    private static async ValueTask<int> HandleSessionCurrentAsync(AltaCommandContext context)
     {
         if (string.IsNullOrWhiteSpace(context.Caller.SourceSessionId))
         {
@@ -1423,9 +1472,33 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             sourceProjectId = context.Caller.SourceProjectId,
             sourceAgentId = context.Caller.SourceAgentId,
             callerKind = context.Caller.Kind,
+            worktreeDirectory = await GetSessionWorktreeAsync(context, context.Caller.SourceSessionId).ConfigureAwait(false),
         });
         return AltaExitCodes.Success;
     }
+
+    // The git worktree a session works in, or null: for one that works in the folder of its project, and when no runtime can say.
+    private static async Task<string?> GetSessionWorktreeAsync(AltaCommandContext context, string? sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId) || context.Services.Get<SessionRuntimeService>() is not { } runtime)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await runtime.GetSessionWorktreeAsync(sessionId.Trim(), context.CancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    // The worktrees of the host, or ones made for this command over the catalog of the host.
+    private static GitWorktreeService? GetWorktrees(AltaCommandContext context)
+        => context.Services.Get<GitWorktreeService>()
+            ?? (context.Services.Get<CatalogOptions>() is { } options ? new GitWorktreeService(options, new CodeAltaConfigStore(options)) : null);
 
     private static async ValueTask<int> HandleAskAsync(AltaCommandContext context, string? sessionId, bool useStdin)
     {
@@ -2279,6 +2352,22 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return UsageError(context, "usage.parentConflict", "Use either --parent or --no-parent, not both.", "alta session create");
         }
 
+        if (options.Worktree && options.NoWorktree)
+        {
+            return UsageError(context, "usage.worktreeConflict", "Use either --worktree or --no-worktree, not both.", "alta session create");
+        }
+
+        if (options.Worktree && options.Global)
+        {
+            return UsageError(context, "usage.worktreeWithoutProject", "A worktree is a checkout of a project: use --project with --worktree.", "alta session create");
+        }
+
+        var worktreeBase = NormalizeOptionalText(options.WorktreeBase);
+        if (worktreeBase is not null && (!options.Worktree || !GitWorktreeService.IsReferenceName(worktreeBase)))
+        {
+            return UsageError(context, "usage.invalidBase", "--base names the branch or commit a new worktree starts from: use it with --worktree.", "alta session create");
+        }
+
         if (!context.TryGetRequired<SessionRuntimeService>(nameof(SessionRuntimeService), out var runtime) ||
             !context.TryGetRequired<ProjectCatalog>(nameof(ProjectCatalog), out var catalog))
         {
@@ -2316,6 +2405,44 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         }
 
         var workingDirectory = project?.ProjectPath ?? GetGlobalRootOrCwd(context);
+        // Where a project session works: a worktree of its own, the worktree of the session that creates it, or
+        // the folder of the project.
+        string? worktreeDirectory = null;
+        GitWorktreeCreation? worktree = null;
+        if (options.Worktree)
+        {
+            if (GetWorktrees(context) is not { } worktrees)
+            {
+                AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "service.unavailable", AltaExitCodes.ServiceUnavailable,
+                    "Required in-process service 'GitWorktreeService' is unavailable.");
+                return AltaExitCodes.ServiceUnavailable;
+            }
+
+            worktree = await worktrees.CreateAsync(project!, worktreeBase, context.CancellationToken).ConfigureAwait(false);
+            if (!worktree.Succeeded)
+            {
+                var reason = worktree.Status switch
+                {
+                    "not_repository" => $"The folder of project '{project!.Id}' is not in a git repository.",
+                    "no_commit" => "The repository has no commit yet: a worktree starts from one.",
+                    "invalid" => $"'{worktreeBase}' is not a branch or a commit of the repository.",
+                    "git_unavailable" => "git is not installed.",
+                    "timeout" => "git did not answer in time.",
+                    _ => "git could not create the worktree.",
+                };
+                AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "worktree." + worktree.Status, AltaExitCodes.Failure,
+                    worktree.Message is null ? reason : reason + " " + worktree.Message);
+                return AltaExitCodes.Failure;
+            }
+
+            worktreeDirectory = worktree.Folder;
+        }
+        else if (!options.NoWorktree && project is not null
+            && string.Equals(NormalizeOptionalText(context.Caller.SourceProjectId), project.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            worktreeDirectory = await GetSessionWorktreeAsync(context, context.Caller.SourceSessionId).ConfigureAwait(false);
+        }
+
         string? createdSessionId = null;
         var createdBy = CreateProvenance(context);
         var executionOptions = BuildExecutionOptions(
@@ -2325,16 +2452,22 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             project is null ? [] : [project.ProjectPath],
             () => createdSessionId,
             project?.Id,
-            promptId);
+            promptId,
+            worktreeDirectory);
 
         SessionViewDescriptor session;
-        if (project is null)
+        try
         {
-            session = await runtime.CreateGlobalSessionAsync(executionOptions, options.Title, parentResolution.ParentSessionId, createdBy, context.CancellationToken).ConfigureAwait(false);
+            session = project is null
+                ? await runtime.CreateGlobalSessionAsync(executionOptions, options.Title, parentResolution.ParentSessionId, createdBy, context.CancellationToken).ConfigureAwait(false)
+                : await runtime.CreateProjectSessionAsync(project, executionOptions, options.Title, parentResolution.ParentSessionId, createdBy, worktreeDirectory, context.CancellationToken).ConfigureAwait(false);
         }
-        else
+        catch (Exception) when (worktree is not null)
         {
-            session = await runtime.CreateProjectSessionAsync(project, executionOptions, options.Title, parentResolution.ParentSessionId, createdBy, context.CancellationToken).ConfigureAwait(false);
+            // Nothing was written there yet: the checkout that no session will use goes, and the failure stays what it is.
+            try { await GetWorktrees(context)!.RemoveAsync(project!.ProjectPath, worktree.Root!, force: false, CancellationToken.None).ConfigureAwait(false); }
+            catch (Exception) { }
+            throw;
         }
 
         createdSessionId = session.SessionId;
@@ -2356,6 +2489,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             title = session.Title,
             parentSessionId = session.ParentSessionId,
             createdBy = session.CreatedBy,
+            workingDirectory = session.WorkingDirectory,
+            worktreeDirectory = session.WorktreeDirectory,
+            worktreeBranch = worktree?.Branch,
             modelSelection = ToModelSelectionPayload(modelSelection.Selection!, promptId),
         });
         return AltaExitCodes.Success;
@@ -3566,7 +3702,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         IReadOnlyList<string> projectRoots,
         Func<string?>? sourceSessionIdProvider,
         string? sourceProjectId,
-        string? promptId = null)
+        string? promptId = null,
+        string? worktreeDirectory = null)
         => new()
         {
             ProviderId = new ModelProviderId(selection.ProviderKey),
@@ -3576,7 +3713,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             Model = selection.ModelId,
             ReasoningEffort = selection.ReasoningEffort,
             AgentPromptId = NormalizeOptionalText(promptId),
-            Tools = CreateAltaSessionTools(context, selection.ProviderKey, sourceSessionIdProvider, sourceProjectId, workingDirectory),
+            // The commands of the session resolve paths from the folder it works in.
+            Tools = CreateAltaSessionTools(context, selection.ProviderKey, sourceSessionIdProvider, sourceProjectId, worktreeDirectory ?? workingDirectory),
             OnPermissionRequest = InteractionDefaults(context).OnPermissionRequest,
             OnUserInputRequest = InteractionDefaults(context).OnUserInputRequest,
         };
@@ -3604,7 +3742,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             Model = info.Preference?.ModelId ?? info.Session.ModelId,
             ReasoningEffort = info.Preference?.ReasoningEffort ?? info.Session.ReasoningEffort,
             AgentPromptId = NormalizeOptionalText(promptId) ?? NormalizeOptionalText(info.Session.AgentPromptId),
-            Tools = CreateAltaSessionTools(context, info.Session.ProviderId, () => info.Session.SessionId, info.Session.ProjectRef, workingDirectory),
+            // The session works where it records: its worktree while that folder exists, the folder of its project otherwise.
+            Tools = CreateAltaSessionTools(context, info.Session.ProviderId, () => info.Session.SessionId, info.Session.ProjectRef,
+                info.Session.WorktreeDirectory is { Length: > 0 } worktree && Directory.Exists(worktree) ? worktree : workingDirectory),
             OnPermissionRequest = InteractionDefaults(context).OnPermissionRequest,
             OnUserInputRequest = InteractionDefaults(context).OnUserInputRequest,
         };
@@ -4592,6 +4732,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             state = info.State,
             status = SessionStatusWire(info.Session.Status),
             workingDirectory = info.Session.WorkingDirectory,
+            // Where the session works: the worktree it records, while that folder is there.
+            worktreeDirectory = NormalizeOptionalText(info.Session.WorktreeDirectory) is { } worktreeDirectory && Directory.Exists(worktreeDirectory) ? worktreeDirectory : null,
             latestSummary = info.Session.LatestSummary,
             messageCount = info.Session.MessageCount,
             isRunning = info.IsRunning,
@@ -5425,6 +5567,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     private sealed class SessionCreateOptions
     {
         public AltaModelSelectionOptions Model { get; } = new();
+
+        public bool Worktree { get; set; }
+
+        public bool NoWorktree { get; set; }
+
+        public string? WorktreeBase { get; set; }
 
         public string? Project { get; set; }
 

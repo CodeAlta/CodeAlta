@@ -45,9 +45,22 @@ public sealed record AgentSessionSummary
     public string? AgentPromptId { get; init; }
 
     /// <summary>
-    /// Gets or initializes the working directory.
+    /// Gets or initializes the working directory: the folder the session belongs to.
     /// </summary>
     public string? WorkingDirectory { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the git worktree the session works in; null when it works in
+    /// <see cref="WorkingDirectory"/>. Older journals have no such value.
+    /// </summary>
+    public string? WorktreeDirectory { get; init; }
+
+    /// <summary>
+    /// Gets the folder tools run in and paths are resolved from: the worktree of the session when it has one,
+    /// its working directory otherwise.
+    /// </summary>
+    [JsonIgnore]
+    public string? ExecutionDirectory => string.IsNullOrWhiteSpace(WorktreeDirectory) ? WorkingDirectory : WorktreeDirectory;
 
     /// <summary>
     /// Gets or initializes the user-facing title.
