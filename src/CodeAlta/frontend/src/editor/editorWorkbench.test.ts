@@ -144,3 +144,9 @@ test("the files that were tabs of their own become the files of their project's 
   assert.deepEqual(storage.projects.busy, { files: ["kept.ts"], active: "kept.ts", side: "files", expanded: [] });
   assert.deepEqual(storage.projects.idle, { files: ["c.ts"], active: "c.ts", side: null, expanded: ["src"] });
 });
+
+test("a new file is named Untitled on its tab, and is not told apart by a folder", () => {
+  const names = editorTabNames([{ path: "untitled:1", preview: false }, { path: "untitled:2", preview: false }, { path: "src/a.ts", preview: false }, { path: "test/a.ts", preview: false }]);
+  assert.deepEqual([...names].map(([path, shown]) => [path, shown.name, shown.folder]),
+    [["untitled:1", "Untitled-1", null], ["untitled:2", "Untitled-2", null], ["src/a.ts", "a.ts", "src"], ["test/a.ts", "a.ts", "test"]]);
+});

@@ -5,7 +5,9 @@ import { ensureMonacoLanguage } from "../monaco/monacoLanguages";
 import { fileLanguage, type EditorLanguage } from "../monaco/fileLanguage";
 
 /** A text document the surface holds a model for: `text` is what was read from the disk, `generation` when it was read. */
-export type SurfaceDocument = Readonly<{ id: number; path: string; text: string; generation: number }>;
+export type SurfaceDocument = Readonly<{ id: number; path: string; text: string; generation: number;
+  /** The language chosen for the text; without one it is the language of the name of the file. */
+  language?: EditorLanguage | null }>;
 export type SurfaceCursor = Readonly<{ line: number; column: number; selected: number }>;
 /** What the status bar says of the document shown. */
 export type SurfaceInfo = Readonly<{ language: string; eol: "LF" | "CRLF"; spaces: boolean; tabSize: number }>;
@@ -157,7 +159,7 @@ export function EditorSurface({ documents, active, readOnly, wrap, minimap, labe
       entry.changed.dispose(); entry.model.dispose(); known.delete(id);
     }
     for (const document of documents) {
-      const language = fileLanguage(document.path);
+      const language = document.language ?? fileLanguage(document.path);
       let entry = known.get(document.id);
       if (!entry) {
         const model = monaco.editor.createModel(document.text, registered(language) ? language : "plaintext");

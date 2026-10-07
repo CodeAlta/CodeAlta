@@ -1,3 +1,4 @@
+import { documentName, isUntitledPath } from "./editorDocuments";
 /** A file open in a project's code editor. The preview tab is the one the next previewed file takes over. */
 export type EditorFile = Readonly<{ path: string; preview: boolean }>;
 export type EditorFiles = Readonly<{
@@ -100,11 +101,11 @@ export function removeEditorPath(state: EditorFiles, path: string): EditorFiles 
 
 /** The names shown on the tabs: a name that several open files share is followed by its folder. */
 export function editorTabNames(files: readonly EditorFile[]): ReadonlyMap<string, Readonly<{ name: string; folder: string | null }>> {
-  const base = (path: string) => path.slice(path.lastIndexOf("/") + 1);
+  const base = (path: string) => documentName(path);
   const count = new Map<string, number>();
   for (const file of files) count.set(base(file.path), (count.get(base(file.path)) ?? 0) + 1);
   return new Map(files.map(file => {
-    const name = base(file.path), parent = file.path.slice(0, Math.max(0, file.path.length - name.length - 1));
+    const name = base(file.path), parent = isUntitledPath(file.path) ? "" : file.path.slice(0, Math.max(0, file.path.length - name.length - 1));
     return [file.path, { name, folder: count.get(name)! > 1 ? parent || "." : null }];
   }));
 }

@@ -150,3 +150,11 @@ button.editor-status-item:hover { background: var(--panel-2); color: var(--text)
 .project-editor[data-narrow="true"] .editor-side { flex: 1 1 auto; width: auto !important; max-width: none; }
 @container (max-width: 760px) { .editor-status-item:not(button):nth-of-type(n + 3) { display: none; } }
 @container (max-width: 520px) { .editor-status-path { visibility: hidden; } .editor-tab { max-width: 170px; } }
+
+/* A new file: the question of its name, and the choice of the language of a text. */
+.save-as-dialog { width: min(520px, calc(100vw - 32px)); }
+.save-as-dialog .bp6-form-group { margin: 0; }
+.save-as-dialog .bp6-form-helper-text { overflow-wrap: anywhere; }
+.editor-language-dialog { width: min(380px, calc(100vw - 32px)); }
+.editor-language-dialog .bp6-dialog-body { display: flex; flex-direction: column; gap: 8px; }
+.editor-language-list { max-height: min(46vh, 380px); overflow-y: auto; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: transparent; }

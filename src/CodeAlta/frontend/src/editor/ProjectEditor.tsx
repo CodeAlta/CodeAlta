@@ -11,8 +11,11 @@ import type { MessageKey } from "../localization";
 import { MarkdownContent } from "../MarkdownContent";
 import { SessionTabMenu, type SessionMenuEntry } from "../SessionTabMenu";
 import { useShellLanguage } from "../shellLanguage";
-import { canSaveDocument, documentChecked, documentConflictDismissed, documentEdited, documentImageRead, documentPreview, documentRead, documentSaved,
-  documentSaveUnknown, documentSaving, documentStatus, documentTooLarge, formatFileSize, newDocument, type EditorDocument } from "./editorDocuments";
+import { canSaveDocument, documentChecked, documentConflictDismissed, documentEdited, documentImageRead, documentName, documentNamed, documentPreview, documentRead, documentSaved,
+  documentSaveUnknown, documentSaving, documentStatus, documentTooLarge, formatFileSize, isUntitledPath, newDocument, newUntitledDocument, nextUntitledPath,
+  type EditorDocument } from "./editorDocuments";
+import { fileLanguage, languageExtension, languageName, type EditorLanguage } from "../monaco/fileLanguage";
+import { LanguageDialog, SaveAsDialog } from "./UntitledDialogs";
 import { EditorExplorer, type ExplorerEntry, type ExplorerHandle } from "./EditorExplorer";
 import { EditorSearch, type SearchHandle } from "./EditorSearch";
 import { EditorSurface, type EditorSurfaceHandle, type SurfaceCursor, type SurfaceInfo } from "./EditorSurface";
@@ -94,6 +97,14 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
   const [previewText, setPreviewText] = useState<Readonly<{ path: string; generation: number; text: string }> | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [closing, setClosing] = useState<Readonly<{ paths: readonly string[]; busy: boolean }> | null>(null);
+  // A new file is being given a name: the question, and who waits for its answer (a save, a close, an exit).
+  const [naming, setNaming] = useState<Readonly<{ path: string; name: string; busy: boolean; problem: MessageKey | null }> | null>(null);
+  const named = useRef<((saved: boolean) => void) | null>(null);
+  // Where a new file went when it was given a name: who asked to save it by its first place finds it again.
+  const namedAs = useRef(new Map<string, string>());
+  const [choosingLanguage, setChoosingLanguage] = useState(false);
+  // Ctrl+K starts a chord, as in the editors people know: Ctrl+K M chooses the language.
+  const chord = useRef(0);
   const [deleting, setDeleting] = useState<Deleting | null>(null);
   const [menu, setMenu] = useState<Readonly<{ at: Point; anchor: HTMLElement; title: string; items: SessionMenuEntry[] }> | null>(null);
   // The folder of a built-in skill, or of a skill of a plugin: its files are shown, and the host changes none.
@@ -165,7 +176,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
 
   // What the shell shows of this editor, and what it can ask of it from outside.
   const unsaved = useMemo(() => [...documents].filter(([, document]) => document.dirty).map(([path]) => path), [documents]);
-  useEffect(() => { editors.setUnsaved(key, unsaved.map(treeBaseName)); }, [editors, key, unsaved]);
+  useEffect(() => { editors.setUnsaved(key, unsaved.map(documentName)); }, [editors, key, unsaved]);
   const actions = useRef<{ save: () => Promise<boolean>; closeFile: () => boolean }>({ save: async () => true, closeFile: () => false });
   useEffect(() => editors.attach(key, { save: () => actions.current.save(), closeFile: () => actions.current.closeFile() }), [editors, key]);
 
@@ -173,7 +184,8 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
   const expandedKey = useMemo(() => [...tree.expanded].sort().join("\n"), [tree.expanded]);
   useEffect(() => {
     updateEditorStorage(stored, store, { projectId: tab.projectId,
-      editor: { files: files.open.map(file => file.path), active: files.active, side, expanded: expandedKey ? expandedKey.split("\n") : [] } });
+      editor: { files: files.open.map(file => file.path).filter(path => !isUntitledPath(path)), active: isUntitledPath(files.active) ? null : files.active, side,
+        expanded: expandedKey ? expandedKey.split("\n") : [] } });
   }, [files.open, files.active, side, expandedKey, tab.projectId]);
 
   useLayoutEffect(() => {
@@ -248,7 +260,8 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
     const abort = new AbortController();
     let running = false;
     const check = () => {
-      const ready = [...latest.current.documents].filter(([, document]) => document.phase === "ready" && !document.saving && !document.reloading).slice(0, 128);
+      // A new file is not on the disk: there is nothing to compare it with.
+      const ready = [...latest.current.documents].filter(([, document]) => document.phase === "ready" && !document.untitled && !document.saving && !document.reloading).slice(0, 128);
       if (running || !ready.length || document.visibilityState === "hidden") return;
       running = true;
       void api.stat({ expectedEpoch: epoch, projectId: tab.projectId, paths: ready.map(([path]) => path) }, { signal: abort.signal, timeoutMilliseconds: 15_000 }).then(reply => {
@@ -328,7 +341,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
   const textReady = shownDocument?.kind === "text" && shownDocument.phase === "ready";
   const showSurface = textReady && mode === "source";
   const surfaceDocuments = useMemo(() => [...documents].filter(([, document]) => document.kind === "text" && document.phase === "ready")
-    .map(([path, document]) => ({ id: document.id, path, text: document.text, generation: document.generation })), [documents]);
+    .map(([path, document]) => ({ id: document.id, path, text: document.text, generation: document.generation, language: document.language })), [documents]);
   const rows = useMemo(() => treeRows(tree, edit), [tree, edit]);
 
   // A drawing or a page is made from the text as the editor holds it, unsaved edits included.
@@ -340,7 +353,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
 
   // The file shown is shown in the tree too: the folders above it open.
   useEffect(() => {
-    if (activePath === null || side !== "files") return;
+    if (activePath === null || side !== "files" || isUntitledPath(activePath)) return;
     setTree(current => expandTreeFolders(current, treeAncestors(activePath)));
     setSelected(activePath);
   }, [activePath, side]);
@@ -358,6 +371,16 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
   const [focusAsked, setFocusAsked] = useState(0);
   const focusWanted = useRef(false);
   const focusEditor = () => { focusWanted.current = true; setFocusAsked(value => value + 1); };
+  // A dialog of the editor that closes is still there for a moment: the text takes the keyboard once it is gone.
+  function focusAfterDialog() {
+    let tries = 0;
+    const attempt = () => {
+      if (!alive.current) return;
+      if (modalOpen() && tries++ < 40) { window.setTimeout(attempt, 25); return; }
+      if (!modalOpen()) surface.current?.focus();
+    };
+    window.setTimeout(attempt, 25);
+  }
   useEffect(() => {
     if (!focusWanted.current || !showSurface) return;
     focusWanted.current = false;
@@ -395,9 +418,70 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
     if (showSurface) surface.current?.focus(); else if (side === "files") explorer.current?.focus(); else root.current?.focus();
   }, [active, showSurface]);
 
+  // A new file, in memory until it is saved: it opens at once, and takes the keyboard.
+  function newFile(language: EditorLanguage | null = null) {
+    const path = nextUntitledPath(latest.current.files.open.map(file => file.path));
+    setDocuments(current => new Map(current).set(path, newUntitledDocument(nextId.current++, language)));
+    setFiles(current => openEditorFile(current, path, false, held));
+    if (latest.current.narrow) setSide(null);
+    focusEditor();
+  }
+  // Saving a new file is giving it a name: the question is asked, and the answer comes when it is saved or given up.
+  function saveAs(path: string): Promise<boolean> {
+    const current = latest.current.documents.get(path);
+    if (!current?.untitled) return Promise.resolve(false);
+    named.current?.(false);
+    setFiles(files => activateEditorFile(files, path));
+    setNaming({ path, name: `${documentName(path).toLowerCase()}.${languageExtension(current.language ?? "plaintext")}`, busy: false, problem: null });
+    return new Promise(resolve => { named.current = resolve; });
+  }
+  function endNaming(saved: boolean) {
+    setNaming(null);
+    const waiting = named.current; named.current = null;
+    waiting?.(saved);
+    focusAfterDialog();
+  }
+  // The host creates the file (and the folders above it), which is then the file this text is an edit of.
+  async function nameFile(from: string, target: string) {
+    const current = latest.current.documents.get(from), host = latest.current.epoch;
+    const content = current ? surface.current?.read(current.id) : null;
+    if (!current || !content || !host) { setNaming(value => value && { ...value, problem: "File editing requires an owned host." }); return; }
+    if (documentTooLarge(content.text)) { setNaming(value => value && { ...value, problem: "The text is larger than 1 MiB; nothing was saved." }); return; }
+    setNaming(value => value && { ...value, busy: true, problem: null });
+    const refuse = (problem: MessageKey) => { if (alive.current) setNaming(value => value && { ...value, busy: false, problem }); };
+    try {
+      const created = await api.create({ expectedEpoch: host, projectId: tab.projectId, path: target, directory: false }, { timeoutMilliseconds: 30_000 });
+      if (!alive.current) return;
+      if (created.status !== "ok" || !created.path) {
+        refuse(created.status === "exists" ? "A file or folder with this name already exists." : created.status === "invalid" || created.status === "outside_root" ? "This name is not valid."
+          : created.status === "read_only" ? "The file is read-only; nothing was saved." : "The file could not be written; nothing was saved.");
+        return;
+      }
+      const path = created.path;
+      const read = await api.read({ expectedEpoch: host, projectId: tab.projectId, path, reload: true }, { timeoutMilliseconds: 15_000 });
+      if (!alive.current) return;
+      if (read.status !== "ok" || read.revision === null) { refuse("The file could not be written; nothing was saved."); refreshTree.current(); return; }
+      const result = await api.write({ expectedEpoch: host, projectId: tab.projectId, path, content: content.text, expectedRevision: read.revision, overwrite: false }, { timeoutMilliseconds: 30_000 });
+      if (!alive.current) return;
+      // From here the tab is the file of the disk, whatever the write answered: a refused write leaves its edits to save again.
+      const saved = result.status === "ok" && !!result.revision;
+      namedAs.current.set(from, path);
+      setFiles(files => renameEditorPath(files, from, path));
+      setDocuments(documents => new Map([...documents].map(([key, document]) => key === from
+        ? [path, { ...documentSaved(documentNamed(document, read), result), dirty: !saved }] : [key, document])));
+      setModes(modes => new Map([...modes].map(([key, value]) => [key === from ? path : key, value])));
+      if (saved) surface.current?.saved(current.id, content.version);
+      refreshTree.current();
+      endNaming(saved);
+    } catch {
+      refuse("The save did not complete; reload to see what is on disk.");
+    }
+  }
+
   async function save(path: string, overwrite = false): Promise<boolean> {
     const current = latest.current.documents.get(path), host = latest.current.epoch;
     if (!current || !host) return false;
+    if (current.untitled) return saveAs(path);
     // Nothing to write: the disk already holds this text.
     if (!canSaveDocument(current, overwrite)) return current.phase === "ready" && !current.dirty && !current.conflict && !current.saving;
     const content = surface.current?.read(current.id);
@@ -442,7 +526,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
     setClosing({ paths, busy: true });
     const saved = await saveAll(paths.filter(held));
     if (!alive.current) return;
-    if (saved) close(paths, true); else setClosing(null);
+    if (saved) close(paths.map(path => namedAs.current.get(path) ?? path), true); else setClosing(null);
   }
   actions.current = { save: () => saveAll(), closeFile: () => { if (latest.current.files.active === null) return false; close([latest.current.files.active]); return true; } };
 
@@ -561,19 +645,29 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
       { key: "all", label: t("Close all"), onSelect: () => close(files.open.map(file => file.path)) },
       { key: "d1", divider: true },
       ...(files.open.some(file => file.path === path && file.preview) ? [{ key: "keep", label: t("Keep open"), onSelect: () => setFiles(current => pinEditorFile(current, path)) }] : []),
-      { key: "path", label: t("Copy path"), icon: "copy", onSelect: () => copy(absolute(path)) },
-      { key: "relative", label: t("Copy relative path"), icon: "copy", onSelect: () => copy(path) },
-      { key: "files", label: t("Show in the files"), icon: "locate", onSelect: () => { setFiles(current => activateEditorFile(current, path)); setSelected(path); setTree(current => expandTreeFolders(current, treeAncestors(path))); show("files"); } },
-      ...(capabilities.reveal ? [{ key: "reveal", label: revealLabel, icon: "openExternal" as const, onSelect: () => reveal(path) }] : []),
+      ...(isUntitledPath(path) ? [{ key: "save", label: `${t("Save as")}…`, icon: "save" as const, onSelect: () => void save(path) }] : [
+      { key: "path", label: t("Copy path"), icon: "copy" as const, onSelect: () => copy(absolute(path)) },
+      { key: "relative", label: t("Copy relative path"), icon: "copy" as const, onSelect: () => copy(path) },
+      { key: "files", label: t("Show in the files"), icon: "locate" as const, onSelect: () => { setFiles(current => activateEditorFile(current, path)); setSelected(path); setTree(current => expandTreeFolders(current, treeAncestors(path))); show("files"); } },
+      ...(capabilities.reveal ? [{ key: "reveal", label: revealLabel, icon: "openExternal" as const, onSelect: () => reveal(path) }] : [])]),
     ];
-    setMenu({ at, anchor: root.current!, title: treeBaseName(path), items });
+    setMenu({ at, anchor: root.current!, title: documentName(path), items });
   }
 
   // Ctrl+S saves, wherever the keyboard is in the editor; the other keys of the editor are its own.
   function keyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.defaultPrevented || event.nativeEvent.isComposing) return;
     const key = event.key.toLowerCase(), control = (event.ctrlKey || event.metaKey) && !event.altKey;
-    if (control && key === "s") { if (event.shiftKey) void saveAll(); else if (activePath !== null) void save(activePath); }
+    // The second key of Ctrl+K M. The text editor has chords of its own on Ctrl+K: the first key is left to it.
+    if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "m" && Date.now() - chord.current < 3000) {
+      // The key still reaches the text editor, which ends its own chord with it; it types nothing.
+      chord.current = 0; event.preventDefault();
+      if (showSurface) setChoosingLanguage(true);
+      return;
+    }
+    if (control && !event.shiftKey && key === "k") { chord.current = Date.now(); return; }
+    else if (control && key === "s") { if (event.shiftKey) void saveAll(); else if (activePath !== null) void save(activePath); }
+    else if (control && !event.shiftKey && key === "n") newFile();
     else if (control && !event.shiftKey && key === "b") show(side === null ? "files" : null);
     else if (control && event.shiftKey && key === "e") show("files");
     else if (control && event.shiftKey && key === "f") {
@@ -596,14 +690,17 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
     handle.addEventListener("pointermove", moved); handle.addEventListener("pointerup", done); handle.addEventListener("pointercancel", done);
   }
 
-  const name = activePath === null ? null : treeBaseName(activePath);
+  const name = activePath === null ? null : documentName(activePath);
+  const onDisk = activePath !== null && !isUntitledPath(activePath);
   const look = activePath === null ? null : fileAppearance(activePath, false);
   const busy = !!shownDocument && (shownDocument.saving || shownDocument.phase === "loading");
   const preview = previewText && previewText.path === activePath ? previewText.text : shownDocument?.text ?? "";
   const size = imageSize && imageSize.path === activePath ? imageSize : null;
-  const closingNames = closing ? closing.paths.filter(held).map(treeBaseName).join(", ") : "";
+  const closingNames = closing ? closing.paths.filter(held).map(documentName).join(", ") : "";
   const sideToggle = <Button variant="minimal" size="small" className="editor-side-toggle" icon={<AppIcon name="sidebar" size={15} />} active={side !== null} aria-pressed={side !== null}
     aria-label={t(side === null ? "Show the files" : "Hide the files")} title={`${t(side === null ? "Show the files" : "Hide the files")} (Ctrl+B)`} onClick={() => show(side === null ? "files" : null)} />;
+  const newFileButton = <Button variant="minimal" size="small" className="editor-new-file" icon={<AppIcon name="plus" size={15} />} aria-label={t("New file")} title={`${t("New file")} (Ctrl+N)`}
+    onClick={() => newFile()} />;
   const fileActions = activePath !== null && <span className="editor-tab-actions">
     {previewKind && textReady && <ButtonGroup className="editor-mode">
       <Button variant="minimal" size="small" active={mode === "preview"} aria-pressed={mode === "preview"} icon={<AppIcon name="eye" size={14} />}
@@ -622,10 +719,12 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
       <MenuItem roleStructure="listoption" selected={preferences.minimap} shouldDismissPopover={false} icon={<AppIcon name="minimap" size={15} />} text={t("Minimap")}
         onClick={() => prefer({ minimap: !preferences.minimap })} />
       <MenuDivider />
-      <MenuItem icon={<AppIcon name="refresh" size={15} />} text={t("Reload from disk")} disabled={!shownDocument || shownDocument.phase === "loading" || busy}
+      <MenuItem icon={<AppIcon name="code" size={15} />} text={`${t("Select the language")}…`} label="Ctrl+K M" disabled={!showSurface} onClick={() => setChoosingLanguage(true)} />
+      <MenuDivider />
+      <MenuItem icon={<AppIcon name="refresh" size={15} />} text={t("Reload from disk")} disabled={!onDisk || !shownDocument || shownDocument.phase === "loading" || busy}
         onClick={() => { if (shownDocument?.dirty) setClosing(null); reload(activePath); }} />
-      <MenuItem icon={<AppIcon name="copy" size={15} />} text={t("Copy path")} onClick={() => copy(absolute(activePath))} />
-      {capabilities.reveal && <MenuItem icon={<AppIcon name="openExternal" size={15} />} text={revealLabel} onClick={() => reveal(activePath)} />}
+      <MenuItem icon={<AppIcon name="copy" size={15} />} text={t("Copy path")} disabled={!onDisk} onClick={() => copy(absolute(activePath))} />
+      {capabilities.reveal && <MenuItem icon={<AppIcon name="openExternal" size={15} />} text={revealLabel} disabled={!onDisk} onClick={() => reveal(activePath)} />}
     </Menu>}>
       <Button variant="minimal" size="small" icon={<AppIcon name="ellipsis" size={15} />} aria-label={t("Editor options")} title={t("Editor options")} />
     </PopoverNext>
@@ -675,7 +774,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
         onDoubleClick={() => prefer({ width: 264 })} />
     </>}
     <div className="editor-main">
-      <EditorTabs files={files.open} active={activePath} leading={sideToggle} trailing={fileActions}
+      <EditorTabs files={files.open} active={activePath} leading={sideToggle} trailing={<>{newFileButton}{fileActions}</>}
         state={path => { const document = documents.get(path); return { dirty: !!document?.dirty, missing: !!document?.missing }; }}
         onSelect={path => { setFiles(current => activateEditorFile(current, path)); focusEditor(); }} onClose={path => close([path])}
         onPin={path => setFiles(current => pinEditorFile(current, path))} onMove={(path, index) => setFiles(current => moveEditorFile(current, path, index))} onMenu={tabMenu} />
@@ -701,6 +800,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
         {activePath === null ? <NonIdealState className="editor-empty" icon={<AppIcon name="code" size={40} />} title={t("No file is open")}
             description={<span className="editor-empty-keys">
               <span><kbd>Ctrl+E</kbd>{t("Open a file by name")}</span>
+              <span><kbd>Ctrl+N</kbd>{t("Start a new file")}</span>
               <span><kbd>Ctrl+Shift+E</kbd>{t("Browse the files of the project")}</span>
               <span><kbd>Ctrl+Shift+F</kbd>{t("Search in files")}</span>
             </span>}
@@ -723,13 +823,14 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
         {shownDocument && activePath !== null ? <>
           <span className="file-editor-status" data-state={shownDocument.conflict || shownDocument.missing ? "conflict" : shownDocument.dirty ? "modified" : "clean"} role="status">
             {(busy || shownDocument.reloading) && <ActivitySpinner size={12} />}{t(documentStatus(shownDocument))}</span>
-          <span className="editor-status-path" title={activePath}><span className="file-tab-icon" data-file-tone={look!.tone}><AppIcon name={look!.icon} size={13} /></span><span>{activePath}</span></span>
+          <span className="editor-status-path" title={onDisk ? activePath : name!}><span className="file-tab-icon" data-file-tone={look!.tone}><AppIcon name={look!.icon} size={13} /></span><span>{onDisk ? activePath : name}</span></span>
           {showSurface && <button type="button" className="editor-status-item" title={`${t("Go to line")} (Ctrl+G)`} onClick={() => surface.current?.run("editor.action.gotoLine")}>
             {t("Ln {line}, Col {column}", cursor)}{cursor.selected > 0 && ` (${t("{count} selected", { count: cursor.selected.toLocaleString(locale) })})`}</button>}
           {showSurface && info && <span className="editor-status-item">{info.spaces ? t("Spaces: {count}", { count: info.tabSize }) : t("Tab size: {count}", { count: info.tabSize })}</span>}
           {showSurface && info && <span className="editor-status-item">{info.eol}</span>}
           {textReady && shownDocument.encoding && <span className="editor-status-item">{shownDocument.encoding}</span>}
-          {showSurface && info && <span className="editor-status-item">{info.language}</span>}
+          {showSurface && info && <button type="button" className="editor-status-item" title={`${t("Select the language")} (Ctrl+K M)`} onClick={() => setChoosingLanguage(true)}>
+            {shownDocument.language ? languageName(shownDocument.language) : info.language}</button>}
           {(shownDocument.kind === "image" || mode === "preview" && previewKind === "svg") && size && <span className="editor-status-item">{size.width} × {size.height}</span>}
           {shownDocument.phase === "ready" && shownDocument.length > 0 && shownDocument.kind === "image" && <span className="editor-status-item">{formatFileSize(shownDocument.length, locale)}</span>}
           {shownDocument.kind === "image" && shownDocument.image && <span className="editor-status-item">{shownDocument.image.mediaType.replace("image/", "").replace("x-icon", "ico").toUpperCase()}</span>}
@@ -738,7 +839,13 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
         </> : <span className="editor-status-path"><span>{tab.projectPath}</span></span>}
       </footer>
     </div>
-    {closing && <UnsavedFileDialog name={closingNames} mode="close" busy={closing.busy} onSave={() => void saveAndClose(closing.paths)}
+    {naming && <SaveAsDialog key={naming.path} name={naming.name} project={tab.projectPath} busy={naming.busy} problem={naming.problem}
+      onSave={target => void nameFile(naming.path, target)} onCancel={() => endNaming(false)} />}
+    {choosingLanguage && shownDocument && activePath !== null && <LanguageDialog current={shownDocument.language ?? (onDisk ? fileLanguage(activePath) : "plaintext")}
+      automatic={!shownDocument.language} names={languageName}
+      onChoose={language => { setChoosingLanguage(false); change(shownDocument.id, document => document.language === language ? document : { ...document, language }); focusAfterDialog(); }}
+      onCancel={() => { setChoosingLanguage(false); focusAfterDialog(); }} />}
+    {closing && !naming && <UnsavedFileDialog name={closingNames} mode="close" busy={closing.busy} onSave={() => void saveAndClose(closing.paths)}
       onDiscard={() => close(closing.paths, true)} onCancel={() => setClosing(null)} />}
     {deleting && <DeleteEntryDialog name={treeBaseName(deleting.path)} directory={deleting.directory} permanent={deleting.permanent} trashFailed={deleting.trashFailed}
       unsaved={unsaved.filter(path => underPath(path, deleting.path)).length} platform={platform} busy={deleting.busy}

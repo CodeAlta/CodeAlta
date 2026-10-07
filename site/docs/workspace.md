@@ -214,13 +214,19 @@ The **Files** pane lists the folders and files of the project, without those exc
 
 | Action | Shortcut |
 | --- | --- |
+| New file | `Ctrl+N` |
 | Save the file / all files | `Ctrl+S` / `Ctrl+Shift+S` |
+| Select the language of the text | `Ctrl+K` `M` |
 | Find / replace in the file, also with a regular expression | `Ctrl+F` / `Ctrl+H` |
 | Go to a line | `Ctrl+G` |
 | Next file | `Ctrl+Tab` |
 | Close the file | `Ctrl+W` |
 | Show the files / search in files | `Ctrl+Shift+E` / `Ctrl+Shift+F` |
 | Wrap lines | `Alt+Z` |
+
+`Ctrl+N`, or the **+** button beside the tabs, starts a new file. It is named **Untitled-1** and stays in the editor only: write in it at once, and save it when you want to keep it. `Ctrl+S` then asks for its path in the project, and creates the folders that do not exist yet.
+
+A new file is plain text. Choose its language with `Ctrl+K` `M`, or click the language in the status bar. The same choice changes the language of any open file.
 
 The editor asks before it closes a file with unsaved changes. A file changed by an agent or by another program is reloaded, unless you have edited it: the editor then lets you choose.
 

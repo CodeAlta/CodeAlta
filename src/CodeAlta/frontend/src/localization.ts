@@ -2025,6 +2025,13 @@ export const messages = dictionary({
   "Width of the conversation": ["Ancho de la conversación", "Largeur de la conversation", "Breite der Unterhaltung", "会話の幅", "对话宽度"],
   "Drag to change the width of the conversation; double-click to reset": ["Arrastre para cambiar el ancho de la conversación; doble clic para restablecer", "Faites glisser pour changer la largeur de la conversation ; double-cliquez pour réinitialiser", "Ziehen, um die Breite der Unterhaltung zu ändern; Doppelklick zum Zurücksetzen", "ドラッグして会話の幅を変更、ダブルクリックでリセット", "拖动以更改对话宽度；双击重置"],
   "Reset": ["Restablecer", "Réinitialiser", "Zurücksetzen", "リセット", "重置"],
+  "Save as": ["Guardar como", "Enregistrer sous", "Speichern unter", "名前を付けて保存", "另存为"],
+  "Path in the project": ["Ruta en el proyecto", "Chemin dans le projet", "Pfad im Projekt", "プロジェクト内のパス", "项目中的路径"],
+  "Select the language": ["Seleccionar el lenguaje", "Choisir le langage", "Sprache auswählen", "言語を選択", "选择语言"],
+  "Filter languages": ["Filtrar lenguajes", "Filtrer les langages", "Sprachen filtern", "言語を絞り込む", "筛选语言"],
+  "Detect from the file name": ["Detectar por el nombre del archivo", "Détecter d'après le nom du fichier", "Anhand des Dateinamens erkennen", "ファイル名から判定", "根据文件名检测"],
+  "No language matches.": ["Ningún lenguaje coincide.", "Aucun langage ne correspond.", "Keine Sprache passt.", "一致する言語がありません。", "没有匹配的语言。"],
+  "Start a new file": ["Empezar un archivo nuevo", "Commencer un nouveau fichier", "Eine neue Datei beginnen", "新しいファイルを始める", "开始一个新文件"],
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

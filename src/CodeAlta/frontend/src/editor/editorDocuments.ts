@@ -1,5 +1,6 @@
 import type { ProjectFileImageResponse, ProjectFileReadResponse, ProjectFileStat, ProjectFileWriteResponse } from "#neoastra";
 import type { MessageKey } from "../localization";
+import type { EditorLanguage } from "../monaco/fileLanguage";
 import { fileReadFailure, maximumFileLength, type FileNotice } from "./fileEditorState";
 
 export type DocumentKind = "text" | "image";
@@ -31,7 +32,40 @@ export type EditorDocument = Readonly<{
   missing: boolean;
   notice: FileNotice | null;
   image: Readonly<{ url: string; mediaType: string }> | null;
+  /** A new file that is not on the disk yet: its text is only in the editor until it is saved under a name. */
+  untitled?: boolean;
+  /** The language chosen for the text; without one it is the language of the name of the file. */
+  language?: EditorLanguage | null;
 }>;
+
+/**
+ * The place of a new file that has no name yet, among the open files: no file of a project can have this path,
+ * which the host refuses for its colon.
+ */
+const untitledPrefix = "untitled:";
+export const isUntitledPath = (path: string | null | undefined): boolean => !!path && path.startsWith(untitledPrefix);
+/** The path of the next new file: the first number that no open file has. */
+export function nextUntitledPath(open: Iterable<string>): string {
+  const taken = new Set(open);
+  for (let number = 1; ; number++) if (!taken.has(`${untitledPrefix}${number}`)) return `${untitledPrefix}${number}`;
+}
+/** What a file is called where it is shown: its name, or "Untitled-1" for a new file. */
+export function documentName(path: string): string {
+  return isUntitledPath(path) ? `Untitled-${path.slice(untitledPrefix.length)}` : path.slice(path.lastIndexOf("/") + 1);
+}
+
+/** A new file: empty text that is ready to be typed in, and nothing on the disk. */
+export const newUntitledDocument = (id: number, language: EditorLanguage | null = null): EditorDocument => ({ id, kind: "text", phase: "ready", failure: null, text: "", generation: 0,
+  revision: null, stamp: null, encoding: null, length: 0, dirty: false, readOnly: false, saving: false, reloading: false, conflict: false, missing: false, notice: null, image: null,
+  untitled: true, language });
+
+/**
+ * A new file that was given a name: it becomes the file the host created (empty) and read, and holds what was
+ * typed as an edit of it, which the save that follows writes.
+ */
+export function documentNamed(document: EditorDocument, created: Pick<ProjectFileReadResponse, "revision" | "stamp" | "encoding" | "readOnly">): EditorDocument {
+  return { ...document, untitled: undefined, language: null, revision: created.revision, stamp: created.stamp, encoding: created.encoding, readOnly: created.readOnly, dirty: true, notice: null };
+}
 
 const rasterImages = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "avif"]);
 const extension = (path: string) => { const name = path.slice(path.lastIndexOf("/") + 1), dot = name.lastIndexOf("."); return dot > 0 ? name.slice(dot + 1).toLowerCase() : ""; };
@@ -86,6 +120,8 @@ export function documentEdited(document: EditorDocument, dirty: boolean): Editor
 
 /** A save is sent for the changed text of a writable file; an overwrite answers a conflict. */
 export function canSaveDocument(document: EditorDocument, overwrite = false): boolean {
+  // A new file can always be saved: saving it is giving it a name.
+  if (document.untitled) return !document.saving && !overwrite;
   return document.kind === "text" && document.phase === "ready" && !!document.revision && !document.saving && !document.reloading && !document.readOnly
     && (overwrite ? document.conflict : document.dirty);
 }
@@ -126,7 +162,8 @@ export const documentConflictDismissed = (document: EditorDocument): EditorDocum
  * (`reloading`); one with edits is in conflict, once for each change; one that is gone is marked missing.
  */
 export function documentChecked(document: EditorDocument, stat: Pick<ProjectFileStat, "status" | "stamp" | "readOnly"> | undefined): EditorDocument {
-  if (!stat || document.phase !== "ready" || document.saving || document.reloading) return document;
+  // A new file is not on the disk: nothing the disk says is about it.
+  if (!stat || document.untitled || document.phase !== "ready" || document.saving || document.reloading) return document;
   if (stat.status === "not_found") return document.missing ? document : { ...document, missing: true };
   if (stat.status !== "ok" || stat.stamp === null) return document;
   const readOnly = document.kind === "text" ? stat.readOnly : document.readOnly;
@@ -139,6 +176,7 @@ export function documentChecked(document: EditorDocument, stat: Pick<ProjectFile
 /** The one-word state shown in the status bar. */
 export function documentStatus(document: EditorDocument): MessageKey {
   return document.phase === "loading" ? "Loading…" : document.phase === "failed" ? "Unavailable" : document.saving ? "Saving…"
+    : document.untitled ? "Not saved yet"
     : document.missing ? "Deleted on disk" : document.conflict ? "Changed on disk" : document.dirty ? "Modified" : document.readOnly ? "Read-only" : "Saved";
 }
 

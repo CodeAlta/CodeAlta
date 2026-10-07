@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { editorLanguages, fileLanguage } from "./fileLanguage";
+import { editorLanguages, fileLanguage, languageExtension, languageName } from "./fileLanguage";
 
 test("the extension chooses the editor language, ignoring case and folders", () => {
   for (const [path, language] of [["src/main.tsx", "typescript"], ["a/b/index.MJS", "javascript"], ["Program.cs", "csharp"],
@@ -32,4 +32,19 @@ test("every mapped language is one the editor can register", () => {
     "a.mm", "a.rb", "a.php", "a.lua", "a.pl", "a.r", "a.dart", "a.graphql", "a.proto", "a.bicep", "a.ini", "a.md", "a.json"])
     assert.ok(editorLanguages.includes(fileLanguage(path)) && fileLanguage(path) !== "plaintext", path);
   assert.equal(new Set(editorLanguages).size, editorLanguages.length);
+});
+
+test("a new file of a language is saved with the usual extension of that language", () => {
+  assert.deepEqual((["plaintext", "markdown", "typescript", "csharp", "python", "yaml", "cpp", "shell", "dockerfile", "rust"] as const).map(languageExtension),
+    ["txt", "md", "ts", "cs", "py", "yml", "cpp", "sh", "txt", "rs"]);
+  // The extension names its language again, for every language an extension names: the file opens as it was written.
+  for (const language of editorLanguages) {
+    const extension = languageExtension(language);
+    if (extension !== "txt" || language === "plaintext") assert.equal(fileLanguage(`untitled-1.${extension}`), language, language);
+  }
+});
+
+test("a language has a name where it is chosen", () => {
+  assert.deepEqual((["csharp", "cpp", "plaintext", "typescript", "rust", "objective-c"] as const).map(languageName), ["C#", "C/C++", "Plain Text", "TypeScript", "Rust", "Objective-C"]);
+  assert.ok(editorLanguages.every(language => languageName(language).length > 0));
 });

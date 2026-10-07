@@ -1644,6 +1644,24 @@ shown as a page: two buttons at the right of the tabs switch between **Preview**
 opens in the view last chosen for its kind. A preview is made from the text as the editor holds it, unsaved
 edits included.
 
+**New files.** `Ctrl+N`, or the **+** button of the tab strip, opens a new file that is not on the disk
+(`newUntitledDocument` in `editorDocuments.ts`). Its place among the open files is `untitled:<n>`, a path no
+file of a project can have (the host refuses a colon), shown as **Untitled-n**. It is ready at once and empty;
+it is not written to the saved list of open files, not compared with the disk and not shown in the tree, and
+its text is lost when the window goes, which asks first as for any unsaved file. Saving it (`Ctrl+S`, the
+**Save** button, **Save** in the question of a close or of an exit) asks for its path in the project
+(`SaveAsDialog`), proposed from its name and the usual extension of its language (`languageExtension`). The
+host creates the empty file with the folders above it (`projectFiles.create`), it is read for its revision,
+and the text is written as an edit of it; the tab is then that file, with the same text model. A name that
+exists, or is no name, is said in the dialog, which stays open.
+
+**Language.** The language of a text is the one of the name of its file. `Ctrl+K` `M`, the language in the
+status bar, or **Select the language** in the editor options, chooses another one for the document shown
+(`LanguageDialog`: the languages the editor colors, filtered by what is typed; the first entry gives the
+choice back to the name of the file). The choice lasts while the file is open and is dropped when a new file
+is given a name. The first key of the chord is left to the text editor, which has chords of its own on
+`Ctrl+K`.
+
 **Saving and changes from elsewhere.**
 
 - `Ctrl+S` saves the file shown through `projectFiles.write` with the revision that was read, and
@@ -2409,6 +2427,7 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | `Ctrl+O` | Open project |
 | `Ctrl+E`, `Ctrl+E` `Ctrl+E` | Open a project file in the code editor (`/edit`), open the code editor with the files of the project (`/editor`) |
 | In a code editor: `Ctrl+S`, `Ctrl+Shift+S`, `Ctrl+W`, `Ctrl+Tab` | Save the file, save every file, close the file shown, next file |
+| In a code editor: `Ctrl+N`, `Ctrl+K` `M` | Start a new file, select the language of the text |
 | In a code editor: `Ctrl+B`, `Ctrl+Shift+E`, `Ctrl+Shift+F` | Show or hide the side, go to the files, search in files |
 | In the text of a code editor: `Ctrl+G`, `Ctrl+F`, `Ctrl+H`, `F3`, `Alt+Z` | Go to line, find, replace, next match, wrap lines |
 | In the files of a code editor: `F2`, `Delete`, `Enter`, `Space` | Rename, delete, open, preview |

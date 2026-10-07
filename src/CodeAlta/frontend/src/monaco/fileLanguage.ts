@@ -39,6 +39,31 @@ const byName: Readonly<Record<string, EditorLanguage>> = {
   ".bashrc": "shell", ".zshrc": "shell", ".prettierrc": "json", ".eslintrc": "json",
 };
 
+// The extension a new file of a language is saved with: the usual one, where several name the language.
+const usualExtension: Readonly<Partial<Record<EditorLanguage, string>>> = {
+  plaintext: "txt", markdown: "md", json: "json", typescript: "ts", javascript: "js", csharp: "cs", fsharp: "fs", xml: "xml", html: "html", yaml: "yml",
+  python: "py", cpp: "cpp", shell: "sh", powershell: "ps1", bat: "cmd", ini: "ini", clojure: "clj", scheme: "scm", pascal: "pas", systemverilog: "sv",
+  razor: "cshtml", graphql: "graphql", hcl: "tf", makefile: "mk", diff: "diff", kotlin: "kt", handlebars: "hbs", pug: "pug", elixir: "ex", perl: "pl", "objective-c": "m",
+};
+
+const languageNames: Readonly<Partial<Record<EditorLanguage, string>>> = {
+  plaintext: "Plain Text", csharp: "C#", cpp: "C/C++", fsharp: "F#", javascript: "JavaScript", typescript: "TypeScript", markdown: "Markdown", json: "JSON", yaml: "YAML",
+  xml: "XML", html: "HTML", css: "CSS", scss: "SCSS", less: "Less", shell: "Shell Script", powershell: "PowerShell", bat: "Batch", sql: "SQL", mysql: "MySQL", pgsql: "PostgreSQL",
+  php: "PHP", toml: "TOML", ini: "INI", dockerfile: "Dockerfile", makefile: "Makefile", "objective-c": "Objective-C", vb: "Visual Basic", graphql: "GraphQL",
+  protobuf: "Protocol Buffers", hcl: "HCL (Terraform)", mdx: "MDX", qsharp: "Q#", restructuredtext: "reStructuredText", typespec: "TypeSpec", wgsl: "WGSL", r: "R",
+  systemverilog: "SystemVerilog", coffee: "CoffeeScript", freemarker2: "FreeMarker", azcli: "Azure CLI", msdax: "DAX", powerquery: "Power Query", st: "Structured Text",
+};
+
+/** The name a language is shown with where one is chosen. */
+export function languageName(language: EditorLanguage): string {
+  return languageNames[language] ?? language.charAt(0).toUpperCase() + language.slice(1);
+}
+
+/** The extension of a new file of a language, without the dot; "txt" for a language no extension names. */
+export function languageExtension(language: EditorLanguage): string {
+  return usualExtension[language] ?? Object.keys(byExtension).find(extension => byExtension[extension] === language) ?? "txt";
+}
+
 /** The editor language of a project-relative path: the file name is matched before its extension, ignoring case. */
 export function fileLanguage(path: string): EditorLanguage {
   const name = path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1).toLowerCase();

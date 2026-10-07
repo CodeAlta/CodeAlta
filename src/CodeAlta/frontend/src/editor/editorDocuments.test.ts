@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canSaveDocument, documentChecked, documentConflictDismissed, documentEdited, documentImageRead, documentKind, documentPreview,
-  documentRead, documentSaved, documentSaveUnknown, documentSaving, documentStatus, documentTooLarge, formatFileSize, newDocument } from "./editorDocuments";
+import { canSaveDocument, documentChecked, documentConflictDismissed, documentEdited, documentImageRead, documentKind, documentPreview, documentRead, documentSaved, documentSaveUnknown, documentSaving, documentStatus, documentTooLarge, formatFileSize, newDocument, documentName, documentNamed, isUntitledPath, newUntitledDocument, nextUntitledPath } from "./editorDocuments";
 
 const read = (content: string, revision: string, stamp: string, readOnly = false) =>
   ({ status: "ok", content, revision, readOnly, stamp, encoding: "UTF-8", length: content.length });
@@ -127,4 +126,31 @@ test("a picture is shown from the bytes that were read, and read again when its 
 test("sizes are short", () => {
   assert.deepEqual([formatFileSize(0, "en"), formatFileSize(812, "en"), formatFileSize(1536, "en"), formatFileSize(14540, "en"), formatFileSize(3250586, "en")],
     ["0 B", "812 B", "1.5 KB", "14 KB", "3.1 MB"]);
+});
+
+test("a new file is text in the editor only, until it is given a name", () => {
+  assert.equal(nextUntitledPath([]), "untitled:1");
+  assert.equal(nextUntitledPath(["src/a.ts", "untitled:1", "untitled:3"]), "untitled:2", "the first number that is free");
+  assert.deepEqual(["untitled:2", "src/untitled:2", "src/a.ts", null, ""].map(path => isUntitledPath(path)), [true, false, false, false, false]);
+  assert.deepEqual([documentName("untitled:2"), documentName("src/deep/a.ts"), documentName("readme.md")], ["Untitled-2", "a.ts", "readme.md"]);
+
+  const fresh = newUntitledDocument(7);
+  assert.deepEqual([fresh.id, fresh.kind, fresh.phase, fresh.untitled, fresh.dirty, fresh.revision, fresh.language], [7, "text", "ready", true, false, null, null]);
+  assert.equal(newUntitledDocument(8, "markdown").language, "markdown");
+  // It can always be saved (saving it asks for its name), also before anything is typed; there is no disk text to overwrite.
+  assert.equal(canSaveDocument(fresh), true);
+  assert.equal(canSaveDocument(fresh, true), false);
+  assert.equal(canSaveDocument({ ...fresh, saving: true }), false);
+  assert.equal(documentStatus(fresh), "Not saved yet");
+  assert.equal(documentStatus(documentEdited(fresh, true)), "Not saved yet");
+  // The disk is not asked about it.
+  assert.equal(documentChecked(fresh, { status: "not_found", stamp: null, readOnly: false }), fresh);
+
+  // Given a name, it is the empty file the host created, and what was typed is an edit of it that the save writes.
+  const typed = { ...documentEdited(fresh, true), language: "markdown" as const };
+  const named = documentNamed(typed, { revision: "r0", stamp: "0:1", encoding: "UTF-8", readOnly: false });
+  assert.deepEqual([named.untitled, named.language, named.revision, named.stamp, named.encoding, named.dirty, named.id], [undefined, null, "r0", "0:1", "UTF-8", true, 7]);
+  assert.equal(canSaveDocument(named), true);
+  const saved = documentSaved(named, { status: "ok", revision: "r1", stamp: "15:2" });
+  assert.deepEqual([saved.revision, saved.stamp, documentStatus({ ...saved, dirty: false })], ["r1", "15:2", "Saved"]);
 });
