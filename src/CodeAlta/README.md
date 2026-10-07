@@ -63,8 +63,11 @@ It runs beside the normal app on the same `~/.alta` profile:
 - it keeps its own web view data (tabs, drafts, theme) under `CodeAlta/desktop-dev` in the local
   application data folder.
 
-Use it to work on CodeAlta with CodeAlta: the installed app runs the agents, and the developer
-instance runs the build you are testing. `alta --dev --exit` asks it to exit.
+Use it to work on CodeAlta with CodeAlta: the normal app runs the agents, and the developer
+instance runs the build you are testing. `alta --dev --exit` asks it to exit. The normal app can be
+the installed one or a build of this repository; a build cannot be replaced while it runs, so when
+the normal app runs from `bin/Release`, build, test and start the developer instance in `Debug`, and
+the other way round.
 
 Its MCP server listens at `http://127.0.0.1:2583/mcp` (the normal app has port 2582): the `.mcp.json`
 and `.alta/mcp.json` of this repository register it as `codealta-dev`, which is how an agent looks at

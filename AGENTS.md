@@ -34,19 +34,46 @@ lunet build
 
 All .NET tests, the frontend tests (`npm test`) and the Lunet website build must pass, and docs must be updated before submitting. `npm test` runs every `*.test.ts(x)` file under `src` and its feature folders, including the `*.browser.test.ts` files, which mount real components in headless Edge and are skipped where Edge is not installed. A frontend test that no longer matches the app is fixed or removed, never left failing.
 
+### Debug or Release
+
+CodeAlta is developed with CodeAlta, so a CodeAlta that runs on this computer may be a build of this checkout: `src/CodeAlta/bin/<Configuration>/net10.0/alta` or `src/CodeAlta.Tui/bin/<Configuration>/net10.0/altatui`. Its files cannot be replaced while it runs (on Windows the build stops on a locked file), and every build of that configuration writes them: the solution, `CodeAlta.csproj`, and `dotnet test`, whose test projects build both applications.
+
+Before the first build, look at what runs:
+
+```powershell
+Get-Process alta, altatui -ErrorAction SilentlyContinue | Select-Object Id, Path
+```
+
+```sh
+# macOS, Linux
+ps -eo pid,args | grep -E '/alta(tui)?( |$)'
+```
+
+| A CodeAlta runs from | Build, test and start the developer instance with |
+| --- | --- |
+| `bin/Release` of this checkout | `Debug` |
+| `bin/Debug` of this checkout | `Release` |
+| anywhere else (an installed `alta`, another checkout or worktree), or none runs | `Release` for the tests and `Debug` for the developer instance, as this file writes them |
+
+Use that configuration in every command of this file: `-c <Configuration>` for `dotnet build` and `dotnet test`, and `bin/<Configuration>` in the path of an executable. Tests that pass in `Debug` count; CI runs them in `Release`.
+
+- Never exit that application to free its files: it is the one the user works in, and often the one you run in.
+- The developer instance you started (below) is yours: exit it before a build or a test run of its configuration.
+- Run one build at a time, whatever the configurations: they share `src/CodeAlta/frontend/dist` and the generated RPC client.
+
 ## Working on the desktop WebApp
 
 The desktop UI (`src/CodeAlta`, React frontend in `src/CodeAlta/frontend`) runs in a native window. Drive the running window through its MCP server instead of guessing from the source: look at it, click in it, read its DOM and console.
 
-**1. Build.** `dotnet build CodeAlta/CodeAlta.csproj` from `src` builds the host and the frontend (it restores npm packages and regenerates the typed RPC client `src/CodeAlta/obj/neoastra/neoastra.ts`). The frontend alone is checked from `src/CodeAlta/frontend` with `node node_modules/typescript/bin/tsc --noEmit` and one test file with `node node_modules/tsx/dist/cli.mjs --test src/<name>.test.ts`, or `src/<feature>/<name>.test.ts` for a feature folder (`npm test` runs them all). The `src/*.browser.test.ts` files start their own Edge; do not use them to look at the app.
+**1. Build.** `dotnet build CodeAlta/CodeAlta.csproj` from `src` builds the host and the frontend in `Debug`; add `-c Release` when `Debug` is the configuration to leave alone (see "Debug or Release"). The build restores npm packages and regenerates the typed RPC client `src/CodeAlta/obj/neoastra/neoastra.ts`. The frontend alone is checked from `src/CodeAlta/frontend` with `node node_modules/typescript/bin/tsc --noEmit` and one test file with `node node_modules/tsx/dist/cli.mjs --test src/<name>.test.ts`, or `src/<feature>/<name>.test.ts` for a feature folder (`npm test` runs them all). The `src/*.browser.test.ts` files start their own Edge; do not use them to look at the app.
 
-**2. Launch the developer instance.** `--dev` starts a second CodeAlta beside the normal one (see "Developer instance" below). From the repository root (PowerShell):
+**2. Launch the developer instance.** `--dev` starts a second CodeAlta beside the normal one (see "Developer instance" below). What makes an instance the normal or the developer one is `--dev`, not its build: either can be the `Debug` or the `Release` one. From the repository root, with the configuration you built (PowerShell; `src/CodeAlta/bin/Debug/net10.0/alta --dev` on macOS and Linux):
 
 ```powershell
 Start-Process src\CodeAlta\bin\Debug\net10.0\alta.exe -ArgumentList "--dev" -WorkingDirectory (Get-Location)
 ```
 
-The window is titled **CodeAlta (dev)** and shows a **DEV** tag beside its name. Its MCP server listens at `http://127.0.0.1:2583/mcp` (the normal instance has port 2582); `~/.alta/dev/mcp_url.txt` holds that address while the instance runs, and `--mcp-port <port>` asks for another port. `alta.exe` is a windowed executable: it has no console. Started from a shell, it runs the window in a second `alta.exe` process and exits once the window is shown, with code 0; a non-zero exit code is a startup failure, and the log is under `%LOCALAPPDATA%\CodeAlta\desktop-dev\logs`. A second developer instance shows the window of the running one and exits at once. Add `--wait` to keep the window in the process you started.
+The native window is titled **CodeAlta (dev)** and the page shows a **DEV** tag beside its name (`document.title` stays `CodeAlta`). Its MCP server listens at `http://127.0.0.1:2583/mcp` (the normal instance has port 2582); `~/.alta/dev/mcp_url.txt` holds that address while the instance runs, and `--mcp-port <port>` asks for another port. `alta.exe` is a windowed executable: it has no console. Started from a shell, it runs the window in a second `alta.exe` process and exits once the window is shown, with code 0; a non-zero exit code is a startup failure, and the log is under `%LOCALAPPDATA%\CodeAlta\desktop-dev\logs`. A second developer instance shows the window of the running one and exits at once. Add `--wait` to keep the window in the process you started.
 
 **3. Connect.** Two checked-in files register that server as `codealta-dev`, over HTTP: `.mcp.json` for agents that read project MCP configuration (Claude Code and others), and `.alta/mcp.json` for CodeAlta itself. Nothing has to be installed. A client that connects when it starts needs the app running first, or a reconnection afterwards; a restart of the app needs neither, because the server keeps no session.
 
@@ -54,15 +81,17 @@ The window is titled **CodeAlta (dev)** and shows a **DEV** tag beside its name.
 - `take_screenshot` with a `filePath` saves the picture instead of returning it: in the folder of a project, or in the folder of the tools (`%LOCALAPPDATA%\CodeAlta\desktop-dev\ui`).
 - `alta` runs the commands of that instance, for example `{"args": ["session", "list"]}`: the caller belongs to no session.
 - The title bar's native caption buttons are not part of the page, so they are not in screenshots.
-- In a CodeAlta session the server starts inactive: `alta mcp activate codealta-dev` registers its tools (`mcp__codealta_dev__…`) in the running turn.
+- In a CodeAlta session the server starts inactive, or unavailable while nothing listens: once the developer instance runs, `alta mcp activate codealta-dev` registers its tools (`mcp__codealta_dev__…`) in the running turn, and they stay for the next turns and across restarts of that instance. In a session of the Claude Code provider they are named `mcp__codealta__mcp__codealta_dev__…`; Claude Code may also list the server of `.mcp.json` by itself (`mcp__codealta-dev__…`), which is the same window.
 - A session of CodeAlta Desktop has the same tools for the window it runs in, without any server: `alta ui activate`.
 - On Windows, WebView2 still opens a DevTools port when `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222` is set before the start, for what these tools do not cover (performance traces, CSS inspection).
 
-**4. Change, rebuild, look again.** The executable and its assets are locked while the window is open. Close the developer window only, never every `alta` process (the normal instance may be the one you are running in):
+**4. Change, rebuild, look again.** The files of the developer instance are locked while it runs, and closing its window may only hide it. Ask it to exit, with the `alta` of either build:
 
 ```powershell
-Get-Process alta | Where-Object MainWindowTitle -eq 'CodeAlta (dev)' | ForEach-Object { $_.CloseMainWindow() }
+Start-Process src\CodeAlta\bin\Debug\net10.0\alta.exe -ArgumentList "--dev", "--exit"
 ```
+
+It is gone within a few seconds, and `~/.alta/dev/mcp_url.txt` with it. While sessions run there or files have unsaved edits, it asks in its window first. Always pass `--dev`: `--exit` alone exits the normal instance, which may be the one you are running in, and never end every `alta` process for the same reason.
 
 Then build and launch again. Check both themes and a narrow window (`resize_page`) when a change is visual.
 
@@ -78,7 +107,7 @@ Only one CodeAlta runs on a profile, because two processes must not write the sa
 
 The desktop developer instance also has its own WebView data (`%LOCALAPPDATA%\CodeAlta\desktop-dev`: open tabs, drafts, theme) and its own MCP port. One developer instance runs at a time, terminal or desktop. It leaves the coordinator `~/.alta/AGENTS.md` as the normal instance wrote it, and on its first run takes over the normal instance's per-project provider/model preferences.
 
-This is how CodeAlta is developed with CodeAlta: you run in the normal instance (desktop or terminal, any released or built `alta`/`altatui` that has this branch's MCP support), build the repository, start `alta.exe --dev`, and drive that window through its MCP server (`codealta-dev`). The terminal UI is checked the same way with `altatui --dev` in a separate console.
+This is how CodeAlta is developed with CodeAlta: you run in the normal instance (desktop or terminal, any released or built `alta`/`altatui` that has this branch's MCP support), build the repository in a configuration that instance does not run from, start that `alta.exe --dev`, and drive that window through its MCP server (`codealta-dev`). The terminal UI is checked the same way with `altatui --dev` in a separate console.
 
 ## Contribution Rules (Do/Don't)
 
