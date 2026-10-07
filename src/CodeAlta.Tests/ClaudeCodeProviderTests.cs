@@ -180,8 +180,8 @@ public sealed class ClaudeCodeProviderTests
         var probe = await runtime.ProbeAsync();
 
         Assert.AreEqual(ModelProviderAvailability.Ready, probe.Availability);
-        CollectionAssert.AreEqual(new[] { "default", "sonnet", "haiku" }, probe.Models.Select(static model => model.Id).ToArray(), "An entry the CLI disables is not offered.");
-        Assert.AreEqual("Default (recommended)", probe.Models[0].DisplayName);
+        CollectionAssert.AreEqual(new[] { "claude-test-1", "sonnet", "haiku" }, probe.Models.Select(static model => model.Id).ToArray(), "An entry the CLI disables is not offered, and its default is named.");
+        Assert.AreEqual("claude-test-1", probe.Models[0].DisplayName);
         CollectionAssert.AreEqual(
             new[] { AgentReasoningEffort.Low, AgentReasoningEffort.Medium, AgentReasoningEffort.High, AgentReasoningEffort.XHigh, AgentReasoningEffort.Max },
             probe.Models[0].SupportedReasoningEfforts!.ToArray());
@@ -314,6 +314,41 @@ public sealed class ClaudeCodeProviderTests
         CollectionAssert.AreEqual(new[] { "claude-custom-9" }, pinnedModels.Select(static model => model.Id).ToArray());
         Assert.AreEqual(true, AgentImageInputCapability.Read(pinnedModels[0]), "A model the CLI does not list takes images like the others.");
         Assert.AreEqual("claude-custom-9", pinnedRuntime.Descriptor.DefaultModelId);
+    }
+
+    [TestMethod]
+    public void Models_NameTheModelTheCliChoosesByDefault()
+    {
+        static string[] Read(string models) => [.. ClaudeCodeModelCatalog.ReadModels(JsonDocument.Parse($$"""{"models":[{{models}}]}""").RootElement).Select(static model => $"{model.Id}={model.DisplayName}")];
+
+        // What Claude Code 2.1.292 lists: its default and the alias of the same model, then the others.
+        const string Default = """{"value":"default","resolvedModel":"claude-opus-5-5","displayName":"Default (recommended)","description":"Opus 5.5 · Best for everyday, complex tasks"}""";
+        const string Opus = """{"value":"opus","resolvedModel":"claude-opus-5-5","displayName":"Opus 5.5"}""";
+        const string Sonnet = """{"value":"sonnet","resolvedModel":"claude-sonnet-5-5","displayName":"Sonnet 5.5"}""";
+
+        CollectionAssert.AreEqual(new[] { "opus=Opus 5.5", "sonnet=Sonnet 5.5" }, Read($"{Default},{Opus},{Sonnet}"));
+        CollectionAssert.AreEqual(new[] { "opus=Opus 5.5", "sonnet=Sonnet 5.5" }, Read($"{Default},{Sonnet},{Opus}"), "The model of the default stays the first one, which a session without a model takes.");
+        CollectionAssert.AreEqual(new[] { "claude-opus-5-5=claude-opus-5-5", "sonnet=Sonnet 5.5" }, Read($"{Default},{Sonnet}"), "A default that no other entry names is listed under the name of its model.");
+        CollectionAssert.AreEqual(new[] { "sonnet=Sonnet 5.5" }, Read("""{"value":"default","displayName":"Default (recommended)"},""" + Sonnet), "A default that does not say its model is not a model to select.");
+        Assert.AreEqual(0, Read("""{"value":"default","displayName":"Default (recommended)"}""").Length);
+
+        // A session or a setting that still names the default runs with the choice of the CLI.
+        Assert.IsNull(ClaudeCodeLauncher.ToModelOption("default"));
+    }
+
+    [TestMethod]
+    public async Task Catalog_OffersNamedModelsWhenTheCliCannotBeAsked()
+    {
+        var options = new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = "claude-code",
+            ResolveCli = static () => new ClaudeCodeCliResolution(null, "Claude Code was not found."),
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(options);
+
+        var models = await runtime.ModelCatalog!.ListModelsAsync(runtime.RuntimeDescriptor);
+
+        CollectionAssert.AreEqual(new[] { "sonnet", "opus", "haiku" }, models.Select(static model => model.Id).ToArray());
     }
 
     [TestMethod]

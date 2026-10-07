@@ -114,7 +114,7 @@ The `claude-code` provider runs your sessions through the [Claude Code](https://
 
 1. Install Claude Code and sign in: run `claude` in a terminal and use `/login` (an API key or a cloud provider configured for the CLI works too).
 2. In the provider editor, enable **Claude Code** and use **Test**. The test asks the CLI for its models; it does not call a model.
-3. Start a session with it. The models are the ones the CLI offers for your account; **Default** lets Claude Code choose.
+3. Start a session with it. The models are the ones the CLI offers for your account, each under its own name. The first one is the model Claude Code recommends for the account.
 
 CodeAlta never sees your Claude credentials, and there is no API key, endpoint or sign-in for this provider in CodeAlta. Usage counts against the account the CLI is signed in to, with the limits of its plan.
 

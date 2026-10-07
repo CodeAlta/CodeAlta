@@ -23,8 +23,14 @@ internal sealed record ClaudeCodeInspection(
 /// </summary>
 internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
 {
-    /// <summary>The entry of the CLI that lets it choose the model.</summary>
+    /// <summary>
+    /// The entry of the CLI that lets it choose the model. It is not offered as a model; a session or a setting that
+    /// names it still runs with the choice of the CLI.
+    /// </summary>
     public const string DefaultModelId = "default";
+
+    // The model an entry of the CLI runs, which several entries can share (an alias and the default).
+    private const string ResolvedModelCapability = "resolvedModel";
 
     private static readonly TimeSpan CacheLifetime = TimeSpan.FromMinutes(5);
 
@@ -32,12 +38,11 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
     // whatever the model is. CodeAlta only lets an image be attached for a model that says it takes them.
     private const string ImageInputCapability = "supportsImageInput";
 
-    // The aliases of the CLI, offered when it cannot be asked.
+    // The aliases of the CLI, offered when it cannot be asked. The first one is the model every account has.
     private static readonly AgentModelInfo[] FallbackModels =
     [
-        CreateUnlistedModel(DefaultModelId, "Default (recommended)", "The model Claude Code selects for the account."),
-        CreateUnlistedModel("opus", "Opus", "The Opus model of the installed Claude Code."),
         CreateUnlistedModel("sonnet", "Sonnet", "The Sonnet model of the installed Claude Code."),
+        CreateUnlistedModel("opus", "Opus", "The Opus model of the installed Claude Code."),
         CreateUnlistedModel("haiku", "Haiku", "The Haiku model of the installed Claude Code."),
     ];
 
@@ -145,6 +150,7 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
         }
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        AgentModelInfo? byDefault = null;
         foreach (var entry in entries.EnumerateArray())
         {
             // An entry the CLI shows as unavailable (an update is required) cannot run a turn.
@@ -182,7 +188,7 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
             var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal) { [ImageInputCapability] = true };
             if (ClaudeCodeJson.GetString(entry, "resolvedModel") is { Length: > 0 } resolvedModel)
             {
-                capabilities["resolvedModel"] = resolvedModel;
+                capabilities[ResolvedModelCapability] = resolvedModel;
             }
 
             if (efforts is { Count: > 0 })
@@ -190,17 +196,47 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
                 capabilities["supportsReasoning"] = true;
             }
 
-            models.Add(new AgentModelInfo(
+            var model = new AgentModelInfo(
                 value,
                 ClaudeCodeJson.GetString(entry, "displayName") ?? value,
                 ClaudeCodeJson.GetString(entry, "description"),
                 Provider: "Claude Code",
                 SupportedReasoningEfforts: efforts is { Count: > 0 } ? efforts : null,
-                Capabilities: capabilities));
+                Capabilities: capabilities);
+            if (string.Equals(value, DefaultModelId, StringComparison.OrdinalIgnoreCase))
+            {
+                byDefault = model;
+            }
+            else
+            {
+                models.Add(model);
+            }
+        }
+
+        // The default of the CLI is one of its models under another name. It is not offered: the model it stands
+        // for is, and comes first, where a session that names no model takes it.
+        if (byDefault is not null && ResolvedModel(byDefault) is { } resolved)
+        {
+            var named = models.FindIndex(model =>
+                string.Equals(ResolvedModel(model), resolved, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(model.Id, resolved, StringComparison.OrdinalIgnoreCase));
+            if (named < 0)
+            {
+                models.Insert(0, byDefault with { Id = resolved, DisplayName = resolved });
+            }
+            else if (named > 0)
+            {
+                var model = models[named];
+                models.RemoveAt(named);
+                models.Insert(0, model);
+            }
         }
 
         return models;
     }
+
+    private static string? ResolvedModel(AgentModelInfo model)
+        => model.Capabilities is { } capabilities && capabilities.TryGetValue(ResolvedModelCapability, out var resolved) ? resolved as string : null;
 
     private static AgentModelInfo CreateUnlistedModel(string id, string displayName, string? description)
         => new(id, displayName, description, Provider: "Claude Code", Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal) { [ImageInputCapability] = true });
