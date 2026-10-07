@@ -176,6 +176,37 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
+    public async Task BuiltInProviders_ThatTheConfigurationLacks_AreOfferedAndAddedAsCodeAltaShipsThem()
+    {
+        await using var fixture = new Fixture("[providers.openai]\nenabled = true\ntype = \"openai-responses\"\napi_key = \"sk-kept\"\n\n[providers.Anthropic]\nenabled = false\ntype = \"anthropic\"\n");
+        var listed = fixture.Service.Providers(new(Epoch));
+
+        var offered = listed.BuiltIn.ToDictionary(static entry => entry.Key);
+        Assert.IsFalse(offered.ContainsKey("openai") || offered.ContainsKey("anthropic"), "What the configuration has, whatever the case of its key, is not offered again.");
+        Assert.AreEqual(new GlobalConfigBuiltInProvider("claude-code", "claude-code", "Claude Code"), offered["claude-code"]);
+        Assert.AreEqual(("openai-chat", "DeepSeek"), (offered["deepseek"].Type, offered["deepseek"].Name));
+        CollectionAssert.AreEqual(listed.BuiltIn.Select(static entry => entry.Name).Order(StringComparer.OrdinalIgnoreCase).ToArray(), listed.BuiltIn.Select(static entry => entry.Name).ToArray());
+        Assert.AreEqual(0, fixture.Service.Providers(new("another")).BuiltIn.Count);
+
+        Assert.AreEqual("conflict", fixture.Service.AddBuiltInProvider(new(Epoch, "stale", "deepseek")).Status);
+        Assert.AreEqual("invalid", fixture.Service.AddBuiltInProvider(new(Epoch, listed.Revision, "no-such-provider")).Status);
+        Assert.AreEqual("invalid", fixture.Service.AddBuiltInProvider(new(Epoch, listed.Revision, "OpenAI")).Status, "A provider that is there is not replaced.");
+        Assert.AreEqual("invalid", fixture.Service.AddBuiltInProvider(new(Epoch, listed.Revision, " ")).Status);
+
+        var added = fixture.Service.AddBuiltInProvider(new(Epoch, listed.Revision, "deepseek"));
+        Assert.AreEqual("ok", added.Status, added.Message);
+        var text = File.ReadAllText(fixture.ConfigPath);
+        StringAssert.Contains(text, "[providers.deepseek]");
+        StringAssert.Contains(text, "api_key = \"sk-kept\"", "The other providers stay as they were.");
+        var after = fixture.Service.Providers(new(Epoch));
+        var deepseek = after.Providers.Single(static provider => provider.Key == "deepseek");
+        var shipped = CodeAltaConfigStore.LoadDefaultProviderDefinitions().Single(static provider => provider.ProviderKey == "deepseek");
+        Assert.AreEqual(("openai-chat", false, "DeepSeek", shipped.ApiUrl, shipped.ApiKeyEnv), (deepseek.Type, deepseek.Enabled, deepseek.EffectiveName, deepseek.EffectiveApiUrl, deepseek.ApiKeyEnv),
+            "It is added with its endpoint and the variable of its key, disabled until the user gives it a credential.");
+        Assert.IsFalse(after.BuiltIn.Any(static entry => entry.Key == "deepseek"));
+    }
+
+    [TestMethod]
     public async Task SaveProvider_UpdatesOnlyTheEditedFieldsAndKeepsTheStoredSecret()
     {
         await using var fixture = new Fixture(ProvidersConfig);

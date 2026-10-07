@@ -178,9 +178,10 @@ export const globalConfig = Object.freeze({
   read: async () => ({ status: "unavailable", content: null, revision: null }),
   validate: async () => ({ valid: true, message: null, line: null, column: null }),
   save: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
-  providers: async () => ({ status: "unavailable", revision: null, defaultProvider: null, providers: [], providerTypes: [], reasoningEfforts: [] }),
+  providers: async () => ({ status: "unavailable", revision: null, defaultProvider: null, providers: [], providerTypes: [], reasoningEfforts: [], typeDefaults: [], builtIn: [] }),
   saveProvider: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
   deleteProvider: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
+  addBuiltInProvider: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
 });
 
 // The demo has no host to edit: every Settings editor reports itself unavailable.

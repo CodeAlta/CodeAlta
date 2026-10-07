@@ -52,6 +52,7 @@ Open it with `Ctrl+G Ctrl+R`, `/model_providers`, or the provider summary below 
 Both apps edit the same providers and share the same credentials, so a provider configured or signed in from one app is ready in the other. The provider editor can:
 
 - add, delete, enable, and disable provider entries;
+- in CodeAlta Desktop, **Add provider** lists the built-in providers you do not have yet: choose one to add it with its key and type, or **Custom provider…** for an entry of your own;
 - validate provider keys, endpoint URLs, required credentials, and conflicting settings;
 - store an API key directly or refer to an environment variable;
 - list and choose a provider model on demand when the Model field is not using its default;

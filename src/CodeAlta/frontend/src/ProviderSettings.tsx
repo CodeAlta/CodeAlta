@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Callout, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, NonIdealState, PopoverNext, Section, SectionCard, Switch, Tag, type Intent } from "@blueprintjs/core";
+import { Button, Callout, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Section, SectionCard, Switch, Tag, type Intent } from "@blueprintjs/core";
 import { globalConfig, providerLogin, type GlobalConfigProviderDefaults, type GlobalConfigProvidersResponse, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse,
   type ModelCatalogProvidersRequest, type ModelCatalogProvidersResponse } from "#neoastra";
 import { ProviderAccount } from "./ProviderAccount";
@@ -34,7 +34,7 @@ function DefaultedInput({ id, value, fallback, unset, disabled, onChange }: {
  * Saving writes the global configuration and re-registers the providers in the running host.
  */
 export function ProviderSettings({ epoch, config = globalConfig, login = providerLogin, readRuntime, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed }: {
-  epoch: string; config?: Pick<typeof globalConfig, "providers" | "saveProvider" | "deleteProvider">;
+  epoch: string; config?: Pick<typeof globalConfig, "providers" | "saveProvider" | "deleteProvider" | "addBuiltInProvider">;
   login?: Pick<typeof providerLogin, "status" | "login" | "logout">;
   readRuntime: (request: ModelCatalogProvidersRequest, options: CallOptions) => Promise<ModelCatalogProvidersResponse>;
   probe: (request: ModelCatalogProbeRequest, options: CallOptions) => Promise<ModelCatalogProbeResponse>;
@@ -134,6 +134,11 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
     void settle(() => config.saveProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, originalKey: original?.key ?? null,
       provider: wire, makeDefault: form.makeDefault, applyProviders: true }, { timeoutMilliseconds: 60000 }), wire.key);
   }
+  // A provider CodeAlta knows: it is added as CodeAlta ships it, and shown so that its credential can be given.
+  function addBuiltIn(key: string) {
+    if (!listing || busy) return;
+    void settle(() => config.addBuiltInProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, key }, { timeoutMilliseconds: 60000 }), key);
+  }
   function remove() {
     if (!original || !listing || busy) return;
     void settle(() => config.deleteProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, key: original.key, applyProviders: true },
@@ -171,7 +176,18 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
         {(loading || busy) && <ActivitySpinner size={14} />}
         <Button variant="minimal" icon={<AppIcon name="question" size={15} />} disabled={!listing || tour} aria-label={t("Setup guide")} title={t("Setup guide")} onClick={() => setTour(true)} />
         <Button icon={<AppIcon name="refresh" size={15} />} disabled={loading || busy} onClick={() => setGeneration(value => value + 1)}>{t("Reload")}</Button>
-        <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!listing || busy} onClick={() => choose(newProvider)}>{t("Add provider")}</Button>
+        {listing && listing.builtIn.length > 0
+          // The providers CodeAlta knows and the user does not have yet are offered first: one click adds one with its key and type.
+          ? <PopoverNext placement="bottom-end" content={<Menu className="provider-add-menu" aria-label={t("Add provider")}>
+              <MenuDivider title={t("Built-in providers")} />
+              {listing.builtIn.map(entry => <MenuItem key={entry.key} icon={<AppIcon name="model" size={15} />} text={entry.name} label={entry.type} disabled={busy}
+                onClick={() => addBuiltIn(entry.key)} />)}
+              <MenuDivider />
+              <MenuItem icon={<AppIcon name="plus" size={15} />} text={t("Custom provider…")} disabled={busy} onClick={() => choose(newProvider)} />
+            </Menu>}>
+              <Button intent="primary" icon={<AppIcon name="plus" size={15} />} endIcon={<AppIcon name="chevronDown" size={14} />} disabled={busy} aria-haspopup="menu">{t("Add provider")}</Button>
+            </PopoverNext>
+          : <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!listing || busy} onClick={() => choose(newProvider)}>{t("Add provider")}</Button>}
       </div>
     </header>
     {notice && <Callout intent={notice.intent} compact role={notice.intent === "success" ? "status" : "alert"}>

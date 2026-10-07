@@ -1997,6 +1997,8 @@ export const messages = dictionary({
   "When a Jira issue is updated": ["Cuando se actualiza una incidencia de Jira", "Quand un ticket Jira est mis à jour", "Wenn ein Jira-Vorgang aktualisiert wird", "Jira の課題が更新されたとき", "更新 Jira 事务时"],
   "is created": ["se crea", "est créé", "erstellt wird", "が作成されたとき", "被创建"],
   "is updated": ["se actualiza", "est mis à jour", "aktualisiert wird", "が更新されたとき", "被更新"],
+  "Built-in providers": ["Proveedores integrados", "Fournisseurs intégrés", "Integrierte Anbieter", "組み込みプロバイダー", "内置提供商"],
+  "Custom provider…": ["Proveedor personalizado…", "Fournisseur personnalisé…", "Eigener Anbieter…", "カスタムプロバイダー…", "自定义提供商…"],
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

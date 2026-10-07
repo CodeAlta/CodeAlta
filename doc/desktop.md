@@ -1222,7 +1222,11 @@ disabled ones) are listed on the left with their cached availability and the con
 the selected one has a form for its key, adapter type, enabled state, display name, default model,
 reasoning effort, API URL, API key environment variable and API key, plus **Use as the default
 provider**. **Add provider** starts a new definition and the trash button removes one after
-confirmation. **Save and apply** writes the global `config.toml` and re-registers the providers in
+confirmation. When the configuration lacks some of the providers CodeAlta ships a definition for (the bundled
+`DefaultConfig/config.toml`), **Add provider** first opens a menu of them, by name with their adapter type, and
+**Custom provider…** for a blank definition; choosing one adds it as it is shipped (`globalConfig.addBuiltInProvider`:
+its key, adapter type, endpoint, the variable of its key and what its service needs), disabled, and selects it so
+that its credential can be given. A configuration that has them all goes straight to the blank definition. **Save and apply** writes the global `config.toml` and re-registers the providers in
 the running host; it is refused as a conflict when the file changed on disk since the page read it.
 A stored API key is never sent to the page: leaving the field blank keeps it, and **Remove the
 stored key** clears it. Settings the form does not show (timeouts, request overrides, compaction and

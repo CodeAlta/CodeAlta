@@ -126,8 +126,8 @@ internal sealed class GlobalConfigService
     public GlobalConfigProvidersResponse Providers(GlobalConfigProvidersRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (_store is null) return new("unavailable", null, null, [], ProviderTypes, ReasoningEfforts, []);
-        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null, null, [], ProviderTypes, ReasoningEfforts, []);
+        if (_store is null) return new("unavailable", null, null, [], ProviderTypes, ReasoningEfforts, [], []);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null, null, [], ProviderTypes, ReasoningEfforts, [], []);
         try
         {
             lock (_gate)
@@ -147,12 +147,16 @@ internal sealed class GlobalConfigService
                             Bound(definition?.ApiUrl), Bound(effective.ApiUrl), Bound(definition?.ApiKeyEnv),
                             !string.IsNullOrEmpty(definition?.ApiKey), defaults.For(effective));
                     }).ToArray();
-                return new("ok", revision, Bound(document.Chat?.DefaultProvider?.Trim().ToLowerInvariant()), providers, ProviderTypes, ReasoningEfforts, defaults.Types);
+                // The providers CodeAlta knows how to configure that this configuration does not have yet.
+                var builtIn = defaults.Template.Values.Where(entry => !providers.Any(provider => string.Equals(provider.Key, entry.ProviderKey, StringComparison.OrdinalIgnoreCase)))
+                    .Select(entry => new GlobalConfigBuiltInProvider(Bound(entry.ProviderKey)!, Bound(entry.ProviderType) ?? string.Empty, defaults.For(entry).DisplayName ?? entry.ProviderKey))
+                    .OrderBy(static entry => entry.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+                return new("ok", revision, Bound(document.Chat?.DefaultProvider?.Trim().ToLowerInvariant()), providers, ProviderTypes, ReasoningEfforts, defaults.Types, builtIn);
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
         {
-            return new("read_failed", null, null, [], ProviderTypes, ReasoningEfforts, []);
+            return new("read_failed", null, null, [], ProviderTypes, ReasoningEfforts, [], []);
         }
     }
 
@@ -212,6 +216,30 @@ internal sealed class GlobalConfigService
             else if (!string.IsNullOrEmpty(edit.ApiKey)) definition.ApiKey = edit.ApiKey;
             store.SaveGlobalProviderDefinitions(definitions);
             if (request.MakeDefault && edit.Enabled) store.SaveGlobalDefaultProvider(key);
+            return null;
+        });
+    }
+
+    /// <summary>
+    /// Adds one of the providers CodeAlta ships a configuration for, as that configuration has it: its key, its
+    /// adapter type, its endpoint, the variable of its key and what its service needs. It is added disabled: the user
+    /// gives it a credential, or signs in, and enables it.
+    /// </summary>
+    [NeoRpcMethod("addBuiltInProvider")]
+    public GlobalConfigSaveResponse AddBuiltInProvider(GlobalConfigAddBuiltInProviderRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var key = request.Key?.Trim();
+        if (string.IsNullOrEmpty(key) || key.Length > 64) return new("invalid", null, "A provider key is required.", null, null, 0);
+        return Mutate(request.ExpectedEpoch, request.ExpectedRevision, applyProviders: true, (store, definitions) =>
+        {
+            if (definitions.Any(value => string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase))) return "This provider is already in the configuration.";
+            // Read again: the definition that is added is not one another caller could have changed.
+            if (CodeAltaConfigStore.LoadDefaultProviderDefinitions().FirstOrDefault(value => string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase)) is not { } template)
+                return "CodeAlta has no built-in provider with this key.";
+            template.Enabled = false;
+            definitions.Add(template);
+            store.SaveGlobalProviderDefinitions(definitions);
             return null;
         });
     }
@@ -337,6 +365,9 @@ internal sealed class GlobalConfigService
         /// <summary>The defaults of a new provider of each offered type, in the order of the offered types.</summary>
         public IReadOnlyList<GlobalConfigProviderTypeDefaults> Types { get; }
 
+        /// <summary>The providers of the configuration CodeAlta ships, by their key.</summary>
+        public IReadOnlyDictionary<string, CodeAltaProviderDocument> Template => _template;
+
         /// <exception cref="InvalidOperationException">The bundled template or an offered type cannot be completed.</exception>
         public static ProviderDefaults Load()
         {
@@ -385,7 +416,16 @@ internal sealed record GlobalConfigSaveResponse(string Status, string? Revision,
 internal sealed record GlobalConfigProvidersRequest(string? ExpectedEpoch);
 internal sealed record GlobalConfigProvidersResponse(string Status, string? Revision, string? DefaultProvider,
     IReadOnlyList<GlobalConfigProvider> Providers, IReadOnlyList<string> ProviderTypes, IReadOnlyList<string> ReasoningEfforts,
-    IReadOnlyList<GlobalConfigProviderTypeDefaults> TypeDefaults);
+    IReadOnlyList<GlobalConfigProviderTypeDefaults> TypeDefaults, IReadOnlyList<GlobalConfigBuiltInProvider> BuiltIn);
+
+/// <summary>A provider CodeAlta ships a configuration for and that the user does not have yet.</summary>
+/// <param name="Key">Its key, which the added provider takes.</param>
+/// <param name="Type">Its adapter type.</param>
+/// <param name="Name">Its name.</param>
+internal sealed record GlobalConfigBuiltInProvider(string Key, string Type, string Name);
+
+/// <summary>Asks to add a built-in provider by its key; the revision is the one of the listing it was chosen from.</summary>
+internal sealed record GlobalConfigAddBuiltInProviderRequest(string? ExpectedEpoch, string? ExpectedRevision, string? Key);
 
 /// <summary>One configured provider: values as written (null when the file leaves them to defaults) plus effective display values.</summary>
 internal sealed record GlobalConfigProvider(string Key, string Type, bool Enabled, string? DisplayName, string EffectiveName,
