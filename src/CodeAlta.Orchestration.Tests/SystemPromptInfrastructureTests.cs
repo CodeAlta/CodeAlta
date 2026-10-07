@@ -270,6 +270,19 @@ public sealed class SystemPromptInfrastructureTests
             Session = new SessionViewDescriptor { SessionId = "../other", ProviderId = "codex", ProviderKey = "codex", WorkingDirectory = workingDirectory, Kind = SessionViewKind.ProjectSession },
             PartOptionsOverride = new PartialSystemPromptPartOptions(Skills: false, ProjectContext: false, RuntimeContext: true, ToolGuidance: false),
         });
+        // An application that ships the user guide names it, and says what it is for; one that ships none says nothing.
+        Assert.IsFalse(developerInstructions.Contains("CodeAlta user guide", StringComparison.Ordinal));
+        var guide = Directory.CreateDirectory(Path.Combine(appBase, "content", "user-guide")).FullName;
+        File.WriteAllText(Path.Combine(guide, "readme.md"), "# User Guide");
+        StringAssert.Contains(other.DeveloperInstructions!, "- Scratchpad file:");
+        var guided = builder.Build(new SystemPromptBuildRequest
+        {
+            ProviderKey = "codex", ProviderType = "codex", ProtocolFamily = "codex",
+            Session = new SessionViewDescriptor { SessionId = "session-1", ProviderId = "codex", ProviderKey = "codex", WorkingDirectory = workingDirectory, Kind = SessionViewKind.ProjectSession },
+            PartOptionsOverride = new PartialSystemPromptPartOptions(Skills: false, ProjectContext: false, RuntimeContext: true, ToolGuidance: false),
+        }).DeveloperInstructions!;
+        StringAssert.Contains(guided, $"- CodeAlta user guide: `{guide}` (start with `readme.md`; the pictures its pages name are in `img/`).");
+        StringAssert.Contains(guided, "For a question about CodeAlta itself");
         var otherHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData("../other"u8), 0, 3);
         Assert.AreNotEqual(hash, otherHash);
         StringAssert.Contains(other.DeveloperInstructions!, $"- Scratchpad file: `{Path.Combine(Path.GetFullPath(projectRoot), "scratchpad", $"<yyyy-mm-dd>-<short-name>-{otherHash}.md")}`");

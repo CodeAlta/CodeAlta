@@ -74,7 +74,15 @@ public sealed record SystemPromptContentRoots(
     string ShippedDocsRoot,
     string GlobalPromptRoot,
     string? ProjectPromptRoot,
-    bool ProjectPromptResourcesTrusted);
+    bool ProjectPromptResourcesTrusted)
+{
+    /// <summary>
+    /// Gets the folder of the user guide of CodeAlta that ships with the application, beside the built-in
+    /// documentation: the pages of the site (<c>readme.md</c> lists them) and, in <c>img</c>, the pictures they show.
+    /// An application that ships none does not have the folder.
+    /// </summary>
+    public string ShippedUserGuideRoot => Path.Combine(Path.GetDirectoryName(ShippedDocsRoot) ?? ShippedDocsRoot, "user-guide");
+}
 
 /// <summary>
 /// Default file-system implementation of <see cref="ISystemPromptContentLocator"/>.

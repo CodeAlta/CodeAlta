@@ -117,7 +117,7 @@ public sealed class SystemPromptBuilder
 
         if (composition.PartOptions.RuntimeContext)
         {
-            AddGeneratedPart(developerParts, parts, "runtime.context", "runtime_context", "Runtime Context", 400, BuildRuntimeContext(request, projectRoot));
+            AddGeneratedPart(developerParts, parts, "runtime.context", "runtime_context", "Runtime Context", 400, BuildRuntimeContext(request, projectRoot, roots));
         }
 
         if (composition.PartOptions.ToolGuidance)
@@ -531,7 +531,7 @@ public sealed class SystemPromptBuilder
         return part;
     }
 
-    private static string BuildRuntimeContext(SystemPromptBuildRequest request, string? projectRoot)
+    private static string BuildRuntimeContext(SystemPromptBuildRequest request, string? projectRoot, SystemPromptContentRoots? roots = null)
     {
         var lines = new List<string>
         {
@@ -572,6 +572,12 @@ public sealed class SystemPromptBuilder
         if (ScratchpadFile(request) is { } scratchpad)
         {
             lines.Add($"- Scratchpad file: {MarkdownCode(scratchpad)}");
+        }
+
+        // The user guide that ships with the application: the agent answers questions about CodeAlta from it.
+        if (roots is not null && File.Exists(Path.Combine(roots.ShippedUserGuideRoot, "readme.md")))
+        {
+            lines.Add($"- CodeAlta user guide: {MarkdownCode(roots.ShippedUserGuideRoot)} (start with `readme.md`; the pictures its pages name are in `img/`). For a question about CodeAlta itself (what a feature does, where a setting is, how to do something in its interface), read the guide and answer from it; you can guide the user step by step.");
         }
 
         return string.Join(Environment.NewLine, lines);

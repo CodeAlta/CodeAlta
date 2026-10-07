@@ -39,6 +39,10 @@
     <Content Include="../../img/alta.png" Link="alta.png" CopyToOutputDirectory="PreserveNewest" Pack="false" />
     <Content Include="../../img/alta-tray.png" Link="alta-tray.png" CopyToOutputDirectory="PreserveNewest" Pack="false" />
     <Content Include="../../img/alta.icns" Link="alta.icns" CopyToOutputDirectory="PreserveNewest" Pack="false" />
+    <!-- The user guide of the site, for the agents: they answer questions about CodeAlta from it and guide the
+         user in the window. Its pages, and the pictures of the desktop application the pages show. -->
+    <Content Include="../../site/docs/**/*.md" Link="content/user-guide/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Pack="false" />
+    <Content Include="../../site/img/alta-desktop-*.webp" Link="content/user-guide/img/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Pack="false" />
     <!-- The page imports the logo from outside its folder: without this, changing it does not rebuild the page. -->
     <NeoAstraFrontendInput Include="../../img/CodeAlta.svg" />
     <PackageReference Include="NeoAstra" />

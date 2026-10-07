@@ -35,6 +35,11 @@
     <None Include="$(MSBuildThisFileDirectory)../../img/CodeAlta.png" Pack="true" PackagePath="/" />
     <None Include="$(MSBuildThisFileDirectory)../../readme.md" Pack="true" PackagePath="/" />
     <EmbeddedResource Include="Assets\3d.flf" LogicalName="CodeAlta.Assets.3d.flf" />
+    <!-- The user guide of the site, for the agents: they answer questions about CodeAlta from it and guide the
+         user in the terminal. Its pages, and the pictures of the terminal application the pages show. They are
+         read beside the application: Pack="false" keeps the copies NuGet adds for content files out of the package. -->
+    <Content Include="../../site/docs/**/*.md" Link="content/user-guide/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Pack="false" />
+    <Content Include="../../site/img/alta-*.png;../../site/img/alta-*.gif" Exclude="../../site/img/alta-banner.png;../../site/img/alta-desktop-*" Link="content/user-guide/img/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Pack="false" />
   </ItemGroup>
 
   <ItemGroup>

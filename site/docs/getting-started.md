@@ -183,6 +183,20 @@ PNG, JPEG, GIF, WebP and BMP files are supported. A large image is scaled down t
 - **Desktop**: the timeline shows an **Image read** card with a preview of each image the agent looked at. Click the preview to open the image.
 - **TUI**: the tool call shows a line with the name, type and size of the image.
 
+## Ask CodeAlta about CodeAlta
+
+This guide ships with CodeAlta, and every agent can read it. Ask a session how to do something:
+
+```text
+How do I make the conversation narrower?
+```
+
+```text
+Where do I see the pull requests of my project?
+```
+
+The agent answers from the guide and can walk you through the interface step by step.
+
 ## Essential shortcuts
 
 {{ alta_shot "alta-desktop-help.webp" "alta-help.png" "Commands and shortcuts help" "Open help with <code>F1</code>, <code>/help</code>, or <code>?</code> in an empty prompt whenever you need a reminder of the commands and their shortcuts." }}
