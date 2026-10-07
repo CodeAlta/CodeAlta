@@ -28,6 +28,7 @@ This guide applies to both. Screenshots have a **Desktop / TUI** switch, and pag
 - [Sessions and Delegation](sessions.md): global vs project sessions, multiple-agent delegation, prompt queues, steering, compaction, notes, and reminders.
 - [Worktrees](worktrees.md): sessions that work in their own git worktree, so that several can change the same project at the same time.
 - [Automations](automations.md): prompts that CodeAlta Desktop runs on a schedule, on a new issue or pull request, or on demand.
+- [UI tools and MCP server](ui-tools.md): an agent sees and drives the window of CodeAlta Desktop, from a session or from another application.
 - [Advanced Agent Workflows](advanced-agent-workflows.md): how custom prompts can leverage CodeAlta live-tool capabilities for asks, notes, reminders, sessions, MCP, skills, model comparisons, and self-inspection.
 - [CodeAlta Principles](principles.md): the efficient, transparent, keyboard-first, session-oriented, provider-agnostic, native .NET, error-aware, and extensible design principles.
 

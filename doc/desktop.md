@@ -565,7 +565,8 @@ and `Escape` closes the window.
 
 ### Images a tool gives the model
 
-When a tool result has images (`view_image` on a file, a screenshot tool of an MCP server), the timeline
+When a tool result has images (`view_image` on a file, `take_screenshot` of the UI tools, a screenshot tool
+of an MCP server), the timeline
 shows an **Image read** card after the tile of the tool call. The card names the images and shows them as
 previews, larger than the thumbnails of a prompt; a click opens the same image window. The tile of the call
 keeps the text of the result. The card ends the group of tool calls it follows, so it sits where the image
@@ -1217,6 +1218,9 @@ list enables or disables a server without opening it. Stored environment and hea
 sent to the page; leaving a value blank keeps the stored one. Connection tests, sign-in and per-tool
 switches are done in the TUI. Enabling or disabling rewrites `config.toml` without its comments.
 
+The MCP server of CodeAlta itself, which other applications connect to, has its own page (see "MCP
+server").
+
 A session uses MCP servers as in the terminal: the model activates one with `alta mcp activate <id>`,
 and the server's tools (`mcp__<server>__<tool>`) are part of the session from the model's next step
 of the same turn. A server stays active for that session while the app runs.
@@ -1250,7 +1254,8 @@ The normal launch (`alta`, `alta --dev`) starts the plugin runtime like the term
 window's page loads:
 
 - The built-in plugins are the terminal's, under the same ids (`mcp`, `git`, `statistics`), so one
-  `[plugins.<id>]` configuration applies to both. They run as backends: the MCP plugin gives sessions
+  `[plugins.<id>]` configuration applies to both, and one of the window's own, `ui`, which gives a
+  session the tools that see and drive the window (see "UI tools"). They run as backends: the MCP plugin gives sessions
   the `alta mcp` commands, its prompt guidance and the tools of activated servers; the Git plugin
   gives sessions of CodeAlta-managed providers the `gh`, `glab` and `az` tools (each when its CLI is
   installed), run in the session's project; the Statistics plugin gives `alta statistics`. The MCP
@@ -1882,6 +1887,99 @@ sessions of its own. Automations exist in CodeAlta Desktop only. The sources are
 
 Each run takes one of the commands the host accepts in one run of the application, with the sends of the
 page and the reminders: the desktop keeps 4,096 of them.
+
+## UI tools
+
+A session can see and drive the window it runs in. The tools are those of
+[Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp), with the same names, arguments
+and result text, so that a model that knows them uses these unchanged. They come from the browser automation
+of NeoAstra (`NeoAutomation`), which works inside the page with DOM APIs and is the same on WebView2,
+WKWebView and WebKitGTK. The sources are in `Desktop/Ui/` (the tools and their plugin) and
+`frontend/src/monaco/automationTyping.ts` (text in the editors).
+
+- **The tools.** `take_snapshot` (the elements of the page as text, each with a `uid`), `take_screenshot`,
+  `click`, `click_at`, `hover`, `drag`, `fill`, `fill_form`, `type_text`, `press_key`, `upload_file`,
+  `handle_dialog`, `wait_for`, `evaluate_script`, `list_console_messages`, `get_console_message`,
+  `list_network_requests`, `get_network_request`, `list_pages`, `select_page`, `navigate_page` and
+  `resize_page`. `new_page` and `close_page` are left out: the pages are the windows of the application,
+  not those of a browser. The view only loads the application's own document, so `navigate_page` is of use
+  with the type `reload`.
+- **They are tools, not `alta` commands.** A result holds a text and images, which an `alta` command cannot
+  return.
+- **On request.** The tools are two dozen, so a session does not carry them until it asks for them.
+  `alta ui activate` registers them in the running turn (`toolsAvailable: now`); the later runs of that
+  session start with them, until `alta ui deactivate` or the end of the application. `alta ui status` says
+  whether the session has them. A line of the developer instructions of every session says so too, and how to
+  get them ("UI tools: inactive. `alta ui activate` gives this session…"): this is how an agent that is asked
+  to look at the window finds them. A caller that is no session cannot turn them on (`ui.noSession`).
+- **A built-in plugin.** The tools, the `alta ui` commands and the line of instructions come from the plugin
+  `ui` ("UI tools"), which only the window has. A plugin reaches every session the same way: the ones the
+  window sends to, and the ones another session creates with `alta session`. `[plugins.ui]` with
+  `enabled = false` turns it off, and so does everything that turns plugins off. A host that has the user
+  review the commands of its sessions (`--review-owned-command-permissions`) does not have the plugin: a
+  session that drives the window could answer the review itself.
+- **Files.** `take_screenshot` and `take_snapshot` take a `filePath` to save their result instead of
+  returning it. A relative path starts from the folder the session works in (its git worktree, or the folder
+  of its project), and the file has to be in that folder or in the folder of the tools (`ui` in the
+  application data directory). The automation only writes into the folder of the tools: the file is saved
+  there, then moved. The files the other tools read (`upload_file`, the `sourcePath` of `evaluate_script`)
+  are in the folder of the tools.
+- **Images.** A screenshot goes to the model with the text of the result, as any image a tool returns: the
+  timeline shows it in an **Image read** card (see "Images a tool gives the model").
+- **Editors.** The prompt and the code editors are Monaco editors, which take their text from the browser's
+  own text input (EditContext). No event of a tool feeds it. The page therefore types the characters of
+  such key events itself, and replaces the text of an editor when `fill` names one (the event
+  `codealta:fill`, sent by the host when the automation says that the element cannot be filled). What the
+  user types never goes through this.
+- **Window size.** `resize_page` gives the page the size it is asked for. The automation adds what the window
+  has beyond the page, counting the window in the pixels of the screen and the page in its own: on a display
+  that scales, the host asks again with a size corrected by what the page shows.
+- **Limits.** Those of the automation: input is dispatched as DOM events (`isTrusted` is false), so CSS
+  `:hover` does not apply and a native popup does not open; the caption buttons of the title bar are not part
+  of the page; a screenshot needs a visible window on Windows. Sessions run at the same time against one
+  window: two sessions that drive it get in each other's way.
+
+## MCP server
+
+CodeAlta Desktop is an MCP server: another application sees and drives the window, and runs `alta`
+commands, through it. It is what drives the developer instance when CodeAlta is developed (see `AGENTS.md`).
+The sources are in `Desktop/Mcp/`, `Desktop/Rpc/McpHostRpc.cs` and `frontend/src/mcpHost/`.
+
+- **Transport.** Streamable HTTP, with the official C# SDK (`ModelContextProtocol.AspNetCore`) on a Kestrel
+  server of its own: nothing is read from the folder the application was started in (no settings file, no
+  environment variable), and the server listens neither to the console nor to the signals of the process.
+  Requests share no state: a client has nothing to set up again after the application restarts. The
+  package brings the ASP.NET Core shared framework, which the .NET SDK a tool is installed with has.
+- **Address.** `http://127.0.0.1:2582/mcp`. The developer instance (`--dev`) has port 2583, so that both run
+  side by side; an instance on explicit roots takes a free port, as several of them run at once. When the
+  port of the application's own choice is taken, it takes a free one. `--mcp-port <port>` (0 for a free
+  port) and `--mcp-host <address>` (`localhost` or an IP address), with any start that opens the window, say
+  where the server listens; a port named this way is not replaced when it is taken: the server then does not
+  listen, and Settings says why. The address of the running server is in `mcp_url.txt` beside the lock of the
+  instance (`~/.alta/mcp_url.txt`, `~/.alta/dev/mcp_url.txt`); the file is removed when the server stops.
+- **Tools.** The UI tools, under the names above, and `alta`: the tool the sessions have (same description
+  and arguments), for a caller of the kind `mcp` that belongs to no session. A relative path starts from the
+  folder the application was started in. The tools an agent works on a project with (files, shell) are not
+  offered: a client is an application that has its own. A client saves a file (`filePath`) in the folder of a
+  project of the catalog or in the folder of the tools. The server listens before the host runs; `alta`
+  joins the tools once it does. A client creates sessions and sends to them without the window asking: after
+  each of its `alta` commands the page is told (`sessions-changed`, a notice of the shell) and reads its
+  sessions again.
+- **Who is answered.** A client has the control of the application that its user has. On the loopback address
+  the server answers the programs of this computer, and no page of a browser: a request whose `Host` is not
+  the loopback address or `localhost` (a name an attacker resolves to this computer), and a request with the
+  `Origin` of a page that is not served from this computer, are refused (403). A server other computers can
+  reach (`--mcp-host` with another address) asks every request for an access token
+  (`Authorization: Bearer <token>`, else 401); the token is created once and kept in `mcp_token.txt` beside
+  the address.
+- **Settings > CodeAlta MCP server** has the switch (**Run the MCP server**), the address, the configuration
+  to paste into a client (`mcpServers` with `"type": "http"` and the address, and the access token as a
+  header when there is one; the server is named `codealta`, or `codealta-dev` in the developer instance) and
+  the tools. The switch starts and stops the server at once. It is kept in `preferences.json` of the
+  application data directory (`"mcpServer": false`; the default, on, is not written), so the developer
+  instance has its own. A server that is on and cannot listen shows why.
+- **Host API.** `mcpHost.status` and `mcpHost.setEnabled` answer `state` (`running`, `stopped`, `failed`),
+  `enabled`, `url`, `token`, `error` and `tools`.
 
 ## Commands, help and keyboard shortcuts
 

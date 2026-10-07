@@ -137,6 +137,7 @@ import { closeApplicationWindow, logoUrl, useWindowTitleBar, WindowBrand, Window
 import { createPluginEventsRead } from "./pluginEvents";
 import { ProjectContext } from "./ProjectContext";
 import { WorktreeSettings } from "./worktrees/WorktreeSettings";
+import { McpHostSettings } from "./mcpHost/McpHostSettings";
 import { persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
 import type { ComposerChromeValue } from "./composerChrome";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
@@ -166,13 +167,14 @@ import "./explorer/explorer.css";
 import "./terminal/terminal.css";
 import "./automations/automations.css";
 import "./worktrees/worktrees.css";
+import "./mcpHost/mcpHost.css";
 
 type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; epoch: string | null;
   ready: () => boolean; navigate: (action: MessageNavigation) => void;
   latestReady: () => boolean; latest: () => void; cancelLatest: () => void }>;
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
-type View = "workspace" | "appearance" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees";
+type View = "workspace" | "appearance" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "mcpHost";
 type SettingsSection = Exclude<View, "workspace">;
 const paneLayoutStorageKey = "codealta.desktop.panes.v1";
 
@@ -858,6 +860,8 @@ function App() {
           else if (notice.kind === "exit-requested") requestExit.current();
           else if (notice.kind === "confirm-exit") setExitQuestionFor({ sessions: notice.runningSessions, terminals: notice.busyTerminals });
           else if (notice.kind === "confirm-close" && !exitPending.current) setCloseQuestion(true);
+          // An application that drives CodeAlta through its MCP server creates sessions without the window asking.
+          else if (notice.kind === "sessions-changed") readSessionList.current();
         }
       } catch { /* The bridge is gone; the window's own close still works. */ }
     })();
@@ -2379,6 +2383,7 @@ function App() {
       : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
       : settingsSection === "worktrees" ? <WorktreeSettings epoch={owned ? status!.hostEpoch : null}
         pick={owned ? initial => pickFolder(desktopShell.pickFolder, t("Folder for worktrees"), initial) : undefined} />
+      : settingsSection === "mcpHost" ? <McpHostSettings epoch={owned ? status!.hostEpoch : null} developer={status?.developerMode ?? false} />
       : settingsSection === "skills" ? <SkillSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
       : settingsSection === "mcp" ? <McpServerSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
       : settingsSection === "prompts" ? <AgentPromptSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
@@ -2508,7 +2513,7 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
     ["Agent & models", [["providers", "Providers", "provider"], ["models", "Models", "model"], ["prompts", "Agent prompts", "assistant"], ["skills", "Skills", "skill"],
       ["worktrees", "Worktrees", "worktree"]]],
     ["Extensions", [["plugins", "Plugins", "plugin"], ["mcp", "MCP Servers", "server"]]],
-    ["Advanced", [["config", "Configuration file", "config"]]],
+    ["Advanced", [["config", "Configuration file", "config"], ["mcpHost", "CodeAlta MCP", "remote"]]],
     ["Diagnostics", [["logs", "Application Logs", "logs"], ["about", "About", "info"]]],
   ];
   return <AppWindow storageKey="codealta.desktop.window.settings.v1" className="settings-dialog" titleId="settings-title" title={t("Settings")}

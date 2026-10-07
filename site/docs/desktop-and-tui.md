@@ -99,6 +99,10 @@ An automation sends a prompt by itself: every morning, every Friday, or when an 
 
 A session can work in its own git worktree, on its own branch, so that several sessions change the same project at the same time. See [Worktrees](worktrees.md).
 
+### UI tools and MCP server
+
+An agent can take a screenshot of the window, read what it shows, click and type. Other applications do the same through the MCP server of CodeAlta Desktop. See [UI tools and MCP server](ui-tools.md).
+
 ### Review changes
 
 Click the `+` / `−` numbers in the prompt bar, or the changes button of a project in the sidebar, to open the Changes tab of the project. It lists the changed files and recent commits and shows a syntax-highlighted diff of the selected file. See [Changes](workspace.md#changes-desktop).
@@ -146,6 +150,7 @@ When a new version is available, the desktop app shows a notice with **Update an
 | Terminal | Terminals in tabs, listed in the sidebar; agents can use them | Not available |
 | Automations | Prompts that run on a schedule, on a new issue or pull request, or on demand | Not available |
 | Worktrees | Start a session in a new git worktree; list, remove and switch branches in the Changes tab | Sessions run in their worktree; not created or removed there |
+| UI tools and MCP server | Agents see and drive the window; other applications connect to the MCP server of CodeAlta | Not available |
 | Sessions of no project | **Chats**, first in the sidebar | **Global sessions** |
 | Favorite projects | Listed first in the sidebar | Not available |
 | Settings | One window with a page per area | One dialog per area |

@@ -43,6 +43,24 @@ internal static class DesktopPlugins
     ];
 
     /// <summary>
+    /// The built-in plugins of a window: the ones of both applications, and the one that gives a session the
+    /// tools that see and drive the window.
+    /// </summary>
+    /// <param name="ui">The tools of the window.</param>
+    /// <param name="sessions">The sessions that have them.</param>
+    /// <param name="reviewsCommands">
+    /// Whether the user reviews the commands of the sessions. Such a host gives no session the tools that drive
+    /// the window: a session could answer the review itself.
+    /// </param>
+    /// <exception cref="ArgumentNullException"><paramref name="ui"/> or <paramref name="sessions"/> is null.</exception>
+    internal static IReadOnlyList<BuiltInPluginDefinition> ForWindow(Ui.IDesktopUi ui, Ui.DesktopUiSessions sessions, bool reviewsCommands)
+    {
+        ArgumentNullException.ThrowIfNull(ui);
+        ArgumentNullException.ThrowIfNull(sessions);
+        return reviewsCommands ? BuiltIns : [.. BuiltIns, Ui.DesktopUiPlugin.Definition(ui, sessions)];
+    }
+
+    /// <summary>
     /// Whether the user turned plugins off for this launch (<c>CODEALTA_DISABLE_PLUGINS=1</c>): no plugin is
     /// built, loaded or activated, the built-in ones included.
     /// </summary>

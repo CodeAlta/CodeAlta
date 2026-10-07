@@ -1,5 +1,5 @@
 [plugins]
 [plugins.mcp]
 [plugins.mcp.servers]
-[plugins.mcp.servers.chrome-devtools]
+[plugins.mcp.servers.codealta-dev]
 enabled = true

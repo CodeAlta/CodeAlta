@@ -96,6 +96,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | `editor` | Show the files of a project to the user in the code editor. Only in CodeAlta Desktop. |
 | `terminal` | List, create, read, type in, rename, show and close the terminals of the window. Only in CodeAlta Desktop. |
 | `automation` | List, create, run, enable, disable and delete automations, and find the one that started a session. Only in CodeAlta Desktop. |
+| `ui` | Give the calling session the tools that see and drive the window, or take them back. Only in CodeAlta Desktop (a plugin root, see below). |
 
 `note` is a compatibility alias for `notes`. Prefer the plural `notes` group because it names the sidebar panel and the single sticky notes document. `skills activate` and `skills_activate` are compatibility aliases for `skill activate`. Prefer the singular `skill` group in new prompts and docs.
 
@@ -529,6 +530,23 @@ alta mcp tool call --server <server> --tool <raw-tool-name> --arguments {"key":"
 ```
 
 MCP config/list/status commands read fixed JSON config paths and report overlay/shadowing without connecting to servers. MCP server add/remove mutates JSON MCP config only; enable/disable mutates TOML policy only. MCP auth commands manage CodeAlta-owned OAuth token cache state for HTTP/SSE servers; they report cache status, run explicit browser login, or delete cached tokens without writing tokens to MCP JSON. `alta mcp activate <server>...` records selected servers for the current session and performs bounded tool discovery so tools can be registered on future agent runs. MCP tool commands lazily connect to stdio and HTTP/SSE servers, apply policy filters, emit redacted diagnostics, and return raw server/tool names plus stable aliases such as `mcp__server__tool`. Direct policy-controlled MCP agent tools use those same aliases; agents can use `alta mcp tool ...` commands for discovery, diagnostics, and manual calls. See [MCP support](mcp.md).
+
+The built-in `ui` plugin of CodeAlta Desktop contributes the `ui` root:
+
+```text
+alta ui activate
+alta ui status
+alta ui deactivate
+```
+
+The UI tools (`take_snapshot`, `take_screenshot`, `click`, `fill`, `press_key`, `evaluate_script` and the
+others, named as in Chrome DevTools MCP) see and drive the window the session runs in. They are tools and not
+`alta` commands, because their results hold images. `alta ui activate` gives them to the calling session: the
+record `alta.ui.activate` has `toolsAvailable` (`now` when an agent run called the command: the tools are
+registered in the running turn and are called in the next step; `next_run` otherwise) and the names of the
+tools. The session keeps them on its later runs until `alta ui deactivate` (`alta.ui.deactivate`) or the end
+of the application. `alta ui status` (`alta.ui.status`) says whether the calling session has them. A caller
+that is no session gets `alta.ui.error` with the code `ui.noSession`. See `doc/desktop.md`, UI tools.
 
 The built-in statistics plugin contributes a small `statistics` root:
 

@@ -1,0 +1,13 @@
+/* Settings page of the MCP server of the application. */
+.mcp-host-settings .mcp-host-switch { margin: 6px 0 14px; }
+.mcp-host-field { display: grid; gap: 4px; max-width: 720px; margin-bottom: 12px; }
+.mcp-host-field > span { color: var(--muted); font-size: 12px; }
+.mcp-host-field input { font-family: var(--bp-typography-family-mono); font-size: 12px; }
+.mcp-host-block { max-width: 720px; margin-top: 16px; }
+.mcp-host-block > header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.mcp-host-block > header h2 { flex: 1 1 auto; margin: 0; font-size: 13px; font-weight: 600; }
+.mcp-host-count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.mcp-host-configuration { margin: 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--panel-2); font-size: 12px; line-height: 1.5; user-select: text; }
+.mcp-host-tools { display: flex; flex-wrap: wrap; gap: 4px; }
+.mcp-host-tools .bp6-tag { font-family: var(--bp-typography-family-mono); font-size: 11px; }

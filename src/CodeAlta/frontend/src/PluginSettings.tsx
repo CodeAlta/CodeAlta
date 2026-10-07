@@ -12,6 +12,7 @@ const builtIn: readonly { id: string; name: string; description: MessageKey }[] 
   { id: "mcp", name: "MCP", description: "Connects Model Context Protocol servers and exposes their tools." },
   { id: "git", name: "Git", description: "Issue picker for GitHub, GitLab and Azure DevOps repositories, and their CLIs when available." },
   { id: "statistics", name: "Statistics", description: "Per-turn and session statistics." },
+  { id: "ui", name: "UI tools", description: "Tools an agent sees and drives this window with, when its session asks for them." },
 ];
 const stateIntent: Record<string, Intent> = { Enabled: "success", Failed: "danger", Changed: "warning", Disabled: "none", Configured: "none" };
 // What the running application did with an enabled plugin, when that is not simply "running".

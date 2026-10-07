@@ -220,7 +220,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         PluginUiService? pluginCommands = null;
         WorkspaceService? workspace = null;
         NeoWindow? window = null;
+        Mcp.DesktopMcpServer? mcp = null;
         IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null, chromeLifetime = null, instanceLifetime = null;
+        IAsyncDisposable? uiLifetime = null;
         var bodyFailed = false;
         try
         {
@@ -230,6 +232,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             DesktopAssetPaths.EnsureUsable(assets, manifest);
             var appearance = DesktopAppearance.Load(options.DataRoot);
             appearance.ApplyToBrowser();
+            // The tools that see and drive the window, for the sessions that ask for them and for the MCP server.
+            // They are on before the view loads its first document: they then know the page from its first message.
+            var ui = new Ui.DesktopUiAutomation(application, Path.Combine(options.DataRoot, "ui"));
+            uiLifetime = ui;
+            var uiSessions = new Ui.DesktopUiSessions();
             window = application.CreateWindow(DesktopWindowChrome.WindowOptions(options.Developer, appearance));
             application.MainWindow = window;
             window.Closed += (_, _) => closed.TrySetResult();
@@ -252,6 +259,32 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 if (!allowClose) shell.Close(request);
                 return ValueTask.CompletedTask; // Never await host cleanup inside the native deadline.
             };
+            // The MCP server other applications drive the window through. It listens from now on, with the tools
+            // of the window; `alta` joins them once the host runs. A client saves a file in the folder of the
+            // tools or in a project.
+            Mcp.DesktopMcpTool? altaTool = null;
+            var windowTools = Mcp.DesktopMcpTools.Window(ui, async token =>
+            {
+                var folders = new List<string> { ui.FilesDirectory };
+                if (_hostCreation is { IsCompletedSuccessfully: true } created)
+                {
+                    try
+                    {
+                        var projects = await created.Result.ProjectCatalog.LoadAsync(token).ConfigureAwait(false);
+                        folders.AddRange(projects.Where(static project => !project.Archived && Directory.Exists(project.ProjectPath)).Select(static project => project.ProjectPath));
+                    }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+                    {
+                        // The catalog cannot be read: a file is saved in the folder of the tools only.
+                    }
+                }
+
+                return new Ui.DesktopUiFiles(ui.FilesDirectory, folders, $"the folder of a project of CodeAlta, or {ui.FilesDirectory}");
+            });
+            IReadOnlyList<Mcp.DesktopMcpTool> McpTools() => Volatile.Read(ref altaTool) is { } alta ? [.. windowTools, alta] : windowTools;
+            mcp = new Mcp.DesktopMcpServer(Mcp.DesktopMcpEndpoint.For(options), McpTools, options.StateRoot ?? options.CatalogRoot!,
+                DesktopCommandLine.Version, shell.McpServer, shell.SetMcpServer);
+            _ = mcp.StartAsync(); // A server that cannot listen says so in Settings: the application does not wait for it.
             // The installed tool becomes an application of this desktop; the page says so the first time.
             if (!options.Developer && roots.Home is null)
                 _ = Task.Run(() => { if (DesktopIntegration.Ensure(options.DataRoot, DesktopCommandLine.Version)) shell.NotifyEntryAdded(); });
@@ -299,7 +332,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 StartPlugins = pluginAlta is not null, OwnsLogging = false, IsHeadless = false, HasInteractiveUi = true,
                 PluginFrontend = PluginFrontends.Desktop, PluginAuthoringProfile = PluginAuthoringProfile.Terminal,
                 PluginStartupFeedback = new DesktopPluginStartupFeedback(startupStatus),
-                PluginBuiltIns = DesktopPlugins.BuiltIns, PluginSafeMode = DesktopPlugins.SafeMode,
+                PluginBuiltIns = DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions), PluginSafeMode = DesktopPlugins.SafeMode,
                 PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi),
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!),
@@ -309,6 +342,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             _closeFlow = CloseOwnedHostWhenRequestedAsync(closeRequested.Task, _hostCreation, async () =>
             {
                 await workspacePrepared.Task;
+                if (mcp is not null) await mcp.DisposeAsync(); // No client starts a command on a host that is closing.
                 if (workspace is not null) await Task.WhenAll(workspace.CloseImportsAsync(), workspace.CloseSessionsAsync());
                 if (automations is not null) await automations.DisposeAsync(); // Nothing more is started; sessions end with the host.
                 if (terminals is not null) await terminals.CloseAsync(); // The programs of the terminals end with the application.
@@ -432,9 +466,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     new Automations.AutomationStateStore(Path.Combine(host.CatalogOptions.StateRoot, "automations.json"), pausedByDefault: options.Developer),
                     new Automations.AutomationRunner(host), TimeProvider.System, TimeZoneInfo.Local, new Automations.GitAutomationFeed());
                 // A host that has the user review the commands of its sessions lets no session type in a terminal.
-                DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
+                var altaCommands = DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
                     new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
                     new DesktopAltaAutomations(automations, host.ProjectCatalog), worktrees);
+                // The clients of the MCP server run the same commands, as callers that belong to no session.
+                Volatile.Write(ref altaTool, Mcp.DesktopMcpTools.Alta(altaCommands, roots.Project, shell.NotifySessionsChanged));
+                uiSessions.WorkFolder = (sessionId, token) => SessionFolderAsync(host, sessionId, token);
                 automations.Start();
                 workspacePrepared.TrySetResult();
                 {
@@ -511,11 +548,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddWorktreesService(new WorktreesService(worktrees, host.ProjectCatalog, worktreeConfig, host.RuntimeService.ListBusySessionFolders, epoch));
                     // A terminal opened from a session starts in the folder that session works in: its worktree
                     // while that folder is there, the folder of its project otherwise.
-                    builder.AddTerminalsService(new TerminalsService(terminals, host.ProjectCatalog, epoch, async (sessionId, token) =>
-                        (await host.WorkspaceReads.ReadSnapshotAsync(token).ConfigureAwait(false)).Sessions
-                            .FirstOrDefault(session => string.Equals(session.SessionId, sessionId, StringComparison.Ordinal)) is { } session
-                            ? !string.IsNullOrWhiteSpace(session.WorktreePath) && Directory.Exists(session.WorktreePath) ? session.WorktreePath : session.WorkspacePath
-                            : null));
+                    builder.AddTerminalsService(new TerminalsService(terminals, host.ProjectCatalog, epoch,
+                        async (sessionId, token) => await SessionFolderAsync(host, sessionId, token).ConfigureAwait(false)));
+                    builder.AddMcpHostService(new McpHostService(mcp, McpTools, epoch));
                     builder.AddPromptImagesService(new PromptImagesService(host.WorkspaceReads, epoch));
                     builder.AddComposerStatusService(new ComposerStatusService(host.ProjectCatalog, epoch, roots.Home, host.PluginRuntime));
                     pluginCommands = pluginAlta is null ? new PluginUiService() : new PluginUiService(host.ProjectCatalog, host.PluginRuntime, pluginUi, epoch);
@@ -561,6 +596,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             }
             catch (Exception) { bodyFailed = true; }
         }
+        if (mcp is not null)
+        {
+            // Whatever became of the host: nothing answers a client any more.
+            try { await mcp.DisposeAsync(); }
+            catch (Exception failure) { LogManager.GetLogger("CodeAlta.Desktop").Error(failure, "The MCP server did not stop"); }
+        }
         var hostConfirmed = _hostCreation is null ||
             (_hostCreation.IsCompletedSuccessfully && _hostDisposal?.IsCompletedSuccessfully == true);
         if (!hostConfirmed)
@@ -578,7 +619,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             return; // No native-resource disposal, lease release or ForceShutdown on this path.
         }
         var nativeFailed = false;
-        foreach (var resource in new[] { bindingLifetime, viewLifetime, rpcLifetime, instanceLifetime, chromeLifetime, environmentLifetime })
+        foreach (var resource in new[] { uiLifetime, bindingLifetime, viewLifetime, rpcLifetime, instanceLifetime, chromeLifetime, environmentLifetime })
         {
             if (resource is null) continue;
             try
@@ -616,6 +657,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         _nativeConfirmed = true;
         application.ForceShutdown(); // Only after confirmed host and native-resource disposal.
     }
+
+    // The folder a session works in: its git worktree while that folder is there, the folder of its project otherwise.
+    private static async ValueTask<string?> SessionFolderAsync(CodeAltaHost host, string sessionId, CancellationToken cancellationToken)
+        => (await host.WorkspaceReads.ReadSnapshotAsync(cancellationToken).ConfigureAwait(false)).Sessions
+            .FirstOrDefault(session => string.Equals(session.SessionId, sessionId, StringComparison.Ordinal)) is { } session
+            ? !string.IsNullOrWhiteSpace(session.WorktreePath) && Directory.Exists(session.WorktreePath) ? session.WorktreePath : session.WorkspacePath
+            : null;
 
     private async Task CloseOwnedHostWhenRequestedAsync(Task closeRequested, Task<CodeAltaHost> creation, Func<Task> closeImports)
     {
@@ -665,6 +713,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddProjectFilesService(new ProjectFilesService());
             builder.AddProjectGitService(new ProjectGitService());
             builder.AddWorktreesService(new WorktreesService());
+            builder.AddMcpHostService(new McpHostService());
             builder.AddTerminalsService(new TerminalsService());
             builder.AddAutomationsService(new AutomationsService());
             builder.AddPromptImagesService(new PromptImagesService());

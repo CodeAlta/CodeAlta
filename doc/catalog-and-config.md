@@ -25,6 +25,10 @@ CodeAlta keeps user-owned durable state under a global root and project-local `.
 | `automations.json` | Desktop `AutomationStateStore` | What an instance remembers of the automations: whether they are paused, their runs, what the event triggers have seen and which automations of a project the user allowed (see `doc/desktop.md`). It is under the state root. |
 | `sessions/internal/` | Work-session catalog | Internal session linkage descriptors still read by the catalog. |
 
+CodeAlta Desktop also writes two files of its MCP server in the state root of the instance (see below):
+`mcp_url.txt`, the address of the server while it runs, and `mcp_token.txt`, the access token of a server
+that other computers can reach (see `doc/desktop.md`, MCP server).
+
 ### Instance state and the developer instance
 
 `CatalogOptions.StateRoot` is the root of what one running instance alone writes: `sessions/` (journals and prompt-image copies), `cache/cache.sqlite3`, `ui-state.yaml`, `saved_prompts/`, `automations.json` and the legacy `threads/internal/`. It defaults to the global root, so the layout above is unchanged for the normal instance, whose lock is `~/.alta/alta.lock`.

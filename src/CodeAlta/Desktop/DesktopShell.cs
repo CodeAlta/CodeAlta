@@ -28,8 +28,9 @@ internal enum DesktopCloseAction
 /// <summary>
 /// A notice for the page: <c>exit-requested</c> (the tray's Exit, or a closed window that cannot stay hidden),
 /// <c>confirm-exit</c>, which carries the number of running sessions and of terminals that run a command,
-/// <c>confirm-close</c> (the window was closed, and the user has not said yet what that does) and
-/// <c>entry-added</c> (the application was just added to the desktop's applications).
+/// <c>confirm-close</c> (the window was closed, and the user has not said yet what that does),
+/// <c>entry-added</c> (the application was just added to the desktop's applications) and
+/// <c>sessions-changed</c> (something outside the window may have created or changed sessions).
 /// </summary>
 internal sealed record DesktopShellEvent(string Kind, int RunningSessions, int BusyTerminals = 0);
 
@@ -119,6 +120,12 @@ internal sealed class DesktopShell
         lock (_gate) _entryAdded = true;
         Publish(new("entry-added", 0));
     }
+
+    /// <summary>
+    /// Tells the page that something outside it may have created or changed sessions (a command of a client of
+    /// the MCP server): it reads its list again.
+    /// </summary>
+    internal void NotifySessionsChanged() => Publish(new("sessions-changed", 0));
 
     /// <summary>Whether the tray icon exists: without it a hidden window could not be brought back.</summary>
     internal bool TrayAvailable { get { lock (_gate) return _tray; } }
@@ -259,6 +266,17 @@ internal sealed class DesktopShell
     {
         DesktopPreferences preferences;
         lock (_gate) preferences = _preferences = _preferences with { OnClose = value };
+        preferences.Save(_dataRoot);
+    }
+
+    /// <summary>Whether the MCP server of the application is turned on.</summary>
+    internal bool McpServer { get { lock (_gate) return _preferences.McpServer; } }
+
+    /// <summary>Turns the MCP server on or off for the next starts; the server itself is started and stopped by its owner.</summary>
+    internal void SetMcpServer(bool value)
+    {
+        DesktopPreferences preferences;
+        lock (_gate) preferences = _preferences = _preferences with { McpServer = value };
         preferences.Save(_dataRoot);
     }
 

@@ -47,6 +47,7 @@ for source plugins:
 | [Git](git.md) | `#` issue lookup in GitHub, GitLab and Azure DevOps repositories, and the `gh`, `glab` and `az` agent tools when these CLIs are installed. |
 | [MCP](mcp.md) | Model Context Protocol server configuration, `alta mcp` commands, session-activated MCP agent tools, and MCP server management. |
 | [Statistics](statistics.md) | Transient per-turn/session statistics timeline cards and a `statistics estimate` live-tool command. |
+| [UI tools](../ui-tools.md) | In CodeAlta Desktop: the tools an agent sees and drives the window with, when its session asks for them. |
 
 ## Manage plugins
 

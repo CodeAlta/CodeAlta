@@ -100,6 +100,22 @@ test("a prompt sent while the session works is queued or steers, and is never re
     await command("Page.navigate", { url: pathToFileURL(page).href });
     assert.equal(await wait(`!!document.querySelector('#session-prompt') && ${idle}`), true, exceptions.join("\n"));
 
+    // The UI tools type with events of the page, which the browser's own text input does not take: the editor
+    // types their characters, and one event replaces its text.
+    await evaluate("document.querySelector('#session-prompt').focus()");
+    assert.equal(await wait("!!document.activeElement?.closest('#session-prompt')"), true);
+    await evaluate(`(()=>{const node=document.activeElement;for(const key of ['O','k',' ','!']){
+      node.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true,cancelable:true}));node.dispatchEvent(new KeyboardEvent('keyup',{key,bubbles:true,cancelable:true}));}})()`);
+    assert.equal(await wait("promptText()==='Ok !'"), true);
+    assert.equal(await evaluate("!document.activeElement.dispatchEvent(new CustomEvent('codealta:fill',{bubbles:true,cancelable:true,detail:'replaced by a tool'}))"), true);
+    assert.equal(await wait("promptText()==='replaced by a tool'"), true);
+    // A shortcut is no character.
+    await evaluate(`(()=>{const node=document.activeElement;
+      node.dispatchEvent(new KeyboardEvent('keydown',{key:'b',ctrlKey:true,bubbles:true,cancelable:true}));node.dispatchEvent(new KeyboardEvent('keyup',{key:'b',ctrlKey:true,bubbles:true,cancelable:true}));})()`);
+    assert.equal(await evaluate("promptText()"), "replaced by a tool");
+    assert.equal(await evaluate("!document.activeElement.dispatchEvent(new CustomEvent('codealta:fill',{bubbles:true,cancelable:true,detail:''}))"), true);
+    assert.equal(await wait("promptText()===''"), true);
+
     // An idle session takes the prompt at once; the Stop button then holds the Send slot.
     await write("first"); await enter();
     assert.equal(await wait(`fixture.sendCalls.length===1 && ${running} && promptText()===''`), true);

@@ -36,25 +36,27 @@ All .NET tests, the frontend tests (`npm test`) and the Lunet website build must
 
 ## Working on the desktop WebApp
 
-The desktop UI (`src/CodeAlta`, React frontend in `src/CodeAlta/frontend`) runs in a WebView2 window. Drive the running window through the Chrome DevTools Protocol instead of guessing from the source: look at it, click in it, read its DOM and console.
+The desktop UI (`src/CodeAlta`, React frontend in `src/CodeAlta/frontend`) runs in a native window. Drive the running window through its MCP server instead of guessing from the source: look at it, click in it, read its DOM and console.
 
 **1. Build.** `dotnet build CodeAlta/CodeAlta.csproj` from `src` builds the host and the frontend (it restores npm packages and regenerates the typed RPC client `src/CodeAlta/obj/neoastra/neoastra.ts`). The frontend alone is checked from `src/CodeAlta/frontend` with `node node_modules/typescript/bin/tsc --noEmit` and one test file with `node node_modules/tsx/dist/cli.mjs --test src/<name>.test.ts`, or `src/<feature>/<name>.test.ts` for a feature folder (`npm test` runs them all). The `src/*.browser.test.ts` files start their own Edge; do not use them to look at the app.
 
-**2. Launch the developer instance with remote debugging.** `--dev` starts a second CodeAlta beside the normal one (see "Developer instance" below), and WebView2 opens a DevTools port when this variable is set; the MCP configuration expects port 9222. From the repository root (PowerShell):
+**2. Launch the developer instance.** `--dev` starts a second CodeAlta beside the normal one (see "Developer instance" below). From the repository root (PowerShell):
 
 ```powershell
-$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
 Start-Process src\CodeAlta\bin\Debug\net10.0\alta.exe -ArgumentList "--dev" -WorkingDirectory (Get-Location)
 ```
 
-`http://127.0.0.1:9222/json/list` then lists one page, `app://codealta/index.html`. The window is titled **CodeAlta (dev)** and shows a **DEV** tag beside its name. `alta.exe` is a windowed executable: it has no console. Started from a shell, it runs the window in a second `alta.exe` process and exits once the window is shown, with code 0; a non-zero exit code is a startup failure, and the log is under `%LOCALAPPDATA%\CodeAlta\desktop-dev\logs`. A second developer instance shows the window of the running one and exits at once. Add `--wait` to keep the window in the process you started.
+The window is titled **CodeAlta (dev)** and shows a **DEV** tag beside its name. Its MCP server listens at `http://127.0.0.1:2583/mcp` (the normal instance has port 2582); `~/.alta/dev/mcp_url.txt` holds that address while the instance runs, and `--mcp-port <port>` asks for another port. `alta.exe` is a windowed executable: it has no console. Started from a shell, it runs the window in a second `alta.exe` process and exits once the window is shown, with code 0; a non-zero exit code is a startup failure, and the log is under `%LOCALAPPDATA%\CodeAlta\desktop-dev\logs`. A second developer instance shows the window of the running one and exits at once. Add `--wait` to keep the window in the process you started.
 
-**3. Connect.** Two checked-in files register the same `chrome-devtools` MCP server ([chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp)), attached to `http://127.0.0.1:9222`: `.mcp.json` for agents that read project MCP configuration (Claude Code and others), and `.alta/mcp.json` for CodeAlta itself. Both start it with `npx -y chrome-devtools-mcp@latest …`, so `npx` must be on the `PATH` of the application that starts the server. On Windows with Node managed by fnm, add the default version's folder (`%APPDATA%\fnm\aliases\default`) to the user `PATH`. Start the app before the first tool call.
+**3. Connect.** Two checked-in files register that server as `codealta-dev`, over HTTP: `.mcp.json` for agents that read project MCP configuration (Claude Code and others), and `.alta/mcp.json` for CodeAlta itself. Nothing has to be installed. A client that connects when it starts needs the app running first, or a reconnection afterwards; a restart of the app needs neither, because the server keeps no session.
 
-- `list_pages` gives the page id; pass it as `pageId` to the other tools. The id changes each time the app restarts.
-- `take_snapshot` (accessibility tree with element ids) and `take_screenshot` show the window; `click`, `fill`, `type_text` and `press_key` act on it; `evaluate_script` runs JavaScript in the page; `list_console_messages` reads its console.
+- `take_snapshot` (the elements of the page, each with a `uid`) and `take_screenshot` show the window; `click`, `fill`, `type_text` and `press_key` act on it; `evaluate_script` runs JavaScript in the page; `list_console_messages` reads its console. The tools have the names and the arguments of [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp).
+- `take_screenshot` with a `filePath` saves the picture instead of returning it: in the folder of a project, or in the folder of the tools (`%LOCALAPPDATA%\CodeAlta\desktop-dev\ui`).
+- `alta` runs the commands of that instance, for example `{"args": ["session", "list"]}`: the caller belongs to no session.
 - The title bar's native caption buttons are not part of the page, so they are not in screenshots.
-- In a CodeAlta session the server starts inactive: activate it with the `alta mcp` command, then its tools (`mcp__chrome_devtools__…`) are available from the next turn.
+- In a CodeAlta session the server starts inactive: `alta mcp activate codealta-dev` registers its tools (`mcp__codealta_dev__…`) in the running turn.
+- A session of CodeAlta Desktop has the same tools for the window it runs in, without any server: `alta ui activate`.
+- On Windows, WebView2 still opens a DevTools port when `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222` is set before the start, for what these tools do not cover (performance traces, CSS inspection).
 
 **4. Change, rebuild, look again.** The executable and its assets are locked while the window is open. Close the developer window only, never every `alta` process (the normal instance may be the one you are running in):
 
@@ -62,7 +64,7 @@ Start-Process src\CodeAlta\bin\Debug\net10.0\alta.exe -ArgumentList "--dev" -Wor
 Get-Process alta | Where-Object MainWindowTitle -eq 'CodeAlta (dev)' | ForEach-Object { $_.CloseMainWindow() }
 ```
 
-Then build, launch again and call `list_pages` again. Check both themes and a narrow window when a change is visual.
+Then build and launch again. Check both themes and a narrow window (`resize_page`) when a change is visual.
 
 **5. Mind what is shared.** The developer instance has its own sessions, so sending prompts there is safe and its sessions are disposable. Everything else is the user's real profile: do not change settings, providers, prompts or skills, and do not rename, archive or add projects, unless the task asks for it. A window started without `--dev` is the normal instance, with the user's real sessions: look and navigate freely, but do not send prompts, rename or delete sessions there unless asked, and leave it as you found it.
 
@@ -74,9 +76,9 @@ Only one CodeAlta runs on a profile, because two processes must not write the sa
 | --- | --- |
 | `config.toml`, providers and their credentials (`auth/`), `mcp.json`, prompts, skills, plugins, color schemes (`color-schemes/`), the project catalog (`projects/`) | `sessions/` (journals, pasted images), `cache/cache.sqlite3`, `ui-state.yaml`, `saved_prompts/`, `logs/`, `alta.lock` |
 
-The desktop developer instance also has its own WebView data (`%LOCALAPPDATA%\CodeAlta\desktop-dev`: open tabs, drafts, theme), which is what lets it take its own debugging port. One developer instance runs at a time, terminal or desktop. It leaves the coordinator `~/.alta/AGENTS.md` as the normal instance wrote it, and on its first run takes over the normal instance's per-project provider/model preferences.
+The desktop developer instance also has its own WebView data (`%LOCALAPPDATA%\CodeAlta\desktop-dev`: open tabs, drafts, theme) and its own MCP port. One developer instance runs at a time, terminal or desktop. It leaves the coordinator `~/.alta/AGENTS.md` as the normal instance wrote it, and on its first run takes over the normal instance's per-project provider/model preferences.
 
-This is how CodeAlta is developed with CodeAlta: you run in the normal instance (desktop or terminal, any released or built `alta`/`altatui` that has this branch's MCP support), build the repository, start `alta.exe --dev` with the debugging port, and drive that window through the `chrome-devtools` MCP server. The terminal UI is checked the same way with `altatui --dev` in a separate console.
+This is how CodeAlta is developed with CodeAlta: you run in the normal instance (desktop or terminal, any released or built `alta`/`altatui` that has this branch's MCP support), build the repository, start `alta.exe --dev`, and drive that window through its MCP server (`codealta-dev`). The terminal UI is checked the same way with `altatui --dev` in a separate console.
 
 ## Contribution Rules (Do/Don't)
 

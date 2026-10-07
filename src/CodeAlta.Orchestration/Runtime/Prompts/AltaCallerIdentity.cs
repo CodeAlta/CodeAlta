@@ -5,7 +5,7 @@ namespace CodeAlta.LiveTool;
 /// </summary>
 public sealed record AltaCallerIdentity
 {
-    /// <summary>Gets the caller kind: <c>cli</c>, <c>agent</c>, <c>host</c>, or <c>plugin</c>.</summary>
+    /// <summary>Gets the caller kind: <c>cli</c>, <c>agent</c>, <c>host</c>, <c>plugin</c>, <c>reminder</c>, or <c>mcp</c> (a client of the MCP server of the desktop application).</summary>
     public required string Kind { get; init; }
 
     /// <summary>Gets the source CodeAlta session id, when the caller is associated with one.</summary>

@@ -127,7 +127,7 @@ public static class AltaSessionToolFactory
 
         var caller = new AltaCallerIdentity
         {
-            Kind = "agent",
+            Kind = string.IsNullOrWhiteSpace(options.CallerKind) ? "agent" : options.CallerKind,
             // A run names its own session: the session the user looks at may be another one.
             SourceSessionId = invocation.RunTools is not null ? invocation.SessionId
                 : options.SourceSessionIdProvider?.Invoke() ?? options.SourceSessionId,
@@ -334,6 +334,12 @@ public sealed record AltaSessionToolOptions
 
     /// <summary>Gets the source agent/session id, when known.</summary>
     public string? SourceAgentId { get; init; }
+
+    /// <summary>
+    /// Gets the kind of caller the commands see: <c>agent</c> when not set, which is what a session is. A host
+    /// that gives the tool to another kind of caller names it, such as <c>mcp</c> for a client of its MCP server.
+    /// </summary>
+    public string? CallerKind { get; init; }
 
     /// <summary>Gets the source project id, when known.</summary>
     public string? SourceProjectId { get; init; }

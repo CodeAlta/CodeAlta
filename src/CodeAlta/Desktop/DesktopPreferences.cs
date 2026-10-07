@@ -23,7 +23,8 @@ internal enum DesktopCloseBehavior
 /// the appearance. The page's own preferences (theme, language, layout) stay in the page.
 /// </summary>
 /// <param name="OnClose">What closing the window does.</param>
-internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose)
+/// <param name="McpServer">Whether the MCP server of the application runs: other applications drive the window through it.</param>
+internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool McpServer = true)
 {
     private const string FileName = "preferences.json";
     private const int MaximumFileBytes = 4096;
@@ -43,11 +44,13 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose)
             using var document = JsonDocument.Parse(File.ReadAllBytes(path));
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object) return Default;
+            // The server runs unless it was turned off: a file written before it existed says nothing about it.
+            var server = !(root.TryGetProperty("mcpServer", out var running) && running.ValueKind == JsonValueKind.False);
             if (root.TryGetProperty("onClose", out var value) && value.ValueKind == JsonValueKind.String && TryParse(value.GetString(), out var behavior))
-                return new(behavior);
+                return new(behavior, server);
             // Written before the question existed, by the switch of the settings: the user had chosen.
             return root.TryGetProperty("closeToTray", out var kept) && kept.ValueKind is JsonValueKind.True or JsonValueKind.False
-                ? new(kept.GetBoolean() ? DesktopCloseBehavior.KeepRunning : DesktopCloseBehavior.Exit) : Default;
+                ? new(kept.GetBoolean() ? DesktopCloseBehavior.KeepRunning : DesktopCloseBehavior.Exit, server) : Default with { McpServer = server };
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException)
         {
@@ -64,7 +67,8 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose)
             Directory.CreateDirectory(dataRoot);
             var path = Path.Combine(dataRoot, FileName);
             var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            File.WriteAllText(temporary, "{\"onClose\":\"" + Name(OnClose) + "\"}");
+            // The server runs unless the file says otherwise: only the choice to turn it off is written.
+            File.WriteAllText(temporary, "{\"onClose\":\"" + Name(OnClose) + "\"" + (McpServer ? "" : ",\"mcpServer\":false") + "}");
             File.Move(temporary, path, overwrite: true);
             return true;
         }

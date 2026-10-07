@@ -39,8 +39,9 @@ internal static class DesktopAltaTools
     /// <param name="terminals">The terminals the <c>alta terminal</c> commands use; without them the commands do not exist.</param>
     /// <param name="automations">The automations the <c>alta automation</c> commands use; without them the commands do not exist.</param>
     /// <param name="worktrees">The worktrees <c>alta session create --worktree</c> creates; the commands make their own without it.</param>
+    /// <returns>The dispatcher of the commands, for the other callers of the host (its MCP server).</returns>
     /// <exception cref="ArgumentNullException">The host or the reminders are null.</exception>
-    internal static void Attach(CodeAltaHost host, AltaReminderService reminders, PluginAltaServiceBridge? pluginAlta = null, IAltaChangesView? changes = null,
+    internal static AltaCommandDispatcher Attach(CodeAltaHost host, AltaReminderService reminders, PluginAltaServiceBridge? pluginAlta = null, IAltaChangesView? changes = null,
         IAltaEditorView? editor = null, IAltaTerminals? terminals = null, IAltaAutomations? automations = null,
         CodeAlta.Catalog.Worktrees.GitWorktreeService? worktrees = null)
     {
@@ -49,6 +50,7 @@ internal static class DesktopAltaTools
         var dispatcher = Compose(host, reminders, changes, editor, terminals, automations, worktrees);
         pluginAlta?.SetDispatcher(dispatcher);
         host.Commands.SessionTools = CreateSessionTools(dispatcher);
+        return dispatcher;
     }
 
     /// <summary>Builds the dispatcher of the alta commands over a host's services.</summary>

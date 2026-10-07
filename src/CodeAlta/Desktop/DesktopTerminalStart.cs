@@ -89,7 +89,7 @@ internal static class DesktopTerminalStart
         var executable = Environment.ProcessPath;
         if (!IsApplication(executable) || !StartedFromTerminal()) return null;
         var token = Guid.NewGuid().ToString("N");
-        using var application = StartApplication(executable!, options.Developer, token);
+        using var application = StartApplication(executable!, options, token);
         if (application is null) return null; // What cannot be handed over runs here.
         int code;
         try { code = Await(token, wait => application.WaitForExit(wait) ? application.ExitCode : null, Patience); }
@@ -102,7 +102,7 @@ internal static class DesktopTerminalStart
     }
 
     // The same executable, options, working directory and environment, with the token of this start.
-    private static Process? StartApplication(string executable, bool developer, string token)
+    private static Process? StartApplication(string executable, DesktopLaunchOptions options, string token)
     {
         try
         {
@@ -114,7 +114,7 @@ internal static class DesktopTerminalStart
                 UseShellExecute = OperatingSystem.IsWindows(),
                 WorkingDirectory = Environment.CurrentDirectory,
             };
-            if (developer) start.ArgumentList.Add(CodeAltaInstanceProfile.DeveloperOption);
+            foreach (var argument in Arguments(options)) start.ArgumentList.Add(argument);
             Environment.SetEnvironmentVariable(Variable, token);
             try
             {
@@ -129,6 +129,27 @@ internal static class DesktopTerminalStart
         }
         Remove(TokenPath(token));
         return null;
+    }
+
+    /// <summary>The options the application is started with: the ones of this start that it still has to act on.</summary>
+    internal static IReadOnlyList<string> Arguments(DesktopLaunchOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var arguments = new List<string>(5);
+        if (options.Developer) arguments.Add(CodeAltaInstanceProfile.DeveloperOption);
+        if (options.McpHost is { } host)
+        {
+            arguments.Add(DesktopCommandLine.McpHostOption);
+            arguments.Add(host);
+        }
+
+        if (options.McpPort is { } port)
+        {
+            arguments.Add(DesktopCommandLine.McpPortOption);
+            arguments.Add(port.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        return arguments;
     }
 
     /// <summary>

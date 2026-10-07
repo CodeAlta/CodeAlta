@@ -109,6 +109,7 @@ altatui</code></pre>
         <li>Terminals in tabs, which agents can use too</li>
         <li>Worktrees: each session on its own branch, in its own folder</li>
         <li>Automations: prompts that run on a schedule or on a new issue</li>
+        <li>UI tools and MCP server: agents see and drive the window</li>
         <li>All settings in one window</li>
         <li>Light and dark themes with 13 color schemes</li>
         <li>Keeps running in the notification area</li>

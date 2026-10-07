@@ -32,6 +32,7 @@ See [Getting Started](https://codealta.github.io/docs/getting-started/) for requ
 - **Sessions on your projects**: sessions are saved on disk. Queue prompts, steer a running turn, and let a session delegate tasks to child sessions.
 - **Worktrees**: a session can work in its own git worktree, on its own branch, so that several sessions change the same project at the same time.
 - **Automations**: in CodeAlta Desktop, a prompt can run on a schedule, when an issue or a pull request is opened, or on demand.
+- **UI tools and MCP server**: in CodeAlta Desktop, an agent sees and drives the window, and other applications do the same through its MCP server.
 - **The models you already have**: subscriptions and API keys for OpenAI, Anthropic, Google, Mistral, xAI, Azure OpenAI, and OpenAI-compatible servers.
 - **Everything the agent did**: tool calls, file diffs, and context usage are in the timeline and open with their details.
 - **Extensions**: agent prompts, MCP servers, skills, and trusted local .NET plugins.

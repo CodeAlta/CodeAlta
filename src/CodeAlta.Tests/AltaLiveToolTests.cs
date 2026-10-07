@@ -311,6 +311,22 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionTool_NamesTheKindOfCallerItsHostGivesItTo()
+    {
+        using var arguments = JsonDocument.Parse("""{"args":["session","current"]}""");
+
+        // A session is an agent; a host that gives the tool to another kind of caller names it.
+        foreach (var (kind, expected) in new[] { ((string?)null, "agent"), (" ", "agent"), ("mcp", "mcp") })
+        {
+            var tool = AltaSessionToolFactory.Create(CreateDispatcher(), new AltaSessionToolOptions { SourceSessionId = "session-1", CallerKind = kind });
+            var result = await tool.Handler(CreateInvocation(arguments.RootElement), CancellationToken.None).ConfigureAwait(false);
+
+            Assert.IsTrue(result.Success, result.Error);
+            StringAssert.Contains(AssertTextItem(result), $"\"callerKind\":\"{expected}\"");
+        }
+    }
+
+    [TestMethod]
     public void SessionTool_InputSchema_UsesSpecPayloadShape()
     {
         var tool = AltaSessionToolFactory.Create(CreateDispatcher(), new AltaSessionToolOptions());

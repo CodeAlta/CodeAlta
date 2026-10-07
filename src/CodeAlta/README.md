@@ -17,6 +17,8 @@ in [`doc/desktop.md`](../../doc/desktop.md).
   generates the typed client under `obj/neoastra`.
 - The host is the same as the one of CodeAlta TUI: `CodeAlta.Orchestration`, `CodeAlta.Agent`,
   `CodeAlta.Catalog`, the plugin runtime and the built-in MCP, Git and Statistics plugins.
+- The window can be seen and driven with tools (`Desktop/Ui`, over the browser automation of NeoAstra):
+  by its own sessions, and by other applications through its MCP server (`Desktop/Mcp`).
 - Terminals run behind the pseudo-terminal of the system (ConPTY on Windows, a pty on macOS and
   Linux), started by the host in `Desktop/Terminals`. The page shows them with
   [xterm.js](https://xtermjs.org) and the CaskaydiaCove Nerd Font (SIL Open Font License 1.1), both
@@ -64,6 +66,10 @@ It runs beside the normal app on the same `~/.alta` profile:
 Use it to work on CodeAlta with CodeAlta: the installed app runs the agents, and the developer
 instance runs the build you are testing. `alta --dev --exit` asks it to exit.
 
+Its MCP server listens at `http://127.0.0.1:2583/mcp` (the normal app has port 2582): the `.mcp.json`
+and `.alta/mcp.json` of this repository register it as `codealta-dev`, which is how an agent looks at
+the window and clicks in it. See `AGENTS.md`.
+
 ## Command line
 
 | Command | Effect |
@@ -72,6 +78,8 @@ instance runs the build you are testing. `alta --dev --exit` asks it to exit.
 | `alta --dev` | Starts the developer instance. |
 | `alta --wait` | Starts the app and keeps the terminal until it exits, alone or with `--dev`. |
 | `alta --exit` | Asks the running app to exit. It asks first about unsaved files and running sessions. |
+| `--mcp-port <port>` | With a start that opens the window: the port of the MCP server (0 takes a free one). |
+| `--mcp-host <address>` | With a start that opens the window: the address the MCP server listens on, `localhost` or an IP address. |
 | `alta --version` | Prints the version. |
 | `alta --help` | Prints the options. |
 

@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Net;
 using System.Reflection;
 using CodeAlta.Hosting;
 
@@ -29,6 +31,14 @@ internal sealed record DesktopLaunchOptions(string DataRoot, string? CatalogRoot
     internal string? StartToken { get; init; }
     internal bool ReviewOwnedCommandPermissions { get; init; }
     internal bool EnableOwnedUserInput { get; init; }
+
+    /// <summary>
+    /// The address the MCP server listens on: <c>localhost</c> or an IP address; null for the loopback address.
+    /// </summary>
+    internal string? McpHost { get; init; }
+
+    /// <summary>The port the MCP server listens on, 0 for a free one; null for the port of this kind of instance.</summary>
+    internal int? McpPort { get; init; }
 }
 internal sealed record OwnedDesktopRoots(string Project, string? Home, string? Instructions, string? Builtin);
 
@@ -39,6 +49,12 @@ internal static class DesktopCommandLine
 
     /// <summary>Keeps the terminal until the application exits.</summary>
     internal const string WaitOption = "--wait";
+
+    /// <summary>Names the address the MCP server listens on.</summary>
+    internal const string McpHostOption = "--mcp-host";
+
+    /// <summary>Names the port the MCP server listens on.</summary>
+    internal const string McpPortOption = "--mcp-port";
 
     private const string HelpText = """
         CodeAlta Desktop
@@ -65,6 +81,13 @@ internal static class DesktopCommandLine
         --exit asks first when files have unsaved edits or sessions are running. Use
         alta --dev --exit for the developer instance. Exit before updating with
         dotnet tool update -g CodeAlta.
+
+        CodeAlta Desktop runs an MCP server on this computer for the applications that drive it,
+        at http://127.0.0.1:2582/mcp (port 2583 with --dev). Settings shows the address and turns
+        the server off. Any start that opens the window can say where it listens:
+          --mcp-port <port>      The port; 0 takes a free one.
+          --mcp-host <address>   localhost or an IP address. An address other computers can
+                                 reach asks for the access token that Settings shows.
 
         Isolated roots, for tests and development. The ~/.alta profile is not used, and every
         directory is an absolute path outside .alta:
@@ -125,6 +148,22 @@ internal static class DesktopCommandLine
         ArgumentNullException.ThrowIfNull(fileExists);
         options = null;
         error = "Unknown or invalid options. Run alta without options to start CodeAlta Desktop, or alta --help to list the options.";
+        // Where the MCP server listens goes with any start that runs the application.
+        if (!TryTakeMcpEndpoint(ref args, out var mcpHost, out var mcpPort)) return false;
+        if (mcpHost is not null || mcpPort is not null)
+        {
+            if (!TryParse(args, directoryExists, fileExists, out options, out error)) return false;
+            if (options!.ExitRunning)
+            {
+                options = null;
+                error = "Unknown or invalid options. Run alta without options to start CodeAlta Desktop, or alta --help to list the options.";
+                return false;
+            }
+
+            options = options with { McpHost = mcpHost, McpPort = mcpPort };
+            return true;
+        }
+
         if (args.Length == 0 || args is [CodeAltaInstanceProfile.DeveloperOption])
         {
             options = CreateDefaultOptions(developer: args.Length == 1);
@@ -224,6 +263,45 @@ internal static class DesktopCommandLine
             Developer = developer,
         };
     }
+
+    // Takes the two MCP options out of the arguments. False when one is given twice, without a value or with
+    // a value that names no address or no port.
+    private static bool TryTakeMcpEndpoint(ref string[] args, out string? host, out int? port)
+    {
+        host = null;
+        port = null;
+        if (Array.IndexOf(args, McpHostOption) < 0 && Array.IndexOf(args, McpPortOption) < 0) return true;
+        var rest = new List<string>(args.Length);
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case McpHostOption when host is null && i + 1 < args.Length && IsMcpHost(args[i + 1]):
+                    host = args[++i];
+                    break;
+                case McpPortOption when port is null && i + 1 < args.Length
+                    && int.TryParse(args[i + 1], NumberStyles.None, CultureInfo.InvariantCulture, out var value) && value <= IPEndPoint.MaxPort:
+                    port = value;
+                    i++;
+                    break;
+                case McpHostOption or McpPortOption:
+                    return false;
+                default:
+                    rest.Add(args[i]);
+                    break;
+            }
+        }
+
+        args = [.. rest];
+        return true;
+    }
+
+    /// <summary>Whether <paramref name="host"/> names an address a server can listen on: <c>localhost</c> or an IP address.</summary>
+    internal static bool IsMcpHost(string? host) =>
+        string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+        // An IPv4 address is written with its four parts: a number alone also parses as one.
+        (host is { Length: > 0 } && !host.Contains('%') && IPAddress.TryParse(host, out var address) &&
+            (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 || host.Count(static c => c == '.') == 3));
 
     private static bool ContainsAlta(string path) => path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
         .Any(part => part.TrimEnd(' ', '.').Equals(".alta", StringComparison.OrdinalIgnoreCase));

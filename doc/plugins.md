@@ -355,6 +355,11 @@ The desktop host runs the Git plugin as a backend (the CLI agent tools), without
 
 **Builtin factory migration:** registered `BuiltInPluginDefinition.Factory` callbacks now construct the actual activated instance. A supplied factory runs once per activation attempt, without reflection fallback after a null result or exception. Its returned concrete type must match the discovered type; validation occurs after retaining the instance inside the existing failure/disposal boundary. Dynamic source plugins retain reflection construction. Supply `PluginType` when known: the legacy type-resolution path can separately invoke a factory for metadata, so this is not a single-call guarantee across discovery and activation. All three TUI registrations specify their type explicitly. Direct factory exceptions do not acquire reflection's constructor-exception wrapper; the existing cancellation exclusion and cleanup policy remain unchanged. This route does not strengthen general activation/unload guarantees.
 
+The desktop application has one more built-in plugin, `ui` ("UI tools", `DesktopUiPlugin` in the desktop
+project): on request it gives a session the tools that see and drive the window, with the `alta ui` command
+root and a line of developer instructions that says whether the session has them. It is disabled with
+`[plugins.ui]` and `enabled = false`; see `doc/desktop.md`, UI tools.
+
 The statistics plugin is packaged as `CodeAlta.Plugin.Statistics`, is enabled by default, can be disabled with:
 
 ```toml

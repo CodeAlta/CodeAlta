@@ -26,9 +26,12 @@ import "monaco-editor/features/suggest/register.js";
 import "monaco-editor/features/codicon/register.js";
 import EditorWorker from "monaco-editor/editor/editor.worker.js?worker";
 import { shellColor } from "../shellColors";
+import { installAutomationTyping } from "./automationTyping";
 
 // Vite emits a same-origin worker: no CDN, inline script, eval or blob CSP exception.
 globalThis.MonacoEnvironment = Object.freeze({ getWorker: () => new EditorWorker() });
+// The UI tools write in every editor of the page.
+installAutomationTyping(monaco);
 
 // Inline code in Markdown stands out in the same red as in the rendered messages (Blueprint red 4 / red 2).
 const themes = { dark: { base: "vs-dark", inline: "e76a6e", inserted: "72ca9b", deleted: "fa999c" },

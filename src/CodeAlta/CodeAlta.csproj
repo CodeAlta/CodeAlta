@@ -42,6 +42,9 @@
     <!-- The page imports the logo from outside its folder: without this, changing it does not rebuild the page. -->
     <NeoAstraFrontendInput Include="../../img/CodeAlta.svg" />
     <PackageReference Include="NeoAstra" />
+    <!-- The MCP server other applications drive the window through: the official C# SDK, over HTTP. It brings
+         the ASP.NET Core shared framework, which the .NET SDK a tool is installed with has. -->
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
     <PackageReference Include="MinVer" PrivateAssets="all" />
     <InternalsVisibleTo Include="CodeAlta.Desktop.Tests" />
     <ProjectReference Include="../CodeAlta.Catalog/CodeAlta.Catalog.csproj" />
