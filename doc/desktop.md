@@ -767,7 +767,9 @@ When a turn ends, the built-in Statistics plugin adds a **Turn statistics** row 
 terminal UI: duration, input and output tokens (the provider's totals when it reports them, an
 estimate otherwise), tool calls with their total time, and compactions. The row's **Details** button
 opens the full tables: sizes of the prompt, answer, reasoning and tool traffic, latencies and speeds,
-the provider's usage figures, and one line per tool bucket. The rows are not stored in the session;
+the provider's usage figures, and one line per tool bucket. The provider's totals add up the requests
+of the turn: the session repeats the usage of its last request on later updates (its idle update, a
+compaction), and a request is counted once. The rows are not stored in the session;
 they are computed from its events each time, so earlier turns get theirs when **Load previous
 messages** brings them into view, and a failed turn has one too.
 

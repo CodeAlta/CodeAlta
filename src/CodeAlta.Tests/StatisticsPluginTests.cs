@@ -283,6 +283,75 @@ public sealed class StatisticsPluginTests
     }
 
     [TestMethod]
+    public async Task Projection_CountsARequestOnceWhenLaterUpdatesRepeatItsUsage()
+    {
+        // What an agent session records for a turn of two requests: the usage of each request when its answer
+        // arrives, a predictive update without an operation, a compaction and the idle update. The last two carry
+        // the usage of the session, which still holds the request counted before them. A journal that is read back
+        // gives each event its own copy of it.
+        var plugin = new StatisticsPlugin();
+        var contribution = plugin.GetSessionEventProjections().Single();
+        var providerId = new ModelProviderId("provider-1");
+        var runId = new AgentRunId("run-repeated-usage");
+        var startedAt = DateTimeOffset.Parse("2026-05-08T10:00:00Z");
+        static AgentSessionUsage First(long? currentTokens = 7_000) => new(
+            Window: new AgentWindowUsageSnapshot(currentTokens, 200_000, 2),
+            LastOperation: new AgentOperationUsageSnapshot(Model: "model-1", InputTokens: 6_909, OutputTokens: 13, CachedInputTokens: 0));
+        static AgentSessionUsage Second(long? currentTokens = 7_400) => new(
+            Window: new AgentWindowUsageSnapshot(currentTokens, 200_000, 4),
+            LastOperation: new AgentOperationUsageSnapshot(Model: "model-1", InputTokens: 300, OutputTokens: 40, CachedInputTokens: 6_922));
+        var events = new AgentEvent[]
+        {
+            new AgentContentCompletedEvent(providerId, "session-1", startedAt, runId, AgentContentKind.User, "user-1", null, "prompt"),
+            new AgentSessionUpdateEvent(providerId, "session-1", startedAt.AddSeconds(1), runId, AgentSessionUpdateKind.UsageUpdated, "Usage updated.", Usage: First()),
+            new AgentSessionUpdateEvent(providerId, "session-1", startedAt.AddSeconds(2), runId, AgentSessionUpdateKind.UsageUpdated, "Usage updated.",
+                Usage: First(7_100) with { LastOperation = null }),
+            new AgentSessionUpdateEvent(providerId, "session-1", startedAt.AddSeconds(3), runId, AgentSessionUpdateKind.CompactionCompleted, "compacted", Usage: First(900)),
+            new AgentContentCompletedEvent(providerId, "session-1", startedAt.AddSeconds(4), runId, AgentContentKind.Assistant, "assistant-1", null, "response"),
+            new AgentSessionUpdateEvent(providerId, "session-1", startedAt.AddSeconds(4), runId, AgentSessionUpdateKind.UsageUpdated, "Usage updated.", Usage: Second()),
+            new AgentSessionUpdateEvent(providerId, "session-1", startedAt.AddSeconds(5), runId, AgentSessionUpdateKind.Idle, null, Usage: Second(7_450)),
+        };
+
+        var result = await contribution.ProjectAsync(CreateContext(events), CancellationToken.None);
+
+        var completed = await WaitForDynamicProjectionAsync(result.Single());
+        var detailsMarkdown = completed.DetailSections.Single().Markdown;
+        StringAssert.Contains(detailsMarkdown, "Provider operations | 2");
+        StringAssert.Contains(detailsMarkdown, "Input total (provider aggregate) | 14,131");
+        StringAssert.Contains(detailsMarkdown, "Fresh input (provider aggregate) | 7,209");
+        StringAssert.Contains(detailsMarkdown, "Cached input (provider aggregate) | 6,922");
+        StringAssert.Contains(detailsMarkdown, "Output total (provider aggregate) | 53");
+        StringAssert.Contains(completed.Markdown, "14,131 in (provider aggregate) / 53 out (provider aggregate");
+    }
+
+    [TestMethod]
+    public async Task Projection_CountsTwoRequestsThatDifferOnlyByOneValue()
+    {
+        // Only a request equal in every value to the one counted last is the same request.
+        var plugin = new StatisticsPlugin();
+        var contribution = plugin.GetSessionEventProjections().Single();
+        var providerId = new ModelProviderId("provider-1");
+        var runId = new AgentRunId("run-near-equal-usage");
+        var startedAt = DateTimeOffset.Parse("2026-05-08T10:00:00Z");
+        static AgentSessionUpdateEvent Usage(ModelProviderId providerId, AgentRunId runId, DateTimeOffset at, long cacheRead) => new(
+            providerId, "session-1", at, runId, AgentSessionUpdateKind.UsageUpdated, null,
+            Usage: new AgentSessionUsage(LastOperation: new AgentOperationUsageSnapshot(InputTokens: 10, OutputTokens: 5, CacheReadTokens: cacheRead)));
+        var events = new AgentEvent[]
+        {
+            new AgentContentCompletedEvent(providerId, "session-1", startedAt, runId, AgentContentKind.User, "user-1", null, "prompt"),
+            Usage(providerId, runId, startedAt.AddSeconds(1), cacheRead: 1_000),
+            Usage(providerId, runId, startedAt.AddSeconds(2), cacheRead: 1_100),
+            new AgentSessionUpdateEvent(providerId, "session-1", startedAt.AddSeconds(3), runId, AgentSessionUpdateKind.Idle, null),
+        };
+
+        var result = await contribution.ProjectAsync(CreateContext(events), CancellationToken.None);
+
+        var detailsMarkdown = (await WaitForDynamicProjectionAsync(result.Single())).DetailSections.Single().Markdown;
+        StringAssert.Contains(detailsMarkdown, "Provider operations | 2");
+        StringAssert.Contains(detailsMarkdown, "Input total (provider aggregate) | 2,120");
+    }
+
+    [TestMethod]
     public async Task Projection_GroupsEventsWithoutRunIdByStableFallbackTurn()
     {
         var plugin = new StatisticsPlugin();

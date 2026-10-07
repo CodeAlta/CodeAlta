@@ -1389,6 +1389,7 @@ public sealed class StatisticsPlugin : PluginBase
         private long? _cacheWriteTokens;
         private long? _reasoningTokens;
         private double? _durationMs;
+        private AgentOperationUsageSnapshot? _last;
 
         public void Add(AgentOperationUsageSnapshot? usage)
         {
@@ -1397,6 +1398,15 @@ public sealed class StatisticsPlugin : PluginBase
                 return;
             }
 
+            // A session update carries the usage of the session, which holds its last request until the next one
+            // answers: the idle update of a turn and a compaction repeat the request an earlier update reported.
+            // An operation equal in every value to the one counted last is that request, not another one.
+            if (usage == _last)
+            {
+                return;
+            }
+
+            _last = usage;
             _operationCount++;
             var cacheInputTokens = GetCacheInputTotal(usage);
             Add(ref _inputTokens, Sum(usage.InputTokens, cacheInputTokens));
