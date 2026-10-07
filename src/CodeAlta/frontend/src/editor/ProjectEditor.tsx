@@ -716,7 +716,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
               onSize={value => setImageSize(value && { path: activePath, ...value })} />
           : mode === "preview" && previewKind === "svg" ? <ImageView vector url={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(preview)}`} label={activePath}
               onSize={value => setImageSize(value && { path: activePath, ...value })} />
-          : mode === "preview" ? <div className="editor-markdown"><div className="markdown-content"><MarkdownContent source={preview} /></div></div>
+          : mode === "preview" ? <div className="editor-markdown"><div className="markdown-content"><MarkdownContent source={preview} document /></div></div>
           : null}
       </div>
       <footer className="editor-status">

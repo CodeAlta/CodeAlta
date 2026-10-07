@@ -302,6 +302,32 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .markdown-content th { background: var(--panel-2); }
 .markdown-content a { color: var(--accent); }
 .markdown-content hr { border: 0; border-top: 1px solid var(--line); }
+/* The front matter of a document: its entries, as names and values. */
+.markdown-content table.markdown-front-matter, .ide-shell .markdown-content table.markdown-front-matter { width: 100%; margin: 4px 0 16px; border: 1px solid var(--line); border-radius: 8px;
+  border-collapse: separate; border-spacing: 0; table-layout: auto; font-size: 12px; background: color-mix(in srgb, var(--panel-2) 55%, transparent); }
+.markdown-content table.markdown-front-matter th, .markdown-content table.markdown-front-matter td { padding: 5px 10px; border: 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.markdown-content table.markdown-front-matter th { width: 1%; padding-right: 16px; color: var(--muted); background: transparent; font: 500 11.5px/1.65 "Cascadia Code", "SFMono-Regular", Consolas, monospace; white-space: nowrap; }
+.markdown-content table.markdown-front-matter td { white-space: pre-wrap; }
+.markdown-content table.markdown-front-matter tr:last-child > * { border-bottom: 0; }
+.markdown-content .markdown-front-matter ul { margin: 0; padding-left: 18px; white-space: normal; }
+.markdown-content .markdown-front-matter pre { margin: 0; padding: 6px 8px; }
+.markdown-content div.markdown-front-matter { margin: 4px 0 16px; }
+/* A task of a list: its box takes the place of the bullet, and follows the number of a numbered item. */
+.markdown-content ul > li.markdown-task-item { list-style: none; }
+.markdown-content .markdown-task { position: relative; display: inline-block; box-sizing: border-box; width: 14px; height: 14px; margin: 0 7px 0 0; border: 1.5px solid color-mix(in srgb, var(--muted) 75%, transparent);
+  border-radius: 4px; vertical-align: -2px; }
+.markdown-content ul > li.markdown-task-item > .markdown-task, .markdown-content ul > li.markdown-task-item > p:first-child > .markdown-task { margin-left: -21px; }
+.markdown-content .markdown-task[aria-checked="true"] { border-color: var(--accent); background: var(--accent); }
+.markdown-content .markdown-task[aria-checked="true"]::after { content: ""; position: absolute; left: 3px; top: 0; width: 4px; height: 8px; border: solid var(--panel); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+/* An alert: a quote with a title, in the color of its kind. */
+.markdown-content blockquote.markdown-alert { --alert: var(--bp-palette-blue-4, #4c90f0); margin: 12px 0; padding: 8px 12px; border-left: 3px solid var(--alert); border-radius: 0 6px 6px 0; color: inherit;
+  background: color-mix(in srgb, var(--alert) 9%, transparent); }
+.markdown-content blockquote.markdown-alert > :last-child { margin-bottom: 0; }
+.markdown-content .markdown-alert-title { margin: 0 0 4px; color: color-mix(in srgb, var(--alert) 82%, var(--text)); font-size: 12px; font-weight: 600; letter-spacing: .02em; }
+.markdown-content .markdown-alert[data-alert="tip"] { --alert: var(--bp-palette-green-4, #32a467); }
+.markdown-content .markdown-alert[data-alert="important"] { --alert: var(--bp-palette-violet-4, #9d3f9d); }
+.markdown-content .markdown-alert[data-alert="warning"] { --alert: var(--bp-palette-gold-4, #f0b726); }
+.markdown-content .markdown-alert[data-alert="caution"] { --alert: var(--bp-palette-red-4, #e76a6e); }
 .message-heading { min-height: 22px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
 .message-heading > span:first-child { min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: 7px; }
 .message-heading small { color: var(--muted); font-size: 10px; }

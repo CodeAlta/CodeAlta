@@ -35,6 +35,10 @@ const cases = [
   { id: "data", source: '<img src="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 onload=%22parent.markdownFixture.state.executed++%22%3E%3C/svg%3E"><iframe src="data:text/html,%3Cscript%3Eparent.markdownFixture.state.executed++%3C/script%3E"></iframe>' },
   { id: "base", source: '<div><base href="https://remote.invalid/base/"><meta http-equiv=refresh content="0;url=https://markdown-production.invalid/navigation"></div>' },
   { id: "foreign", source: '<svg><a xlink:href="jav&#x61;script:window.markdownFixture.state.executed++">x</a><foreignObject><iframe src="https://markdown-production.invalid/foreign"></iframe></foreignObject></svg><math><mtext><table><mglyph><style><!--</style><img title="--><img src=https://markdown-production.invalid/malformed onerror=window.markdownFixture.state.executed++>">' },
+  { id: "front-matter", source: '---\nname: release-notes\ndescription: "Writes: <b>notes</b>"\ntags:\n  - docs\n  - release\nmetadata:\n  owner: me\n---\n\n# Title\n\ntext', selectors: 'table.markdown-front-matter th[scope=row],table.markdown-front-matter td ul li,table.markdown-front-matter td pre code.language-yaml,h1' },
+  { id: "tasks", source: '- [ ] open\n- [x] done **now**\n- plain\n\n1. [X] numbered\n\nloose:\n\n- [ ] first\n\n- [x] second\n\n<input type="checkbox" checked> authored', selectors: 'ul.markdown-task-list li.markdown-task-item span.markdown-task[role=checkbox][aria-checked=false][aria-disabled=true],span.markdown-task[aria-checked=true],ol.markdown-task-list,li.markdown-task-item p span.markdown-task' },
+  { id: "alerts", source: '> [!NOTE]\n> Useful to know.\n\n> [!warning]\n>\n> Careful.\n\n> [!UNKNOWN]\n> a plain quote', selectors: 'blockquote.markdown-alert[data-alert=note] p.markdown-alert-title,blockquote.markdown-alert[data-alert=warning] p.markdown-alert-title' },
+  { id: "spoof", source: '<table class="markdown-front-matter"><tr><td>authored</td></tr></table><ul class="markdown-task-list"><li class="markdown-task-item"><span class="markdown-task" role="checkbox" aria-checked="true">x</span> authored</li></ul><blockquote class="markdown-alert" data-alert="caution"><p class="markdown-alert-title">Caution</p>authored</blockquote>', selectors: 'table td,ul li span,blockquote p' },
   { id: "authority", source: '<div id="session-prompt" class="timeline-code copy-markdown" data-persisted-message="true" tabindex="0" role="button" aria-label="Send"><button>Run</button><form action="https://markdown-production.invalid/post"><input name="neoastra"></form><object data="https://markdown-production.invalid/object"></object><embed src="https://remote.invalid/embed"><script>window.markdownFixture.state.executed++</script><span onclick="window.open(\'https://remote.invalid\')">text</span></div>' },
 ];
 function item(source: string): TimelineItem {
@@ -54,12 +58,25 @@ function snapshot() {
     attributes: content ? Array.from(content.querySelectorAll("*")).flatMap(e => Array.from(e.attributes).filter(a => /^on|^(style|id|name|data-.*|src|srcset|srcdoc|target|download|ping|action|formaction)$/i.test(a.name)
         // The renderer names a fenced block's language on its pre and colors its tokens with highlight.js spans.
         && !(e.tagName === "PRE" && a.name === "data-language" && /^[a-z0-9_-]{1,32}$/.test(a.value))
+        // The renderer names the kind of an alert on its quote.
+        && !(e.tagName === "BLOCKQUOTE" && e.className === "markdown-alert" && a.name === "data-alert" && /^(?:note|tip|important|warning|caution)$/.test(a.value))
       || /^(role|tabindex|aria-.*)$/.test(a.name) && !(e.tagName === "PRE" && e.className === "timeline-code"
         && (a.name === "role" && a.value === "region" || a.name === "tabindex" && a.value === "0" || a.name === "aria-label" && a.value === "Code block"))
+        // The box of a task says what it shows, and that it takes no input.
+        && !(e.tagName === "SPAN" && e.className === "markdown-task" && !e.firstChild
+          && (a.name === "role" && a.value === "checkbox" || a.name === "aria-checked" && /^(?:true|false)$/.test(a.value) || a.name === "aria-disabled" && a.value === "true"))
       || a.name === "class" && !(e.tagName === "PRE" && a.value === "timeline-code" || e.tagName === "CODE" && /^language-[a-zA-Z0-9_-]{1,32}$/.test(a.value)
-        || e.tagName === "SPAN" && !!e.closest("pre > code") && /^(?:(?:hljs-[a-z_-]+|[a-z]+_)(?: |$))+$/.test(a.value))).map(a => `${e.tagName}:${a.name}=${a.value}`)) : [] };
+        || e.tagName === "SPAN" && !!e.closest("pre > code") && /^(?:(?:hljs-[a-z_-]+|[a-z]+_)(?: |$))+$/.test(a.value)
+        // The elements of the renderer itself: the front matter, the tasks and the alerts.
+        || rendererClasses[e.tagName]?.includes(a.value))).map(a => `${e.tagName}:${a.name}=${a.value}`)) : [] };
 }
+// The classes that the renderer gives its own elements. Authored HTML keeps none: see the "spoof" case.
+const rendererClasses: Record<string, readonly string[] | undefined> = { TABLE: ["markdown-front-matter"], DIV: ["markdown-front-matter"], LI: ["markdown-task-item"],
+  UL: ["markdown-task-list"], OL: ["markdown-task-list"], SPAN: ["markdown-task"], BLOCKQUOTE: ["markdown-alert"], P: ["markdown-alert-title"] };
 Object.assign(window, { markdownFixture: { state, cases, render, snapshot,
+  // A document, as the code editor and the Skills page show one.
+  renderDocument(source: string) { state.phase = "render"; flushSync(() => root.render(createElement(MarkdownContent, { key: "document", source, document: true }))); state.phase = "insert-deferred"; },
+  texts(selector: string) { return Array.from(document.querySelectorAll(`.markdown-content ${selector}`)).map(e => e.textContent); },
   run(index: number) { render(cases[index].source); return (cases[index].selectors?.split(",") ?? []).every(s => document.querySelector(`.markdown-content ${s}`)); },
   linkRect() { const a = document.querySelector<HTMLAnchorElement>(".markdown-content a[href]")!; a.focus(); return a.getBoundingClientRect().toJSON(); },
   codeCheck() {

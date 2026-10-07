@@ -91,6 +91,30 @@ test("production MarkdownContent retains useful HTML without resource or app aut
         assert.deepEqual(await evaluate("markdownFixture.codeCheck()"), ["<a>&\n", "indented\n", "raw <b>"]);
         assert.deepEqual(await evaluate("markdownFixture.state.copies"), [cases[i].source], "Copy retains CRLF and original markup");
       }
+      if (cases[i].id === "front-matter") {
+        // The entries are a table of names and values, built from the text: nothing of it is Markdown or HTML.
+        assert.deepEqual(await evaluate("markdownFixture.texts('table.markdown-front-matter th')"), ["name", "description", "tags", "metadata"]);
+        assert.deepEqual(await evaluate("markdownFixture.texts('table.markdown-front-matter td').slice(0, 2)"), ["release-notes", "Writes: <b>notes</b>"]);
+        assert.deepEqual(await evaluate("markdownFixture.texts('table.markdown-front-matter td li')"), ["docs", "release"]);
+        assert.deepEqual(await evaluate("markdownFixture.texts('table.markdown-front-matter td pre code')"), ["owner: me\n"]);
+        // The text below is the document, without a rule or a heading made of the delimiters.
+        assert.deepEqual(await evaluate("[markdownFixture.texts('h1'), document.querySelectorAll('.markdown-content hr, .markdown-content h2, .markdown-content table b').length]"), [["Title"], 0]);
+      }
+      if (cases[i].id === "tasks") {
+        assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('.markdown-content .markdown-task')).map(e => e.getAttribute('aria-checked'))"), ["false", "true", "true", "false", "true"]);
+        assert.deepEqual(await evaluate("markdownFixture.texts('li')"), ["open", "done now", "plain", "numbered", "first", "second"].map((text, index) => index < 4 ? text : `\n${text}\n`));
+        assert.equal(await evaluate("document.querySelectorAll('.markdown-content li:not(.markdown-task-item)').length"), 1, "An item without a mark is an item of the list.");
+        assert.equal(await evaluate("document.querySelector('.markdown-content li strong')?.textContent"), "now");
+      }
+      if (cases[i].id === "alerts") {
+        assert.deepEqual(await evaluate("markdownFixture.texts('.markdown-alert-title')"), ["Note", "Warning"]);
+        assert.deepEqual(await evaluate("markdownFixture.texts('blockquote.markdown-alert > p:not(.markdown-alert-title)')"), ["Useful to know.", "Careful."]);
+        assert.equal(await evaluate("document.querySelector('.markdown-content blockquote:not(.markdown-alert)')?.textContent.trim()"), "[!UNKNOWN]\na plain quote");
+      }
+      if (cases[i].id === "spoof") {
+        // What the renderer gives its own elements cannot be authored: the classes, the role and the kind are removed.
+        assert.equal(await evaluate("document.querySelectorAll('.markdown-content [class], .markdown-content [role], .markdown-content [data-alert]').length"), 0);
+      }
       if (cases[i].id === "links") {
         assert.equal(await evaluate("document.querySelectorAll('.markdown-content a[href]').length"), 1);
         const rect = await evaluate<{ x: number; y: number; width: number; height: number }>("markdownFixture.linkRect()");
@@ -101,6 +125,13 @@ test("production MarkdownContent retains useful HTML without resource or app aut
       }
     }
     assert.deepEqual(await evaluate("markdownFixture.memoCheck()"), { identity: true, focused: true, selection: "line", scroll: 30, reparsed: false });
+    // A document is wrapped in its source: its lines follow each other, where a message breaks them.
+    await evaluate("markdownFixture.render('one\\ntwo', false)");
+    assert.equal(await evaluate("document.querySelectorAll('.markdown-content br').length"), 1);
+    await evaluate("markdownFixture.renderDocument('---\\ntitle: Guide\\n---\\n\\none\\ntwo\\n\\n- [x] done\\n\\n> [!TIP]\\n> Wrapped\\n> text.')"); await check();
+    assert.deepEqual(await evaluate("[document.querySelectorAll('.markdown-content br').length, markdownFixture.texts('table.markdown-front-matter td'), markdownFixture.texts('p:not(.markdown-alert-title)')]"),
+      [0, ["Guide"], ["one\ntwo", "Wrapped\ntext."]]);
+    assert.deepEqual(await evaluate("[markdownFixture.texts('.markdown-alert[data-alert=tip] .markdown-alert-title'), document.querySelectorAll('.markdown-content .markdown-task[aria-checked=true]').length]"), [["Tip"], 1]);
     // Same shared component used by Notes/live rendering, without timeline region opt-in.
     await evaluate("markdownFixture.render(markdownFixture.cases[0].source, false)"); await check();
     assert.equal(await evaluate("!!document.querySelector('.markdown-content details summary')"), true);

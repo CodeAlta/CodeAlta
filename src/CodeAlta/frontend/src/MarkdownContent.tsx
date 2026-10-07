@@ -1,17 +1,26 @@
 import { useEffect, useMemo, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import { diagramAppearance, diagrams } from "./diagrams";
+import { translate } from "./localization";
 import { createMarkdownRenderer } from "./markdownBoundary";
 import { appearanceKey, subscribeAppearance } from "./shellColors";
+import { useShellLanguage } from "./shellLanguage";
 
-export function MarkdownContent({ source, timelineCodeBlocks = false }: { source: string; timelineCodeBlocks?: boolean }) {
-  const render = useMemo(() => createMarkdownRenderer(window), []);
+/**
+ * A text of Markdown, rendered through the sanitizing boundary. A message breaks its lines where its text does;
+ * a `document` (a file, the instructions of a skill) is wrapped in its source, and its lines follow each other.
+ */
+export function MarkdownContent({ source, timelineCodeBlocks = false, document: asDocument = false }: { source: string; timelineCodeBlocks?: boolean; document?: boolean }) {
+  // The renderer is made once for a language: the titles of the alerts are in it.
+  const { locale } = useShellLanguage();
+  const render = useMemo(() => createMarkdownRenderer(window, { note: translate(locale, "Note"), tip: translate(locale, "Tip"),
+    important: translate(locale, "Important"), warning: translate(locale, "Warning"), caution: translate(locale, "Caution") }), [locale]);
   // Diagrams are drawn on the side, for the window's theme and color scheme, then found by the next render.
   const appearance = useSyncExternalStore(subscribeAppearance, appearanceKey);
   const [drawn, setDrawn] = useState(0);
   const rendered = useMemo(() => {
     const undrawn: string[] = [];
-    return { html: render(source, timelineCodeBlocks, undrawn), undrawn };
-  }, [render, source, timelineCodeBlocks, appearance, drawn]);
+    return { html: render(source, timelineCodeBlocks, undrawn, { document: asDocument }), undrawn };
+  }, [render, source, timelineCodeBlocks, asDocument, appearance, drawn]);
   const html = rendered.html;
   useEffect(() => {
     if (!rendered.undrawn.length) return;

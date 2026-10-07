@@ -814,12 +814,33 @@ replacement; returning to an earlier source does not restore its previous expans
 
 Timeline, live text and Notes use markdown-it **15.0.2** with the CommonMark preset,
 raw HTML enabled, explicit pipe-table/strikethrough/linkify rules and hard line breaks.
-This is not full GFM or a CommonMark-conformance claim. Task markers remain literal;
-strike renders as `s` rather than `del`. Grid tables, footnotes and task-list plugins
-are not implemented. Footnote-like
+This is not full GFM or a CommonMark-conformance claim: strike renders as `s` rather than
+`del`, and grid tables, footnotes, math, emoji short codes and heading anchors are not
+implemented. Footnote-like
 syntax may parse as an ordinary reference link instead. Mixed inline HTML/Markdown
 renders; Markdown inside block HTML follows CommonMark blank-line boundaries, not
 arbitrary nested Markdown interpretation.
+
+**Messages and documents.** A message breaks its lines where its text does. A document is
+wrapped in its source at any width, so its lines follow each other and only a blank line, two
+spaces or a backslash end one: the preview of a Markdown file in the code editor and the
+instructions of a skill are documents (`MarkdownContent` with `document`).
+
+**Front matter, tasks and alerts.** Three things that Markdown files and messages hold are
+shown as what they are (`markdown.ts`, `markdownBoundary.ts`):
+
+- **Front matter.** The lines between a first line `---` and the next `---` or `...` are taken off
+  the text when they start with a key, as a YAML mapping does (at most 16 Ki characters); a text
+  that only starts with a rule keeps it. They are shown as a table of names and values: a value on
+  one line or a block of text as text, a list of plain items as a list, anything nested as the YAML
+  it is written in. A front matter that is no list of keys is shown whole, as YAML. Nothing of it is
+  read as Markdown or HTML.
+- **Tasks.** An item of a list that starts with `[ ]` or `[x]` shows a box, empty or checked, in the
+  place of its bullet. The box is a `span` of the renderer with the role of a checkbox that takes
+  no input: no form control is ever created.
+- **Alerts.** A quote whose first line is `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` or
+  `[!CAUTION]` is shown as on GitHub, with its title in the language of the window and the color of
+  its kind.
 
 The browser-independent parser returns **untrusted HTML**, never directly injected.
 Each mounted `MarkdownContent` owns its parser and DOMPurify **3.4.14** instance/hooks.
@@ -834,6 +855,11 @@ Table alignment uses `align`, never authored CSS. Authored IDs, app classes, han
 ARIA/data/role/tabindex authority, scripts, styles, forms, frames, objects, embeds,
 images/media and SVG/MathML are not accepted. Sanitized pre/code can receive only the
 renderer-owned harmless timeline region attributes; no markup can create app controls.
+The table of a front matter, the box and the classes of a task, and the title, the class
+and the kind of an alert are added after sanitization, by the renderer and from text alone
+(`markdown-front-matter`, `markdown-task`, `markdown-task-item`, `markdown-task-list`,
+`markdown-alert`, `markdown-alert-title`, `data-alert`): authored HTML that names them
+loses them like any other class, role or data attribute.
 
 **Fenced code blocks.** A fence that names a language is colored with highlight.js **11.12.0**: its
 common set (C#, C/C++, JavaScript, TypeScript, Python, Go, Rust, Java, Kotlin, Swift, JSON, YAML,

@@ -49,7 +49,7 @@ export function SkillDetail({ skill, detail, failed, onEdit }: { skill: SkillsEn
       </dl>
       {detail.diagnostics.length > 0 && <ul className="skill-detail-diagnostics" aria-label={t("Diagnostics")}>
         {detail.diagnostics.map((item, index) => <li key={index} data-severity={item.severity.toLowerCase()}><strong>{item.code}</strong> {item.message}</li>)}</ul>}
-      {instructions ? <article className="skill-detail-instructions" aria-label="SKILL.md"><MarkdownContent source={instructions} /></article>
+      {instructions ? <article className="skill-detail-instructions" aria-label="SKILL.md"><MarkdownContent source={instructions} document /></article>
         : <p className="bp6-text-muted">{t(detail.contentTruncated ? "The skill file is too large to show." : "The skill file has no instructions.")}</p>}
       {instructions && detail.contentTruncated && <p className="bp6-text-muted">{t("Only the beginning of the skill file is shown.")}</p>}
     </>}

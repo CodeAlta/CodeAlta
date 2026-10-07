@@ -223,7 +223,7 @@ The **Search** pane (`Ctrl+Shift+F`) searches the text of the project files. It 
   <figcaption class="small text-secondary mt-2">An SVG file shown as a drawing. The buttons at the right of the tabs switch to its text.</figcaption>
 </figure>
 
-Pictures are shown as pictures. An SVG file opens as a drawing, and a Markdown file can be shown as a page: the buttons at the right of the file tabs switch between the preview and the text.
+Pictures are shown as pictures. An SVG file opens as a drawing, and a Markdown file can be shown as a page: the buttons at the right of the file tabs switch between the preview and the text. The page shows the front matter of the file as a table, task lists (`- [ ]`, `- [x]`) as check boxes, GitHub alerts (`> [!NOTE]`) with their color, code with syntax highlighting and `mermaid` blocks as diagrams.
 
 ### Beside a session
 
