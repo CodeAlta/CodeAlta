@@ -27,6 +27,7 @@ internal sealed class AgentCompactionSummarizer(IAgentCompactionSummaryExecutor 
         ## Relevant Files
 
         Preserve exact file paths, identifiers, tool names, and critical error text when present.
+        When the agent wrote the user's instructions to a scratchpad file, keep its exact path under Critical Context with the note to reread it.
         Keep the summary concise, continuation-oriented, and optimized for replay.
         When a previous summary is provided, update it by preserving still-relevant facts and retiring stale implementation detail; do not append indefinitely.
         Keep Done milestone-level rather than changelog-like. Keep exact commit hashes only when the next agent must reference them.
@@ -56,6 +57,7 @@ internal sealed class AgentCompactionSummarizer(IAgentCompactionSummaryExecutor 
 
         Preserve only continuation-critical facts: active objective, explicit constraints, current state, unresolved blockers, next steps, current verification status, active files, exact paths, identifiers, commands, and critical error text.
         Retire stale completed details, old exploratory file lists, old commit hashes unless needed next, and archival narration.
+        Never retire the path of a scratchpad file of the user's instructions, nor the note to reread it.
         Prefer compact bullets over prose.
         """;
 

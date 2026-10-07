@@ -566,7 +566,27 @@ public sealed class SystemPromptBuilder
         }
 
         lines.Add($"- Session kind: {request.Session.Kind.ToString().ToLowerInvariant()}");
+        // Where an agent writes down long instructions of the user, so that they outlive a compaction of the context.
+        if (ScratchpadFolder(request) is { } scratchpad)
+        {
+            lines.Add($"- Scratchpad folder: {MarkdownCode(scratchpad)}");
+        }
+
         return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string? ScratchpadFolder(SystemPromptBuildRequest request)
+    {
+        // The same root the prompt resources of the user are read from.
+        var root = NormalizeOptionalRoot(request.UserCodeAltaRoot);
+        if (root is null)
+        {
+            var profile = NormalizeOptionalRoot(request.DiscoveryScope?.UserProfileRoot ?? request.UserProfileRoot)
+                ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            root = string.IsNullOrWhiteSpace(profile) ? null : Path.Combine(profile, ".alta");
+        }
+
+        return root is null ? null : Path.Combine(root, "scratchpad");
     }
 
     private static string BuildToolGuidance(SystemPromptBuildRequest request)

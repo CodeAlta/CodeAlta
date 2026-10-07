@@ -52,6 +52,12 @@ Press `Ctrl+F11`, use `/compact`, or click the compact button beside the provide
 
 Local compaction targets a smaller post-compaction context by default so long sessions can continue without immediately hitting the context limit.
 
+## Long instructions
+
+When you give an agent many instructions at once, such as a list of tasks or numbered steps, it first writes them down in a file under `~/.alta/scratchpad/`. A long session compacts its context; the file keeps your instructions as you wrote them, and the agent reads it again after a compaction and before it reports the work as done.
+
+The file is the agent's own record. It is not part of your project and is never committed.
+
 ## Agent delegation and self-inspection
 
 CodeAlta-managed agent-runtime sessions include an in-process `alta` live tool for any configured provider, but it is not a command surface that you normally type into the terminal. It is a tool the selected agent can use when your prompt asks it to inspect CodeAlta state, coordinate with other sessions, or delegate work.

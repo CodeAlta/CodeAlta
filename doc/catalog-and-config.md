@@ -17,6 +17,7 @@ CodeAlta keeps user-owned durable state under a global root and project-local `.
 | `cache/` | Process/runtime services | Machine-local cache root, including `cache.sqlite3` session-listing projections, refreshed model metadata, plugin build cache, and `jira/acli/`, where the Jira plugin downloads the Atlassian CLI. |
 | `sessions/` | Agent session runtime and session catalog | Date-sharded session journals and optional protocol traces. |
 | `prompts/pull-requests/` | Catalog `PullRequestPromptCatalog` | The user's kinds of pull request (`<id>.pr.md`): what a session is sent when asked to create one. A project keeps its own under `<project>/.alta/prompts/pull-requests/`. |
+| `scratchpad/` | Agents | Where an agent writes down long instructions of the user (`<yyyy-mm-dd>-<short-name>.md`), so that they outlive a compaction of the context. The folder is named in the runtime context of the system prompt (`SystemPromptBuilder`), the default agent prompt says when to write there, and the compaction summary keeps the path of the file. |
 | `saved_prompts/` | Catalog `PromptDraftStore` | Unsent session and global/project new-session text drafts. |
 | `ui-state.yaml` | Catalog UI-state store | Open/selected sessions, project preferences, theme/navigator settings, frontend layouts and shared logical tab descriptors. |
 | `plugins/` | Plugin runtime | User-scoped source plugin packages, with the build files and the `.gitignore` CodeAlta generates beside them. |

@@ -100,6 +100,11 @@ public sealed class BuiltInPromptContentTests
         StringAssert.Contains(defaultPrompt.Body, "Do not start a task you proposed");
         StringAssert.Contains(defaultPrompt.Body, "alta task complete <id>");
         StringAssert.Contains(defaultPrompt.Body, "alta plan status <plan-id> done");
+        // Long instructions are written down where a compaction of the context does not lose them.
+        StringAssert.Contains(defaultPrompt.Body, "many instructions at once");
+        StringAssert.Contains(defaultPrompt.Body, "scratchpad folder named in your runtime context");
+        StringAssert.Contains(defaultPrompt.Body, "reread it when you resume after a compaction");
+        StringAssert.Contains(defaultPrompt.Body, "never commit it");
     }
 
     private static IReadOnlyList<AgentPromptDescriptor> ListBuiltInPrompts(string userCodeAltaRoot)

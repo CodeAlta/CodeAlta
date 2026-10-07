@@ -252,6 +252,15 @@ public sealed class SystemPromptInfrastructureTests
         StringAssert.Contains(developerInstructions, $"- Current working directory: `{Path.GetFullPath(workingDirectory)}`");
         StringAssert.Contains(developerInstructions, $"- Project root: `{Path.GetFullPath(projectRoot)}`");
         StringAssert.Contains(developerInstructions, $"File: `{Path.GetFullPath(projectContextFile)}`");
+        // Where long instructions of the user are written down: under the CodeAlta root of the user, of their profile by default.
+        StringAssert.Contains(developerInstructions, $"- Scratchpad folder: `{Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta", "scratchpad")}`");
+        var rooted = builder.Build(new SystemPromptBuildRequest
+        {
+            ProviderKey = "codex", ProviderType = "codex", ProtocolFamily = "codex", UserCodeAltaRoot = projectRoot,
+            Session = new SessionViewDescriptor { SessionId = "session-1", ProviderId = "codex", ProviderKey = "codex", WorkingDirectory = workingDirectory, Kind = SessionViewKind.ProjectSession },
+            PartOptionsOverride = new PartialSystemPromptPartOptions(Skills: false, ProjectContext: false, RuntimeContext: true, ToolGuidance: false),
+        });
+        StringAssert.Contains(rooted.DeveloperInstructions!, $"- Scratchpad folder: `{Path.Combine(Path.GetFullPath(projectRoot), "scratchpad")}`");
     }
 
     [TestMethod]
