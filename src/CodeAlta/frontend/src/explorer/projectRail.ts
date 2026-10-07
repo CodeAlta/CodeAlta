@@ -37,23 +37,21 @@ function activityTime(value: string): number | null {
 }
 
 /**
- * The projects the Explorer lists: those the filter keeps, in the chosen order, the favorite ones first.
- * `favorites` in the result is how many of them, from the first, are favorites.
+ * The projects the Explorer lists, in the chosen order, the favorite ones first. `favorites` in the result is
+ * how many of them, from the first, are favorites. A project is looked for in the search of the window.
  */
-export function projectRailProjection(snapshot: WorkspaceSnapshot, filter: string, sort: ProjectSort, favorites: readonly string[] = []): {
+export function projectRailProjection(snapshot: WorkspaceSnapshot, sort: ProjectSort, favorites: readonly string[] = []): {
   projects: WorkspaceProject[]; favorites: number; evidenceNotice: string | null;
 } {
-  const ordered = orderedProjects(snapshot, filter, sort);
+  const ordered = orderedProjects(snapshot, sort);
   if (!favorites.length) return { ...ordered, favorites: 0 };
   const chosen = new Set(favorites);
   const first = ordered.projects.filter(project => chosen.has(project.id));
   return { projects: [...first, ...ordered.projects.filter(project => !chosen.has(project.id))], favorites: first.length, evidenceNotice: ordered.evidenceNotice };
 }
 
-function orderedProjects(snapshot: WorkspaceSnapshot, filter: string, sort: ProjectSort): { projects: WorkspaceProject[]; evidenceNotice: string | null } {
-  const term = filter.trim().toLowerCase();
-  const projects = snapshot.projects.filter(project => !term
-    || project.name.toLowerCase().includes(term) || project.path.toLowerCase().includes(term));
+function orderedProjects(snapshot: WorkspaceSnapshot, sort: ProjectSort): { projects: WorkspaceProject[]; evidenceNotice: string | null } {
+  const projects = [...snapshot.projects];
   if (sort === "name") return { projects: projects.sort(compareProjects), evidenceNotice: null };
 
   const idCounts = new Map<string, number>();

@@ -1,7 +1,7 @@
 # Desktop Session Info
 
 Open the existing composer **Session info** icon, use **Ctrl+G, Ctrl+T**, or the
-command palette. The compact native HTML dialog preserves the existing modal,
+command of the search window. The compact native HTML dialog preserves the existing modal,
 IME/Escape and guarded focus-return behavior. Settings and other modals do not
 dispatch these commands through their overlays. This is not native WebView or
 screen-reader qualification.

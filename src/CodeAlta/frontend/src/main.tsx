@@ -151,7 +151,7 @@ import type { ProjectDetailsContext } from "./ProjectDetailsEntry";
 import { createApplicationLogClearActions } from "./applicationLogClear";
 import { SessionInfoDialog, type SessionInfoLifetime } from "./SessionInfoDialog";
 import { selectedSessionInfoAvailable, selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
-import { CommandPalette } from "./CommandPalette";
+import { GlobalSearch, type SearchChoice, type SearchStart } from "./search/GlobalSearch";
 import { PluginUiHost } from "./PluginUiHost";
 import { PluginRegionSlot } from "./PluginRegions";
 import { askPluginComposer, noPluginContributions, pluginCommandAvailable, pluginContributions, pluginKeymap, PluginUiContext, resolvePluginKey,
@@ -346,9 +346,6 @@ function App() {
   const openSettingsPage = useRef<(page: string) => void>(() => {});
   openSettingsPage.current = page => { if (page === "mcp" || page === "plugins" || page === "providers" || page === "skills") navigate(page); };
   useEffect(() => settingsNavigation.subscribe(page => openSettingsPage.current(page)), []);
-  const [search, writeSearch] = useState("");
-  function setSearch(value: string) { invalidateCreation(); writeSearch(value); }
-  const [projectFilter, setProjectFilter] = useState("");
   const { projectSort, setProjectSort, theme, variant, appearance, setTheme, darker, setDarker, colorScheme, shownScheme, setColorScheme, customSchemes, setCustomSchemes, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount } = useWindowPreferences();
   // The user's own color schemes, and what the editor of one shows while it edits.
   const schemeLibrary = useColorSchemeLibrary(setCustomSchemes);
@@ -377,10 +374,12 @@ function App() {
     if (value !== "project") setProjectFolder(null);
   }
   const helpOrigin = useRef<{ element: HTMLElement | null; view: View; sessionId: string | null; scope: string | null } | null>(null);
-  const [paletteOpen, writePaletteOpen] = useState(false);
-  function setPaletteOpen(value: boolean) { invalidateCreation(true); writePaletteOpen(value); }
-  const paletteOrigin = useRef<HTMLElement | null>(null);
-  const palettePending = useRef<CommandId | null>(null);
+  // The search of the window: where it starts while it is open, and what was chosen in it, which runs once it has closed.
+  const [searchStart, writeSearchStart] = useState<SearchStart | null>(null);
+  const searchOpen = searchStart !== null;
+  function setSearchStart(value: SearchStart | null) { invalidateCreation(true); writeSearchStart(value); }
+  const searchOrigin = useRef<HTMLElement | null>(null);
+  const searchPending = useRef<SearchChoice | null>(null);
   const [pluginContributed, setPluginContributed] = useState<PluginContributionsView>(noPluginContributions);
   // True after Ctrl+G, until the second stroke of the chord.
   const commandChord = useRef(false);
@@ -469,7 +468,6 @@ function App() {
   const menuOrigin = useRef<HTMLButtonElement>(null);
   const focusAction = useRef<"rename" | "delete" | null>(null);
   const [creatingVisible, writeCreatingVisible] = useState(false);
-  const [sessionOptionsOpen, setSessionOptionsOpen] = useState(false);
   const [creatingTitle, writeCreatingTitle] = useState("");
   const [creatingProvider, writeCreatingProvider] = useState("");
   function setCreatingProvider(value: string) { invalidateCreation(); writeCreatingProvider(value); }
@@ -484,7 +482,7 @@ function App() {
   const creationRefresh = useRef(new AbortController());
   const selectedScope = useRef<string | null>(null);
   function openHelp() {
-    if (paletteOpen || dialog || settingsVisible.current || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+    if (searchOpen || dialog || settingsVisible.current || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
     focusRestoration.cancel();
     helpOrigin.current = { element: document.activeElement instanceof HTMLElement ? document.activeElement : null,
       view: currentView.current, sessionId: selectedSessionId.current, scope: selectedScope.current };
@@ -504,7 +502,7 @@ function App() {
     // presentation lifetime, even if opened and closed before the create reply arrives.
     const modalTransition = (event: Event) => {
       if (!(event.target instanceof HTMLDialogElement)) return;
-      invalidateCreation(event.target.classList.contains("command-palette"));
+      invalidateCreation(event.target.classList.contains("global-search"));
       // Native child dialogs do not otherwise update App state. Publish the existing
       // synchronous fence now, not on the next unrelated (e.g. locale) render.
       // A normal state update also works during child layout effects; do not flushSync.
@@ -529,13 +527,11 @@ function App() {
   const projectRail = useRef<HTMLElement>(null);
   const projectRailToggle = useRef<HTMLButtonElement>(null);
   const focusProjectPending = useRef(false);
-  const projectFilterInput = useRef<HTMLInputElement>(null);
   const sessionRail = useRef<HTMLElement>(null);
   const sessionInfoTrigger = useRef<HTMLButtonElement>(null);
   const remindersTrigger = useRef<HTMLButtonElement>(null);
   const remindersOrigin = useRef<{ element: HTMLButtonElement; lifetime: SessionInfoLifetime } | null>(null);
   const compactTrigger = useRef<HTMLButtonElement>(null);
-  const searchInput = useRef<HTMLInputElement>(null);
   const timelineCommand = useRef<TimelineCommand | null>(null);
   const [paneLayout] = useState(() => restorePaneLayout(() => localStorage.getItem(paneLayoutStorageKey), window.innerWidth));
   const [workspaceWidth, setWorkspaceWidth] = useState(window.innerWidth);
@@ -591,7 +587,7 @@ function App() {
 
   useLayoutEffect(() => {
     if (!railVisible || !focusProjectPending.current || view !== "workspace") return;
-    if (focusVisibleProject(projectRail.current, projectFilterInput.current)) focusProjectPending.current = false;
+    if (focusVisibleProject(projectRail.current)) focusProjectPending.current = false;
   }, [railVisible, view, workspaceState.kind]);
 
   useEffect(() => {
@@ -635,7 +631,7 @@ function App() {
   }
 
   const snapshot = workspaceState.kind === "ready" ? workspaceState.snapshot : undefined;
-  const projectListing = snapshot ? projectRailProjection(snapshot, projectFilter, projectSort, projectTree.favorites) : null;
+  const projectListing = snapshot ? projectRailProjection(snapshot, projectSort, projectTree.favorites) : null;
   useEffect(() => {
     if (!snapshot || initialSelectionMade.current) return;
     initialSelectionMade.current = true;
@@ -916,8 +912,16 @@ function App() {
     const shown = tab && snapshot ? resolveFileTab(snapshot, tab) : undefined;
     return owned ? shown ?? (selectedProject && !selectedProject.archived ? selectedProject : null) : null;
   }
+  // The files that the search of the window looks through: those of the project in front, searched by the host.
+  function searchedFiles() {
+    const project = editedProject(), epoch = status?.hostEpoch;
+    return project && epoch ? { project, search: (query: string, signal: AbortSignal) => sessionOperations.searchReferences({ expectedEpoch: epoch,
+      projectId: project.id, projectPath: project.path, query, sessionId: null }, { signal, timeoutMilliseconds: 8000 }) } : null;
+  }
+  // "/" in an empty prompt looks for a command.
+  function openCommandSearch() { openSearch({ text: "/" }); }
   function openFilePicker() {
-    if (dialog || paletteOpen || !editedProject() || currentView.current !== "workspace"
+    if (dialog || searchOpen || !editedProject() || currentView.current !== "workspace"
       || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
     setDialog("file");
   }
@@ -1051,9 +1055,7 @@ function App() {
   }, [tabs, fileTabs, view]);
 
   const sessions = snapshot ? sessionsForProject(snapshot, projectId) : [];
-  const loadedSessionRows = snapshot ? sessionHierarchy(sessions, snapshot.sessions, search, projectId) : [];
-  // A search starts again from the first sessions of its scope.
-  useEffect(() => { setSessionExtra(selectedScope.current, 0); }, [search]);
+  const loadedSessionRows = snapshot ? sessionHierarchy(sessions, snapshot.sessions, projectId) : [];
   const extraSessions = sessionExtras.get(scopeKey(projectId)) ?? 0;
   const visibleSessionRows = limitSessionHierarchy(loadedSessionRows, recentSessionCount + extraSessions, sessionId);
   const visibleSessions = visibleSessionRows.map(row => row.session);
@@ -1064,7 +1066,7 @@ function App() {
     for (const key of projectTree.expanded) {
       const id = key === globalScope ? null : key;
       if (id === projectId || id !== null && !snapshot.projects.some(project => project.id === id)) continue;
-      const all = sessionHierarchy(sessionsForProject(snapshot, id), snapshot.sessions, "", id);
+      const all = sessionHierarchy(sessionsForProject(snapshot, id), snapshot.sessions, id);
       const rows = limitSessionHierarchy(all, recentSessionCount + (sessionExtras.get(key) ?? 0), null);
       scopes.set(key, { rows, more: all.length - rows.length });
     }
@@ -1253,27 +1255,28 @@ function App() {
     return current() ? current : null;
   }, () => { localImageGeneration.current++; }, language.locale);
 
-  function openPalette() {
-    if (paletteOpen || dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+  // Opens the search of the window: on everything, on a category, or on the sessions of one project.
+  function openSearch(start: SearchStart = {}) {
+    if (searchOpen || dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
     focusRestoration.cancel();
-    paletteOrigin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setPaletteOpen(true);
+    searchOrigin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setSearchStart(start);
   }
 
-  function dismissPalette() {
-    const origin = paletteOrigin.current;
+  function dismissSearch() {
+    const origin = searchOrigin.current;
     const originView = currentView.current;
-    setPaletteOpen(false);
+    setSearchStart(null);
     focusRestoration.schedule(origin, () => currentView.current === originView,
       () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
   }
 
-  // The chosen command runs once the palette's modal dialog has closed (see the layout effect below).
-  function choosePalette(command: CommandId) {
-    if (!commandAvailable(command)) return;
+  // What was chosen in the search is opened once its modal dialog has closed (see the layout effect below).
+  function chooseSearch(choice: SearchChoice) {
+    if (choice.kind === "command" && !commandAvailable(choice.id)) return;
     focusRestoration.cancel();
-    palettePending.current = command;
-    setPaletteOpen(false);
+    searchPending.current = choice;
+    setSearchStart(null);
   }
 
   function invokeComposerControl(button: HTMLButtonElement | null | undefined) {
@@ -1289,12 +1292,20 @@ function App() {
   }
 
   useLayoutEffect(() => {
-    if (paletteOpen || !palettePending.current) return;
-    const command = palettePending.current;
-    palettePending.current = null;
-    // Give focus back to where the palette was opened from, so focus-relative commands act on it.
-    if (paletteOrigin.current?.isConnected) paletteOrigin.current.focus();
-    runCommand(command);
+    if (searchOpen || !searchPending.current) return;
+    const choice = searchPending.current;
+    searchPending.current = null;
+    // Give focus back to where the search was opened from, so focus-relative commands act on it.
+    if (searchOrigin.current?.isConnected) searchOrigin.current.focus();
+    switch (choice.kind) {
+      case "command": runCommand(choice.id); break;
+      // After the search is gone and the focus is back where it was opened from.
+      case "plugin": requestAnimationFrame(() => pluginShortcuts.current.run(choice.id)); break;
+      // A project is shown in the Explorer with its sessions, and its prompt takes the keyboard.
+      case "project": setProjectTree(current => expandScope(current, choice.id)); selectProject(choice.id); focusPromptSoon(); break;
+      case "session": selectProject(choice.projectId, choice.id); focusPromptSoon(); break;
+      case "file": openEditor(choice.project, { path: choice.path, line: null, column: null, explorer: null }); break;
+    }
   });
 
   // What plugins contribute for the selected project: their commands and shortcuts, and their prompt pickers.
@@ -1375,7 +1386,7 @@ function App() {
     if (settingsVisible.current) return;
     switch (command) {
       case "help": openHelp(); break;
-      case "palette": openPalette(); break;
+      case "palette": openSearch(); break;
       case "openProject": setDialog("project"); break;
       case "editFile": openFilePicker(); break;
       case "projectEditor": openProjectEditor(); break;
@@ -1387,7 +1398,7 @@ function App() {
       case "toggleNavigator": toggleProjects(); break;
       case "modelSelector": invokeComposerControl(activeComposerControl(".composer-selection")); break;
       case "usage": invokeComposerControl(activeComposerControl("#session-usage-trigger")); break;
-      case "searchSessions": runShortcut("focusSearch"); break;
+      case "searchSessions": openSearch({ category: "sessions" }); break;
       case "refreshStatuses": runtimeObservationControls().refresh(tabs.open); break;
       case "send": case "abort": case "clearQueue": case "nextPrompt": composerCommand(command); break;
       case "steer": break;
@@ -1407,9 +1418,9 @@ function App() {
         event.preventDefault(); event.stopPropagation(); requestExit.current(); return;
       }
       const target = event.target instanceof HTMLElement ? event.target : null;
-      const settingsOnly = settingsVisible.current && !dialog && !paletteOpen
+      const settingsOnly = settingsVisible.current && !dialog && !searchOpen
         && document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]').length === 1;
-      const modal = paletteOpen || !!dialog || !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]');
+      const modal = searchOpen || !!dialog || !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]');
       if (modal && !settingsOnly) { commandChord.current = false; return; }
       // In an open ask Ctrl+N and Ctrl+P move between its questions and between the comments of its file.
       if (!commandChord.current && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && ["n", "p"].includes(event.key.toLowerCase())
@@ -1492,10 +1503,10 @@ function App() {
     // An open ask has the place of the prompt: its questions take the focus.
     else if (action === "focusPrompt") (visibleAsk(".ask-form")?.querySelector<HTMLElement>("[data-ask-question] input:checked, [data-ask-question] textarea, [data-ask-question] input")
       ?? document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt"))?.focus();
-    else if (action === "focusSearch") showSessionSearch();
+    else if (action === "focusSearch") openSearch({ category: "sessions" });
     else if (action === "focusProjects") {
       if (!railVisible) toggleProjects();
-      else focusVisibleProject(projectRail.current, projectFilterInput.current);
+      else focusVisibleProject(projectRail.current);
     }
     else if (action === "nextProject" || action === "previousProject") {
       if (!projects.length || !railVisible) return;
@@ -1544,19 +1555,18 @@ function App() {
     if (dialog === "file" && !filePickerProject) setDialog(null);
   }, [dialog, filePickerProject]);
 
-  // The inline session search field mounts focused; when it is already shown, focus it again.
-  function showSessionSearch() { setSessionOptionsOpen(true); searchInput.current?.focus(); }
   function scopeCanCreateSession(id: string | null) {
     const project = id === null ? undefined : snapshot?.projects.find(value => value.id === id);
     return owned && !!snapshot && !creatingBusy && (id === null || !!project && !project.archived);
   }
   // One menu per scope row: the session actions first select that scope, then act on it.
   function scopeSessionAction(id: string | null, kind: "create" | "search" | "browse") {
+    // The sessions of a scope are searched in the search of the window, which then keeps to that scope.
+    if (kind === "search") { openSearch({ category: "sessions", projectId: id }); return; }
     if (id !== selectedScope.current) selectProject(id);
-    // The form of a new session and the search field are with the sessions of the scope: a closed scope hides them.
-    if (kind !== "browse") setProjectTree(current => expandScope(current, id));
+    // The form of a new session is with the sessions of the scope: a closed scope hides it.
+    if (kind === "create") setProjectTree(current => expandScope(current, id));
     if (kind === "browse") openSessionBrowser();
-    else if (kind === "search") showSessionSearch();
     else if (scopeCanCreateSession(id)) { setCreatingVisible(true); setCreatingMessage(""); }
   }
 
@@ -1756,8 +1766,6 @@ function App() {
         if (fresh && projectNameVisible(fresh, target, name) && capability.canMutate()
           && projectRenameSelectionCurrent(target, currentHostEpoch.current, selectedScope.current)
           && generation === projectRenameGeneration.current) {
-          if (!projectRailProjection(fresh, projectFilter, projectSort).projects.some(project => project.id === target.id))
-            projectFilterInput.current?.focus();
           setProjectRenameTarget(null);
           setProjectRenameNotice("");
         } else {
@@ -1855,7 +1863,7 @@ function App() {
 
   async function createSelectedSession(fromDraft = false) {
     if (creationPending.current || creationHeld.current || !owned || !snapshot || !mutation?.capability.canMutate() || selectedProject?.archived
-      || projectId !== null && !selectedProject || settingsVisible.current || dialog || paletteOpen
+      || projectId !== null && !selectedProject || settingsVisible.current || dialog || searchOpen
       || currentView.current !== "workspace" || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
     if (fromDraft && (!draftChoices.ready || sessionId !== null || (!localDraft.text.trim() && !localImages.images.length)
       || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim()))) return;
@@ -1945,7 +1953,6 @@ function App() {
           selectedScope.current = selection.projectId;
           setProjectId(selection.projectId);
           setSessionId(selection.sessionId);
-          setSearch("");
           setCreatingVisible(false);
           setCreatingTitle("");
           navigate("workspace");
@@ -2115,7 +2122,7 @@ function App() {
         <WindowBrand developer={status?.developerMode ?? false}>
           <nav className="activity-rail" aria-label={t("Workspace navigation")}>
             <Button ref={projectRailToggle} variant="minimal" size="small" active={railVisible} icon={<AppIcon name="folder" size={16} />} aria-label={t("Explorer")} title={t("Explorer")} aria-expanded={railVisible} aria-controls="project-rail" onClick={toggleProjects} />
-            <Button variant="minimal" size="small" icon={<AppIcon name="search" size={16} />} aria-label={t("Open command palette")} aria-haspopup="dialog" title={`${t("Open command palette")} (Ctrl+P)`} onClick={openPalette} />
+            <Button variant="minimal" size="small" icon={<AppIcon name="search" size={16} />} aria-label={t("Search")} aria-haspopup="dialog" title={`${t("Search")} (Ctrl+P)`} onClick={() => openSearch()} />
             <Button variant="minimal" size="small" icon={<AppIcon name="automation" size={16} />} className="activity-automations" disabled={!owned}
               active={!!fileTabs.active && isAutomationsTab(fileTabs.active)} aria-label={t("Automations")} title={`${t("Automations")} (Ctrl+G, Ctrl+M)`} onClick={() => openAutomations()} />
             <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={16} />} className="activity-settings" aria-label={t("Settings & extensions")} title={t("Settings & extensions")} onClick={() => navigate("appearance")} />
@@ -2147,13 +2154,8 @@ function App() {
           {workspaceState.kind === "loading" && <LoadingRows />}
           {workspaceState.kind === "unconfigured" && <div className="sidebar-empty">{t("No catalog configured. See the launch instructions below.")}</div>}
           {workspaceState.kind === "error" && <div role="alert" className="sidebar-empty error-text">{workspaceState.message}</div>}
-          {snapshot && <InputGroup id="project-filter" inputRef={projectFilterInput} className="project-filter" size="small" type="search" value={projectFilter}
-            leftIcon={<AppIcon name="search" size={14} className={Classes.ICON} />} onChange={event => setProjectFilter(event.target.value)}
-            placeholder={t("Name or path")} aria-label={t("Filter projects by name or path")} aria-controls="project-list"
-            rightElement={projectFilter ? <Button variant="minimal" size="small" icon={<AppIcon name="close" size={14} />} aria-label={t("Clear filter")} title={t("Clear filter")}
-              onClick={() => { setProjectFilter(""); projectFilterInput.current?.focus(); }} /> : undefined} />}
           {snapshot && projectListing?.projects.length === 0 && <p className="sidebar-empty" role="status">
-            {t(projectFilter.trim() ? "No matching projects. Clear the filter to show them again." : "No projects in this snapshot.")}
+            {t("No projects in this snapshot.")}
             {projectId !== null && ` ${t("The selected project and session remain open.")}`}
           </p>}
           </>;
@@ -2193,14 +2195,6 @@ function App() {
           splitter={<PaneSplitter className="session-splitter" label={t("Resize Explorer")} value={ideWidth.width} hidden={narrow || !railVisible}
             onResize={delta => setIdeWidth(value => resizeIdeWidth(value, delta))} onReset={() => setIdeWidth(defaultIdeWidth)} />}
           sessions={<aside className="session-rail" aria-label={t("Sessions")} ref={sessionRail} hidden={!railVisible}>
-          {(sessionOptionsOpen || search !== "") && <InputGroup inputRef={searchInput} className="session-search" size="small" type="search" autoFocus
-            leftIcon={<AppIcon name="search" size={14} className={Classes.ICON} />} value={search} title={notice || undefined}
-            onChange={event => setSearch(event.target.value)} placeholder={t("Search sessions")} aria-label={t("Search sessions")}
-            onKeyDown={event => { if (event.key === "Escape" && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
-              event.preventDefault(); event.stopPropagation(); setSearch(""); setSessionOptionsOpen(false);
-            } }}
-            rightElement={<Button variant="minimal" size="small" icon={<AppIcon name="close" size={14} />} aria-label={t("Clear filter")} title={t("Clear filter")}
-              onClick={() => { setSearch(""); setSessionOptionsOpen(false); }} />} />}
           {creatingVisible && <div className="session-create">
             <label>{selectedProject ? t("New session in {name}", { name: selectedProject.name }) : t("New chat")}
               <input value={creatingTitle} maxLength={256} disabled={creatingBusy} placeholder={t("Title (optional)")} onChange={event => setCreatingTitle(event.target.value)} /></label>
@@ -2280,7 +2274,7 @@ function App() {
               </div>}
             </div>;
             })}
-            {snapshot && visibleSessions.length === 0 && <div className="sidebar-empty">{t(search ? "No matching sessions." : projectId === null ? "No chats." : "No sessions in this project.")}</div>}
+            {snapshot && visibleSessions.length === 0 && <div className="sidebar-empty">{t(projectId === null ? "No chats." : "No sessions in this project.")}</div>}
             <div className="session-list-disclosure">
               {visibleSessionRows.length < loadedSessionRows.length && <button type="button" className="quiet-button" onClick={() => setSessionExtra(projectId, extraSessions + recentSessionCount)}>{t("Show more…")} <span className="muted-text">({loadedSessionRows.length - visibleSessionRows.length})</span></button>}
               {extraSessions > 0 && <button type="button" className="quiet-button" onClick={() => setSessionExtra(projectId, 0)}>{t("Show fewer")}</button>}
@@ -2318,7 +2312,7 @@ function App() {
                   && currentView.current === "workspace" && !settingsVisible.current && currentHostEpoch.current === status?.hostEpoch }}
                 preferredComposerHeight={composerHeights.get(composerSizeKey(status?.hostEpoch ?? null, tab.projectId, row.id))}
                 onComposerHeight={height => setComposerHeights(sizes => rememberComposerHeight(sizes, composerSizeKey(status?.hostEpoch ?? null, tab.projectId, row.id), height))}
-                onOpenCatalog={navigate} onOpenReminders={openSelectedReminders} onOpenHelp={openHelp} onOpenPalette={openPalette}
+                onOpenCatalog={navigate} onOpenReminders={openSelectedReminders} onOpenHelp={openHelp} onOpenCommands={openCommandSearch}
                 readReminders={readReminders} reminderActions={reminderActions} status={status} mutation={mutation}
                 activeReminderCount={activeReminders ? activeReminders.get(row.id) ?? 0 : null}
                 autoSend={autoSend.current?.sessionId === row.id ? { text: autoSend.current.text, consume: () => { autoSend.current = null; } } : null}
@@ -2371,7 +2365,7 @@ function App() {
                 onHeight={height => setComposerHeights(sizes => rememberComposerHeight(sizes, composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope), height))}>
                 <ReadOnlyComposer key={draftScope} sessionId={draftScope} provider={null} draftIndicators={draftIndicators}
                   localImages={owned && snapshot?.configured && currentProjectWritable() ? localImages : undefined}
-                  onOpenHelp={openHelp} onOpenPalette={openPalette}
+                  onOpenHelp={openHelp} onOpenCommands={openCommandSearch}
                   reason={t("Draft kept locally. Start a session to send it.")}
                   localDraft={{ text: localDraft.text, edit: editLocalDraft, options: creationProviderChoice(true),
                     disabled: newPromptDisabled, busy: creatingBusy, submit: () => void createSelectedSession(true),
@@ -2510,13 +2504,13 @@ function App() {
         if (creationAlive.current && currentHostEpoch.current === epoch && mutation.capability.canMutate() && version === browserRevision.current && fresh.configured)
           publishWorkspaceState({ kind: "ready", snapshot: fresh });
       }} />
-    {paletteOpen && <CommandPalette available={commandAvailable} onChoose={choosePalette} onClose={dismissPalette}
-      pluginCommands={pluginContributed.commands} onChoosePlugin={command => {
-        focusRestoration.cancel();
-        setPaletteOpen(false);
-        // After the palette is gone and the focus is back where it was opened from.
-        requestAnimationFrame(() => { if (paletteOrigin.current?.isConnected) paletteOrigin.current.focus(); pluginShortcuts.current.run(command); });
-      }} />}
+    {searchStart && <GlobalSearch snapshot={snapshot ?? null} favorites={projectTree.favorites} start={searchStart} files={searchedFiles()} note={notice}
+      available={commandAvailable} onCommand={id => chooseSearch({ kind: "command", id })}
+      pluginCommands={pluginContributed.commands} onPluginCommand={id => chooseSearch({ kind: "plugin", id })}
+      onProject={project => chooseSearch({ kind: "project", id: project.id })}
+      onSession={session => chooseSearch({ kind: "session", projectId: session.projectId, id: session.id })}
+      onFile={(project, path) => chooseSearch({ kind: "file", project, path })}
+      onClose={dismissSearch} />}
     <PluginUiHost epoch={pluginEpoch}
       onPrompt={request => ["send", "enqueue", "steer", "compact"].includes(request.mode ?? "")
         && askPluginComposer(request.mode as PluginComposerRequest["kind"], request.sessionId ?? null, request.text ?? null).result}
@@ -2636,7 +2630,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   }, [epoch, id, name, path, archived, sessionId, regions, showChanges, openTerminal, refreshSessions, worktreePath, worktreeName, worktreeMissing, place]);
 }
 
-function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin }: {
+function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin }: {
   /** Reports whether the session is working while its panel watches it. */
   onRunActivity?: (running: boolean | null) => void;
   /** A draft prompt to send once this session's composer holds it. */
@@ -2658,7 +2652,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   remindersTrigger: RefObject<HTMLButtonElement | null>;
   onOpenReminders: (sessionId: string, epoch: string, projectId: string | null) => void;
   onOpenHelp: () => void;
-  onOpenPalette: () => void;
+  onOpenCommands: () => void;
   onOpenCatalog: (page: "models" | "prompts" | "providers") => void;
   readReminders: (request: ReminderListRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ReminderListResponse>;
   reminderActions: ReturnType<typeof createReminderActions>;
@@ -2826,9 +2820,9 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
               persistedUsage={persistedUsage} usageTarget={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? {
                 epoch: status.hostEpoch, sessionId: session.id, scope: selectedProjectId === null ? "global" : "project",
                 projectId: selectedProjectId, expectedProjectPath: selectedProjectId === null ? null : session.workspacePath } : null}
-              onOpenCatalog={onOpenCatalog} timelineNotices={timelineNotices} liveState={ownedSession ? live : null} inputLifetime={infoLifetime} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} infoControl={infoControl} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
+              onOpenCatalog={onOpenCatalog} timelineNotices={timelineNotices} liveState={ownedSession ? live : null} inputLifetime={infoLifetime} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} infoControl={infoControl} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} onOpenHelp={onOpenHelp} onOpenCommands={onOpenCommands}
               activeReminderCount={activeReminderCount} autoSend={autoSend} reminderActions={reminderActions} readReminderCount={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? readReminders : undefined} /> : null}
-          readOnly={<ReadOnlyComposer active={active} sessionId={session.id} provider={session.providerKey} draftIndicators={draftIndicators} infoControl={infoControl} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
+          readOnly={<ReadOnlyComposer active={active} sessionId={session.id} provider={session.providerKey} draftIndicators={draftIndicators} infoControl={infoControl} onOpenHelp={onOpenHelp} onOpenCommands={onOpenCommands}
               reason={archivedScope ? t("Archived project; this session is read-only. Sending is unavailable.") : undefined} />}
           recovery={ownedHost ? <ArchivedActionRecovery epoch={status!.hostEpoch!} sessionId={session.id} submissions={submissions}
             steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue}

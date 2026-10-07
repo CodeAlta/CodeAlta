@@ -192,7 +192,7 @@ Both apps use the same shortcuts and slash commands unless noted.
 | Action | Shortcut or command |
 | --- | --- |
 | Help / command discovery | `F1`, `/help`, or `?` |
-| Command palette | `Ctrl+P` or `/` |
+| Search (desktop) or command palette (TUI) | `Ctrl+P`; `/` for commands |
 | Open project | `Ctrl+O` or `/open` |
 | Open a file in the editor | `Ctrl+E` or `/edit` |
 | Open the code editor of the project (desktop) | `Ctrl+E` `Ctrl+E` or `/editor` |

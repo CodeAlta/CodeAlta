@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { InputGroup } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import { AppWindow } from "./AppWindow";
-import { KeyGesture } from "./CommandPalette";
+import { KeyGesture } from "./KeyGesture";
 import { commandCategories, commandDefinitions, commandKeys } from "./commandRegistry";
 import type { PluginCommandView } from "./pluginUi";
 import { useShellLanguage } from "./shellLanguage";

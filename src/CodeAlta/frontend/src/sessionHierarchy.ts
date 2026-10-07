@@ -4,7 +4,7 @@ export type SessionHierarchyRow = { session: WorkspaceSession; depth: number; di
 
 // Keep the server's bounded order for ties. Resolve only an exact persisted scope; a missing
 // header or a missing/truncated parent can never manufacture a same-scope relationship.
-export function sessionHierarchy(visibleScope: readonly WorkspaceSession[], all: readonly WorkspaceSession[], search: string,
+export function sessionHierarchy(visibleScope: readonly WorkspaceSession[], all: readonly WorkspaceSession[],
   selectedProjectId: string | null): SessionHierarchyRow[] {
   const buckets = new Map<string, WorkspaceSession[]>();
   for (const session of all) {
@@ -87,9 +87,5 @@ export function sessionHierarchy(visibleScope: readonly WorkspaceSession[], all:
   for (const session of visibleScope) if (!seen.has(session.id))
     rows.push({ session, depth: 0, diagnostic: "Lineage cannot be verified; shown at root.",
       tooltip: `${session.fullTitle} | Lineage cannot be verified; shown at root.` });
-  if (!search) return rows;
-  // Searching flattens matches rather than hiding a match behind an unmatched parent.
-  const term = search.toLowerCase();
-  return rows.filter(row => `${row.session.title} ${row.session.fullTitle} ${row.session.providerKey ?? ""}`.toLowerCase().includes(term))
-    .map(row => ({ ...row, depth: 0 }));
+  return rows;
 }

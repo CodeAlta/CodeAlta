@@ -79,7 +79,7 @@ test("provider and timeline UI labels translate without translating literal cont
 
 test("interaction controls translate in every locale without changing literal parameters", () => {
   for (const locale of locales.filter(value => value !== "en")) {
-    for (const key of ["Send","Edit prompt", "Search commands", "Reopen closed tab"] as const)
+    for (const key of ["Send","Edit prompt", "Search sessions", "Reopen closed tab"] as const)
       assert.notEqual(translate(locale, key), key);
     const literal = "<user title & /file.ts>";
     assert.ok(renderToStaticMarkup(createElement("button", null, translate(locale, "Remove {title}", { title: literal }))).includes("&lt;user title &amp; /file.ts&gt;"));

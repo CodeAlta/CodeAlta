@@ -41,11 +41,20 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. Use `Ctrl+T` (or 
 - A session with a bolt was started by an [automation](automations.md).
 - A session with a tree mark works in a [worktree](worktrees.md).
 
-### Command palette
+### Search
 
-Press `Ctrl+P`, or type `/` in an empty prompt, to search and run any command. Each entry shows its slash command and its shortcut.
+Press `Ctrl+P` to search and run any command. In the desktop app, `Ctrl+P` or the search icon of the title bar opens one search for everything:
 
-{{ alta_shot "alta-desktop-command-palette.webp" "alta-command-palette.png" "Command palette listing commands with their shortcuts" "The command palette lists every command with its slash name and shortcut." }}
+- the **sessions** of every project and your chats,
+- the **projects**,
+- the **files** of the current project,
+- the **commands**, each with its slash command and its shortcut.
+
+Type a few words and press `Enter` to open what is selected. `Tab` switches between **All**, **Sessions**, **Projects**, **Files** and **Commands**. Start with `/` to look for a command, as when you type `/` in an empty prompt. With nothing typed, the search lists your recent sessions, your projects and the most useful commands.
+
+{{ alta_shot "alta-desktop-search.webp" "alta-command-palette.png" "Search listing sessions, projects and files that match, or the command palette of the TUI" "One search for sessions, projects, files and commands in the desktop app. The TUI has a command palette." }}
+
+**Search sessions…** in the menu of a project searches the sessions of that project only.
 
 ### Split panes (desktop)
 

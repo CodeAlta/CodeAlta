@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { commandCategories, commandDefinitions, commandKeys, resolveCommandKey, searchCommands, type CommandKey } from "./commandRegistry";
+import { commandCategories, commandDefinitions, commandKeys, rankCommands, resolveCommandKey, searchCommands, type CommandKey } from "./commandRegistry";
 
 const key = (value: string, modifiers: Partial<CommandKey> = {}): CommandKey => ({ key: value, ...modifiers });
 const ctrl = (value: string, modifiers: Partial<CommandKey> = {}) => key(value, { ctrlKey: true, ...modifiers });
@@ -79,7 +79,24 @@ test("help lists bindings then typed hints", () => {
   assert.deepEqual(commandKeys(commandDefinitions.find(command => command.id === "send")!), ["Enter"]);
 });
 
-test("palette search ranks the slash name first, needs every word and hides internal commands", () => {
+test("the commands a search finds come with their score: nothing typed lists them all as they are registered", () => {
+  const label = (command: { label: string }) => command.label;
+  const description = (command: { description: string }) => command.description;
+  const all = rankCommands("", label, description);
+  assert.deepEqual(all.map(item => item.command.id), commandDefinitions.filter(command => !command.hidden).map(command => command.id));
+  assert.ok(all.every(item => item.score === 0));
+  // The search of the window is a command as well, under its own name and under the one it had.
+  assert.equal(rankCommands("search", label, description)[0].command.id, "palette");
+  assert.ok(rankCommands("command_palette", label, description).some(item => item.command.id === "palette"));
+  // A better match has a lower score, and the list is in that order.
+  const found = rankCommands("model", label, description);
+  assert.deepEqual(found.slice(0, 2).map(item => item.command.name), ["model", "model_providers"]);
+  assert.ok(found[0].score === 0 && found[1].score > found[0].score);
+  assert.deepEqual(found.map(item => item.score), [...found.map(item => item.score)].sort((left, right) => left - right));
+  assert.deepEqual(searchCommands("model", label, description), found.map(item => item.command));
+});
+
+test("command search ranks the slash name first, needs every word and hides internal commands", () => {
   const label = (command: { label: string }) => command.label;
   const description = (command: { description: string }) => command.description;
   const names = (query: string) => searchCommands(query, label, description).map(command => command.name);

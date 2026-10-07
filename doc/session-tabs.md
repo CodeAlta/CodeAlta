@@ -24,7 +24,7 @@ persistence race limits.
 ### Explicit runtime observations
 
 **Refresh statuses** on the tab strip, in the saved-session browser, or in the
-command palette reads point-in-time runtime facts. It does not poll or create a
+commands of the search window reads point-in-time runtime facts. It does not poll or create a
 background workspace. Only the first 32 displayed/requested rows are considered;
 unverified/archived rows and excess rows are explicitly counted as omitted. Reads
 are sequential, with a 10-second per-read timeout and a 20-second batch cancellation
@@ -56,7 +56,7 @@ draft, selection, scroll or request ownership. No `LastActiveAt` or recent order
 is derived from saved `UpdatedAt` or run IDs. Continuous/native running-status
 parity and authoritative recentness remain separate, unimplemented claims.
 
-Use **Browse saved sessions** in the session rail, its command-palette entry, or
+Use **Browse saved sessions** in the session rail, its command in the search window, or
 **Ctrl+Alt+B outside text editors**. This native dialog searches titles and IDs in
 the already-loaded bounded workspace snapshot. It offers the selected project
 and explicit global scope; choosing a scope or typing never changes the active

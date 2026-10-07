@@ -5,15 +5,15 @@ import { projectRailProjection } from "./projectRail";
 import { focusVisibleProject, persistProjectRailCollapsed, projectRailVisible, resetNarrowRail, restoreProjectRailCollapsed, restoreProjectRailFocus, toggleProjectRail } from "./projectRailVisibility";
 import type { WorkspaceSnapshot } from "#neoastra";
 
-test("desktop collapse/reopen and narrow reveal do not change selection, filter, sort or preferred widths", () => {
+test("desktop collapse/reopen and narrow reveal do not change selection, sort or preferred widths", () => {
   let state = { desktopCollapsed: false, narrowOpen: false };
-  const selected = { projectId: "p", sessionId: "s", filter: "REPO", sort: "recent" as const };
+  const selected = { projectId: "p", sessionId: "s", sort: "recent" as const };
   const preferred = { projects: 400, sessions: 420 };
   const snapshot: WorkspaceSnapshot = {
     configured: true, projects: [{ id: "p", name: "P", path: "/repo/p", archived: false }], sessions: [],
     projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false,
   };
-  const before = projectRailProjection(snapshot, selected.filter, selected.sort);
+  const before = projectRailProjection(snapshot, selected.sort);
   assert.equal(projectRailVisible(state, false), true);
   state = toggleProjectRail(state, false);
   assert.equal(projectRailVisible(state, false), false);
@@ -26,8 +26,8 @@ test("desktop collapse/reopen and narrow reveal do not change selection, filter,
   state = toggleProjectRail(state, true);
   assert.equal(projectRailVisible(state, true), true);
   assert.equal(state.desktopCollapsed, false);
-  assert.deepEqual(projectRailProjection(snapshot, selected.filter, selected.sort), before);
-  assert.deepEqual(selected, { projectId: "p", sessionId: "s", filter: "REPO", sort: "recent" });
+  assert.deepEqual(projectRailProjection(snapshot, selected.sort), before);
+  assert.deepEqual(selected, { projectId: "p", sessionId: "s", sort: "recent" });
   assert.deepEqual(constrainPaneLayout(preferred, 1400), preferred);
   assert.equal(projectRailVisible(resetNarrowRail(state), true), false);
   assert.equal(projectRailVisible(resetNarrowRail(state), false), true);
@@ -56,20 +56,22 @@ test("malformed or inaccessible local storage falls back to expanded, failed wri
   assert.equal(projectRailVisible({ desktopCollapsed: true, narrowOpen: false }, false), false);
 });
 
-test("opening focuses a visible selected row or the filter when hidden; closing restores the toggle only for rail focus", () => {
+test("opening focuses the selected row, or the first row when none is; closing restores the toggle only for rail focus", () => {
   const calls: string[] = [];
   const selected = { focus: () => calls.push("selected") } as unknown as HTMLButtonElement;
-  const filter = { focus: () => calls.push("filter") };
+  const first = { focus: () => calls.push("first") } as unknown as HTMLButtonElement;
   const rail = { querySelector: () => selected } as unknown as Pick<HTMLElement, "querySelector">;
-  assert.equal(focusVisibleProject(rail, filter), true);
+  assert.equal(focusVisibleProject(rail), true);
   assert.deepEqual(calls, ["selected"]);
-  assert.equal(focusVisibleProject({ querySelector: () => null } as unknown as Pick<HTMLElement, "querySelector">, filter), true);
-  assert.deepEqual(calls, ["selected", "filter"]);
-  assert.equal(focusVisibleProject(null, null), false);
+  // No row is pressed (the selected project is not listed): the first row of the Explorer takes the focus.
+  assert.equal(focusVisibleProject({ querySelector: (selector: string) => selector.includes("aria-pressed") ? null : first } as unknown as Pick<HTMLElement, "querySelector">), true);
+  assert.deepEqual(calls, ["selected", "first"]);
+  assert.equal(focusVisibleProject({ querySelector: () => null } as unknown as Pick<HTMLElement, "querySelector">), false);
+  assert.equal(focusVisibleProject(null), false);
   const active = {} as Node;
   const inside = { contains: (target: Node | null) => target === active };
   const toggle = { focus: () => calls.push("toggle") };
   assert.equal(restoreProjectRailFocus(inside, {} as Node, toggle), false);
   assert.equal(restoreProjectRailFocus(inside, active, toggle), true);
-  assert.deepEqual(calls, ["selected", "filter", "toggle"]);
+  assert.deepEqual(calls, ["selected", "first", "toggle"]);
 });

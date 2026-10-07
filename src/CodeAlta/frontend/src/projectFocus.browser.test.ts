@@ -248,6 +248,36 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
     await opened("/fixture/other");
     assert.equal(await evaluate("document.querySelector('#catalog-prompt').textContent.replaceAll('\\u00a0',' ').includes('preserved project draft')"), true);
 
+    // The search of the window (Ctrl+P): a command chosen in it runs once the search has closed, a project it finds
+    // is selected with the keyboard in its prompt, and Escape gives the keyboard back where it was.
+    const search = async (text: string) => {
+      await key("p", "KeyP", 80, true);
+      assert.equal(await wait("document.activeElement?.id==='search-input'"), true);
+      if (text) await command("Input.insertText", { text });
+    };
+    await search("/help");
+    assert.equal(await wait(`document.querySelector('.global-search-row[aria-selected="true"] .global-search-slash')?.textContent==='/help'`), true);
+    assert.equal(await evaluate(`[...document.querySelectorAll('.global-search-categories button')].filter(button=>!button.disabled).map(button=>button.textContent).join()`), "Commands1");
+    await key("Enter", "Enter", 13);
+    assert.equal(await wait("!document.querySelector('dialog.global-search') && !!document.querySelector('dialog.command-help-dialog[open]')"), true, "a command runs once the search has closed");
+    await key("Escape", "Escape", 27);
+    assert.equal(await wait("!document.querySelector('dialog[open]')"), true);
+    await search("fixture/project");
+    assert.equal(await wait(`document.querySelectorAll('.global-search-row[data-kind="project"]').length===1`), true);
+    assert.equal(await evaluate(`document.querySelector('.global-search-row[data-kind="project"] mark')?.textContent`), "fixture/project");
+    // Tab goes through the categories, and the keyboard stays in the field.
+    await key("Tab", "Tab", 9); await key("Tab", "Tab", 9);
+    assert.equal(await wait(`document.querySelector('.global-search-categories [aria-selected="true"]')?.textContent.startsWith('Projects') && document.activeElement?.id==='search-input'`), true);
+    assert.equal(await evaluate("document.querySelectorAll('.global-search-row').length"), 1);
+    await key("Enter", "Enter", 13);
+    await opened("/fixture/project");
+    await search("");
+    assert.equal(await wait("document.querySelectorAll('.global-search-group').length>=2"), true, "nothing typed lists the recent sessions, the projects and the commands");
+    await key("Escape", "Escape", 27);
+    assert.equal(await wait("!document.querySelector('dialog[open]') && !!document.activeElement?.closest('#catalog-prompt')"), true, "Escape gives the keyboard back");
+    // The Explorer has no filter of its own: the search of the window is the one place to look for a project.
+    assert.equal(await evaluate("document.querySelectorAll('#project-rail input').length"), 0);
+
     // Successful folder import closes through a different asynchronous path.
     await evaluate("projectFocusOrigin.focus()");
     await open(); await filter("C:/fixture/imported"); await key("Enter", "Enter", 13);
@@ -262,7 +292,7 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
     await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 650, deviceScaleFactor: 1, mobile: false });
     await command("Page.reload");
     assert.equal(await wait("!!document.querySelector('#catalog-prompt')"), true);
-    await evaluate(`document.querySelector('button[aria-label="Open command palette"]').focus()`);
+    await evaluate(`document.querySelector('button[aria-label="Search"]').focus()`);
     await open(); await filter("Other project"); await key("Enter", "Enter", 13);
     await opened("/fixture/other");
     assert.equal(await evaluate("projectFocusFixture.imports.length"), 0);

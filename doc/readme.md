@@ -9,7 +9,7 @@ selection, exact enabled-host admission, original uncertainty retention and fres
 catalog confirmation. Existing-session provider switching remains separate.
 
 See [commands, help and keyboard shortcuts](desktop.md#commands-help-and-keyboard-shortcuts)
-for the Desktop command palette, help and key map, which follow the TUI's.
+for the Desktop search, help and key map; the commands and the keys follow the TUI's.
 
 Provider/timeline localization and its scroll correction are independently accepted;
 Settings inventory translation is also independently accepted. Static project/session

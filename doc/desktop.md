@@ -240,15 +240,16 @@ Drag a tab along the tab strip to reorder it, to a pane edge to create a split v
 (up to 32 open sessions); drag the divider between panes to resize them. The presentation uses
 stable content slots and one vertical Explorer with Projects above Sessions. Its width is locally
 saved (220–720 pixels, never more than 60% of the window); the Explorer button in the title bar hides it without discarding the width.
-The command palette and Settings are the two buttons next to it, right after the CodeAlta mark. Notes belong
+The search of the window, the automations and Settings are the buttons next to it, right after the CodeAlta mark. Notes belong
 to each session, start collapsed when empty, and open when meaningful content arrives. A small disclosure
 at the top right of the timeline expands/collapses their floating panel without resizing the timeline or
 composer. The panel (or its collapsed disclosure) can be dragged anywhere over the timeline and the open
 panel resized; its size and position are kept across collapse/expand and saved locally, relative to the
 pane's top-right corner, and its header restores the default. There is no nested notes dock or notes divider.
 Project and session rows open floating action menus from their **…** button, context menu or Shift+F10; the
-Projects header has a filter box, a sort/actions menu (with **Open project…**) and a **+** button that adds a
-project folder with the operating system's folder dialog. A dot-matrix spinner on a
+Projects header has a sort/actions menu (with **Open project…**) and a **+** button that adds a
+project folder with the operating system's folder dialog. The Explorer has no filter of its own: a project or
+a session is looked for in the search of the window (see "Search"). A dot-matrix spinner on a
 session tab, its sidebar row and its project marks an observed running session, including sessions whose
 tab is closed. Existing session-keyed transitions and
 draft/uncertain-action guards remain in place.
@@ -262,8 +263,8 @@ its own geometry. Closing Reminders does not cancel an admitted action or retry 
 In the explorer, a project row has one **…** menu (also on right-click): **New session**, **Search
 sessions…** and **Browse saved sessions** for that project, then **Open**, **Add to favorites** (or
 **Remove from favorites**), **Details**, **Rename project…** and **Archive project…**. **Chats** has
-the same session actions. Session search is an inline field above the session list of
-the selected project; Escape or its clear button hides it.
+the same session actions. **Search sessions…** opens the search of the window on the sessions of
+that project, or on the chats.
 
 The **Chats** are the sessions of no project, which the TUI calls global sessions. Their row is the
 first of the Explorer, above the projects, and is closed until it is opened.
@@ -282,7 +283,7 @@ project and Left closes it; Left on a session goes to its project.
 The sessions of an open project are the same rows whether it is selected or not: the most recent ones
 (the recent-session count of **Settings → Appearance**), **Show more…** for the others. A click opens
 the session, which selects its project. **Rename…** and **Delete…** act on the selected session, so in
-another project they open the session first. The search field, the form of a new session and the
+another project they open the session first. The form of a new session and the
 notices of an unconfirmed action belong to the selected project.
 
 Favorite projects are listed first, under **Favorites**, in the chosen order; the others follow under
@@ -449,7 +450,7 @@ Delete and panel shortcuts. Neither card sends, retries or retargets an operatio
   does not. No archived controls can resolve, cancel or retry an interaction. These records are
   bounded app-instance evidence, not host execution/completion proof. The archived and catalog-only
   composer is a compact, auto-growing **draft-only** editor: ordinary Enter makes a new line, Send
-  is unavailable; Settings opens only from the project rail, shortcut or palette (Ctrl+G, Ctrl+U
+  is unavailable; Settings opens only from the project rail, shortcut or search (Ctrl+G, Ctrl+U
   opens Settings when no owned context refresh is available).
   Model/prompt/reasoning are not inferred from unavailable runtime state. Draft restoration uses
   WebView-local storage when available; a failed write does not certify an off-session draft badge.
@@ -1129,7 +1130,7 @@ The command approval policy is edited in **Settings → Configuration file**.
 
 **Settings → About** is an inline page with the product, version, build metadata (only for a recognized
 version `+metadata` suffix) and the mode of the running app (desktop app, catalog only, browser demo or
-unavailable host). The command palette opens the same facts as a window. The result of this
+unavailable host). The **About** command opens the same facts as a window. The result of this
 run's update check is shown under **Updates** (see "Updates" above).
 
 ### Application Logs
@@ -2011,7 +2012,7 @@ sessions of its own. Automations exist in CodeAlta Desktop only. The sources are
   running an automation by hand still works. The developer instance (`--dev`) reads the same
   definitions as the installed application and starts paused, so that it does not run them a second
   time.
-- **The tab.** The bolt of the activity bar, **Automations** in the command palette and `Ctrl+G`
+- **The tab.** The bolt of the activity bar, **Automations** in the search of the window and `Ctrl+G`
   `Ctrl+M` open one tab (`view: "automations"` in `fileTabs`), kept for the next start. It shows the
   next 24 hours on a line (a mark for each time a schedule is due, a band for an automation that runs
   all along), a card for each automation (what starts it, where it runs, when it is next due, how its
@@ -2134,16 +2135,46 @@ The sources are in `Desktop/Mcp/`, `Desktop/Rpc/McpHostRpc.cs` and `frontend/src
 
 ## Commands, help and keyboard shortcuts
 
-The desktop app uses the TUI's key map. `Ctrl+P` (or `/` in an empty prompt, or the search icon on
-the activity rail) opens the **command palette**: every command with its slash name, description and
-shortcut, grouped by category and searchable by any of them; Enter runs the selected command and
-commands that cannot run right now are dimmed. The palette is a window like Settings: drag its title
-bar to move it and its edges to resize it. `F1` (or `?` in an empty prompt) opens **Commands and
-shortcuts**, a filterable window listing the same commands by category.
+The desktop app uses the TUI's key map. `Ctrl+P` (or the search icon on the activity rail) opens the
+**search** of the window, which also runs every command: see "Search" below. `F1` (or `?` in an empty
+prompt) opens **Commands and shortcuts**, a filterable window listing the commands by category.
+
+### Search
+
+One window looks through everything (`frontend/src/search/GlobalSearch.tsx`, with the ranking in
+`searchResults.ts`). It takes the place of the command palette and of the two filters the Explorer had.
+
+- **What it finds.** The **sessions** of every project and the chats, the **projects**, the **files** of
+  the project in front (the one of the code editor or the Changes tab shown, otherwise the selected
+  project), and the **commands**, those of plugins included. Enter opens what is selected: a session in
+  its tab, a project with its new-session tab and its sessions shown in the Explorer, a file in the code
+  editor, and a command runs. What was chosen is opened once the window of the search has closed, with
+  the keyboard in the prompt of a session or of a project.
+- **Categories.** **All** shows the first results of each group, the group with the best match first,
+  and **Show all** goes to its category. `Tab` and `Shift+Tab` go through **All**, **Sessions**,
+  **Projects**, **Files** and **Commands**, with the number each one found. A text that starts with `/`
+  looks for a command, as `/` typed in an empty prompt does.
+- **Nothing typed.** The sessions that were updated last, the projects (the favorite ones first) and the
+  commands that start something (new session, open, new terminal, project editor, settings, help).
+- **Ranking.** Every word has to be found. A word counts most as the whole text, then at its start, then
+  at the start of one of its words, then anywhere; a session is found by its title, then by the name of
+  its project, then by its id, and the one updated last comes first among matches as good; a project by
+  its name, then by its folder, then by the rest of its path, a favorite first and an archived one last.
+  The files are searched and ranked by the host (`sessions.searchReferences`, the search of the `@`
+  picker), a moment after the last key. What a word found is marked in the names.
+- **The sessions of one project.** **Search sessions…** in the menu of a project or of **Chats** opens
+  the search on its sessions only, with the name of the project before the field; Backspace in the empty
+  field, or the button of that name, searches every project again. `Ctrl+F` outside a text
+  (**Search Sessions**) opens the search on the sessions of every project.
+- **Limits.** The projects and the sessions are those of the workspace snapshot (up to 200 projects and
+  500 sessions); when the host shortened it, the window says so under the results. A session is found by
+  what its row shows, not by the text of its conversation.
+
+The window is one like Settings: drag its title bar to move it and its edges to resize it.
 
 | Keys | Command |
 |---|---|
-| `Ctrl+P`, `F1` | Command palette, help |
+| `Ctrl+P`, `F1` | Search (sessions, projects, files, commands), help |
 | `Ctrl+Q` | Exit (`/exit`); works from any window |
 | `Ctrl+O` | Open project |
 | `Ctrl+E`, `Ctrl+E` `Ctrl+E` | Open a project file in the code editor (`/edit`), open the code editor with the files of the project (`/editor`) |
@@ -2162,7 +2193,7 @@ shortcuts**, a filterable window listing the same commands by category.
 | `F6`, `Ctrl+T` | Full prompt editor, next agent prompt |
 | `F8`, `F10`, `Ctrl+F11` | Abort the running turn, clear the queue, compact |
 | `F3` / `F4`, `Ctrl+F3` / `Ctrl+F4` | Previous / next message, first / latest message |
-| `Ctrl+Alt+B`, `Ctrl+F` | Browse sessions, filter the project's sessions |
+| `Ctrl+Alt+B`, `Ctrl+F` | Browse sessions, search the sessions of every project |
 | `Alt+Up` / `Alt+Down`, `Alt+Left` / `Alt+Right` outside text | Previous / next session, previous / next project |
 | `Ctrl+Shift+N` | Show or hide the session notes |
 | `Ctrl+G` then `Ctrl+P` / `Ctrl+S` / `Ctrl+G` | Go to prompt, go to sidebar, toggle the navigator |

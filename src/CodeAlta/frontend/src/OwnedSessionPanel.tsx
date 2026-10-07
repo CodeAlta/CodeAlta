@@ -59,7 +59,7 @@ export function sendFailureMessage(status: string, reason?: string): string {
   }
 }
 
-export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount, activeReminderCount = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true }: {
+export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true }: {
   active?: boolean;
   observing?: boolean;
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
@@ -89,7 +89,7 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
   /** Active reminders of this session as last reported by the host for the explorer markers; null while unknown. */
   activeReminderCount?: number | null;
   onOpenHelp?: () => void;
-  onOpenPalette?: () => void;
+  onOpenCommands?: () => void;
   onOpenCatalog?: (page: "models" | "prompts" | "providers") => void;
   reminderActions?: ReturnType<typeof createReminderActions>;
   readReminderCount?: (request: ReminderListRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ReminderListResponse>;
@@ -854,7 +854,7 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
         if (dispatchTransientComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
           altKey: event.altKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing,
           keyCode: event.nativeEvent.keyCode, repeat: event.repeat, defaultPrevented: event.defaultPrevented },
-        promptInput.current!, onOpenHelp, onOpenPalette)) { event.preventDefault(); event.stopPropagation(); return; }
+        promptInput.current!, onOpenHelp, onOpenCommands)) { event.preventDefault(); event.stopPropagation(); return; }
         if (dispatchComposerKey({ key: event.key, ctrlKey: event.ctrlKey,
           shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey,
           isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode,

@@ -1,8 +1,8 @@
 import type { MessageKey } from "./localization";
 
 /**
- * The application's commands: one list drives the command palette, the shortcut help and the keyboard
- * dispatcher. Names, labels and key gestures follow the terminal UI so both heads share one key map.
+ * The application's commands: one list drives the commands of the search window, the shortcut help and the
+ * keyboard dispatcher. Names, labels and key gestures follow the terminal UI so both heads share one key map.
  */
 export type CommandId =
   | "help" | "palette" | "openProject" | "editFile" | "projectEditor" | "newTerminal" | "automations" | "about" | "skills" | "plugins" | "settings" | "prompts" | "nextPrompt"
@@ -14,7 +14,7 @@ export type CommandId =
 export type CommandCategory = "General" | "Prompt" | "Session" | "Navigation" | "Inspection";
 export type CommandDefinition = Readonly<{
   id: CommandId;
-  /** The slash name shown in the palette, as in the terminal UI. */
+  /** The slash name shown in the search window, as in the terminal UI. */
   name: string;
   label: MessageKey;
   description: MessageKey;
@@ -23,11 +23,11 @@ export type CommandDefinition = Readonly<{
   keys?: readonly string[];
   /** Extra gestures listed in help that are handled elsewhere (typed in an empty prompt, or by the composer). */
   hints?: readonly string[];
-  /** Additional words the palette search matches. */
+  /** Additional words the search matches. */
   search?: string;
   /** Gestures that only apply while focus is not in a text field (they are ordinary typing or caret keys there). */
   outsideText?: boolean;
-  /** Hidden from the palette (still listed in help when it has a gesture). */
+  /** Hidden from the search window (still listed in help when it has a gesture). */
   hidden?: boolean;
 }>;
 
@@ -35,7 +35,7 @@ export const commandCategories: readonly CommandCategory[] = ["General", "Prompt
 
 export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "help", name: "help", label: "Help", description: "Show the commands and their shortcuts.", category: "General", keys: ["F1"], hints: ["?"], search: "? commands shortcuts keyboard" },
-  { id: "palette", name: "command_palette", label: "Command Palette", description: "Search and run a command.", category: "General", keys: ["Ctrl+P"], hints: ["/"], search: "/ palette commands" },
+  { id: "palette", name: "search", label: "Search", description: "Search projects, sessions, files and commands.", category: "General", keys: ["Ctrl+P"], hints: ["/"], search: "/ palette commands command_palette find go to" },
   { id: "openProject", name: "open", label: "Open", description: "Open a project by name or folder.", category: "General", keys: ["Ctrl+O"], search: "project folder open_project open_folder" },
   { id: "editFile", name: "edit", label: "Edit File", description: "Open a project file in the code editor.", category: "General", keys: ["Ctrl+E"], search: "open_file open file editor view" },
   { id: "projectEditor", name: "editor", label: "Project Editor", description: "Open the code editor of the project with its files.", category: "General", hints: ["Ctrl+E Ctrl+E"], search: "code editor files explorer tree folders project_editor" },
@@ -71,7 +71,7 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "nextTab", name: "tab_right", label: "Tab Right", description: "Switch to the next tab.", category: "Session", keys: ["Ctrl+Alt+Right", "Ctrl+PageDown"] },
   { id: "reminders", name: "reminder", label: "Reminders", description: "Schedule prompts for this session.", category: "Session", keys: ["Ctrl+G Ctrl+D"], search: "reminders delayed_prompt" },
   { id: "browseSessions", name: "sessions", label: "Browse Sessions", description: "Find and open a saved session.", category: "Session", keys: ["Ctrl+Alt+B"], search: "saved sessions history" },
-  { id: "searchSessions", name: "search_sessions", label: "Search Sessions", description: "Filter the sessions of the selected project.", category: "Session", keys: ["Ctrl+F"], outsideText: true },
+  { id: "searchSessions", name: "search_sessions", label: "Search Sessions", description: "Search the sessions of every project.", category: "Session", keys: ["Ctrl+F"], outsideText: true, search: "find session chat" },
 
   { id: "messagePrevious", name: "msg_prev", label: "Previous Message", description: "Scroll to the previous message.", category: "Navigation", keys: ["F3"] },
   { id: "messageNext", name: "msg_next", label: "Next Message", description: "Scroll to the next message.", category: "Navigation", keys: ["F4"] },
@@ -148,15 +148,21 @@ export function commandKeys(command: CommandDefinition): readonly string[] {
 export type RankedCommand = Readonly<{ command: CommandDefinition; score: number }>;
 
 /**
- * Palette search with the terminal UI's ranking: per field, an exact match beats a prefix, a word
+ * Command search with the terminal UI's ranking: per field, an exact match beats a prefix, a word
  * start and then any substring; the slash name outranks the label, extra search words and description.
  * Every word of the query must match somewhere. An empty query lists everything in registry order.
  */
 export function searchCommands(query: string, label: (command: CommandDefinition) => string,
   description: (command: CommandDefinition) => string): CommandDefinition[] {
+  return rankCommands(query, label, description).map(item => item.command);
+}
+
+/** The commands {@link searchCommands} finds, each with its score: lower is better, and 0 when nothing is typed. */
+export function rankCommands(query: string, label: (command: CommandDefinition) => string,
+  description: (command: CommandDefinition) => string): RankedCommand[] {
   const visible = commandDefinitions.filter(command => !command.hidden);
   const words = query.trim().toLowerCase().replace(/^\//u, "").split(/\s+/u).filter(Boolean);
-  if (!words.length) return visible;
+  if (!words.length) return visible.map(command => ({ command, score: 0 }));
   const fieldScore = (text: string, word: string): number | null => {
     const value = text.toLowerCase();
     if (value === word) return 0;
@@ -180,5 +186,5 @@ export function searchCommands(query: string, label: (command: CommandDefinition
     }
     ranked.push({ command, score: total });
   });
-  return ranked.sort((left, right) => left.score - right.score).map(item => item.command);
+  return ranked.sort((left, right) => left.score - right.score);
 }

@@ -29,17 +29,14 @@ const rows = (html: string) => html.split('<li class="project-action-row"').slic
 
 test("favorite projects are listed first, in the chosen order, and the others follow", () => {
   const value = snapshot([project("c", "Gamma"), project("a", "Alpha"), project("b", "Beta"), project("d", "Delta")]);
-  const listed = (filter: string, favorites: string[]) => {
-    const result = projectRailProjection(value, filter, "name", favorites);
+  const listed = (favorites: string[]) => {
+    const result = projectRailProjection(value, "name", favorites);
     return [result.projects.map(row => row.id).join(""), result.favorites];
   };
-  assert.deepEqual(listed("", []), ["abdc", 0]);
+  assert.deepEqual(listed([]), ["abdc", 0]);
   // The order they were made favorites in does not matter, nor do favorites that are no longer projects.
-  assert.deepEqual(listed("", ["d", "missing", "b"]), ["bdac", 2]);
-  assert.deepEqual(listed("a", ["d", "b"]), ["bdac", 2]);
-  assert.deepEqual(listed("alp", ["d", "b"]), ["a", 0]);
-  assert.deepEqual(listed("delta", ["d", "b"]), ["d", 1]);
-  assert.deepEqual(listed("", ["a", "b", "c", "d"]), ["abdc", 4]);
+  assert.deepEqual(listed(["d", "missing", "b"]), ["bdac", 2]);
+  assert.deepEqual(listed(["a", "b", "c", "d"]), ["abdc", 4]);
 });
 
 test("the projects are under two titles only when some are favorites and some are not", () => {
@@ -120,7 +117,7 @@ test("every open scope shows its sessions; the selected one keeps its own while 
 
 test("the sessions of an open scope are rows that open them, with more on demand", () => {
   const value = snapshot([project("a", "Alpha")], [session("parent", "a"), session("child", "a", "parent"), { ...session("other", "a"), automationId: "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77" }]);
-  const all = sessionHierarchy(value.sessions, value.sessions, "", "a");
+  const all = sessionHierarchy(value.sessions, value.sessions, "a");
   const render = (rows: typeof all, more: number, extended: boolean, global = false) => renderToStaticMarkup(createElement(ExplorerSessions, { rows, global, more, extended,
     access: () => ({ rename: true, delete: true }), marks: row => createElement("i", null, `marks of ${row.id}`), onAction: never, onMore: never, onFewer: never }));
   const html = render(all, 0, false);

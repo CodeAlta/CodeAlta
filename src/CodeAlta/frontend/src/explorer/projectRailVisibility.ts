@@ -24,15 +24,11 @@ export function resetNarrowRail(state: ProjectRailState): ProjectRailState {
   return { ...state, narrowOpen: false };
 }
 
-export function focusVisibleProject(rail: Pick<HTMLElement, "querySelector"> | null,
-  filter: (Pick<HTMLInputElement, "focus"> & Partial<Pick<HTMLInputElement, "closest">>) | null): boolean {
-  const selected = rail?.querySelector<HTMLButtonElement>('.project-list button[aria-pressed="true"], .project-root-list button[aria-pressed="true"]');
-  const target = selected ?? filter;
+/** Moves the focus into the Explorer: on the row that is selected, or on its first row when none is. */
+export function focusVisibleProject(rail: Pick<HTMLElement, "querySelector"> | null): boolean {
+  const target = rail?.querySelector<HTMLButtonElement>('.project-list button[aria-pressed="true"], .project-root-list button[aria-pressed="true"]')
+    ?? rail?.querySelector<HTMLButtonElement>(".project-root-list button, .project-list button");
   if (!target) return false;
-  if (target === filter) {
-    const disclosure = filter?.closest?.<HTMLDetailsElement>("details");
-    if (disclosure) disclosure.open = true;
-  }
   target.focus();
   return true;
 }

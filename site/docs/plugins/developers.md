@@ -73,7 +73,7 @@ public sealed class HelloPlugin : PluginBase
 }
 ```
 
-In CodeAlta Desktop, click **Build and reload** on the row of the plugin in **Settings > Plugins**: CodeAlta builds the plugin and loads it, and `/hello` appears in the command palette. In CodeAlta TUI, restart.
+In CodeAlta Desktop, click **Build and reload** on the row of the plugin in **Settings > Plugins**: CodeAlta builds the plugin and loads it, and `/hello` appears among the commands of the search (`Ctrl+P`). In CodeAlta TUI, restart.
 
 A plugin is a public class that inherits `PluginBase` and has a public parameterless constructor. The `[Plugin]` attribute is optional. One file can declare several plugins.
 
@@ -144,7 +144,7 @@ Override only the methods the plugin needs.
 {.table}
 | Method | Adds | Desktop | TUI |
 |---|---|---|---|
-| `GetCommands()` | Commands for the palette, the `/` menu and shortcuts | yes | yes |
+| `GetCommands()` | Commands for the search or the palette, the `/` menu and shortcuts | yes | yes |
 | `GetUiContributions()` | Status items and content around the prompt | yes | yes |
 | `GetPromptPickers()` | A picker opened by a character typed in the prompt | yes | yes |
 | `GetSessionEventProjections()` | Cards in the session timeline | yes | yes |
