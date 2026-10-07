@@ -114,6 +114,12 @@ public sealed class WorkItemService
             : null;
     }
 
+    // Four characters that read well in a file name: no vowel (no word by accident), no 0/1 beside o/l.
+    private const string SuffixAlphabet = "23456789bcdfghjkmnpqrstvwxz";
+
+    private static string ShortSuffix()
+        => string.Create(4, 0, static (span, _) => { foreach (ref var character in span) character = SuffixAlphabet[Random.Shared.Next(SuffixAlphabet.Length)]; });
+
     /// <summary>Writes a new task in the project.</summary>
     /// <param name="project">The project.</param>
     /// <param name="draft">What the task is.</param>
@@ -180,7 +186,10 @@ public sealed class WorkItemService
         var text = WorkItemFiles.SerializeTask(title, kind, WorkTaskStatus.Pending, created, summary, body);
         for (var attempt = 1; ; attempt++)
         {
-            var id = attempt == 1 ? stem : stem + "-" + attempt.ToString(CultureInfo.InvariantCulture);
+            // The id ends with a few random characters: two sessions that work in two checkouts of the project (a
+            // worktree, another clone) and propose a task of the same title on the same day write two files, which
+            // meet without a conflict when their branches are merged.
+            var id = stem + "-" + ShortSuffix();
             var path = Path.Combine(directory, id + ".md");
             try
             {
@@ -199,7 +208,7 @@ public sealed class WorkItemService
             }
             catch (IOException) when (File.Exists(path) && attempt < 50)
             {
-                // Another task of the day has this name.
+                // Another task of the day has this name: another end is drawn.
             }
         }
     }

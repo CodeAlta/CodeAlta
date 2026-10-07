@@ -252,15 +252,27 @@ public sealed class SystemPromptInfrastructureTests
         StringAssert.Contains(developerInstructions, $"- Current working directory: `{Path.GetFullPath(workingDirectory)}`");
         StringAssert.Contains(developerInstructions, $"- Project root: `{Path.GetFullPath(projectRoot)}`");
         StringAssert.Contains(developerInstructions, $"File: `{Path.GetFullPath(projectContextFile)}`");
-        // Where long instructions of the user are written down: under the CodeAlta root of the user, of their profile by default.
-        StringAssert.Contains(developerInstructions, $"- Scratchpad folder: `{Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta", "scratchpad")}`");
+        // Where long instructions of the user are written down: a file the agent names after the day and the request,
+        // which ends with a short hash of the session, under the CodeAlta root of the user (of their profile by default).
+        var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData("session-1"u8), 0, 3);
+        StringAssert.Contains(developerInstructions, $"- Scratchpad file: `{Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta", "scratchpad", $"<yyyy-mm-dd>-<short-name>-{hash}.md")}`");
         var rooted = builder.Build(new SystemPromptBuildRequest
         {
             ProviderKey = "codex", ProviderType = "codex", ProtocolFamily = "codex", UserCodeAltaRoot = projectRoot,
             Session = new SessionViewDescriptor { SessionId = "session-1", ProviderId = "codex", ProviderKey = "codex", WorkingDirectory = workingDirectory, Kind = SessionViewKind.ProjectSession },
             PartOptionsOverride = new PartialSystemPromptPartOptions(Skills: false, ProjectContext: false, RuntimeContext: true, ToolGuidance: false),
         });
-        StringAssert.Contains(rooted.DeveloperInstructions!, $"- Scratchpad folder: `{Path.Combine(Path.GetFullPath(projectRoot), "scratchpad")}`");
+        StringAssert.Contains(rooted.DeveloperInstructions!, $"- Scratchpad file: `{Path.Combine(Path.GetFullPath(projectRoot), "scratchpad", $"<yyyy-mm-dd>-<short-name>-{hash}.md")}`");
+        // Another session has another hash, whatever its id is made of: two agents never write the same file.
+        var other = builder.Build(new SystemPromptBuildRequest
+        {
+            ProviderKey = "codex", ProviderType = "codex", ProtocolFamily = "codex", UserCodeAltaRoot = projectRoot,
+            Session = new SessionViewDescriptor { SessionId = "../other", ProviderId = "codex", ProviderKey = "codex", WorkingDirectory = workingDirectory, Kind = SessionViewKind.ProjectSession },
+            PartOptionsOverride = new PartialSystemPromptPartOptions(Skills: false, ProjectContext: false, RuntimeContext: true, ToolGuidance: false),
+        });
+        var otherHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData("../other"u8), 0, 3);
+        Assert.AreNotEqual(hash, otherHash);
+        StringAssert.Contains(other.DeveloperInstructions!, $"- Scratchpad file: `{Path.Combine(Path.GetFullPath(projectRoot), "scratchpad", $"<yyyy-mm-dd>-<short-name>-{otherHash}.md")}`");
     }
 
     [TestMethod]

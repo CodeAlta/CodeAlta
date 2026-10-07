@@ -117,7 +117,12 @@ public sealed class WorkItemTests
 
         Assert.AreEqual(2, changes);
         Assert.AreNotEqual(first.Id, second.Id, "Two tasks of a day with one title have two files.");
-        StringAssert.EndsWith(second.Id, "-2");
+        // An id is the day, the title and a short random end, which keeps two checkouts of a project from creating one file.
+        foreach (var id in new[] { first.Id, second.Id })
+        {
+            StringAssert.Matches(id, new System.Text.RegularExpressions.Regex(@"^\d{4}-\d{2}-\d{2}-report-why-a-probe-failed-[23456789bcdfghjkmnpqrstvwxz]{4}$"));
+            Assert.IsTrue(WorkItemFiles.IsValidId(id));
+        }
         Assert.IsTrue(File.Exists(Path.Combine(project.ProjectPath, ".alta", "tasks", first.Id + ".md")));
         CollectionAssert.AreEquivalent(new[] { first.Id, second.Id }, items.ListTasks(project).Select(static task => task.Id).ToArray());
         Assert.AreEqual("session-1", items.GetLink(project.Id, WorkItemKinds.Task, first.Id)!.ProposedBy);

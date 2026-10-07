@@ -50,8 +50,10 @@ Each work item is a Markdown file of its project, which you can read, edit and c
 {.table}
 | Kind | File | Status |
 |---|---|---|
-| Task | `.alta/tasks/yyyy-mm-dd-name.md` | `pending`, `later` |
+| Task | `.alta/tasks/yyyy-mm-dd-name-xxxx.md` | `pending`, `later` |
 | Plan | `.alta/plans/yyyy-mm-dd-name.md` | `draft`, `approved`, `in-progress`, `done`, `blocked` |
+
+The name of a task ends with four random characters, so that two branches of a project never create the same file.
 
 ```markdown
 ---

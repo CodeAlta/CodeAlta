@@ -567,16 +567,24 @@ public sealed class SystemPromptBuilder
 
         lines.Add($"- Session kind: {request.Session.Kind.ToString().ToLowerInvariant()}");
         // Where an agent writes down long instructions of the user, so that they outlive a compaction of the context.
-        if (ScratchpadFolder(request) is { } scratchpad)
+        // The agent names the file after the day and the request; the end of the name is a short hash of the session,
+        // so that two agents never write the same file.
+        if (ScratchpadFile(request) is { } scratchpad)
         {
-            lines.Add($"- Scratchpad folder: {MarkdownCode(scratchpad)}");
+            lines.Add($"- Scratchpad file: {MarkdownCode(scratchpad)}");
         }
 
         return string.Join(Environment.NewLine, lines);
     }
 
-    private static string? ScratchpadFolder(SystemPromptBuildRequest request)
+    private static string? ScratchpadFile(SystemPromptBuildRequest request)
     {
+        var session = request.Session.SessionId?.Trim();
+        if (string.IsNullOrEmpty(session))
+        {
+            return null;
+        }
+
         // The same root the prompt resources of the user are read from.
         var root = NormalizeOptionalRoot(request.UserCodeAltaRoot);
         if (root is null)
@@ -586,7 +594,9 @@ public sealed class SystemPromptBuilder
             root = string.IsNullOrWhiteSpace(profile) ? null : Path.Combine(profile, ".alta");
         }
 
-        return root is null ? null : Path.Combine(root, "scratchpad");
+        // Six characters of a hash of the id: the same for every prompt of the session, and a name of a file whatever the id is.
+        var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(session)), 0, 3);
+        return root is null ? null : Path.Combine(root, "scratchpad", $"<yyyy-mm-dd>-<short-name>-{hash}.md");
     }
 
     private static string BuildToolGuidance(SystemPromptBuildRequest request)

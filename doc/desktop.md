@@ -2109,7 +2109,7 @@ settings, the store of the links), `Desktop/WorkItems/WorkItemRunner.cs` and
 - **Tasks.** A task is one specific piece of work beside what a session was asked: a gap, a problem
   or an improvement the agent found and verified. The **Default** agent prompt tells the agent when to
   propose one (before it ends its turn, never for what belongs to the request, never as a list of
-  ideas) and to leave the decision to the user. A task is `<project>/.alta/tasks/yyyy-mm-dd-<slug>.md`:
+  ideas) and to leave the decision to the user. A task is `<project>/.alta/tasks/yyyy-mm-dd-<slug>-<xxxx>.md` (four random characters end the name, so that two checkouts of a project never create the same file):
 
   ```markdown
   ---
