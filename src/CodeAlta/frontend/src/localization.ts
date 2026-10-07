@@ -2032,6 +2032,7 @@ export const messages = dictionary({
   "Detect from the file name": ["Detectar por el nombre del archivo", "Détecter d'après le nom du fichier", "Anhand des Dateinamens erkennen", "ファイル名から判定", "根据文件名检测"],
   "No language matches.": ["Ningún lenguaje coincide.", "Aucun langage ne correspond.", "Keine Sprache passt.", "一致する言語がありません。", "没有匹配的语言。"],
   "Start a new file": ["Empezar un archivo nuevo", "Commencer un nouveau fichier", "Eine neue Datei beginnen", "新しいファイルを始める", "开始一个新文件"],
+  "From the GitHub Copilot layout": ["Del diseño de GitHub Copilot", "De la disposition GitHub Copilot", "Aus dem GitHub-Copilot-Layout", "GitHub Copilot のレイアウトから", "来自 GitHub Copilot 布局"],
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

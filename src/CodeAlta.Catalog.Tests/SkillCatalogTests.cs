@@ -42,6 +42,52 @@ public sealed class SkillCatalogTests
     }
 
     [TestMethod]
+    public async Task SkillCatalog_ListAsync_ReadsTheSkillsOfTheCopilotLayout_AsCopilotWritesThem()
+    {
+        using var temp = TempDirectory.Create();
+        var projectRoot = Path.Combine(temp.Path, "project");
+        var userHome = Path.Combine(temp.Path, "home");
+        // A skill written for Copilot: fields of its own, and the tools as a list.
+        Directory.CreateDirectory(Path.Combine(projectRoot, ".github", "skills", "release-notes"));
+        await File.WriteAllTextAsync(Path.Combine(projectRoot, ".github", "skills", "release-notes", "SKILL.md"),
+            "---\nname: release-notes\ndescription: Writes the notes of a release.\nargument-hint: \"[version]\"\nuser-invocable: true\nallowed-tools:\n  - Read\n  - \"Bash(git log:*)\"\nsomething-new: 1\n---\n# Release notes\n\nBody.\n");
+        Directory.CreateDirectory(Path.Combine(userHome, ".copilot", "skills", "quiet"));
+        await File.WriteAllTextAsync(Path.Combine(userHome, ".copilot", "skills", "quiet", "SKILL.md"),
+            "---\nname: quiet\ndescription: Only when asked by name.\ndisable-model-invocation: true\n---\n# Quiet\n");
+        // One name in two folders of a project: the folder of the common layout comes before the one of Copilot.
+        await WriteSkillAsync(Path.Combine(projectRoot, ".agents", "skills", "shared"), "shared", "The common one.");
+        await WriteSkillAsync(Path.Combine(projectRoot, ".github", "skills", "shared"), "shared", "The one of Copilot.");
+        // The same fields are still an error outside a folder of Copilot.
+        Directory.CreateDirectory(Path.Combine(projectRoot, ".alta", "skills", "strict"));
+        await File.WriteAllTextAsync(Path.Combine(projectRoot, ".alta", "skills", "strict", "SKILL.md"),
+            "---\nname: strict\ndescription: Not of Copilot.\nargument-hint: x\n---\n# Strict\n");
+
+        var descriptors = await new SkillCatalog().ListAsync(new SkillCatalogQuery
+        {
+            Discovery = new SkillDiscoveryContext { ProjectRoots = [projectRoot], UserCodeAltaRoot = Path.Combine(userHome, ".alta"), UserProfileRoot = userHome },
+        });
+
+        var notes = descriptors.Single(static skill => skill.Name == "release-notes");
+        Assert.AreEqual((SkillSourceKind.ProjectCopilot, SkillScopeKind.Project, true, true), (notes.SourceKind, notes.Scope, notes.IsValid, notes.IsModelVisible),
+            string.Join("; ", notes.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+        Assert.AreEqual("Read, Bash(git log:*)", notes.Frontmatter.AllowedTools);
+        Assert.AreEqual(0, notes.Diagnostics.Count);
+        Assert.IsTrue(notes.SourceKind.IsCopilot() && !SkillSourceKind.ProjectCommon.IsCopilot());
+
+        var quiet = descriptors.Single(static skill => skill.Name == "quiet");
+        Assert.AreEqual((SkillSourceKind.UserCopilot, SkillScopeKind.User, true, false), (quiet.SourceKind, quiet.Scope, quiet.IsValid, quiet.IsModelVisible),
+            "A skill that asks not to be offered to the model is still one the user activates.");
+
+        var shared = descriptors.Where(static skill => skill.Name == "shared").ToArray();
+        CollectionAssert.AreEqual(new[] { (SkillSourceKind.ProjectCommon, false), (SkillSourceKind.ProjectCopilot, true) },
+            shared.Select(static skill => (skill.SourceKind, skill.IsShadowed)).ToArray());
+
+        var strict = descriptors.Single(static skill => skill.Name == "strict");
+        Assert.IsFalse(strict.IsValid);
+        Assert.IsTrue(strict.Diagnostics.Any(static diagnostic => diagnostic.Code == "unknown-frontmatter-field"));
+    }
+
+    [TestMethod]
     public async Task SkillCatalog_ListAsync_RespectsGitIgnoreAndStopsAtSkillRoots()
     {
         using var temp = TempDirectory.Create();

@@ -999,6 +999,8 @@ internal sealed class SkillsManagementDialog
             SkillSourceKind.ProjectCommon => SR.T("project .agents/skills"),
             SkillSourceKind.UserAlta => SR.T("user ~/.alta/skills"),
             SkillSourceKind.UserCommon => SR.T("user ~/.agents/skills"),
+            SkillSourceKind.ProjectCopilot => SR.T("project .github/skills (Copilot)"),
+            SkillSourceKind.UserCopilot => SR.T("user ~/.copilot/skills (Copilot)"),
             SkillSourceKind.Plugin => SR.T("plugin"),
             SkillSourceKind.Builtin => SR.T("builtin"),
             _ => SR.T("temporary"),

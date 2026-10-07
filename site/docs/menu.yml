@@ -11,6 +11,7 @@ doc:
   - {path: automations.md, title: "<i class='bi bi-lightning-charge' aria-hidden='true'></i> Automations"}
   - {path: work-items.md, title: "<i class='bi bi-list-check' aria-hidden='true'></i> Work Items"}
   - {path: issues.md, title: "<i class='bi bi-record-circle' aria-hidden='true'></i> Issues and Pull Requests"}
+  - {path: copilot-layout.md, title: "<i class='bi bi-github' aria-hidden='true'></i> GitHub Copilot Layout"}
   - {path: ui-tools.md, title: "<i class='bi bi-cursor' aria-hidden='true'></i> UI Tools and MCP Server"}
   - {path: advanced-agent-workflows.md, title: "<i class='bi bi-stars' aria-hidden='true'></i> Advanced Agent Workflows"}
   - {path: plugins/readme.md, title: "<i class='bi bi-puzzle' aria-hidden='true'></i> Plugins", folder: true}

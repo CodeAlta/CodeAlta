@@ -33,6 +33,16 @@ public sealed class SkillCatalog
         "allowed-tools",
     }.ToFrozenSet(StringComparer.Ordinal);
 
+    // What GitHub Copilot writes in the front matter of a skill beside the fields of the Agent Skills format. In a
+    // folder of Copilot they are part of the format; anything else there is left unread, as Copilot leaves it.
+    private static readonly FrozenSet<string> CopilotTopLevelFields = new[]
+    {
+        "argument-hint",
+        "user-invocable",
+        "disable-model-invocation",
+        "context",
+    }.ToFrozenSet(StringComparer.Ordinal);
+
     private readonly FileTreeWalker _walker = new();
     private readonly IReadOnlyList<ISkillRootProvider> _rootProviders;
 
@@ -44,7 +54,7 @@ public sealed class SkillCatalog
     {
         _rootProviders = rootProviders is { Count: > 0 }
             ? rootProviders
-            : [new ProjectCodeAltaSkillRootProvider(), new ProjectCommonSkillRootProvider(), new UserCodeAltaSkillRootProvider(), new UserCommonSkillRootProvider(), new BuiltInCodeAltaSkillRootProvider()];
+            : [new ProjectCodeAltaSkillRootProvider(), new ProjectCommonSkillRootProvider(), new ProjectCopilotSkillRootProvider(), new UserCodeAltaSkillRootProvider(), new UserCommonSkillRootProvider(), new UserCopilotSkillRootProvider(), new BuiltInCodeAltaSkillRootProvider()];
     }
 
     /// <summary>
@@ -439,7 +449,7 @@ public sealed class SkillCatalog
             {
                 frontmatterMap = YamlSerializer.Deserialize<Dictionary<string, object?>>(rawFrontmatter)
                     ?? new Dictionary<string, object?>(StringComparer.Ordinal);
-                frontmatter = ParseFrontmatter(frontmatterMap, diagnostics, skillFilePath);
+                frontmatter = ParseFrontmatter(frontmatterMap, diagnostics, skillFilePath, root.SourceKind.IsCopilot());
             }
             catch (Exception ex)
             {
@@ -508,14 +518,15 @@ public sealed class SkillCatalog
             IsTrusted = isTrusted,
             IsValid = !hasErrors && !string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(description),
             IsEnabled = true,
-            IsModelVisible = !hasErrors && !isShadowed && isTrusted && !string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(description),
+            IsModelVisible = !hasErrors && !isShadowed && isTrusted && !frontmatter.DisableModelInvocation && !string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(description),
         };
     }
 
     private static SkillFrontmatter ParseFrontmatter(
         IReadOnlyDictionary<string, object?> frontmatterMap,
         List<SkillValidationDiagnostic> diagnostics,
-        string skillFilePath)
+        string skillFilePath,
+        bool copilot = false)
     {
         var metadata = new Dictionary<string, string>(StringComparer.Ordinal);
         List<string> unknownFields = [];
@@ -537,11 +548,27 @@ public sealed class SkillCatalog
 
         foreach (var key in frontmatterMap.Keys)
         {
-            if (!AllowedTopLevelFields.Contains(key))
+            // A skill of a folder of Copilot is read as Copilot reads it: a field CodeAlta does not know is no error.
+            if (!AllowedTopLevelFields.Contains(key) && !copilot)
             {
                 unknownFields.Add(key);
             }
         }
+
+        // The tools a skill may use: one text, or a list of them (as Copilot also writes it).
+        string? GetTools()
+        {
+            if (frontmatterMap.TryGetValue("allowed-tools", out var value) && value is System.Collections.IEnumerable items and not string)
+            {
+                var names = items.Cast<object?>().Select(static item => item as string).ToArray();
+                if (names.All(static name => !string.IsNullOrWhiteSpace(name))) return Normalize(string.Join(", ", names.Select(static name => name!.Trim())));
+            }
+
+            return GetString("allowed-tools");
+        }
+
+        var hidden = copilot && frontmatterMap.TryGetValue("disable-model-invocation", out var disabled)
+            && (disabled is true || disabled is string text && string.Equals(text.Trim(), "true", StringComparison.OrdinalIgnoreCase));
 
         if (frontmatterMap.TryGetValue("metadata", out var metadataValue) && metadataValue is not null)
         {
@@ -586,8 +613,9 @@ public sealed class SkillCatalog
             License = GetString("license"),
             Compatibility = GetString("compatibility"),
             Metadata = metadata,
-            AllowedTools = GetString("allowed-tools"),
+            AllowedTools = GetTools(),
             UnknownTopLevelFields = unknownFields,
+            DisableModelInvocation = hidden,
         };
     }
 
@@ -856,8 +884,8 @@ public sealed class SkillCatalog
     {
         return sourceKind switch
         {
-            SkillSourceKind.ProjectAlta or SkillSourceKind.ProjectCommon => "project",
-            SkillSourceKind.UserAlta or SkillSourceKind.UserCommon => "user",
+            SkillSourceKind.ProjectAlta or SkillSourceKind.ProjectCommon or SkillSourceKind.ProjectCopilot => "project",
+            SkillSourceKind.UserAlta or SkillSourceKind.UserCommon or SkillSourceKind.UserCopilot => "user",
             SkillSourceKind.Plugin => "plugin",
             SkillSourceKind.Builtin => "builtin",
             _ => "temporary",

@@ -50,7 +50,7 @@ export const isSkillTab = (tab: FileTab) => tab.view === "editor" && tab.project
 /** A tab of the code editor on a folder that is no project of the workspace: the one of a plugin or of a skill. */
 export const isFolderTab = (tab: FileTab) => isPluginTab(tab) || isSkillTab(tab);
 /** Whether the folder of a skill is only read: the skill is not one of the user or of a project. */
-export const skillReadOnly = (source: string) => !["ProjectAlta", "ProjectCommon", "UserAlta", "UserCommon"].includes(source);
+export const skillReadOnly = (source: string) => !["ProjectAlta", "ProjectCommon", "UserAlta", "UserCommon", "ProjectCopilot", "UserCopilot"].includes(source);
 /** Whether nothing is changed in the folder of a tab. The id of the folder of a skill says where the skill comes from. */
 export function isReadOnlyTab(tab: FileTab) {
   if (!isSkillTab(tab)) return false;

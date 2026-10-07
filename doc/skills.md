@@ -7,10 +7,12 @@ CodeAlta skills are filesystem directories that contain a required `SKILL.md` fi
 CodeAlta discovers skills from these roots, highest precedence first:
 
 1. `<project>/.alta/skills/`
-2. `<project>/.agents/skills/`
+2. `<project>/.agents/skills/`, then `<project>/.github/skills/` (the layout of GitHub Copilot)
 3. `~/.alta/skills/`
-4. `~/.agents/skills/`
+4. `~/.agents/skills/`, then `~/.copilot/skills/` (the layout of GitHub Copilot)
 5. built-in skills bundled with CodeAlta
+
+The two folders of GitHub Copilot (`SkillSourceKind.ProjectCopilot`, `UserCopilot`; `IsCopilot()`) have the precedence of the common folder of their scope and come after it by their path. A skill there is read as Copilot writes it: any top-level field is accepted (`argument-hint`, `user-invocable`, `disable-model-invocation`, `context` and whatever Copilot adds later), where the other roots refuse an unknown field. `disable-model-invocation: true` keeps the skill from the model (`SkillFrontmatter.DisableModelInvocation`). In every root `allowed-tools` is one text or a list of texts. The Skills page marks these skills **Copilot** with the GitHub mark (`CopilotTag`), and their folders are edited like those of the other skills of a project or of the user.
 
 Plugin-contributed skill roots are included through plugin resource contributions with runtime-assigned scope and precedence. Project/user skills with the same `name` shadow lower-precedence entries. Shadowed skills remain inspectable in the UI when requested, but only the winning valid skill is advertised for activation.
 

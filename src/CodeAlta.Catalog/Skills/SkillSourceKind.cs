@@ -39,4 +39,23 @@ public enum SkillSourceKind
     /// Temporary or explicit test/tooling root.
     /// </summary>
     Temporary,
+
+    /// <summary>
+    /// Project-local skill root of GitHub Copilot (<c>.github/skills</c>).
+    /// </summary>
+    ProjectCopilot,
+
+    /// <summary>
+    /// User-level skill root of GitHub Copilot (<c>~/.copilot/skills</c>).
+    /// </summary>
+    UserCopilot,
+}
+
+/// <summary>What is said of a source of skills beyond its kind.</summary>
+public static class SkillSourceKindExtensions
+{
+    /// <summary>Whether a source is a folder of the layout of GitHub Copilot: its skills are read as Copilot writes them.</summary>
+    /// <param name="kind">The source.</param>
+    /// <returns>True for the Copilot folders of a project and of the user.</returns>
+    public static bool IsCopilot(this SkillSourceKind kind) => kind is SkillSourceKind.ProjectCopilot or SkillSourceKind.UserCopilot;
 }

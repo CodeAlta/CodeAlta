@@ -29,7 +29,8 @@ internal readonly record struct SkillFolder(string? ProjectId, SkillSourceKind S
     internal string Id => ProjectId is null ? $"{GlobalPrefix}{Source}:{Name}" : $"{ProjectPrefix}{ProjectId}:{Source}:{Name}";
 
     /// <summary>Whether nothing is changed in the folder: it is not one of the user or of a project.</summary>
-    internal bool ReadOnly => Source is not (SkillSourceKind.ProjectAlta or SkillSourceKind.ProjectCommon or SkillSourceKind.UserAlta or SkillSourceKind.UserCommon);
+    internal bool ReadOnly => Source is not (SkillSourceKind.ProjectAlta or SkillSourceKind.ProjectCommon or SkillSourceKind.UserAlta or SkillSourceKind.UserCommon
+        or SkillSourceKind.ProjectCopilot or SkillSourceKind.UserCopilot);
 
     /// <summary>Reads an id of a skill folder; false for anything else, the id of a project included.</summary>
     internal static bool TryParse(string? id, out SkillFolder folder)

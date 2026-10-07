@@ -1,3 +1,4 @@
+import { CopilotTag, copilotSkillSource } from "./CopilotTag";
 import { useEffect, useMemo, useState } from "react";
 import { Button, Card, CardList, FormGroup, InputGroup, NonIdealState, PopoverNext, Switch, Tag } from "@blueprintjs/core";
 import { skills, type SkillsDetailResponse, type SkillsEntry } from "#neoastra";
@@ -10,7 +11,8 @@ import { settingsFailure, type SettingsScope } from "./settingsEditing";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
 
-const sourceLabels: Record<string, MessageKey> = { ProjectAlta: "Project", ProjectCommon: "Project", UserAlta: "User", UserCommon: "User", Plugin: "Plugin", Builtin: "Built-in" };
+const sourceLabels: Record<string, MessageKey> = { ProjectAlta: "Project", ProjectCommon: "Project", ProjectCopilot: "Project", UserAlta: "User", UserCommon: "User", UserCopilot: "User",
+  Plugin: "Plugin", Builtin: "Built-in" };
 
 const skillKey = (skill: Pick<SkillsEntry, "name" | "source">) => `${skill.source}:${skill.name}`;
 
@@ -30,7 +32,7 @@ export function SkillDetail({ skill, detail, failed, onEdit }: { skill: SkillsEn
   const instructions = detail?.content ? skillInstructions(detail.content) : "";
   return <section className="skill-detail" aria-label={t("Details for {name}", { name: skill.title || skill.name })}>
     <header><h2>{skill.title || skill.name}</h2>
-      <span className="settings-editor-tags"><Tag minimal round>{t(sourceLabels[skill.source] ?? "Plugin")}</Tag>
+      <span className="settings-editor-tags"><Tag minimal round>{t(sourceLabels[skill.source] ?? "Plugin")}</Tag>{copilotSkillSource(skill.source) && <CopilotTag />}
         <Tag minimal round intent={skill.enabled ? "success" : "none"}>{t(skill.enabled ? "Enabled" : "Disabled")}</Tag>
         {detail && !detail.modelVisible && skill.enabled && <Tag minimal round intent="warning">{t("Not offered to the model")}</Tag>}
         {skill.shadowed && <Tag minimal round intent="warning">{t("Overridden")}</Tag>}
@@ -138,7 +140,7 @@ export function SkillSettings({ epoch, project, onEdit, api = skills }: {
           {shown.map(skill => <Card key={skillKey(skill)} interactive selected={skill === selected} aria-current={skill === selected ? "true" : undefined}
             onClick={event => { if (!(event.target as HTMLElement).closest(".bp6-switch")) setSelectedKey(skillKey(skill)); }}>
             <span className="settings-editor-name"><strong>{skill.title || skill.name}</strong><small>{skill.description}</small></span>
-            <span className="settings-editor-tags"><Tag minimal round>{t(sourceLabels[skill.source] ?? "Plugin")}</Tag>
+            <span className="settings-editor-tags"><Tag minimal round>{t(sourceLabels[skill.source] ?? "Plugin")}</Tag>{copilotSkillSource(skill.source) && <CopilotTag />}
               {skill.shadowed && <Tag minimal round intent="warning">{t("Overridden")}</Tag>}
               {!skill.valid && <Tag minimal round intent="danger">{t("Invalid")}</Tag>}
               <Switch checked={skill.enabled} disabled={busy} aria-label={t("Enable {name}", { name: skill.name })} onChange={event => toggle(skill, event.currentTarget.checked)} /></span>

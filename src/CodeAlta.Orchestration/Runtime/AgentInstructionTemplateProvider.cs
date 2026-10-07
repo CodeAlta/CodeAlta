@@ -244,6 +244,8 @@ public sealed class AgentInstructionTemplateProvider
             SkillSourceKind.ProjectCommon => "project .agents/skills",
             SkillSourceKind.UserAlta => "user ~/.alta/skills",
             SkillSourceKind.UserCommon => "user ~/.agents/skills",
+            SkillSourceKind.ProjectCopilot => "project .github/skills",
+            SkillSourceKind.UserCopilot => "user ~/.copilot/skills",
             SkillSourceKind.Plugin => "plugin",
             SkillSourceKind.Builtin => "builtin",
             _ => "temporary",

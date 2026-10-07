@@ -1066,6 +1066,8 @@ Each root can contain `system/<id>.system-prompt.md` and `agents/<id>.prompt.md`
 
 System prompts carry the invariant host/agent behavior. Agent prompts are selectable session profiles with `name` frontmatter for UI display (required for replacement prompts and inherited for appended prompts), optional `description`, optional `system` (default `default`), optional generated-part overrides (`skills`, `project_context`, `runtime_context`, `tool_guidance`), and a Markdown body that is included in the composed developer instructions. Prompt descriptions are also surfaced in generated model context for prompt/mode discoverability, so custom descriptions should be concise and decision-useful. Built-in resources are read-only; global and project prompt/system-prompt files can be edited through the prompt manager or `alta prompt` live-tool commands. The selected agent prompt determines the system prompt id unless a runtime system override is supplied.
 
+The project context also reads the layout of GitHub Copilot. `.github/copilot-instructions.md` is one of the instruction files of a folder, with `AGENTS.md` and `CLAUDE.md` (the largest of a folder is read). `~/.copilot/copilot-instructions.md`, of the profile the host names, comes first. The `*.instructions.md` files of `<project>/.github/instructions/` that have an `applyTo` are not included: the context names each with its patterns and tells the agent to read it before changing a file that matches (50 files at most; one with `excludeAgent: coding-agent` is left out; a session in a worktree reads the folder of its worktree).
+
 `SystemPromptBuilder` composes:
 
 - native system prompt content selected from `prompts/system`;

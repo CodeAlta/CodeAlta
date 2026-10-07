@@ -267,8 +267,10 @@ public sealed class CodeAltaHost : IAsyncDisposable
             var skillCatalog = new SkillCatalog([
                 new ProjectCodeAltaSkillRootProvider(),
                 new ProjectCommonSkillRootProvider(),
+                new ProjectCopilotSkillRootProvider(),
                 new UserCodeAltaSkillRootProvider(),
                 new UserCommonSkillRootProvider(),
+                new UserCopilotSkillRootProvider(),
                 builtInSkillRootProvider,
                 new PluginSkillRootProvider(() => pluginRuntime.Adapter.GetResources(pluginRuntime.ActivePlugins, pluginOperationOptions)),
             ]);

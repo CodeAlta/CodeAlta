@@ -8328,6 +8328,12 @@
   fr: "projet .agents/skills"
   ja: "プロジェクト.エージェント/スキル"
   zh: "项目 .agents/skills"
+"project .github/skills (Copilot)":
+  de: "Projekt .github/skills (Copilot)"
+  es: "proyecto .github/skills (Copilot)"
+  fr: "projet .github/skills (Copilot)"
+  ja: "プロジェクト .github/skills (Copilot)"
+  zh: "项目 .github/skills (Copilot)"
 "project .alta/skills":
   de: "Projekt .alta/skills"
   es: "proyecto .alta/skills"
@@ -8736,6 +8742,12 @@
   fr: "utilisateur ~/.agents/skills"
   ja: "ユーザー ~/.エージェント/スキル"
   zh: "用户 ~/.agents/skills"
+"user ~/.copilot/skills (Copilot)":
+  de: "Benutzer ~/.copilot/skills (Copilot)"
+  es: "usuario ~/.copilot/skills (Copilot)"
+  fr: "utilisateur ~/.copilot/skills (Copilot)"
+  ja: "ユーザー ~/.copilot/skills (Copilot)"
+  zh: "用户 ~/.copilot/skills (Copilot)"
 "user ~/.alta/skills":
   de: "Benutzer ~/.alta/skills"
   es: "usuario ~/.alta/skills"

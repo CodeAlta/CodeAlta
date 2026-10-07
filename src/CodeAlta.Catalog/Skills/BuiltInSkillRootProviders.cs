@@ -57,6 +57,70 @@ public sealed class ProjectCommonSkillRootProvider : ISkillRootProvider
 }
 
 /// <summary>
+/// Resolves the project-local skill roots of GitHub Copilot (<c>.github/skills</c>), so that a project written for
+/// Copilot brings its skills as they are. A skill of the same name under <c>.alta/skills</c> or
+/// <c>.agents/skills</c> comes first.
+/// </summary>
+public sealed class ProjectCopilotSkillRootProvider : ISkillRootProvider
+{
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<SkillRootRegistration>> GetRootsAsync(
+        SkillDiscoveryContext context,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return ValueTask.FromResult<IReadOnlyList<SkillRootRegistration>>(
+            context.ProjectRoots
+                .Where(static path => !string.IsNullOrWhiteSpace(path))
+                .Select(static projectRoot => new SkillRootRegistration
+                {
+                    RootPath = Path.Combine(projectRoot, ".github", "skills"),
+                    SourceKind = SkillSourceKind.ProjectCopilot,
+                    SourceId = $"project-copilot:{Path.GetFullPath(projectRoot)}",
+                    Scope = SkillScopeKind.Project,
+                    // With the common root: of two skills of one name, the path decides, and `.agents` comes before `.github`.
+                    Precedence = 1,
+                })
+                .ToArray());
+    }
+}
+
+/// <summary>
+/// Resolves the user-level skill root of GitHub Copilot (<c>~/.copilot/skills</c>).
+/// </summary>
+public sealed class UserCopilotSkillRootProvider : ISkillRootProvider
+{
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<SkillRootRegistration>> GetRootsAsync(
+        SkillDiscoveryContext context,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (string.IsNullOrWhiteSpace(context.UserProfileRoot))
+        {
+            return ValueTask.FromResult<IReadOnlyList<SkillRootRegistration>>([]);
+        }
+
+        return ValueTask.FromResult<IReadOnlyList<SkillRootRegistration>>(
+        [
+            new SkillRootRegistration
+            {
+                RootPath = Path.Combine(context.UserProfileRoot, ".copilot", "skills"),
+                SourceKind = SkillSourceKind.UserCopilot,
+                SourceId = $"user-copilot:{Path.GetFullPath(context.UserProfileRoot)}",
+                Scope = SkillScopeKind.User,
+                // With the common root of the user, after it by its path.
+                Precedence = 3,
+            },
+        ]);
+    }
+}
+
+/// <summary>
 /// Resolves user-level CodeAlta skill roots.
 /// </summary>
 public sealed class UserCodeAltaSkillRootProvider : ISkillRootProvider

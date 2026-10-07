@@ -208,6 +208,54 @@ public sealed class SystemPromptInfrastructureTests
     }
 
     [TestMethod]
+    public void SystemPromptBuilder_ReadsTheInstructionsOfTheCopilotLayout()
+    {
+        using var temp = TempDirectory.Create();
+        var appBase = Path.Combine(temp.Path, "app");
+        var projectRoot = Path.Combine(temp.Path, "project");
+        var home = Path.Combine(temp.Path, "home");
+        var instructions = Directory.CreateDirectory(Path.Combine(projectRoot, ".github", "instructions", "web")).Parent!.FullName;
+        Directory.CreateDirectory(Path.Combine(home, ".copilot"));
+        File.WriteAllText(Path.Combine(home, ".copilot", "copilot-instructions.md"), "Answer in short sentences.");
+        File.WriteAllText(Path.Combine(projectRoot, "AGENTS.md"), "Project instructions.");
+        File.WriteAllText(Path.Combine(instructions, "web", "frontend.instructions.md"), "---\napplyTo: \"src/**/*.ts,src/**/*.tsx\"\n---\nUse function components.");
+        File.WriteAllText(Path.Combine(instructions, "csharp.instructions.md"), "---\ndescription: C# conventions\napplyTo: '**/*.cs'\n---\nFile-scoped namespaces.");
+        // Not for a coding agent, or for no file: neither is named.
+        File.WriteAllText(Path.Combine(instructions, "review.instructions.md"), "---\napplyTo: \"**\"\nexcludeAgent: \"coding-agent\"\n---\nOnly for reviews.");
+        File.WriteAllText(Path.Combine(instructions, "manual.instructions.md"), "---\ndescription: attached by hand\n---\nNothing applies it.");
+        File.WriteAllText(Path.Combine(instructions, "notes.md"), "---\napplyTo: \"**\"\n---\nNot an instructions file.");
+        WriteSystem(appBase, "default", "Built-in default system.");
+        WritePrompt(appBase, "default", "Default", "default", "Built-in default prompt.");
+        var builder = new SystemPromptBuilder(new FileSystemPromptContentLocator(appBase));
+
+        SystemPromptBundle Build(string? profile) => builder.Build(new SystemPromptBuildRequest
+        {
+            ProviderKey = "codex", ProviderType = "codex", ProtocolFamily = "codex", UserProfileRoot = profile,
+            Session = new SessionViewDescriptor { SessionId = "session-1", ProviderId = "codex", ProviderKey = "codex", WorkingDirectory = projectRoot, Kind = SessionViewKind.ProjectSession },
+            Project = new ProjectDescriptor { Id = "project-1", Slug = "project-1", DisplayName = "Project 1", ProjectPath = projectRoot },
+            PartOptionsOverride = new PartialSystemPromptPartOptions(Skills: false, ProjectContext: true, RuntimeContext: false, ToolGuidance: false),
+        });
+
+        var text = Build(home).DeveloperInstructions!;
+        // The instructions the user wrote for every project come first, then those of the project.
+        var personal = text.IndexOf($"File: `{Path.Combine(home, ".copilot", "copilot-instructions.md")}`", StringComparison.Ordinal);
+        var project = text.IndexOf($"File: `{Path.Combine(projectRoot, "AGENTS.md")}`", StringComparison.Ordinal);
+        Assert.IsTrue(personal >= 0 && project > personal, text);
+        StringAssert.Contains(text, "Answer in short sentences.");
+        // The instructions for some files are named with their patterns, and not included.
+        StringAssert.Contains(text, "Before you change a file that matches a pattern, read the file of instructions and follow it:");
+        StringAssert.Contains(text, $"- `{Path.Combine(instructions, "csharp.instructions.md")}` applies to `**/*.cs`");
+        StringAssert.Contains(text, $"- `{Path.Combine(instructions, "web", "frontend.instructions.md")}` applies to `src/**/*.ts, src/**/*.tsx`");
+        foreach (var absent in new[] { "File-scoped namespaces.", "Use function components.", "review.instructions.md", "manual.instructions.md", "notes.md" })
+        {
+            Assert.IsFalse(text.Contains(absent, StringComparison.Ordinal), absent);
+        }
+
+        // A request that names no profile reads none.
+        Assert.IsFalse(Build(null).DeveloperInstructions!.Contains("Answer in short sentences.", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void SystemPromptBuilder_CodeFormatsPathsInGeneratedMarkdown()
     {
         using var temp = TempDirectory.Create();

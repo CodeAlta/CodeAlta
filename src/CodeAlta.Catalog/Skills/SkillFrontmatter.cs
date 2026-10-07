@@ -39,4 +39,10 @@ public sealed record SkillFrontmatter
     /// Gets unknown top-level frontmatter field names.
     /// </summary>
     public IReadOnlyList<string> UnknownTopLevelFields { get; init; } = [];
+
+    /// <summary>
+    /// Gets whether the skill asks not to be offered to the model (<c>disable-model-invocation: true</c>, as GitHub
+    /// Copilot writes it): the user still activates it by name.
+    /// </summary>
+    public bool DisableModelInvocation { get; init; }
 }

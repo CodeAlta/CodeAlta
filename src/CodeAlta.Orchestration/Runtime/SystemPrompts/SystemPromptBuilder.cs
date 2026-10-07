@@ -700,11 +700,20 @@ public sealed class SystemPromptBuilder
 
     private static string? BuildProjectContext(SystemPromptBuildRequest request, string? projectRoot, List<SystemPromptDiagnostic> diagnostics, out IReadOnlyList<string> files)
     {
+        var projectRoots = request.ProjectRoots.Count > 0 ? request.ProjectRoots : projectRoot is null ? [] : [projectRoot];
         var selectedFiles = InWorktree(
-            EnumerateProjectInstructionFiles(request.Session.WorkingDirectory ?? request.WorkingDirectory, request.ProjectRoots.Count > 0 ? request.ProjectRoots : projectRoot is null ? [] : [projectRoot], request.DiscoveryScope),
-            request.Session);
-        files = selectedFiles;
-        if (selectedFiles.Count == 0)
+            EnumerateProjectInstructionFiles(request.Session.WorkingDirectory ?? request.WorkingDirectory, projectRoots, request.DiscoveryScope),
+            request.Session).ToList();
+        // The layout of GitHub Copilot beside CodeAlta's own: the instructions of the user for every project, and the
+        // instructions of a project that are for some of its files only.
+        if (CopilotUserInstructions(request) is { } personal && !selectedFiles.Contains(personal, StringComparer.OrdinalIgnoreCase))
+        {
+            selectedFiles.Insert(0, personal);
+        }
+
+        var scoped = CopilotPathInstructions(ExistingWorktree(request.Session) is { } worktree ? [worktree] : projectRoots);
+        files = [.. selectedFiles, .. scoped.Select(static item => item.Path)];
+        if (selectedFiles.Count == 0 && scoped.Count == 0)
         {
             return null;
         }
@@ -738,7 +747,77 @@ public sealed class SystemPromptBuilder
             builder.Append("</INSTRUCTIONS>");
         }
 
+        if (scoped.Count > 0)
+        {
+            if (builder.Length > 0)
+            {
+                builder.AppendLine().AppendLine();
+            }
+
+            // They are named, not included: an agent reads the ones of the files it is about to change.
+            builder.AppendLine("Instructions for some files only (`.github/instructions`). Before you change a file that matches a pattern, read the file of instructions and follow it:");
+            foreach (var (path, applyTo) in scoped)
+            {
+                builder.AppendLine($"- {MarkdownCode(path)} applies to {MarkdownCode(applyTo)}");
+            }
+
+            builder.Length -= Environment.NewLine.Length;
+        }
+
         return builder.Length == 0 ? null : builder.ToString();
+    }
+
+    // What the user wrote for GitHub Copilot in every project: `~/.copilot/copilot-instructions.md`.
+    private static string? CopilotUserInstructions(SystemPromptBuildRequest request)
+    {
+        // The profile the host names: a request that names none is given no file of the real one.
+        if (NormalizeOptionalRoot(request.DiscoveryScope?.UserProfileRoot ?? request.UserProfileRoot) is not { } profile) return null;
+        var path = Path.Combine(profile, ".copilot", "copilot-instructions.md");
+        return File.Exists(path) ? path : null;
+    }
+
+    private const int MaximumPathInstructions = 50;
+
+    // The `*.instructions.md` files of `.github/instructions` that say which files they are for (`applyTo`), as GitHub
+    // Copilot reads them. One that is not for a coding agent (`excludeAgent: coding-agent`) is left out.
+    private static IReadOnlyList<(string Path, string ApplyTo)> CopilotPathInstructions(IReadOnlyList<string> roots)
+    {
+        var found = new List<(string Path, string ApplyTo)>();
+        foreach (var root in roots)
+        {
+            if (string.IsNullOrWhiteSpace(root)) continue;
+            var folder = Path.Combine(root, ".github", "instructions");
+            string[] candidates;
+            try
+            {
+                if (!Directory.Exists(folder)) continue;
+                candidates = Directory.GetFiles(folder, "*.instructions.md", SearchOption.AllDirectories);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            foreach (var file in candidates.OrderBy(static file => file, StringComparer.OrdinalIgnoreCase))
+            {
+                if (found.Count >= MaximumPathInstructions) return found;
+                try
+                {
+                    var info = new FileInfo(file);
+                    if (info.LinkTarget is not null || info.Length > 256 * 1024) continue;
+                    var (frontmatter, _) = PromptFileFormat.SplitFrontmatter(File.ReadAllText(file));
+                    if (!frontmatter.TryGetValue("applyTo", out var applyTo) || string.IsNullOrWhiteSpace(applyTo)) continue;
+                    if (frontmatter.TryGetValue("excludeAgent", out var excluded) && excluded.Contains("coding-agent", StringComparison.OrdinalIgnoreCase)) continue;
+                    var patterns = string.Join(", ", applyTo.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+                    if (patterns.Length is > 0 and <= 400 && !patterns.Any(char.IsControl) && !patterns.Contains('`')) found.Add((file, patterns));
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+
+        return found;
     }
 
     // A session in a git worktree reads the instruction files of that checkout: a file of the project's own
