@@ -17,8 +17,10 @@ public sealed class ClaudeCodeProviderTests
     [TestMethod]
     public void Locator_FindsTheExecutableOnPath()
     {
-        var expected = Path.Combine(Root, "tools", "claude");
-        var environment = CreateEnvironment(isWindows: false, path: $"relative{Path.PathSeparator}{Path.Combine(Root, "usr", "bin")}{Path.PathSeparator}{Path.Combine(Root, "tools")}", expected);
+        // The folders have no drive: the separator of the PATH of the described system is the ':' a drive has.
+        var root = Path.DirectorySeparatorChar.ToString();
+        var expected = Path.Combine(root, "tools", "claude");
+        var environment = CreateEnvironment(isWindows: false, path: $"relative{Path.PathSeparator}{Path.Combine(root, "usr", "bin")}{Path.PathSeparator}{Path.Combine(root, "tools")}", expected);
 
         var resolution = ClaudeCodeCliLocator.Resolve(null, environment);
 
