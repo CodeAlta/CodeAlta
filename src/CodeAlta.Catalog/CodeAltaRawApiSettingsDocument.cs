@@ -299,6 +299,24 @@ public sealed class CodeAltaProviderDocument
     public int? NetworkTimeoutSeconds { get; set; }
 
     /// <summary>
+    /// Gets or sets the path or the name of the executable of a provider that runs a CLI (<c>claude-code</c>).
+    /// </summary>
+    [JsonPropertyName("command")]
+    public string? Command { get; set; }
+
+    /// <summary>
+    /// Gets or sets arguments added to the command line of a provider that runs a CLI (<c>claude-code</c>).
+    /// </summary>
+    [JsonPropertyName("args")]
+    public List<string>? Arguments { get; set; }
+
+    /// <summary>
+    /// Gets or sets the permission mode a provider that runs a CLI starts it with (<c>claude-code</c>).
+    /// </summary>
+    [JsonPropertyName("permission_mode")]
+    public string? PermissionMode { get; set; }
+
+    /// <summary>
     /// Gets or sets the GitHub Enterprise URL or domain for the GitHub Copilot direct provider.
     /// </summary>
     [JsonPropertyName("github_enterprise_url")]

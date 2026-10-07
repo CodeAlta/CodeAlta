@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Agent.Anthropic;
+using CodeAlta.Agent.Claude;
 using CodeAlta.Agent.Copilot;
 using CodeAlta.Agent.Xai;
 using CodeAlta.Agent.GoogleGenAI;
@@ -194,6 +195,8 @@ public static class ConfiguredModelProviderRegistryBuilder
                 return TryCreateVertexAIProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
             case "mistral":
                 return TryCreateMistralProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
+            case ClaudeCodeModelProviderRuntime.ProviderType:
+                return TryCreateClaudeCodeProvider(definition, out descriptor, out createRuntime);
             default:
                 descriptor = null!;
                 createRuntime = null!;
@@ -617,6 +620,36 @@ public static class ConfiguredModelProviderRegistryBuilder
         };
 
         return document is null ? profile : ApplyProfileOverrides(profile, document);
+    }
+
+    // The provider needs no credential of CodeAlta: the Claude Code CLI of the user signs in by itself. Whether it is
+    // installed and signed in is found by the probe, not here.
+    private static bool TryCreateClaudeCodeProvider(
+        CodeAltaProviderDocument definition,
+        out ModelProviderDescriptor descriptor,
+        out Func<IModelProviderRuntime> createRuntime)
+    {
+        var options = new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = definition.ProviderKey,
+            DisplayName = ResolveProviderDisplayName(definition),
+            Command = NormalizeText(definition.Command),
+            ExtraArguments = definition.Arguments is { Count: > 0 } arguments ? [.. arguments] : [],
+            PermissionMode = NormalizeText(definition.PermissionMode),
+            SingleModelId = NormalizeText(definition.SingleModelId),
+            ModelsIncludeRegex = NormalizeText(definition.ModelsIncludeRegex),
+            DefaultModelId = NormalizeText(definition.Model),
+            DefaultReasoningEffort = ParseReasoningEffort(definition.ReasoningEffort),
+            IsDefault = true,
+            IsEnabled = definition.Enabled != false,
+            SortModels = definition.SortModels == true,
+        };
+
+        descriptor = ClaudeCodeModelProviderRuntime.CreateDescriptor(options);
+        createRuntime = () => new ClaudeCodeModelProviderRuntime(options);
+        LogInfo(
+            $"Registered model provider key={definition.ProviderKey} type={definition.ProviderType} displayName={options.DisplayName} command={options.Command ?? "claude"}");
+        return true;
     }
 
     private static bool TryCreateAnthropicProvider(

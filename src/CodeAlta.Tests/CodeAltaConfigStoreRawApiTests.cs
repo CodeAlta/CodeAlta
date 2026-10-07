@@ -432,6 +432,92 @@ public sealed class CodeAltaConfigStoreRawApiTests
     }
 
     [TestMethod]
+    public void LoadGlobalProviderDefinitions_AcceptsClaudeCodeProvider()
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            """
+            [providers.Claude]
+            type = " Claude_Code "
+            model = " sonnet "
+            reasoning_effort = "high"
+            command = " ~/.local/bin/claude "
+            args = ["--add-dir", "/data"]
+            permission_mode = " acceptEdits "
+            models_include_regex = "sonnet|opus"
+            """);
+
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var provider = store.LoadGlobalProviderDefinitions(includeDisabled: true).Single();
+
+        Assert.AreEqual("claude", provider.ProviderKey);
+        Assert.AreEqual("claude-code", provider.ProviderType);
+        Assert.AreEqual("Claude Code", provider.DisplayName);
+        Assert.AreEqual("sonnet", provider.Model);
+        Assert.AreEqual("~/.local/bin/claude", provider.Command);
+        CollectionAssert.AreEqual(new[] { "--add-dir", "/data" }, provider.Arguments);
+        Assert.AreEqual("acceptEdits", provider.PermissionMode);
+        Assert.AreEqual("Claude Code", CodeAltaConfigStore.CreateProviderTypeDefaults("claude-code").DisplayName);
+
+        // The settings of the CLI are written back, and the default display name is not.
+        store.SaveGlobalProviderDefinitions([provider]);
+        var saved = File.ReadAllText(Path.Combine(temp.Path, "config.toml"));
+        StringAssert.Contains(saved, "command = \"~/.local/bin/claude\"");
+        StringAssert.Contains(saved, "permission_mode = \"acceptEdits\"");
+        StringAssert.Contains(saved, "args = [");
+        Assert.IsFalse(saved.Contains("display_name", StringComparison.Ordinal));
+        var reloaded = store.LoadGlobalProviderDefinitions(includeDisabled: true).Single();
+        CollectionAssert.AreEqual(new[] { "--add-dir", "/data" }, reloaded.Arguments);
+    }
+
+    [TestMethod]
+    [DataRow("api_key = \"secret\"", "api_key")]
+    [DataRow("api_key_env = \"ANTHROPIC_API_KEY\"", "api_key_env")]
+    [DataRow("api_url = \"https://api.anthropic.com\"", "api_url")]
+    [DataRow("permission_mode = \"everything\"", "permission_mode")]
+    [DataRow("args = [\"\"]", "args")]
+    public void LoadGlobalProviderDefinitions_ClaudeCodeRejectsCredentialsAndUnknownModes(string setting, string field)
+    {
+        // The CLI signs in by itself: CodeAlta holds no credential and names no endpoint for it.
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            $"""
+            [providers.claude-code]
+            type = "claude-code"
+            {setting}
+            """);
+
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var failure = Assert.ThrowsExactly<InvalidDataException>(() => store.LoadGlobalProviderDefinitions(includeDisabled: true));
+
+        StringAssert.Contains(failure.InnerException?.Message, field);
+    }
+
+    [TestMethod]
+    [DataRow("command = \"claude\"", "command")]
+    [DataRow("args = [\"--verbose\"]", "args")]
+    [DataRow("permission_mode = \"plan\"", "permission_mode")]
+    public void LoadGlobalProviderDefinitions_RejectsCliSettingsForApiProviders(string setting, string field)
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            $"""
+            [providers.anthropic]
+            type = "anthropic"
+            api_key_env = "CODEALTA_ANTHROPIC_API_KEY"
+            {setting}
+            """);
+
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var failure = Assert.ThrowsExactly<InvalidDataException>(() => store.LoadGlobalProviderDefinitions(includeDisabled: true));
+
+        StringAssert.Contains(failure.InnerException?.Message, $"'{field}'");
+    }
+
+    [TestMethod]
     public void LoadGlobalProviderDefinitions_CodexSubscriptionAppliesDefaults()
     {
         using var temp = TempDirectory.Create();

@@ -36,6 +36,9 @@ public sealed class CodeAltaConfigStore
     private const string CodexSubscriptionProviderType = "codex";
     private const string CopilotDirectProviderType = "copilot";
     private const string XaiDirectProviderType = "xai";
+    private const string ClaudeCodeProviderType = "claude-code";
+    private const string ClaudeCodeDefaultDisplayName = "Claude Code";
+    private static readonly string[] ClaudeCodePermissionModes = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
     private const string CopilotDirectDefaultDisplayName = "Copilot";
     private const string CopilotDirectDefaultAuthSource = "github_device_flow";
     private const string CopilotDirectDefaultModelDiscovery = "copilot_endpoint_with_static_fallback";
@@ -1294,6 +1297,7 @@ public sealed class CodeAltaConfigStore
             "codex" => CodexSubscriptionProviderType,
             "copilot" => CopilotDirectProviderType,
             "xai" or "xai-grok" or "grok" or "x-ai" => XaiDirectProviderType,
+            "claude-code" or "claude_code" or "claudecode" or "claude-cli" or "claude-code-cli" => ClaudeCodeProviderType,
             _ => null,
         };
 
@@ -1316,11 +1320,12 @@ public sealed class CodeAltaConfigStore
         definition.Enabled ??= GetDefaultProviderEnabled(definition.ProviderKey);
         definition.ProviderType = NormalizeProviderType(definition.ProviderKey, definition.ProviderType)
             ?? throw new InvalidOperationException(
-                $"providers.{definition.ProviderKey} type must be one of: codex, copilot, openai-chat, openai-responses, azure-openai, anthropic, google-genai, vertex-ai, mistral, xai.");
+                $"providers.{definition.ProviderKey} type must be one of: codex, copilot, openai-chat, openai-responses, azure-openai, anthropic, google-genai, vertex-ai, mistral, xai, claude-code.");
         definition.Compaction = NormalizeAndCompleteCompactionSettings(definition.Compaction, DefaultCompaction);
         ApplyCodexSubscriptionDefaults(definition);
         ApplyCopilotDirectDefaults(definition);
         ApplyXaiDirectDefaults(definition);
+        ApplyClaudeCodeDefaults(definition);
         ValidateProviderFields(definition);
     }
 
@@ -1378,8 +1383,31 @@ public sealed class CodeAltaConfigStore
         definition.ModelDiscovery ??= XaiDirectDefaultModelDiscovery;
     }
 
+    private static void ApplyClaudeCodeDefaults(CodeAltaProviderDocument definition)
+    {
+        if (!string.Equals(definition.ProviderType, ClaudeCodeProviderType, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        definition.DisplayName ??= ClaudeCodeDefaultDisplayName;
+        definition.Command = NormalizeText(definition.Command);
+        definition.PermissionMode = NormalizeText(definition.PermissionMode);
+        if (definition.Arguments is { Count: 0 })
+        {
+            definition.Arguments = null;
+        }
+    }
+
     private static void ValidateProviderFields(CodeAltaProviderDocument definition)
     {
+        if (!string.Equals(definition.ProviderType, ClaudeCodeProviderType, StringComparison.Ordinal))
+        {
+            RejectUnsupportedField(definition, "command", definition.Command);
+            RejectUnsupportedField(definition, "args", definition.Arguments is { Count: > 0 } ? definition.Arguments : null);
+            RejectUnsupportedField(definition, "permission_mode", definition.PermissionMode);
+        }
+
         if (!string.Equals(definition.ProviderType, CodexSubscriptionProviderType, StringComparison.Ordinal))
         {
             RejectUnsupportedField(definition, "service_tier", definition.ServiceTier);
@@ -1516,6 +1544,34 @@ public sealed class CodeAltaConfigStore
                 if (definition.Enabled != false && string.IsNullOrWhiteSpace(definition.Location))
                 {
                     throw new InvalidOperationException($"providers.{definition.ProviderKey} location is required for type 'vertex-ai'.");
+                }
+
+                break;
+
+            case ClaudeCodeProviderType:
+                // The CLI authenticates by itself, with what the user set up for it: CodeAlta holds no credential
+                // and names no endpoint for it.
+                RejectUnsupportedField(definition, "api_key", definition.ApiKey);
+                RejectUnsupportedField(definition, "api_key_env", definition.ApiKeyEnv);
+                RejectUnsupportedField(definition, "api_url", definition.ApiUrl);
+                RejectUnsupportedField(definition, "organization_id", definition.OrganizationId);
+                RejectUnsupportedField(definition, "project_id", definition.ProjectId);
+                RejectUnsupportedField(definition, "project", definition.Project);
+                RejectUnsupportedField(definition, "location", definition.Location);
+                RejectUnsupportedField(definition, "models_dev_provider_id", definition.ModelsDevProviderId);
+                RejectUnsupportedField(definition, "extra_body", definition.ExtraBody);
+                RejectUnsupportedField(definition, "request", definition.Request);
+                RejectUnsupportedField(definition, "model_request", definition.ModelRequest);
+                if (definition.PermissionMode is { } permissionMode &&
+                    !ClaudeCodePermissionModes.Contains(permissionMode, StringComparer.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"providers.{definition.ProviderKey} permission_mode must be one of: {string.Join(", ", ClaudeCodePermissionModes)}.");
+                }
+
+                if (definition.Arguments is { } arguments && arguments.Exists(static argument => string.IsNullOrWhiteSpace(argument)))
+                {
+                    throw new InvalidOperationException($"providers.{definition.ProviderKey} args must not contain empty values.");
                 }
 
                 break;
@@ -1928,6 +1984,12 @@ public sealed class CodeAltaConfigStore
             }
         }
 
+        if (string.Equals(definition.ProviderType, ClaudeCodeProviderType, StringComparison.Ordinal) &&
+            string.Equals(definition.DisplayName, ClaudeCodeDefaultDisplayName, StringComparison.Ordinal))
+        {
+            definition.DisplayName = null;
+        }
+
         if (string.Equals(definition.ProviderType, XaiDirectProviderType, StringComparison.Ordinal))
         {
             if (string.Equals(definition.DisplayName, XaiDirectDefaultDisplayName, StringComparison.Ordinal))
@@ -1969,6 +2031,9 @@ public sealed class CodeAltaConfigStore
                !string.IsNullOrWhiteSpace(definition.ApiKeyEnv) ||
                !string.IsNullOrWhiteSpace(definition.ApiUrl) ||
                definition.NetworkTimeoutSeconds is not null ||
+               !string.IsNullOrWhiteSpace(definition.Command) ||
+               definition.Arguments is { Count: > 0 } ||
+               !string.IsNullOrWhiteSpace(definition.PermissionMode) ||
                !string.IsNullOrWhiteSpace(definition.GitHubEnterpriseUrl) ||
                !string.IsNullOrWhiteSpace(definition.GitHubTokenEnv) ||
                !string.IsNullOrWhiteSpace(definition.CopilotTokenEnv) ||
@@ -2059,6 +2124,9 @@ public sealed class CodeAltaConfigStore
             ApiKeyEnv = definition.ApiKeyEnv,
             ApiUrl = definition.ApiUrl,
             NetworkTimeoutSeconds = definition.NetworkTimeoutSeconds,
+            Command = definition.Command,
+            Arguments = definition.Arguments is null ? null : [.. definition.Arguments],
+            PermissionMode = definition.PermissionMode,
             GitHubEnterpriseUrl = definition.GitHubEnterpriseUrl,
             GitHubTokenEnv = definition.GitHubTokenEnv,
             CopilotTokenEnv = definition.CopilotTokenEnv,

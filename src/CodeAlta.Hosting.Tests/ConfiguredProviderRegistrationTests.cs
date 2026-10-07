@@ -47,6 +47,38 @@ public sealed class ConfiguredProviderRegistrationTests
     }
 
     [TestMethod]
+    public void ClaudeCode_RegistersWithoutAnyCredentialOfCodeAlta()
+    {
+        // The CLI of the user signs in by itself: the provider is registered from its type alone, and whether the
+        // CLI is installed and signed in is found when it is probed.
+        var stateRoot = NewStateRoot();
+        var definition = new CodeAltaProviderDocument
+        {
+            ProviderKey = "claude-code",
+            ProviderType = "claude-code",
+            DisplayName = " Claude Code ",
+            Model = " sonnet ",
+            ReasoningEffort = "high",
+            Command = " /opt/claude/claude ",
+            Arguments = ["--add-dir", "/data"],
+            PermissionMode = "acceptEdits",
+        };
+
+        Assert.IsTrue(ConfiguredModelProviderRegistryBuilder.TryCreateProviderRegistration(
+            definition, stateRoot, null, out var descriptor, out var factory));
+
+        Assert.AreEqual("claude-code", descriptor.ProviderId.Value);
+        Assert.AreEqual("claude-code", descriptor.ProviderType);
+        Assert.AreEqual("Claude Code", descriptor.DisplayName);
+        Assert.IsNull(descriptor.BaseUri);
+        Assert.AreEqual("sonnet", descriptor.DefaultModelId);
+        Assert.AreEqual(AgentReasoningEffort.High, descriptor.DefaultReasoningEffort);
+        Assert.IsTrue(descriptor.IsEnabled);
+        Assert.IsNotNull(factory); // Never invoked: creating the runtime starts no process either.
+        Assert.IsFalse(Directory.Exists(stateRoot));
+    }
+
+    [TestMethod]
     [DataRow("openai-chat")]
     [DataRow("openai-responses")]
     [DataRow("azure-openai")]
