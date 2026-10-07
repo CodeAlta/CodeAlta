@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
@@ -49,6 +50,35 @@ public sealed class AltaLiveToolTests
         Assert.IsTrue(duration.GetDouble() >= 0d);
         Assert.IsTrue(result.Duration >= TimeSpan.Zero);
         Assert.AreEqual("alta.version", lines[1].GetProperty("type").GetString());
+    }
+
+    [TestMethod]
+    public async Task Dispatcher_Version_ReportsTheApplicationNotTheLiveToolLibrary()
+    {
+        var result = await CreateDispatcher().InvokeAsync(["version"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        var record = ReadJsonLines(result.Stdout)[1];
+        var application = AltaApplicationVersion.Read();
+        Assert.AreEqual(application.Application, record.GetProperty("application").GetString());
+        Assert.AreEqual(application.InformationalVersion, record.GetProperty("informationalVersion").GetString());
+        Assert.AreEqual(application.PackageVersion, record.GetProperty("packageVersion").GetString());
+        Assert.IsFalse(record.TryGetProperty("liveToolAssembly", out _));
+    }
+
+    [TestMethod]
+    public void ApplicationVersion_IsReadFromTheApplicationAndSplitsItsBuildMetadata()
+    {
+        // The runtime library stands for an application whose version differs from the one of the live tool.
+        var runtime = typeof(object).Assembly;
+        var expected = runtime.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion;
+
+        var version = AltaApplicationVersion.Read(runtime);
+
+        Assert.AreEqual(runtime.GetName().Name, version.Application);
+        Assert.AreEqual(expected, version.InformationalVersion);
+        Assert.AreEqual(expected.Split('+')[0], version.PackageVersion);
+        Assert.IsFalse(version.PackageVersion.Contains('+'));
+        Assert.AreNotEqual(AltaApplicationVersion.Read(typeof(AltaCommandDispatcher).Assembly).InformationalVersion, version.InformationalVersion);
     }
 
     [TestMethod]

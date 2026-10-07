@@ -213,18 +213,20 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static Command CreateVersionCommand(AltaCommandContext context)
     {
-        var command = Leaf("version", "Print the CodeAlta/alta live-tool version as JSONL.");
+        var command = Leaf("version", "Print the version of the CodeAlta application as JSONL.");
         command.Add((_, _) =>
         {
-            var assembly = typeof(BuiltInAltaCommandContributor).Assembly;
+            // The application that runs, not this library, whose version is not the one of a release.
+            var application = AltaApplicationVersion.Read();
             AltaJsonlWriter.WriteRecord(context.Stdout, new
             {
                 type = "alta.version",
                 version = 1,
                 correlationId = context.CorrelationId,
                 product = "CodeAlta",
-                liveToolAssembly = assembly.GetName().Name,
-                informationalVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? assembly.GetName().Version?.ToString(),
+                application = application.Application,
+                informationalVersion = application.InformationalVersion,
+                packageVersion = application.PackageVersion,
             });
             return ValueTask.FromResult(AltaExitCodes.Success);
         });
