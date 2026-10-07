@@ -2,6 +2,8 @@ using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Claude;
+using CodeAlta.Orchestration.Hosting;
+using CodeAlta.Orchestration.Runtime;
 
 namespace CodeAlta.Tests;
 
@@ -131,6 +133,106 @@ public sealed class ClaudeCodeLiveCliTests
         StringAssert.Contains(live.LastAnswer.ToLowerInvariant(), "kumquat");
     }
 
+    [TestMethod]
+    public async Task Host_RunsATurnWithTheInstructionsOfCodeAlta()
+    {
+        // The whole composition of an application without a window: the registry of providers, the hub, the
+        // session runtime and the instructions it composes for the session.
+        var command = RequireCli();
+        if (Environment.GetEnvironmentVariable("CODEALTA_TEST_CLAUDE_TURN") != "1")
+        {
+            Assert.Inconclusive("Set CODEALTA_TEST_CLAUDE_TURN=1 to run turns with the account of the CLI.");
+        }
+
+        using var directory = TestTempDirectory.Create();
+        var globalRoot = Path.Combine(directory.Path, "global");
+        var projectRoot = Path.Combine(directory.Path, "codealta-tests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(globalRoot);
+        Directory.CreateDirectory(projectRoot);
+        var options = CreateOptions(command);
+        var providerId = new ModelProviderId(options.ProviderKey);
+        try
+        {
+            await using var host = await CodeAltaHost.CreateAsync(
+                new CodeAltaHostOptions
+                {
+                    GlobalRoot = globalRoot,
+                    CurrentProjectPath = projectRoot,
+                    IsHeadless = true,
+                    HasInteractiveUi = false,
+                    StartPlugins = false,
+                    ConfigureModelProviders = registry => registry.RegisterOrReplace(
+                        ClaudeCodeModelProviderRuntime.CreateDescriptor(options),
+                        () => new ClaudeCodeModelProviderRuntime(options)),
+                });
+            var execution = new SessionExecutionOptions
+            {
+                ProviderId = providerId,
+                ProviderKey = providerId.Value,
+                WorkingDirectory = projectRoot,
+                ProjectRoots = [projectRoot],
+                Model = Model,
+                // Only the instructions of CodeAlta say this: the answer shows that they reached Claude Code.
+                AdditionalDeveloperInstructions = "The code word of this CodeAlta session is 'quince'.",
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            };
+            var events = new List<AgentEvent>();
+            var settled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var streaming = new CancellationTokenSource(Timeout);
+            var stream = Task.Run(async () =>
+            {
+                await foreach (var runtimeEvent in host.RuntimeService.StreamEventsAsync(streaming.Token))
+                {
+                    if (runtimeEvent is not SessionAgentEvent { Event: var agentEvent })
+                    {
+                        continue;
+                    }
+
+                    lock (events)
+                    {
+                        events.Add(agentEvent);
+                    }
+
+                    if (agentEvent is AgentErrorEvent or AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle })
+                    {
+                        settled.TrySetResult();
+                    }
+                }
+            });
+
+            var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, execution, title: "Live Claude Code", CancellationToken.None);
+            await host.RuntimeService.SendAsync(
+                session,
+                execution,
+                new AgentSendOptions { Input = AgentInput.Text("What is the code word of this CodeAlta session? Answer with the word only.") },
+                CancellationToken.None);
+            await settled.Task.WaitAsync(Timeout);
+            await streaming.CancelAsync();
+            await stream.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+
+            AgentEvent[] snapshot;
+            lock (events)
+            {
+                snapshot = [.. events];
+            }
+
+            foreach (var error in snapshot.OfType<AgentErrorEvent>())
+            {
+                Console.WriteLine($"error {error.Message}");
+            }
+
+            var answer = snapshot.OfType<AgentContentCompletedEvent>().Last(static e => e.Kind == AgentContentKind.Assistant).Content;
+            Console.WriteLine($"answer {answer}");
+            StringAssert.Contains(answer.ToLowerInvariant(), "quince");
+            var prompt = snapshot.OfType<AgentSystemPromptEvent>().FirstOrDefault();
+            Console.WriteLine($"instructions {prompt?.DeveloperInstructions?.Length} characters");
+        }
+        finally
+        {
+            RemoveTranscripts(projectRoot);
+        }
+    }
+
     private static string RequireCli()
     {
         var command = Environment.GetEnvironmentVariable("CODEALTA_TEST_CLAUDE_CLI");
@@ -140,6 +242,32 @@ public sealed class ClaudeCodeLiveCliTests
         }
 
         return command!;
+    }
+
+    // Claude Code keeps the transcripts of a folder under its own profile, in a folder named after it. The folder
+    // of a test has a unique name: what ends with it is what the test left there.
+    private static void RemoveTranscripts(string directory)
+    {
+        var configuration = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
+        var projects = Path.Combine(
+            string.IsNullOrWhiteSpace(configuration) ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude") : configuration,
+            "projects");
+        var name = Path.GetFileName(directory.TrimEnd(Path.DirectorySeparatorChar));
+        if (!Directory.Exists(projects) || !name.StartsWith("codealta-tests-", StringComparison.Ordinal) || name.Length < 40)
+        {
+            return;
+        }
+
+        foreach (var transcripts in Directory.EnumerateDirectories(projects, "*" + name))
+        {
+            try
+            {
+                Directory.Delete(transcripts, recursive: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
     }
 
     private static ClaudeCodeModelProviderRuntimeOptions CreateOptions(string command)
@@ -263,34 +391,8 @@ public sealed class ClaudeCodeLiveCliTests
         {
             Session.DisposeAsync().AsTask().GetAwaiter().GetResult();
             _runtime?.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            RemoveTranscripts();
+            RemoveTranscripts(Directory);
             _directory.Dispose();
-        }
-
-        // Claude Code keeps the transcripts of a folder under its own profile, in a folder named after it. The
-        // folder of the test has a unique name: what ends with it is what this test left there.
-        private void RemoveTranscripts()
-        {
-            var configuration = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
-            var projects = Path.Combine(
-                string.IsNullOrWhiteSpace(configuration) ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude") : configuration,
-                "projects");
-            var name = Path.GetFileName(Directory.TrimEnd(Path.DirectorySeparatorChar));
-            if (!System.IO.Directory.Exists(projects) || !name.StartsWith("codealta-tests-", StringComparison.Ordinal) || name.Length < 40)
-            {
-                return;
-            }
-
-            foreach (var transcripts in System.IO.Directory.EnumerateDirectories(projects, "*" + name))
-            {
-                try
-                {
-                    System.IO.Directory.Delete(transcripts, recursive: true);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                }
-            }
         }
 
         private void Attach(IAgentSession session)
