@@ -1191,6 +1191,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             : pruned with { Messages = normalized };
     }
 
+    // The usage of the last request says nothing of a conversation images were just taken out of, unless the
+    // provider keeps the context: it still has them, and its count holds a prompt this session knows nothing of.
+    private AgentSessionUsage? SelectUsageForPromptEstimate(AgentInlineMediaPruneResult providerConversation)
+        => providerConversation.PrunedImageCount > 0 && _turnExecutor is not IAgentProviderCompaction ? null : _state.Usage;
+
     private static AgentSessionUsage? CreateConversationUsageSnapshot(
         string? systemMessage,
         string? developerInstructions,
@@ -1372,7 +1377,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             systemMessage,
             developerInstructions,
             providerConversation.Messages,
-            providerConversation.PrunedImageCount > 0 ? null : _state.Usage);
+            SelectUsageForPromptEstimate(providerConversation));
         var label = estimate.IsEstimated
             ? "Estimated active context"
             : "Active context window";
@@ -3053,7 +3058,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             systemMessage,
             developerInstructions,
             providerConversation.Messages,
-            providerConversation.PrunedImageCount > 0 ? null : _state.Usage);
+            SelectUsageForPromptEstimate(providerConversation));
         var remainingTokens = Math.Max(thresholdTokens - currentEstimate.Tokens, 0L);
         var allowedTokens = Math.Min(perToolTokenLimit, remainingTokens);
         if (allowedTokens <= 0)

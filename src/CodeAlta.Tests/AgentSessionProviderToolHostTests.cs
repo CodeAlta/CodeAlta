@@ -149,6 +149,41 @@ public sealed class AgentSessionProviderToolHostTests
         Assert.AreEqual(AgentSessionUpdateKind.Warning, events.OfType<AgentSessionUpdateEvent>().Last().Kind);
     }
 
+    [TestMethod]
+    public async Task ContextUsage_StaysTheProvidersAfterATurnWithAnImage()
+    {
+        // A 1x1 PNG, as a tool that takes a picture returns one.
+        const string Png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+        using var directory = TestTempDirectory.Create();
+        var provider = new ToolHostProvider
+        {
+            Responses = [Call("call-1", "take_picture", new { }), new AgentMessagePart.Text("done")],
+            OnProviderTool = static _ => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Image(Png, "image/png")])),
+            // What the provider counted holds its own prompt and tools, which the session knows nothing of.
+            Usage = static request => new AgentSessionUsage(
+                Window: new AgentWindowUsageSnapshot(CurrentTokens: 39_000, TokenLimit: 1_000_000, MessageCount: request.Conversation.Count, Label: "Active context window"),
+                Scope: AgentUsageScope.CurrentWindow,
+                Source: AgentUsageSource.ProviderUsage,
+                UpdatedAt: DateTimeOffset.UtcNow),
+        };
+        var events = new List<AgentEvent>();
+        await using var session = await provider.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            ProviderKey = "tool-host-fixture",
+            WorkingDirectory = directory.Path,
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        });
+        session.Subscribe(events.Add);
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("go"), EnableUserInputTool = false });
+
+        // The image leaves the conversation the session would send again once the run ended. A provider that
+        // keeps the context still has it: its count is not replaced by an estimate of what the session holds.
+        var usage = events.OfType<AgentSessionUpdateEvent>().Last(static update => update.Usage?.Window is not null).Usage!;
+        Assert.IsTrue(usage.CurrentTokens >= 39_000, $"Expected the count of the provider, got {usage.CurrentTokens}.");
+        Assert.AreEqual(1_000_000L, usage.TokenLimit);
+    }
+
     private static AgentMessagePart Call(string id, string name, object arguments)
         => new AgentMessagePart.ToolCall(id, name, JsonSerializer.SerializeToElement(arguments));
 
@@ -157,6 +192,7 @@ public sealed class AgentSessionProviderToolHostTests
     {
         public IReadOnlyList<AgentMessagePart> Responses { get; init; } = [];
         public Func<AgentMessagePart.ToolCall, Task<AgentToolResult>>? OnProviderTool { get; init; }
+        public Func<AgentTurnRequest, AgentSessionUsage?>? Usage { get; init; }
         public AgentCompactionOutcome? Compaction { get; init; }
         public Exception? CompactionFailure { get; init; }
         public AgentProviderRunContext? Run { get; private set; }
@@ -182,7 +218,11 @@ public sealed class AgentSessionProviderToolHostTests
         {
             var part = Responses[Math.Min(Turns, Responses.Count - 1)];
             Turns++;
-            return Task.FromResult(new AgentTurnResponse { AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [part]) });
+            return Task.FromResult(new AgentTurnResponse
+            {
+                AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [part]),
+                Usage = Usage?.Invoke(request),
+            });
         }
 
         public void AttachRun(AgentProviderRunContext context) => Run = context;
