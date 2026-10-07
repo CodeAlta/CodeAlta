@@ -26,6 +26,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
 {
     private const string PreEditHookId = "codealta_pre_edit";
     private const string PreEditHookMatcher = "Edit|MultiEdit|Write|NotebookEdit";
+    private const string PlanModeHookId = "codealta_plan_mode";
+    private const string PlanModeHookMatcher = "EnterPlanMode";
     private const string ReasoningDisplayOption = "--thinking-display";
     private static readonly TimeSpan HookGateTimeout = TimeSpan.FromSeconds(20);
 
@@ -441,6 +443,14 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                     writer.WriteString("matcher", PreEditHookMatcher);
                     writer.WriteStartArray("hookCallbackIds");
                     writer.WriteStringValue(PreEditHookId);
+                    writer.WriteEndArray();
+                    writer.WriteEndObject();
+                    // The plan mode of Claude Code ends with an approval of the user that CodeAlta has no way to
+                    // ask for. CodeAlta has a plan mode of its own, which the user sees: that one is used.
+                    writer.WriteStartObject();
+                    writer.WriteString("matcher", PlanModeHookMatcher);
+                    writer.WriteStartArray("hookCallbackIds");
+                    writer.WriteStringValue(PlanModeHookId);
                     writer.WriteEndArray();
                     writer.WriteEndObject();
                     writer.WriteEndArray();

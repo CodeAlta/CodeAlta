@@ -529,6 +529,22 @@ internal sealed partial class ClaudeCodeSession
     // when it reads the file to show the change afterwards. It never decides: the permissions of the CLI do.
     private bool HandleHook(string requestId, JsonElement request)
     {
+        if (string.Equals(ClaudeCodeJson.GetString(request, "callback_id"), PlanModeHookId, StringComparison.Ordinal))
+        {
+            _ = SendSafelyAsync(connection => connection.RespondAsync(requestId, static writer =>
+            {
+                writer.WriteStartObject("hookSpecificOutput");
+                writer.WriteString("hookEventName", "PreToolUse");
+                writer.WriteString("permissionDecision", "deny");
+                writer.WriteString(
+                    "permissionDecisionReason",
+                    "The plan mode of Claude Code is not used in a CodeAlta session: the approval that ends it cannot be asked of the user here. " +
+                    $"Go on without it. When the user wants planning only, the plan mode of CodeAlta is the one its instructions describe (`{ClaudeCodePrompts.GatewayTool} session set_agent --prompt-id plan`).");
+                writer.WriteEndObject();
+            }));
+            return false;
+        }
+
         ClaudeCodeJson.TryGetObject(request, "input", out var input);
         var toolUseId = ClaudeCodeJson.GetString(request, "tool_use_id") ?? ClaudeCodeJson.GetString(input, "tool_use_id");
         var isSubagent = ClaudeCodeJson.GetString(input, "agent_id") is { Length: > 0 };

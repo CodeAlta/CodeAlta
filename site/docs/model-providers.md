@@ -125,6 +125,7 @@ A session of this provider is a Claude Code session shown in CodeAlta:
 - Its tool calls, command output and file diffs appear in the timeline, and the session is saved, resumed, queued and steered like any other. The CLI keeps the conversation in its own transcript (`~/.claude/projects`), which is what a resumed session continues from.
 - When Claude Code asks a permission that your Claude Code settings do not already decide, CodeAlta answers it the way it does for its own tools: commands and file edits follow the session's review setting. A question of Claude (`AskUserQuestion`) opens the question form where CodeAlta takes live questions; in the desktop application Claude asks with `alta ask`, as the other providers do.
 - A picture a tool returns (a screenshot of the window, for instance) is also saved by Claude Code in its own folder, `~/.claude/projects/<folder>/<session>/tool-results`.
+- Claude Code's own plan mode is not used: its approval step has no place in the CodeAlta window. Use the **Plan** agent prompt of CodeAlta instead. With `permission_mode = "plan"` in the provider configuration a session stays read-only and gives its plan as its answer.
 - Claude Code compacts its context itself. The **Compact** command asks it to (`/compact`).
 - A prompt that starts with `/` is a Claude Code slash command.
 

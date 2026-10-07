@@ -306,6 +306,82 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public async Task PlanModeOfClaudeCode_IsNotEnteredNorLeftWithAnApprovalNobodyGave()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        JsonElement? enter = null;
+        JsonElement? exit = null;
+        cli.OnUserMessage = async (process, user) =>
+        {
+            process.EmitInit();
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "EnterPlanMode", new JsonObject())));
+            enter = await process.RequestAsync(new JsonObject
+            {
+                ["subtype"] = "hook_callback",
+                ["callback_id"] = "codealta_plan_mode",
+                ["tool_use_id"] = "toolu_1",
+                ["input"] = new JsonObject { ["hook_event_name"] = "PreToolUse", ["tool_name"] = "EnterPlanMode", ["tool_use_id"] = "toolu_1" },
+            });
+            process.EmitToolResult("toolu_1", "refused", isError: true);
+            process.EmitAssistant("msg_2", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_2", "ExitPlanMode", new JsonObject { ["plan"] = "Do it." })));
+            exit = await process.AskPermissionAsync("ExitPlanMode", new JsonObject { ["plan"] = "Do it." }, "toolu_2");
+            process.EmitToolResult("toolu_2", "refused", isError: true);
+            process.EmitAssistant("msg_3", new JsonArray(ClaudeCodeFakeProcess.TextBlock("no plan mode")));
+            process.EmitResult("no plan mode", user);
+        };
+        // The session was put in the plan mode of Claude Code by the configuration of the provider.
+        var options = cli.CreateOptions();
+        await using var runtime = new ClaudeCodeModelProviderRuntime(new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = options.ProviderKey,
+            TransportFactory = cli,
+            ResolveCli = options.ResolveCli,
+            PermissionMode = "plan",
+        });
+        await using var session = await CreateSessionAsync(runtime, directory);
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("plan it") }).WaitAsync(Timeout);
+
+        // CodeAlta has a plan mode of its own, which the user sees: the one of Claude Code is not entered.
+        var hooks = SessionProcess(cli).InitializeRequest.GetProperty("hooks").GetProperty("PreToolUse");
+        Assert.AreEqual("EnterPlanMode", hooks[1].GetProperty("matcher").GetString());
+        Assert.AreEqual("codealta_plan_mode", hooks[1].GetProperty("hookCallbackIds")[0].GetString());
+        var decision = enter!.Value.GetProperty("response").GetProperty("hookSpecificOutput");
+        Assert.AreEqual("PreToolUse", decision.GetProperty("hookEventName").GetString());
+        Assert.AreEqual("deny", decision.GetProperty("permissionDecision").GetString());
+        StringAssert.Contains(decision.GetProperty("permissionDecisionReason").GetString(), "set_agent");
+
+        // Leaving it tells the model that the user approved its plan: nobody did, in a session that was made to plan.
+        Assert.AreEqual("deny", exit!.Value.GetProperty("behavior").GetString());
+        StringAssert.Contains(exit.Value.GetProperty("message").GetString(), "permission_mode");
+    }
+
+    [TestMethod]
+    public async Task PlanModeOfClaudeCode_CanBeLeftWhenTheSessionWasNotMadeToPlan()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        JsonElement? exit = null;
+        cli.OnUserMessage = async (process, user) =>
+        {
+            process.EmitInit();
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "ExitPlanMode", new JsonObject { ["plan"] = "Do it." })));
+            exit = await process.AskPermissionAsync("ExitPlanMode", new JsonObject { ["plan"] = "Do it." }, "toolu_1");
+            process.EmitToolResult("toolu_1", "left");
+            process.EmitAssistant("msg_2", new JsonArray(ClaudeCodeFakeProcess.TextBlock("done")));
+            process.EmitResult("done", user);
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(runtime, directory);
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("go") }).WaitAsync(Timeout);
+
+        // A model that got there another way is not kept in a mode in which it can change nothing.
+        Assert.AreEqual("allow", exit!.Value.GetProperty("behavior").GetString());
+    }
+
+    [TestMethod]
     public async Task QuestionOfARunThatCannotAsk_IsRefusedWithTheWayCodeAltaAsks()
     {
         using var directory = TestTempDirectory.Create();
