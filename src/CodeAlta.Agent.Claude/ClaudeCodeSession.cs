@@ -266,10 +266,15 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
 
     private async Task EnsureConnectionAsync(AgentTurnRequest request, CancellationToken cancellationToken)
     {
+        // An effort is only given to a model the CLI lists it for; a model it does not list is given what was asked.
+        var effort = request.ModelInfo is { } modelInfo &&
+                     (request.ReasoningEffort is not { } requested || modelInfo.SupportedReasoningEfforts?.Contains(requested) != true)
+            ? null
+            : ClaudeCodeLauncher.ToEffort(request.ReasoningEffort);
         var key = new ClaudeCodeLaunchKey(
             string.IsNullOrWhiteSpace(request.WorkingDirectory) ? null : request.WorkingDirectory,
             ClaudeCodeLauncher.ToModelOption(request.ModelId),
-            ClaudeCodeLauncher.ToEffort(request.ReasoningEffort));
+            effort);
         if (_connection is { IsClosed: false } && key == _launchKey)
         {
             return;

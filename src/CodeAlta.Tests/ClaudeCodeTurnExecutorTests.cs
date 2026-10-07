@@ -81,6 +81,27 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task Effort_IsOnlyGivenToAModelThatSupportsIt()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var request = CreateRequest([User("one")]) with { ReasoningEffort = AgentReasoningEffort.High };
+
+        await ExecuteAsync(executor, request with { SessionId = "without", ModelId = "haiku", ModelInfo = new AgentModelInfo("haiku") });
+        Assert.IsFalse(cli.Last.Launch.Arguments.Contains("--effort"));
+
+        await ExecuteAsync(executor, request with { SessionId = "other-levels", ModelId = "sonnet", ModelInfo = new AgentModelInfo("sonnet", SupportedReasoningEfforts: [AgentReasoningEffort.Low]) });
+        Assert.IsFalse(cli.Last.Launch.Arguments.Contains("--effort"));
+
+        await ExecuteAsync(executor, request with { SessionId = "with", ModelId = "opus", ModelInfo = new AgentModelInfo("opus", SupportedReasoningEfforts: [AgentReasoningEffort.High]) });
+        CollectionAssert.IsSubsetOf(new[] { "--effort", "high" }, cli.Last.Launch.Arguments.ToArray());
+
+        // A model the CLI did not list (a full model name the user typed) is given what was asked.
+        await ExecuteAsync(executor, request with { SessionId = "unlisted", ModelId = "claude-custom-9" });
+        CollectionAssert.IsSubsetOf(new[] { "--effort", "high" }, cli.Last.Launch.Arguments.ToArray());
+    }
+
+    [TestMethod]
     public async Task IdleSession_ClosesItsProcessAndResumesWithTheNextTurn()
     {
         var cli = new ClaudeCodeFakeCli();

@@ -324,7 +324,7 @@ To show the change of an edit, `AgentSession` reads the file before and after th
 
 ### Models, usage and compaction
 
-- Models come from the CLI: `ClaudeCodeModelCatalog` starts a short-lived process (`--no-session-persistence`), sends `initialize` and reads `models` and `account`. No model is called. The list is what the plan, the settings and the policies of the user allow, with the effort levels each model supports; `default` lets the CLI choose. Aliases (`default`, `opus`, `sonnet`, `haiku`) are the fallback when the CLI cannot be asked.
+- Models come from the CLI: `ClaudeCodeModelCatalog` starts a short-lived process (`--no-session-persistence`), sends `initialize` and reads `models` and `account`. No model is called. The list is what the plan, the settings and the policies of the user allow, with the effort levels each model supports; `default` lets the CLI choose. Aliases (`default`, `opus`, `sonnet`, `haiku`) are the fallback when the CLI cannot be asked. `--effort` is passed only for a level the CLI lists for the model.
 - The probe fails with a message when the executable is not found or when the CLI has no way to authenticate (`account.tokenSource` and `apiKeySource` are `none` with the first-party API). It reports how the CLI authenticates (a plan or a provider), never an identity.
 - Usage is the usage of the last model request (what it read is what the context holds), the context window the CLI reports (`get_context_usage`, then `modelUsage`), the cost of the turn and the subscription limit events (`rate_limit_event`).
 - The CLI keeps and compacts its context. Local compaction is disabled for the provider, and a manual compaction sends `/compact` to the CLI (`IAgentProviderCompaction`).
