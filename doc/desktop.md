@@ -1315,7 +1315,8 @@ the `alta` tool an `AltaPluginWorkshop` over the plugin runtime of the host, whi
 `alta plugin create`, `build`, `reload`, `refresh` and `open` to `list`, `status` and `api` (see
 `doc/live-tool.md`, Plugin commands):
 
-- `create` writes the first `plugin.cs` and starts it; `reload` builds the source again and replaces the
+- `create` writes the first `plugin.cs` and starts it, for the user (`~/.alta/plugins`) unless `--project`
+  asks for a plugin of the project; `reload` builds the source again and replaces the
   running plugin. A build that fails returns the errors of the compiler with file, line and column, and
   leaves the running version in place.
 - The agent tools of the plugin are registered in the turn that built it (`AgentRunTools.Set`), so the

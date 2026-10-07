@@ -17,7 +17,7 @@ A source plugin is one C# file that CodeAlta builds and loads. CodeAlta Desktop 
 In CodeAlta Desktop, ask a session in your own words:
 
 ```text
-Write a plugin for this project that shows the current git branch beside the prompt, with a command that lists the last ten commits in a dialog.
+Write a plugin that shows the current git branch beside the prompt, with a command that lists the last ten commits in a dialog.
 ```
 
 <figure class="alta-figure my-4">
@@ -25,14 +25,14 @@ Write a plugin for this project that shows the current git branch beside the pro
   <figcaption class="small text-secondary mt-2">A session wrote this plugin: the dialog of its command, and the branch beside the prompt.</figcaption>
 </figure>
 
-Say *for this project* to keep the plugin in the project, under `.alta/plugins`. Otherwise it is for all your projects, under `~/.alta/plugins`.
+The plugin is for all your projects: the agent creates it under `~/.alta/plugins`. Ask for a plugin *for this project* to keep it in the project instead, under `.alta/plugins`. Everything on this page works the same for both.
 
 The agent reads the `codealta-plugin-runtime` skill, which ships with CodeAlta and has this guidance with sample plugins. Then it works with the `alta plugin` commands of its session:
 
 {.table}
 | Command | What it does |
 |---|---|
-| `alta plugin create <id>` | Writes a first `plugin.cs`, builds it and starts it. `--project` makes a plugin of one project. |
+| `alta plugin create <id>` | Writes a first `plugin.cs` under `~/.alta/plugins/<id>`, builds it and starts it. With `--project`, the plugin is created in the project. |
 | `alta plugin reload <id>` | Builds the file again and replaces the plugin that runs. A build that fails returns the compiler errors, and the version that ran keeps running. |
 | `alta plugin status <id>` | Shows the state of the plugin, its last build, what it adds and the errors it raised. |
 | `alta plugin api <name>` | Shows a type of the plugin API with its members. |
@@ -44,7 +44,7 @@ CodeAlta TUI loads plugins when it starts: there the agent writes the file and y
 
 ## Create a plugin
 
-In CodeAlta Desktop, open **Settings > Plugins** and click **New plugin**. Enter an id: CodeAlta creates the folder with a first `plugin.cs`, starts the plugin and opens it in the code editor.
+In CodeAlta Desktop, open **Settings > Plugins** and click **New plugin**. Enter an id: CodeAlta creates the folder with a first `plugin.cs`, starts the plugin and opens it in the code editor. The plugin is for all your projects; choose **Project** at the top of the page first to create it in the selected project.
 
 You can also create the folder yourself. A plugin is one folder with a `plugin.cs` file:
 
@@ -91,7 +91,7 @@ A project plugin is loaded when CodeAlta is started in that project.
 
 ## Edit, build and reload
 
-In CodeAlta Desktop, **Settings > Plugins** is where you work on a source plugin.
+In CodeAlta Desktop, **Settings > Plugins** is where you work on a source plugin, whether it is for all your projects (**User**) or for one (**Project**).
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-plugins.webp" alt="The Plugins page of Settings with a source plugin, its Reload and Edit buttons, and New plugin" loading="lazy">

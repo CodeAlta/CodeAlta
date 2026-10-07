@@ -42,6 +42,8 @@ Where the plugins are:
 | All projects | `~/.alta/plugins/<id>/plugin.cs` |
 | One project | `<project>/.alta/plugins/<id>/plugin.cs`, loaded when CodeAlta is started in that project |
 
+Create a plugin for all projects unless the user asks for a plugin of the project. Every command works for both: when a plugin of each scope has the same id, add `--global` or `--project` after the id.
+
 What a reload changes, and when:
 
 - Commands, shortcuts, status items, content around the prompt and pickers: at once, in the window.
