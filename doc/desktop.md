@@ -302,7 +302,8 @@ automation a bolt, and the chats two speech bubbles.
 **Rename project…** and a session's **Rename…** open a small popover beside the row, with the current
 name selected: Enter or **Rename** saves it; Escape, **Cancel** or a click elsewhere leaves the name
 as it is. A rename that is refused says why under the field. A session keeps the name it was created
-or renamed with, also when a later Send attaches it again (another model, a restart); a session that
+or renamed with, also when a later Send attaches it again (another model, a restart) and when it is
+continued from the terminal UI, which lists a session by the first line of its summary; a session that
 was never named shows the first line of its summary.
 
 Clicking a project opens one temporary **New session** tab, reused when selecting another project

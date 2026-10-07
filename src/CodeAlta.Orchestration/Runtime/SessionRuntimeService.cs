@@ -1151,6 +1151,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         bool startNewSession;
         lock (_identityGate) startNewSession = _newSessionIds.Remove(session.SessionId);
 
+        // An attachment writes the title of the session. A list of sessions names a session by the first line of
+        // its summary: that line is not written over the name the session was given.
+        var title = (startNewSession ? null : await GivenTitleAsync(session, cancellationToken).ConfigureAwait(false))
+            ?? NormalizeOptionalText(session.Title);
         var requestedSessionId = NormalizeOptionalText(session.SessionId);
         var systemMessage = AppendPromptPart(instructions.SystemMessage, options.AdditionalSystemMessage);
         var finalDeveloperInstructions = AppendPromptPart(developerInstructions, additionalDeveloperInstructions);
@@ -1194,7 +1198,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             CreatedBySessionId = NormalizeOptionalText(session.CreatedBy?.SourceSessionId),
             // The journal header records this instant; the provider's own record must not name a later one.
             CreatedAt = session.CreatedAt == default ? null : session.CreatedAt,
-            Title = NormalizeOptionalText(session.Title),
+            Title = title,
             ProviderKey = options.ProviderKey ?? session.ResolvedProviderKey,
             Model = options.Model,
             ReasoningEffort = options.ReasoningEffort,
@@ -1249,7 +1253,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         session.ModelId = options.Model;
         session.ReasoningEffort = options.ReasoningEffort;
         session.AgentPromptId = effectiveAgentPromptId ?? session.AgentPromptId;
-        await UpsertSessionMetadataAsync(session, options, cancellationToken).ConfigureAwait(false);
+        await UpsertSessionMetadataAsync(session, options, title ?? session.Title, cancellationToken).ConfigureAwait(false);
         var actor = GetActorForWork(session.SessionId);
         // Queue mutations share this mailbox. Keep the durable read/modify/append indivisible
         // with respect to them, without joining setup or retirement from inside the actor.
@@ -1286,7 +1290,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             session.ParentSessionId,
             session.CreatedBy,
             session.CreatedAt,
-            session.Title,
+            title ?? session.Title,
             options.WorkingDirectory,
             options.Model,
             options.ReasoningEffort,
@@ -3150,6 +3154,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private async Task UpsertSessionMetadataAsync(
         SessionViewDescriptor session,
         SessionExecutionOptions options,
+        string title,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(session.SessionId) || session.CreatedAt == default)
@@ -3170,7 +3175,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     AgentPromptId = NormalizeOptionalText(session.AgentPromptId) ?? AgentPromptCatalog.DefaultPromptName,
                     WorkingDirectory = session.WorkingDirectory,
                     WorktreeDirectory = NormalizeOptionalText(session.WorktreeDirectory),
-                    Title = session.Title,
+                    Title = title,
                     Summary = session.LatestSummary,
                     ParentSessionId = NormalizeOptionalText(session.ParentSessionId),
                     CreatedBySessionId = NormalizeOptionalText(session.CreatedBy?.SourceSessionId ?? session.ParentSessionId),
@@ -3587,6 +3592,15 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
 
         return null;
+    }
+
+    // The name the stored session was given, or null: for a session that was never named, and for one that is not stored.
+    private async Task<string?> GivenTitleAsync(SessionViewDescriptor session, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(session.SessionId)) return null;
+        var metadata = await _sessionViewCatalog.JournalStore.CreateSessionStore()
+            .GetSessionAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
+        return metadata is null ? null : GivenTitle(metadata, session, await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>
