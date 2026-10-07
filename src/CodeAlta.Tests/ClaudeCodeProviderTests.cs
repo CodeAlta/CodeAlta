@@ -417,4 +417,33 @@ public sealed class ClaudeCodeProviderTests
         var pathVariable = path is null ? null : path.Replace(Path.PathSeparator, isWindows ? ';' : ':');
         return new ClaudeCodeCliEnvironment(isWindows, pathVariable, Home, Path.Combine(Home, "AppData", "Roaming"), existing.Contains);
     }
+
+    [TestMethod]
+    public async Task Models_AreDescribedByWhatModelsDevKnowsOfTheAnthropicModelTheyRun()
+    {
+        await using var catalog = new CodeAlta.Agent.ModelCatalog.ModelsDevCatalogService();
+        var models = new ClaudeCodeModelCatalog(new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code", ModelCatalog = catalog });
+        var read = ClaudeCodeModelCatalog.ReadModels(JsonDocument.Parse("""
+            {"models":[{"value":"sonnet","resolvedModel":"claude-sonnet-5-5","displayName":"Sonnet 5.5"},
+                       {"value":"sonnet[1m]","resolvedModel":"claude-sonnet-5-5[1m]","displayName":"Sonnet 5.5 (1M context)"},
+                       {"value":"claude-opus-5-5","displayName":"Opus 5.5"},
+                       {"value":"experimental","resolvedModel":"claude-not-listed-anywhere","displayName":"Experimental"}]}
+            """).RootElement);
+
+        var sonnet = models.Describe(read[0]);
+        Assert.AreEqual(("sonnet", "Sonnet 5.5"), (sonnet.Id, sonnet.DisplayName), "The entry keeps the name the CLI gave it.");
+        Assert.AreEqual(("anthropic", "claude-sonnet-5-5"), (sonnet.Capabilities!["modelsDevProviderId"], sonnet.Capabilities["modelsDevModelId"]));
+        Assert.IsTrue(sonnet.Capabilities.ContainsKey("contextWindowTokens") && sonnet.Capabilities.ContainsKey("family"));
+        Assert.AreEqual(true, sonnet.Capabilities["supportsImageInput"], "What the CLI is known to take is kept.");
+
+        // A larger context window is not the one models.dev lists for the model: its limits are left to the CLI.
+        var large = models.Describe(read[1]);
+        Assert.AreEqual("claude-sonnet-5-5", large.Capabilities!["modelsDevModelId"]);
+        Assert.IsFalse(large.Capabilities.ContainsKey("contextWindowTokens") || large.Capabilities.ContainsKey("contextWindow"));
+
+        Assert.AreEqual("claude-opus-5-5", models.Describe(read[2]).Capabilities!["modelsDevModelId"], "A model named by its own id is looked up by it.");
+        Assert.AreSame(read[3], models.Describe(read[3]), "A model models.dev does not know stays as the CLI described it.");
+        var bare = new ClaudeCodeModelCatalog(new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code" });
+        Assert.AreSame(read[0], bare.Describe(read[0]));
+    }
 }

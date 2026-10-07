@@ -196,7 +196,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             case "mistral":
                 return TryCreateMistralProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
             case ClaudeCodeModelProviderRuntime.ProviderType:
-                return TryCreateClaudeCodeProvider(definition, out descriptor, out createRuntime);
+                return TryCreateClaudeCodeProvider(definition, modelCatalog, out descriptor, out createRuntime);
             default:
                 descriptor = null!;
                 createRuntime = null!;
@@ -626,6 +626,7 @@ public static class ConfiguredModelProviderRegistryBuilder
     // installed and signed in is found by the probe, not here.
     private static bool TryCreateClaudeCodeProvider(
         CodeAltaProviderDocument definition,
+        ModelsDevCatalogService? modelCatalog,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
@@ -643,6 +644,8 @@ public static class ConfiguredModelProviderRegistryBuilder
             IsDefault = true,
             IsEnabled = definition.Enabled != false,
             SortModels = definition.SortModels == true,
+            // The models of Claude Code are those of Anthropic: models.dev lists them under that provider.
+            ModelCatalog = modelCatalog,
         };
 
         descriptor = ClaudeCodeModelProviderRuntime.CreateDescriptor(options);

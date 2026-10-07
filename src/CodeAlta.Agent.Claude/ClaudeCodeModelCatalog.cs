@@ -269,7 +269,32 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
         return (true, ClaudeCodeJson.GetString(account, "subscriptionType") ?? (hasApiKey ? "API key" : null));
     }
 
-    private IReadOnlyList<AgentModelInfo> Filter(IReadOnlyList<AgentModelInfo> models)
+    private IReadOnlyList<AgentModelInfo> Filter(IReadOnlyList<AgentModelInfo> models) => [.. Select(models).Select(Describe)];
+
+    /// <summary>
+    /// Adds what models.dev knows of the model an entry of the CLI runs: its family, its limits, what it takes.
+    /// The entry keeps its name and what the CLI said of it; an alias (<c>sonnet</c>) is looked up by the model it
+    /// stands for, without the mark of a larger context window (<c>[1m]</c>), whose limits are not those listed.
+    /// </summary>
+    internal AgentModelInfo Describe(AgentModelInfo model)
+    {
+        if (_options.ModelCatalog is not { } catalog || string.IsNullOrWhiteSpace(_options.ModelsDevProviderId)) return model;
+        var name = ResolvedModel(model) ?? model.Id;
+        var mark = name.IndexOf('[', StringComparison.Ordinal);
+        var extended = mark > 0;
+        if (extended) name = name[..mark];
+        var described = CodeAlta.Agent.ModelCatalog.AgentModelMetadataEnricher.EnrichModel(model with { Id = name }, catalog, _options.ModelsDevProviderId, overrides: null);
+        if (described.Capabilities is not { } found || !found.ContainsKey("modelsDevModelId")) return model;
+        var capabilities = new Dictionary<string, object?>(found, StringComparer.Ordinal);
+        if (extended)
+        {
+            foreach (var limit in (string[])["contextWindow", "contextWindowTokens", "inputTokenLimit", "maxInputTokens"]) capabilities.Remove(limit);
+        }
+
+        return model with { Capabilities = capabilities };
+    }
+
+    private IReadOnlyList<AgentModelInfo> Select(IReadOnlyList<AgentModelInfo> models)
     {
         if (!string.IsNullOrWhiteSpace(_options.SingleModelId))
         {

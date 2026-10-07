@@ -104,6 +104,17 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     public TimeSpan InterruptTimeout { get; init; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
+    /// Gets or initializes the catalog of models.dev the models of the CLI are looked up in; null when there is none.
+    /// </summary>
+    public CodeAlta.Agent.ModelCatalog.ModelsDevCatalogService? ModelCatalog { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the provider of models.dev whose models the CLI runs: the models of Claude Code are
+    /// those of Anthropic.
+    /// </summary>
+    public string ModelsDevProviderId { get; init; } = "anthropic";
+
+    /// <summary>
     /// Gets or initializes the factory of the processes. Tests replace it with a scripted CLI.
     /// </summary>
     internal IClaudeCodeTransportFactory? TransportFactory { get; init; }
