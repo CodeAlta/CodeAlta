@@ -159,12 +159,20 @@ public sealed class SessionQueueRpcTests
         Assert.AreEqual("conflict", f.Rpc.Send(new("epoch", request.ClientRequestId, request.SessionId, "text"), default).Status);
         Assert.AreEqual("busy", f.Rpc.Queue(request with { ClientRequestId = "busy" }, default).Status);
         var cancel = f.Cancel(receipt, "cancel"); await f.Wait(cancel.Completion); await f.Wait(receipt.Completion);
-        Assert.AreEqual("capacity", f.Rpc.Queue(request with { ClientRequestId = "full" }, default).Status);
+        // Both receipts have settled: one more command takes the place of the older one, the queue operation, whose
+        // key is answered as expired from then on and is not queued a second time.
+        var queued = receipt.OperationId.ToString("D");
+        Assert.AreEqual("accepted", f.Rpc.CancelQueue(new("epoch", "late", queued), default).Status);
+        Assert.AreEqual("expired", f.Rpc.Queue(request, default).Status);
+        Assert.IsNull(f.Rpc.Queue(request, default).Receipt);
+        Assert.AreEqual("unknowntarget", f.Rpc.CancelQueue(new("epoch", "later", queued), default).Status);
         await f.Wait(f.Commands.DisposeAsync().AsTask());
-        Assert.AreEqual("replay", f.Rpc.Queue(request, default).Status);
+        Assert.AreEqual("replay", f.Rpc.CancelQueue(new("epoch", "cancel", queued), default).Status);
+        Assert.AreEqual("expired", f.Rpc.Queue(request, default).Status);
         Assert.AreEqual("closed", f.Rpc.Queue(request with { ClientRequestId = "closed" }, default).Status);
         f.Rpc.CloseAdmission(); Assert.AreEqual("closed", f.Rpc.Queue(request, default).Status);
-        Assert.AreEqual(2, f.Rpc.Receipts(new("epoch", 0)).Rows.Length);
+        // The page is shown what the host keeps: the two cancellations, the most recent first.
+        CollectionAssert.AreEqual(new[] { "late", "cancel" }, f.Rpc.Receipts(new("epoch", 0)).Rows.Select(static row => row.ClientRequestId).ToArray());
     }, capacity: 2);
 
     [TestMethod]

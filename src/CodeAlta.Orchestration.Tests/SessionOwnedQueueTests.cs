@@ -60,11 +60,18 @@ public sealed class SessionOwnedQueueTests
         Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.Commands.AdmitCancelQueue(new("cancel", new Guid("00000000-0000-0000-0000-000000000001"))).Kind);
         await f.Wait(cancel.Completion);
         await f.Wait(receipt.Completion);
-        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Capacity, f.Commands.AdmitQueue(request with { ClientRequestId = "capacity" }).Kind);
-        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Capacity, f.Commands.AdmitSend(new("send-capacity", request.SessionId, "not dispatched")).Kind);
+        // Both receipts have settled. A cancellation of the settled queue operation takes the place of the older one,
+        // the queue operation itself, whose key is not run again and which is no target any more.
+        Assert.IsTrue(f.Commands.HasCapacity);
+        var late = f.Commands.AdmitCancelQueue(new("late", receipt.OperationId));
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, late.Kind);
+        Assert.AreEqual("already_terminal", (await f.Wait(late.Receipt!.Completion)).Code);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Expired, f.Commands.AdmitQueue(request).Kind);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.UnknownTarget, f.Commands.AdmitCancelQueue(new("later", receipt.OperationId)).Kind);
         await f.Wait(f.Commands.DisposeAsync().AsTask());
-        Assert.AreSame(receipt, f.Commands.AdmitQueue(request).Receipt);
         Assert.AreSame(cancel, f.Commands.AdmitCancelQueue(new("cancel", receipt.OperationId)).Receipt);
+        Assert.AreSame(late.Receipt, f.Commands.AdmitCancelQueue(new("late", receipt.OperationId)).Receipt);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Expired, f.Commands.AdmitQueue(request).Kind);
         Assert.AreEqual(OwnedSessionCommandAdmissionKind.Closed, f.Commands.AdmitQueue(request with { ClientRequestId = "closed" }).Kind);
     }, capacity: 2);
 

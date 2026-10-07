@@ -134,7 +134,7 @@ function matchesAbort(intent: AbortIntent, row: SessionReceiptView): boolean {
     && row.sessionId === intent.sessionId && row.targetOperationId === intent.request.targetOperationId && row.operationId !== row.targetOperationId;
 }
 function definiteRefusal(admission: SessionAdmission, abort: boolean): boolean {
-  return admission.receipt === null && (["conflict", "busy", "capacity", "closed", "invalid_request"].includes(admission.status)
+  return admission.receipt === null && (["conflict", "expired", "busy", "capacity", "closed", "invalid_request"].includes(admission.status)
     || abort && admission.status === "unknowntarget");
 }
 export function captureSubmissionAbort(epoch: string, sessionId: string, page: SessionReceiptPage, row: SessionReceiptView, key: string): AbortIntent | null {

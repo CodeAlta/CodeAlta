@@ -228,6 +228,13 @@ test("a prompt sent while the session works is queued or steers, and is never re
     await evaluate("fixture.steerMode('refuse')");
     await write("cannot steer"); await enter(true);
     assert.equal(await wait("fixture.steerCalls.length===4 && fixture.rows().at(-1)==='Queue:waiting:1:cannot steer'"), true);
+    // Steering the host ran earlier, and keeps no receipt of, is not sent a second time as the next prompt.
+    await evaluate("fixture.steerMode('expired')");
+    await write("already delivered"); await enter(true);
+    assert.equal(await wait("fixture.steerCalls.length===5 && fixture.rows().includes('Steer:failed:1:already delivered')"), true);
+    assert.equal(await evaluate("fixture.rows().filter(row=>row.endsWith(':already delivered')).length"), 1);
+    await evaluate(`${row("already delivered")}.querySelector('.composer-queue-delete').click()`);
+    assert.equal(await wait("fixture.rows().length===4 && fixture.rows().at(-1)==='Queue:waiting:1:cannot steer'"), true);
     await evaluate("fixture.steerMode('accept')");
 
     // A sent steering prompt can be taken off the list; the others leave with their turn, and the queue goes on.

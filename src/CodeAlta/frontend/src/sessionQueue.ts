@@ -120,7 +120,7 @@ function matchesCancel(intent: CancelIntent, row: SessionReceiptView): boolean {
     && row.sessionId === intent.sessionId && row.targetOperationId === intent.request.targetOperationId;
 }
 function definiteRejection(admission: SessionAdmission, cancel: boolean): boolean {
-  return admission.receipt === null && (["conflict", "busy", "capacity", "closed", "invalid_request"].includes(admission.status)
+  return admission.receipt === null && (["conflict", "expired", "busy", "capacity", "closed", "invalid_request"].includes(admission.status)
     || cancel && admission.status === "unknowntarget");
 }
 

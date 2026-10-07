@@ -321,8 +321,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     ? null
                     : new SessionDiscoveryScope(roots.Home, roots.Instructions),
                 BuiltInSkillRoot = roots.Builtin,
-                // Sends of the page, reminders and automations share it for the whole run of the application.
-                OwnedCommandReceiptCapacity = 4096, PluginEnvironment = FrozenDictionary<string, string?>.Empty,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty,
                 ReviewOwnedCommandPermissions = options.ReviewOwnedCommandPermissions,
                 AutoApproveOwnedPermissions = !options.ReviewOwnedCommandPermissions,
                 EnableOwnedAsks = true,

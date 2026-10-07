@@ -433,7 +433,7 @@ public sealed class AutomationHostTests
     }
 
     [TestMethod]
-    public async Task Runner_WhenTheHostAcceptsNoMoreCommands_StartsNoSession()
+    public async Task Runner_WhenEveryCommandTheHostKeepsIsPending_StartsNoSession_AndRunsAgainOnceOneHasSettled()
     {
         var root = Directory.CreateTempSubdirectory("codealta-automation-capacity-").FullName;
         try
@@ -444,7 +444,6 @@ public sealed class AutomationHostTests
             var builtin = Path.Combine(root, "builtin");
             foreach (var path in new[] { global, projectPath, home, builtin }) Directory.CreateDirectory(path);
             var provider = new RunnerProvider();
-            provider.Release.SetResult();
             await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
                 GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
@@ -454,13 +453,26 @@ public sealed class AutomationHostTests
             var runner = new AutomationRunner(host);
             var entry = new AutomationEntry(new("0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77", "Every minute") { Prompt = "p" }, new(Path.Combine(global, "config.toml"), null, null), null, null, null);
 
+            // The prompt of the first run is still being sent: it is the one command this host keeps.
             var first = await runner.StartAsync(entry, "run-1", "p", null, default);
-            Assert.AreEqual(AutomationRun.Completed, (await first.Completion!.WaitAsync(Patience)).Status);
+            Assert.IsNull(first.Problem);
             var second = await runner.StartAsync(entry, "run-2", "p", null, default);
 
-            Assert.AreEqual((null, "CodeAlta has accepted as many commands as it keeps in one run. Restart it to run automations again.", null), (second.SessionId, second.Problem, second.Completion));
+            Assert.AreEqual((null, "Too many commands are pending in CodeAlta. The automation runs again at its next trigger.", null), (second.SessionId, second.Problem, second.Completion));
             var workspace = new WorkspaceService(host, Epoch);
             Assert.AreEqual(1, (await workspace.SnapshotAsync(new(), default)).Sessions.Length, "The run that could not send its prompt left no session behind.");
+
+            // Once that command has settled its receipt makes room: the host accepts commands for as long as it runs.
+            provider.Release.SetResult();
+            Assert.AreEqual(AutomationRun.Completed, (await first.Completion!.WaitAsync(Patience)).Status);
+            for (var index = 3; index < 6; index++)
+            {
+                var next = await runner.StartAsync(entry, "run-" + index, "p", null, default);
+                Assert.IsNull(next.Problem);
+                Assert.AreEqual(AutomationRun.Completed, (await next.Completion!.WaitAsync(Patience)).Status);
+            }
+
+            Assert.AreEqual(4, (await workspace.SnapshotAsync(new(), default)).Sessions.Length);
             await workspace.CloseSessionsAsync();
             await workspace.CloseImportsAsync();
         }

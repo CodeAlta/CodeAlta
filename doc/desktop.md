@@ -1948,8 +1948,9 @@ sessions of its own. Automations exist in CodeAlta Desktop only. The sources are
   automations that are read from one file, is left as it is, with the reason. The switch of an
   automation changes the file as it is on disk, not as it was last read.
 
-Each run takes one of the commands the host accepts in one run of the application, with the sends of the
-page and the reminders: the desktop keeps 4,096 of them.
+The prompt of a run is one of the commands the host keeps a receipt of, with the sends of the page and
+the reminders. A run is refused, before a session is created for it, only while as many commands are
+pending as the host keeps (256); it runs again at its next trigger.
 
 ## UI tools
 
@@ -2168,8 +2169,16 @@ original Abort target for deliberate retry, never automatic resend. Receipt refr
 an intent while its original waiter is live; Abort-only recovery does not erase unrelated composer
 text. Late valid epoch mismatch disables mutations even after the old selection is cancelled.
 Reload permits manual receipt browsing, not reconstruction of lost text/keys. Abort control
-settlement is not rollback, decision retraction or run termination. The host's separate shared
-receipt capacity is 4,096 for one run of the application, paged 64 at a time.
+settlement is not rollback, decision retraction or run termination.
+
+The host keeps the receipts of 256 commands: those of the commands that are pending, and the most
+recent of those that have settled. When it is full, the oldest settled receipt makes room for the
+next command, so the host accepts commands for as long as the application runs; it answers `capacity`
+only while 256 commands are pending at once. A retry with the key of a receipt that made room is
+answered `expired` and is not run a second time: the page tells the user that the prompt was already
+sent, and keeps no intent for it. `sessions.receipts` pages what the host still keeps, 64 at a time:
+the pending commands first, which are the ones that can still be aborted or cancelled, then the
+settled ones, the most recent first.
 
 The composer visibly emphasizes **Cancel observed run** when an eligible point-in-time target
 is available, keeping **Send** as a separate secondary button. This is not a live-running indicator.
@@ -2318,7 +2327,7 @@ An uncertain steering request retains its immutable target, key and text across 
 Use **Refresh submissions** to reconcile it or **Retry exact steering request** deliberately;
 there is no automatic retry. A fresh runtime observation does not change that retained target.
 Only one steering dispatch per session is in flight, independently of an owned send; steering
-shares the host's 4,096-receipt limit. Closing presentation cancels only the waiter, while host
+shares the receipts the host keeps. Closing presentation cancels only the waiter, while host
 shutdown retains and joins accepted steering and cancellation work.
 
 The compact prompt toolbar offers **Compact observed idle attachment** (or `Ctrl+F11` from the
@@ -2332,7 +2341,7 @@ or stale targets fail without fallback, discovery or replacement. Compaction sum
 attachment's context **at provider admission**, not a history snapshot captured by the UI, and
 may use the configured model/network and persist context changes. It creates no new permission
 authority. One compaction per session
-may be in flight and shares the 4,096-receipt limit. Refresh submissions for the settled outcome;
+may be in flight and shares the receipts the host keeps. Refresh submissions for the settled outcome;
 busy, unsupported and unsuccessful compaction are not success. Uncertain requests survive
 selection changes for manual receipt reconciliation. Replaying a busy receipt does not try again:
 a new explicit action uses a fresh key. Closing the panel cancels only the wait; shutdown retains

@@ -355,23 +355,31 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
-    public Task ImageReceiptCapacity_DoesNotEvictReplayOrConsumeTextCapacity() => Fixture.RunAsync(async f =>
+    public Task ImageReceipts_MakeRoomWithSettledOnesAndDoNotConsumeTextCapacity() => Fixture.RunAsync(async f =>
     {
         var request = new OwnedTextSendRequest("bounded-image-0", f.SessionId, "describe")
         {
             Selection = new(f.Provider.Descriptor.ProviderId.Value, "default", "unobserved", null),
             Images = [new("Image 1", "image/png", Convert.ToBase64String(OwnedPromptImageTests.Png(1, 1)))],
         };
-        OwnedSessionCommandReceipt? first = null;
-        for (var index = 0; index < 8; index++)
+        OwnedSessionCommandReceipt? first = null, last = null;
+        for (var index = 0; index < OwnedSessionCommandService.MaximumImageReceipts; index++)
         {
             var admission = f.AdmitSend(request with { ClientRequestId = "bounded-image-" + index });
             Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, admission.Kind);
             first ??= admission.Receipt;
+            last = admission.Receipt;
             Assert.AreEqual("preparation_failed", (await f.Observe(admission.Receipt!.Completion)).Code);
         }
-        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Capacity, f.AdmitSend(request with { ClientRequestId = "overflow" }).Kind);
+
+        // The images of a send stay with its receipt, and the owner keeps few of them: one more takes the place
+        // of the oldest settled one, which is not run again when its key comes back.
         Assert.AreSame(first, f.AdmitSend(request).Receipt);
+        var next = f.Accept(f.AdmitSend(request with { ClientRequestId = "one-more" }));
+        Assert.AreEqual("preparation_failed", (await f.Observe(next.Completion)).Code);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Expired, f.AdmitSend(request).Kind);
+        Assert.AreSame(last, f.AdmitSend(request with { ClientRequestId = "bounded-image-" + (OwnedSessionCommandService.MaximumImageReceipts - 1) }).Receipt);
+        Assert.AreSame(next, f.AdmitSend(request with { ClientRequestId = "one-more" }).Receipt);
         var text = f.Accept(f.AdmitSend(new("text-after-image-capacity", f.SessionId, "text only")));
         f.Provider.ReleaseAll();
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(text.Completion)).Outcome);
@@ -609,14 +617,77 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
-    public Task ReceiptCapacity_RejectsWithoutEvictingRetryProtection() => Fixture.RunAsync(async f =>
+    public Task ReceiptCapacity_MakesRoomWithSettledReceiptsAndNeverRunsAnExpiredKeyAgain() => Fixture.RunAsync(async f =>
     {
-        var receipt = f.Send();
+        Assert.AreEqual(2, f.Host.Commands.ReceiptCapacity);
+        var first = f.Send("first");
         f.Provider.ReleaseSend.TrySetResult();
-        await f.Observe(receipt.Completion);
-        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Capacity, f.AdmitSend(new("other", f.SessionId, "text")).Kind);
-        Assert.AreSame(receipt, f.AdmitSend(new("send", f.SessionId, "text")).Receipt);
-    }, capacity: 1);
+        await f.Observe(first.Completion);
+        var second = f.Send("second");
+        await f.ObserveReadiness(f.Provider.SecondSendStarted.Task, second, "second send");
+        Assert.IsTrue(f.Host.Commands.HasCapacity, "A settled receipt is room for a new command.");
+
+        // A command that is refused for another reason takes nobody's place: the first receipt still answers its retry.
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Busy, f.AdmitSend(new("busy", f.SessionId, "text")).Kind);
+        Assert.AreSame(first, f.AdmitSend(new("first", f.SessionId, "text")).Receipt);
+
+        // A new command takes the place of the oldest settled receipt. Its key stays known: it is not run again,
+        // whatever comes with it.
+        var late = f.Abort(first, "late");
+        Assert.AreEqual("already_terminal", (await f.Observe(late.Completion)).Code);
+        var expired = f.AdmitSend(new("first", f.SessionId, "text"));
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Expired, expired.Kind);
+        Assert.IsNull(expired.Receipt);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Expired, f.AdmitSend(new("first", f.SessionId, "other text")).Kind);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Expired, f.AdmitAbort(new("first", second.OperationId)).Kind);
+        Assert.AreEqual(2, f.Provider.Sends);
+        // Nothing of a send whose receipt made room is left to abort.
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.UnknownTarget, f.AdmitAbort(new("too-late", first.OperationId)).Kind);
+
+        // A pending command is never forgotten: once every kept receipt is pending, a new command is refused.
+        var abort = f.Abort(second);
+        await f.ObserveReadiness(f.Provider.AbortStarted.Task, abort, "abort");
+        Assert.IsFalse(f.Host.Commands.HasCapacity);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Capacity, f.AdmitAbort(new("full", second.OperationId)).Kind);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Capacity, f.AdmitSend(new("full-send", f.SessionId, "text")).Kind);
+        Assert.AreSame(second, f.AdmitSend(new("second", f.SessionId, "text")).Receipt);
+        Assert.AreSame(abort, f.AdmitAbort(new("abort", second.OperationId)).Receipt);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Expired, f.AdmitAbort(new("late", first.OperationId)).Kind);
+
+        // Once they settle, commands are accepted again, for as long as the host runs.
+        f.Provider.ReleaseAll();
+        await f.Observe(abort.Completion);
+        await f.Observe(second.Completion);
+        for (var index = 0; index < 6; index++)
+        {
+            var next = f.Send("next-" + index);
+            Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(next.Completion)).Outcome);
+        }
+
+        Assert.AreEqual(8, f.Provider.Sends);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Expired, f.AdmitSend(new("second", f.SessionId, "text")).Kind);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Expired, f.AdmitSend(new("next-0", f.SessionId, "text")).Kind);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Replay, f.AdmitSend(new("next-5", f.SessionId, "text")).Kind);
+        Assert.AreEqual(8, f.Provider.Sends);
+    }, capacity: 2);
+
+    [TestMethod]
+    public void ExpiredKeys_RememberTheMostRecentOnes()
+    {
+        var keys = new OwnedSessionCommandService.ExpiredKeys(3);
+        foreach (var key in new[] { "a", "b", "c", "b" }) keys.Add(key);
+        Assert.AreEqual(3, keys.Count);
+        Assert.IsTrue(keys.Contains("a") && keys.Contains("b") && keys.Contains("c"));
+        Assert.IsFalse(keys.Contains("A"), "Keys are compared as they are written.");
+
+        // One more than it keeps: the oldest one is no longer known.
+        keys.Add("d");
+        Assert.AreEqual(3, keys.Count);
+        Assert.IsFalse(keys.Contains("a"));
+        Assert.IsTrue(keys.Contains("b") && keys.Contains("c") && keys.Contains("d"));
+        Assert.ThrowsExactly<ArgumentNullException>(() => keys.Add(null!));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new OwnedSessionCommandService.ExpiredKeys(0));
+    }
 
     [TestMethod]
     public Task ConcurrentAdmission_ReservesBeforeLookupAndAllowsOneActiveSend() => Fixture.RunAsync(async f =>
@@ -1064,6 +1135,14 @@ public sealed class OwnedSessionCommandServiceTests
         await f.ObserveReadiness(f.Provider.SteerStarted.Task, steer, "steer");
         Assert.AreEqual(OwnedSessionCommandAdmissionKind.Capacity, f.AdmitSteer(request with { ClientRequestId = "over" }).Kind);
         Assert.AreSame(steer, f.AdmitSteer(request).Receipt);
+        // Once it has settled, the steer makes room for the next one, and is not delivered a second time.
+        f.Provider.ReleaseSteer.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(steer.Completion)).Outcome);
+        var next = f.Accept(f.AdmitSteer(request with { ClientRequestId = "next" }));
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(next.Completion)).Outcome);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Expired, f.AdmitSteer(request).Kind);
+        Assert.AreSame(next, f.AdmitSteer(request with { ClientRequestId = "next" }).Receipt);
+        Assert.AreEqual(2, f.Provider.SteerDeliveries);
     }, capacity: 2);
 
     [TestMethod]
@@ -1118,8 +1197,17 @@ public sealed class OwnedSessionCommandServiceTests
         f.Provider.FailCompact = true;
         var failed = f.Accept(f.AdmitCompact(request with { ClientRequestId = "failure" }));
         Assert.AreEqual("compact_failed", (await f.Observe(failed.Completion)).Code);
-        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Capacity, f.AdmitCompact(request with { ClientRequestId = "capacity" }).Kind);
+        // The owner is full of settled receipts: the oldest one, the send that prepared the session, makes room.
+        var again = f.Accept(f.AdmitCompact(request with { ClientRequestId = "again" }));
+        Assert.AreEqual("compact_failed", (await f.Observe(again.Completion)).Code);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Expired, f.AdmitSend(new("send", f.SessionId, "text")).Kind);
         Assert.AreSame(compact, f.AdmitCompact(request).Receipt);
+        // Then the first compaction, which is not attempted a second time.
+        var compactions = f.Provider.Compactions;
+        var once = f.Accept(f.AdmitCompact(request with { ClientRequestId = "once-more" }));
+        Assert.AreEqual("compact_failed", (await f.Observe(once.Completion)).Code);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Expired, f.AdmitCompact(request).Kind);
+        Assert.AreEqual(compactions + 1, f.Provider.Compactions);
     }, capacity: 4);
 
     [TestMethod]
@@ -1261,15 +1349,20 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.AreEqual("cancellation_signalled", (await f.Observe(abort.Completion)).Code);
         var stale = f.Accept(f.AdmitAbortRun(request with { ClientRequestId = "stale", ExpectedRunId = "not-active" }));
         Assert.AreEqual("abort_run_not_active", (await f.Observe(stale.Completion)).Code);
-        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Capacity, f.AdmitAbortRun(request with { ClientRequestId = "full" }).Kind);
-        Assert.AreSame(abort, f.AdmitAbortRun(request).Receipt);
+        // The send and the steer are pending, the two cancellations have settled: the older one makes room.
+        var more = f.Accept(f.AdmitAbortRun(request with { ClientRequestId = "more", ExpectedRunId = "not-active" }));
+        Assert.AreEqual("abort_run_not_active", (await f.Observe(more.Completion)).Code);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Expired, f.AdmitAbortRun(request).Kind);
+        Assert.AreSame(stale, f.AdmitAbortRun(request with { ClientRequestId = "stale", ExpectedRunId = "not-active" }).Receipt);
         Assert.AreEqual(1, f.Provider.ExactTraversals);
         Assert.AreEqual(1, f.Provider.ExactAdmissions);
         f.Provider.ReleaseAll();
         await f.Observe(send.Completion);
         await f.Observe(steer.Completion);
         await f.Observe(f.BeginDisposal());
-        Assert.AreSame(abort, f.AdmitAbortRun(request).Receipt);
+        // A closed owner still answers the keys it knows: the kept ones with their receipt, the others as expired.
+        Assert.AreSame(more, f.AdmitAbortRun(request with { ClientRequestId = "more", ExpectedRunId = "not-active" }).Receipt);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Expired, f.AdmitAbortRun(request).Kind);
         Assert.AreEqual(OwnedSessionCommandAdmissionKind.Closed, f.AdmitAbortRun(request with { ClientRequestId = "closed" }).Kind);
     }, capacity: 4);
 

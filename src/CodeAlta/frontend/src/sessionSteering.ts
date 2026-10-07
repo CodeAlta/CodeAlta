@@ -67,7 +67,7 @@ export function createSteeringSubmissions(invoke: (request: SessionSteerRequest,
           if ((admission.status === "accepted" || admission.status === "replay") && admission.receipt && matches(captured, admission.receipt)) {
             pending.delete(key);
             result = admission;
-          } else if (["conflict", "busy", "capacity", "closed", "invalid_request"].includes(admission.status)) {
+          } else if (["conflict", "expired", "busy", "capacity", "closed", "invalid_request"].includes(admission.status)) {
             pending.delete(key);
             result = admission;
           }

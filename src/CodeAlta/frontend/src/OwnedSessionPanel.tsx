@@ -52,6 +52,7 @@ export function sendFailureMessage(status: string, reason?: string): string {
       : `CodeAlta did not confirm this send${reason ? ` (${reason})` : ""}. Check the timeline before sending it again.`;
     case "invalid_request": return "The prompt or the selected model was not accepted.";
     case "conflict": return "This prompt was already sent with different content.";
+    case "expired": return "This prompt was already sent earlier. Check the timeline before sending it again.";
     case "capacity": return "Too many requests are pending. Wait for one to finish.";
     case "closed": case "stale_epoch": return "CodeAlta restarted. Reload the window to continue.";
     default: return `The send was not accepted (${status}).`;
@@ -413,7 +414,8 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
       if (result.status === "accepted" || result.status === "replay") queue.composer.sent(id);
       else if (result.status === "uncertain") queue.composer.uncertain(id, "uncertain");
       else if (result.status === "busy") { queue.composer.release(id); retryLater(); }
-      else if (result.status === "closed" || result.status === "stale_epoch") queue.composer.fail(id, result.status);
+      // A request the host no longer keeps the receipt of was delivered earlier: it is not sent a second time.
+      else if (result.status === "closed" || result.status === "stale_epoch" || result.status === "expired") queue.composer.fail(id, result.status);
       // The turn cannot be steered: the prompt is sent as the next one instead.
       else queue.composer.requeue(id);
     };

@@ -34,7 +34,11 @@ public sealed class CodeAltaHostOptions
     /// <summary>Gets an explicit absolute builtin skill root; null preserves application/source discovery.</summary>
     public string? BuiltInSkillRoot { get; init; }
 
-    /// <summary>Gets the positive owner-lifetime receipt limit; full owners reject new requests without evicting retry protection.</summary>
+    /// <summary>
+    /// Gets how many command receipts the owner keeps: those of pending commands and, while there is room, of
+    /// settled ones. A full owner makes room with its oldest settled receipt, whose key it still refuses to run
+    /// again, and rejects a new command only when every kept receipt is pending.
+    /// </summary>
     public int OwnedCommandReceiptCapacity { get; init; } = 256;
 
     /// <summary>

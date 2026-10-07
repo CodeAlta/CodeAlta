@@ -21,7 +21,7 @@ let run: string | null = null;
 let runs = 0;
 let operations = 0;
 let sendMode: "accept" | "busy" | "refuse" = "accept";
-let steerMode: "accept" | "refuse" = "accept";
+let steerMode: "accept" | "refuse" | "expired" = "accept";
 const operationId = () => `22222222-2222-4222-8222-${String(++operations).padStart(12, "0")}`;
 
 const queue = createQueueSubmissions(unavailable, unavailable);
@@ -36,7 +36,7 @@ const submissions = createOwnedSubmissions(async (request): Promise<SessionAdmis
 }, unavailable);
 const steering = createSteeringSubmissions(async (request): Promise<SessionAdmission> => {
   fixture.steerCalls.push(request);
-  if (steerMode === "refuse") return { status: "conflict", epoch: request.expectedEpoch, receipt: null };
+  if (steerMode !== "accept") return { status: steerMode === "refuse" ? "conflict" : "expired", epoch: request.expectedEpoch, receipt: null };
   return { status: "accepted", epoch: request.expectedEpoch, receipt: { kind: "Steer", clientRequestId: request.clientRequestId,
     sessionId: request.sessionId, operationId: operationId(), targetOperationId: null, state: "terminal", outcome: "Completed", code: null,
     runId: request.expectedRunId, queueInsertion: null } };

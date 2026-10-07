@@ -131,3 +131,18 @@ test("compact retention is bounded and pre-cancelled attempts never invoke", asy
   assert.equal(calls, 256);
   assert.equal(store.pending("session"), undefined);
 });
+
+test("a compaction key whose receipt the host no longer keeps is a definite answer", async () => {
+  let status = "admission_failed";
+  const store = createCompactionSubmissions(async () => ({ status, epoch: "epoch", receipt: null }));
+  const capability = createMutationCapability("epoch");
+  const signal = new AbortController().signal;
+  const original = request();
+  await store.submit(original, signal, capability, () => {});
+  assert.equal(store.pending("session")!.request, original);
+  status = "expired";
+  const published: string[] = [];
+  await store.submit(original, signal, capability, value => published.push(value.status));
+  assert.deepEqual(published, ["expired"]);
+  assert.equal(store.pending("session"), undefined);
+});

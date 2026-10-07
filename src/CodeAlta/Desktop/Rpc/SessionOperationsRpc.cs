@@ -7,7 +7,8 @@ using XenoAtom.Logging;
 namespace CodeAlta.Desktop.Rpc;
 
 // The host owns every operation. This application-scoped transport index retains receipt references
-// only, never prompt text, executable workers, cancellation sources or another retry policy.
+// only, never prompt text, executable workers, cancellation sources or another retry policy. It keeps as
+// many references as the host keeps receipts, and makes room the same way: with the oldest settled one.
 [NeoRpcService("sessions", Version = 1)]
 internal sealed class SessionOperationsService
 {
@@ -20,7 +21,10 @@ internal sealed class SessionOperationsService
     private readonly Func<OwnedAbortRunRequest, CancellationToken, OwnedSessionCommandAdmission>? _abortRun;
     private readonly Func<OwnedTextQueueRequest, CancellationToken, OwnedSessionCommandAdmission>? _queue;
     private readonly Func<OwnedCancelQueueRequest, CancellationToken, OwnedSessionCommandAdmission>? _cancelQueue;
-    private readonly Dictionary<Guid, OwnedSessionCommandReceipt> _receipts = [];
+    private readonly Dictionary<Guid, LinkedListNode<OwnedSessionCommandReceipt>> _receipts = [];
+    // In the order of their admission, the oldest first.
+    private readonly LinkedList<OwnedSessionCommandReceipt> _kept = new();
+    private readonly int _capacity = 256;
     private bool _closed;
     private readonly Func<string, CancellationToken, Task<OwnedSelectionChoices?>>? _choices;
     private readonly OwnedSessionCommandService? _commands;
@@ -31,6 +35,7 @@ internal sealed class SessionOperationsService
         ArgumentNullException.ThrowIfNull(commands);
         _epoch = epoch;
         _commands = commands;
+        _capacity = commands.ReceiptCapacity;
         _send = commands.AdmitSend;
         _abort = commands.AdmitAbort;
         _steer = commands.AdmitSteer;
@@ -355,9 +360,16 @@ internal sealed class SessionOperationsService
             if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", _epoch, [], null);
             if (request.Offset < 0 || request.Offset > _receipts.Count || request.Offset % 64 != 0)
                 return new("invalid_cursor", _epoch, [], null);
-            // Insertion order is stable for this epoch: references are never removed or replaced.
-            var rows = _receipts.Values.Skip(request.Offset).Take(64).Select(ProjectReceipt).ToArray();
-            return ProjectPage(_epoch, rows, request.Offset + rows.Length < _receipts.Count ? request.Offset + rows.Length : null);
+            // What can still be acted on comes first: the pending commands, then the settled ones, each the most
+            // recent first. The first page is what the window reads; an offset names a place in this order as it
+            // is now, which moves when a command is admitted or settles.
+            var ordered = new List<OwnedSessionCommandReceipt>(_kept.Count);
+            for (var node = _kept.Last; node is not null; node = node.Previous)
+                if (!node.Value.Completion.IsCompleted) ordered.Add(node.Value);
+            for (var node = _kept.Last; node is not null; node = node.Previous)
+                if (node.Value.Completion.IsCompleted) ordered.Add(node.Value);
+            var rows = ordered.Skip(request.Offset).Take(64).Select(ProjectReceipt).ToArray();
+            return ProjectPage(_epoch, rows, request.Offset + rows.Length < ordered.Count ? request.Offset + rows.Length : null);
         }
     }
 
@@ -369,13 +381,31 @@ internal sealed class SessionOperationsService
     {
         if (admission.Receipt is { } receipt)
         {
-            // Production host fixes owner capacity at 256; every admission goes through this index.
-            _receipts.TryAdd(receipt.OperationId, receipt);
+            // Every admission of the page goes through this index.
+            Keep(receipt);
             var projected = ProjectReceipt(receipt);
             return ValidRow(projected) ? new(admission.Kind.ToString().ToLowerInvariant(), _epoch, projected)
                 : new("wire_limit", _epoch, null);
         }
         return new(admission.Kind.ToString().ToLowerInvariant(), _epoch, null);
+    }
+
+    // Called under _gate. A replay names a receipt that is already here; a new one takes the place of the
+    // oldest settled one when the index is full, as it did in the host. The host admits a command only while it
+    // keeps a settled receipt or has room, so a full index has a settled one too.
+    private void Keep(OwnedSessionCommandReceipt receipt)
+    {
+        if (_receipts.ContainsKey(receipt.OperationId)) return;
+        if (_receipts.Count >= _capacity)
+        {
+            var oldest = _kept.First;
+            while (oldest is not null && !oldest.Value.Completion.IsCompleted) oldest = oldest.Next;
+            oldest ??= _kept.First!;
+            _kept.Remove(oldest);
+            _receipts.Remove(oldest.Value.OperationId);
+        }
+
+        _receipts.Add(receipt.OperationId, _kept.AddLast(receipt));
     }
 
     private static SessionReceiptView ProjectReceipt(OwnedSessionCommandReceipt receipt)

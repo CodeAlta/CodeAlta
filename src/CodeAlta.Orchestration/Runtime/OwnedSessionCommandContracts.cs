@@ -159,12 +159,17 @@ public enum OwnedSessionCommandAdmissionKind
     Conflict,
     /// <summary>The session already has an outstanding operation in the requested command slot.</summary>
     Busy,
-    /// <summary>The owner-lifetime receipt bound is exhausted.</summary>
+    /// <summary>Every receipt the owner keeps belongs to a command that is still pending.</summary>
     Capacity,
     /// <summary>Disposal has closed new admission.</summary>
     Closed,
-    /// <summary>The target is not an owned operation of the required kind.</summary>
+    /// <summary>The target is not an owned operation of the required kind, or its receipt is no longer kept.</summary>
     UnknownTarget,
+    /// <summary>
+    /// The retry key belongs to a command that settled earlier and whose receipt made room for newer commands.
+    /// The command is not run again, and its result is no longer known to the owner.
+    /// </summary>
+    Expired,
 }
 
 /// <summary>Terminal command outcome; successful submission is not transcript completion.</summary>
@@ -190,8 +195,10 @@ public sealed record OwnedSessionCommandResult(OwnedSessionCommandOutcome Outcom
 public sealed record OwnedSessionCommandAdmission(OwnedSessionCommandAdmissionKind Kind, OwnedSessionCommandReceipt? Receipt = null);
 
 /// <summary>
-/// Immutable owner-lifetime receipt. Completion reports command dispatch/control, not a transcript.
-/// Cancelling a caller's wait on Completion does not cancel the retained operation.
+/// Immutable receipt of an admitted command. Completion reports command dispatch/control, not a transcript.
+/// Cancelling a caller's wait on Completion does not cancel the retained operation. The owner keeps the
+/// receipt while its command is pending, and afterwards until newer commands need its place; the object
+/// stays valid for whoever holds it.
 /// </summary>
 public sealed class OwnedSessionCommandReceipt
 {

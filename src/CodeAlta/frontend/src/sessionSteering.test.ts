@@ -130,3 +130,17 @@ test("uncertain retention is bounded and pre-cancelled attempts do not invoke", 
   assert.equal(calls, 256);
   assert.equal(store.pending("session"), undefined);
 });
+
+test("a steering key whose receipt the host no longer keeps is a definite answer", async () => {
+  let status = "admission_failed";
+  const store = createSteeringSubmissions(async () => ({ status, epoch: "epoch", receipt: null }));
+  const capability = createMutationCapability("epoch");
+  const original = request();
+  await store.submit(original, signal, capability, () => {});
+  assert.equal(store.pending("session")!.request, original);
+  status = "expired";
+  const published: string[] = [];
+  await store.submit(original, signal, capability, value => published.push(value.status));
+  assert.deepEqual(published, ["expired"]);
+  assert.equal(store.pending("session"), undefined);
+});

@@ -267,3 +267,19 @@ test("queue combined bound precancellation and malformed responses retain uncert
   response = { status: "accepted", epoch: "epoch", receipt: cancelRow() };
   await store.cancel(store.cancellations("session")[0].intent, signal, capability, () => {}); assert.equal(store.cancellations("session").length, 0);
 });
+
+test("a key whose receipt the host no longer keeps is a definite answer for a queue request and for its cancellation", async () => {
+  let response: SessionAdmission = { status: "admission_failed", epoch: "epoch", receipt: null };
+  const store = createQueueSubmissions(async () => response, async () => response);
+  const capability = createMutationCapability("epoch"); const signal = new AbortController().signal;
+  await store.submit(request(), signal, capability, () => {});
+  await store.cancel(cancelIntent(), signal, capability, () => {});
+  assert.ok(store.pending("session")); assert.equal(store.cancellations("session").length, 1);
+  // The request was run earlier in this run of the host: it is neither retained for a retry nor sent again.
+  response = { status: "expired", epoch: "epoch", receipt: null };
+  const published: string[] = [];
+  await store.submit(store.pending("session")!.request, signal, capability, value => published.push(value.status));
+  await store.cancel(store.cancellations("session")[0].intent, signal, capability, value => published.push(value.status));
+  assert.deepEqual(published, ["expired", "expired"]);
+  assert.equal(store.pending("session"), undefined); assert.equal(store.cancellations("session").length, 0);
+});

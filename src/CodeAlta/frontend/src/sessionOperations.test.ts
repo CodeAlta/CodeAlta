@@ -402,7 +402,8 @@ test("combined retention bound precancellation and coherent definite refusals pr
   await f.wait(store.submit(retained, signal, capability, () => {})); assert.ok(store.pending("s0"));
   response = { status: "unknowntarget", epoch: "epoch", receipt: abortRow() };
   await f.wait(store.abort(store.abortPending(operation)!.intent, signal, capability, () => {})); assert.ok(store.abortPending(operation));
-  for (const status of ["conflict", "busy", "capacity", "closed", "invalid_request"]) {
+  // "expired": the host ran this key earlier and no longer keeps its receipt. It is not uncertainty either.
+  for (const status of ["conflict", "expired", "busy", "capacity", "closed", "invalid_request"]) {
     response = { status, epoch: "epoch", receipt: null };
     await f.wait(store.submit(store.pending("s0")?.request ?? retained, signal, capability, () => {}));
     assert.equal(store.pending("s0"), undefined);

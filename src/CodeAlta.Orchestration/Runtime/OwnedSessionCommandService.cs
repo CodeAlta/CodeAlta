@@ -11,6 +11,14 @@ namespace CodeAlta.Orchestration.Runtime;
 /// One send and independently one steer, compact, abort-run and volatile queue operation per session are reserved.
 /// No durable queue or event reader is created.
 /// </summary>
+/// <remarks>
+/// The owner keeps a bounded number of receipts: those of the commands that are pending, and, while there is
+/// room, those of commands that have settled, so that an exact retry is answered with the original receipt.
+/// When it is full, the oldest settled receipt makes room for a new command, and a new command is refused
+/// (<see cref="OwnedSessionCommandAdmissionKind.Capacity"/>) only when every kept receipt is pending. The key of
+/// a receipt that made room is remembered, so that a retry with it is answered
+/// <see cref="OwnedSessionCommandAdmissionKind.Expired"/> and never runs its command a second time.
+/// </remarks>
 public sealed partial class OwnedSessionCommandService : IAsyncDisposable
 {
     private readonly object _gate = new();
@@ -20,7 +28,47 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     private readonly int _capacity;
     private readonly bool _reviewPermissions;
     private readonly bool _enableUserInput;
-    private readonly Dictionary<string, ReceiptEntry> _receipts = new(StringComparer.Ordinal);
+    /// <summary>How many image-bearing sends the owner keeps the receipt, and so the images, of.</summary>
+    internal const int MaximumImageReceipts = 8;
+
+    /// <summary>How many keys of receipts that made room the owner remembers.</summary>
+    internal const int MaximumExpiredKeys = 65536;
+
+    /// <summary>
+    /// The keys of the receipts that made room, so that none of them is admitted as a new command. It keeps the
+    /// most recent ones: a key older than those is no longer known, which only a retry that comes after that
+    /// many other commands could meet.
+    /// </summary>
+    internal sealed class ExpiredKeys
+    {
+        private readonly HashSet<string> _keys = new(StringComparer.Ordinal);
+        private readonly Queue<string> _order = new();
+        private readonly int _capacity;
+
+        internal ExpiredKeys(int capacity)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
+            _capacity = capacity;
+        }
+
+        internal int Count => _keys.Count;
+
+        internal bool Contains(string key) => _keys.Contains(key);
+
+        internal void Add(string key)
+        {
+            ArgumentNullException.ThrowIfNull(key);
+            if (!_keys.Add(key)) return;
+            _order.Enqueue(key);
+            if (_order.Count > _capacity) _keys.Remove(_order.Dequeue());
+        }
+    }
+
+    private readonly Dictionary<string, LinkedListNode<ReceiptEntry>> _receipts = new(StringComparer.Ordinal);
+    // The kept receipts in the order of their admission: the oldest settled one makes room.
+    private readonly LinkedList<ReceiptEntry> _kept = new();
+    private readonly ExpiredKeys _expired = new(MaximumExpiredKeys);
+    private int _imageReceipts;
     private readonly Dictionary<Guid, SendOperation> _operations = [];
     private readonly Dictionary<string, SendOperation> _active = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<SteerOperation> _steers = [];
@@ -31,7 +79,6 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     private readonly HashSet<string> _abortingRuns = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<Guid, QueueOperation> _queues = [];
     private readonly HashSet<string> _queueing = new(StringComparer.OrdinalIgnoreCase);
-    private readonly List<Exception> _failures = [];
     private readonly List<Exception> _cleanupFailures = [];
     private bool _closed;
     private bool _retained;
@@ -158,13 +205,70 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         => SessionTools?.Invoke(new(sessionId, projectId, workingDirectory, providerKey)) ?? [];
 
     /// <summary>
-    /// Gets whether one more command can be admitted. The service keeps a bounded number of receipts for one run
-    /// of the host: a caller that creates something for a command, such as a session for a prompt, asks first, so
-    /// that nothing is left behind when the command is then refused.
+    /// Gets whether one more command can be admitted: the owner keeps fewer receipts than it can, or one of them
+    /// belongs to a command that has settled. A caller that creates something for a command, such as a session for
+    /// a prompt, asks first, so that nothing is left behind when the command is then refused.
     /// </summary>
     public bool HasCapacity
     {
-        get { lock (_gate) return _receipts.Count < _capacity; }
+        get { lock (_gate) return HasRoom(); }
+    }
+
+    /// <summary>Gets how many receipts the owner keeps.</summary>
+    public int ReceiptCapacity => _capacity;
+
+    // Called under _gate: the answer for a key the owner already knows, or null for a new key.
+    private OwnedSessionCommandAdmission? Known(string clientRequestId, Func<ReceiptEntry, bool> same)
+    {
+        if (_receipts.TryGetValue(clientRequestId, out var kept)) return Replay(kept.Value, same(kept.Value));
+        return _expired.Contains(clientRequestId) ? new(OwnedSessionCommandAdmissionKind.Expired) : null;
+    }
+
+    // Called under _gate. A full owner has room when the command of one of its receipts has settled.
+    private bool HasRoom() => _receipts.Count < _capacity || OldestSettled(images: false) is not null;
+
+    private LinkedListNode<ReceiptEntry>? OldestSettled(bool images)
+    {
+        for (var node = _kept.First; node is not null; node = node.Next)
+        {
+            var entry = node.Value;
+            if (images && entry.Send?.Images is not { Count: > 0 }) continue;
+            // The receipt of a command that retains a dependency stays: that command is never released.
+            if (entry.Receipt.Completion.IsCompleted && entry.Release is not { Released: false }) return node;
+        }
+
+        return null;
+    }
+
+    // Called under _gate, by an admission that found room there.
+    private void Keep(ReceiptEntry entry)
+    {
+        var images = entry.Send?.Images is { Count: > 0 };
+        if (images && _imageReceipts == MaximumImageReceipts) Forget(OldestSettled(images: true)!);
+        if (_receipts.Count == _capacity) Forget(OldestSettled(images: false)!);
+        _receipts.Add(entry.Receipt.ClientRequestId, _kept.AddLast(entry));
+        if (images) _imageReceipts++;
+    }
+
+    // Called under _gate. The command has settled: nothing of it is left to cancel or to join, and its source,
+    // which nothing uses any more, is left to the collector. Its key stays known, so it is not run again.
+    private void Forget(LinkedListNode<ReceiptEntry> node)
+    {
+        var entry = node.Value;
+        var receipt = entry.Receipt;
+        _kept.Remove(node);
+        _receipts.Remove(receipt.ClientRequestId);
+        if (entry.Send?.Images is { Count: > 0 }) _imageReceipts--;
+        switch (receipt.Kind)
+        {
+            case OwnedSessionCommandKind.Send: _operations.Remove(receipt.OperationId); break;
+            case OwnedSessionCommandKind.Queue: _queues.Remove(receipt.OperationId); break;
+            case OwnedSessionCommandKind.Steer: _steers.RemoveAll(operation => ReferenceEquals(operation.Receipt, receipt)); break;
+            case OwnedSessionCommandKind.Compact: _compacts.RemoveAll(operation => ReferenceEquals(operation.Receipt, receipt)); break;
+            case OwnedSessionCommandKind.AbortRun: _abortRuns.RemoveAll(operation => ReferenceEquals(operation.Receipt, receipt)); break;
+        }
+
+        _expired.Add(receipt.ClientRequestId);
     }
 
     /// <summary>Creates a draft through the host runtime using the same restricted permission and input policy as owned sends.</summary>
@@ -272,22 +376,20 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         lock (_gate)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_receipts.TryGetValue(request.ClientRequestId, out var previous))
-            {
-                var same = previous.Send is not null && SameAskContext(previous.Ask, askSubmission) &&
-                    string.Equals(previous.Send.SessionId, request.SessionId, StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(previous.Send.Text, request.Text, StringComparison.Ordinal) && previous.Send.Selection == request.Selection
-                    && previous.Send.References == request.References
-                    && (previous.Send.Images ?? []).SequenceEqual(request.Images ?? []);
-                return Replay(previous, same);
-            }
+            var sent = request;
+            if (Known(request.ClientRequestId, previous => previous.Send is not null && SameAskContext(previous.Ask, askSubmission) &&
+                    string.Equals(previous.Send.SessionId, sent.SessionId, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(previous.Send.Text, sent.Text, StringComparison.Ordinal) && previous.Send.Selection == sent.Selection
+                    && previous.Send.References == sent.References
+                    && (previous.Send.Images ?? []).SequenceEqual(sent.Images ?? [])) is { } known)
+                return known;
             if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
             if (_deleteWork is not null) return new(OwnedSessionCommandAdmissionKind.Busy);
-            if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
+            if (!HasRoom()) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (request.Images is { Count: > 0 })
             {
-                // Payload evidence remains with receipts for the host lifetime; no unbounded image history.
-                if (_receipts.Values.Count(entry => entry.Send?.Images is { Count: > 0 }) >= 8)
+                // The images stay with their receipt: the owner keeps few of them, and no image history.
+                if (_imageReceipts == MaximumImageReceipts && OldestSettled(images: true) is null)
                     return new(OwnedSessionCommandAdmissionKind.Capacity);
                 request = request with { Images = OwnedPromptImages.Freeze(request.Images) };
             }
@@ -298,7 +400,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
 
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Send, request.SessionId);
             operation = new SendOperation(request, receipt) { AskSubmission = askSubmission };
-            _receipts.Add(request.ClientRequestId, new ReceiptEntry(receipt, request, Ask: askSubmission));
+            Keep(new ReceiptEntry(receipt, request, Ask: askSubmission, Release: operation.ReleaseDecision));
             _operations.Add(receipt.OperationId, operation);
             _active.Add(request.SessionId, operation);
             // The first await is an unreleased asynchronous launch gate, not fallible setup.
@@ -322,15 +424,15 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         lock (_gate)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_receipts.TryGetValue(request.ClientRequestId, out var previous))
-                return Replay(previous, previous.Abort == request);
+            if (Known(request.ClientRequestId, previous => previous.Abort == request) is { } known) return known;
             if (_closed) return new(OwnedSessionCommandAdmissionKind.Closed);
-            if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
+            if (!HasRoom()) return new(OwnedSessionCommandAdmissionKind.Capacity);
+            // A send whose receipt made room has settled long ago: there is nothing of it to abort.
             if (!_operations.TryGetValue(request.TargetOperationId, out var target)) return new(OwnedSessionCommandAdmissionKind.UnknownTarget);
             operation = target;
 
             receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Abort, operation.SessionId, request.TargetOperationId);
-            _receipts.Add(request.ClientRequestId, new ReceiptEntry(receipt, Abort: request));
+            Keep(new ReceiptEntry(receipt, Abort: request));
             if (operation.Released)
             {
                 receipt.Complete(new(OwnedSessionCommandOutcome.Completed, Code: "already_terminal"));
@@ -364,15 +466,14 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         lock (_gate)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_receipts.TryGetValue(request.ClientRequestId, out var previous))
-                return Replay(previous, previous.Steer == request);
+            if (Known(request.ClientRequestId, previous => previous.Steer == request) is { } known) return known;
             if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
             if (_deleteWork is not null) return new(OwnedSessionCommandAdmissionKind.Busy);
-            if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
+            if (!HasRoom()) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_steering.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Steer, request.SessionId);
             operation = new(request, receipt);
-            _receipts.Add(request.ClientRequestId, new ReceiptEntry(receipt, Steer: request));
+            Keep(new ReceiptEntry(receipt, Steer: request, Release: operation.ReleaseDecision));
             _steers.Add(operation);
             _steering.Add(request.SessionId);
             operation.Work = RunSteerAsync(operation);
@@ -425,15 +526,14 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         lock (_gate)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_receipts.TryGetValue(request.ClientRequestId, out var previous))
-                return Replay(previous, previous.Compact == request);
+            if (Known(request.ClientRequestId, previous => previous.Compact == request) is { } known) return known;
             if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
             if (_deleteWork is not null) return new(OwnedSessionCommandAdmissionKind.Busy);
-            if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
+            if (!HasRoom()) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_compacting.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Compact, request.SessionId);
             operation = new(request, receipt);
-            _receipts.Add(request.ClientRequestId, new ReceiptEntry(receipt, Compact: request));
+            Keep(new ReceiptEntry(receipt, Compact: request, Release: operation.ReleaseDecision));
             _compacts.Add(operation);
             _compacting.Add(request.SessionId);
             operation.Work = RunCompactAsync(operation);
@@ -489,14 +589,14 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         lock (_gate)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_receipts.TryGetValue(request.ClientRequestId, out var previous)) return Replay(previous, previous.Queue == request);
+            if (Known(request.ClientRequestId, previous => previous.Queue == request) is { } known) return known;
             if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
             if (_deleteWork is not null) return new(OwnedSessionCommandAdmissionKind.Busy);
-            if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
+            if (!HasRoom()) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_queueing.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Queue, request.SessionId);
             operation = new(request, receipt);
-            _receipts.Add(request.ClientRequestId, new(receipt, Queue: request));
+            Keep(new(receipt, Queue: request, Release: operation.ReleaseDecision));
             _queues.Add(receipt.OperationId, operation);
             _queueing.Add(request.SessionId);
             operation.Work = RunQueueAsync(operation);
@@ -520,14 +620,14 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         lock (_gate)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_receipts.TryGetValue(request.ClientRequestId, out var previous)) return Replay(previous, previous.CancelQueue == request);
+            if (Known(request.ClientRequestId, previous => previous.CancelQueue == request) is { } known) return known;
             if (_closed) return new(OwnedSessionCommandAdmissionKind.Closed);
             if (_deleteWork is not null) return new(OwnedSessionCommandAdmissionKind.Busy);
-            if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
+            if (!HasRoom()) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (!_queues.TryGetValue(request.TargetOperationId, out var target)) return new(OwnedSessionCommandAdmissionKind.UnknownTarget);
             operation = target;
             receipt = new(request.ClientRequestId, OwnedSessionCommandKind.CancelQueue, operation.Request.SessionId, request.TargetOperationId);
-            _receipts.Add(request.ClientRequestId, new(receipt, CancelQueue: request));
+            Keep(new(receipt, CancelQueue: request));
             if (operation.Released) receipt.Complete(new(OwnedSessionCommandOutcome.Completed, Code: "already_terminal"));
             else
             {
@@ -645,15 +745,14 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         lock (_gate)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_receipts.TryGetValue(request.ClientRequestId, out var previous))
-                return Replay(previous, previous.AbortRun == request);
+            if (Known(request.ClientRequestId, previous => previous.AbortRun == request) is { } known) return known;
             if (_closed) return new(OwnedSessionCommandAdmissionKind.Closed);
             if (_deleteWork is not null) return new(OwnedSessionCommandAdmissionKind.Busy);
-            if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
+            if (!HasRoom()) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_abortingRuns.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.AbortRun, request.SessionId);
             operation = new(request, receipt);
-            _receipts.Add(request.ClientRequestId, new ReceiptEntry(receipt, AbortRun: request));
+            Keep(new ReceiptEntry(receipt, AbortRun: request, Release: operation.ReleaseDecision));
             _abortRuns.Add(operation);
             _abortingRuns.Add(request.SessionId);
             operation.Work = RunAbortRunAsync(operation);
@@ -974,7 +1073,6 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         lock (_gate)
         {
             decision?.Observe(failure);
-            _failures.Add(failure);
             if (cleanup) _cleanupFailures.Add(failure);
             if (OwnedProviderEventForwarding.HasRetention(failure))
             {
@@ -1199,9 +1297,11 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         if (failures.Length > 1) throw new AggregateException(failures);
     }
 
+    // Release is the decision of the work of the command; null for a control of the work of another command.
     private sealed record ReceiptEntry(OwnedSessionCommandReceipt Receipt, OwnedTextSendRequest? Send = null, OwnedAbortRequest? Abort = null,
         OwnedTextSteerRequest? Steer = null, OwnedCompactRequest? Compact = null, OwnedAbortRunRequest? AbortRun = null,
-        OwnedTextQueueRequest? Queue = null, OwnedCancelQueueRequest? CancelQueue = null, OwnedAskSubmission? Ask = null);
+        OwnedTextQueueRequest? Queue = null, OwnedCancelQueueRequest? CancelQueue = null, OwnedAskSubmission? Ask = null,
+        DependencyReleaseDecision? Release = null);
     private sealed record Prepared(SessionViewDescriptor Session, SessionExecutionOptions Options, AgentInput Input);
 
     private sealed class QueueOperation(OwnedTextQueueRequest request, OwnedSessionCommandReceipt receipt)

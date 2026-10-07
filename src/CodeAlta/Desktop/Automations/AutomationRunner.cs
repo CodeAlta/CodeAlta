@@ -40,7 +40,7 @@ internal interface IAutomationRunner
 internal sealed class AutomationRunner : IAutomationRunner
 {
     private const int MaximumDetailInTitle = 80;
-    private const string NoCapacity = "CodeAlta has accepted as many commands as it keeps in one run. Restart it to run automations again.";
+    private const string NoCapacity = "Too many commands are pending in CodeAlta. The automation runs again at its next trigger.";
 
     private readonly CodeAltaHost _host;
 
@@ -99,7 +99,7 @@ internal sealed class AutomationRunner : IAutomationRunner
             if (!prompts.Any(candidate => candidate.Id == agent)) return Refuse($"There is no agent prompt '{agent}'.");
 
             cancellationToken.ThrowIfCancellationRequested();
-            // The host accepts a bounded number of commands in one run: a prompt that would be refused starts no session.
+            // The host keeps a bounded number of pending commands: a prompt that would be refused starts no session.
             if (!_host.Commands.HasCapacity) return Refuse(NoCapacity);
             var session = await _host.Commands.CreateDraftSessionAsync(project, provider, SessionTitle(definition.Name, detail), new AltaActorProvenance
             {

@@ -419,9 +419,15 @@ does not change preparation/session callbacks, existing TUI policy or direct run
 
 Admission reserves one owned send per session before lookup. Client request IDs are ordinal;
 send identity uses a case-insensitive session ID and exact text. Matching retries return the
-same receipt. `OwnedCommandReceiptCapacity` defaults to 256; receipts are retained for the
-owner's lifetime rather than evicted, and new requests, including abort receipts, are rejected
-when full. Disposal can still initiate control without allocating another receipt.
+same receipt. `OwnedCommandReceiptCapacity` defaults to 256: the owner keeps the receipts of the
+commands that are pending and, while it has room, of commands that have settled. When it is full,
+the oldest settled receipt makes room for a new command, with its operation and its request; a
+pending command is never forgotten, so a new request, an abort included, is rejected (`Capacity`)
+only while every kept receipt is pending. The key of a receipt that made room stays known (the last
+65,536 of them): a retry with it is answered `Expired`, without a receipt, and its command is not
+run a second time. A send whose receipt made room is no target for an abort any more
+(`UnknownTarget`), and image-bearing sends keep at most eight receipts by the same rule. Disposal
+can still initiate control without allocating another receipt.
 
 `OwnedTextSteerRequest` captures exact session/runtime-instance/positive-attachment/non-null-run
 identity, retry key and unnormalized text. Steering reserves an independent per-session slot

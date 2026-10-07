@@ -111,3 +111,18 @@ test("abort-run pre-cancellation, capacity and wrong-kind admission fail closed"
   await store.submit(Object.freeze({ ...request(), sessionId: "full" }), signal, capability, result => assert.equal(result.status, "capacity"));
   assert.equal(calls, 256);
 });
+
+test("a cancellation key whose receipt the host no longer keeps is a definite answer", async () => {
+  let status = "admission_failed";
+  const store = createAbortRunSubmissions(async () => ({ status, epoch: "epoch", receipt: null }));
+  const capability = createMutationCapability("epoch");
+  const signal = new AbortController().signal;
+  const original = request();
+  await store.submit(original, signal, capability, () => {});
+  assert.equal(store.pending("session")!.request, original);
+  status = "expired";
+  const published: string[] = [];
+  await store.submit(original, signal, capability, value => published.push(value.status));
+  assert.deepEqual(published, ["expired"]);
+  assert.equal(store.pending("session"), undefined);
+});

@@ -157,6 +157,69 @@ public sealed class DesktopOwnedSessionTests
     });
 
     [TestMethod]
+    public Task ReceiptPages_ShowWhatTheHostKeeps_ThePendingCommandsFirstThenTheMostRecent() => RealFixture.RunAsync(async f =>
+    {
+        var service = new SessionOperationsService(f.Host.Commands, "fixture-epoch");
+        var capacity = f.Host.Commands.ReceiptCapacity;
+        Assert.IsTrue(capacity % 64 == 0 && capacity >= 128, "The pages below assume whole pages.");
+        var sent = service.Send(new("fixture-epoch", "send", f.SessionId, "text"), CancellationToken.None);
+        var send = f.Retain(f.Host.Commands.AdmitSend(new("send", f.SessionId, "text")));
+        Assert.AreEqual("accepted", sent.Status);
+        await f.Ready(send);
+        var target = sent.Receipt!.OperationId;
+
+        // More controls of the pending send than the host keeps receipts. Each one settles; the send stays pending.
+        var count = capacity + 44;
+        for (var index = 0; index < count; index++)
+        {
+            Assert.AreEqual("accepted", service.Abort(new("fixture-epoch", "abort-" + index, target), CancellationToken.None).Status, "abort-" + index);
+            if (index == 0) await f.Wait(f.Retain(f.Host.Commands.AdmitAbort(new("abort-0", send.OperationId))).Completion);
+        }
+
+        List<SessionReceiptView> Pages()
+        {
+            var rows = new List<SessionReceiptView>();
+            for (int? offset = 0; offset is { } at;)
+            {
+                var page = service.Receipts(new("fixture-epoch", at));
+                Assert.AreEqual("ok", page.Status);
+                Assert.IsTrue(page.Next is null || page.Rows.Length == 64 && page.Next == at + 64);
+                rows.AddRange(page.Rows);
+                offset = page.Next;
+            }
+
+            return rows;
+        }
+
+        // The pending send is first, although it is the oldest: it is what can still be acted on. The settled
+        // controls follow, the most recent first, and the oldest of them made room.
+        var kept = Pages();
+        Assert.AreEqual(capacity, kept.Count);
+        Assert.AreEqual(("send", "pending"), (kept[0].ClientRequestId, kept[0].State));
+        CollectionAssert.AreEqual(Enumerable.Range(0, capacity - 1).Select(index => "abort-" + (count - 1 - index)).ToArray(),
+            kept.Skip(1).Select(static row => row.ClientRequestId).ToArray());
+        Assert.IsTrue(kept.Skip(1).All(static row => row.State == "terminal"));
+        Assert.AreEqual(64, service.Receipts(new("fixture-epoch", 0)).Next);
+
+        // A key whose receipt made room is not run again, and one that is kept is answered with its receipt.
+        Assert.AreEqual(("expired", (SessionReceiptView?)null), Answer(service.Abort(new("fixture-epoch", "abort-0", target), CancellationToken.None)));
+        Assert.AreEqual("replay", service.Abort(new("fixture-epoch", "abort-" + (count - 1), target), CancellationToken.None).Status);
+        Assert.AreEqual(capacity, Pages().Count);
+
+        // Once it has settled, the send is the oldest of the settled commands: the last one.
+        f.Provider.Release.TrySetResult();
+        await f.Wait(send.Completion);
+        kept = Pages();
+        Assert.AreEqual(capacity, kept.Count);
+        Assert.AreEqual("abort-" + (count - 1), kept[0].ClientRequestId);
+        Assert.AreEqual(("send", "terminal"), (kept[^1].ClientRequestId, kept[^1].State));
+        foreach (var offset in new[] { -64, 1, capacity + 64 })
+            Assert.AreEqual("invalid_cursor", service.Receipts(new("fixture-epoch", offset)).Status);
+
+        static (string Status, SessionReceiptView? Receipt) Answer(SessionAdmission admission) => (admission.Status, admission.Receipt);
+    });
+
+    [TestMethod]
     public void ReceiptPages_BoundWorstCaseGeneratedJson()
     {
         var escaped = new string('\u0001', 256);
