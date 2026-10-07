@@ -323,6 +323,29 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task CostOfATurn_IsReportedOnceWithItsAnswer()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var first = await ExecuteAsync(executor, CreateRequest([User("one")]));
+        Assert.AreEqual(0.01, first.Usage!.LastOperation!.Cost);
+        Assert.AreEqual(42, first.Usage.LastOperation.DurationMs);
+
+        // The first request of the next turn calls a tool: the turn has no cost yet.
+        cli.OnUserMessage = static (process, _) =>
+        {
+            process.EmitAssistant("msg_2", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "Bash", new JsonObject { ["command"] = "ls" })));
+            process.EmitMessageStop("tool_use");
+            return Task.CompletedTask;
+        };
+        var second = await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two")], first));
+
+        Assert.IsInstanceOfType<AgentMessagePart.ToolCall>(second.AssistantMessage.Parts.Single());
+        Assert.IsNull(second.Usage!.LastOperation!.Cost);
+        Assert.IsNull(second.Usage.LastOperation.DurationMs);
+    }
+
+    [TestMethod]
     public async Task SummaryRequestOfALocalCompaction_IsRefused()
     {
         var cli = new ClaudeCodeFakeCli();

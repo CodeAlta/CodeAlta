@@ -143,7 +143,9 @@ internal static class ClaudeCodeLauncher
 
     private static string CreateDefaultClientApp()
     {
-        var version = typeof(ClaudeCodeLauncher).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        // The version of the application that runs, not of this library: only the applications are versioned.
+        var application = Assembly.GetEntryAssembly() ?? typeof(ClaudeCodeLauncher).Assembly;
+        var version = application.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         var plus = version?.IndexOf('+') ?? -1;
         if (plus > 0)
         {

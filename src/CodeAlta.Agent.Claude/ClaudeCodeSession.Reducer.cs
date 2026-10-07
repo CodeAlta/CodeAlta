@@ -569,12 +569,18 @@ internal sealed partial class ClaudeCodeSession
         }
 
         var hasContentIds = segment.ContentIds.Exists(static id => id is not null);
+        var usageSnapshot = CreateUsage(_conversationCount + (durable ? 1 : 0));
+
+        // The cost and the duration the CLI gives with a result are those of the turn that ended: they are
+        // reported once, with the answer that follows the result, not with the requests of a later turn.
+        _resultCost = null;
+        _resultDurationMs = null;
         return new AgentTurnResponse
         {
             AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [.. segment.Parts]),
             AssistantPartContentIds = hasContentIds ? [.. segment.ContentIds] : null,
             RequiresProviderFollowUp = requiresFollowUp,
-            Usage = CreateUsage(_conversationCount + (durable ? 1 : 0)),
+            Usage = usageSnapshot,
             ProviderSessionId = _claudeSessionId,
             ProviderState = _claudeSessionId is { } sessionId
                 ? new ClaudeCodeProviderState(sessionId, _syncedUsers, _syncedAssistants).ToJson()
