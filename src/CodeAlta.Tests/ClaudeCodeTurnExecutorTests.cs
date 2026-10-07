@@ -102,6 +102,26 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task CliWithoutTheReasoningDisplayOption_IsStartedWithoutIt()
+    {
+        var cli = new ClaudeCodeFakeCli { RefuseReasoningDisplay = true };
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+
+        var first = await ExecuteAsync(executor, CreateRequest([User("one")]));
+
+        Assert.AreEqual(2, cli.Processes.Count);
+        CollectionAssert.IsSubsetOf(new[] { "--thinking-display", "summarized" }, cli.Processes[0].Launch.Arguments.ToArray());
+        Assert.IsFalse(cli.Processes[1].Launch.Arguments.Contains("--thinking-display"));
+        Assert.AreEqual(cli.Processes[0].SessionId, cli.Processes[1].SessionId, "The conversation is the one that was being started.");
+        Assert.AreEqual("ok", first.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+
+        // The session remembers: a later restart does not try the option again.
+        await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two")], first) with { ModelId = "opus" });
+        Assert.AreEqual(3, cli.Processes.Count);
+        Assert.IsFalse(cli.Last.Launch.Arguments.Contains("--thinking-display"));
+    }
+
+    [TestMethod]
     public async Task IdleSession_ClosesItsProcessAndResumesWithTheNextTurn()
     {
         var cli = new ClaudeCodeFakeCli();

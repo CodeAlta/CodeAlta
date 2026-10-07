@@ -28,6 +28,9 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
     /// <summary>Gets or sets a value indicating whether the CLI has no transcript to resume.</summary>
     public bool FailResume { get; set; }
 
+    /// <summary>Gets or sets a value indicating whether the CLI predates the option that shows the reasoning.</summary>
+    public bool RefuseReasoningDisplay { get; set; }
+
     /// <summary>Gets or sets a value indicating whether the CLI answers the interrupt request.</summary>
     public bool AnswerInterrupt { get; set; } = true;
 
@@ -72,7 +75,13 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
         _cli = cli;
         Launch = launch;
         SessionId = FindOption("--session-id=") ?? FindOption("--resume=") ?? "fake-session";
-        if (cli.FailResume && FindOption("--resume=") is { } missing)
+        if (cli.RefuseReasoningDisplay && launch.Arguments.Contains("--thinking-display"))
+        {
+            StandardErrorTail = "error: unknown option '--thinking-display'";
+            ExitCode = 1;
+            _output.Writer.TryComplete();
+        }
+        else if (cli.FailResume && FindOption("--resume=") is { } missing)
         {
             StandardErrorTail = $"No conversation found with session ID: {missing}";
             ExitCode = 1;
@@ -430,7 +439,7 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
                         new JsonObject { ["value"] = "haiku", ["displayName"] = "Haiku", ["description"] = "Haiku" },
                         new JsonObject { ["value"] = "cc-update-required-1", ["displayName"] = "Update required", ["disabled"] = true }),
                     ["account"] = _cli.SignedIn
-                        ? new JsonObject { ["tokenSource"] = "claude.ai", ["subscriptionType"] = "max", ["apiProvider"] = "firstParty", ["email"] = "someone@example.test" }
+                        ? new JsonObject { ["email"] = "someone@example.test", ["organization"] = "Someone's Organization", ["subscriptionType"] = "Claude Max", ["apiProvider"] = "firstParty" }
                         : new JsonObject { ["tokenSource"] = "none", ["apiProvider"] = "firstParty" },
                 });
                 break;

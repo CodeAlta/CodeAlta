@@ -43,7 +43,8 @@ internal static class ClaudeCodeLauncher
         ClaudeCodeLaunchKey key,
         string? newSessionId,
         string? resumeSessionId,
-        bool withTools)
+        bool withTools,
+        bool showReasoning = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executable);
         ArgumentNullException.ThrowIfNull(options);
@@ -96,6 +97,13 @@ internal static class ClaudeCodeLauncher
             arguments.Add(McpConfig);
             // The tools of CodeAlta ask their own permissions.
             arguments.Add($"--allowedTools=mcp__{McpServerName}");
+        }
+
+        if (showReasoning)
+        {
+            // Without it the thinking blocks of the model are written empty: the timeline shows their summary.
+            arguments.Add("--thinking-display");
+            arguments.Add("summarized");
         }
 
         arguments.AddRange(options.ExtraArguments);

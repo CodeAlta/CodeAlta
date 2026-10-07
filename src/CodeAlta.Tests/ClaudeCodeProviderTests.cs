@@ -111,7 +111,8 @@ public sealed class ClaudeCodeProviderTests
             new ClaudeCodeLaunchKey("/work", "sonnet", "xhigh"),
             newSessionId: "0f0e0d0c-0b0a-4908-8706-050403020100",
             resumeSessionId: null,
-            withTools: true);
+            withTools: true,
+            showReasoning: true);
 
         CollectionAssert.AreEqual(
             new[]
@@ -119,7 +120,8 @@ public sealed class ClaudeCodeProviderTests
                 "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
                 "--replay-user-messages", "--permission-prompt-tool", "stdio", "--permission-mode", "acceptEdits", "--model", "sonnet",
                 "--effort", "xhigh", "--session-id=0f0e0d0c-0b0a-4908-8706-050403020100", "--mcp-config",
-                """{"mcpServers":{"codealta":{"type":"sdk","name":"codealta"}}}""", "--allowedTools=mcp__codealta", "--add-dir", "/data",
+                """{"mcpServers":{"codealta":{"type":"sdk","name":"codealta"}}}""", "--allowedTools=mcp__codealta",
+                "--thinking-display", "summarized", "--add-dir", "/data",
             },
             launch.Arguments.ToArray());
         Assert.AreEqual("/bin/claude", launch.FileName);
@@ -183,8 +185,9 @@ public sealed class ClaudeCodeProviderTests
             probe.Models[0].SupportedReasoningEfforts!.ToArray());
         Assert.IsNull(probe.Models[2].SupportedReasoningEfforts);
         StringAssert.Contains(probe.StatusMessage, "/fake/bin/claude");
-        StringAssert.Contains(probe.StatusMessage, "max");
+        StringAssert.Contains(probe.StatusMessage, "Claude Max");
         Assert.IsFalse(probe.StatusMessage!.Contains("someone@example.test", StringComparison.Ordinal), "The identity of the account stays in the CLI.");
+        Assert.IsFalse(probe.StatusMessage.Contains("Organization", StringComparison.Ordinal));
 
         var process = cli.Processes.Single();
         Assert.IsTrue(process.IsDisposed, "The process that answered is stopped.");
@@ -277,8 +280,10 @@ public sealed class ClaudeCodeProviderTests
     {
         static (bool IsSignedIn, string? Summary) Read(string account) => ClaudeCodeModelCatalog.ReadAccount(JsonDocument.Parse($$"""{"account":{{account}}}""").RootElement);
 
+        // The two shapes Claude Code 2.1.289 and 2.1.292 write: signed out, and signed in with a plan.
         Assert.AreEqual((false, null), Read("""{"tokenSource":"none","apiProvider":"firstParty"}"""));
-        Assert.AreEqual((true, "pro"), Read("""{"tokenSource":"claude.ai","subscriptionType":"pro","apiProvider":"firstParty"}"""));
+        Assert.AreEqual((true, "Claude Max"), Read("""{"email":"a@b.test","organization":"Org","subscriptionType":"Claude Max","apiProvider":"firstParty"}"""));
+        Assert.AreEqual((true, null), Read("""{"apiProvider":"firstParty"}"""), "Only a CLI that says it has no token is signed out.");
         Assert.AreEqual((true, "API key"), Read("""{"tokenSource":"none","apiKeySource":"ANTHROPIC_API_KEY","apiProvider":"firstParty"}"""));
         Assert.AreEqual((true, "bedrock"), Read("""{"apiProvider":"bedrock"}"""));
         Assert.AreEqual((true, null), ClaudeCodeModelCatalog.ReadAccount(JsonDocument.Parse("{}").RootElement), "A CLI that does not describe its account is tried.");

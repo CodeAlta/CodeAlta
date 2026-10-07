@@ -211,11 +211,12 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
             return (true, apiProvider);
         }
 
-        var tokenSource = ClaudeCodeJson.GetString(account, "tokenSource");
+        // A signed-out CLI says so (`tokenSource` is "none"); a signed-in one names its plan and no token source.
+        // Anything else is tried: a turn tells when the CLI cannot authenticate.
         var apiKeySource = ClaudeCodeJson.GetString(account, "apiKeySource");
-        var hasToken = tokenSource is not null && !string.Equals(tokenSource, "none", StringComparison.OrdinalIgnoreCase);
         var hasApiKey = apiKeySource is not null && !string.Equals(apiKeySource, "none", StringComparison.OrdinalIgnoreCase);
-        if (!hasToken && !hasApiKey)
+        var saysNoToken = string.Equals(ClaudeCodeJson.GetString(account, "tokenSource"), "none", StringComparison.OrdinalIgnoreCase);
+        if (saysNoToken && !hasApiKey)
         {
             return (false, null);
         }

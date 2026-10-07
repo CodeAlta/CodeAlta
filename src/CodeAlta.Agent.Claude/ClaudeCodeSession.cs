@@ -26,6 +26,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
 {
     private const string PreEditHookId = "codealta_pre_edit";
     private const string PreEditHookMatcher = "Edit|MultiEdit|Write|NotebookEdit";
+    private const string ReasoningDisplayOption = "--thinking-display";
     private static readonly TimeSpan HookGateTimeout = TimeSpan.FromSeconds(20);
 
     private readonly ClaudeCodeModelProviderRuntimeOptions _options;
@@ -56,6 +57,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private string _exposedToolsSignature = string.Empty;
     private bool _mcpInitialized;
     private Task? _interrupt;
+    private bool _showReasoning = true;
     private int _disposed;
 
     public ClaudeCodeSession(string sessionId, ClaudeCodeModelProviderRuntimeOptions options)
@@ -329,7 +331,28 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         string appendSystemPrompt,
         CancellationToken cancellationToken)
     {
-        var launch = ClaudeCodeLauncher.Create(executable, _options, key, newSessionId, resumeSessionId, withTools: true);
+        try
+        {
+            await StartConnectionCoreAsync(executable, key, newSessionId, resumeSessionId, appendSystemPrompt, cancellationToken).ConfigureAwait(false);
+        }
+        catch (IOException) when (_showReasoning && _connection?.DescribeExit().Contains(ReasoningDisplayOption, StringComparison.Ordinal) == true)
+        {
+            // A CLI that predates the option refuses to start with it: the session runs without the summaries.
+            _showReasoning = false;
+            await CloseConnectionAsync().ConfigureAwait(false);
+            await StartConnectionCoreAsync(executable, key, newSessionId, resumeSessionId, appendSystemPrompt, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task StartConnectionCoreAsync(
+        string executable,
+        ClaudeCodeLaunchKey key,
+        string? newSessionId,
+        string? resumeSessionId,
+        string appendSystemPrompt,
+        CancellationToken cancellationToken)
+    {
+        var launch = ClaudeCodeLauncher.Create(executable, _options, key, newSessionId, resumeSessionId, withTools: true, _showReasoning);
         var channel = Channel.CreateUnbounded<TurnEvent>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
         var generation = Interlocked.Increment(ref _generation);
         var transport = _transportFactory.Start(launch);
