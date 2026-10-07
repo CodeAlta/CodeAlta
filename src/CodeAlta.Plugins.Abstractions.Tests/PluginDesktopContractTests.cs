@@ -18,6 +18,27 @@ public sealed class PluginDesktopContractTests
     }
 
     [TestMethod]
+    public void HtmlHelpers_WriteMarkdownCodeAndDiagramsForTheRendererOfTheWindow()
+    {
+        // The text is content of the fragment, never markup of it.
+        Assert.AreEqual("<div class=\"alta-markdown\">## Totals\n\n| a | b |\n&lt;script&gt;x&lt;/script&gt; &amp; &quot;q&quot;</div>",
+            PluginHtml.Markdown("## Totals\n\n| a | b |\n<script>x</script> & \"q\""));
+        Assert.AreEqual("<div class=\"alta-markdown\"></div>", PluginHtml.Markdown(null));
+
+        // Code and diagrams are fenced Markdown: the fence names the language and cannot be closed by the text.
+        Assert.AreEqual("<div class=\"alta-markdown\">```csharp\nvar x = a &lt; b;\n```</div>", PluginHtml.Code("var x = a < b;\r\n", "csharp"));
+        Assert.AreEqual("<div class=\"alta-markdown\">```\nplain\n```</div>", PluginHtml.Code("plain"));
+        Assert.AreEqual("<div class=\"alta-markdown\">```\n\n```</div>", PluginHtml.Code(null));
+        Assert.AreEqual("<div class=\"alta-markdown\">`````md\n````\ninner\n````\n`````</div>", PluginHtml.Code("````\ninner\n````", "md"));
+        Assert.AreEqual("<div class=\"alta-markdown\">```mermaid\ngraph TD; A--&gt;B\n```</div>", PluginHtml.Diagram("graph TD; A-->B\n"));
+
+        foreach (var language in new[] { "", " ", "c#", "a b", "x\ny", "x\n", new string('a', 33) })
+            Assert.ThrowsExactly<ArgumentException>(() => PluginHtml.Code("x", language), language);
+        Assert.ThrowsExactly<ArgumentException>(() => PluginHtml.Diagram(" "));
+        Assert.ThrowsExactly<ArgumentNullException>(() => PluginHtml.Diagram(null!));
+    }
+
+    [TestMethod]
     public void RenderResult_CarriesAnHtmlFragmentWithItsPlainText()
     {
         var result = PluginRenderResult.FromHtml("<b>3</b> notes", "3 notes");

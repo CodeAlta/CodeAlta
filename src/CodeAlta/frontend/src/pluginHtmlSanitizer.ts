@@ -101,6 +101,33 @@ export function createPluginHtmlSanitizer(view: Window & typeof globalThis) {
   };
 }
 
+/** The class of an element whose text is Markdown, which the window shows with its own Markdown renderer. */
+export const pluginMarkdownClass = "alta-markdown";
+
+/**
+ * The Markdown of such an element as its author meant it: without the blank lines around it and without the
+ * indentation that all its lines share, which come from the fragment it is written in.
+ */
+export function pluginMarkdownSource(text: string): string {
+  const lines = text.replace(/\r\n?/gu, "\n").split("\n");
+  while (lines.length && !lines[0].trim()) lines.shift();
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  let shared: string | null = null;
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const own = /^[ \t]*/u.exec(line)![0];
+    if (shared === null) shared = own;
+    else {
+      let length = 0;
+      while (length < shared.length && length < own.length && shared[length] === own[length]) length++;
+      shared = shared.slice(0, length);
+    }
+    if (!shared) break;
+  }
+  const indent = shared ?? "";
+  return (indent ? lines.map(line => line.startsWith(indent) ? line.slice(indent.length) : line.trimStart()) : lines).join("\n");
+}
+
 /** A structural view of an element that carries values, so this stays testable without a browser. */
 type FieldElement = { name?: string; type?: string; value?: string; checked?: boolean; disabled?: boolean; multiple?: boolean;
   selectedOptions?: ArrayLike<{ value: string }>; nodeName: string };

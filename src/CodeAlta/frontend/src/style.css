@@ -1513,6 +1513,11 @@ button.project-context-changes:hover, button.project-context-changes:focus-visib
 .plugin-html label.alta-field > :is(input, select, textarea) { width: 100%; color: var(--text); font-size: 13px; }
 .plugin-html .alta-card.bp6-card { padding: 10px 12px; box-shadow: none; border: 1px solid var(--line); background: var(--panel-2); }
 .plugin-html .alta-muted { color: var(--muted); }
+.plugin-html .alta-markdown { min-width: 0; }
+.plugin-html .alta-markdown > .markdown-content { color: inherit; font-size: inherit; line-height: 1.5; }
+.plugin-html .alta-markdown > .markdown-content > :first-child { margin-top: 0; }
+.plugin-html .alta-markdown > .markdown-content > :last-child { margin-bottom: 0; }
+.plugin-html .alta-markdown pre code { padding: 0; background: transparent; }
 .plugin-html .alta-success:not(.bp6-button, .bp6-tag, .bp6-callout) { color: var(--green); }
 .plugin-html .alta-warning:not(.bp6-button, .bp6-tag, .bp6-callout) { color: var(--yellow); }
 .plugin-html .alta-danger:not(.bp6-button, .bp6-tag, .bp6-callout) { color: var(--red); }

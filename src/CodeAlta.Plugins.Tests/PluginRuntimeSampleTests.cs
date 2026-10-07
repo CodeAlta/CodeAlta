@@ -19,6 +19,7 @@ public sealed class PluginRuntimeSampleTests
         "alta-command",
         "timeline-card",
         "saved-data",
+        "report-dialog",
         "todo",
     ];
 

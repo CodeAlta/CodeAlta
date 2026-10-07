@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.RegularExpressions;
 
 namespace CodeAlta.Plugins.Abstractions;
 
@@ -19,8 +20,13 @@ namespace CodeAlta.Plugins.Abstractions;
 /// Buttons, fields, tables and links take the look of the application. The classes named by the
 /// constants of this type add an intent or a layout.
 /// </para>
+/// <para>
+/// A fragment runs no script of its own. What the application itself draws is reached through Markdown:
+/// <see cref="Markdown"/>, <see cref="Code"/> and <see cref="Diagram"/> write a block that the application
+/// renders as it renders the messages of a session, with highlighted code and Mermaid diagrams.
+/// </para>
 /// </remarks>
-public static class PluginHtml
+public static partial class PluginHtml
 {
     /// <summary>The attribute that runs a command of the same plugin: <c>data-alta-command</c>.</summary>
     public const string CommandAttribute = "data-alta-command";
@@ -64,6 +70,13 @@ public static class PluginHtml
     /// <summary>Marks a block shown as a card: a bordered panel.</summary>
     public const string CardClass = "alta-card";
 
+    /// <summary>
+    /// Marks a block whose text is Markdown. The application renders it as it renders the messages of a
+    /// session: headings, lists, tables, fenced code with the colors of its language, and <c>mermaid</c>
+    /// fences as diagrams. The indentation that every line of the block shares is not part of the Markdown.
+    /// </summary>
+    public const string MarkdownClass = "alta-markdown";
+
     /// <summary>Encodes text so that it can be placed in a fragment as content or as an attribute value.</summary>
     /// <param name="text">The text to encode; <see langword="null"/> is encoded as an empty string.</param>
     /// <returns>The encoded text.</returns>
@@ -94,6 +107,55 @@ public static class PluginHtml
         ArgumentException.ThrowIfNullOrWhiteSpace(label);
         return Button(ActionAttribute, action, label, primary);
     }
+
+    /// <summary>Creates a block that the application renders as Markdown.</summary>
+    /// <param name="markdown">The Markdown text; <see langword="null"/> is an empty block.</param>
+    /// <returns>The block markup, with the text encoded.</returns>
+    public static string Markdown(string? markdown) => $"<div class=\"{MarkdownClass}\">{Encode(markdown)}</div>";
+
+    /// <summary>Creates a block of source code, shown with the colors of its language.</summary>
+    /// <param name="code">The code; <see langword="null"/> is an empty block.</param>
+    /// <param name="language">
+    /// The language as Markdown names it after a fence (<c>csharp</c>, <c>json</c>, <c>diff</c>), or
+    /// <see langword="null"/> for plain text. An unknown language is shown as plain text.
+    /// </param>
+    /// <returns>The block markup.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="language"/> is not 1 to 32 letters, digits, <c>_</c> or <c>-</c>.</exception>
+    public static string Code(string? code, string? language = null)
+    {
+        if (language is not null && !LanguageName().IsMatch(language))
+            throw new ArgumentException("A language is 1 to 32 letters, digits, '_' or '-'.", nameof(language));
+        return Markdown(Fence(code ?? string.Empty, language));
+    }
+
+    /// <summary>Creates a diagram from its Mermaid text (a flowchart, a sequence diagram, a pie chart).</summary>
+    /// <param name="mermaid">The text of the diagram, as after a <c>mermaid</c> fence.</param>
+    /// <returns>The block markup. Text that is not a diagram is shown as it is.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="mermaid"/> is null, empty or whitespace.</exception>
+    public static string Diagram(string mermaid)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(mermaid);
+        return Markdown(Fence(mermaid, "mermaid"));
+    }
+
+    // A fence longer than any run of backticks in the text, so that the text cannot close it.
+    private static string Fence(string text, string? language)
+    {
+        var longest = 0;
+        var run = 0;
+        foreach (var character in text)
+        {
+            run = character == '`' ? run + 1 : 0;
+            longest = Math.Max(longest, run);
+        }
+
+        var fence = new string('`', Math.Max(3, longest + 1));
+        var body = text.ReplaceLineEndings("\n").TrimEnd('\n');
+        return $"{fence}{language}\n{body}\n{fence}";
+    }
+
+    [GeneratedRegex(@"^[A-Za-z0-9_-]{1,32}\z")]
+    private static partial Regex LanguageName();
 
     private static string Button(string attribute, string name, string label, bool primary)
         => $"<button type=\"button\"{(primary ? $" class=\"{PrimaryClass}\"" : string.Empty)} {attribute}=\"{Encode(name)}\">{Encode(label)}</button>";

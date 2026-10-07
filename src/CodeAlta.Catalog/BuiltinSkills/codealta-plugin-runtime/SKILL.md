@@ -192,6 +192,25 @@ The window of CodeAlta Desktop is made with React and Blueprint. **A plugin runs
 | `<label class="alta-field">Title <input name="title"></label>` | A label above its field, which takes the width |
 | `class="alta-card"` | Blueprint card: a bordered block |
 | `class="alta-muted"`, or a tone class on text | Muted or colored text |
+| `PluginHtml.Markdown(text)` | The text rendered as Markdown by the window, as in the timeline: headings, lists, tables, links |
+| `PluginHtml.Code(code, "csharp")` | Source code with the colors of its language (`csharp`, `json`, `diff`, `bash`, `typescript`, ...) |
+| `PluginHtml.Diagram(text)` | A Mermaid diagram: `flowchart`, `sequenceDiagram`, `pie`, `gantt`, ... |
+
+**What a fragment uses of the window.** A fragment cannot load or call a library, and it does not need to for these three: the Markdown renderer, the code highlighter and Mermaid are those of the window, reached through `PluginHtml.Markdown`, `Code` and `Diagram`. Each helper writes `<div class="alta-markdown">` with Markdown as its text, encoded; you can write that element yourself, and the indentation its lines share is not part of the Markdown. See `samples/report-dialog`.
+
+```csharp
+private static string BuildHtml(string report, string failingTest) => $"""
+    <div class="alta-column">
+      {PluginHtml.Markdown(report)}
+      {PluginHtml.Diagram("flowchart LR\n  build[Build] --> test[Test] -->|2 failed| fix[Fix]")}
+      {PluginHtml.Code(failingTest, "csharp")}
+    </div>
+    """;
+```
+
+The other parts of the window are not for a fragment: the code editor, the terminal, trees, tabs, popovers, icons and images. To show a picture, draw a Mermaid diagram or a table.
+
+Content around the prompt and timeline cards also take Markdown without HTML (`PluginRenderResult.Markdown`, `PluginDerivedSessionEvent.Markdown`, the `Markdown` of a detail section): on the desktop it is the same renderer, with the same code and diagrams. CodeAlta TUI shows that Markdown with its own renderer, and a diagram as its text.
 
 The fragment is sanitized first: `script`, `style`, `img`, `svg`, `iframe`, `form`, event attributes (`onclick`), the `style` attribute and classes that do not start with `alta-` are removed. An `id` and a `for` start with `alta-`. A link is shown and not followed. Kept: text and structure (`p`, `div`, `span`, `h1`-`h6`, `ul`, `ol`, `li`, `table`, `pre`, `code`, `details`, `summary`, `a`, `b`, `i`, `small`, `hr`, ...) and fields (`button`, `input`, `select`, `option`, `textarea`, `label`, `fieldset`, `progress`, `meter`).
 
@@ -390,6 +409,7 @@ Each folder under `samples/` is a complete plugin that the tests of CodeAlta bui
 | `hello-command` | A command |
 | `desktop-and-terminal` | One plugin for both applications: commands with a shortcut, an HTML dialog with actions, a status item, content above the prompt, a prompt picker |
 | `saved-data` | Data kept between runs with `Services.State` |
+| `report-dialog` | A dialog with Markdown, a Mermaid diagram and highlighted code |
 | `agent-tool` | A tool the model calls |
 | `alta-command` | A command of the `alta` tool |
 | `timeline-card` | A card in the timeline, computed from the events of a session |

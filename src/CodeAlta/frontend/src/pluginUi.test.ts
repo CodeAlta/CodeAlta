@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { CommandKey } from "./commandRegistry";
-import { collectPluginFields } from "./pluginHtmlSanitizer";
+import { collectPluginFields, pluginMarkdownSource } from "./pluginHtmlSanitizer";
 import { activePluginReference, findPluginCommand, insertPluginReference, pluginCommandAvailable, pluginContributions, pluginGesture, pluginKeymap, pluginRegions,
   resolvePluginKey, samePluginRegions, searchPluginCommands, type PluginCommandView, type PluginPane } from "./pluginUi";
 
@@ -120,4 +120,17 @@ test("the named fields of a fragment are returned as text", () => {
   ];
   assert.deepEqual(collectPluginFields({ querySelectorAll: () => elements }),
     { title: "Hello", urgent: "true", quiet: "false", size: "large", labels: "bug,ui", kind: "task", body: "Text" });
+});
+
+test("the Markdown of a fragment is read without the indentation and the blank lines of the fragment around it", () => {
+  // As a plugin writes it inside its HTML: every line carries the indentation of the element it is in.
+  const written = "\n      ## Report\n\n      | a | b |\n      |---|---|\n\n      ```csharp\n      if (x)\n          y();\n      ```\n    ";
+  assert.equal(pluginMarkdownSource(written), "## Report\n\n| a | b |\n|---|---|\n\n```csharp\nif (x)\n    y();\n```");
+  // What a helper wrote has no indentation to remove, and the lines of a file of Windows are lines.
+  assert.equal(pluginMarkdownSource("# One\r\n\r\n- a\r\n  - b"), "# One\n\n- a\n  - b");
+  // A line that is less indented than the others decides: nothing is cut from the middle of a line.
+  assert.equal(pluginMarkdownSource("    a\n  b\n\tc"), "    a\n  b\n\tc");
+  assert.equal(pluginMarkdownSource("\t\tx\n\t\t\ty"), "x\n\ty");
+  assert.equal(pluginMarkdownSource(""), "");
+  assert.equal(pluginMarkdownSource(" \n\t\n"), "");
 });

@@ -213,6 +213,9 @@ A fragment is plain HTML that CodeAlta inserts in its window. Before that, CodeA
 | `<input>`, `<textarea>`, `<select>` | A field of the app |
 | `<table>` | A compact table |
 | `class="alta-tag"`, `class="alta-callout"`, `class="alta-card"` | A tag, a callout, a card |
+| `PluginHtml.Markdown(text)` | Markdown rendered as in the timeline: headings, lists, tables |
+| `PluginHtml.Code(code, "csharp")` | Source code with the colors of its language |
+| `PluginHtml.Diagram(text)` | A [Mermaid](https://mermaid.js.org/) diagram |
 
 A plugin has no JavaScript in the window, and creates no component of the app: its code is C#. Nothing in a fragment runs: scripts, styles, event handlers, images and forms are removed, and links are shown but not followed. A fragment asks the window to act with attributes, and the plugin answers in C#:
 
@@ -250,6 +253,29 @@ Classes you can use:
 Other classes are removed. Allowed elements are text and structure (`p`, `div`, `span`, headings, lists, `table`, `pre`, `code`, `details`, `a`, …) and fields (`button`, `input`, `select`, `textarea`, `label`, `fieldset`, `progress`, `meter`).
 
 Write text with `PluginHtml.Encode(text)`. `PluginHtml.CommandButton` and `PluginHtml.ActionButton` write the two kinds of buttons.
+
+### Markdown, code and diagrams
+
+A fragment cannot load a library. For Markdown, highlighted code and diagrams it uses those of the window:
+
+```csharp
+var html = $"""
+    <div class="alta-column">
+      {PluginHtml.Markdown("## Build report\n\n| Step | Result |\n|---|---|\n| Test | **2 failed** |")}
+      {PluginHtml.Diagram("flowchart LR\n  build[Build] --> test[Test] -->|2 failed| fix[Fix]")}
+      {PluginHtml.Code(failingTest, "csharp")}
+    </div>
+    """;
+```
+
+<figure class="alta-figure my-4" style="max-width: 44rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-plugin-report.webp" alt="A plugin dialog of CodeAlta Desktop with a Markdown table, a flowchart and a block of highlighted C# code" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A plugin dialog with Markdown, a diagram and code.</figcaption>
+</figure>
+
+Each helper writes an element of class `alta-markdown` whose text is Markdown, which you can also write yourself. The code editor, the terminal, tabs, trees, icons and images of the app are not available to a fragment.
+
+Content around the prompt and timeline cards also take Markdown directly, in both apps: `PluginRenderResult.Markdown`, `PluginDerivedSessionEvent.Markdown`.
 
 ## Status items and content around the prompt
 
@@ -381,6 +407,7 @@ The `codealta-plugin-runtime` skill ships complete plugins that CodeAlta's tests
 | `hello-command` | A command |
 | `desktop-and-terminal` | One plugin for both apps: portable dialogs, an HTML dialog with actions, a status item, content above the prompt, a prompt picker |
 | `saved-data` | Data kept between runs with `Services.State` |
+| `report-dialog` | A dialog with Markdown, a diagram and highlighted code |
 | `agent-tool` | A tool the model calls |
 | `alta-command` | A command of the `alta` tool |
 | `timeline-card` | A card in the timeline, computed from the events of a session |
