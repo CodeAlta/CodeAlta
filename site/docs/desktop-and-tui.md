@@ -6,21 +6,85 @@ title: Desktop and TUI
 
 CodeAlta has two apps:
 
-- **CodeAlta Desktop** (`alta`) is a desktop application with session tabs you can arrange, a code editor for your projects and a single Settings window. It is the most complete way to use CodeAlta.
-- **CodeAlta TUI** (`altatui`) is a keyboard-first terminal UI.
+- **CodeAlta Desktop** (`alta`) is the app we recommend. It has session tabs you can arrange, a code editor, terminals and git changes for your projects, automations, and a single Settings window.
+- **CodeAlta TUI** (`altatui`) is a keyboard-first terminal UI, for when you want to stay in a terminal.
 
-Both apps share the same harness: the same agent runtime, providers, tools, agent prompts, skills, MCP servers and plugins, on the same `~/.alta` profile. This documentation applies to both. Where the two apps differ, the page says so, and screenshots have a **Desktop / TUI** switch.
+Both apps run the same agents: the same providers, tools, agent prompts, skills, MCP servers and plugins, on the same `~/.alta` profile. This documentation applies to both. Where the two apps differ, the page says so, and screenshots have a **Desktop / TUI** switch.
 
 {{ alta_shot "alta-desktop-home.webp" "alta-home.png" "CodeAlta main workspace" "The same workspace in both apps: projects and sessions on the left, the session timeline, and the prompt at the bottom." }}
 
 ## Install
 
+Install CodeAlta Desktop:
+
 ```sh
-dotnet tool install -g CodeAlta        # Desktop: alta
-dotnet tool install -g CodeAlta.Tui    # TUI: altatui
+dotnet tool install -g CodeAlta
+alta
 ```
 
-You can install both. See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements and first launch.
+The TUI is a separate tool. You can install both:
+
+```sh
+dotnet tool install -g CodeAlta.Tui
+altatui
+```
+
+See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements and first launch.
+
+## Compare the two apps
+
+<div class="alta-compare-wrap my-4">
+<table class="alta-compare">
+  <thead>
+    <tr><th scope="col"></th><th scope="col"><i class="bi bi-window" aria-hidden="true"></i> Desktop</th><th scope="col"><i class="bi bi-terminal" aria-hidden="true"></i> TUI</th></tr>
+  </thead>
+  <tbody>
+    <tr class="alta-compare-group"><th scope="rowgroup" colspan="3">Agents</th></tr>
+    <tr><th scope="row">Model providers, sessions, agent prompts, skills, MCP servers, plugins</th><td>{{ alta_yes }}</td><td>{{ alta_yes }}</td></tr>
+    <tr><th scope="row">Delegated agents, prompt queue, steering, compaction</th><td>{{ alta_yes }}</td><td>{{ alta_yes }}</td></tr>
+    <tr><th scope="row">Notes, reminders and asks</th><td>{{ alta_yes }}</td><td>{{ alta_yes }}</td></tr>
+    <tr><th scope="row">Automations: prompts on a schedule, on a new issue or pull request</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
+    <tr><th scope="row">Worktrees: a session on its own branch, in its own folder</th><td>{{ alta_yes }} <small>Created, listed and removed in the app</small></td><td>{{ alta_part }} <small>Sessions run in theirs</small></td></tr>
+    <tr><th scope="row">Agents that see and drive the app (UI tools)</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
+    <tr><th scope="row">MCP server for other applications</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
+    <tr><th scope="row">Review each tool permission request</th><td>{{ alta_no }} <small>Always approved</small></td><td>{{ alta_yes }}</td></tr>
+  </tbody>
+  <tbody>
+    <tr class="alta-compare-group"><th scope="rowgroup" colspan="3">Workspace</th></tr>
+    <tr><th scope="row">Session tabs</th><td>{{ alta_yes }} <small>Reorder, split and merge panes</small></td><td>{{ alta_part }} <small>One visible at a time</small></td></tr>
+    <tr><th scope="row">Several projects open in the sidebar, favorites first</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>No favorites</small></td></tr>
+    <tr><th scope="row">Code editor</th><td>{{ alta_yes }} <small>Files, search in files, file tabs</small></td><td>{{ alta_part }} <small>One file per tab</small></td></tr>
+    <tr><th scope="row">Git changes: changed files, commits, diffs, branches</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
+    <tr><th scope="row">Terminals, which agents can use too</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
+    <tr><th scope="row">Tool call details</th><td>{{ alta_yes }} <small>Live terminal, highlighted files and diffs</small></td><td>{{ alta_yes }} <small>Live text output</small></td></tr>
+    <tr><th scope="row">Images pasted in a prompt or read by an agent</th><td>{{ alta_yes }} <small>Thumbnails and previews</small></td><td>{{ alta_part }} <small>In terminals that show images</small></td></tr>
+    <tr><th scope="row">Notes of a session</th><td>{{ alta_yes }} <small>Movable window</small></td><td>{{ alta_yes }} <small>Sidebar panel</small></td></tr>
+  </tbody>
+  <tbody>
+    <tr class="alta-compare-group"><th scope="rowgroup" colspan="3">Plugins</th></tr>
+    <tr><th scope="row">Run plugins</th><td>{{ alta_yes }}</td><td>{{ alta_yes }}</td></tr>
+    <tr><th scope="row">Create, edit and reload a plugin while the app runs</th><td>{{ alta_yes }}</td><td>{{ alta_no }} <small>Built at start</small></td></tr>
+    <tr><th scope="row">Ask an agent to write a plugin and try it</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
+    <tr><th scope="row">Plugin dialogs and content</th><td>{{ alta_yes }} <small>App components, HTML, Markdown, diagrams</small></td><td>{{ alta_yes }} <small>Terminal controls</small></td></tr>
+  </tbody>
+  <tbody>
+    <tr class="alta-compare-group"><th scope="rowgroup" colspan="3">Application</th></tr>
+    <tr><th scope="row">Settings</th><td>{{ alta_yes }} <small>One window, a page per area</small></td><td>{{ alta_yes }} <small>A dialog per area</small></td></tr>
+    <tr><th scope="row">Appearance</th><td>{{ alta_yes }} <small>Light, dark or system, 13 color schemes</small></td><td>{{ alta_yes }} <small>Terminal themes</small></td></tr>
+    <tr><th scope="row">Keeps running in the notification area</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
+    <tr><th scope="row">Update and restart from the app</th><td>{{ alta_yes }}</td><td>{{ alta_no }} <small>Shows the command to run</small></td></tr>
+    <tr><th scope="row">Works without a Nerd Font</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
+    <tr><th scope="row">Runs in a terminal</th><td>{{ alta_no }}</td><td>{{ alta_yes }}</td></tr>
+    <tr><th scope="row">Copy the UI as an image</th><td>{{ alta_no }}</td><td>{{ alta_yes }} <small><code>Ctrl+F12</code></small></td></tr>
+  </tbody>
+</table>
+</div>
+
+## Which one to use
+
+Use CodeAlta Desktop for daily work: it shows more at once, and it has features that the TUI does not have.
+
+Use CodeAlta TUI when you want to stay in a terminal, or when you want to review each tool permission request.
 
 ## What is shared
 
@@ -129,6 +193,8 @@ The TUI opens a dialog for each area. The desktop app groups them as pages of on
 
 Tool details, file diffs, context usage, session info, the session browser and the Notes of a session open as windows that you can move and resize over the workspace.
 
+The window of a tool call follows the call while it runs. A command shows its output in a terminal, a file that was read or changed shows its lines or its diff in the colors of its language, and a patch that changes several files has a tab per file. See [Tool calls](workspace.md#tool-calls).
+
 ### Runs in the background
 
 Closing the window can keep CodeAlta running in the notification area, with its sessions. CodeAlta asks whether to keep running or to exit, and remembers the answer if you tick **Remember my choice**. Use the tray icon to open the window again or to exit. **Settings > Appearance > When the window is closed** changes the choice. Exiting while sessions are running asks for confirmation first.
@@ -139,32 +205,13 @@ On macOS the menu bar has the standard items and shortcuts: **Quit CodeAlta** (â
 
 When a new version is available, the desktop app shows a notice with **Update and restart**. The TUI shows the `dotnet tool update` command to run.
 
-## Differences at a glance
+## Same feature, another name
 
 | | Desktop | TUI |
 | --- | --- | --- |
 | Command | `alta` | `altatui` |
-| Session tabs | Drag to reorder, split and merge panes | One visible tab at a time |
-| Code editor | One tab per project with its files, a search in files and file tabs | One editor tab per file |
-| Git changes | Changes tab with the changed files, recent commits and a diff | Not available |
-| Terminal | Terminals in tabs, listed in the sidebar; agents can use them | Not available |
-| Automations | Prompts that run on a schedule, on a new issue or pull request, or on demand | Not available |
-| Worktrees | Start a session in a new git worktree; list, remove and switch branches in the Changes tab | Sessions run in their worktree; not created or removed there |
-| UI tools and MCP server | Agents see and drive the window; other applications connect to the MCP server of CodeAlta | Not available |
 | Sessions of no project | **Chats**, first in the sidebar | **Global sessions** |
-| Favorite projects | Listed first in the sidebar | Not available |
-| Settings | One window with a page per area | One dialog per area |
-| Appearance | Light, dark or system theme, 13 color schemes | Terminal themes |
-| Session notes | Movable Notes window over the timeline | Notes panel in the sidebar |
-| Pasted images | Thumbnails above the prompt | Preview dialog, in terminals with image support |
-| Images read by the agent | **Image read** card with a preview | A line naming the image |
 | Queue every prompt, also when idle | **Enqueue until idle** in the Send options | **AlwaysQueue** checkbox |
-| Tool permissions | Always approved automatically | Approved automatically by default; can be reviewed |
-| Plugin dialogs and content | The app's own components, with HTML fragments from the plugin | Terminal controls |
-| Work on a plugin | Create, edit and reload it while the app runs, from **Settings > Plugins** or by asking an agent | Built when the app starts |
-| Updates | **Update and restart** | Shows the command to run |
-| Font | No requirement | Nerd Font required |
-| Copy the UI as an image | Not available | `Ctrl+F12` |
 
 ## Current desktop limitations
 
@@ -173,7 +220,3 @@ Tool permission requests are always approved automatically on the desktop. To re
 The `--no-plugins` and `--plugin-safe-mode` options belong to the TUI. Set `CODEALTA_DISABLE_PLUGINS=1` to start the desktop app without plugins.
 
 A plugin written with terminal controls only shows its plain text or Markdown form on the desktop. See [Plugin development](plugins/developers.md#one-plugin-two-apps).
-
-## Which one to use
-
-Use the desktop app for daily work: it shows more at once and every feature is one click away. Use the TUI when you prefer to stay in a terminal, or when you want to review tool permission requests.

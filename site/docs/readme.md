@@ -6,9 +6,9 @@ title: User Guide
 
 CodeAlta is a workspace for agentic coding. It brings together local project navigation, model-provider setup, prompt attachments, durable session history, agent prompts, delegated work, MCP-connected tools, skills, and trusted plugins.
 
-It comes as two apps that share the same harness and the same `~/.alta` profile:
+It comes as two apps that run the same agents on the same `~/.alta` profile:
 
-- **CodeAlta Desktop**, the `alta` command: a desktop application with session tabs you can split and arrange, a code editor for your projects, and one Settings window.
+- **CodeAlta Desktop**, the `alta` command, is the app we recommend: session tabs you can split and arrange, a code editor, terminals and git changes for your projects, automations, and one Settings window.
 - **CodeAlta TUI**, the `altatui` command: a keyboard-first terminal UI.
 
 This guide applies to both. Screenshots have a **Desktop / TUI** switch, and pages point out where the two apps differ.
@@ -18,7 +18,7 @@ This guide applies to both. Screenshots have a **Desktop / TUI** switch, and pag
 ## Start here
 
 1. [Getting Started](getting-started.md): install the tools, launch CodeAlta, configure the first provider, choose an agent prompt, and send a first prompt.
-2. [Desktop and TUI](desktop-and-tui.md): what the two apps share, what the desktop app adds, and its current limitations.
+2. [Desktop and TUI](desktop-and-tui.md): a table that compares the two apps, what they share, and what the desktop app adds.
 3. [Model Providers](model-providers.md): understand provider configuration, credentials, models, reasoning settings, and provider testing.
 4. [Agent Prompts](prompts.md): use Default and Plan modes, create global/project workflow prompts, and understand prompt override rules.
 5. [Workspace and Dialogs](workspace.md): learn the main screen, timeline, prompt editor, file picker, logs, settings, and management screens.

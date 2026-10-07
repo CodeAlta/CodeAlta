@@ -222,11 +222,61 @@
 
 .alta-install {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
-  max-width: 54rem;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: .9rem;
+  max-width: 36rem;
   margin: 2.25rem auto 0;
   text-align: left;
+
+  > * {
+    width: 100%;
+  }
+}
+
+// The desktop app is the one to install: its card is larger and framed by the gradient.
+.alta-install-card.alta-install-primary {
+  position: relative;
+  padding: 1.1rem 1.25rem .5rem;
+  border: 2px solid transparent;
+  background: linear-gradient(var(--lunet-color-surface-1), var(--lunet-color-surface-1)) padding-box, var(--alta-gradient) border-box;
+  box-shadow: 0 1rem 2.8rem color-mix(in srgb, var(--alta-cyan) 22%, transparent), 0 0 3rem color-mix(in srgb, var(--alta-purple) 14%, transparent);
+
+  .alta-install-label {
+    font-size: 1.15rem;
+  }
+
+  pre {
+    font-size: 1.05rem;
+  }
+}
+
+.alta-install-tag {
+  margin-left: auto;
+  padding: .1rem .7rem;
+  border-radius: 999px;
+  background: var(--alta-gradient);
+  color: #fff;
+  font-size: .76rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.alta-install-card.alta-install-secondary {
+  width: 82%;
+  padding: .6rem .9rem .1rem;
+  opacity: .88;
+
+  .alta-install-label {
+    margin-bottom: .3rem;
+    font-size: .92rem;
+    font-weight: 600;
+  }
+
+  pre {
+    font-size: .86rem;
+  }
 }
 
 .alta-install-card {
@@ -261,7 +311,7 @@
 }
 
 .alta-install-note {
-  margin: 1rem auto 0;
+  margin: 0 auto .6rem;
   color: var(--bs-secondary-color);
   font-size: .9rem;
   text-align: center;
@@ -270,6 +320,97 @@
     color: inherit;
   }
 }
+
+// Comparison of the two apps ----------------------------------------------------
+
+.alta-compare-wrap {
+  max-width: 58rem;
+  margin: 0 auto;
+  overflow-x: auto;
+  border: 1px solid var(--alta-card-border);
+  border-radius: 1rem;
+  background: var(--alta-card-bg);
+}
+
+.alta-compare {
+  width: 100%;
+  margin: 0;
+  border-collapse: collapse;
+  font-size: .98rem;
+
+  th,
+  td {
+    padding: .62rem 1.1rem;
+    border-bottom: 1px solid var(--alta-card-border);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  tbody tr:last-child > * {
+    border-bottom: 0;
+  }
+
+  thead th {
+    font-size: 1rem;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  tbody th {
+    font-weight: 500;
+  }
+
+  // The two columns of the apps have the same width; the one of the desktop app is tinted.
+  th:nth-child(n + 2),
+  td:nth-child(n + 2) {
+    width: 24%;
+    min-width: 9.5rem;
+  }
+
+  th:nth-child(2),
+  td:nth-child(2) {
+    background: color-mix(in srgb, var(--alta-cyan) 7%, transparent);
+  }
+
+  // A note stays beside its mark when it takes several lines.
+  td {
+    padding-left: 2.75rem;
+  }
+
+  small {
+    color: var(--bs-secondary-color);
+    font-size: .86rem;
+  }
+
+  code {
+    white-space: nowrap;
+  }
+}
+
+// A row that names a group of features.
+.alta-compare-group > th {
+  padding-top: 1rem;
+  background: transparent !important;
+  color: var(--lunet-color-cyan);
+  font-size: .74rem;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.alta-mark {
+  display: inline-block;
+  width: 1.5rem;
+  margin-left: -1.65rem;
+  margin-right: .15rem;
+  font-size: 1.05rem;
+  line-height: 1;
+  vertical-align: -.1em;
+}
+
+.alta-mark-yes { color: #34d399; }
+.alta-mark-part { color: #fbbf24; }
+.alta-mark-no { color: var(--bs-secondary-color); opacity: .55; }
 
 // Showcase windows ------------------------------------------------------------
 
@@ -294,6 +435,11 @@
     opacity: .7;
     pointer-events: none;
   }
+}
+
+// A smaller showcase, for what is not the main subject of the page.
+.alta-showcase-small {
+  max-width: 54rem;
 }
 
 .alta-window {
@@ -605,8 +751,21 @@ a.alta-card,
 }
 
 @media (max-width: 767.98px) {
-  .alta-install {
-    grid-template-columns: minmax(0, 1fr);
+  .alta-install-secondary {
+    width: 100%;
+  }
+
+  .alta-compare {
+    font-size: .9rem;
+
+    th,
+    td {
+      padding: .5rem .7rem;
+    }
+
+    td {
+      padding-left: 2.35rem;
+    }
   }
 }
 

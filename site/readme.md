@@ -15,35 +15,35 @@ og_type: website
 <span class="logo-code">░░██    ██ ░██   ░██ ░██  ░██ ░██░░░░   </span><span class="logo-alta">░██░░░░░░██  ░██   ░██    ██░░░░██</span>
 <span class="logo-code"> ░░██████  ░░██████  ░░██████ ░░██████  </span><span class="logo-alta">░██     ░██  ███   ░░██  ░░████████</span>
 <span class="logo-code">  ░░░░░░    ░░░░░░    ░░░░░░   ░░░░░░   </span><span class="logo-alta">░░      ░░  ░░░     ░░    ░░░░░░░░</span></pre>
-  <h1 class="alta-hero-title">AI coding agents on your <span class="alta-gradient-text">desktop</span> and in your <span class="alta-gradient-text">terminal</span></h1>
+  <h1 class="alta-hero-title">A <span class="alta-gradient-text">desktop workspace</span> for AI coding agents</h1>
   <p class="alta-hero-lead">
-    CodeAlta is a workspace for agentic coding on your local projects: model providers, durable sessions, agent prompts, MCP tools, plugins, and delegated agents, in a desktop app or a terminal UI.
+    CodeAlta Desktop runs coding agents on your local projects: sessions in tabs you can split, a code editor, terminals and git changes in one window, with the model providers, agent prompts, MCP tools and plugins you choose.
   </p>
   <div class="alta-hero-actions">
     <a href="{{site.basepath}}/docs/getting-started/" class="btn btn-primary btn-lg"><i class="bi bi-rocket-takeoff"></i> Get started</a>
-    <a href="{{site.basepath}}/docs/desktop-and-tui/" class="btn btn-outline-secondary btn-lg"><i class="bi bi-window-split"></i> Desktop and TUI</a>
+    <a href="#desktop-or-tui" class="btn btn-outline-secondary btn-lg"><i class="bi bi-window-split"></i> Desktop or TUI?</a>
     <a href="https://github.com/CodeAlta/CodeAlta" class="btn btn-info btn-lg"><i class="bi bi-github"></i> GitHub</a>
   </div>
   <div class="alta-install">
-    <div class="alta-install-card">
-      <div class="alta-install-label"><i class="bi bi-window"></i> CodeAlta Desktop <small>recommended</small></div>
+    <div class="alta-install-card alta-install-primary">
+      <div class="alta-install-label"><i class="bi bi-window"></i> CodeAlta Desktop <span class="alta-install-tag">Recommended</span></div>
       <pre class="language-shell-session"><code>dotnet tool install -g CodeAlta
 alta</code></pre>
     </div>
-    <div class="alta-install-card">
-      <div class="alta-install-label"><i class="bi bi-terminal"></i> CodeAlta TUI</div>
+    <p class="alta-install-note">For Windows, macOS and Linux. Requires <a href="https://dotnet.microsoft.com/en-us/download/dotnet/10.0">.NET 10</a>.</p>
+    <div class="alta-install-card alta-install-secondary">
+      <div class="alta-install-label"><i class="bi bi-terminal"></i> CodeAlta TUI <small>for the terminal</small></div>
       <pre class="language-shell-session"><code>dotnet tool install -g CodeAlta.Tui
 altatui</code></pre>
     </div>
   </div>
-  <p class="alta-install-note">Requires <a href="https://dotnet.microsoft.com/en-us/download/dotnet/10.0">.NET 10</a>. Both apps use the same <code>~/.alta</code> profile, so you can install both.</p>
 </section>
 
 <section class="my-5 py-4">
   <div class="alta-section-head">
     <span class="alta-kicker">CodeAlta Desktop</span>
     <h2 class="display-6">The complete CodeAlta experience</h2>
-    <p>A desktop app with session tabs you can drag and split, a code editor for your projects, and every setting in one window.</p>
+    <p>Sessions, code, terminals and changes side by side, and every setting in one window.</p>
   </div>
   <div class="alta-showcase">
     <div class="alta-window">
@@ -59,10 +59,31 @@ altatui</code></pre>
       </div>
     </div>
     <div class="alta-point">
+      <span class="alta-icon" style="--accent: #a3e635; --accent-2: #06b6d4;"><i class="bi bi-code-slash"></i></span>
+      <div>
+        <h3>Code, terminals and changes</h3>
+        <p>Each project has a code editor, terminals that agents can use too, and a Changes tab with the diff of every file.</p>
+      </div>
+    </div>
+    <div class="alta-point">
       <span class="alta-icon" style="--accent: #34d399; --accent-2: #06b6d4;"><i class="bi bi-eye"></i></span>
       <div>
-        <h3>Inspect everything</h3>
-        <p>Tool calls, file diffs, images, context usage and turn statistics open in windows over the session.</p>
+        <h3>Watch the agent work</h3>
+        <p>Open a tool call to follow a command in a live terminal, or to read a file or a diff in the colors of its language.</p>
+      </div>
+    </div>
+    <div class="alta-point">
+      <span class="alta-icon" style="--accent: #fb923c; --accent-2: #f43f5e;"><i class="bi bi-lightning-charge"></i></span>
+      <div>
+        <h3>Automations and worktrees</h3>
+        <p>Run a prompt every morning or on a new issue, and give each session its own branch in its own folder.</p>
+      </div>
+    </div>
+    <div class="alta-point">
+      <span class="alta-icon" style="--accent: #818cf8; --accent-2: #2dd4bf;"><i class="bi bi-cursor"></i></span>
+      <div>
+        <h3>Agents that see the window</h3>
+        <p>An agent can take a screenshot of CodeAlta, click and type, and write a plugin that the app reloads while it runs.</p>
       </div>
     </div>
     <div class="alta-point">
@@ -75,71 +96,34 @@ altatui</code></pre>
   </div>
 </section>
 
-<section class="my-5 py-4">
+<section class="container my-5 py-4" id="desktop-or-tui">
   <div class="alta-section-head">
-    <span class="alta-kicker">CodeAlta TUI</span>
-    <h2 class="display-6">The same workspace in your terminal</h2>
-    <p>A keyboard-first terminal UI with tabs, a full-width timeline, a prompt editor and dialogs for everything else.</p>
+    <span class="alta-kicker">Desktop or TUI?</span>
+    <h2 class="display-6">Start with CodeAlta Desktop</h2>
+    <p>CodeAlta also has a terminal UI. Both apps run the same agents on the same <code>~/.alta</code> profile, so a session started in one continues in the other. The desktop app does much more.</p>
   </div>
-  <div class="alta-showcase">
-    <div class="alta-window">
-      <div class="alta-window-bar" aria-hidden="true">
-        <span></span><span></span><span></span><strong>altatui</strong>
-      </div>
-      <video controls autoplay loop muted playsinline preload="metadata" poster="{{site.basepath}}/img/alta-home.png" aria-label="CodeAlta TUI workflow video">
-        <source src="{{site.basepath}}/img/alta-multi-agents.mp4" type="video/mp4">
-        <a href="{{site.basepath}}/img/alta-multi-agents.mp4">Download the CodeAlta TUI workflow video.</a>
-      </video>
-    </div>
+  <div class="alta-compare-wrap">
+    <table class="alta-compare">
+      <thead>
+        <tr><th scope="col"></th><th scope="col"><i class="bi bi-window" aria-hidden="true"></i> Desktop</th><th scope="col"><i class="bi bi-terminal" aria-hidden="true"></i> TUI</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Providers, sessions, agent prompts, skills, MCP servers, plugins</th><td>{{ alta_yes }}</td><td>{{ alta_yes }}</td></tr>
+        <tr><th scope="row">Delegated agents, notes, reminders, asks</th><td>{{ alta_yes }}</td><td>{{ alta_yes }}</td></tr>
+        <tr><th scope="row">Sessions side by side, in panes you split</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
+        <tr><th scope="row">Code editor with the files of the project and a search</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>One file at a time</small></td></tr>
+        <tr><th scope="row">Git changes: diffs, commits, branches</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
+        <tr><th scope="row">Terminals, which agents can use too</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
+        <tr><th scope="row">Automations: on a schedule, on a new issue or pull request</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
+        <tr><th scope="row">Worktrees created and removed from the app</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
+        <tr><th scope="row">Agents that see and drive the app, and an MCP server</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
+        <tr><th scope="row">Plugins written and reloaded while the app runs</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
+        <tr><th scope="row">Light and dark themes, 13 color schemes</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>Terminal themes</small></td></tr>
+        <tr><th scope="row">Runs in a terminal</th><td>{{ alta_no }}</td><td>{{ alta_yes }}</td></tr>
+      </tbody>
+    </table>
   </div>
-</section>
-
-<section class="container my-5 py-4">
-  <div class="alta-section-head">
-    <span class="alta-kicker">One harness</span>
-    <h2 class="display-6">Two apps, the same agents</h2>
-    <p>Desktop and TUI run the same agent runtime on the same profile. A session started in one can be continued in the other, and this documentation applies to both.</p>
-  </div>
-  <div class="alta-harness">
-    <div class="alta-card">
-      <h3><span class="alta-icon" style="--accent: #38bdf8; --accent-2: #6366f1;"><i class="bi bi-window"></i></span> Desktop</h3>
-      <ul>
-        <li>Session tabs you can drag, split and merge</li>
-        <li>A code editor for each project, beside its sessions</li>
-        <li>Terminals in tabs, which agents can use too</li>
-        <li>Worktrees: each session on its own branch, in its own folder</li>
-        <li>Automations: prompts that run on a schedule or on a new issue</li>
-        <li>UI tools and MCP server: agents see and drive the window</li>
-        <li>All settings in one window</li>
-        <li>Light and dark themes with 13 color schemes</li>
-        <li>Keeps running in the notification area</li>
-        <li>Updates and restarts from the app</li>
-      </ul>
-    </div>
-    <div class="alta-harness-core">
-      <strong>Shared by both</strong>
-      <ul>
-        <li>Projects and sessions</li>
-        <li>Providers and models</li>
-        <li>Agent prompts and skills</li>
-        <li>MCP servers and plugins</li>
-        <li>Notes, reminders and asks</li>
-        <li><code class="text-white">~/.alta</code> configuration</li>
-      </ul>
-    </div>
-    <div class="alta-card">
-      <h3><span class="alta-icon" style="--accent: #34d399; --accent-2: #06b6d4;"><i class="bi bi-terminal"></i></span> TUI</h3>
-      <ul>
-        <li>Runs in your terminal, keyboard-first</li>
-        <li>Tabs, timeline, prompt and dialogs in one screen</li>
-        <li>Terminal color themes</li>
-        <li>Plugin dialogs drawn with terminal controls</li>
-        <li>Permission prompts when auto-approve is off</li>
-        <li>Screenshot of the UI with <code>Ctrl+F12</code></li>
-      </ul>
-    </div>
-  </div>
-  <p class="text-center mt-4 mb-0"><a href="{{site.basepath}}/docs/desktop-and-tui/">Compare Desktop and TUI <i class="bi bi-arrow-right"></i></a></p>
+  <p class="text-center mt-4 mb-0"><a href="{{site.basepath}}/docs/desktop-and-tui/">The full comparison <i class="bi bi-arrow-right"></i></a></p>
 </section>
 
 <section class="container my-5 py-4">
@@ -159,11 +143,11 @@ altatui</code></pre>
     </div>
     <div class="alta-tour-row">
       <div class="alta-tour-copy">
-        <h3>See what the agent did</h3>
-        <p>Tool calls are grouped in the timeline with their status, size and duration. Open any of them to read the exact arguments and the output.</p>
+        <h3>See what the agent does</h3>
+        <p>Tool calls are grouped in the timeline with their status and what they wrote. Open one to follow a command in a terminal while it runs, or to read the file or the diff it worked on.</p>
         <a href="{{site.basepath}}/docs/workspace/#timeline-cards">The timeline <i class="bi bi-arrow-right"></i></a>
       </div>
-      {{ alta_shot "alta-desktop-tool-details.webp" "alta-tool-input-output-dialog.png" "Tool call details with arguments and output" "" }}
+      {{ alta_shot "alta-desktop-tool-details.webp" "alta-tool-input-output-dialog.png" "Details of a tool call" "" }}
     </div>
     <div class="alta-tour-row">
       <div class="alta-tour-copy">
@@ -196,6 +180,25 @@ altatui</code></pre>
         <a href="{{site.basepath}}/docs/workspace/#workspace-settings">Appearance settings <i class="bi bi-arrow-right"></i></a>
       </div>
       {{ alta_shot "alta-desktop-themes.webp" "alta-theme-multi.png" "CodeAlta in several color themes" "" }}
+    </div>
+  </div>
+</section>
+
+<section class="my-5 py-4">
+  <div class="alta-section-head">
+    <span class="alta-kicker">CodeAlta TUI</span>
+    <h2 class="display-6">The same agents in your terminal</h2>
+    <p>A keyboard-first terminal UI with tabs, a full-width timeline, a prompt editor and dialogs for everything else.</p>
+  </div>
+  <div class="alta-showcase alta-showcase-small">
+    <div class="alta-window">
+      <div class="alta-window-bar" aria-hidden="true">
+        <span></span><span></span><span></span><strong>altatui</strong>
+      </div>
+      <video controls autoplay loop muted playsinline preload="metadata" poster="{{site.basepath}}/img/alta-home.png" aria-label="CodeAlta TUI workflow video">
+        <source src="{{site.basepath}}/img/alta-multi-agents.mp4" type="video/mp4">
+        <a href="{{site.basepath}}/img/alta-multi-agents.mp4">Download the CodeAlta TUI workflow video.</a>
+      </video>
     </div>
   </div>
 </section>
@@ -260,7 +263,7 @@ altatui</code></pre>
 <section class="container my-5 pb-4">
   <div class="alta-cta">
     <h2>Start your first session</h2>
-    <p>Install CodeAlta, enable one provider and send a prompt on one of your projects.</p>
+    <p>Install CodeAlta Desktop, enable one provider and send a prompt on one of your projects.</p>
     <a href="{{site.basepath}}/docs/getting-started/" class="btn btn-light btn-lg"><i class="bi bi-rocket-takeoff"></i> Get started</a>
   </div>
 </section>

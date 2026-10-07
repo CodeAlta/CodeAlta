@@ -6,26 +6,26 @@ title: Getting Started
 
 ## Install
 
-CodeAlta comes as two .NET global tools. They run the same agents on the same `~/.alta` profile, so you can install one or both.
-
-| App | NuGet package | Command |
-| --- | --- | --- |
-| **CodeAlta Desktop** | [`CodeAlta`](https://www.nuget.org/packages/CodeAlta/) | `alta` |
-| **CodeAlta TUI** | [`CodeAlta.Tui`](https://www.nuget.org/packages/CodeAlta.Tui/) | `altatui` |
-
-Install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0) first, then install the desktop app and launch it from a project folder:
+Install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0) first, then install CodeAlta Desktop and launch it from a project folder:
 
 ```sh
 dotnet tool install -g CodeAlta
 alta
 ```
 
-Or install the terminal UI:
+CodeAlta Desktop is the app we recommend. CodeAlta also has a terminal UI, which runs the same agents on the same `~/.alta` profile:
 
 ```sh
 dotnet tool install -g CodeAlta.Tui
 altatui
 ```
+
+| App | NuGet package | Command |
+| --- | --- | --- |
+| **CodeAlta Desktop** | [`CodeAlta`](https://www.nuget.org/packages/CodeAlta/) | `alta` |
+| **CodeAlta TUI** | [`CodeAlta.Tui`](https://www.nuget.org/packages/CodeAlta.Tui/) | `altatui` |
+
+You can install both. [Desktop and TUI]({{site.basepath}}/docs/desktop-and-tui/) compares them.
 
 For the TUI, `dnx` can install, update, and run in a single command:
 
@@ -35,7 +35,7 @@ dnx --yes CodeAlta.Tui
 
 The folder you launch from is opened as a project. CodeAlta stores user state under `~/.alta/`, including configuration, logs, cached provider state, session journals, agent prompts under `~/.alta/prompts/agents`, plugins, and skills.
 
-Only one CodeAlta runs on a profile at a time. Close the desktop app before starting the TUI, and the other way around. See [Desktop and TUI]({{site.basepath}}/docs/desktop-and-tui/) for what each app offers.
+Only one CodeAlta runs on a profile at a time. Close the desktop app before starting the TUI, and the other way around.
 
 ### Desktop requirements
 

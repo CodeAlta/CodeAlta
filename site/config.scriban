@@ -38,6 +38,11 @@ site_project_init
 html.head.metas.add '<script>(function(){var ui="desktop";try{if(localStorage.getItem("codealta-ui")==="tui"){ui="tui";}}catch(_){}document.documentElement.setAttribute("data-alta-ui",ui);}());</script>'
 
 with builtins
+    # The marks of the tables that compare the two apps: available, partly available, not available.
+    alta_yes = '<span class="alta-mark alta-mark-yes"><i class="bi bi-check-circle-fill" aria-hidden="true"></i><span class="visually-hidden">Yes</span></span>'
+    alta_part = '<span class="alta-mark alta-mark-part"><i class="bi bi-circle-half" aria-hidden="true"></i><span class="visually-hidden">Partly</span></span>'
+    alta_no = '<span class="alta-mark alta-mark-no"><i class="bi bi-dash-lg" aria-hidden="true"></i><span class="visually-hidden">No</span></span>'
+
     # Renders one screenshot in its Desktop and TUI versions with a switch between them.
     # `desktop` and `tui` are file names under /img, `alt` describes the screen and
     # `caption` is HTML shown below the image.
