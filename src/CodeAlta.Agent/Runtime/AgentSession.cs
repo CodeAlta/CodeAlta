@@ -1202,14 +1202,17 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         AgentModelInfo? modelInfo,
         IReadOnlyList<AgentConversationMessage> conversation,
         AgentSessionUsage? previousUsage,
-        AgentSessionUsage? usage)
+        AgentSessionUsage? usage,
+        bool providerKeepsContext)
     {
         if (usage is null)
         {
             return null;
         }
 
-        var usageForEstimate = SelectUsageForConversationEstimate(previousUsage, usage, conversation.Count);
+        // A provider that keeps the context counts all of it with each request, and trims it by itself (it clears
+        // old tool results, it compacts): a count smaller than the one before is what it holds now.
+        var usageForEstimate = providerKeepsContext ? usage : SelectUsageForConversationEstimate(previousUsage, usage, conversation.Count);
         var estimate = AgentTokenEstimator.EstimatePromptTokens(
             systemMessage,
             developerInstructions,
@@ -1465,7 +1468,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             modelInfo,
             providerConversation.Messages,
             _state.Usage,
-            response.Usage);
+            response.Usage,
+            providerKeepsContext: _turnExecutor is IAgentProviderCompaction);
 
         _state = _state with
         {

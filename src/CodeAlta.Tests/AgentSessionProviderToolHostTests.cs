@@ -184,6 +184,39 @@ public sealed class AgentSessionProviderToolHostTests
         Assert.AreEqual(1_000_000L, usage.TokenLimit);
     }
 
+    [TestMethod]
+    public async Task ContextUsage_GoesDownWhenTheProviderTrimsTheContextItKeeps()
+    {
+        using var directory = TestTempDirectory.Create();
+        var counts = new Queue<long>([57_000, 44_000]);
+        var provider = new ToolHostProvider
+        {
+            Responses = [new AgentMessagePart.Text("one"), new AgentMessagePart.Text("two")],
+            // A CLI clears old tool results and compacts by itself: its second request reads less than its first.
+            Usage = request => new AgentSessionUsage(
+                Window: new AgentWindowUsageSnapshot(CurrentTokens: counts.Dequeue(), TokenLimit: 200_000, MessageCount: request.Conversation.Count, Label: "Active context window"),
+                Scope: AgentUsageScope.CurrentWindow,
+                Source: AgentUsageSource.ProviderUsage,
+                UpdatedAt: DateTimeOffset.UtcNow),
+        };
+        var events = new List<AgentEvent>();
+        await using var session = await provider.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            ProviderKey = "tool-host-fixture",
+            WorkingDirectory = directory.Path,
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        });
+        session.Subscribe(events.Add);
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("first"), EnableUserInputTool = false });
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("second"), EnableUserInputTool = false });
+
+        // A smaller count is not the count of a part of the context, as it is for a provider that is sent the
+        // conversation again: it is what the provider holds now.
+        var usage = events.OfType<AgentSessionUpdateEvent>().Last(static update => update.Usage?.Window is not null).Usage!;
+        Assert.IsTrue(usage.CurrentTokens is >= 44_000 and < 50_000, $"Expected the count of the provider, got {usage.CurrentTokens}.");
+    }
+
     private static AgentMessagePart Call(string id, string name, object arguments)
         => new AgentMessagePart.ToolCall(id, name, JsonSerializer.SerializeToElement(arguments));
 
