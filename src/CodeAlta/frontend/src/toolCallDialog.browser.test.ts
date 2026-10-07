@@ -33,7 +33,7 @@ test("the window of a tool call follows it: live output, then its record, with a
       + await readFile(new URL("../node_modules/@xterm/xterm/css/xterm.css", import.meta.url), "utf8") + await readFile(new URL("./style.css", import.meta.url), "utf8"));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body class="bp6-dark"><div id="root"></div><script src="fixture.js"></script></body></html>');
-    browser = spawn(edge!, ["--headless=new", "--disable-gpu", "--no-first-run", "--disable-background-networking", "--disable-extensions", "--window-size=1400,1000",
+    browser = spawn(edge!, ["--headless=new", "--disable-gpu", "--no-first-run", "--disable-background-networking", "--disable-extensions", "--edge-skip-compat-layer-relaunch", "--window-size=1400,1000",
       `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", windowsHide: true });
     let port = "";
     for (let attempt = 0; attempt < 100 && !port; attempt++) {

@@ -23,7 +23,7 @@ test("mounted timeline follows the final page across later layout growth", { ski
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><body><div id="app"></div><script src="fixture.js"></script></body></html>');
     const profile = join(root, "profile");
-    browser = spawn(edge!, ["--headless=new", "--disable-gpu", "--no-first-run", "--disable-background-networking", "--disable-extensions",
+    browser = spawn(edge!, ["--headless=new", "--disable-gpu", "--no-first-run", "--disable-background-networking", "--disable-extensions", "--edge-skip-compat-layer-relaunch",
       `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", windowsHide: true });
     let port = "";
     for (let attempt = 0; attempt < 100 && !port; attempt++) {

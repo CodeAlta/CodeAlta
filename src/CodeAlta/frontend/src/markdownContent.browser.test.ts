@@ -19,7 +19,7 @@ test("production MarkdownContent retains useful HTML without resource or app aut
       bundle: true, platform: "browser", format: "iife", write: false });
     const origin = "https://markdown-production.invalid", page = origin + "/index.html", script = origin + "/fixture.js";
     const assets = new Map([[page, '<!doctype html><html><head><link rel="icon" href="data:,"></head><body><div id="app"></div><script src="/fixture.js"></script></body></html>'], [script, bundle.outputFiles[0].text]]);
-    browser = spawn(edge!, ["--headless=new", "--disable-gpu", "--no-first-run", "--disable-background-networking", "--disable-extensions",
+    browser = spawn(edge!, ["--headless=new", "--disable-gpu", "--no-first-run", "--disable-background-networking", "--disable-extensions", "--edge-skip-compat-layer-relaunch",
       "--host-resolver-rules=MAP * ~NOTFOUND", `--user-data-dir=${join(directory, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", windowsHide: true });
     let port = "";
     for (let i = 0; i < 100 && !port; i++) {
