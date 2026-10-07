@@ -48,7 +48,7 @@ test("source fixture forwards exact revision/range/options and suppresses aborte
 function entry(index: number): HistoryResponse["entries"][number] {
   return { offset: String(index * 200), eventType: "contentCompleted", providerId: "p", sessionId: "s", runId: null,
     timestamp: "2026-01-01T00:00:00Z", kind: "Assistant", phase: null, contentId: String(index), activityId: null,
-    parentActivityId: null, interactionId: null, name: null, text: "x".repeat(32768), details: null,
+    parentActivityId: null, interactionId: null, sourceSessionId: null, name: null, text: "x".repeat(32768), details: null,
     tool: null, files: null, images: null, textTruncated: true, detailsTruncated: false, bodyOmitted: false };
 }
 

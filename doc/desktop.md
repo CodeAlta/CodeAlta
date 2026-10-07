@@ -1455,10 +1455,23 @@ user, `<project>/.alta/plugin-data/<plugin key>/` for a project (see `doc/plugin
   session: it opens in a tab and takes prompts from the window. Sub-sessions created before their
   journal and their provider record agreed on the creation time stay at the root of their project.
 
-What a sub-session reports to its parent, and what one session writes to another, is recorded as a
-prompt with a routing envelope. The timeline shows it as an **Agent message** card with the kind of
-message and the start of the sending session's id, and only the text that was sent; **Details** names
-the sending session.
+A session that started sessions shows how many beside its title (`SubAgentBadge`; the count is
+`subAgents` of its row in `sessionHierarchy.ts`), in the color of sub-agents (`--agent-accent`), which is
+also the color of the rows under it.
+
+What agents send each other is shown as an **Agent message** card in that color (`data-delegated` on the
+row), with only the text that was sent:
+
+- What a sub-session reports to its parent, and what one session writes to another with
+  `alta session message` or `request`, is recorded as a prompt with a routing envelope, which names the
+  sending session and the kind of message (**Answer**, **Note**, **Request**).
+- The prompt a session sends another with `alta session send` (a parent that gives work to a sub-agent)
+  is sent as it is written. The host records the session that sent it with the user message
+  (`AgentSendOptions.SourceSessionId`, `source_session_id` in the journal, `sourceSessionId` of the
+  history entry), and the card says **Prompt**.
+
+The card names the sending session by its title (`SessionReference`): a button that opens that session.
+A session the window does not list is named by the start of its id. **Details** gives the full id.
 
 ## Files
 

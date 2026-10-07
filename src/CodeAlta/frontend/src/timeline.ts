@@ -47,6 +47,8 @@ export type TimelineItem = Readonly<{
   toolExitCode?: number | null;
   /** True for a prompt another agent session delivered, shown without its routing envelope. */
   delegated?: boolean;
+  /** The session a delegated prompt comes from, when it is known: the row names it by its title. */
+  sourceSessionId?: string;
 }>;
 
 /**
@@ -184,7 +186,11 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
   let detailMarkdown: string | null = null;
   let details = formatDetails(entry.details);
   let detailsLabel = "Details";
-  const delegated = !streaming && normalizedKind === "user" && entry.eventType === "contentCompleted" ? parseDelegatedMessage(entry.text) : null;
+  // A prompt of another session is one that has the envelope of a message between agents, or one the host
+  // recorded with the session that sent it: the prompt a parent gives its sub-agent is sent as it is written.
+  const fromAgent = !streaming && normalizedKind === "user" && entry.eventType === "contentCompleted";
+  const delegated = !fromAgent ? null : parseDelegatedMessage(entry.text)
+    ?? (entry.sourceSessionId ? { sourceSessionId: entry.sourceSessionId, kind: "prompt", body: entry.text ?? "" } : null);
   const toolImages = !streaming && normalizedKind === "tooloutput" && entry.eventType === "contentCompleted" ? projectTimelineImages(entry.images) : undefined;
 
   if (entry.eventType === "contentCompleted" || entry.eventType === "contentDelta") {
@@ -200,7 +206,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     else if (normalizedKind.endsWith("output")) { category = "tool"; icon = "tool"; title = friendly(kind); }
     else { title = friendly(kind || entry.eventType); }
     subtitle = streaming ? "Streaming" : delegated
-      ? [friendly(delegated.kind), delegated.sourceSessionId?.slice(0, 8)].filter(Boolean).join(" · ")
+      ? friendly(delegated.kind)
       : category === "image" ? toolImages!.map(image => image.title).join(", ") : null;
   } else if (entry.eventType === "activity") {
     category = normalizedKind === "filechange" ? "file" : "tool";
@@ -306,6 +312,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     toolChanges: entry.tool?.added != null && entry.tool.removed != null ? { added: entry.tool.added, removed: entry.tool.removed } : undefined,
     toolExitCode: entry.tool?.exitCode,
     delegated: delegated ? true : undefined,
+    sourceSessionId: delegated?.sourceSessionId ?? undefined,
   };
 }
 

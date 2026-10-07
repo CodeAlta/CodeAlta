@@ -30,6 +30,27 @@ public sealed class DesktopTimelineHistoryTests
     }
 
     [TestMethod]
+    public async Task Timeline_NamesTheSessionOfTheAgentThatSentAPrompt()
+    {
+        AgentContentCompletedEvent Content(AgentContentKind kind, string id, string? source) => new(new("p"), "child", DateTimeOffset.UnixEpoch, new("run"), kind, id, null, "text", SourceSessionId: source);
+        var result = await WorkspaceService.ReadTimelineAsync(new("child", null), (_, _, _) => Task.FromResult(
+            new AgentSessionHistoryPage([new(0, Content(AgentContentKind.User, "user:1", "parent-session")) { SourceEnd = 10 },
+                new(10, Content(AgentContentKind.User, "user:2", null)) { SourceEnd = 20 },
+                new(20, Content(AgentContentKind.Assistant, "assistant:1", "parent-session")) { SourceEnd = 30 }], null, false)
+            { Revision = new("child", 30, 7) }), CancellationToken.None);
+
+        Assert.AreEqual("ok", result.Page.Status);
+        // The prompt of a parent names it; the prompt of a person and the answer of the model name nobody.
+        CollectionAssert.AreEqual(new[] { "parent-session", null, null }, result.Page.Entries.Select(static entry => entry.SourceSessionId).ToArray());
+        StringAssert.Contains(JsonSerializer.Serialize(result, DesktopJsonContext.Default.TimelineHistoryResponse), "\"sourceSessionId\":\"parent-session\"");
+        // An identity that is no identity is refused with the page, as the others are.
+        var refused = await WorkspaceService.ReadTimelineAsync(new("child", null), (_, _, _) => Task.FromResult(
+            new AgentSessionHistoryPage([new(0, Content(AgentContentKind.User, "user:1", new string('x', 300))) { SourceEnd = 10 }], null, false)
+            { Revision = new("child", 10, 7) }), CancellationToken.None);
+        Assert.AreNotEqual("ok", refused.Page.Status);
+    }
+
+    [TestMethod]
     public async Task Source_ValidatesRangeBeforeRead_AndBoundsEscapedResponse()
     {
         var request = new HistorySourceRequest(new("selected", "4000000", "7"), "0", "4000000", "0");

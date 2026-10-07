@@ -2020,6 +2020,8 @@ export const messages = dictionary({
   "These are the instructions CodeAlta ships. To change them, make a copy of your own: it takes their place.": ["Estas son las instrucciones que incluye CodeAlta. Para cambiarlas, crea tu propia copia: ocupará su lugar.", "Ce sont les instructions fournies avec CodeAlta. Pour les changer, faites-en une copie à vous : elle prend leur place.", "Dies sind die Anweisungen, die CodeAlta mitliefert. Um sie zu ändern, erstelle eine eigene Kopie: Sie tritt an ihre Stelle.", "これは CodeAlta に同梱されている指示です。変更するには自分用のコピーを作成してください。コピーが代わりに使われます。", "这些是 CodeAlta 附带的指令。要更改它们，请创建自己的副本：它会取而代之。"],
   "This session cannot take it right now. Try again in a moment.": ["Esta sesión no puede aceptarlo ahora. Inténtalo de nuevo en un momento.", "Cette session ne peut pas le prendre pour l'instant. Réessayez dans un instant.", "Diese Sitzung kann es gerade nicht annehmen. Versuche es gleich noch einmal.", "このセッションは今は受け付けられません。しばらくしてからもう一度お試しください。", "此会话现在无法接收。请稍后重试。"],
   "What a session is told when you ask it to create a pull request.": ["Lo que se le dice a una sesión cuando le pides crear una pull request.", "Ce qui est dit à une session quand vous lui demandez de créer une pull request.", "Was einer Sitzung gesagt wird, wenn du sie bittest, einen Pull Request zu erstellen.", "プルリクエストの作成を依頼したときにセッションへ伝える内容。", "当你要求会话创建拉取请求时告知它的内容。"],
+  "Open the session {title}": ["Abrir la sesión {title}", "Ouvrir la session {title}", "Sitzung {title} öffnen", "セッション「{title}」を開く", "打开会话 {title}"],
+  "{count} sub-agent(s)": ["{count} subagente(s)", "{count} sous-agent(s)", "{count} Sub-Agent(en)", "サブエージェント {count} 件", "{count} 个子代理"],
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

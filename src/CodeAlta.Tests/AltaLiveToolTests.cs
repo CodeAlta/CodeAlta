@@ -3258,6 +3258,8 @@ public sealed class AltaLiveToolTests
             Assert.AreEqual("request", record.GetProperty("dispatchKind").GetString());
             Assert.IsTrue(record.GetProperty("detached").GetBoolean());
             await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 1).ConfigureAwait(false);
+            // The prompt is recorded with the session of the agent that sent it: the target shows whose it is.
+            Assert.AreEqual("parent-session", providerRuntime.SentOptions.Single().SourceSessionId);
         }
         finally
         {

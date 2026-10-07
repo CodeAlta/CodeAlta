@@ -10,7 +10,7 @@ const source = "x".repeat(239) + "😀\n\n**supplied** [link](https://example.in
   + '<img src=x onerror="window.injected=true"><script>window.injected=true</script> END';
 const original: HistoryEntry = { offset: "1", eventType: "error", kind: "Failure", phase: null,
   sessionId: "one", providerId: "provider", runId: "run", contentId: "body", activityId: null,
-  parentActivityId: null, interactionId: null, name: null, timestamp: "2026-09-27T00:00:00Z",
+  parentActivityId: null, interactionId: null, sourceSessionId: null, name: null, timestamp: "2026-09-27T00:00:00Z",
   tool: null, files: null, images: null, text: source, details: '{"literal":"<img src=x>"}', textTruncated: true, detailsTruncated: false, bodyOmitted: true };
 let entry = original, patch: Partial<TimelineItem> = {}, locale: Locale = "en", generation = 0;
 const copies: string[] = [];

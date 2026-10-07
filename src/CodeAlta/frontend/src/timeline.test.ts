@@ -29,12 +29,19 @@ test("a prompt delivered by another session is shown as an agent message without
   assert.equal(item.category, "user");
   assert.equal(item.delegated, true);
   assert.equal(item.title, "Agent message");
-  assert.equal(item.subtitle, "Answer · 01a105f5");
+  assert.equal(item.subtitle, "Answer");
+  assert.equal(item.sourceSessionId, "01a105f5-60d1");
   assert.equal(item.markdown, "PONG");
   assert.ok(item.metadata.includes("From session: 01a105f5-60d1"));
   const [own] = buildTimelineItems([entry({ eventType: "contentCompleted", kind: "User", text: "PONG" })]);
   assert.equal(own.delegated, undefined);
   assert.equal(own.title, "You");
+  // The prompt a parent session gives its sub-agent has no envelope: the host records who sent it.
+  const [given] = buildTimelineItems([entry({ eventType: "contentCompleted", kind: "User", text: "Map the parser.", sourceSessionId: "01a105f5-60d1" })]);
+  assert.deepEqual([given.delegated, given.title, given.subtitle, given.sourceSessionId, given.markdown, given.icon],
+    [true, "Agent message", "Prompt", "01a105f5-60d1", "Map the parser.", "branch"]);
+  // Only a prompt has a sender: the answer of the model in the same record shape is the assistant's.
+  assert.equal(buildTimelineItems([entry({ eventType: "contentCompleted", kind: "Assistant", text: "Done.", sourceSessionId: "01a105f5-60d1" })])[0].delegated, undefined);
 });
 
 test("TUI status-only updates do not become timeline cards", () => {
@@ -134,7 +141,7 @@ function entry(overrides: Partial<Entry>): Entry {
   return {
     offset: "1", eventType: "contentCompleted", providerId: "provider", sessionId: "session", runId: "run",
     timestamp: "2026-09-22T10:00:00Z", kind: "Assistant", phase: null, contentId: "content", activityId: null,
-    parentActivityId: null, interactionId: null, name: null, text: "Hello", details: null,
+    parentActivityId: null, interactionId: null, sourceSessionId: null, name: null, text: "Hello", details: null,
     tool: null, files: null, images: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, ...overrides,
   };
 }

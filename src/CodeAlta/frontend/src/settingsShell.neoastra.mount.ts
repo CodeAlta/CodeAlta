@@ -95,7 +95,7 @@ function fileHistory(request: HistoryRequest): HistoryResponse {
   return { status: "ok", next: null, tailOmitted: false, entries: [
     { offset: "1", eventType: "activity", kind: "FileChange", providerId: "fixture", sessionId: request.sessionId,
       runId: "run", timestamp: "2026-09-24T00:00:00Z", phase: "Failed", contentId: null, activityId: "file",
-      parentActivityId: null, interactionId: null, name: null, text: null, details: fileDetails,
+      parentActivityId: null, interactionId: null, sourceSessionId: null, name: null, text: null, details: fileDetails,
       tool: null, files: null, images: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false },
   ] };
 }
@@ -120,7 +120,7 @@ function navigationHistory(request: HistoryRequest): HistoryResponse {
       lastWriteUtcTicks: "7", offset: "1" } : null,
     entries: kinds.map((kind, index) => ({ offset: `${index + 1}`, eventType: kind === "Status" ? "sessionUpdate" : "contentCompleted", providerId: "fixture",
       sessionId: request.sessionId, runId: null, timestamp: "2026-09-24T00:00:00Z", kind, phase: null,
-      contentId: `${index}`, activityId: null, parentActivityId: null, interactionId: null, name: null,
+      contentId: `${index}`, activityId: null, parentActivityId: null, interactionId: null, sourceSessionId: null, name: null,
       text: `persisted-${kind}-${request.sessionId}` + (mode === "tabs" ? "\n\n" + Array.from({ length: 30 }, (_, n) => `Retained paragraph ${n}`).join("\n\n") : ""),
       tool: null, files: null, images: null, details: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false })) };
 }

@@ -1,3 +1,4 @@
+import { SubAgentBadge } from "../SessionReference";
 import type { WorkspaceSession } from "#neoastra";
 import { useState, type ReactNode } from "react";
 import { AppIcon } from "../AppIcon";
@@ -14,12 +15,12 @@ export const sessionRowIndent = (depth: number) => 11 + Math.min(depth, 8) * 12;
  * The icon and the title of a session row: a session started by another one has an icon of its own, and so has a
  * session started by an automation.
  */
-export function SessionRowTitle({ session, depth, diagnostic }: Pick<SessionHierarchyRow, "session" | "depth" | "diagnostic">) {
+export function SessionRowTitle({ session, depth, diagnostic, subAgents }: Pick<SessionHierarchyRow, "session" | "depth" | "diagnostic" | "subAgents">) {
   const { t } = useShellLanguage();
   const automated = !!session.automationId;
   return <><span className="session-icon" data-file-tone={depth > 0 ? "teal" : automated ? "gold" : "purple"} title={automated && depth === 0 ? t("Started by an automation") : undefined}>
     <AppIcon name={depth > 0 ? "childSession" : automated ? "automation" : "assistant"} size={13} /></span>
-    <span className="session-title">{diagnostic && <span aria-hidden="true">⚠ </span>}{plainTitle(session.title)}</span></>;
+    <span className="session-title">{diagnostic && <span aria-hidden="true">⚠ </span>}{plainTitle(session.title)}</span><SubAgentBadge count={subAgents ?? 0} /></>;
 }
 
 /**
@@ -46,7 +47,7 @@ export function ExplorerSessions({ rows, global, more, extended, access, marks, 
   const [menu, setMenu] = useState<{ id: string; anchor: HTMLElement } | null>(null);
   const show = (id: string, anchor: HTMLElement | null) => setMenu(current => !anchor || current?.id === id ? null : { id, anchor });
   return <div className="session-rail"><div className="session-list">
-    {rows.map(({ session, depth, diagnostic, tooltip }) => {
+    {rows.map(({ session, depth, diagnostic, tooltip, subAgents }) => {
       const shown = menu?.id === session.id ? menu : null;
       const allowed = shown ? access(session) : null;
       return <div className={`session-row${shown ? " menu-open" : ""}`} key={session.id}
@@ -61,7 +62,7 @@ export function ExplorerSessions({ rows, global, more, extended, access, marks, 
           show(session.id, event.currentTarget.querySelector<HTMLElement>(".session-actions-trigger"));
         }}>
         <button type="button" aria-pressed={false} title={tooltip} style={{ paddingLeft: sessionRowIndent(depth) }} onClick={() => onAction(session, "open")}>
-          <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} />{marks(session)}
+          <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} />{marks(session)}
         </button>
         <button type="button" className="icon-button session-actions-trigger" aria-label={t("Actions for {title} (ID: {id})", { title: session.title, id: session.id })}
           aria-haspopup="menu" aria-expanded={!!shown} onClick={event => show(session.id, event.currentTarget)}><AppIcon name="ellipsis" size={16} /></button>

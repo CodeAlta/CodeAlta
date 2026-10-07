@@ -6,7 +6,7 @@ import { createPluginEventsRead, pluginEventItem, pluginEventItems, pluginEvents
 type Entry = HistoryResponse["entries"][number];
 const entry = (offset: string, patch: Partial<Entry>): Entry => ({ offset, eventType: "contentCompleted", providerId: "provider", sessionId: "session", runId: "run",
   timestamp: `2026-01-01T10:00:${offset.padStart(2, "0")}Z`, kind: "Assistant", phase: null, contentId: null, activityId: null, parentActivityId: null,
-  interactionId: null, name: null, text: "text", details: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, files: null, tool: null, images: null, ...patch });
+  interactionId: null, sourceSessionId: null, name: null, text: "text", details: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, files: null, tool: null, images: null, ...patch });
 const idle = (offset: string) => entry(offset, { eventType: "sessionUpdate", kind: "Idle", text: null });
 const card = (patch: Partial<SessionPluginEvent> = {}): SessionPluginEvent => ({ eventId: "statistics:session:run-1", pluginId: "statistics", timestamp: "2026-01-01T10:00:09Z",
   markdown: "**Turn statistics** · 4.0s · tools 2 calls / 1.5s", details: [{ header: "Detailed statistics", markdown: "| Metric | Value |\n| --- | ---: |", html: null }], html: null, ...patch });

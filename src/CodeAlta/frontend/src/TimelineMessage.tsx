@@ -3,6 +3,7 @@ import { AppIcon } from "./AppIcon";
 import { MarkdownContent } from "./MarkdownContent";
 import { PluginHtml } from "./PluginHtml";
 import { writeMarkdown, type TimelineItem } from "./timeline";
+import { SessionReference } from "./SessionReference";
 import { useShellLanguage } from "./shellLanguage";
 import { timelineTime } from "./sessionTime";
 import { FileChangeInspection } from "./FileChangeInspection";
@@ -156,7 +157,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
       if (item.category === "tool" && hasDetails && toolTrigger.current && !event.defaultPrevented
         && !(event.target as HTMLElement).closest("button, a, dialog, input, textarea") && !window.getSelection()?.toString()) openDetails(toolTrigger.current);
     }}
-    data-tool-phase={item.toolPhase} data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}>
+    data-tool-phase={item.toolPhase} data-delegated={item.delegated ? "true" : undefined} data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}>
     <div className="avatar"><AppIcon name={item.icon} size={17} /></div>
     <div className="message-body">
       <div className="message-heading">
@@ -164,7 +165,8 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
           onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
           onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}>{state === "running"
             ? <ActivitySpinner size={10} className="tool-state-spinner" /> : <span className="tool-state-dot" aria-hidden="true">●</span>} <strong>{title}</strong></button>
-          : item.category !== "reasoning" && <strong>{title}</strong>}{!toolTile && item.subtitle && <small>{item.subtitle === "Sending…" || item.subtitle === "Pending" || item.subtitle === "Failed" || item.subtitle === "Streaming" ? t(item.subtitle) : item.subtitle}</small>}</span>
+          : item.category !== "reasoning" && <strong>{title}</strong>}{!toolTile && item.subtitle && <small>{item.subtitle === "Sending…" || item.subtitle === "Pending" || item.subtitle === "Failed" || item.subtitle === "Streaming" ? t(item.subtitle) : item.subtitle}</small>}
+          {item.delegated && item.sourceSessionId && <SessionReference sessionId={item.sourceSessionId} />}</span>
         {compact && item.html ? <div className="timeline-inline-preview timeline-plugin-html"><PluginHtml html={item.html} pluginKey={item.pluginKey} /></div>
           : compact && excerpt && !toolTile && item.category !== "file" && <div className="timeline-inline-preview">{codePreview !== null ? <code>{codePreview}</code>
           : item.summary ? excerpt : <MarkdownContent source={excerpt} />}</div>}

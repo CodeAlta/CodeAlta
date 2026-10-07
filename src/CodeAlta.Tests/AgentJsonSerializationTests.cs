@@ -241,6 +241,11 @@ public sealed class AgentJsonSerializationTests
         Assert.AreEqual("contentCompleted", root.GetProperty("$type").GetString());
         Assert.AreEqual("ask-123", root.GetProperty("ask_id").GetString());
         Assert.AreEqual("# Ask response\n\nProceed.", root.GetProperty("content").GetString());
+        Assert.IsFalse(root.TryGetProperty("source_session_id", out _), "A prompt of a person names no session.");
+
+        // The prompt a parent session gives its sub-agent is recorded with the session that sent it.
+        using var given = JsonDocument.Parse((@event with { AskId = null, SourceSessionId = "parent-session" }).ToJson());
+        Assert.AreEqual("parent-session", given.RootElement.GetProperty("source_session_id").GetString());
     }
 
     [TestMethod]

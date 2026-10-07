@@ -28,7 +28,7 @@ const reader = createToolCallCache(async request => {
 }).reader("epoch", "session");
 
 const entry = (values: Partial<HistoryEntry>): HistoryEntry => ({ offset: "1", sessionId: "session", providerId: "provider", runId: "run", activityId: null,
-  contentId: null, parentActivityId: null, interactionId: null, eventType: "activity", kind: "ToolCall", name: null, phase: null, text: null,
+  contentId: null, parentActivityId: null, interactionId: null, sourceSessionId: null, eventType: "activity", kind: "ToolCall", name: null, phase: null, text: null,
   timestamp: "2026-10-07T08:00:00Z", details: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, files: null, tool: null, images: null, ...values });
 
 let show: ((entries: HistoryEntry[] | null) => void) | undefined;

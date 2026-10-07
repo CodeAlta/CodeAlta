@@ -1,6 +1,7 @@
 import type { WorkspaceSession } from "#neoastra";
 
-export type SessionHierarchyRow = { session: WorkspaceSession; depth: number; diagnostic: string | null; tooltip: string };
+/** A row of the list of sessions: `subAgents` is how many sessions it started (its sub-agents), shown under it. */
+export type SessionHierarchyRow = { session: WorkspaceSession; depth: number; diagnostic: string | null; tooltip: string; subAgents?: number };
 
 // Keep the server's bounded order for ties. Resolve only an exact persisted scope; a missing
 // header or a missing/truncated parent can never manufacture a same-scope relationship.
@@ -79,8 +80,8 @@ export function sessionHierarchy(visibleScope: readonly WorkspaceSession[], all:
     const parent = parentOf.get(session.id);
     const tooltip = [session.fullTitle + (session.fullTitleTruncated ? " [title truncated]" : ""),
       diagnostic ?? (parent ? `Child of '${parent.fullTitle}'` : null)].filter(Boolean).join(" | ");
-    rows.push({ session, depth, diagnostic, tooltip });
     const children = (childrenById.get(session.id) ?? []).sort(order);
+    rows.push({ session, depth, diagnostic, tooltip, subAgents: children.length });
     for (const child of children.reverse()) stack.push({ session: child, depth: depth + 1 });
   }
   // A malformed graph must not silently drop a row, even if its parent was excluded.

@@ -81,3 +81,11 @@ test("bounded 500-row cycles and missing parents terminate without duplication",
   const incomplete = sessionHierarchy(sessions.slice(1), sessions.slice(1), "p1");
   assert.equal(incomplete.length, 499);
 });
+
+test("a row says how many sessions it started, and a session of another scope is not counted", () => {
+  const sessions = [row("parent"), row("first", "parent", 2), row("second", "parent", 3), row("nested", "first", 4), row("alone")];
+  const counts = Object.fromEntries(sessionHierarchy(sessions, sessions, "p1").map(item => [item.session.id, item.subAgents]));
+  assert.deepEqual(counts, { parent: 2, second: 0, first: 1, nested: 0, alone: 0 });
+  // A child whose parent is not shown is a root: its parent is not there to count it.
+  assert.deepEqual(sessionHierarchy([sessions[1]], sessions, "p1").map(item => [item.session.id, item.depth, item.subAgents]), [["first", 0, 0]]);
+});

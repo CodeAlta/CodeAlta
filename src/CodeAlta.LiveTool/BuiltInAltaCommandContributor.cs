@@ -2600,7 +2600,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             var sendTask = runtime.SendAsync(
                 info.Session,
                 executionOptions,
-                new AgentSendOptions { Input = agentInput },
+                new AgentSendOptions { Input = agentInput, SourceSessionId = IsAgentCaller(context) ? context.Caller.SourceSessionId : null },
                 ShouldDetachPromptSubmission(context) ? CancellationToken.None : context.CancellationToken);
 
             if (ShouldDetachPromptSubmission(context) && await WaitForAgentSubmissionAckAsync(runtime, info.Session, sendTask).ConfigureAwait(false) && !sendTask.IsCompleted)
@@ -4547,6 +4547,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
            !string.IsNullOrWhiteSpace(context.Caller.SourceSessionId) &&
            string.Equals(context.Caller.SourceSessionId.Trim(), sessionId.Trim(), StringComparison.OrdinalIgnoreCase);
 
+    // A caller that is not a person at the prompt hands the prompt over and goes on: a command that waited for the
+    // run would end it when the command reaches its time limit.
     private static bool ShouldDetachPromptSubmission(AltaCommandContext context)
         => IsAgentCaller(context) || string.Equals(context.Caller.Kind, "reminder", StringComparison.OrdinalIgnoreCase)
            || string.Equals(context.Caller.Kind, "mcp", StringComparison.OrdinalIgnoreCase);

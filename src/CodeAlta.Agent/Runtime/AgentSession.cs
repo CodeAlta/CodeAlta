@@ -226,7 +226,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     instructionBundle.InstructionHash,
                     linkedCts.Token)
                 .ConfigureAwait(false);
-            await AppendUserMessageAsync(options.Input, runId, options.AskId, linkedCts.Token).ConfigureAwait(false);
+            await AppendUserMessageAsync(options.Input, runId, options.AskId, linkedCts.Token, options.SourceSessionId).ConfigureAwait(false);
 
             _state = _state with
             {
@@ -1256,7 +1256,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         };
     }
 
-    private async Task AppendUserMessageAsync(AgentInput input, AgentRunId runId, string? askId, CancellationToken cancellationToken)
+    private async Task AppendUserMessageAsync(AgentInput input, AgentRunId runId, string? askId, CancellationToken cancellationToken, string? sourceSessionId = null)
     {
         var message = new AgentConversationMessage(
             AgentConversationRole.User,
@@ -1280,7 +1280,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             null,
             RenderUserInput(input.Items),
             SerializeAgentInput(input),
-            askId);
+            askId,
+            string.IsNullOrWhiteSpace(sourceSessionId) ? null : sourceSessionId.Trim());
         var events = new List<AgentEvent> { rawEvent, userContent };
         if (TryCreateUserActivatedSkillState(input, out var activatedSkill))
         {

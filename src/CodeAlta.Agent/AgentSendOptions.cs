@@ -16,6 +16,13 @@ public sealed class AgentSendOptions
     public string? AskId { get; init; }
 
     /// <summary>
+    /// Gets the session of the agent that sends this prompt: a parent that gives work to a sub-agent, or a peer.
+    /// Null for a prompt of a person or of the host. It is recorded with the user message, and changes nothing
+    /// of what the model receives.
+    /// </summary>
+    public string? SourceSessionId { get; init; }
+
+    /// <summary>
     /// Gets or initializes an optional permission callback for this send.
     /// </summary>
     /// <remarks>

@@ -6,7 +6,7 @@ import { groupTimelineTools, toolGroupLimit } from "./toolGroups";
 
 const entry = (offset: string, changes: Partial<HistoryEntry> = {}): HistoryEntry => ({ offset,
   eventType: "activity", kind: "ToolCall", providerId: "provider", runId: "run", sessionId: "session",
-  activityId: `tool-${offset}`, parentActivityId: null, phase: "Completed", contentId: null, interactionId: null,
+  activityId: `tool-${offset}`, parentActivityId: null, phase: "Completed", contentId: null, interactionId: null, sourceSessionId: null,
   timestamp: "2026-09-27T00:00:00Z", name: "Read", text: "Done", details: null,
   tool: null, files: null, images: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, ...changes });
 

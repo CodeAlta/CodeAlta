@@ -1473,6 +1473,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     {
                         Input = sendOptions.Input,
                         AskId = sendOptions.AskId,
+                        SourceSessionId = sendOptions.SourceSessionId,
                         AdditionalTools = sendOptions.AdditionalTools,
                         OnPermissionRequest = Permissions.CreateOwnedCommandHandler(permissionExecution),
                         OnUserInputRequest = Permissions.CreateOwnedUserInputHandler(permissionExecution),
@@ -2741,7 +2742,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             var runStartedAt = DateTimeOffset.UtcNow;
             var runId = await _agentHub.RunAsync(
                     work.SessionHandleId,
-                    new AgentSendOptions { Input = AgentInput.Text(work.Prompt!.Prompt) },
+                    new AgentSendOptions { Input = AgentInput.Text(work.Prompt!.Prompt), SourceSessionId = AgentSource(work.Prompt.SubmittedBy) },
                     work.Entry.Attachment.Cancellation.Token)
                 .ConfigureAwait(false);
             await MarkQueuedPromptSubmittedAsync(work.Entry, work.Prompt!.QueueItemId, runId, runStartedAt, DateTimeOffset.UtcNow).ConfigureAwait(false);
@@ -3622,6 +3623,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var project = projects.FirstOrDefault(candidate => string.Equals(candidate.Id, session.ProjectRef, StringComparison.Ordinal));
         return project is not null && (title == project.DisplayName || title == SummaryTitle(UnnamedProjectSessionSummary(project))) ? null : title;
     }
+
+    // The session of the agent a prompt comes from; null for a prompt of a person, of a reminder or of the host.
+    private static string? AgentSource(AltaActorProvenance? submittedBy)
+        => string.Equals(submittedBy?.Kind, "agent", StringComparison.OrdinalIgnoreCase) ? NormalizeOptionalText(submittedBy!.SourceSessionId) : null;
 
     private static string? ResolveParentSessionId(string? parentSessionId, string? createdBySessionId)
         => NormalizeOptionalText(parentSessionId) ?? NormalizeOptionalText(createdBySessionId);

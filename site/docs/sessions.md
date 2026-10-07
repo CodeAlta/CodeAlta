@@ -69,9 +69,26 @@ Think of it as CodeAlta giving the agent a safe, scoped way to ask the host ques
 - how to schedule a later reminder prompt for itself or another session;
 - how to update sticky Markdown notes in the sidebar while it works.
 
+## Sub-agents
+
+An agent decides by itself when sub-agents help. A sub-agent is a child session with a context of its own, which works in parallel with its parent.
+
+- When the work has independent parts (several modules to look into, a research beside an implementation, a review of a diff), the agent gives each part to a sub-agent and keeps the decisions and the final answer.
+- It works directly when the task is small or does not split.
+- It gives simple work a lower reasoning effort.
+- A sub-agent does its work itself: it does not pass it on to a single sub-agent of its own.
+
+Say so when you want it otherwise: "do not use sub-agents", or "use a sub-agent for each folder".
+
+In CodeAlta Desktop:
+
+- The sub-agents of a session are listed under it in the sidebar, and the session shows how many it started.
+- A sub-agent is an ordinary session: open it to follow its work, or to write to it.
+- What agents send each other is shown as an **Agent message**, in its own color: the prompt a sub-agent receives, and the answer it gives back. The message names the session it comes from. Click the name to open that session.
+
 ## Prompting for delegated work
 
-Ask the current agent to create and coordinate child sessions for you.
+You can also ask the current agent to create and coordinate child sessions for you.
 
 Examples:
 

@@ -4,7 +4,7 @@ import { buildTimelineItems, type HistoryEntry } from "./timeline";
 // The same typed-event presentation as persisted history; no second live-message UI.
 function displayEntry(values: Partial<HistoryEntry>): HistoryEntry {
   return { offset: "", sessionId: "", providerId: "", runId: null, activityId: null,
-    contentId: null, parentActivityId: null, interactionId: null, eventType: "contentCompleted",
+    contentId: null, parentActivityId: null, interactionId: null, sourceSessionId: null, eventType: "contentCompleted",
     kind: null, name: null, phase: null, text: null, timestamp: "", details: null,
     textTruncated: false, detailsTruncated: false, bodyOmitted: false, files: null, tool: null, images: null, ...values };
 }

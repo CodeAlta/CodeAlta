@@ -135,6 +135,7 @@ import { TerminalList } from "./terminal/TerminalList";
 import { persistTerminalLook, restoreTerminalLook, terminalLookKey, type TerminalLook } from "./terminal/terminalLook";
 import { applicationKey, terminalsOf } from "./terminal/terminals";
 import { ExplorerSessions, SessionRowTitle, sessionRowIndent } from "./explorer/ExplorerSessions";
+import { SessionLinksContext, type SessionLinks } from "./SessionReference";
 import { collapseAllScopes, emptyProjectTree, expandScope, globalScope, isExpanded, isFavorite, persistProjectTree, projectTreeKey, restoreProjectTree, scopeKey,
   setFavorite, toggleScope, type ProjectTree } from "./explorer/projectTree";
 import { defaultIdeWidth, maximumIdeWidth, minimumIdeWidth, parseIdeWidth, persistIdeWidth, resizeIdeWidth } from "./ideWidth";
@@ -1214,6 +1215,11 @@ function App() {
   const showTerminalLatest = useRef(showTerminal); showTerminalLatest.current = showTerminal;
   const navigateLatest = useRef(navigate); navigateLatest.current = navigate;
   const [openPullRequestSettings] = useState(() => () => navigateLatest.current("pullRequests"));
+  // What a message between agents needs of the sessions: the title of the one it names, and a way to open it.
+  const openLinkedSession = useRef<(id: string) => void>(() => { });
+  const sessionTitles = useMemo(() => new Map((snapshot?.sessions ?? []).map(session => [session.id.toLowerCase(), session.title])), [snapshot]);
+  const sessionLinks = useMemo<SessionLinks>(() => ({ title: id => sessionTitles.get(id.toLowerCase()) ?? null, open: id => openLinkedSession.current(id) }), [sessionTitles]);
+  openLinkedSession.current = id => void openAutomationSession(id);
   // A session can ask for the tab of a terminal to be shown.
   useEffect(() => terminalWorkspace.hub.onReveal(id => {
     const asked = terminalWorkspace.hub.list().find(terminal => terminal.id === id);
@@ -2152,7 +2158,7 @@ function App() {
   const newPromptDisabled = creatingBusy || creationLocked || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !snapshot
     || !!selectedProject?.archived || projectId !== null && !selectedProject || (!localDraft.text.trim() && !localImages.images.length)
     || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim());
-  return <ShellLanguageContext.Provider value={language}><PluginUiContext.Provider value={pluginUiValue}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
+  return <ShellLanguageContext.Provider value={language}><PluginUiContext.Provider value={pluginUiValue}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
     {(hostSilent || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {hostSilent && <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
         <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button></div>}
@@ -2275,7 +2281,7 @@ function App() {
           {!owned && <p className="muted-text">{t("Session creation requires an owned host.")}</p>}
           {batchDeletionState.phase !== "idle" && <p role="status">Batch deletion: {batchDeletionState.phase}. {batchDeletionState.items.filter(item => item.outcome === "deleted").length} confirmed deleted; {batchDeletionState.items.filter(item => item.outcome === "uncertain").length} uncertain. Single deletion is blocked. Reopen Browse saved sessions for the retained exact-target report.</p>}
           <div className="session-list">
-            {visibleSessionRows.map(({ session, depth, diagnostic, tooltip }, index) => {
+            {visibleSessionRows.map(({ session, depth, diagnostic, tooltip, subAgents }, index) => {
               const menu = activeMenu?.id === session.id ? activeMenu : null;
               const access = sessionActionAccess(session,
                 menu ?? { id: session.id, projectId, hostEpoch: status?.hostEpoch ?? null },
@@ -2299,7 +2305,7 @@ function App() {
               <button type="button" aria-pressed={sessionId === session.id} aria-describedby={`session-tooltip-${index}`} title={tooltip}
                 style={{ paddingLeft: sessionRowIndent(depth) }}
                 onClick={() => { setMenuTarget(null); focusAction.current = null; selectedSessionId.current = session.id; setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); }}>
-                <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} />{sessionMarks(session, projectId)}
+                <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} />{sessionMarks(session, projectId)}
               </button>
               <span id={`session-tooltip-${index}`} role="tooltip" className="session-tooltip"
                 tabIndex={tooltip.length > 256 ? 0 : undefined}>{tooltip}</span>
@@ -2590,7 +2596,7 @@ function App() {
       onPrompt={request => ["send", "enqueue", "steer", "compact"].includes(request.mode ?? "")
         && askPluginComposer(request.mode as PluginComposerRequest["kind"], request.sessionId ?? null, request.text ?? null).result}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></SessionListRefreshContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></PullRequestSettingsContext.Provider></PluginUiContext.Provider></ShellLanguageContext.Provider>;
+  </div></SessionListRefreshContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginUiContext.Provider></ShellLanguageContext.Provider>;
 }
 
 // Native modal matches the other shell dialogs: showModal supplies inert background,

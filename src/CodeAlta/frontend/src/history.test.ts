@@ -34,7 +34,7 @@ test("reverse pages stop at the latest user prompt, or at the 1,000-event cap, a
   const journal = (user: number) => Array.from({ length: 1205 }, (_, index) => ({
     offset: `${index * 200}`, eventType: "contentCompleted", providerId: "p", sessionId: "runtime", runId: null,
     timestamp: "2026-01-01T00:00:00Z", kind: index === user ? "User" : "Assistant", phase: null,
-    contentId: `${index}`, activityId: null, parentActivityId: null, interactionId: null, name: null,
+    contentId: `${index}`, activityId: null, parentActivityId: null, interactionId: null, sourceSessionId: null, name: null,
     text: index === user ? "latest user prompt" : `${index}`, details: null, textTruncated: false,
     tool: null, files: null, images: null, detailsTruncated: false, bodyOmitted: false,
   } satisfies HistoryResponse["entries"][number]));
@@ -72,7 +72,7 @@ test("an uneven initial page keeps the newest 1,000 and rewinds the older cursor
   const entry = (index: number): HistoryResponse["entries"][number] => ({
     offset: `${index * 200}`, eventType: "contentCompleted", providerId: "p", sessionId: "runtime", runId: null,
     timestamp: "2026-01-01T00:00:00Z", kind: "Assistant", phase: null, contentId: `${index}`,
-    activityId: null, parentActivityId: null, interactionId: null, name: null, text: `turn-${index}`, details: null,
+    activityId: null, parentActivityId: null, interactionId: null, sourceSessionId: null, name: null, text: `turn-${index}`, details: null,
     tool: null, files: null, images: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false,
   });
   let timeline;
@@ -104,7 +104,7 @@ test("replaying an already merged page keeps the loaded window", () => {
   const entry = (index: number): HistoryResponse["entries"][number] => ({
     offset: `${index * 200}`, eventType: "contentCompleted", providerId: "p", sessionId: "runtime", runId: null,
     timestamp: "2026-01-01T00:00:00Z", kind: index === 120 ? "User" : "Assistant", phase: null, contentId: `${index}`,
-    activityId: null, parentActivityId: null, interactionId: null, name: null, text: `turn-${index}`, details: null,
+    activityId: null, parentActivityId: null, interactionId: null, sourceSessionId: null, name: null, text: `turn-${index}`, details: null,
     tool: null, files: null, images: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false,
   });
   const revision = { sessionId: "s", length: "70000", lastWriteUtcTicks: "7" };
@@ -193,7 +193,7 @@ test("timeline paging accumulates distinct rows and an explicit restart replaces
   const entry: HistoryResponse["entries"][number] = {
     offset: "0", eventType: "contentDelta", providerId: "p", sessionId: "runtime", runId: null,
     timestamp: "2026-01-01T00:00:00Z", kind: "Assistant", phase: null, contentId: "content",
-    activityId: null, parentActivityId: null, interactionId: null, name: null, text: "delta", details: null,
+    activityId: null, parentActivityId: null, interactionId: null, sourceSessionId: null, name: null, text: "delta", details: null,
     tool: null, files: null, images: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false,
   };
   const cursor = { version: 2, sessionId: "s", length: "100", lastWriteUtcTicks: "7", offset: "10" };
@@ -209,7 +209,7 @@ test("timeline paging de-duplicates offsets and remains bounded", () => {
   const entries = Array.from({ length: 1000 }, (_, index) => ({
     offset: `${index + 100}`, eventType: "contentCompleted", providerId: "p", sessionId: "s", runId: null,
     timestamp: "2026-01-01T00:00:00Z", kind: "Assistant", phase: null, contentId: `${index}`,
-    activityId: null, parentActivityId: null, interactionId: null, name: null, text: `${index}`, details: null,
+    activityId: null, parentActivityId: null, interactionId: null, sourceSessionId: null, name: null, text: `${index}`, details: null,
     tool: null, files: null, images: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false,
   }));
   const cursor = { version: 2, sessionId: "s", length: "2000", lastWriteUtcTicks: "7", offset: "1000" };
@@ -231,7 +231,7 @@ test("a window that reaches its largest size slides instead of growing", () => {
   const entry = (index: number) => ({
     offset: `${index + 100}`, eventType: "contentCompleted", providerId: "p", sessionId: "s", runId: null,
     timestamp: "2026-01-01T00:00:00Z", kind: "Assistant", phase: null, contentId: `${index}`,
-    activityId: null, parentActivityId: null, interactionId: null, name: null, text: "x", details: null,
+    activityId: null, parentActivityId: null, interactionId: null, sourceSessionId: null, name: null, text: "x", details: null,
     tool: null, files: null, images: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false,
   });
   const cursor = { version: 2, sessionId: "s", length: "900000", lastWriteUtcTicks: "7", offset: "100" };
@@ -301,7 +301,7 @@ test("reading position waits for final page or explicit error, never loading or 
 
 test("a refresh of the newest history keeps the loaded window and appends what is new", () => {
   const row = (offset: number, kind = "Assistant") => ({ offset: `${offset}`, eventType: "contentCompleted", providerId: "p", sessionId: "runtime", runId: "r",
-    timestamp: "2026-01-01T00:00:00Z", kind, phase: null, contentId: `${offset}`, activityId: null, parentActivityId: null, interactionId: null, name: null,
+    timestamp: "2026-01-01T00:00:00Z", kind, phase: null, contentId: `${offset}`, activityId: null, parentActivityId: null, interactionId: null, sourceSessionId: null, name: null,
     text: `${offset}`, details: null, textTruncated: false, tool: null, files: null, images: null, detailsTruncated: false, bodyOmitted: false } satisfies HistoryResponse["entries"][number]);
   const cursor = (length: number, offset: number) => ({ version: 2, sessionId: "s", length: `${length}`, lastWriteUtcTicks: `${length}`, offset: `${offset}` });
   // Two turns are loaded (the older one on request); the journal then grows by one answer and a new turn.
@@ -335,7 +335,7 @@ test("a refresh of the newest history keeps the loaded window and appends what i
 
 test("a refresh keeps a window that older history made larger than a first read", () => {
   const row = (offset: number, kind = "Assistant") => ({ offset: `${offset}`, eventType: "contentCompleted", providerId: "p", sessionId: "runtime", runId: "r",
-    timestamp: "2026-01-01T00:00:00Z", kind, phase: null, contentId: `${offset}`, activityId: null, parentActivityId: null, interactionId: null, name: null,
+    timestamp: "2026-01-01T00:00:00Z", kind, phase: null, contentId: `${offset}`, activityId: null, parentActivityId: null, interactionId: null, sourceSessionId: null, name: null,
     text: `${offset}`, details: null, textTruncated: false, tool: null, files: null, images: null, detailsTruncated: false, bodyOmitted: false } satisfies HistoryResponse["entries"][number]);
   // The whole journal was loaded: 5,000 records, far more than the 1,000 a first read keeps.
   const known: HistoryTimeline = { sessionId: "s", entries: Array.from({ length: 5000 }, (_, index) => row(index * 10, index % 10 === 0 ? "User" : "Assistant")), next: null,
@@ -352,7 +352,7 @@ test("a refresh keeps a window that older history made larger than a first read"
 
 test("older history is read in chunks of whole turns", () => {
   const row = (offset: number, kind = "Assistant") => ({ offset: `${offset}`, eventType: "contentCompleted", providerId: "p", sessionId: "runtime", runId: "r",
-    timestamp: "2026-01-01T00:00:00Z", kind, phase: null, contentId: `${offset}`, activityId: null, parentActivityId: null, interactionId: null, name: null,
+    timestamp: "2026-01-01T00:00:00Z", kind, phase: null, contentId: `${offset}`, activityId: null, parentActivityId: null, interactionId: null, sourceSessionId: null, name: null,
     text: `${offset}`, details: null, textTruncated: false, tool: null, files: null, images: null, detailsTruncated: false, bodyOmitted: false } satisfies HistoryResponse["entries"][number]);
   const cursor = (offset: number) => ({ version: 2, sessionId: "s", length: "900", lastWriteUtcTicks: "9", offset: `${offset}` });
   const window: HistoryTimeline = { sessionId: "s", entries: [row(700, "User"), row(800)], next: cursor(700),
@@ -391,7 +391,7 @@ test("older history is read in chunks of whole turns", () => {
 
 test("loading all older history reads to the start of the journal without cutting at turns", () => {
   const row = (offset: number, kind = "Assistant") => ({ offset: `${offset}`, eventType: "contentCompleted", providerId: "p", sessionId: "runtime", runId: "r",
-    timestamp: "2026-01-01T00:00:00Z", kind, phase: null, contentId: `${offset}`, activityId: null, parentActivityId: null, interactionId: null, name: null,
+    timestamp: "2026-01-01T00:00:00Z", kind, phase: null, contentId: `${offset}`, activityId: null, parentActivityId: null, interactionId: null, sourceSessionId: null, name: null,
     text: `${offset}`, details: null, textTruncated: false, tool: null, files: null, images: null, detailsTruncated: false, bodyOmitted: false } satisfies HistoryResponse["entries"][number]);
   const cursor = (offset: number) => ({ version: 2, sessionId: "s", length: "900000", lastWriteUtcTicks: "9", offset: `${offset}` });
   let timeline: HistoryTimeline = { sessionId: "s", entries: [row(500_000, "User"), row(500_001)], next: cursor(500_000),
@@ -416,7 +416,7 @@ test("loading all older history reads to the start of the journal without cuttin
 test("a window cut at a turn keeps the preparation records written before the user's message", () => {
   const record = (offset: string, eventType: string, kind: string | null, runId: string | null) => ({
     offset, eventType, providerId: "p", sessionId: "runtime", runId, timestamp: "2026-01-01T00:00:00Z", kind, phase: null,
-    contentId: eventType === "contentCompleted" ? offset : null, activityId: null, parentActivityId: null, interactionId: null, name: null,
+    contentId: eventType === "contentCompleted" ? offset : null, activityId: null, parentActivityId: null, interactionId: null, sourceSessionId: null, name: null,
     text: "text", details: null, textTruncated: false, tool: null, files: null, images: null, detailsTruncated: false, bodyOmitted: false,
   } satisfies HistoryResponse["entries"][number]);
   const revision = { sessionId: "s", length: "900", lastWriteUtcTicks: "900" };

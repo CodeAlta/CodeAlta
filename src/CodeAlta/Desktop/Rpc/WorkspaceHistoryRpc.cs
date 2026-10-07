@@ -116,7 +116,7 @@ internal sealed partial class WorkspaceService
             var value = entry.Event;
             var type = "";
             string? kind = null, phase = null, contentId = null, activityId = null, parentId = null, interactionId = null;
-            string? text = null, name = null, details = null;
+            string? text = null, name = null, details = null, source = null;
             var omitted = false;
             HistoryImage[]? images = null;
             var imageCost = 0;
@@ -130,6 +130,8 @@ internal sealed partial class WorkspaceService
                     type = "contentCompleted"; kind = completed.Kind.ToString(); contentId = completed.ContentId;
                     parentId = completed.ParentActivityId; text = completed.Content;
                     interactionId = completed.AskId; details = Json(completed.Details);
+                    // A prompt another session of an agent sent names that session: the page shows whose it is.
+                    if (completed.Kind == AgentContentKind.User) source = completed.SourceSessionId;
                     // A user message and a tool result list their images; their text and details do not name the files.
                     images = HistoryImageProjection.Project(completed, ref text, ref details, out imageCost);
                     break;
@@ -195,7 +197,7 @@ internal sealed partial class WorkspaceService
             ValidateIdentity(provider, 256, required: true);
             ValidateIdentity(value.SessionId, 256, required: true);
             var identityCost = 0;
-            foreach (var id in new[] { provider, value.SessionId, run, kind, phase, contentId, activityId, parentId, interactionId })
+            foreach (var id in new[] { provider, value.SessionId, run, kind, phase, contentId, activityId, parentId, interactionId, source })
             {
                 ValidateIdentity(id, 256, required: false);
                 identityCost += (id?.Length ?? 0) * 6;
@@ -224,7 +226,7 @@ internal sealed partial class WorkspaceService
             remaining -= cost;
             rows.Add(new(entry.Offset.ToString(CultureInfo.InvariantCulture), type, provider, value.SessionId, run,
                 value.Timestamp, kind, phase, contentId, activityId, parentId, interactionId, name, text, details,
-                shortened, detailsShortened, omitted, files, tool, images));
+                shortened, detailsShortened, omitted, files, tool, images, source));
         }
         HistoryCursor? next = null;
         if (page.Next is { } cursor)
@@ -373,4 +375,4 @@ internal sealed record HistoryResponse(string Status, HistoryEntry[] Entries, Hi
 internal sealed record HistoryEntry(string Offset, string EventType, string ProviderId, string SessionId, string? RunId,
     DateTimeOffset Timestamp, string? Kind, string? Phase, string? ContentId, string? ActivityId, string? ParentActivityId,
     string? InteractionId, string? Name, string? Text, string? Details, bool TextTruncated, bool DetailsTruncated, bool BodyOmitted,
-    HistoryFileSet? Files = null, HistoryToolSummary? Tool = null, HistoryImage[]? Images = null);
+    HistoryFileSet? Files = null, HistoryToolSummary? Tool = null, HistoryImage[]? Images = null, string? SourceSessionId = null);
