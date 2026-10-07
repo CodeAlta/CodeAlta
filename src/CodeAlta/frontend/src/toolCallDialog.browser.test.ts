@@ -137,6 +137,19 @@ test("the window of a tool call follows it: live output, then its record, with a
       "class,Class,class|1 match,2 matches");
     assert.equal(await evaluate(`[...${dialog}.querySelectorAll('.tool-arguments dt')].map(name=>name.textContent).join(',')`), "pattern,path,caseSensitive");
 
+    // A long result stays in the window: the view that holds it scrolls, and nothing is cut at the bottom.
+    const fits = (view: string) => `(()=>{const body=${dialog}.querySelector('.app-window-body'),part=${dialog}.querySelector('${view}');
+      return part.scrollHeight>part.clientHeight+200 && part.getBoundingClientRect().bottom<=body.getBoundingClientRect().bottom+1 && body.scrollHeight<=body.clientHeight+1})()`;
+    const long = Array.from({ length: 400 }, (_, index) => `line ${index + 1}`).join("\n");
+    await show({ ...call, name: "lookup", offset: "74", phase: "Completed", tool: tool({ primary: "everything", fields: [{ path: "arguments", text: '{"query":"everything"}', truncated: false },
+      { path: "result.content", text: long, truncated: false }] }) });
+    assert.equal(await wait(`${dialog}?.querySelector('.tool-panel[data-view=generic] .tool-output')?.textContent.includes('line 400')`), true);
+    assert.equal(await evaluate(fits(".tool-panel")), true, "A long result scrolls in its view.");
+    await show({ ...call, name: "read_file", offset: "76", phase: "Completed", tool: tool({ primary: "src/long.txt", fields: [{ path: "arguments", text: '{"path":"src/long.txt"}', truncated: false },
+      { path: "result.content", text: long.split("\n").map((line, index) => `${String(index + 1).padStart(5)}: ${line}`).join("\n"), truncated: false }] }) });
+    assert.equal(await wait(`${dialog}?.querySelectorAll('.tool-read .tool-code-line').length===400`), true);
+    assert.equal(await evaluate(fits(".tool-code-lines")), true, "A long file scrolls under its name.");
+
     // A call that failed with a message says it once, above its arguments.
     await show({ ...call, name: "read_file", offset: "80", phase: "Failed", text: "File 'missing.txt' was not found.", tool: tool({ primary: "missing.txt",
       fields: [{ path: "arguments", text: '{"path":"missing.txt"}', truncated: false }, { path: "result.content", text: "File 'missing.txt' was not found.", truncated: false }] }) });

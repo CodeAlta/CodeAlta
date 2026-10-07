@@ -48,6 +48,10 @@ export class OutputTerminal {
     this.terminal.loadAddon(this.fitting);
     this.terminal.attachCustomKeyEventHandler(event => this.key(event));
     this.terminal.write(hideCursor);
+    // Rows that left the screen can be scrolled back to: the page shows the scroll bar then.
+    const scrollable = () => this.element.toggleAttribute("data-scrollable", this.terminal.buffer.active.baseY > 0);
+    this.terminal.onWriteParsed(scrollable);
+    this.terminal.onResize(scrollable);
   }
 
   /** Shows the terminal in an element of the page. */
@@ -85,6 +89,7 @@ export class OutputTerminal {
     if (this.disposed) return;
     this.terminal.reset();
     this.terminal.write(hideCursor);
+    this.element.removeAttribute("data-scrollable");
   }
 
   setTheme(theme: ITheme) { if (!this.disposed) this.terminal.options.theme = { ...theme, overviewRulerBorder: "#00000000" }; }

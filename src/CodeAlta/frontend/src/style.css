@@ -1984,6 +1984,9 @@ dialog.tool-call-dialog:has(> .app-window) > .app-window > .app-window-body { ga
 .tool-summary .file-counts em, .tool-file-header .file-counts em, .tool-file-tab .file-counts em { color: var(--red); font-style: normal; }
 .tool-error.bp6-callout { flex: none; font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tool-tabs.bp6-tabs { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+/* The tabs take the height that is left, whatever they hold: a long result scrolls in its view. The parts of
+   a window body do not shrink by default, which would let them grow past the window. */
+dialog.tool-call-dialog:has(> .app-window) > .app-window > .app-window-body > .tool-tabs { flex-shrink: 1; }
 .tool-tabs > .bp6-tab-list { flex: none; border-bottom: 1px solid var(--line); }
 .tool-tabs > .bp6-tab-list > .bp6-tab { font-size: 13px; line-height: 28px; }
 .tool-tabs > .bp6-tab-panel { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; margin-top: 10px; }
@@ -2002,6 +2005,9 @@ dialog.tool-call-dialog .tool-command pre.tool-command-text { flex: 1 1 auto; mi
 .tool-terminal, .output-terminal { position: absolute; inset: 0; }
 .output-terminal .xterm { height: 100%; padding: 8px 0 8px 12px; }
 .output-terminal .xterm-viewport { background-color: transparent !important; }
+/* An output longer than its frame keeps its scroll bar in view: it says there is more than what is shown. */
+.output-terminal[data-scrollable] .xterm-scrollbar.xterm-vertical { opacity: 1 !important; visibility: visible !important; pointer-events: auto; }
+.output-terminal[data-scrollable] .xterm-scrollbar.xterm-vertical > .xterm-slider { border-radius: 5px; }
 .tool-empty, .tool-waiting, .tool-partial { margin: 0; color: var(--muted); font-size: 12.5px; }
 .tool-partial { flex: none; font-size: 11.5px; }
 .tool-terminal-frame > :is(.tool-empty, .tool-waiting) { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }

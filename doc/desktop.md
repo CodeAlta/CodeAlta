@@ -730,7 +730,8 @@ output, the files and the lines changed, the timeout and the working folder. The
 
 - The first tab depends on the call. **Output**, for a command: the command as it is typed, with the colors
   of its shell, and a terminal that shows what the command wrote (xterm, read-only: colors, carriage
-  returns, selection, `Ctrl+C` to copy, the scrolling keys). The standard error follows the standard output
+  returns, selection, `Ctrl+C` to copy, the scrolling keys; it opens on the end of the output and keeps its
+  scroll bar in view when there is more above). The standard error follows the standard output
   under a rule. **File**, for a file that was read: its lines with their numbers, in the colors of its
   language. **Changes**, for an edit: the diff of the file with the line numbers of both sides, highlighted;
   a new file is shown as the file it is; a call that changed several files (`apply_patch`) has a tab per
@@ -741,7 +742,8 @@ output, the files and the lines changed, the timeout and the working folder. The
   the model, and its result. The result of `grep` is shown by file with what matched marked, the one of
   `list_dir` as entries with their icons, JSON is formatted (the records an `alta` command writes, one per
   line, each under its type), a text with fenced code blocks is rendered as Markdown, and any other text is
-  shown as it is. A failed call says its error once, above the tabs.
+  shown as it is. A failed call says its error once, above the tabs. The tabs take the height the window
+  has left: a long file, diff or result scrolls in its view, and nothing is cut at the bottom of the window.
 - **Details** has what the records hold as they are: the tool, the kind of call, the provider, the run and
   the call identity, when it started and ended, its arguments as JSON and the text of its result, each
   with a copy button, and the files the call read and modified.
