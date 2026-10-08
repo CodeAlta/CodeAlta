@@ -364,6 +364,33 @@ internal sealed class DesktopShell
         return true;
     }
 
+    /// <summary>The zoom of the window's view, in percent.</summary>
+    internal int Zoom { get { lock (_gate) return _preferences.Zoom; } }
+
+    /// <summary>Applies a zoom factor (1 is 100 percent) to the window's view; null until the view exists.</summary>
+    internal Action<double>? ApplyZoom { get; set; }
+
+    /// <summary>
+    /// Zooms the view one step in (<paramref name="direction"/> 1) or out (-1), or back to 100 percent (0), and keeps
+    /// the zoom for the next starts. Called on the window's thread.
+    /// </summary>
+    internal void StepZoom(int direction)
+    {
+        DesktopPreferences? preferences = null;
+        int zoom;
+        lock (_gate)
+        {
+            zoom = DesktopPreferences.NextZoom(_preferences.Zoom, direction);
+            if (_preferences.Zoom != zoom) preferences = _preferences = _preferences with { Zoom = zoom };
+        }
+
+        if (preferences is not null)
+        {
+            ApplyZoom?.Invoke(zoom / 100d);
+            preferences.Save(_dataRoot);
+        }
+    }
+
     /// <summary>Whether the MCP server of the application is turned on.</summary>
     internal bool McpServer { get { lock (_gate) return _preferences.McpServer; } }
 

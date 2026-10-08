@@ -113,3 +113,16 @@ test("command search ranks the slash name first, needs every word and hides inte
   assert.deepEqual(names("zzz-nothing"), []);
   assert.ok(names("session").includes("session_info") && names("session").includes("new_session"));
 });
+
+test("zoom takes the keys of a browser, with or without Shift for the plus key", () => {
+  for (const focus of ["prompt", "text", "none"] as const) {
+    assert.equal(resolveCommandKey(ctrl("="), false, focus).command, "zoomIn");
+    assert.equal(resolveCommandKey(ctrl("+", { shiftKey: true }), false, focus).command, "zoomIn");
+    // The plus key of the numeric keypad.
+    assert.equal(resolveCommandKey(ctrl("+"), false, focus).command, "zoomIn");
+    assert.equal(resolveCommandKey(ctrl("-"), false, focus).command, "zoomOut");
+    assert.equal(resolveCommandKey(ctrl("0"), false, focus).command, "resetZoom");
+  }
+  assert.equal(resolveCommandKey(key("="), false, "none").command, null);
+  assert.equal(resolveCommandKey(ctrl("=", { altKey: true }), false, "none").command, null);
+});

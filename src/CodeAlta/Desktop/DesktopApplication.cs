@@ -385,6 +385,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var view = await creatingView;
             Mark("view created");
             viewLifetime = view;
+            // The kept zoom, before the first document: the window never shows at another one.
+            view.ZoomFactor = shell.Zoom / 100d;
+            shell.ApplyZoom = factor => view.ZoomFactor = factor;
             view.NavigationRequested = request => ValueTask.FromResult(new NeoNavigationDecision(
                 IsApplicationDocument(request.Uri) ? NeoDecisionAction.Allow : NeoDecisionAction.Cancel));
             view.NewWindowRequested = static _ => ValueTask.FromResult(new NeoNewWindowDecision(NeoDecisionAction.Cancel));

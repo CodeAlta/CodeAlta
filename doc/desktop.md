@@ -280,6 +280,13 @@ The view is an application shell rather than a browser page: the browser's own f
 and zoom shortcuts, its context menu and its status bubble are turned off, so those keys reach
 CodeAlta's commands. Text-editing keys work as usual.
 
+CodeAlta's own zoom commands (**Zoom In** `Ctrl+=` or `Ctrl+Plus`, **Zoom Out** `Ctrl+-`, **Reset
+Zoom** `Ctrl+0`, also `/zoom_in`, `/zoom_out` and `/reset_zoom`) zoom the whole view, from 25 to 500
+percent in Chrome's steps, and work whatever window of the app is open. A focused terminal keeps those
+keys for its program. The host applies the zoom to the view (`desktopShell.zoom`) and keeps it in
+`preferences.json` (`zoom`, written only when it is not 100), so the next start opens at the same zoom
+before the page loads.
+
 ### When the host stops responding
 
 Reloading the window opens a new RPC session with the same host; sessions keep running and prompt
@@ -2577,6 +2584,7 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 |---|---|
 | `Ctrl+P`, `F1` | Search (sessions, projects, files, commands), help |
 | `Ctrl+Q` | Exit (`/exit`); works from any window |
+| `Ctrl+=` (or `Ctrl+Plus`), `Ctrl+-`, `Ctrl+0` | Zoom in, zoom out, reset the zoom; kept for the next start |
 | `Ctrl+O` | Open project |
 | `Ctrl+E`, `Ctrl+E` `Ctrl+E` | Open a project file in the code editor (`/edit`), open the code editor with the files of the project (`/editor`) |
 | In a code editor: `Ctrl+S`, `Ctrl+Shift+S`, `Ctrl+W`, `Ctrl+Tab` | Save the file, save every file, close the file shown, next file |
