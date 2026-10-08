@@ -3,7 +3,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { locales, translate } from "./localization";
-import { availableUpdate, installedNotice, RecoveryUpdateNotice, updateStatus } from "./UpdateNotice";
+import { availableUpdate, installedNotice, RecoveryUpdateNotice, updateCheckInterval, updateStatus, updateToAnnounce } from "./UpdateNotice";
 
 const available = { status: "available", latestVersion: "1.3.0", command: "dotnet tool update -g CodeAlta", releaseNotes: "https://github.com/CodeAlta/CodeAlta/releases/tag/1.3.0", canInstall: false };
 
@@ -52,4 +52,18 @@ test("the screen of a configuration that cannot be loaded offers the newer versi
     assert.ok(other.includes(translate(locale, "Exit CodeAlta, then run this command in a terminal.")), other);
     assert.ok(other.includes('role="alert"'), other);
   }
+});
+
+test("an application that stays open announces each newer version once", () => {
+  const first = availableUpdate(available)!;
+  // The check of the start, then the same answer every time the page asks again.
+  assert.equal(updateToAnnounce(null, first), first);
+  assert.equal(updateToAnnounce("1.3.0", first), null);
+  // A version published later is new again; nothing newer says nothing.
+  const next = availableUpdate({ ...available, latestVersion: "1.4.0" })!;
+  assert.equal(updateToAnnounce("1.3.0", next), next);
+  assert.equal(updateToAnnounce("1.3.0", null), null);
+  assert.equal(updateToAnnounce(null, null), null);
+  // The page asks more often than the host looks at nuget.org (every four hours), and not every minute.
+  assert.ok(updateCheckInterval >= 10 * 60_000 && updateCheckInterval <= 60 * 60_000);
 });

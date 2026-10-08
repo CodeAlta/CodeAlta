@@ -32,9 +32,86 @@ public sealed class DesktopAppUpdateTests
         // The page opens the notes through the host, which opens its own address and no other.
         Assert.AreEqual("ok", (await service.OpenReleaseNotesAsync(new(), CancellationToken.None)).Status);
         CollectionAssert.AreEqual(new[] { "https://github.com/CodeAlta/CodeAlta/releases/tag/1.3.0" }, opened);
-        // One look at nuget.org per run, however often the page asks.
+        // One look at nuget.org for a while, however often the page asks.
         _ = await service.CheckAsync(new(), CancellationToken.None);
+        _ = await service.CheckAsync(new(Refresh: true), CancellationToken.None);
         Assert.AreEqual(1, checks);
+    }
+
+    [TestMethod]
+    public async Task ApplicationThatKeepsRunning_ChecksAgainAsTimePasses()
+    {
+        // 1.2.0 is published while a 1.1.1 started the evening before is still running.
+        var time = new ManualTime();
+        var published = "1.1.1";
+        var checks = 0;
+        using var service = new AppUpdateService("1.1.1", (package, current, prerelease, _) =>
+        {
+            checks++;
+            var latest = NuGetVersion.Parse(published);
+            return Task.FromResult(new CodeAltaNuGetUpdateCheckResult(package, current, latest, true, latest > current, prerelease));
+        }, _ => true) { Time = time };
+
+        Assert.AreEqual("latest", (await service.CheckAsync(new(), CancellationToken.None)).Status);
+        published = "1.2.0";
+        time.Advance(AppUpdateService.Period - TimeSpan.FromSeconds(1));
+        Assert.AreEqual("latest", (await service.CheckAsync(new(), CancellationToken.None)).Status, "the page asks often: nuget.org is not asked each time");
+        Assert.AreEqual(1, checks);
+        time.Advance(TimeSpan.FromSeconds(1));
+        var update = await service.CheckAsync(new(), CancellationToken.None);
+        Assert.AreEqual(("available", "1.2.0", 2), (update.Status, update.LatestVersion, checks));
+
+        // The About page asks for a check that is not hours old, and still not for one of a moment ago.
+        published = "1.3.0";
+        Assert.AreEqual("1.2.0", (await service.CheckAsync(new(Refresh: true), CancellationToken.None)).LatestVersion);
+        time.Advance(AppUpdateService.MinimumAge);
+        Assert.AreEqual("1.2.0", (await service.CheckAsync(new(), CancellationToken.None)).LatestVersion);
+        Assert.AreEqual("1.3.0", (await service.CheckAsync(new(Refresh: true), CancellationToken.None)).LatestVersion);
+        Assert.AreEqual(3, checks);
+
+        // What the page was told is what is installed or opened: neither asks nuget.org again, however old the check.
+        time.Advance(AppUpdateService.Period + AppUpdateService.Period);
+        Assert.AreEqual("ok", (await service.OpenReleaseNotesAsync(new(), CancellationToken.None)).Status);
+        Assert.AreEqual("unavailable", (await service.InstallAsync(new(), CancellationToken.None)).Status, "not an installed tool");
+        Assert.AreEqual(3, checks);
+    }
+
+    [TestMethod]
+    public async Task FailedCheck_IsMadeAgainSoon_AndABuildWithoutVersionNever()
+    {
+        var time = new ManualTime();
+        var online = false;
+        var checks = 0;
+        using var service = new AppUpdateService("1.2.0", (package, current, prerelease, _) =>
+        {
+            checks++;
+            return online ? Task.FromResult(new CodeAltaNuGetUpdateCheckResult(package, current, NuGetVersion.Parse("1.3.0"), true, true, prerelease))
+                : throw new HttpRequestException("no network");
+        }, _ => true) { Time = time };
+        Assert.AreEqual("failed", (await service.CheckAsync(new(), CancellationToken.None)).Status);
+        online = true;
+        Assert.AreEqual("failed", (await service.CheckAsync(new(), CancellationToken.None)).Status);
+        time.Advance(AppUpdateService.MinimumAge);
+        Assert.AreEqual(("available", 2), ((await service.CheckAsync(new(), CancellationToken.None)).Status, checks));
+
+        // A build of the checkout, and an instance on explicit roots, ask nothing however long they run.
+        using var development = new AppUpdateService("development", (_, _, _, _) => throw new InvalidOperationException("not asked"), _ => true) { Time = time };
+        using var absent = new AppUpdateService { Time = time };
+        foreach (var quiet in new[] { development, absent })
+        {
+            Assert.AreEqual("unavailable", (await quiet.CheckAsync(new(), CancellationToken.None)).Status);
+            time.Advance(AppUpdateService.Period + AppUpdateService.Period);
+            Assert.AreEqual("unavailable", (await quiet.CheckAsync(new(Refresh: true), CancellationToken.None)).Status);
+        }
+    }
+
+    // A clock the test moves: the age of a check is elapsed time, not the time of day.
+    private sealed class ManualTime : TimeProvider
+    {
+        private long _ticks;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => Interlocked.Read(ref _ticks);
+        public void Advance(TimeSpan by) => Interlocked.Add(ref _ticks, by.Ticks);
     }
 
     [TestMethod]

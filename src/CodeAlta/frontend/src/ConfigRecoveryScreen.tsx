@@ -51,7 +51,7 @@ function ConfigRecovery({ api, updates }: { api: Api; updates: Updates }) {
   const updating = useRef(false);
   useEffect(() => {
     const abort = new AbortController();
-    void updates.check({}, { signal: abort.signal, timeoutMilliseconds: 30_000 })
+    void updates.check({ refresh: false }, { signal: abort.signal, timeoutMilliseconds: 30_000 })
       .then(value => { if (!abort.signal.aborted) setUpdate(availableUpdate(value)); }, () => { /* No check: the file is still there to repair. */ });
     return () => abort.abort();
   }, [updates]);

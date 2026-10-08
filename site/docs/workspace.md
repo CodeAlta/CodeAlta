@@ -525,11 +525,11 @@ The desktop app always approves requests automatically.
 
 ## About and updates
 
-Open it with `Ctrl+G Ctrl+A` or `/about`. It shows the current version and whether the startup update check found a newer .NET tool package.
+Open it with `Ctrl+G Ctrl+A` or `/about`. It shows the current version and whether the update check found a newer .NET tool package.
 
 ### New version notice
 
-When the startup update check finds a newer package on NuGet, CodeAlta shows a notice with the new version and a link to the release notes.
+CodeAlta checks NuGet for a newer package when it starts. When there is one, it shows a notice with the new version and a link to the release notes. The desktop app checks again every few hours while it stays open, and when you open About, so a version published in the meantime is announced without a restart.
 
 - **Desktop**: the notice has an **Update and restart** button. CodeAlta exits, runs `dotnet tool update -g CodeAlta`, and starts again.
 - **TUI**: the notice shows the `dotnet tool update -g CodeAlta.Tui` command with a copy action. After you exit, the same command is printed so you can run it in your shell.

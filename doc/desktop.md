@@ -172,8 +172,13 @@ ends (`DesktopTerminalStart`):
 
 ### Updates
 
-Once per start the desktop asks nuget.org whether a newer `CodeAlta` package is published, as the
-terminal application does for its own package (a prerelease build also considers prereleases). The
+At its start the desktop asks nuget.org whether a newer `CodeAlta` package is published, as the
+terminal application does for its own package (a prerelease build also considers prereleases). It
+stays open, or in the notification area, for days, so it asks again: the page asks the host every
+half hour, and when its window comes back after that long; the host looks at nuget.org again when
+its last look is four hours old, or five minutes old after a look that failed or when the About page
+is opened. Each newer version is announced once. Installing a version and opening its release notes
+use what the last look found. The
 tool package only names one package per platform (`CodeAlta.win-x64`, `CodeAlta.Tui.linux-x64`), and
 nuget.org can list it well before those: a version counts once the package of the running platform
 lists it too, so that the update command cannot fail on a package that is not there yet. A
@@ -182,7 +187,7 @@ newer version is announced by a notice with the version, the command that instal
 it, and **View release notes**, which opens the release page in the browser. The application has to
 be exited first (**Exit** in the tray, or `alta --exit`): the tool cannot be replaced while it runs.
 Settings → About keeps the result under **Updates**. A build that is not a published version, and an
-instance on explicit roots, make no request.
+instance on explicit roots, make no request, however long they run.
 
 For a tool installed with `dotnet tool install -g`, the notice and the About page also have **Update
 and restart**. It hands the update to a small script in the application data directory (`update/`),

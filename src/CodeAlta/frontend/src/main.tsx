@@ -16,7 +16,7 @@ import { CloseWindowDialog } from "./CloseWindowDialog";
 import { closeBehavior, entryAddedGuide, entryAddedNotice, type CloseBehavior } from "./desktopShell";
 import { EntryAddedDialog } from "./EntryAddedDialog";
 import { showToast } from "./appToaster";
-import { availableUpdate, installedNotice, UpdateNotice } from "./UpdateNotice";
+import { availableUpdate, installedNotice, updateCheckInterval, updateToAnnounce, UpdateNotice } from "./UpdateNotice";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionPluginEvents, projectFiles, projectGit, promptImages, toolCalls, composerStatus, pluginUi, sessionUserInput, type BootStatus,
@@ -836,9 +836,12 @@ function App() {
   const [closeQuestion, setCloseQuestion] = useState(false);
   const exitPending = useRef(false);
   exitPending.current = exiting !== null || exitQuestionFor !== null;
-  // One look for a newer version per run, as the terminal application does: a newer one is announced once,
-  // with the command that installs it; Settings > About keeps the result.
+  // A look for a newer version at the start, as the terminal application does, then again as time passes: the
+  // application stays open, or in the notification area, for days. A newer version is announced once, with the
+  // command that installs it; Settings > About keeps the result.
   const [appUpdateResult, setAppUpdateResult] = useState<AppUpdateResponse | null>(null);
+  const announcedUpdate = useRef<string | null>(null);
+  const updateChecked = useRef(false);
   // Update and restart: the host hands the update to a helper and exits as it does for Exit. An exit the
   // user cancels (unsaved files, running sessions) calls the update off.
   const updatePending = useRef(false);
@@ -857,22 +860,48 @@ function App() {
     void appUpdate.cancelInstallation({}, { timeoutMilliseconds: 15_000 }).catch(() => { /* The helper gives up by itself after its wait. */ });
   }
   function openReleaseNotes() { void appUpdate.openReleaseNotes({}, { timeoutMilliseconds: 15_000 }).catch(() => { /* The address is in the toast's command line. */ }); }
+  // Asks the host, which looks at nuget.org again only when its last look is old enough; `refresh` is the
+  // About page, where a look of a few minutes ago is made again.
+  function checkForUpdate(refresh: boolean, signal: AbortSignal) {
+    void appUpdate.check({ refresh }, { signal, timeoutMilliseconds: 30_000 }).then(value => {
+      if (signal.aborted) return;
+      const first = !updateChecked.current;
+      updateChecked.current = true;
+      setAppUpdateResult(value);
+      // What became of the update the previous run started, said once, then what is available now.
+      const installed = first ? installedNotice(value) : null;
+      if (installed) showToast({ intent: installed.intent, icon: installed.intent === "success" ? "tick" : "error", timeout: 12_000,
+        message: translate(shownLocale.current, installed.key, installed.parameters) });
+      const available = updateToAnnounce(announcedUpdate.current, availableUpdate(value));
+      if (!available) return;
+      announcedUpdate.current = available.version;
+      showToast({ intent: "primary", icon: "automatic-updates", timeout: 20_000,
+        message: <UpdateNotice update={available} locale={shownLocale.current} onOpenReleaseNotes={openReleaseNotes} onInstall={installUpdate} /> });
+    }, () => {
+      // A later question that gets no answer leaves what the page knows.
+      if (!signal.aborted && !updateChecked.current) setAppUpdateResult({ status: "failed", packageId: "CodeAlta", currentVersion: "", latestVersion: null, command: null, releaseNotes: null, canInstall: false, installed: null });
+    });
+  }
   useEffect(() => {
     if (!status?.hostEpoch) return;
     const abort = new AbortController();
-    void appUpdate.check({}, { signal: abort.signal, timeoutMilliseconds: 30_000 }).then(value => {
-      if (abort.signal.aborted) return;
-      setAppUpdateResult(value);
-      // What became of the update the previous run started, then what is available now.
-      const installed = installedNotice(value);
-      if (installed) showToast({ intent: installed.intent, icon: installed.intent === "success" ? "tick" : "error", timeout: 12_000,
-        message: translate(shownLocale.current, installed.key, installed.parameters) });
-      const available = availableUpdate(value);
-      if (available) showToast({ intent: "primary", icon: "automatic-updates", timeout: 20_000,
-        message: <UpdateNotice update={available} locale={shownLocale.current} onOpenReleaseNotes={openReleaseNotes} onInstall={installUpdate} /> });
-    }, () => { if (!abort.signal.aborted) setAppUpdateResult({ status: "failed", packageId: "CodeAlta", currentVersion: "", latestVersion: null, command: null, releaseNotes: null, canInstall: false, installed: null }); });
-    return () => abort.abort();
+    checkForUpdate(false, abort.signal);
+    // Again as time passes, and when the window comes back after a while: a hidden page may run no timer.
+    let asked = Date.now();
+    const again = () => { if (document.visibilityState === "visible" && Date.now() - asked >= updateCheckInterval) { asked = Date.now(); checkForUpdate(false, abort.signal); } };
+    const timer = window.setInterval(again, updateCheckInterval);
+    document.addEventListener("visibilitychange", again);
+    window.addEventListener("focus", again);
+    return () => { abort.abort(); window.clearInterval(timer); document.removeEventListener("visibilitychange", again); window.removeEventListener("focus", again); };
   }, [status?.hostEpoch]);
+  // The About page shows the result: it is asked for again when the page opens.
+  const aboutOpen = settingsOpen && settingsSection === "about";
+  useEffect(() => {
+    if (!aboutOpen || !status?.hostEpoch || !updateChecked.current) return;
+    const abort = new AbortController();
+    checkForUpdate(true, abort.signal);
+    return () => abort.abort();
+  }, [aboutOpen, status?.hostEpoch]);
   const shownLocale = useRef(language.locale); shownLocale.current = language.locale;
   // Said once, the first time the installed tool is added to the desktop's applications.
   // The notice may come before the platform is known: it then waits for it, as each platform is told differently.

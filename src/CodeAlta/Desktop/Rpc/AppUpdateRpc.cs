@@ -6,8 +6,10 @@ using NuGet.Versioning;
 namespace CodeAlta.Desktop.Rpc;
 
 /// <summary>
-/// Whether a newer CodeAlta package is published, checked once at start as the terminal application does:
-/// the page shows the new version, its release notes and the command that updates the tool.
+/// Whether a newer CodeAlta package is published, checked at start as the terminal application does: the page
+/// shows the new version, its release notes and the command that updates the tool. The desktop stays open, or
+/// in the notification area, for days: the page asks again as time passes, and a check that is old enough is
+/// then made again.
 /// </summary>
 [NeoRpcService("appUpdate", Version = 1)]
 internal sealed class AppUpdateService : IDisposable
@@ -21,6 +23,19 @@ internal sealed class AppUpdateService : IDisposable
     private readonly CancellationTokenSource _closing = new();
     private readonly Lock _gate = new();
     private Task<AppUpdateResponse>? _result;
+    private long _checkedAt;
+
+    /// <summary>How old a check is before the page's next question makes it again.</summary>
+    internal static readonly TimeSpan Period = TimeSpan.FromHours(4);
+
+    /// <summary>
+    /// How old a check is before it is made again for a question that asks for it (the About page was
+    /// opened), or after it failed: nuget.org is not asked more often than this.
+    /// </summary>
+    internal static readonly TimeSpan MinimumAge = TimeSpan.FromMinutes(5);
+
+    /// <summary>The clock the age of a check is measured with.</summary>
+    internal TimeProvider Time { get; init; } = TimeProvider.System;
 
     /// <summary>Creates an unavailable service for a window without an installed application behind it.</summary>
     internal AppUpdateService()
@@ -55,19 +70,21 @@ internal sealed class AppUpdateService : IDisposable
     /// <summary>How the update started by the previous run went (<c>ok</c> or <c>failed</c>); null when none ran.</summary>
     internal string? Installed { get; init; }
 
-    /// <summary>Starts the one check of this run; the page asks for its result later.</summary>
-    internal void Start() => _ = Result();
+    /// <summary>Starts the first check of this run; the page asks for its result later.</summary>
+    internal void Start() => _ = Result(refresh: false);
 
     /// <summary>
-    /// The result of this run's check: <c>available</c> with the newer version, its release notes and the
-    /// update command, <c>latest</c>, <c>not_found</c> (the package is not published), <c>failed</c>
-    /// (nuget.org could not be read) or <c>unavailable</c> (a build that is not a published version).
+    /// The result of the check: <c>available</c> with the newer version, its release notes and the update
+    /// command, <c>latest</c>, <c>not_found</c> (the package is not published), <c>failed</c> (nuget.org
+    /// could not be read) or <c>unavailable</c> (a build that is not a published version). A check older than
+    /// <see cref="Period"/> is made again first, and one older than <see cref="MinimumAge"/> when the request
+    /// asks for it or when it failed.
     /// </summary>
     [NeoRpcMethod("check")]
-    public async Task<AppUpdateResponse> CheckAsync(AppUpdateRequest request, CancellationToken cancellationToken)
+    public async Task<AppUpdateResponse> CheckAsync(AppUpdateCheckRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var result = await Result().WaitAsync(cancellationToken).ConfigureAwait(false);
+        var result = await Result(request.Refresh).WaitAsync(cancellationToken).ConfigureAwait(false);
         return result with { CanInstall = Install is not null && result.Status == "available", Installed = Installed };
     }
 
@@ -80,7 +97,7 @@ internal sealed class AppUpdateService : IDisposable
     public async Task<AppUpdateOpenResponse> InstallAsync(AppUpdateRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var result = await Result().WaitAsync(cancellationToken).ConfigureAwait(false);
+        var result = await Known().WaitAsync(cancellationToken).ConfigureAwait(false);
         if (Install is null || result is not { Status: "available", LatestVersion: { } latest }) return new("unavailable");
         return new(Install(NuGetVersion.TryParse(latest, out var version) && version.IsPrerelease) ? "started" : "failed");
     }
@@ -100,7 +117,7 @@ internal sealed class AppUpdateService : IDisposable
     public async Task<AppUpdateOpenResponse> OpenReleaseNotesAsync(AppUpdateRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var result = await Result().WaitAsync(cancellationToken).ConfigureAwait(false);
+        var result = await Known().WaitAsync(cancellationToken).ConfigureAwait(false);
         // The address is the host's own: the page cannot make the host open anything else.
         return new(result is { Status: "available", ReleaseNotes: { } address } && _open(address) ? "ok" : "unavailable");
     }
@@ -112,9 +129,30 @@ internal sealed class AppUpdateService : IDisposable
         _closing.Dispose();
     }
 
-    private Task<AppUpdateResponse> Result()
+    // What the page was last told: installing a version or opening its notes asks nuget.org nothing more.
+    private Task<AppUpdateResponse> Known()
     {
-        lock (_gate) return _result ??= Task.Run(CheckOnceAsync);
+        lock (_gate) return _result ?? Result(refresh: false);
+    }
+
+    private Task<AppUpdateResponse> Result(bool refresh)
+    {
+        lock (_gate)
+        {
+            if (_result is not null && !Expired(_result, refresh)) return _result;
+            _checkedAt = Time.GetTimestamp();
+            return _result = Task.Run(CheckOnceAsync);
+        }
+    }
+
+    // One check at a time; a build without a published version has nothing to ask again.
+    private bool Expired(Task<AppUpdateResponse> last, bool refresh)
+    {
+        if (!last.IsCompleted) return false;
+        if (!last.IsCompletedSuccessfully) return true;
+        var status = last.Result.Status;
+        if (status == "unavailable") return false;
+        return Time.GetElapsedTime(_checkedAt) >= (refresh || status == "failed" ? MinimumAge : Period);
     }
 
     private async Task<AppUpdateResponse> CheckOnceAsync()
@@ -150,6 +188,9 @@ internal sealed class AppUpdateService : IDisposable
 }
 
 internal sealed record AppUpdateRequest;
+
+/// <param name="Refresh">The user is looking at the result (the About page): a check of a few minutes is made again.</param>
+internal sealed record AppUpdateCheckRequest(bool Refresh = false);
 
 /// <param name="Status"><c>available</c>, <c>latest</c>, <c>not_found</c>, <c>failed</c> or <c>unavailable</c>.</param>
 /// <param name="PackageId">The package that was checked.</param>

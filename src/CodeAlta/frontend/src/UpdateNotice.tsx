@@ -14,6 +14,20 @@ export function availableUpdate(update: Pick<AppUpdateResponse, "status" | "late
     ? { version: update.latestVersion, command: update.command, releaseNotes: !!update.releaseNotes, canInstall: update.canInstall } : null;
 }
 
+/**
+ * How often the page asks the host whether there is a newer version. The host decides whether its last look
+ * at nuget.org is old enough to be made again, so the page may ask often: also when the window comes back.
+ */
+export const updateCheckInterval = 30 * 60_000;
+
+/**
+ * The newer version to announce after a check: one that was not announced yet. The application stays open
+ * for days and checks again as time passes; each newer version is announced once.
+ */
+export function updateToAnnounce(announced: string | null, update: AvailableUpdate | null): AvailableUpdate | null {
+  return update && update.version !== announced ? update : null;
+}
+
 /** What to say about the update the previous run started; null when none ran. */
 export function installedNotice(update: Pick<AppUpdateResponse, "installed" | "currentVersion">): { key: MessageKey; parameters?: Readonly<Record<string, string>>; intent: "success" | "danger" } | null {
   return update.installed === "ok" ? { key: "CodeAlta was updated to {version}.", parameters: { version: update.currentVersion }, intent: "success" }
