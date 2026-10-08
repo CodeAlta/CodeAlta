@@ -2,15 +2,15 @@ import type { SessionRuntimeActivityResponse } from "#neoastra";
 import type { SessionHierarchyRow } from "./sessionHierarchy";
 
 export const recentSessionCountKey = "codealta.desktop.recent-session-count.v1";
-export const defaultRecentSessionCount = 20;
+export const defaultRecentSessionCount = 6;
 export function validRecentSessionCount(value: number) { return Number.isInteger(value) && value >= 1 && value <= 50; }
 export function readRecentSessionCount(read: () => string | null): { value: number; notice?: string; issue?: "invalid" | "unavailable" } {
   try {
     const raw = read();
     if (raw === null) return { value: defaultRecentSessionCount };
     if (/^(?:[1-9]|[1-4][0-9]|50)$/.test(raw)) return { value: Number(raw) };
-    return { value: defaultRecentSessionCount, issue: "invalid", notice: "Recent session count: invalid saved preference; using 20. Not overwritten." };
-  } catch { return { value: defaultRecentSessionCount, issue: "unavailable", notice: "Recent session count: local storage unavailable; using 20. Not saved." }; }
+    return { value: defaultRecentSessionCount, issue: "invalid", notice: `Recent session count: invalid saved preference; using ${defaultRecentSessionCount}. Not overwritten.` };
+  } catch { return { value: defaultRecentSessionCount, issue: "unavailable", notice: `Recent session count: local storage unavailable; using ${defaultRecentSessionCount}. Not saved.` }; }
 }
 const decimal = (value: unknown) => typeof value === "string" && /^(0|[1-9][0-9]{0,18})$/.test(value) && BigInt(value) <= 9223372036854775807n;
 export function activityTicks(value: unknown): bigint | null {

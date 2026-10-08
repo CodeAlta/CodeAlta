@@ -62,7 +62,7 @@ not reuse them. Future provider-supplied times are not corrected using a clock.
 ## Presentation only
 
 General settings persists **Recent session display count (1–50)** in WebView local
-storage (`codealta.desktop.recent-session-count.v1`, default 20). Malformed values
+storage (`codealta.desktop.recent-session-count.v1`, default 6). Malformed values
 are not overwritten automatically; defaults and unavailable/failed storage are
 reported in settings. Failed writes still apply in this window.
 

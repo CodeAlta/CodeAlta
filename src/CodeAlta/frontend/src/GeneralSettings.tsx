@@ -9,6 +9,7 @@ import { themeLabel, themes, type Theme, type PreferenceNotices } from "./window
 import { clampSessionWidth, defaultSessionWidth, minimumSessionWidth, sessionWidthStep } from "./sessionWidth";
 import { useShellLanguage } from "./shellLanguage";
 import { locales, languageNames, preferenceNotice } from "./localization";
+import { defaultRecentSessionCount } from "./recentSessions";
 import { closeBehavior, closeBehaviorLabel, closeBehaviors, keepRunningPlace, type CloseBehavior } from "./desktopShell";
 
 /** The icon of each theme choice, shared with the title-bar switch. */
@@ -63,7 +64,7 @@ export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, s
       </HTMLSelect>
     </Field>
     <Field label={t("Recent session display count (1–50)")} htmlFor="settings-recent-count"
-      notice={notices.recent && <p role="status" className="notice" data-diagnostic={notices.recent}>{preferenceNotice(locale, "Recent session count", "20", notices.recent)}</p>}>
+      notice={notices.recent && <p role="status" className="notice" data-diagnostic={notices.recent}>{preferenceNotice(locale, "Recent session count", String(defaultRecentSessionCount), notices.recent)}</p>}>
       <HTMLSelect id="settings-recent-count" value={recentSessionCount} onChange={event => setRecentSessionCount(Number(event.target.value))}>
         {Array.from({ length: 50 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}
       </HTMLSelect>

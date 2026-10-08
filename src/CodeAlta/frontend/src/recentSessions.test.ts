@@ -5,9 +5,9 @@ import type { SessionHierarchyRow } from "./sessionHierarchy";
 
 test("recent count storage is canonical, bounded, nonwriting and reports failures", () => {
   for (let i = 1; i <= 50; i++) assert.deepEqual(readRecentSessionCount(() => String(i)), { value: i });
-  assert.deepEqual(readRecentSessionCount(() => null), { value: 20 });
+  assert.deepEqual(readRecentSessionCount(() => null), { value: 6 });
   for (const raw of ["", "0", "51", "1.0", "01", " 2", "NaN", "-1", "999999999999999999999"]) {
-    assert.equal(readRecentSessionCount(() => raw).value, 20);
+    assert.equal(readRecentSessionCount(() => raw).value, 6);
     assert.match(readRecentSessionCount(() => raw).notice!, /invalid.*Not overwritten/);
   }
   assert.match(readRecentSessionCount(() => { throw Error(); }).notice!, /unavailable/);
