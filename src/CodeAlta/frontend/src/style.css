@@ -1862,6 +1862,11 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .config-recovery-heading p { margin: 0 0 6px; color: var(--muted); }
 .config-recovery-icon { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid color-mix(in srgb, var(--red) 45%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red); }
 .config-recovery-path { display: inline-block; max-width: 100%; padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--muted); font: 12px/1.6 "Cascadia Code", Consolas, monospace; overflow-wrap: anywhere; user-select: text; }
+.config-recovery-update { flex: none; position: relative; }
+.config-recovery-update > svg { position: absolute; top: 10px; left: 9px; }
+.config-recovery-update-body { display: grid; gap: 4px; }
+.config-recovery-update-body .update-notice { margin-top: 4px; max-width: 560px; }
+.config-recovery-update-failure { color: var(--red); }
 .config-recovery-editor { display: grid; background: var(--panel); }
 .config-recovery-footer { display: flex; flex-direction: column; gap: 12px; }
 .config-recovery-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-height: 36px; }

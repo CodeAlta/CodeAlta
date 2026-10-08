@@ -75,7 +75,8 @@ internal static class DesktopUpdateInstaller
         script.Append(" > ").Append(DesktopIntegration.ShellQuote(log)).Append(" 2>&1\n");
         script.Append("echo $? > ").Append(DesktopIntegration.ShellQuote(result)).Append('\n');
         if (bundle is not null)
-            script.Append("if [ -d ").Append(DesktopIntegration.ShellQuote(bundle)).Append(" ]; then /usr/bin/open ").Append(DesktopIntegration.ShellQuote(bundle)).Append("; exit 0; fi\n");
+            // The bundle keeps the icon and the place of the application in the Dock; the launcher when it does not open.
+            script.Append("if [ -d ").Append(DesktopIntegration.ShellQuote(bundle)).Append(" ] && /usr/bin/open ").Append(DesktopIntegration.ShellQuote(bundle)).Append("; then exit 0; fi\n");
         script.Append("nohup ").Append(DesktopIntegration.ShellQuote(launcher)).Append(" >/dev/null 2>&1 &\n");
         return script.ToString();
     }

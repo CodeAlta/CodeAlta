@@ -410,6 +410,32 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 remembered.Save(options.DataRoot);
                 application.Dispatcher.Post(() => { if (!startedWindow.IsClosed) startedWindow.TitleBar = DesktopWindowChrome.TitleBar(remembered); });
             }
+            // As the terminal application does: one look at nuget.org for a newer version. An instance on
+            // explicit roots is automation and stays off the network.
+            // Only an installed tool can replace itself: a helper waits for this process to end, runs
+            // the update and starts CodeAlta again.
+            AppUpdateService StartAppUpdate()
+            {
+                var updateLauncher = options.Developer ? null : DesktopIntegration.InstalledLauncher(AppContext.BaseDirectory, OperatingSystem.IsWindows());
+                var updateDotnet = DesktopUpdateInstaller.DotnetPath();
+                var selfUpdate = updateLauncher is not null && updateDotnet is not null && File.Exists(updateLauncher);
+                var service = roots.Home is not null ? new AppUpdateService() : new AppUpdateService(DesktopCommandLine.Version)
+                {
+                    Installed = DesktopUpdateInstaller.ConsumeResult(options.DataRoot),
+                    Install = !selfUpdate ? null : prerelease =>
+                    {
+                        if (!DesktopUpdateInstaller.Start(options.DataRoot, updateLauncher!, updateDotnet!,
+                            CodeAltaNuGetUpdateChecker.UpdateArguments(AppUpdateService.PackageId, prerelease))) return false;
+                        // The workspace exits in its own way, with its questions; the configuration editor has none to ask.
+                        if (shell.HasWorkspace) shell.RequestUserExit();
+                        else shell.RequestExit(confirmed: true);
+                        return true;
+                    },
+                    CancelInstall = () => DesktopUpdateInstaller.Cancel(options.DataRoot),
+                };
+                service.Start();
+                return service;
+            }
             if (_hostCreation is null)
             {
                 // No host yet: the page gets the configuration editor alone. Saving a valid file starts the
@@ -425,6 +451,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 });
                 recoveryBuilder.AddDesktopShellService(new DesktopShellService(shell));
                 recoveryBuilder.AddColorSchemesService(new ColorSchemesService(options.CatalogRoot!));
+                // A file written by a newer version is the usual reason an installed one cannot read it: the
+                // editor says when a newer version is published, and can install it.
+                appUpdate = StartAppUpdate();
+                recoveryBuilder.AddAppUpdateService(appUpdate);
                 await using (var recoveryRpc = recoveryBuilder.Build())
                 {
                     await using (NeoRpcViewBinding.Bind(recoveryRpc, view))
@@ -511,26 +541,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddDesktopShellService(new DesktopShellService(shell));
                     builder.AddMarkdownLinksService(new MarkdownLinksService(epoch, DesktopLinks.Open));
                     builder.AddColorSchemesService(new ColorSchemesService(options.CatalogRoot!));
-                    // As the terminal application does: one look at nuget.org for a newer version. An instance on
-                    // explicit roots is automation and stays off the network.
-                    // Only an installed tool can replace itself: a helper waits for this process to end, runs
-                    // the update and starts CodeAlta again.
-                    var updateLauncher = options.Developer ? null : DesktopIntegration.InstalledLauncher(AppContext.BaseDirectory, OperatingSystem.IsWindows());
-                    var updateDotnet = DesktopUpdateInstaller.DotnetPath();
-                    var selfUpdate = updateLauncher is not null && updateDotnet is not null && File.Exists(updateLauncher);
-                    appUpdate = roots.Home is not null ? new AppUpdateService() : new AppUpdateService(DesktopCommandLine.Version)
-                    {
-                        Installed = DesktopUpdateInstaller.ConsumeResult(options.DataRoot),
-                        Install = !selfUpdate ? null : prerelease =>
-                        {
-                            if (!DesktopUpdateInstaller.Start(options.DataRoot, updateLauncher!, updateDotnet!,
-                                CodeAltaNuGetUpdateChecker.UpdateArguments(AppUpdateService.PackageId, prerelease))) return false;
-                            shell.RequestUserExit();
-                            return true;
-                        },
-                        CancelInstall = () => DesktopUpdateInstaller.Cancel(options.DataRoot),
-                    };
-                    appUpdate.Start();
+                    // The one of the configuration editor when the application started with it.
+                    appUpdate ??= StartAppUpdate();
                     builder.AddAppUpdateService(appUpdate);
                     builder.AddWorkspaceService(workspace);
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime));

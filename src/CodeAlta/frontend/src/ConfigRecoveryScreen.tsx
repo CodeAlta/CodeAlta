@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Callout, NonIdealState } from "@blueprintjs/core";
-import { startupConfig, type StartupConfigDocument, type StartupConfigValidation } from "#neoastra";
+import { appUpdate, startupConfig, type StartupConfigDocument, type StartupConfigValidation } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import { CodeEditor, type CodeEditorHandle } from "./monaco/CodeEditor";
@@ -9,28 +9,30 @@ import { maximumConfigLength } from "./configEditor";
 import { ShellAppearance } from "./ShellAppearance";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
 import { dismissStartupScreen } from "./startupScreen";
+import { availableUpdate, RecoveryUpdateNotice, type AvailableUpdate } from "./UpdateNotice";
 import { useWindowTitleBar, WindowBrand, WindowControls } from "./windowChrome";
 import { useWindowPreferences } from "./windowPreferences";
 
 type Api = Pick<typeof startupConfig, "read" | "reload" | "validate" | "save" | "leave">;
+type Updates = Pick<typeof appUpdate, "check" | "install" | "openReleaseNotes">;
 
 /**
  * The window when the global configuration file cannot be loaded: there is no workspace yet, only the file
  * in an editor. It is checked as it is typed; saving a valid file starts the application.
  */
-export function ConfigRecoveryScreen({ developer = false, api = startupConfig }: { developer?: boolean; api?: Api }) {
+export function ConfigRecoveryScreen({ developer = false, api = startupConfig, updates = appUpdate }: { developer?: boolean; api?: Api; updates?: Updates }) {
   const language = useLanguagePreference();
   const { appearance } = useWindowPreferences();
   const titleBar = useWindowTitleBar();
   // The same theme as the workspace: this screen stands where it would.
   return <ShellLanguageContext.Provider value={language}><ShellAppearance appearance={appearance} /><div className="config-recovery-shell">
     <header className="config-recovery-titlebar" data-neoastra-drag-region><WindowBrand developer={developer} /><WindowControls snapshot={titleBar} /></header>
-    <ConfigRecovery api={api} />
+    <ConfigRecovery api={api} updates={updates} />
   </div></ShellLanguageContext.Provider>;
 }
 
-function ConfigRecovery({ api }: { api: Api }) {
-  const { t } = useShellLanguage();
+function ConfigRecovery({ api, updates }: { api: Api; updates: Updates }) {
+  const { t, locale } = useShellLanguage();
   const [document, setDocument] = useState<StartupConfigDocument | null>(null);
   const [content, setContent] = useState("");
   const [validation, setValidation] = useState<StartupConfigValidation | null>(null);
@@ -42,6 +44,25 @@ function ConfigRecovery({ api }: { api: Api }) {
   const shownError = useRef(false);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  // A file written by a newer version is the usual reason an installed one cannot read it, and this screen is
+  // then all the application shows: it says when a newer version is published, and installs it.
+  const [update, setUpdate] = useState<AvailableUpdate | null>(null);
+  const [updateFailure, setUpdateFailure] = useState(false);
+  const updating = useRef(false);
+  useEffect(() => {
+    const abort = new AbortController();
+    void updates.check({}, { signal: abort.signal, timeoutMilliseconds: 30_000 })
+      .then(value => { if (!abort.signal.aborted) setUpdate(availableUpdate(value)); }, () => { /* No check: the file is still there to repair. */ });
+    return () => abort.abort();
+  }, [updates]);
+  function installUpdate() {
+    if (updating.current) return;
+    updating.current = true; setUpdateFailure(false);
+    void updates.install({}, { timeoutMilliseconds: 30_000 }).then(reply => reply.status === "started", () => false).then(started => {
+      if (started || !alive.current) return;
+      updating.current = false; setUpdateFailure(true);
+    });
+  }
 
   function show(value: StartupConfigDocument) {
     setDocument(value); setFailure(null);
@@ -120,6 +141,8 @@ function ConfigRecovery({ api }: { api: Api }) {
         <p>{t("Repair the file and save it to continue.")}</p>
         {document?.path && <code className="config-recovery-path">{document.path}</code>}</div>
     </header>
+    {update && <RecoveryUpdateNotice update={update} locale={locale} failed={updateFailure} onInstall={installUpdate}
+      onOpenReleaseNotes={() => { void updates.openReleaseNotes({}, { timeoutMilliseconds: 15_000 }).catch(() => { /* The command is on the screen. */ }); }} />}
     <div className="config-editor-surface config-recovery-editor">
       {!document ? <NonIdealState icon={<ActivitySpinner size={28} />} title={t("Reading configuration…")} />
         : baseline === null ? <NonIdealState icon={<AppIcon name="config" size={36} />} title={t(status.key, status.parameters)} description={status.detail ?? undefined} />

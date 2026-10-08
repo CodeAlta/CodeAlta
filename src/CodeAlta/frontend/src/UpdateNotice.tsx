@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Button } from "@blueprintjs/core";
+import { Button, Callout } from "@blueprintjs/core";
 import type { AppUpdateResponse } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { translate, type Locale, type MessageKey } from "./localization";
@@ -57,4 +57,23 @@ export function UpdateNotice({ update, locale, title = true, onOpenReleaseNotes,
       : <><span className="update-notice-hint">{t("Exit CodeAlta, then run this command in a terminal.")}</span>
         {update.releaseNotes && <Button className="update-notice-notes" size="small" variant="minimal" intent="primary" onClick={onOpenReleaseNotes}>{t("View release notes")}</Button>}</>}
   </div>;
+}
+
+/**
+ * The update on the screen of a configuration that could not be loaded. A file written by a newer version is
+ * the usual reason an installed one cannot read it, and that screen is then all the application shows.
+ */
+export function RecoveryUpdateNotice({ update, locale, failed, onOpenReleaseNotes, onInstall }: {
+  update: AvailableUpdate; locale: Locale; /** The update was asked for and could not be started. */ failed: boolean;
+  onOpenReleaseNotes: () => void; onInstall: () => void;
+}) {
+  const t = (key: MessageKey, parameters?: Readonly<Record<string, string>>) => translate(locale, key, parameters);
+  return <Callout compact intent="primary" className="config-recovery-update" icon={<AppIcon name="refresh" size={16} />}>
+    <div className="config-recovery-update-body">
+      <strong>{t("CodeAlta {version} is available.", { version: update.version })}</strong>
+      <span>{t("A newer version may have written this file. Update before you change it.")}</span>
+      <UpdateNotice update={update} locale={locale} title={false} onInstall={onInstall} onOpenReleaseNotes={onOpenReleaseNotes} />
+      {failed && <span className="config-recovery-update-failure" role="alert">{t("The update could not be started. Run the command in a terminal.")}</span>}
+    </div>
+  </Callout>;
 }

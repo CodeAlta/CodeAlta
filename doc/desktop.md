@@ -66,6 +66,12 @@ edits; **Exit** closes the application without changing the file. A file that ch
 meantime is not overwritten. Recovery reads, checks and writes that one file only: no provider,
 plugin or session is started before it is valid.
 
+A file written by a newer version is the usual reason an installed one cannot read it (a provider
+type it does not know, for example), and recovery is then all that version shows. So recovery makes
+the update check of the workspace too: when a newer version is published, a notice above the editor
+names it, says that it may have written the file, and has the update command and, for an installed
+tool, **Update and restart** (see "Updates"). The exit of that update asks nothing.
+
 ### The application beyond its window
 
 CodeAlta keeps an icon in the notification area (the menu bar on macOS, the system tray on Linux)
@@ -185,7 +191,8 @@ the same `dotnet tool update` command with the .NET installation the application
 the outcome and starts CodeAlta again through the tool's launcher, which says whether it was
 updated. Canceling the exit calls the update off, and the script gives up after fifteen minutes.
 `update/update.log` keeps the command's output. A build output and the developer instance have no
-such button.
+such button. On macOS the script starts the application again through its bundle, which keeps its
+icon and its place in the Dock, and through the launcher when the bundle does not open.
 
 ### Desktop entry of the installed tool
 
