@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using CodeAlta.Desktop;
 using CodeAlta.Desktop.Rpc;
+using NeoAstra;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -170,4 +171,62 @@ public sealed class DesktopStartupTests
     [DataRow("/index.html", false)]
     public void Navigation_OnlyAllowsControlledApplicationDocument(string value, bool expected) =>
         Assert.AreEqual(expected, DesktopApplication.IsApplicationDocument(new Uri(value, UriKind.RelativeOrAbsolute)));
+
+    [TestMethod]
+    public void Navigation_BackFromTheApplicationDoesNotReturnToTheStartupScreen()
+    {
+        // The view's history after a start: the start-up screen, then the application.
+        var navigation = new DesktopNavigation();
+        Assert.AreEqual(NeoDecisionAction.Allow, Decide(navigation, navigation.Show(DesktopApplication.StartupDocument)));
+        Assert.AreEqual(NeoDecisionAction.Allow, Decide(navigation, navigation.Show(DesktopApplication.ApplicationDocument)));
+
+        // The back button of a mouse, a swipe, a key or history.back() ask for the entry before.
+        Assert.AreEqual(NeoDecisionAction.Cancel, Decide(navigation, DesktopApplication.StartupDocument));
+        Assert.AreEqual(NeoDecisionAction.Cancel, Decide(navigation, DesktopApplication.StartupDocument, userInitiated: true));
+        // The page still loads itself again.
+        Assert.AreEqual(NeoDecisionAction.Allow, Decide(navigation, DesktopApplication.ApplicationDocument));
+        Assert.AreEqual(NeoDecisionAction.Allow, Decide(navigation, new Uri("app://codealta/index.html#workspace")));
+    }
+
+    [TestMethod]
+    public void Navigation_ConfigurationRecoveryShowsOnlyTheDocumentOfItsStep()
+    {
+        // Recovery stacks four entries: the start-up screen, the editor, the start-up screen again, the application.
+        var navigation = new DesktopNavigation();
+        navigation.Show(DesktopApplication.StartupDocument);
+        navigation.Show(DesktopApplication.ApplicationDocument);
+        Assert.AreEqual(NeoDecisionAction.Cancel, Decide(navigation, DesktopApplication.StartupDocument));
+
+        // While the host starts, back does not bring the editor of the configuration again.
+        navigation.Show(DesktopApplication.StartupDocument);
+        Assert.AreEqual(NeoDecisionAction.Cancel, Decide(navigation, DesktopApplication.ApplicationDocument));
+        Assert.AreEqual(NeoDecisionAction.Allow, Decide(navigation, DesktopApplication.StartupDocument));
+
+        navigation.Show(DesktopApplication.ApplicationDocument);
+        Assert.AreEqual(NeoDecisionAction.Cancel, Decide(navigation, DesktopApplication.StartupDocument));
+        Assert.AreEqual(NeoDecisionAction.Allow, Decide(navigation, DesktopApplication.ApplicationDocument));
+    }
+
+    [TestMethod]
+    [DataRow("app://codealta/other.html")]
+    [DataRow("app://codealta/index.html?dev=true")]
+    [DataRow("https://codealta/index.html")]
+    [DataRow("javascript:alert(1)")]
+    [DataRow("/index.html")]
+    public void Navigation_NeverLeavesTheApplicationDocuments(string value)
+    {
+        var uri = new Uri(value, UriKind.RelativeOrAbsolute);
+        var navigation = new DesktopNavigation();
+        // Before the host shows a document, the view loads none.
+        Assert.AreEqual(NeoDecisionAction.Cancel, Decide(navigation, DesktopApplication.ApplicationDocument));
+        Assert.AreEqual(NeoDecisionAction.Cancel, Decide(navigation, uri));
+
+        navigation.Show(DesktopApplication.ApplicationDocument);
+        Assert.AreEqual(NeoDecisionAction.Cancel, Decide(navigation, uri));
+        Assert.AreEqual(NeoDecisionAction.Cancel, Decide(navigation, uri, mainFrame: false));
+        Assert.ThrowsExactly<ArgumentException>(() => navigation.Show(uri));
+    }
+
+    private static NeoDecisionAction Decide(DesktopNavigation navigation, Uri uri, bool mainFrame = true, bool userInitiated = false) =>
+        navigation.Decide(new NeoNavigationRequest(uri, mainFrame, userInitiated)).Action;
 }

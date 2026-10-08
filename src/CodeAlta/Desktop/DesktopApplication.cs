@@ -385,8 +385,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var view = await creatingView;
             Mark("view created");
             viewLifetime = view;
-            view.NavigationRequested = request => ValueTask.FromResult(new NeoNavigationDecision(
-                IsApplicationDocument(request.Uri) ? NeoDecisionAction.Allow : NeoDecisionAction.Cancel));
+            // The view loads the document this method shows and no other: its history holds the start-up screen,
+            // which the back button of a mouse would otherwise bring again, for good.
+            var documents = new DesktopNavigation();
+            view.NavigationRequested = request => ValueTask.FromResult(documents.Decide(request));
             view.NewWindowRequested = static _ => ValueTask.FromResult(new NeoNewWindowDecision(NeoDecisionAction.Cancel));
             // The start-up screen first, then the window: it appears with the logo on its theme, never empty.
             // The browser draws into a shown window only, so the window is shown out of sight until the
@@ -398,7 +400,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // while the window is hidden, so that it appears there and not in its default place first.
             windowState = await DesktopWindowState.StartAsync(window, options.DataRoot, chrome.Services.SystemInfo);
             var cloaked = DesktopWindowReveal.ShowCloaked(window);
-            var starting = view.NavigateAsync(StartupDocument);
+            var starting = view.NavigateAsync(documents.Show(StartupDocument));
             await starting;
             await Task.WhenAny(startupShown.Task, Task.Delay(TimeSpan.FromSeconds(2)));
             if (cloaked)
@@ -467,13 +469,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 {
                     await using (NeoRpcViewBinding.Bind(recoveryRpc, view))
                     {
-                        var recovering = view.NavigateAsync(ApplicationDocument);
+                        var recovering = view.NavigateAsync(documents.Show(ApplicationDocument));
                         await recovering;
                         await Task.WhenAny(repaired.Task, closeRequested.Task);
                         // Back to the start-up screen while the host starts: the editor is gone before its bridge is.
                         if (!closeRequested.Task.IsCompleted)
                         {
-                            var restarting = view.NavigateAsync(StartupDocument);
+                            var restarting = view.NavigateAsync(documents.Show(StartupDocument));
                             await restarting;
                         }
                     }
@@ -614,7 +616,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     if (!closeRequested.Task.IsCompleted)
                     {
                         bindingLifetime = NeoRpcViewBinding.Bind(rpc, view);
-                        var navigation = view.NavigateAsync(ApplicationDocument);
+                        var navigation = view.NavigateAsync(documents.Show(ApplicationDocument));
                         await navigation;
                         Mark("application loading");
                     }
@@ -779,11 +781,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             await using var rpc = builder.Build();
             window.Show();
             await using var view = await environment.CreateWebViewAsync(NeoAstraHost.FillWindow(window), DesktopWindowChrome.ViewOptions());
-            view.NavigationRequested = request => ValueTask.FromResult(new NeoNavigationDecision(
-                IsApplicationDocument(request.Uri) ? NeoDecisionAction.Allow : NeoDecisionAction.Cancel));
+            var documents = new DesktopNavigation();
+            view.NavigationRequested = request => ValueTask.FromResult(documents.Decide(request));
             view.NewWindowRequested = static _ => ValueTask.FromResult(new NeoNewWindowDecision(NeoDecisionAction.Cancel));
             await using var binding = NeoRpcViewBinding.Bind(rpc, view);
-            await view.NavigateAsync(ApplicationDocument);
+            await view.NavigateAsync(documents.Show(ApplicationDocument));
             await closed.Task;
             ExitCode = 0;
         }

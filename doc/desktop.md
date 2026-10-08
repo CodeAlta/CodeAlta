@@ -57,6 +57,12 @@ the dark themes, and they follow a theme change at once. The theme and its backg
 `appearance.json` in the WebView data directory, which is what lets the window open in the right
 colors before any page exists.
 
+The view loads the document the host shows in it and no other: the start-up screen, then the
+application. Its history still holds the start-up screen, so the host cancels every navigation to
+another document than the one it shows (`DesktopNavigation`). The back and forward buttons of a mouse,
+the browser keys of a keyboard, a swipe and `history.back()` therefore leave the window on what it
+shows, and the page still loads itself again.
+
 When the global `config.toml` cannot be loaded, the window opens on **configuration recovery** instead
 of failing: the file in an editor with TOML highlighting, the error marked on its line and the caret
 on it. The text is checked as it is typed, and the status under the editor says where it is still
