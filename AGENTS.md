@@ -9,6 +9,9 @@ Paths/commands below are relative to this directory.
 - Frontends: 
     - Webview2-based UI: `src/CodeAlta` (`alta` command)
     - TUI: `src/CodeAlta.Tui/` (`altatui` command)
+- **New features are developed for CodeAlta Desktop only.** No new feature is developed for the TUI: do not add a screen, a dialog, a command or a setting to `src/CodeAlta.Tui/`, and do not build a TUI counterpart of a desktop feature, unless the task asks for it.
+    - The TUI is kept working. It shares the orchestration, the catalog, the providers, the plugins and the `alta` tool with the desktop application, so a change made there for the desktop can change what the TUI does: build it, keep its tests passing, and fix what the change breaks.
+    - A bug of the TUI is still fixed when the task is about it.
 - Tests: `src/CodeAlta.Tests/` (MSTest)
 - The in-process agent tool remains `alta`; do not rename neutral `CodeAlta.*` libraries or shared `.alta` state when changing frontend identities.
 - Website: `site/` (Lunet end-user documentation)
