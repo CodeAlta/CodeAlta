@@ -46,7 +46,8 @@ room in a narrow Explorer), the session tabs continue the same strip, and the pl
 buttons stay at the top right. Drag the mark or any empty part of a tab strip along the top edge to
 move the window, and double-click it to maximize or restore; tabs and buttons in that strip keep
 their own clicks and drags. With the Explorer hidden the tabs start right after these buttons. In a split
-layout only the panes along the top edge are part of the title bar.
+layout only the panes along the top edge are part of the title bar. At the right, before the zoom and the
+theme switch, is the **space switch**: the space the window shows (see "Spaces").
 
 The window appears with a **start-up screen**: the title strip with the mark and name, the logo and a
 progress bar, in the colors of the theme the window last had (dark on a first start). It stays until
@@ -604,6 +605,106 @@ The shared catalog caches its snapshot, and closing/reloading the document is no
 or run-abort contract. Relaunch with a fresh browser data directory to load another snapshot.
 Canceling an RPC waiter does not stop the shared catalog's background load. Existing RPC
 teardown waits only a bounded time, so cache work can outlive bridge teardown.
+
+## Spaces
+
+A **space** is a named group of projects the user works on together. The window shows one space at a
+time. The word is *space* in the interface, the files, the `alta` tool and the code; it is never called
+a workspace, which here is the catalog of projects and sessions and the main area of the window.
+
+- The **Default** space (`default`) holds every project, always exists and cannot be deleted. The user
+  creates the others; a project can be in several. A catalog holds at most 32 spaces
+  (`SpaceCatalog.MaximumSpaces`).
+- A space has an id, a name (1 to 64 characters on one line, unique without regard to case), an optional
+  description of at most 2000 characters ("What it is for", read by the user and by the agents through
+  `alta space list`), an icon (a general icon or a brand logo, as a provider has) and a color (`#rgb` or
+  `#rrggbb`). The id is worked out from the first name (`SpaceDescriptor.IdFromName`: lower case, one `-`
+  for what is neither a letter nor a digit, `space` when nothing usable is left, a number after it when
+  the id is taken) and a rename keeps it.
+- On a profile that never had spaces, the first start of CodeAlta Desktop creates two empty ones,
+  **Work** and **Personal** (`SpaceCatalog.SeedAsync`, called in `DesktopApplication` before the page
+  reads the spaces). It does nothing once `~/.alta/spaces/` exists, so what the user deleted does not
+  come back.
+- Chats, the sessions of no project, are shown in every space.
+- Deleting a space deletes its file, then its id in the file of each of its projects. The projects,
+  their folders and their sessions stay, in the Default space and in their other spaces.
+
+**What follows the shown space.** Everything the window lists: the Explorer (projects, their sessions,
+terminals and work item badges), the search (projects, sessions, files), Open project, the browser of
+saved sessions, the Work items tab ("All projects" is the projects of the space), the project list of the
+Issues tab, and previous/next project. Automations are the application's: their tab lists every project.
+A session opened from a link, a work item or an automation whose project is not in the shown space
+shows the Default space first (`revealSession`). A folder added with **+** or Open project while another
+space than Default is shown joins that space; a folder that is already a project of another space joins
+the shown one (`joinShownSpace`) instead of being opened elsewhere.
+
+**Tabs.** Each space has its own tabs (sessions, code editors, Changes, terminals, Work items, Issues,
+Automations) and its own layout. Showing a space swaps the Explorer and the tabs; the tabs of a space
+come back when it is shown again, also after a restart. The panes of a space that is not shown are not
+in the page; its sessions keep running in the host, and a prompt being typed is kept. When code editors
+hold unsaved edits, leaving the space asks first (Save, Discard, Cancel). A space that is gone (removed
+here, by a command or by the other instance) gives its place to the Default space, and the tabs kept for
+it are forgotten.
+
+**Space switch.** In the title bar (`SpaceSwitch`). With the Default space alone it is an icon; with
+several it shows the icon, in its color, and the name of the shown space. It opens the list of the
+spaces, each with what its sessions do and its `Ctrl+G 1`…`9` hint, then **New space…** and **Organize
+spaces…** (in a window with a host of its own). A dot on the switch says that a session waits for the
+user or failed in a space that is not shown.
+
+**Foot of the Explorer.** With more than the Default space (`SpaceActivityBar`), one button for each
+space, as its icon, the shown one marked. A mark says what the sessions of the space do, the first that
+applies: a session waits for the user (a question, a command to review, a form), a run failed, sessions
+run, a provider works in the background. Above the buttons, up to three lines name a session that waits
+or failed in a space that is not shown (`spaceCalls`: one for each space, a session that waits before one
+that failed, named for the first space of its project); a click shows that space and opens that session.
+When a session starts to wait in another space, a toast says so once, with **Show**; what already waited
+when the window started or left a space is not said.
+
+**New space.** The window (`SpaceDialog`) has a row of ready-made spaces (`spaceTemplates`: Work,
+Personal, Open source, Experiments, Learning, Clients; a name, an icon and a color in one click, the
+names already taken are not offered), the name, the icon, the color, "What it is for" and a checklist of
+the projects. A space created from the title bar is shown at once. An empty space says "No project in
+this space yet." with **Add projects…**, which opens Settings → Spaces.
+
+**Implementation.**
+
+- *Catalog* (`src/CodeAlta.Catalog`): `SpaceDescriptor` (the values and their validation),
+  `SpaceCatalog` (`LoadAsync`, `LoadMembersAsync`, `CreateAsync`, `UpdateAsync`, `DeleteAsync`,
+  `ReorderAsync`, `AssignAsync`, `SeedAsync`; the changes of one instance run one after the other, and a
+  file that cannot be read as a space is left out so that it never hides the others),
+  `ProjectCatalog.UpdateSpacesAsync` in `ProjectCatalog.Spaces.cs` (the in-place edit of the `spaces`
+  entry of a project file, under the project edit gate, see `doc/catalog-and-config.md`),
+  `CatalogOptions.SpacesRoot` and the space front matter of `CatalogYamlSerializer`. Tests:
+  `src/CodeAlta.Catalog.Tests/SpaceCatalogTests.cs`.
+- *Host*: `CodeAltaHost.SpaceCatalog`. The RPC service `spaces` (`Desktop/Rpc/SpacesRpc.cs`) has `list`,
+  `create`, `update`, `delete`, `assign`, `reorder`, `shown` (the page says which space it shows),
+  `activity` and `watch`. `DesktopSpaceView` implements `IAltaSpaceView`: it holds the space the page
+  says it shows, which the `alta` commands read as the current space, and sends the page the requests
+  `show` (`alta space switch`) and `changed` (a command changed the spaces or the projects) over
+  `watch`. It is no setting of the user. `activity` lists the sessions that run, work in the background,
+  whose last run failed (`SessionRuntimeService.ListOverview()`) or that wait for the user
+  (`OwnedSessionAskService.ListWaitingSessions()` and
+  `SessionPermissionService.ListWaitingSessionsAsync()`), the ones that wait first, at most 128. Tests:
+  `src/CodeAlta.Desktop.Tests/SpacesRpcTests.cs`.
+- *Page* (`frontend/src/spaces/`): `spaces.ts` holds the rules without the DOM (`readSpaces`,
+  `scopeSnapshot`, `spaceActivities`, `spaceCalls`, `spaceStorageKey`), `spacesHub.ts` the link to the
+  host, `SpaceViews.tsx` the switch and the bar, `SpaceDialog.tsx` and `SpaceSettings.tsx` the two
+  windows, with `spaces.css` and the tests in `spaces.test.tsx`. In `main.tsx`, the catalog snapshot is
+  kept whole (the `catalog` ref) and the window is given what the shown space has of it: the
+  `workspace.snapshot` wrapper applies `scopeSnapshot`, so everything that reads the snapshot follows
+  the space without knowing of it. `showSpace` publishes the snapshot of the other space and swaps the
+  tabs, kept for each space in memory and under storage keys of the space. `SessionTabStrip` is given
+  one FlexLayout model for each space (`layout`) and is keyed by the id of the space. The hub lists the
+  spaces when it connects, when the host says they changed and after each of its own changes; it asks
+  `spaces.activity` every 4 s, only while there is more than one space and the window is visible.
+- *Storage of the page* (local storage of the window): `codealta.desktop.space.v1` is the shown space;
+  `codealta.desktop.sessionTabs.v1.<id>` and `codealta.desktop.fileTabs.v1.<id>` are the tabs of a
+  space. The Default space keeps the keys without a suffix, which are the ones the window had before.
+
+The `alta space` commands, and the `alta project` commands that follow the shown space, are described
+in `doc/live-tool.md` ("Spaces" and "Project commands"). CodeAlta TUI shows no spaces and lists every
+project; its `alta` tool has the `alta space` commands except `switch`.
 
 ## Composer
 
@@ -1406,6 +1507,21 @@ recency, and undated projects follow name/ID order. Narrow-screen Show projects 
 temporary reveal independent of the desktop collapse preference. These controls do not
 change the selected project/session, draft, requests, pane widths or timeline position.
 The command approval policy is edited in **Settings → Configuration file**.
+
+### Spaces
+
+**Settings → Spaces** (group Personalization, after Appearance; `/spaces`, or **Organize spaces…** in the
+space switch) is where the spaces are organized (`frontend/src/spaces/SpaceSettings.tsx`, see "Spaces").
+
+- On the left, the Default space with the list of every project, each with the icons of the other spaces
+  it is in. Its name, icon, color and description can be changed like those of the others.
+- On the right, one card for each space: icon, name, color swatches, "What it is for", its projects,
+  **Projects** (a checklist of all the projects, to add or remove them with the keyboard), **Show**, move
+  before and after, and remove, which asks to confirm. The `×` of a project removes it from that space.
+  **New space** opens the window that creates one.
+- Drag a project from the list onto a card to add it; from a card onto another card to move it, or to
+  keep it in both with `Ctrl` or `Alt` held; from a card back to the list to remove it from that space.
+- Every change is saved at once, through the `spaces` RPC service. Nothing is kept by the page.
 
 ### About
 
@@ -2860,7 +2976,7 @@ prompt) opens **Commands and shortcuts**, a filterable window listing the comman
 One window looks through everything (`frontend/src/search/GlobalSearch.tsx`, with the ranking in
 `searchResults.ts`). It takes the place of the command palette and of the two filters the Explorer had.
 
-- **What it finds.** The **sessions** of every project and the chats, the **projects**, the **files** of
+- **What it finds.** In the space the window shows (see "Spaces"): the **sessions** of every project and the chats, the **projects**, the **files** of
   the project in front (the one of the code editor or the Changes tab shown, otherwise the selected
   project), and the **commands**, those of plugins included. Enter opens what is selected: a session in
   its tab, a project with its new-session tab and its sessions shown in the Explorer, a file in the code
@@ -2906,6 +3022,9 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | `Ctrl+G` then `Ctrl+M` | Automations (`/automations`) |
 | `Ctrl+G` then `Ctrl+I` | Work items (`/work_items`) |
 | `Ctrl+G` then `Ctrl+B` | Issues and pull requests (`/issues`) |
+| `Ctrl+G` then `Ctrl+V`, `Ctrl+G` then `1`…`9` | Go to Space (`/space`, opens the space switch), show the space at that place of the list (Default is 1) |
+| `Ctrl+Alt+PageUp` / `Ctrl+Alt+PageDown` (also from a terminal) | Previous / next space (`/space_prev`, `/space_next`) |
+| No key | New Space (`/new_space`), Spaces (`/spaces`, opens Settings → Spaces) |
 | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+PageUp` / `Ctrl+PageDown`) | Previous / next tab |
 | `Ctrl+W` (also `Ctrl+Shift+W`, which a terminal leaves to the application), `Ctrl+Shift+T` | Close tab, reopen the last closed tab |
 | `Enter`, `Ctrl+Enter`, `Shift+Enter` | Send (queued while a turn runs), steer the running turn, new line |

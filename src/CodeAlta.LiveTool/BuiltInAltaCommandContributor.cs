@@ -51,6 +51,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Read("project resolve", supportsCatalogOnlyContext: true),
         Read("project current", supportsCatalogOnlyContext: true),
         Mutating("project upsert", requiresRuntime: false, supportsCatalogOnlyContext: true),
+        Mutating("project add", requiresRuntime: false, supportsCatalogOnlyContext: true),
+        Mutating("project rename", requiresRuntime: false, supportsCatalogOnlyContext: true),
+        Mutating("project archive", requiresRuntime: false, supportsCatalogOnlyContext: true),
+        Mutating("project unarchive", requiresRuntime: false, supportsCatalogOnlyContext: true),
+        Disruptive("project remove"),
         Read("session current", supportsCatalogOnlyContext: true),
         Read("session list"),
         Read("session info"),
@@ -109,6 +114,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         yield return CreateNotesCommand(context.Invocation, "notes");
         yield return CreateNotesCommand(context.Invocation, "note");
         yield return CreateProjectCommand(context.Invocation);
+        // The spaces that group the projects, in a host that keeps them.
+        if (context.Invocation.Services.Get<SpaceCatalog>() is not null)
+        {
+            yield return CreateSpaceCommand(context.Invocation);
+        }
+
         yield return CreateSessionCommand(context.Invocation);
         yield return CreateReminderCommand(context.Invocation);
         yield return CreateSkillCommand(context.Invocation);
@@ -181,8 +192,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var workItems = context.Services.Get<CodeAlta.Catalog.WorkItems.WorkItemService>() is not null;
         var issues = context.Services.Get<CodeAlta.Plugins.PluginRuntimeManager>() is not null;
         var appearance = context.Services.Get<IAltaAppearance>() is not null;
-        if (!changes && !editor && !terminals && !automations && !workItems && !issues && !appearance && workshop is null) return Policies;
+        var spaces = context.Services.Get<SpaceCatalog>() is not null;
+        if (!changes && !editor && !terminals && !automations && !workItems && !issues && !appearance && !spaces && workshop is null) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
+        if (spaces) policies.AddRange(SpacePolicies);
+        if (spaces && context.Services.Get<IAltaSpaceView>() is not null) policies.Add(SpaceSwitchPolicy);
         if (appearance) policies.AddRange(AppearancePolicies);
         if (workItems) policies.AddRange(WorkItemPolicies);
         if (issues) policies.AddRange(IssuePolicies);
@@ -287,9 +301,15 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         group.Add(CreateProjectResolveCommand(context));
         group.Add(CreateProjectCurrentCommand(context));
         group.Add(CreateProjectUpsertCommand(context));
+        group.Add(CreateProjectAddCommand(context));
+        group.Add(CreateProjectRenameCommand(context));
+        group.Add(CreateProjectArchiveCommand(context, archive: true));
+        group.Add(CreateProjectArchiveCommand(context, archive: false));
+        group.Add(CreateProjectRemoveCommand(context));
         AddHelpText(
             group,
-            "Examples: `alta project current`; `alta project list`; `alta project show CodeAlta`; `alta project resolve --path C:/code/CodeAlta`.");
+            "A project is a folder CodeAlta knows. Projects are grouped in spaces (`alta space --help`): `spaces` names the spaces of a project besides the default one, which holds every project.",
+            "Examples: `alta project current`; `alta project list`; `alta project list --all`; `alta project show CodeAlta`; `alta project resolve --path C:/code/CodeAlta`; `alta project add C:/code/Tomlyn --space work`.");
         return group;
     }
 
@@ -560,10 +580,17 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     {
         var includeArchived = false;
         var detailed = false;
-        var command = Leaf("list", "List known projects from the CodeAlta catalog.");
+        string? space = null;
+        var all = false;
+        var command = Leaf("list", "List the projects of the current space from the CodeAlta catalog.");
         command.Add("include-archived", "Include archived projects.", value => includeArchived = value is not null);
         command.Add("detailed", "Emit one detailed metadata record per project instead of the compact project refs array.", value => detailed = value is not null);
-        command.Add(async (_, _) => await HandleProjectListAsync(context, includeArchived, detailed).ConfigureAwait(false));
+        command.Add("space=", "List the projects of this space: id, start of id, or name. `default` lists every project.", value => space = value);
+        command.Add("all", "List every project, whatever its spaces.", value => all = value is not null);
+        command.Add(async (_, _) => await HandleProjectListAsync(context, includeArchived, detailed, space, all).ConfigureAwait(false));
+        AddHelpText(command,
+            "Without --space or --all, the projects are those of the space the CodeAlta window shows; without a window, every project. `spaceId` names the space that was listed.",
+            "Examples: `alta project list`; `alta project list --all`; `alta project list --space work --detailed`.");
         return command;
     }
 
@@ -587,9 +614,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static Command CreateProjectCurrentCommand(AltaCommandContext context)
     {
-        var command = Leaf("current", "Resolve the invocation cwd/current directory to a catalog project.");
-        command.Add(async (_, _) => await HandleProjectResolveAsync(context, null).ConfigureAwait(false));
-        AddHelpText(command, "Example: `alta project current` returns the catalog project matched by the live-tool cwd.");
+        var command = Leaf("current", "Show the project of the calling session, or the catalog project of the invocation cwd/current directory.");
+        command.Add(async (_, _) => await HandleProjectCurrentAsync(context).ConfigureAwait(false));
+        AddHelpText(command, "Example: `alta project current` returns the project of the calling session, or else the catalog project matched by the live-tool cwd.");
         return command;
     }
 
@@ -1585,21 +1612,28 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         return AltaExitCodes.Success;
     }
 
-    private static async ValueTask<int> HandleProjectListAsync(AltaCommandContext context, bool includeArchived, bool detailed)
+    private static async ValueTask<int> HandleProjectListAsync(AltaCommandContext context, bool includeArchived, bool detailed, string? spaceRef, bool all)
     {
         if (!context.TryGetRequired<ProjectCatalog>(nameof(ProjectCatalog), out var catalog))
         {
             return AltaExitCodes.ServiceUnavailable;
         }
 
+        var (space, exitCode) = await ResolveProjectListSpaceAsync(context, spaceRef, all).ConfigureAwait(false);
+        if (exitCode != AltaExitCodes.Success)
+        {
+            return exitCode;
+        }
+
+        var spaceId = space?.Id ?? SpaceDescriptor.DefaultId;
         var projects = await catalog.LoadAsync(context.CancellationToken).ConfigureAwait(false);
         var filtered = projects
-            .Where(project => includeArchived || !project.Archived)
+            .Where(project => (includeArchived || !project.Archived) && (space is null || project.Spaces.Contains(space.Id, StringComparer.Ordinal)))
             .OrderBy(static project => project.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         if (!detailed)
         {
-            WriteProjectRefs(context, filtered);
+            WriteProjectRefs(context, filtered, spaceId);
             return AltaExitCodes.Success;
         }
 
@@ -1608,7 +1642,15 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             WriteProject(context, "alta.project.item", project);
         }
 
-        WriteSummary(context, "alta.project.summary", filtered.Length, truncated: false);
+        AltaJsonlWriter.WriteRecord(context.Stdout, new
+        {
+            type = "alta.project.summary",
+            version = 1,
+            correlationId = context.CorrelationId,
+            count = filtered.Length,
+            truncated = false,
+            spaceId,
+        });
         return AltaExitCodes.Success;
     }
 
@@ -1672,6 +1714,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         var project = await catalog.UpsertFromPathAsync(resolvedPath, context.CancellationToken).ConfigureAwait(false);
         WriteProject(context, "alta.project.upserted", project);
+        NotifySpacesChanged(context);
         return AltaExitCodes.Success;
     }
 
@@ -4699,29 +4742,36 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         => context.Services.Get<CatalogOptions>()?.GlobalRoot ?? context.Cwd ?? Environment.CurrentDirectory;
 
     private static void WriteProject(AltaCommandContext context, string type, ProjectDescriptor project)
+        => AltaJsonlWriter.WriteRecord(context.Stdout, ProjectRecord(context, type, project));
+
+    // `spaces` names the spaces of the project besides the default one, which holds every project.
+    private static Dictionary<string, object?> ProjectRecord(AltaCommandContext context, string type, ProjectDescriptor project)
     {
-        AltaJsonlWriter.WriteRecord(context.Stdout, new
+        var record = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
-            type,
-            version = 1,
-            correlationId = context.CorrelationId,
-            projectId = project.Id,
-            project.Slug,
-            project.Name,
-            project.DisplayName,
-            projectPath = project.ProjectPath,
-            project.DefaultBranch,
-            project.Archived,
-            project.SourcePath,
-            project.Description,
-            tags = project.Tags,
-        });
+            ["type"] = type,
+            ["version"] = 1,
+            ["correlationId"] = context.CorrelationId,
+            ["projectId"] = project.Id,
+            ["slug"] = project.Slug,
+            ["name"] = project.Name,
+            ["displayName"] = project.DisplayName,
+            ["projectPath"] = project.ProjectPath,
+        };
+        if (project.DefaultBranch is not null) record["defaultBranch"] = project.DefaultBranch;
+        record["archived"] = project.Archived;
+        if (project.SourcePath is not null) record["sourcePath"] = project.SourcePath;
+        if (project.Description is not null) record["description"] = project.Description;
+        record["tags"] = project.Tags;
+        record["spaces"] = project.Spaces;
+        return record;
     }
 
-    private static void WriteProjectRefs(AltaCommandContext context, IReadOnlyList<ProjectDescriptor> projects)
+    private static void WriteProjectRefs(AltaCommandContext context, IReadOnlyList<ProjectDescriptor> projects, string spaceId)
         => AltaJsonlWriter.WriteRecord(context.Stdout, new
         {
             type = "alta.project.refs",
+            spaceId,
             projects = projects.Select(static project => new[] { project.Slug, project.ProjectPath }).ToArray(),
         });
 

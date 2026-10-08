@@ -135,6 +135,10 @@ export const workItems = Object.freeze({ list: async () => ({ status: "unavailab
 export const issues = Object.freeze({ sources: async () => ({ status: "unavailable", sources: [] }), list: unavailable, read: unavailable, start: unavailable, openLink: unavailable });
 export const markdownLinks = Object.freeze({ open: async () => ({ status: "unavailable", hostEpoch: "" }) });
 // The demo has no host to keep the instructions for a pull request.
+// The spaces need a host that keeps them: the demo has the default one alone.
+export const spaces = Object.freeze({ list: async () => ({ status: "unavailable", spaces: [] }), activity: async () => ({ status: "unavailable", sessions: [], truncated: false }),
+  create: unavailable, update: unavailable, delete: unavailable, assign: unavailable, reorder: unavailable, shown: unavailable,
+  watch: unavailable });
 export const pullRequestPrompts = Object.freeze({ list: async () => ({ status: "unavailable", items: [] }), save: unavailable, delete: unavailable });
 export const promptImages = Object.freeze({ read: unavailable });
 export const toolCalls = Object.freeze({ read: unavailable, observe: unavailable });

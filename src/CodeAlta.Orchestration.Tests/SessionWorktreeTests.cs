@@ -47,6 +47,7 @@ public sealed class SessionWorktreeTests
 
         // Nothing is at work yet.
         Assert.AreEqual(0, host.RuntimeService.ListBusySessionFolders().Count);
+        Assert.IsFalse(host.RuntimeService.ListOverview().Any(static overview => overview.Running));
         var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         provider.Hold = hold;
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), session.SessionId, "one")).Receipt;
@@ -61,9 +62,13 @@ public sealed class SessionWorktreeTests
         StringAssert.Contains(turn.Instructions, $"- Git worktree: the working directory is a git worktree of the project, a checkout of its own with its own branch. The main checkout of the project is `{temp.ProjectRoot}`");
         // While it runs, the worktree is in use: this is what keeps it from being removed.
         CollectionAssert.AreEqual(new[] { new SessionWorkFolder(session.SessionId, temp.Worktree, true) }, host.RuntimeService.ListBusySessionFolders().ToArray());
+        // And it is one of the sessions that run, with its project, for a summary of every session.
+        var running = host.RuntimeService.ListOverview().Single(overview => overview.SessionId == session.SessionId);
+        Assert.AreEqual((host.CurrentProject.Id, true, 0, false), (running.ProjectId, running.Running, running.BackgroundTasks, running.Failed));
         hold.SetResult();
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10))).Outcome);
         while (host.RuntimeService.ListBusySessionFolders().Count > 0) await Task.Delay(20, timeout.Token);
+        Assert.IsFalse(host.RuntimeService.ListOverview().Single(overview => overview.SessionId == session.SessionId).Running);
 
         // The commands of the session resolve paths from the worktree, when it is created and when it is sent to.
         lock (tools)
@@ -206,6 +211,27 @@ public sealed class SessionWorktreeTests
         CollectionAssert.AreEqual(new[] { new SessionWorkFolder(plain.SessionId, temp.ProjectRoot, false) }, host.RuntimeService.ListBusySessionFolders().ToArray());
         hold.SetResult();
         await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // A run that ends with an error leaves the session marked as failed, for a summary of every session,
+        // until its next run starts.
+        SessionRuntimeOverview Overview() => host.RuntimeService.ListOverview().Single(overview => overview.SessionId == plain.SessionId);
+        while (Overview().Running) await Task.Delay(20, timeout.Token);
+        Assert.IsFalse(Overview().Failed);
+        provider.Failure = new InvalidOperationException("The provider refused the turn.");
+        var failed = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), plain.SessionId, "two")).Receipt;
+        Assert.IsNotNull(failed);
+        await failed.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        while (!Overview().Failed || Overview().Running) await Task.Delay(20, timeout.Token);
+        Assert.AreEqual((host.CurrentProject.Id, false, true), (Overview().ProjectId, Overview().Running, Overview().Failed));
+        var again = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        provider.Hold = again;
+        var third = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), plain.SessionId, "three")).Receipt;
+        Assert.IsNotNull(third);
+        await provider.Turns.Reader.ReadAsync(timeout.Token);
+        while (!Overview().Running) await Task.Delay(20, timeout.Token);
+        Assert.IsFalse(Overview().Failed, "A run that goes on makes the failure a thing of the past.");
+        again.SetResult();
+        await third.Completion.WaitAsync(TimeSpan.FromSeconds(10));
     }
 
     private static Task<CodeAltaHost> CreateHostAsync(TempDirectory temp, RecordingProvider provider)
@@ -276,6 +302,9 @@ public sealed class SessionWorktreeTests
         /// <summary>Keeps the next turn running until it is completed.</summary>
         public TaskCompletionSource? Hold { get; set; }
 
+        /// <summary>What the next turn fails with, once.</summary>
+        public Exception? Failure { get; set; }
+
         public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("fake-worktrees"), "Fake Worktrees") { DefaultModelId = "fake-model" };
 
         public ModelProviderRuntimeDescriptor RuntimeDescriptor { get; } = new()
@@ -304,6 +333,12 @@ public sealed class SessionWorktreeTests
 
         public async Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate, CancellationToken cancellationToken = default)
         {
+            if (Failure is { } failure)
+            {
+                Failure = null;
+                throw failure;
+            }
+
             Turns.Writer.TryWrite(new(request.WorkingDirectory, string.Join("\n", request.SystemMessage, request.DeveloperInstructions)));
             if (Hold is { } hold)
             {

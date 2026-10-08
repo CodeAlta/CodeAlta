@@ -6,6 +6,7 @@ doc:
   - {path: model-providers.md, title: "<i class='bi bi-cpu' aria-hidden='true'></i> Model Providers"}
   - {path: prompts.md, title: "<i class='bi bi-chat-square-text' aria-hidden='true'></i> Agent Prompts"}
   - {path: workspace.md, title: "<i class='bi bi-display' aria-hidden='true'></i> Workspace and Dialogs"}
+  - {path: spaces.md, title: "<i class='bi bi-collection' aria-hidden='true'></i> Spaces"}
   - {path: sessions.md, title: "<i class='bi bi-diagram-3' aria-hidden='true'></i> Sessions and Delegation"}
   - {path: worktrees.md, title: "<i class='bi bi-tree' aria-hidden='true'></i> Worktrees"}
   - {path: automations.md, title: "<i class='bi bi-lightning-charge' aria-hidden='true'></i> Automations"}

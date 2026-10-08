@@ -55,6 +55,7 @@ See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements 
     <tr class="alta-compare-group"><th scope="rowgroup" colspan="3">Workspace</th></tr>
     <tr><th scope="row">Session tabs</th><td>{{ alta_yes }} <small>Reorder, split and merge panes</small></td><td>{{ alta_part }} <small>One visible at a time</small></td></tr>
     <tr><th scope="row">Several projects open in the sidebar, favorites first</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>No favorites</small></td></tr>
+    <tr><th scope="row">Spaces: groups of projects, each with its own tabs</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>Through the agent</small></td></tr>
     <tr><th scope="row">One search for sessions, projects, files and commands</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>Command palette</small></td></tr>
     <tr><th scope="row">Code editor</th><td>{{ alta_yes }} <small>Files, search in files, file tabs</small></td><td>{{ alta_part }} <small>One file per tab</small></td></tr>
     <tr><th scope="row">Git changes: changed files, commits, diffs, branches</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
@@ -94,7 +95,7 @@ Use CodeAlta TUI when you want to stay in a terminal, or when you want to review
 Everything under `~/.alta/` is common to both apps:
 
 - `config.toml`, model providers and their credentials;
-- the project catalog and all sessions, with their timelines, notes and pasted images;
+- the project catalog, its [spaces](spaces.md) and all sessions, with their timelines, notes and pasted images;
 - agent prompts, system prompts and skills;
 - MCP server configuration and plugins.
 
@@ -183,9 +184,13 @@ Click the `+` / `−` numbers in the prompt bar, or the changes button of a proj
 
 Several projects can stay open in the sidebar, each with its sessions, and CodeAlta shows them the same way at the next start. Favorite projects are listed first. See [Projects sidebar](workspace.md#projects-sidebar-desktop).
 
+### Spaces
+
+A space is a group of projects you work on together, such as **Work** or **Personal**. The window shows one space at a time, each with its own projects and tabs, and tells you when a session waits for you in another one. CodeAlta TUI has no spaces: it lists every project. See [Spaces](spaces.md).
+
 ### One Settings window
 
-The TUI opens a dialog for each area. The desktop app groups them as pages of one window: **Appearance**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**.
+The TUI opens a dialog for each area. The desktop app groups them as pages of one window: **Appearance**, **Spaces**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-settings.webp" alt="CodeAlta Desktop Settings window showing the Appearance page with the list of pages on the left" loading="lazy">

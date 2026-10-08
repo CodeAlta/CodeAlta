@@ -232,6 +232,9 @@ Both apps use the same shortcuts and slash commands unless noted.
 | Clear prompt queue | `F10` |
 | Previous/next user or assistant message | `F3` / `F4` |
 | Switch tabs | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` |
+| Go to a [space](spaces.md) (desktop) | `Ctrl+G Ctrl+V` or `/space` |
+| Show the space at a place of the list (desktop) | `Ctrl+G 1` to `Ctrl+G 9` |
+| Previous / next space (desktop) | `Ctrl+Alt+PageUp` / `Ctrl+Alt+PageDown` |
 | Close tab / reopen closed tab (desktop) | `Ctrl+W` / `Ctrl+Shift+T` |
 | Browse saved sessions (desktop) | `Ctrl+Alt+B` or `/sessions` |
 | Show or hide session notes (desktop) | `Ctrl+Shift+N` or `/notes` |

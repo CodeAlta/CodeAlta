@@ -84,6 +84,17 @@ public sealed class OwnedSessionAskService
         }
     }
 
+    /// <summary>Lists the sessions that wait for the user to answer a question, each once.</summary>
+    /// <returns>The identifiers of those sessions; a reading that can be stale at once.</returns>
+    public IReadOnlyList<string> ListWaitingSessions()
+    {
+        lock (_gate)
+        {
+            return [.. _asks.Values.Select(static ask => ask.Origin.SessionId).Distinct(StringComparer.Ordinal)
+                .Where(sessionId => _queue.GetPending(sessionId).Count > 0)];
+        }
+    }
+
     /// <summary>Returns the pending head and latest retained disposition, never an acknowledgment.</summary>
     /// <exception cref="ArgumentException">The session identity is invalid.</exception>
     public OwnedAskPage List(string sessionId)

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Actions, DockLocation, Layout, TabNode, TabSetNode, type Action } from "flexlayout-react";
+import { Actions, DockLocation, Layout, TabNode, TabSetNode, type Action, type Model } from "flexlayout-react";
 import { Button } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import { SessionTabMenu, type SessionMenuEntry } from "./SessionTabMenu";
@@ -62,8 +62,13 @@ const noFiles = emptyFileTabs();
 // Each pane retains its own live factory payload. App owns session authority and drafts.
 // The code editors and the changes of projects are tabs of the same dock; App owns which are open and which one is active.
 export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen, observations, capture, children, renderSession, newSessionLabel,
-  files = noFiles, renderFile, selectFile, closeFile, fileDirty, terminal, onSessionTabClick }: {
+  files = noFiles, renderFile, selectFile, closeFile, fileDirty, terminal, onSessionTabClick, layout }: {
   state: Tabs; snapshot?: WorkspaceSnapshot;
+  /**
+   * The model of the dock, when its owner keeps one: a dock that is taken away and shown again (the tabs of a
+   * space) then has its panes where they were. Without it the dock has a model of its own.
+   */
+  layout?: Model;
   /** The edited prompts of the window and the selected session, for the mark of a session tab. */
   drafts?: SessionTabDrafts;
   select: (tab: SessionTab) => void; close: (tab: SessionTab) => void; reopen: () => void;
@@ -81,7 +86,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   onSessionTabClick?: () => void;
 }) {
   const { t } = useShellLanguage();
-  const [model] = useState(createSessionTabModel);
+  const [model] = useState(() => layout ?? createSessionTabModel());
   const root = useRef<HTMLDivElement>(null);
   const alive = useRef(true);
   const [menu, setMenu] = useState<{ anchor: HTMLElement; items: SessionMenuEntry[]; current: () => boolean } | null>(null);

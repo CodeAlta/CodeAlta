@@ -85,7 +85,7 @@ Think of it as CodeAlta giving the agent a safe, scoped way to ask the host ques
 > [!NOTE]
 > This page covers daily session and delegation workflows. For the full command-group atlas and prompt recipes, see [Advanced Agent Workflows](advanced-agent-workflows.md).
 
-- which projects are known or currently open;
+- which projects are known or currently open, and which [space](spaces.md) each one is in;
 - what sessions already exist for this project;
 - which model providers and model refs are available;
 - whether a related session has finished and what its final result was;

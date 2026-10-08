@@ -17,6 +17,7 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
         "version",
         "ask",
         "project",
+        "space",
         "session",
         "skill",
         "skills",

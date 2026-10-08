@@ -111,6 +111,7 @@ altatui</code></pre>
         <tr><th scope="row">Providers, sessions, agent prompts, skills, MCP servers, plugins</th><td>{{ alta_yes }}</td><td>{{ alta_yes }}</td></tr>
         <tr><th scope="row">Delegated agents, notes, reminders, asks</th><td>{{ alta_yes }}</td><td>{{ alta_yes }}</td></tr>
         <tr><th scope="row">Sessions side by side, in panes you split</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
+        <tr><th scope="row">Spaces: groups of projects, each with its own tabs</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
         <tr><th scope="row">Code editor with the files of the project and a search</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>One file at a time</small></td></tr>
         <tr><th scope="row">Git changes: diffs, commits, branches</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
         <tr><th scope="row">Terminals, which agents can use too</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>

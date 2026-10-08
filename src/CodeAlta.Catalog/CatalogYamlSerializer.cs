@@ -46,6 +46,34 @@ public sealed class CatalogYamlSerializer
 
         [JsonPropertyName("checkout")]
         public CheckoutFrontMatter? Checkout { get; set; }
+
+        // Left out of a file whose project is in no space: such a file stays as it was before spaces.
+        [JsonPropertyName("spaces")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<string>? Spaces { get; set; }
+    }
+
+    private sealed class SpaceFrontMatter
+    {
+        [JsonPropertyName("id")]
+        public string? Id { get; set; }
+
+        [JsonPropertyName("kind")]
+        public string? Kind { get; set; }
+
+        [JsonPropertyName("name")]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("icon")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Icon { get; set; }
+
+        [JsonPropertyName("color")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Color { get; set; }
+
+        [JsonPropertyName("order")]
+        public int? Order { get; set; }
     }
 
     private sealed class CheckoutFrontMatter
@@ -65,6 +93,7 @@ public sealed class CatalogYamlSerializer
         ArgumentNullException.ThrowIfNull(yaml);
         var descriptor = YamlSerializer.Deserialize<ProjectDescriptor>(yaml) ?? new ProjectDescriptor();
         descriptor.Tags ??= [];
+        descriptor.Spaces ??= [];
         return descriptor;
     }
 
@@ -123,6 +152,7 @@ public sealed class CatalogYamlSerializer
             ProjectPath = projectPath,
             DefaultBranch = frontMatter.DefaultBranch ?? "main",
             Tags = frontMatter.Tags ?? [],
+            Spaces = SpaceDescriptor.NormalizeIds(frontMatter.Spaces),
             Archived = frontMatter.Archived ?? false,
             Checkout = new CheckoutRule
             {
@@ -155,9 +185,57 @@ public sealed class CatalogYamlSerializer
             Checkout = string.IsNullOrWhiteSpace(descriptor.Checkout.PathTemplate)
                 ? null
                 : new CheckoutFrontMatter { PathTemplate = descriptor.Checkout.PathTemplate },
+            Spaces = SpaceDescriptor.NormalizeIds(descriptor.Spaces) is { Count: > 0 } spaces ? spaces : null,
         };
 
         return SerializeMarkdown(frontMatter, descriptor.MarkdownBody, descriptor.DisplayName);
+    }
+
+    /// <summary>
+    /// Deserializes a space from the Markdown file that describes it: its front matter, and its body, which
+    /// is the description of the space.
+    /// </summary>
+    /// <param name="markdown">The markdown content.</param>
+    /// <returns>The space, not yet validated.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="markdown"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidDataException">Thrown when the text has no front matter.</exception>
+    public SpaceDescriptor DeserializeSpaceMarkdown(string markdown)
+    {
+        ArgumentNullException.ThrowIfNull(markdown);
+        var document = ParseFrontMatter(markdown);
+        var frontMatter = YamlSerializer.Deserialize<SpaceFrontMatter>(document.FrontMatter) ?? new SpaceFrontMatter();
+        var description = document.Body.Trim();
+        return new SpaceDescriptor
+        {
+            Id = frontMatter.Id ?? string.Empty,
+            Name = frontMatter.Name?.Trim() ?? string.Empty,
+            Icon = string.IsNullOrWhiteSpace(frontMatter.Icon) ? null : frontMatter.Icon.Trim().ToLowerInvariant(),
+            Color = string.IsNullOrWhiteSpace(frontMatter.Color) ? null : frontMatter.Color.Trim(),
+            Order = frontMatter.Order ?? 0,
+            Description = description.Length == 0 ? null : description,
+        };
+    }
+
+    /// <summary>
+    /// Serializes a space to the Markdown file that describes it.
+    /// </summary>
+    /// <param name="descriptor">The space.</param>
+    /// <returns>Markdown text.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="descriptor"/> is <see langword="null"/>.</exception>
+    public string SerializeSpaceMarkdown(SpaceDescriptor descriptor)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        var yaml = YamlSerializer.Serialize(new SpaceFrontMatter
+        {
+            Id = descriptor.Id,
+            Kind = "space",
+            Name = descriptor.Name,
+            Icon = descriptor.Icon,
+            Color = descriptor.Color,
+            Order = descriptor.Order,
+        }).Trim();
+        var description = descriptor.Description?.Trim();
+        return string.IsNullOrEmpty(description) ? $"---\n{yaml}\n---\n" : $"---\n{yaml}\n---\n\n{description}\n";
     }
 
     private static (string FrontMatter, string Body) ParseFrontMatter(string markdown)

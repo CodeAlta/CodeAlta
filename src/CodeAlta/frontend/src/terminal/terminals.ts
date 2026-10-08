@@ -36,7 +36,8 @@ export function applicationKey(event: TerminalKey): boolean {
   if (plain(event)) return key === "p" || key === "g" || key === "," || key === "`" || key === "PageUp" || key === "PageDown";
   // The tabs: reopen, close, previous and next.
   if (event.shiftKey && !event.altKey) return key === "t" || key === "w" || key === "n";
-  return event.altKey && !event.shiftKey && (key === "ArrowLeft" || key === "ArrowRight" || key === "b");
+  // The tab before and after, the saved sessions, and the space before and after.
+  return event.altKey && !event.shiftKey && (key === "ArrowLeft" || key === "ArrowRight" || key === "b" || key === "PageUp" || key === "PageDown");
 }
 
 /** What a key does to the terminal itself rather than to its program. */

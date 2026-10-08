@@ -116,6 +116,7 @@ CodeAlta's default global root is `~/.alta`. Important roots are:
 
 - `config.toml` for global chat/provider/plugin configuration;
 - `projects/` for project descriptors;
+- `spaces/` for the spaces that group the projects, one Markdown file each;
 - `sessions/yyyy/MM/dd/<session-id>.jsonl` for CodeAlta-owned session journals and legacy session-view headers/state;
 - `sessions/traces/<session-id>.trace` for optional protocol traces;
 - `cache/` for machine-local caches such as refreshed model metadata;

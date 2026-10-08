@@ -68,6 +68,7 @@ public sealed class AltaCommandRegistry
         app.Add("Guidance: non-help commands return JSONL headed by `alta.result`; help is plain text.");
         app.Add("Use small limits for snapshots. Common examples:");
         app.Add("  `alta project current`; `alta project list`");
+        app.Add("  `alta space list`; `alta space show <space>` for the spaces that group the projects");
         app.Add("  `alta ask --stdin` to ask the user structured questions, then yield");
         app.Add("  `alta notes get`; `alta notes set --stdin`; `alta notes clear`");
         app.Add("  `alta session current` to get the calling agent session id");

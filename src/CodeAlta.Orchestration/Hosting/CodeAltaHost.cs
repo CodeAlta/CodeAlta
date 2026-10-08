@@ -48,6 +48,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
     {
         CatalogOptions = catalogOptions;
         ProjectCatalog = projectCatalog;
+        SpaceCatalog = new SpaceCatalog(projectCatalog);
         SessionViewCatalog = sessionViewCatalog;
         SkillCatalog = skillCatalog;
         ModelProviderRegistry = modelProviderRegistry;
@@ -90,6 +91,11 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// Gets the project catalog.
     /// </summary>
     public ProjectCatalog ProjectCatalog { get; }
+
+    /// <summary>
+    /// Gets the catalog of the spaces: the groups of projects the user works on together.
+    /// </summary>
+    public SpaceCatalog SpaceCatalog { get; }
 
     /// <summary>
     /// Gets the session-view catalog.

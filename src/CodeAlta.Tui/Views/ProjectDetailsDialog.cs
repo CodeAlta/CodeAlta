@@ -226,6 +226,7 @@ internal sealed class ProjectDetailsDialog
             DefaultBranch = project.DefaultBranch,
             Description = project.Description,
             Tags = [.. project.Tags],
+            Spaces = [.. project.Spaces],
             Archived = project.Archived,
             Checkout = new CheckoutRule
             {

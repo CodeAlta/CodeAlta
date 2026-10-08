@@ -141,6 +141,7 @@ there, with its components, its state modules, their tests and its stylesheet:
 - `changes/`: the Changes tab, the git status of the composer and the diffs shown in the timeline.
 - `monaco/`: the Monaco setup shared by every editor of the page, the languages, and the text and diff editors.
 - `terminal/`: the terminals (the link to the host, the xterm.js view, the tab, the list of the Explorer, the options, the font).
+- `spaces/`: the spaces (the rules of what a space shows, the link to the host, the switch of the title bar, the bar of the Explorer, the window that creates one, the settings page).
 
 Rules for these sources:
 
@@ -177,6 +178,10 @@ decides how the application feels with long sessions and many tabs:
   render forces the browser to lay the page out each time. Such an effect has dependencies that name when
   it must run.
 - Whether a modal dialog is open is asked with `modalDialogOpen()`, not by searching the document.
+- The panes of a space that is not shown are unmounted: only the tabs of the shown space are in the page. The
+  window is given the catalog as the shown space has it (`scopeSnapshot`), and a switch of space publishes a
+  new snapshot. What reads the snapshot needs no knowledge of spaces; read the whole catalog (the `catalog`
+  ref of `App`) only for what must cross spaces.
 - The host sends a session pane the live state of its own session, when it changed, at most every 33 ms
   (`SessionDisplayService`).
 

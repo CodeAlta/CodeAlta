@@ -119,6 +119,8 @@ internal sealed class CodeAltaFrontendComposition
             .Add(catalogOptions)
             .Add(sessionCatalog.TextFiles)
             .Add(projectCatalog)
+            // The spaces of the catalog, for `alta space`. The desktop application shows one at a time.
+            .Add(new SpaceCatalog(projectCatalog))
             .Add(sessionCatalog)
             .Add(runtimeService)
             .Add(runtimeService.SkillCatalog)

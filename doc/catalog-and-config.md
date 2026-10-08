@@ -11,6 +11,7 @@ CodeAlta keeps user-owned durable state under a global root and project-local `.
 | `config.toml` | `CodeAltaConfigStore` | Global chat defaults, providers, and plugins; the automations of CodeAlta Desktop that are kept with the user. |
 | `mcp.json` | MCP plugin | Global MCP server connection definitions. |
 | `projects/` | `ProjectCatalog` | Markdown project descriptors keyed by project slug. |
+| `spaces/` | `SpaceCatalog` | The spaces that group the projects: one Markdown file for each, `<id>.md` (see "Spaces" below). |
 | `checkouts/` | `ProjectCatalog` helpers | Default checkout root used by catalog planning APIs. |
 | `machines/` | Catalog model | Machine-specific override profile root. |
 | `agents/` | Catalog model | File-backed agent-definition root used by host-owned coordinator setup. |
@@ -37,9 +38,9 @@ that other computers can reach (see `doc/desktop.md`, MCP server).
 
 `CatalogOptions.StateRoot` is the root of what one running instance alone writes: `sessions/` (journals and prompt-image copies), `cache/cache.sqlite3`, `ui-state.yaml`, `saved_prompts/`, `automations.json`, `work_items.json` and the legacy `threads/internal/`. It defaults to the global root, so the layout above is unchanged for the normal instance, whose lock is `~/.alta/alta.lock`.
 
-The developer instance (`alta --dev`, `altatui --dev`; `CodeAltaInstanceProfile` in `CodeAlta.Hosting`) keeps the same global root and sets the state root to `~/.alta/dev/`. It therefore shares `config.toml`, `auth/`, `mcp.json`, `projects/`, `prompts/`, `skills/`, `plugins/`, `plugin-data/`, `color-schemes/` and the rest of `cache/`, and writes its sessions, session cache, view state, drafts, terminal logs (`dev/logs/`) and lock (`dev/alta.lock`) apart, which lets it run beside the normal instance. The desktop developer instance also uses its own WebView data root (`CodeAlta/desktop-dev` under the local application-data directory). A host with a separate state root does not refresh the coordinator `AGENTS.md` of the global root; it only creates it when missing. The first time it runs, its `ui-state.yaml` starts from the normal instance's per-project provider/model preferences and navigator settings (`SessionViewCatalog.SeedViewStateFromAsync`); open sessions, selection and layouts are not copied, and later changes on either side stay separate.
+The developer instance (`alta --dev`, `altatui --dev`; `CodeAltaInstanceProfile` in `CodeAlta.Hosting`) keeps the same global root and sets the state root to `~/.alta/dev/`. It therefore shares `config.toml`, `auth/`, `mcp.json`, `projects/`, `spaces/`, `prompts/`, `skills/`, `plugins/`, `plugin-data/`, `color-schemes/` and the rest of `cache/`, and writes its sessions, session cache, view state, drafts, terminal logs (`dev/logs/`) and lock (`dev/alta.lock`) apart, which lets it run beside the normal instance. The desktop developer instance also uses its own WebView data root (`CodeAlta/desktop-dev` under the local application-data directory). A host with a separate state root does not refresh the coordinator `AGENTS.md` of the global root; it only creates it when missing. The first time it runs, its `ui-state.yaml` starts from the normal instance's per-project provider/model preferences and navigator settings (`SessionViewCatalog.SeedViewStateFromAsync`); open sessions, selection and layouts are not copied, and later changes on either side stay separate.
 
-Shared files keep their existing guarantees between the two instances: Codex credentials are refreshed under a cross-process file lock; `config.toml`, the project descriptors and the Copilot/xAI token files are whole-file writes without one, so the last writer wins. Optional provider protocol traces stay under the global root's `sessions/traces/`, one file per session id.
+Shared files keep their existing guarantees between the two instances: Codex credentials are refreshed under a cross-process file lock; `config.toml`, the project descriptors and the Copilot/xAI token files are whole-file writes without one, so the last writer wins. The space files and the `spaces` entry of a project file are saved over the bytes that were read, and an instance sees the changes of the other at its next read. Optional provider protocol traces stay under the global root's `sessions/traces/`, one file per session id.
 
 The runtime creates directories as needed. Provider auth managers also write under `~/.alta/auth/`, for example subscription credentials and direct-provider token caches. Protocol traces, session journals, auth files, and provider caches can contain prompts, tool arguments, model output, file paths, command output, or credentials; treat them as private user data.
 
@@ -151,6 +152,35 @@ Skill disablement is additive rather than an override: a skill named in global `
 `ProjectCatalog` stores project descriptors under `~/.alta/projects`. Current saves use flat `<slug>.md` files; the loader still reads older `<slug>/readme.md` descriptor paths so existing user state can be opened.
 
 A project descriptor includes stable id, slug, display name, project path, archive/visibility state, and timestamps. At launch, the current directory is exposed as a selectable in-memory project when no persisted descriptor already exists for that path; it is not written to `~/.alta/projects` until a session is created for it. Opening a folder upserts a descriptor for that path, then the shell selects it in the sidebar. Filesystem roots are valid project paths: because they have no leaf folder name, the catalog stores a safe synthetic project `name` and uses the normalized root path (for example `D:\` or `/`) as the sidebar display name.
+
+A project file also names the spaces of the project besides the default one, in the front-matter entry `spaces` (`ProjectDescriptor.Spaces`), for example `spaces: [work, open-source]`. The entry is absent while the project is in no such space. An id that is not valid, the default one and a repeated one are dropped when the file is read (`SpaceDescriptor.NormalizeIds`), and an id that no space has is ignored by the readers.
+
+### Spaces
+
+`SpaceCatalog` stores the spaces under `~/.alta/spaces` (`CatalogOptions.SpacesRoot`): the named groups of projects that CodeAlta Desktop shows one at a time (see `doc/desktop.md`, "Spaces").
+
+```markdown
+---
+id: open-source
+kind: space
+name: Open source
+icon: globe
+color: "#9d3f9d"
+order: 3
+---
+
+Libraries I maintain and the projects I contribute to.
+```
+
+- The file name is the id: what the front matter says of `id` is not what other files refer to. An id is a catalog slug, worked out from the first name of the space and kept when the space is renamed.
+- `name` is 1 to 64 characters on one line; `icon` is the name of an icon (lower-case letters, digits and `-`); `color` is `#rgb` or `#rrggbb`; `order` is the place in the list, the lower first, then the name. The body is the description, at most 2000 characters. A value that is wrong in a file written by hand is ignored; a file that cannot be read as a space is left out, so that it never hides the others.
+- The default space (`default`) holds every project and has no file until it is given another name, icon, color or description (`default.md`). It is always first, and cannot be deleted, joined or left.
+- A catalog holds at most 32 spaces, the default one included.
+- `SeedAsync` gives a catalog that never had spaces its first ones, `work.md` and `personal.md`. It does nothing once the folder exists.
+
+The projects of a space are the ones whose own file names it. `ProjectCatalog.UpdateSpacesAsync` changes that in place: only the `spaces` entry is written, added or removed, on one line, and every other byte of the project file stays. It runs under the project edit gate, with the renames and the archive changes of the same catalog instance, reads the edited text again with the YAML parser before saving, and saves over the revision it read; a file another process changed meanwhile is read again, twice at most. A project file whose front matter it cannot edit that way (the entry written twice, a link in the path, a descriptor without a file) is refused and left as it is. Deleting a space deletes its file first, then its id from each project file.
+
+Which space a window shows, and the tabs of each space, are not in the catalog: the page keeps them in the local storage of the window.
 
 ## Session and session-view storage
 

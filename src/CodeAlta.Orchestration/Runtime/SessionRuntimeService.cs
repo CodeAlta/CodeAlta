@@ -2032,6 +2032,19 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     public int CountActiveRuns() => _entries.Values.Count(static entry => !entry.IsTerminated && entry.HasActiveRun);
 
     /// <summary>
+    /// Lists what the sessions this runtime holds are doing right now: whether each runs, whether its provider
+    /// works in the background, and whether its last run failed. Like <see cref="CountActiveRuns"/> it is a
+    /// reading for the user, taken without waiting for any session. A session the runtime does not hold (one
+    /// that was not opened or sent to since the application started) is not listed.
+    /// </summary>
+    /// <returns>One entry for each session the runtime holds, in no particular order.</returns>
+    public IReadOnlyList<SessionRuntimeOverview> ListOverview()
+        => [.. _entries.Values
+            .Where(static entry => !entry.IsTerminated)
+            .Select(static entry => new SessionRuntimeOverview(entry.SessionId, entry.ProjectId, entry.Title,
+                entry.HasActiveRun || entry.QueueDrainInProgress, entry.BackgroundTasks.Count(static task => task.Outcome is null), entry.LastRunFailed))];
+
+    /// <summary>
     /// Lists the sessions that are at work right now, each with the folder it works in: its worktree when it has
     /// one, the folder of its project otherwise. Like <see cref="CountActiveRuns"/> it is a reading taken without
     /// waiting for any session; it answers whether a checkout can be removed or moved to another branch.
@@ -3929,6 +3942,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         public bool HasActiveRun => ActiveRunId is not null;
 
+        /// <summary>Whether the last run of this attachment ended with an error, until another run starts.</summary>
+        public bool LastRunFailed { get; private set; }
+
         public SessionViewDescriptor ToDescriptor()
             => new()
             {
@@ -3989,8 +4005,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         {
             if (@event.RunId is { } runId && ShouldTrackRunId(@event))
             {
+                // A run that goes on after a failed one makes that failure a thing of the past.
+                if (ActiveRunId is null && @event is not AgentErrorEvent) LastRunFailed = false;
                 ActiveRunId = runId;
             }
+
+            if (@event is AgentErrorEvent) LastRunFailed = true;
 
             if (@event is AgentBackgroundTasksEvent tasks)
             {

@@ -35,7 +35,7 @@ Core types:
 - `AltaSessionToolFactory` creates the agent tool named `alta` with `args`, optional `stdin`, `cwd`, output caps, and timeout.
 - `AltaCommandRegistry` creates a fresh `XenoAtom.CommandLine.CommandApp` per invocation and merges built-in plus plugin command contributors.
 - `AltaCommandDispatcher` captures stdout/stderr and flattens non-help results for live-tool consumption.
-- `BuiltInAltaCommandContributor` contributes core `project`, `session`, `skill`, `provider`, `model`, `plugin`, `tool`, and `version` commands.
+- `BuiltInAltaCommandContributor` contributes core `project`, `space`, `session`, `skill`, `provider`, `model`, `plugin`, `tool`, and `version` commands.
 - `PluginAltaCommandContributor` adapts trusted plugin command roots while reserving core roots.
 
 `CodeAltaFrontendComposition` wires the registry, dispatcher, service collection, plugin catalog bridge, and coordinator help text used by managed sessions.
@@ -83,7 +83,8 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | `version` | Report host/live-tool version metadata. |
 | `ask` | Queue structured user questions for the calling session and return yield guidance. |
 | `notes` | Get, replace, or clear the current session's sticky Markdown notes shown in the sidebar. |
-| `project` | List, show, resolve, upsert, and inspect current project context. |
+| `project` | List, show, resolve and inspect current project context; add, rename, archive, unarchive and remove projects. |
+| `space` | List, show, create, update, delete and reorder the spaces that group the projects, put projects in them, and show one in the window. |
 | `session` | List, create, show, send, queue, steer, abort, compact, inspect, report, and coordinate sessions. |
 | `reminder` | Schedule delayed prompt content for the current or another session, and list/delete reminders. |
 | `skill` | List, show, and activate CodeAlta-managed skills. |
@@ -114,6 +115,8 @@ alta notes get
 alta project current
 alta session current
 alta project list
+alta space list
+alta space current
 alta provider list
 alta model list --provider <provider-key>
 alta prompt list --scope all
@@ -124,6 +127,113 @@ alta mcp tool search
 ```
 
 Most list commands support compact defaults plus a `--detailed` mode.
+
+## Project commands
+
+A project is a folder CodeAlta knows, kept in the catalog of the user. Projects are grouped in spaces
+(see "Spaces" below): every project is in the default space, and can be in others.
+
+```text
+alta project list [--space <space> | --all] [--include-archived] [--detailed]
+alta project show <project>
+alta project resolve [--path <path>]
+alta project current
+alta project upsert <path>
+alta project add <path> [--space <space>]...
+alta project rename <project> <name>
+alta project archive <project>
+alta project unarchive <project>
+alta project remove <project> [--delete-sessions]
+```
+
+`<project>` is the id of a project, its slug or its path.
+
+- `list` lists the projects of the current space: the one the CodeAlta Desktop window shows, or every
+  project when no window says what it shows (CodeAlta TUI, a window that is closed, a space that is
+  gone). `--space <space>` lists another space, and `--all` or `--space default` every project. The
+  compact record is `alta.project.refs` (`spaceId`, `projects`: slug and path of each); `--detailed`
+  emits one `alta.project.item` for each project, then `alta.project.summary` (`count`, `spaceId`).
+- A project record (`alta.project.item`, `alta.project.detail`, `alta.project.resolution`,
+  `alta.project.upserted`, and the records below) has `projectId`, `slug`, `name`, `displayName`,
+  `projectPath`, `defaultBranch`, `archived`, `sourcePath`, `description`, `tags` and `spaces`: the
+  ids of the spaces of the project besides the default one.
+- `current` answers the project of the calling session, and otherwise the catalog project of the cwd.
+  A session that works in a git worktree is not in the folder of its project: it still gets its project.
+- `add` adds a folder to the catalog, as `upsert` does, and puts the project in the spaces named. A
+  folder that is a project already only joins them. It emits `alta.project.added` with `created`.
+- `rename` changes the name CodeAlta shows for a project; its id, its slug and its folder stay. It emits
+  `alta.project.renamed` with `previousName`.
+- `archive` and `unarchive` emit `alta.project.archived` with `archived` and `changed` (false when the
+  project was in that state already). An archived project leaves the lists; its folder, its sessions
+  and its spaces stay.
+- `remove` removes a project from the catalog and never touches its folder. A project that has
+  sessions is not removed (`project.hasSessions`, exit code 7): archive it, or pass
+  `--delete-sessions` to delete its sessions with it. Then a running session stops the command
+  (`project.sessionsRunning`), and a session does not remove its own project
+  (`project.callerSession`). It emits `alta.project.removed` with `deletedSessions` and
+  `deletedSessionIds`.
+
+`project.notFound` and `project.pathNotFound` (exit code 3) answer a project or a folder that is not
+there. `project.conflict` (exit code 1) answers a project file that changed during the command, and
+`project.unsupported` (exit code 7) one that cannot be edited as it is written.
+
+## Spaces
+
+A space is a named group of projects. The default space (`default`) holds every project and cannot be
+deleted; a project can be in several spaces. A space has an `id`, worked out from its name when it is
+created and never changed afterwards, a `name`, and optionally a `description`, an `icon` and a
+`color`. The description tells what the space is for, so that an agent knows which projects belong
+there. The group exists in a host that registers a `SpaceCatalog` (CodeAlta Desktop and CodeAlta TUI).
+
+```text
+alta space list
+alta space show <space> [--include-archived]
+alta space current
+alta space create --name <name> [--description <text> | --stdin] [--icon <name>] [--color <#rgb|#rrggbb>] [--project <project>]...
+alta space update <space> [--name <name>] [--description <text> | --stdin] [--icon <name>] [--color <color>]
+alta space delete <space>
+alta space add <space> <project>...
+alta space remove <space> <project>...
+alta space reorder <space>...
+alta space switch <space>
+```
+
+`<space>` is the id of a space, its name, or the start of its id when only one space starts so
+(`usage.ambiguousSpace` otherwise).
+
+- `list` emits one `alta.space.item` for each space, the default one first, then `alta.space.summary`:
+  `id`, `name`, `description`, `icon`, `color`, `default`, `projectCount` (the projects that are not
+  archived) and `current` (true for the space the window shows, or for the default space when no
+  window says what it shows).
+- `show` emits `alta.space.detail`: the same fields and `projects`, each with `id`, `slug`, `name`,
+  `path` and `archived`. Archived projects are listed with `--include-archived`.
+- `current` emits the `alta.space.detail` of the space the window shows, with `shown: true`. Without a
+  window, or when that space is gone, it is the default space with `shown: false`.
+- `create` emits `alta.space.created`, with the ids of the `--project` it was given in `projects`. The
+  description comes from `--description` or from stdin with `--stdin`, not from both.
+- `update` changes what is given and leaves the rest; an empty value (`--description ""`, `--icon ""`,
+  `--color ""`) removes it. It emits `alta.space.updated` with `changed`, the names of the fields that
+  changed. The default space takes a name, a description, an icon and a color like the others.
+- `delete` emits `alta.space.deleted`. The projects of the space, their folders and their sessions
+  stay, and the projects are still in the default space.
+- `add` and `remove` emit `alta.space.projects`: `spaceId`, `added` or `removed` (the ids of the
+  projects that changed), `unchanged` and `projectCount`. A project that joins a space stays in the
+  others it is in.
+- `reorder` puts the spaces in the order given; those not named follow in their present order, and the
+  default space stays first. It emits `alta.space.order` with `ids`.
+- `switch` shows another space in the CodeAlta Desktop window and emits `alta.space.shown` (`spaceId`,
+  `name`). It exists only where a window shows one space at a time (`IAltaSpaceView`), changes what the
+  window shows and no setting of the user, and is for when the user asks to see another space: `show`
+  reads any space. `view.unavailable` (exit code 5) answers when no window is open.
+
+`space.notFound` (exit code 3) answers a reference that is no space. `space.invalid` (exit code 2)
+answers a name, a description, an icon or a color the catalog does not take, with its reason.
+`space.refused` (exit code 7) answers what cannot be done: deleting the default space, `add` or
+`remove` on it, one space too many. `space.conflict` (exit code 1) answers a file that changed during
+the command.
+
+After each command that changes a space or a project, the window is told (`IAltaSpaceView.NotifyChanged`)
+and reads them again.
 
 ## Session commands
 

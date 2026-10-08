@@ -514,6 +514,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 asks = new SessionAsksService(host.Commands.Asks, epoch);
                 reminders = new ReminderService(host.WorkspaceReads, host.Commands, epoch);
                 changesView = new DesktopChangesView();
+                // The space the window shows, and what a command asks of it. A catalog that never had spaces
+                // gets its first ones before the page reads them.
+                var spaceView = new DesktopSpaceView();
+                try { await host.SpaceCatalog.SeedAsync(); }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* The window then has the default space alone. */ }
                 editorView = new DesktopEditorView();
                 terminals = new Terminals.DesktopTerminals(DesktopCommandLine.Version, Path.Combine(options.DataRoot, "terminal"));
                 shell.BusyTerminals = () => terminals.Busy;
@@ -533,7 +538,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 var workItems = new CodeAlta.Catalog.WorkItems.WorkItemService(worktreeConfig, host.CatalogOptions.StateRoot);
                 var altaCommands = DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
                     new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
-                    new DesktopAltaAutomations(automations, host.ProjectCatalog), worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell));
+                    new DesktopAltaAutomations(automations, host.ProjectCatalog), worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView);
                 // The clients of the MCP server run the same commands, as callers that belong to no session.
                 Volatile.Write(ref altaTool, Mcp.DesktopMcpTools.Alta(altaCommands, roots.Project, shell.NotifySessionsChanged));
                 uiSessions.WorkFolder = (sessionId, token) => SessionFolderAsync(host, sessionId, token);
@@ -591,6 +596,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddAutomationsService(new AutomationsService(automations, host.ProjectCatalog, epoch));
                     var pullRequestPrompts = new CodeAlta.Catalog.PullRequests.PullRequestPromptCatalog(host.CatalogOptions);
                     builder.AddPullRequestPromptsService(new PullRequestPromptsService(pullRequestPrompts, host.ProjectCatalog, epoch));
+                    builder.AddSpacesService(new SpacesService(host.SpaceCatalog, spaceView, host.RuntimeService.ListOverview, async () =>
+                    {
+                        // A question a session asked, a command to review, a form to fill.
+                        var reviews = await host.RuntimeService.Permissions.ListWaitingSessionsAsync();
+                        return [.. host.Commands.Asks.ListWaitingSessions(), .. reviews];
+                    }, epoch));
                     var sessionStarter = new WorkItems.SessionStarter(host, worktrees);
                     builder.AddWorkItemsService(new WorkItemsService(workItems, host.ProjectCatalog, new WorkItems.WorkItemRunner(sessionStarter, workItems), epoch));
                     // The trackers are the ones of the plugins that are active when the page asks: the Git plugin for the
@@ -797,6 +808,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddWorkItemsService(new WorkItemsService());
             builder.AddIssuesService(new IssuesService());
             builder.AddPullRequestPromptsService(new PullRequestPromptsService());
+            builder.AddSpacesService(new SpacesService());
             builder.AddPromptImagesService(new PromptImagesService());
             builder.AddToolCallsService(new ToolCallsService());
             builder.AddComposerStatusService(new ComposerStatusService());

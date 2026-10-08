@@ -312,6 +312,7 @@ internal sealed class NavigatorActionCoordinator : IProjectDetailsDialogService
             DefaultBranch = project.DefaultBranch,
             Description = project.Description,
             Tags = [.. project.Tags],
+            Spaces = [.. project.Spaces],
             Checkout = project.Checkout,
             SourcePath = project.SourcePath,
             Archived = project.Archived,

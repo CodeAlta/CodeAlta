@@ -25,6 +25,7 @@ This guide applies to both. Screenshots have a **Desktop / TUI** switch, and pag
 
 ## Workflow topics
 
+- [Spaces](spaces.md): groups of projects in CodeAlta Desktop, shown one at a time, each with its own tabs.
 - [Sessions and Delegation](sessions.md): global vs project sessions, multiple-agent delegation, prompt queues, steering, compaction, notes, and reminders.
 - [Worktrees](worktrees.md): sessions that work in their own git worktree, so that several can change the same project at the same time.
 - [Automations](automations.md): prompts that CodeAlta Desktop runs on a schedule, on a new issue or pull request, or on demand.

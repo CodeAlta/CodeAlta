@@ -52,6 +52,12 @@ public sealed class CatalogOptions
     public string ProjectsRoot => Path.Combine(GlobalRoot, "projects");
 
     /// <summary>
+    /// Gets the folder of the spaces under the global catalog: one Markdown file for each space. The
+    /// projects of a space are named by the project files, not by this folder.
+    /// </summary>
+    public string SpacesRoot => Path.Combine(GlobalRoot, "spaces");
+
+    /// <summary>
     /// Gets the machine configuration root path under the global catalog.
     /// </summary>
     public string MachinesRoot => Path.Combine(GlobalRoot, "machines");

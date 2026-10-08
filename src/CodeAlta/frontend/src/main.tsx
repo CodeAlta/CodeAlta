@@ -18,7 +18,7 @@ import { EntryAddedDialog } from "./EntryAddedDialog";
 import { showToast } from "./appToaster";
 import { availableUpdate, installedNotice, updateCheckInterval, updateToAnnounce, UpdateNotice } from "./UpdateNotice";
 import {
-  boot, configuration, applicationLogs, modelCatalog, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
+  boot, configuration, applicationLogs, modelCatalog, reminder, workspace as workspaceApi, spaces as spacesApi, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionPluginEvents, projectFiles, projectGit, promptImages, toolCalls, composerStatus, pluginUi, sessionUserInput, type BootStatus,
   type ReminderListRequest,
   type ReminderListResponse,
@@ -39,7 +39,7 @@ import { createToolCallCache } from "./toolCallReader";
 import { createToolOutputStore } from "./toolOutput";
 import { SessionContentLayout } from "./SessionContentLayout";
 import { SessionTabStrip } from "./SessionTabStrip";
-import { sessionTabPresentation } from "./sessionTabLayout";
+import { createSessionTabModel, sessionTabPresentation } from "./sessionTabLayout";
 import { createReferencePopupLifetime } from "./referencePopup";
 import { SessionBrowser } from "./SavedSessionBrowser";
 import { ProjectArchiveDialog } from "./ProjectArchiveDialog";
@@ -47,7 +47,7 @@ import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./
 import { createProjectArchive } from "./projectArchive";
 import { browserActivation } from "./sessionBrowser";
 import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, automationsTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type TabKind, type TabPosition } from "./fileTabs";
+import { activateFileTab, automationsTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type FileTabs, type TabKind, type TabPosition } from "./fileTabs";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
 import { OpenFileDialog } from "./editor/OpenFileDialog";
@@ -163,6 +163,12 @@ import { createPluginEventsRead } from "./pluginEvents";
 import { ProjectContext } from "./ProjectContext";
 import { WorktreeSettings } from "./worktrees/WorktreeSettings";
 import { McpHostSettings } from "./mcpHost/McpHostSettings";
+import { createSpacesHub } from "./spaces/spacesHub";
+import { SpaceActivityBar, SpaceSwitch } from "./spaces/SpaceViews";
+import { SpaceDialog } from "./spaces/SpaceDialog";
+import { SpaceSettings } from "./spaces/SpaceSettings";
+import { defaultSpaceId, findSpace, neighborSpace, persistShownSpace, restoreShownSpace, sameMembers, scopeSnapshot, shownSpaceKey, spaceCalls, spaceMembers,
+  spaceStorageKey } from "./spaces/spaces";
 import { persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
 import type { ComposerChromeValue } from "./composerChrome";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
@@ -195,6 +201,7 @@ import "./workItems/workItems.css";
 import "./issues/issues.css";
 import "./worktrees/worktrees.css";
 import "./mcpHost/mcpHost.css";
+import "./spaces/spaces.css";
 import { modalDialogOpen } from "./modalDialogs";
 
 type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; epoch: string | null;
@@ -202,13 +209,30 @@ type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; e
   latestReady: () => boolean; latest: () => void; cancelLatest: () => void }>;
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
-type View = "workspace" | "appearance" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost";
+type View = "workspace" | "appearance" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost";
 type SettingsSection = Exclude<View, "workspace">;
 const paneLayoutStorageKey = "codealta.desktop.panes.v1";
 
 function App() {
   const language = useLanguagePreference();
   const t = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate(language.locale, key, parameters);
+  // The spaces: the groups of projects the window shows one at a time. What is read of the catalog is kept
+  // whole, and the window is given what the shown space has of it, so that everything it lists and opens
+  // (the Explorer, the tabs, the search, the work items) is the space's.
+  const [spacesHub] = useState(() => createSpacesHub(spacesApi));
+  const spacesState = useSyncExternalStore(spacesHub.subscribe, spacesHub.getSnapshot);
+  const [spaceId, writeSpaceId] = useState(() => restoreShownSpace(() => localStorage.getItem(shownSpaceKey)));
+  const shownSpace = useRef(spaceId);
+  const catalog = useRef<WorkspaceSnapshot | undefined>(undefined);
+  const scopedMembers = useRef<ReadonlySet<string> | null>(null);
+  const [workspace] = useState(() => ({ ...workspaceApi, snapshot: async (...request: Parameters<typeof workspaceApi.snapshot>) => {
+    const fresh = await workspaceApi.snapshot(...request);
+    // A window that comes back on a space waits for the spaces before it shows the projects of that one alone.
+    if (shownSpace.current !== defaultSpaceId) await spacesHub.whenLoaded(6_000);
+    catalog.current = fresh;
+    scopedMembers.current = spaceMembers(spacesHub.getSnapshot().spaces, shownSpace.current);
+    return scopeSnapshot(fresh, scopedMembers.current);
+  } }));
   const [batchDeletion] = useState(() => createSessionBatchDeletion(workspace.deleteSession));
   const batchDeletionState = useSyncExternalStore(batchDeletion.subscribe, batchDeletion.getSnapshot);
   useEffect(() => () => batchDeletion.invalidate(), [batchDeletion]);
@@ -278,7 +302,7 @@ function App() {
   }, []);
   const [projectId, writeProjectId] = useState<string | null>(null);
   const [sessionId, writeSessionId] = useState<string | null>(null);
-  const [restoredTabs] = useState(() => restoreSessionTabs(() => localStorage.getItem(sessionTabsKey)));
+  const [restoredTabs] = useState(() => restoreSessionTabs(() => localStorage.getItem(spaceStorageKey(sessionTabsKey, spaceId))));
   const [tabs, setTabs] = useState(restoredTabs ?? emptySessionTabs);
   const [tabsReady, setTabsReady] = useState(false);
   // File editor tabs share the strip with the sessions. An active file is shown over the session selection,
@@ -287,7 +311,7 @@ function App() {
     // The files that were tabs of their own before the editor had tabs: each project's editor opens its files.
     adoptLegacyFiles(() => localStorage.getItem(editorStorageKey), value => localStorage.setItem(editorStorageKey, value),
       restoreLegacyFiles(() => localStorage.getItem(fileTabsKey)));
-    return restoreFileTabs(() => localStorage.getItem(fileTabsKey));
+    return restoreFileTabs(() => localStorage.getItem(spaceStorageKey(fileTabsKey, spaceId)));
   });
   const [fileTabs, setFileTabs] = useState(emptyFileTabs);
   const [fileEditors] = useState(createFileEditors);
@@ -371,7 +395,7 @@ function App() {
   }
   // A control outside the shell (a composer status item) asks for a Settings page by name.
   const openSettingsPage = useRef<(page: string) => void>(() => {});
-  openSettingsPage.current = page => { if (page === "mcp" || page === "plugins" || page === "providers" || page === "skills") navigate(page); };
+  openSettingsPage.current = page => { if (page === "mcp" || page === "plugins" || page === "providers" || page === "skills" || page === "spaces") navigate(page); };
   useEffect(() => settingsNavigation.subscribe(page => openSettingsPage.current(page)), []);
   const { projectSort, setProjectSort, theme, variant, appearance, setTheme, darker, setDarker, colorScheme, shownScheme, setColorScheme, customSchemes, setCustomSchemes, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount } = useWindowPreferences();
   // The user's own color schemes, and what the editor of one shows while it edits.
@@ -645,6 +669,15 @@ function App() {
     return () => abort.abort();
   }, []);
   const hostAnswered = !!status;
+  // The spaces are read once the host answered, and again each time it says they changed.
+  const spacesEpoch = status?.hostAvailable ? status.hostEpoch ?? null : null;
+  useEffect(() => {
+    if (spacesEpoch) return spacesHub.connect(spacesEpoch);
+    if (hostAnswered) spacesHub.unavailable();
+    return undefined;
+  }, [spacesHub, spacesEpoch, hostAnswered]);
+  // The host is told which space the window shows: the commands of the sessions read it as their current space.
+  useEffect(() => { if (spacesEpoch && spacesState.available) spacesHub.shown(spaceId); }, [spacesHub, spacesEpoch, spacesState.available, spaceId]);
   useEffect(() => {
     // Watch only a host that answered once; a window that never connected already says so.
     if (demoMode || !hostAnswered) return;
@@ -660,6 +693,30 @@ function App() {
 
   const snapshot = workspaceState.kind === "ready" ? workspaceState.snapshot : undefined;
   const projectListing = snapshot ? projectRailProjection(snapshot, projectSort, projectTree.favorites) : null;
+  // The projects of the shown space changed without a read of the catalog (a project joined it, here or through
+  // a command): the window is given the catalog again as that space now has it.
+  useEffect(() => {
+    const full = catalog.current;
+    if (!full || workspaceState.kind !== "ready" || !spacesState.loaded) return;
+    const members = spaceMembers(spacesState.spaces, shownSpace.current);
+    if (sameMembers(members, scopedMembers.current)) return;
+    scopedMembers.current = members;
+    publishWorkspaceState({ kind: "ready", snapshot: scopeSnapshot(full, members) });
+  }, [spacesState.spaces, spacesState.loaded, workspaceState.kind]);
+  // A space that is gone (removed here, by a command or by another instance) gives its place to the default one,
+  // and the tabs the window kept for it are forgotten.
+  useEffect(() => {
+    if (!spacesState.loaded || !spacesState.available) return;
+    if (tabsReady && !spacesState.spaces.some(space => space.id === spaceId)) showSpace(defaultSpaceId, undefined, true);
+    try {
+      for (const base of [sessionTabsKey, fileTabsKey]) {
+        for (const key of Object.keys(localStorage)) {
+          if (key.startsWith(`${base}.`) && !spacesState.spaces.some(space => spaceStorageKey(base, space.id) === key)) localStorage.removeItem(key);
+        }
+      }
+    } catch { /* Storage that cannot be read keeps what it has. */ }
+    for (const id of [...spaceTabs.current.keys()]) if (!spacesState.spaces.some(space => space.id === id)) { spaceTabs.current.delete(id); spaceLayouts.current.delete(id); }
+  }, [spacesState.loaded, spacesState.available, spacesState.spaces, spaceId, tabsReady]);
   useEffect(() => {
     if (!snapshot || initialSelectionMade.current) return;
     initialSelectionMade.current = true;
@@ -698,11 +755,11 @@ function App() {
     if (next !== tabs) setTabs(next);
   }, [snapshot, projectId, sessionId, tabsReady, tabs]);
   useEffect(() => {
-    if (tabsReady && snapshot) persistSessionTabs(value => localStorage.setItem(sessionTabsKey, value), tabs);
-  }, [tabs, tabsReady, snapshot]);
+    if (tabsReady && snapshot) persistSessionTabs(value => localStorage.setItem(spaceStorageKey(sessionTabsKey, spaceId), value), tabs);
+  }, [tabs, tabsReady, snapshot, spaceId]);
   useEffect(() => {
-    if (tabsReady && snapshot) persistFileTabs(value => localStorage.setItem(fileTabsKey, value), fileTabs);
-  }, [fileTabs, tabsReady, snapshot]);
+    if (tabsReady && snapshot) persistFileTabs(value => localStorage.setItem(spaceStorageKey(fileTabsKey, spaceId), value), fileTabs);
+  }, [fileTabs, tabsReady, snapshot, spaceId]);
 
   // A scope that becomes the selected one is opened. At the start what was remembered is kept as it is; with
   // nothing remembered the selected scope is the one open, as it was before the Explorer remembered anything.
@@ -726,6 +783,117 @@ function App() {
     if (!snapshot || snapshot !== currentSnapshot.current || !resolveSessionTab(snapshot, tab)) return;
     applyTabState(openSessionTab(reconcileSessionTabs(tabs, snapshot), tab));
   }
+  // What each space had open when the window left it: its tabs come back with it, and the dock of each space
+  // keeps where its panes were. The panes of a space that is not shown are not in the page at all.
+  type SpaceTarget = Readonly<{ projectId: string | null; sessionId: string | null }>;
+  const spaceTabs = useRef(new Map<string, Readonly<{ tabs: SessionTabsState; files: FileTabs; projectId: string | null }>>());
+  const spaceLayouts = useRef(new Map<string, ReturnType<typeof createSessionTabModel>>());
+  function spaceLayout(id: string) {
+    let layout = spaceLayouts.current.get(id);
+    if (!layout) { layout = createSessionTabModel(); spaceLayouts.current.set(id, layout); }
+    return layout;
+  }
+  // Leaving a space takes its code editors out of the page: while files hold unsaved edits, the window asks first.
+  const [leavingSpace, setLeavingSpace] = useState<{ spaceId: string; target?: SpaceTarget; tabs: FileTab[]; busy: boolean } | null>(null);
+  const [spaceMenuRequest, setSpaceMenuRequest] = useState(0);
+  const [spaceDialog, setSpaceDialog] = useState(false);
+  /**
+   * Shows a space: its projects in the Explorer, and the tabs it had. With a target, that project or session is
+   * then selected. False when the space is not shown (the catalog is not read yet, or files hold unsaved edits
+   * and the window asks what to do with them).
+   */
+  function showSpace(id: string, target?: SpaceTarget, discard = false): boolean {
+    const known = spacesHub.getSnapshot().spaces;
+    const next = findSpace(known, id).id;
+    if (next === shownSpace.current) {
+      if (target) selectProject(target.projectId, target.sessionId);
+      return true;
+    }
+    const full = catalog.current;
+    if (!full || !tabsReady) return false;
+    const unsaved = fileTabs.open.filter(tab => fileEditors.dirty(fileTabKey(tab)));
+    if (unsaved.length > 0 && !discard) { setLeavingSpace({ spaceId: next, target, tabs: unsaved, busy: false }); return false; }
+    setLeavingSpace(null);
+    spaceTabs.current.set(shownSpace.current, { tabs, files: fileTabs, projectId });
+    shownSpace.current = next;
+    writeSpaceId(next);
+    persistShownSpace(value => localStorage.setItem(shownSpaceKey, value), next);
+    const members = spaceMembers(known, next);
+    scopedMembers.current = members;
+    const scoped = scopeSnapshot(full, members);
+    publishWorkspaceState({ kind: "ready", snapshot: scoped });
+    const kept = spaceTabs.current.get(next);
+    const entering = reconcileSessionTabs(kept?.tabs ?? restoreSessionTabs(() => localStorage.getItem(spaceStorageKey(sessionTabsKey, next))) ?? emptySessionTabs(), scoped);
+    const files = reconcileTerminalTabs(reconcileFileTabs(kept?.files ?? restoreFileTabs(() => localStorage.getItem(spaceStorageKey(fileTabsKey, next))) ?? emptyFileTabs(), scoped),
+      new Set(terminalList.map(terminal => terminal.id)));
+    closedTabKinds.current = [];
+    if (target) { setTabs(entering); selectProject(target.projectId, target.sessionId); }
+    else if (entering.active) applyTabState(entering);
+    else {
+      setTabs(entering);
+      // The project the space was left on, else its first one, else the chats.
+      const project = scoped.projects.find(value => value.id === kept?.projectId && !value.archived) ?? scoped.projects.find(value => !value.archived);
+      selectProject(project?.id ?? null);
+    }
+    // After the selection above, which leaves any file: the tab that was in front of the space stays in front.
+    setFileTabs(target ? activateFileTab(files, null) : files);
+    return true;
+  }
+  async function saveAndLeaveSpace(leaving: NonNullable<typeof leavingSpace>) {
+    setLeavingSpace({ ...leaving, busy: true });
+    for (const tab of leaving.tabs) {
+      if (await fileEditors.save(fileTabKey(tab))) continue;
+      if (creationAlive.current) { setLeavingSpace(null); activateFile(tab); }
+      return;
+    }
+    if (creationAlive.current) showSpace(leaving.spaceId, leaving.target, true);
+  }
+  // A session of a project that the shown space does not have: the default space, which has every project, is shown first.
+  function revealSession(session: WorkspaceSession) {
+    const target = { projectId: session.scopeKind === "project" ? session.projectId : null, sessionId: session.id };
+    if (currentSnapshot.current?.sessions.some(candidate => candidate.id === session.id)) selectProject(target.projectId, target.sessionId);
+    else showSpace(defaultSpaceId, target);
+  }
+  // Shows a space on one of its sessions: the one that waits for the user there. A session that just started is read first.
+  async function openSpaceSession(id: string, target: SpaceTarget) {
+    if (target.sessionId && !catalog.current?.sessions.some(session => session.id === target.sessionId)) {
+      try {
+        const fresh = await workspace.snapshot({}, { timeoutMilliseconds: 30_000 });
+        if (!creationAlive.current) return;
+        if (fresh.configured) publishWorkspaceState({ kind: "ready", snapshot: fresh });
+      } catch { /* The space is shown all the same: its Explorer has the session once it is listed. */ }
+    }
+    showSpace(id, catalog.current?.sessions.some(session => session.id === target.sessionId) ? target : undefined);
+    focusPromptSoon();
+  }
+  // A project that another space has joins the one shown, and is selected there.
+  async function joinShownSpace(id: string) {
+    const outcome = await spacesHub.assign(id, [shownSpace.current]);
+    if (!outcome.ok || !creationAlive.current) return;
+    const fresh = await refreshProjects(creationRefresh.current.signal);
+    if (fresh?.projects.some(project => project.id === id)) { selectProject(id); focusPromptSoon(); }
+  }
+  // What reaches the window from elsewhere: a command asks for a space, or changed the spaces or the projects.
+  const spaceRequest = useRef<(kind: "show" | "changed", id: string | null) => void>(() => { });
+  spaceRequest.current = (kind, id) => { if (kind === "show" && id) showSpace(id); else readSessionList.current(); };
+  useEffect(() => { spacesHub.onRequest((kind, id) => spaceRequest.current(kind, id)); }, [spacesHub]);
+  // The sessions that need the user in a space that is not shown: listed at the foot of the Explorer, and said
+  // once, when a session starts to wait, in a message that leads to it.
+  const calls = useMemo(() => spaceCalls(spacesState.spaces, spaceId, spacesState.sessions), [spacesState.spaces, spacesState.sessions, spaceId]);
+  const saidCalls = useRef<{ spaceId: string; sessions: ReadonlySet<string> } | null>(null);
+  useEffect(() => {
+    const said = saidCalls.current;
+    const waiting = calls.filter(call => call.waiting);
+    saidCalls.current = { spaceId, sessions: new Set(waiting.map(call => call.sessionId)) };
+    // What waited when the window started, or when it left a space, is not news.
+    if (!said || said.spaceId !== spaceId) return;
+    for (const call of waiting) {
+      if (said.sessions.has(call.sessionId)) continue;
+      showToast({ intent: "warning", icon: "help", timeout: 12_000,
+        message: translate(shownLocale.current, "{title} waits for you in {space}", { title: call.title || translate(shownLocale.current, "A session"), space: call.space.name }),
+        action: { text: translate(shownLocale.current, "Show"), onClick: () => void openSpaceSession(call.space.id, call) } });
+    }
+  }, [calls, spaceId]);
   function activateFile(tab: FileTab | null) { setFileTabs(state => activateFileTab(state, tab)); }
   function openFile(tab: FileTab) {
     // At the tab limit a file with unsaved edits is never the one that makes room.
@@ -1133,6 +1301,9 @@ function App() {
     if (pick.status !== "ok") { setDialog("project"); return; }
     const saved = currentSnapshot.current?.projects.find(project => sameFolder(project.path, pick.path));
     if (saved && !projectOpening.getSnapshot()) { selectProject(saved.id); focusPromptSoon(); return; }
+    // A folder that is a project of another space joins the one shown.
+    const elsewhere = saved || shownSpace.current === defaultSpaceId ? undefined : catalog.current?.projects.find(project => !project.archived && sameFolder(project.path, pick.path));
+    if (elsewhere && !projectOpening.getSnapshot()) { void joinShownSpace(elsewhere.id); return; }
     setDialog("project");
     setProjectFolder(pick.path);
   }
@@ -1261,8 +1432,8 @@ function App() {
         shown = fresh;
       } catch { return; }
     }
-    const session = shown.sessions.find(candidate => candidate.id === id);
-    if (session) selectProject(session.scopeKind === "project" ? session.projectId : null, session.id);
+    const session = shown.sessions.find(candidate => candidate.id === id) ?? catalog.current?.sessions.find(candidate => candidate.id === id);
+    if (session) revealSession(session);
   }
   // The tasks agents propose and the plans of the projects: this window lists them and is told when they change.
   const [workHub] = useState(() => createWorkItemsHub(workItemsApi));
@@ -1273,7 +1444,11 @@ function App() {
   const workOrder = useMemo(() => snapshot ? readingOrder(snapshot.projects, snapshot.sessions, null) : null, [snapshot]);
   useEffect(() => { if (workOrder) workHub.setProjects(workOrder); }, [workHub, workOrder]);
   const workSessionIds = useMemo(() => new Set(snapshot?.sessions.map(session => session.id) ?? []), [snapshot]);
-  const work = useMemo(() => workItems(workState.projects, workSessionIds), [workState.projects, workSessionIds]);
+  // The work items of the projects the window shows: the ones of a project that is in another space are not listed here.
+  const work = useMemo(() => {
+    const shown = new Set(snapshot?.projects.map(project => project.id) ?? []);
+    return workItems(workState.projects.filter(project => shown.has(project.projectId)), workSessionIds);
+  }, [workState.projects, workSessionIds, snapshot]);
   // Each answer of a status refresh changes the observations; App follows only which sessions run.
   const observedRunning = useSyncExternalStore(runtimeObservations.subscribe, runtimeObservations.getRunning);
   const runningSessionIds = useMemo(() => new Set((snapshot?.sessions ?? []).filter(session => observedRunning.has(tabKey(
@@ -1310,7 +1485,8 @@ function App() {
   const [openPullRequestSettings] = useState(() => () => navigateLatest.current("pullRequests"));
   // What a message between agents needs of the sessions: the title of the one it names, and a way to open it.
   const openLinkedSession = useRef<(id: string) => void>(() => { });
-  const sessionTitles = useMemo(() => new Map((snapshot?.sessions ?? []).map(session => [session.id.toLowerCase(), session.title])), [snapshot]);
+  // A message can name a session of a project that is in another space: every session of the catalog has its title here.
+  const sessionTitles = useMemo(() => new Map((catalog.current?.sessions ?? snapshot?.sessions ?? []).map(session => [session.id.toLowerCase(), session.title])), [snapshot]);
   const sessionLinks = useMemo<SessionLinks>(() => ({ title: id => sessionTitles.get(id.toLowerCase()) ?? null, open: id => openLinkedSession.current(id) }), [sessionTitles]);
   openLinkedSession.current = id => void openAutomationSession(id);
   // A session can ask for the tab of a terminal to be shown.
@@ -1521,6 +1697,9 @@ function App() {
       case "editFile": case "projectEditor": return view === "workspace" && !!editedProject();
       case "newTerminal": return view === "workspace" && !!terminalOrigin();
       case "automations": case "workItems": case "issues": return owned;
+      case "spaces": case "newSpace": return owned && spacesState.available;
+      case "goToSpace": return spacesState.available;
+      case "previousSpace": case "nextSpace": return spacesState.available && spacesState.spaces.length > 1;
       case "refreshStatuses": return owned && tabs.open.length > 0;
       case "newSession": return owned && !!snapshot && !selectedProject?.archived;
       case "renameProject": return owned && !!selectedProject && !selectedProject.archived;
@@ -1546,7 +1725,7 @@ function App() {
     }
     // Settings is a modal window: only commands that move to another Settings page run while it is open.
     const pages: Partial<Record<CommandId, View>> = { settings: "appearance", about: "about", skills: "skills", plugins: "plugins", mcp: "mcp",
-      config: "config", prompts: "prompts", providers: "providers", models: "models", logs: "logs" };
+      config: "config", prompts: "prompts", providers: "providers", models: "models", logs: "logs", spaces: "spaces" };
     if (pages[command]) { navigate(pages[command]!); return; }
     if (settingsVisible.current) return;
     switch (command) {
@@ -1559,6 +1738,11 @@ function App() {
       case "automations": openAutomations(); break;
       case "workItems": openWorkItems(); break;
       case "issues": openFile(issuesTab); break;
+      case "newSpace": setSpaceDialog(true); break;
+      case "goToSpace": setSpaceMenuRequest(value => value + 1); break;
+      case "previousSpace": case "nextSpace":
+        if (showSpace(neighborSpace(spacesState.spaces, spaceId, command === "nextSpace" ? 1 : -1).id)) focusPromptSoon();
+        break;
       case "newSession": selectProject(projectId); requestAnimationFrame(() => document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt")?.focus()); break;
       case "focusSidebar": runShortcut("focusProjects"); break;
       case "focusAskFile": visibleAsk(".ask-file-review")?.dispatchEvent(new CustomEvent("codealta-ask-file-focus")); break;
@@ -1604,6 +1788,14 @@ function App() {
       if (!commandChord.current && event.key === "F2" && target?.closest("[data-rename-keys]")) return;
       if (editing && !commandChord.current && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && event.key.toLowerCase() === "g") return;
       const focus = target?.closest("#session-prompt, #catalog-prompt") ? "prompt" : target?.closest(workspaceEditingSelector) ? "text" : "none";
+      // After Ctrl+G a digit shows the space at that place of the list.
+      if (commandChord.current && /^[1-9]$/u.test(event.key) && !event.altKey && !event.shiftKey && !event.metaKey && !settingsVisible.current) {
+        commandChord.current = false;
+        event.preventDefault(); event.stopPropagation();
+        const space = spacesHub.getSnapshot().spaces[Number(event.key) - 1];
+        if (space && showSpace(space.id)) focusPromptSoon();
+        return;
+      }
       // "?" outside text opens help, as it does when typed into an empty prompt.
       const resolved = focus === "none" && !commandChord.current && event.key === "?" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.repeat
         ? { command: "help" as CommandId, chord: false, handled: true }
@@ -2324,6 +2516,8 @@ function App() {
           </nav>
         </WindowBrand>
         <div className="window-actions">
+          {spacesState.available && <SpaceSwitch spaces={spacesState.spaces} shownId={spaceId} activity={spacesState.activity} canEdit={owned} request={spaceMenuRequest}
+            onShow={id => { if (showSpace(id)) focusPromptSoon(); }} onCreate={() => setSpaceDialog(true)} onOrganize={() => navigate("spaces")} />}
           {shellPreferences && <WindowZoom zoom={shellPreferences.zoom} run={runCommand} />}
           <Button variant="minimal" size="small" className="theme-switch" icon={<AppIcon name={themeIcons[theme]} size={16} />}
             aria-label={t("Theme: {theme}", { theme: t(themeLabel(theme)) })} title={t("Theme: {theme}", { theme: t(themeLabel(theme)) })} onClick={() => setTheme(nextTheme(theme))} />
@@ -2350,10 +2544,13 @@ function App() {
           {workspaceState.kind === "loading" && <LoadingRows />}
           {workspaceState.kind === "unconfigured" && <div className="sidebar-empty">{t("No catalog configured. See the launch instructions below.")}</div>}
           {workspaceState.kind === "error" && <div role="alert" className="sidebar-empty error-text">{workspaceState.message}</div>}
-          {snapshot && projectListing?.projects.length === 0 && <p className="sidebar-empty" role="status">
+          {snapshot && projectListing?.projects.length === 0 && (spaceId === defaultSpaceId ? <p className="sidebar-empty" role="status">
             {t("No projects in this snapshot.")}
             {projectId !== null && ` ${t("The selected project and session remain open.")}`}
-          </p>}
+          </p> : <div className="sidebar-empty space-empty" role="status">
+            <p>{t("No project in this space yet.")}</p>
+            {owned && <Button size="small" icon={<AppIcon name="space" size={14} />} onClick={() => navigate("spaces")}>{t("Add projects")}…</Button>}
+          </div>)}
           </>;
           return <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}>
           {!snapshot && railHead}
@@ -2388,6 +2585,8 @@ function App() {
           {projectArchive.records.length > 0 && <button type="button" className="quiet-button" onClick={() => setDialog("archive")}>{t("Archive operation evidence")}</button>}
           {projectRenameNotice && !projectRenaming && <p role="alert" className="notice error-text">{workflowNotice(language.locale, projectRenameNotice)}</p>}
           {projectRenameLocked && <button type="button" className="quiet-button" onClick={() => void refreshProjectRename()}>{t("Refresh project name (no retry)")}</button>}
+          <SpaceActivityBar spaces={spacesState.spaces} shownId={spaceId} activity={spacesState.activity} calls={calls}
+            onShow={id => { if (showSpace(id)) focusPromptSoon(); }} onOpen={(id, session) => void openSpaceSession(id, session)} />
         </aside>; }}
           splitter={<PaneSplitter className="session-splitter" label={t("Resize Explorer")} value={ideWidth.width} hidden={narrow || !railVisible}
             onResize={delta => setIdeWidth(value => resizeIdeWidth(value, delta))} onReset={() => setIdeWidth(defaultIdeWidth)} />}
@@ -2479,7 +2678,7 @@ function App() {
           </div>
         </aside>}
           content={<ProjectReferenceContext.Provider value={selectedReference}><main className="content">
-          <SessionTabStrip state={sessionTabPresentation(tabs, snapshot, projectId, sessionId)} snapshot={snapshot}
+          <SessionTabStrip key={spaceId} layout={spaceLayout(spaceId)} state={sessionTabPresentation(tabs, snapshot, projectId, sessionId)} snapshot={snapshot}
             newSessionLabel={selectedProject ? t("New session — {project}", { project: selectedProject.name }) : t("New chat")}
             renderSession={(tab, visible) => {
               const row = snapshot && resolveSessionTab(snapshot, tab);
@@ -2545,7 +2744,8 @@ function App() {
                 onOpenFile={(id, file) => { const project = snapshot?.projects.find(candidate => candidate.id === id); if (project) openEditor(project, { path: file, line: null, column: null, explorer: null }); }}
                 onOpenSettings={() => navigate("workItems")} />
               : isAutomationsTab(tab)
-              ? <AutomationsPanel key={fileTabKey(tab)} hub={automationsHub} projects={snapshot?.projects.filter(project => !project.archived) ?? []} sessions={snapshot?.sessions ?? []}
+              // The automations are the application's, whatever the space shown: each names its project among all of them.
+              ? <AutomationsPanel key={fileTabKey(tab)} hub={automationsHub} projects={(catalog.current ?? snapshot)?.projects.filter(project => !project.archived) ?? []} sessions={(catalog.current ?? snapshot)?.sessions ?? []}
                 projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null} epoch={!status ? undefined : owned ? status.hostEpoch : null}
                 providers={configurationState.snapshot?.providerRuntimeAvailable ? [...configurationState.snapshot.providers].filter(provider => provider.enabled).sort((a, b) => Number(b.isDefault) - Number(a.isDefault)) : []}
                 visible={visible && view === "workspace" && !settingsOpen} focus={automationFocus} onFocused={() => setAutomationFocus(null)}
@@ -2605,6 +2805,8 @@ function App() {
           onOpenFolder: owned ? openColorSchemeFolder : undefined }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); },
         sessionWidth, setSessionWidth,
         closing: shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, trayIcon: shellPreferences.trayIcon, set: setOnClose } : null }} />
+      : settingsSection === "spaces" ? <SpaceSettings hub={spacesHub} spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} shownId={spaceId}
+        activity={spacesState.activity} canEdit={owned && !!mutation?.capability.canMutate()} onShow={id => { showSpace(id); }} onCreate={() => setSpaceDialog(true)} />
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}
         update={owned ? appUpdateResult : undefined} onOpenReleaseNotes={openReleaseNotes} onInstallUpdate={installUpdate} />
       : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} revision={pluginRevision}
@@ -2672,6 +2874,8 @@ function App() {
         const previousSession = selectedSessionId.current;
         if (original?.kind !== "imported" || original.epoch !== currentHostEpoch.current ||
           original.path !== path || original.projectId !== id) return false;
+        // A project opened while a space is shown joins that space.
+        if (shownSpace.current !== defaultSpaceId) await spacesHub.assign(id, [shownSpace.current]);
         const fresh = await refreshProjects(signal);
         if (!fresh?.configured || signal.aborted || !mutation?.capability.canMutate() ||
           currentHostEpoch.current !== original.epoch || selectedScope.current !== previousScope ||
@@ -2686,6 +2890,12 @@ function App() {
         focusPromptSoon();
         return true;
       }} onClose={() => setDialog(null)} />}
+    {spaceDialog && <SpaceDialog spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} create={spacesHub.create}
+      // A space made from Settings is organized there; one made from the title bar is shown at once.
+      onCreated={space => { setSpaceDialog(false); if (!settingsVisible.current) showSpace(space.id); }} onClose={() => setSpaceDialog(false)} />}
+    {leavingSpace && <UnsavedFileDialog name={leavingSpace.tabs.flatMap(tab => fileEditors.unsaved(fileTabKey(tab))).join(", ")} mode="close" busy={leavingSpace.busy}
+      onSave={() => void saveAndLeaveSpace(leavingSpace)} onDiscard={() => showSpace(leavingSpace.spaceId, leavingSpace.target, true)}
+      onCancel={() => { if (!leavingSpace.busy) setLeavingSpace(null); }} />}
     {dialog === "help" && <CommandHelp onClose={closeHelp} pluginCommands={pluginContributed.commands} />}
     {dialog === "file" && filePickerProject && <OpenFileDialog epoch={status!.hostEpoch!} project={filePickerProject}
       observe={value => mutation?.capability.observe(value)} onClose={() => setDialog(null)}
@@ -2749,7 +2959,7 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
   const { t } = useShellLanguage();
   const composingEscape = useRef(false);
   const destinations: readonly [MessageKey, readonly [SettingsSection, MessageKey, IconName][]][] = [
-    ["Personalization", [["appearance", "Appearance", "palette"]]],
+    ["Personalization", [["appearance", "Appearance", "palette"], ["spaces", "Spaces", "space"]]],
     ["Agent & models", [["providers", "Providers", "provider"], ["models", "Models", "model"], ["prompts", "Agent prompts", "assistant"], ["skills", "Skills", "skill"],
       ["worktrees", "Worktrees", "worktree"], ["workItems", "Work items", "task"], ["pullRequests", "Pull requests", "pullRequest"]]],
     ["Extensions", [["plugins", "Plugins", "plugin"], ["mcp", "MCP Servers", "server"]]],

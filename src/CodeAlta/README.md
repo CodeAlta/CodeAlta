@@ -58,7 +58,8 @@ developer instance.
 `alta --dev` starts a second window, titled **CodeAlta (dev)** with a **DEV** tag beside its name.
 It runs beside the normal app on the same `~/.alta` profile:
 
-- it shares configuration, providers, credentials, prompts, skills and the project catalog;
+- it shares configuration, providers, credentials, prompts, skills, the project catalog and the
+  spaces;
 - it keeps its own sessions, session cache and lock under `~/.alta/dev/`;
 - it keeps its own web view data (tabs, drafts, theme) under `CodeAlta/desktop-dev` in the local
   application data folder.
@@ -120,6 +121,9 @@ disappear on refresh. `npm run build:demo` writes the same demo as static files 
 
 ## Frontend notes
 
+- **Spaces**: `frontend/src/spaces/` holds the groups of projects the window shows one at a time.
+  The window is given the catalog as the shown space has it, and each space has its own tabs. See
+  [Spaces](../../doc/desktop.md#spaces).
 - **Tests**: `npm test` in `frontend/` runs the unit tests (`src/*.test.ts`, `src/*.test.tsx`). The
   `*.browser.test.ts` files among them mount real components in headless Edge and are skipped where
   Edge is not installed.
@@ -142,9 +146,10 @@ disappear on refresh. `npm run build:demo` writes the same demo as static files 
 ## Where the app keeps its data
 
 - `~/.alta/`: configuration, providers, sessions, prompts, skills and plugins, shared with CodeAlta
-  TUI. The app adds no desktop-specific state there.
-- `CodeAlta/desktop` in the local application data folder: `webview/` (web view data: open tabs,
-  drafts, window geometry), `appearance.json` (theme of the start-up screen), `preferences.json`
+  TUI. The app adds no desktop-specific state there. The spaces are files of `~/.alta/spaces/`, and
+  each project file names the spaces of its project.
+- `CodeAlta/desktop` in the local application data folder: `webview/` (web view data: the shown
+  space, the open tabs of each space, drafts, window geometry), `appearance.json` (theme of the start-up screen), `preferences.json`
   (what closing the window does) and `update/` (the script and log of **Update and restart**).
 
 ## Tests

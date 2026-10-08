@@ -30,7 +30,7 @@ Open it with the issue icon of the activity bar, or with `Ctrl+G Ctrl+B`.
 
 With no projects, the tab shows **No projects in this snapshot.** Open a project first.
 
-- Choose the project, then **Issues** or **Pull requests**.
+- Choose the project, then **Issues** or **Pull requests**. The list has the projects of the [space](spaces.md) the window shows.
 - **Open**, **Closed**, **Merged** and **All** are separate lists, the most recently updated first.
 - Type words or a number to filter the list.
 - Select an item to read its description and its comments. Double-click it, or use the expand button, to read it in a larger window.

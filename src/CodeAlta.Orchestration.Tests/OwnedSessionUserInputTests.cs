@@ -38,6 +38,8 @@ public sealed class OwnedSessionUserInputTests
         var prompts = new List<AgentUserInputPrompt> { new("q", "Question", AllowFreeform: true) };
         var pending = f.Keep(() => f.Owner.CreateOwnedUserInputHandler(execution)(f.Request() with { Form = new(prompts) }, default));
         var page = await f.Page(); var entry = page.Entries.Single();
+        // The session is one that waits for the user, for a summary of every session.
+        CollectionAssert.AreEqual(new[] { "session" }, (await f.Keep(() => f.Owner.ListWaitingSessionsAsync().AsTask())).ToArray());
         prompts.Clear(); Assert.AreEqual(1, entry.Form.Prompts.Count); Assert.IsNull(entry.Handle.RunId);
         Assert.ThrowsExactly<NotSupportedException>(() => ((IList<AgentUserInputPrompt>)entry.Form.Prompts).Clear());
         Assert.IsFalse(await f.Keep(() => f.Owner.ResolveOwnedUserInputAsync(entry.Handle with { RunId = "run" }, [new("q", "wrong")], default).AsTask()));
@@ -69,6 +71,7 @@ public sealed class OwnedSessionUserInputTests
             await Assert.ThrowsAsync<OperationCanceledException>(() => task);
         }
         Assert.AreEqual(0, (await f.Page()).Entries.Count);
+        Assert.AreEqual(0, (await f.Keep(() => f.Owner.ListWaitingSessionsAsync().AsTask())).Count);
         await f.Keep(() => f.Owner.CloseOwnedExecutionAsync(execution));
         var late = f.Keep(() => handler(f.Request(), default));
         await Assert.ThrowsAsync<OperationCanceledException>(() => late);

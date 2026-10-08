@@ -22,6 +22,8 @@ The main screen has four important areas:
 > [!TIP]
 > Press `F1`, type `/help`, or type `?` when you are unsure where an action lives. Help and command discovery are designed to return you to the prompt quickly.
 
+In CodeAlta Desktop, the title bar has the space switch before the zoom and the theme switch. A [space](spaces.md) is a group of projects: the window shows the projects, the sessions and the tabs of one space at a time.
+
 Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. Use `Ctrl+T` (or `/next_prompt`) to cycle the current draft/session to the next agent prompt. Use `Ctrl+G Ctrl+G` to collapse or expand the navigator, `Ctrl+G Ctrl+S` to focus the sidebar, and `Ctrl+G Ctrl+P` to return to the prompt.
 
 > [!TIP]
@@ -41,6 +43,8 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. Use `Ctrl+T` (or 
 - A session with a bolt was started by an [automation](automations.md).
 - A session with a tree mark works in a [worktree](worktrees.md).
 
+The sidebar lists the projects of the [space](spaces.md) the window shows; the Default space lists them all. With several spaces, the foot of the sidebar has a button for each space and says what its sessions are doing.
+
 ### Search
 
 Press `Ctrl+P` to search and run any command. In the desktop app, `Ctrl+P` or the search icon of the title bar opens one search for everything:
@@ -50,7 +54,7 @@ Press `Ctrl+P` to search and run any command. In the desktop app, `Ctrl+P` or th
 - the **files** of the current project,
 - the **commands**, each with its slash command and its shortcut.
 
-Type a few words and press `Enter` to open what is selected. `Tab` switches between **All**, **Sessions**, **Projects**, **Files** and **Commands**. Start with `/` to look for a command, as when you type `/` in an empty prompt. With nothing typed, the search lists your recent sessions, your projects and the most useful commands.
+Type a few words and press `Enter` to open what is selected. `Tab` switches between **All**, **Sessions**, **Projects**, **Files** and **Commands**. Start with `/` to look for a command, as when you type `/` in an empty prompt. With nothing typed, the search lists your recent sessions, your projects and the most useful commands. The sessions, the projects and the files are those of the [space](spaces.md) the window shows.
 
 {{ alta_shot "alta-desktop-search.webp" "alta-command-palette.png" "Search listing sessions, projects and files that match, or the command palette of the TUI" "One search for sessions, projects, files and commands in the desktop app. The TUI has a command palette." }}
 
@@ -65,7 +69,7 @@ In the desktop app, session tabs, the code editor and the Changes tab can be arr
 - drag a tab to the center of another pane to move it there;
 - or use **Split right** and **Split below** in the tab menu (`…`) of a pane.
 
-Each pane has its own timeline and prompt. Tabs are workspace-wide: sessions from different projects stay open together, and the layout is restored at the next start. `Ctrl+W` closes the current tab and `Ctrl+Shift+T` reopens the last closed one.
+Each pane has its own timeline and prompt. Tabs are workspace-wide: sessions from different projects stay open together, and the layout is restored at the next start. Each [space](spaces.md) has its own tabs and its own layout. `Ctrl+W` closes the current tab and `Ctrl+Shift+T` reopens the last closed one.
 
 <div class="row g-3 my-4">
   <div class="col-md-6">
@@ -162,6 +166,8 @@ Each session has sticky Markdown notes that agents keep up to date with a checkl
 
 Open it with `Ctrl+O` or `/open`.
 Opening a project puts the cursor in its prompt, so you can start typing.
+
+In CodeAlta Desktop the dialog lists the projects of the [space](spaces.md) the window shows, and a folder you add joins that space.
 
 The dialog supports project-name and directory completion. Rooted paths such as `/`, `C:`, `D:`, and `~` open folders. In the TUI, the **Include hidden** toggle includes archived/hidden projects in completion.
 
@@ -395,7 +401,7 @@ Open settings with `Ctrl+G Ctrl+W` or `/settings`.
 
 ### Desktop
 
-The desktop app has one Settings window with a page per area: **Appearance**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. `Ctrl+,` and the gear button of the title bar open it too.
+The desktop app has one Settings window with a page per area: **Appearance**, **Spaces**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. `Ctrl+,` and the gear button of the title bar open it too.
 
 #### Files of the settings
 
@@ -418,7 +424,6 @@ A path that is too long is cut at its start; point at it to see it whole.
 | **Skills** | `~/.alta/skills`, `.alta/skills` of the project, and the folder of the selected skill |
 | **Plugins** | `~/.alta/plugins`, `.alta/plugins` of the project, and the folder of each source plugin |
 | **Appearance** | The folder of your color schemes |
-
 Opening `~/.alta/skills` or `~/.alta/plugins` lets you work on all your skills or plugins at once. CodeAlta creates the folder if it does not exist yet. A file that does not exist yet, such as the `.alta/config.toml` of a project that has none, is listed without the button that opens it.
 
 What you create in Settings you can remove there: a prompt, a skill, a plugin, an MCP server, a color scheme and a kind of pull request each have a red **Remove** button, which asks before it removes anything.

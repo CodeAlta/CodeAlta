@@ -2,6 +2,15 @@ using CodeAlta.Agent;
 
 namespace CodeAlta.Orchestration.Runtime;
 
+/// <summary>What one session of the runtime is doing, for a summary of every session at once.</summary>
+/// <param name="SessionId">The session.</param>
+/// <param name="ProjectId">The project of the session; <see langword="null"/> for a chat.</param>
+/// <param name="Title">The title of the session, as the runtime knows it.</param>
+/// <param name="Running">Whether a run is in flight or queued prompts are being sent.</param>
+/// <param name="BackgroundTasks">How many tasks its provider goes on doing in the background.</param>
+/// <param name="Failed">Whether its last run ended with an error and no run started since.</param>
+public sealed record SessionRuntimeOverview(string SessionId, string? ProjectId, string Title, bool Running, int BackgroundTasks, bool Failed);
+
 /// <summary>A session that is at work, and the folder it works in.</summary>
 /// <param name="SessionId">The session.</param>
 /// <param name="Folder">The folder its tools run in.</param>

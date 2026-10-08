@@ -1,0 +1,113 @@
+/* Spaces: the groups of projects the window shows one at a time. */
+.space-icon { display: inline-grid; place-items: center; flex: none; line-height: 0; }
+
+/* What a space is doing: sessions that wait for the user, that failed, that run, that work in the background. */
+.space-marks { display: inline-flex; align-items: center; gap: 7px; }
+.space-mark { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.space-mark[data-kind="waiting"] { color: var(--yellow); }
+.space-mark[data-kind="failed"] { color: var(--red); }
+.space-mark[data-kind="running"] { color: var(--accent); }
+.space-mark[data-kind="background"] > i { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid currentColor; }
+
+/* The space in the title bar, before the zoom and the theme. The tab strip leaves it the room it takes. */
+.ide-shell { --space-switch-width: 0px; }
+.window-actions .space-switch.bp6-button { position: relative; flex: none; gap: 5px; max-width: 168px; min-height: 28px; padding: 0 6px; color: var(--text); font-size: 12px; }
+.window-actions .space-switch[data-alone].bp6-button { min-width: 28px; padding: 0; color: var(--muted); }
+.window-actions .space-switch.bp6-button:hover, .bp6-popover-open > .space-switch.bp6-button { color: var(--text); }
+.space-switch .bp6-button-text { min-width: 0; margin: 0; overflow: hidden; }
+.space-switch-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.space-switch > .bp6-icon:last-child, .space-switch > svg:last-child { margin: 0; color: var(--muted); }
+.space-switch[data-attention]::after { content: ""; position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--yellow); box-shadow: 0 0 0 2px var(--panel); }
+@media (max-width: 875px) {
+  .window-actions .space-switch.bp6-button { min-width: 28px; padding: 0; }
+  .space-switch .bp6-button-text, .space-switch > svg:last-child { display: none; }
+}
+.space-menu { min-width: 232px; max-width: 360px; }
+.space-menu .bp6-menu-item { align-items: center; }
+.space-menu-label { display: inline-flex; align-items: center; gap: 10px; }
+.space-menu-label kbd { color: var(--muted); font: inherit; font-size: 11px; }
+
+/* The spaces at the foot of the Explorer: each as its icon, and the sessions that need the user elsewhere. */
+.ide-shell .project-rail > .space-bar { flex: 0 0 auto; display: grid; gap: 4px; margin: 4px -4px -4px; padding: 5px 6px 6px; border-top: 1px solid var(--line); background: var(--panel); }
+.space-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
+.ide-shell .project-rail .space-chip { position: relative; display: grid; place-items: center; width: 26px; height: 24px; padding: 0; border: 1px solid transparent; border-radius: 6px; color: var(--muted); background: transparent; opacity: .62; cursor: pointer; }
+.ide-shell .project-rail .space-chip:hover { opacity: 1; background: color-mix(in srgb, var(--text) 8%, transparent); }
+.ide-shell .project-rail .space-chip[aria-pressed="true"] { opacity: 1; border-color: var(--line-strong); background: var(--panel-3); }
+.ide-shell .project-rail .space-chip[data-activity] { opacity: 1; }
+.space-chip-mark { position: absolute; top: -3px; right: -3px; display: grid; place-items: center; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 2px var(--panel); color: var(--accent); }
+.space-chip[data-activity="waiting"] .space-chip-mark { background: var(--yellow); }
+.space-chip[data-activity="failed"] .space-chip-mark { background: var(--red); }
+.space-chip[data-activity="running"] .space-chip-mark { background: var(--panel); }
+.space-chip[data-activity="background"] .space-chip-mark { width: 8px; height: 8px; border: 1.5px solid var(--muted); background: var(--panel); }
+.ide-shell .project-rail .space-call { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; padding: 4px 6px; border: 1px solid color-mix(in srgb, var(--yellow) 45%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--yellow) 10%, transparent); color: var(--text); font-size: 12px; text-align: left; cursor: pointer; }
+.ide-shell .project-rail .space-call[data-kind="failed"] { border-color: color-mix(in srgb, var(--red) 45%, var(--line)); background: color-mix(in srgb, var(--red) 10%, transparent); }
+.ide-shell .project-rail .space-call:hover { background: color-mix(in srgb, var(--yellow) 18%, transparent); }
+.ide-shell .project-rail .space-call[data-kind="failed"]:hover { background: color-mix(in srgb, var(--red) 18%, transparent); }
+.space-call > svg { flex: none; color: var(--yellow); }
+.space-call[data-kind="failed"] > svg { color: var(--red); }
+.space-call-space { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.space-call-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.space-empty { display: grid; justify-items: start; gap: 8px; }
+.space-empty > p { margin: 0; }
+
+/* The window that makes a space. */
+.space-templates { display: flex; flex-wrap: wrap; gap: 6px; }
+.space-name-icon { display: grid; place-items: center; width: 30px; height: 30px; }
+.space-look { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(0, 2fr); gap: 0 14px; }
+.space-look > .bp6-form-group, .space-dialog .bp6-form-group { margin: 0; }
+.space-colors { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.space-colors > .bp6-input-group { flex: 0 1 132px; min-width: 110px; }
+.space-color-swatches { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.space-color { width: 18px; height: 18px; padding: 0; border: 2px solid var(--panel); border-radius: 50%; outline: 1px solid var(--line); cursor: pointer; }
+.space-color:hover { outline-color: var(--text); }
+.space-color[aria-pressed="true"] { outline: 2px solid var(--text); }
+.space-color:disabled { opacity: .5; cursor: default; }
+.space-dialog-projects { flex: 1 1 auto !important; min-height: 96px; }
+.space-dialog-projects > .bp6-form-content { display: flex; flex-direction: column; gap: 6px; min-height: 0; height: 100%; }
+.space-project-checks { flex: 1 1 auto; display: grid; align-content: start; gap: 4px; min-height: 64px; padding: 8px 10px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); }
+.space-project-checks .bp6-control { display: flex; align-items: center; gap: 0; min-width: 0; margin: 0; }
+.space-project-checks .bp6-control .bp6-control-indicator { flex: none; margin-top: 0; }
+.space-project-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.space-project-path { flex: 1 1 0; min-width: 0; margin-left: 8px; overflow: hidden; color: var(--muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+
+/* Settings > Spaces: the list of every project, and a card for each space. */
+.space-board { display: grid; grid-template-columns: minmax(230px, 320px) minmax(0, 1fr); align-items: start; gap: 14px; }
+.space-pool, .space-card { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.space-pool { position: sticky; top: 0; max-height: min(62vh, 720px); }
+.space-pool-note { margin: 0; color: var(--muted); font-size: 12px; }
+.space-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); align-items: start; gap: 12px; }
+.space-card { border-top: 3px solid var(--space-color, var(--line-strong)); }
+.space-pool[data-over], .space-card[data-over] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--panel-2)); box-shadow: 0 0 0 1px var(--accent); }
+.space-heading { display: grid; gap: 7px; }
+.space-heading-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.space-heading-row > .space-name { flex: 1 1 auto; min-width: 0; }
+.space-name input { font-weight: 600; }
+.space-heading-tools { display: inline-flex; align-items: center; gap: 1px; flex: none; }
+.space-heading .provider-icon-compact.bp6-button { flex: none; min-width: 30px; padding: 0 6px; }
+.space-description.bp6-input { min-height: 28px; padding: 5px 8px; font-size: 12px; line-height: 1.4; resize: vertical; field-sizing: content; max-height: 120px; }
+.space-heading .space-color { width: 16px; height: 16px; }
+.space-projects { display: grid; align-content: start; gap: 2px; min-height: 40px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.space-pool > .space-projects { flex: 1 1 auto; min-height: 80px; }
+.space-card > .space-projects { max-height: 260px; }
+.space-project { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 3px 4px 3px 6px; border: 1px solid transparent; border-radius: 5px; font-size: 12.5px; }
+.space-project[draggable="true"] { cursor: grab; }
+.space-project:hover { border-color: var(--line); background: var(--panel-3); }
+.space-project[data-archived] { color: var(--muted); font-style: italic; }
+.space-project > .space-project-name { flex: 1 1 auto; min-width: 0; }
+.space-grip { flex: none; color: var(--muted); opacity: .55; }
+.space-project-spaces { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.space-project-remove.bp6-button { flex: none; min-width: 20px; min-height: 20px; padding: 0; opacity: 0; }
+.space-project:hover .space-project-remove.bp6-button, .space-project-remove.bp6-button:focus-visible { opacity: 1; }
+.space-projects-empty { padding: 12px 8px; border: 1px dashed var(--line-strong); border-radius: 6px; color: var(--muted); font-size: 12px; text-align: center; }
+.space-card > footer, .space-pool > footer { display: flex; align-items: center; gap: 8px; }
+.space-card-count { flex: 1 1 auto; color: var(--muted); font-size: 11.5px; }
+.space-show.bp6-button.bp6-disabled { opacity: 1; }
+.space-add-list { display: grid; gap: 2px; min-width: 220px; max-width: 340px; max-height: 320px; padding: 10px 12px; overflow: auto; }
+.space-add-list .bp6-control { margin: 0; }
+.space-card-new { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 96px; padding: 10px; border: 1px dashed var(--line-strong); border-radius: 8px; color: var(--muted); background: transparent; font-size: 13px; cursor: pointer; }
+.space-card-new:hover:not(:disabled) { border-color: var(--accent); color: var(--text); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.space-card-new:disabled { opacity: .5; cursor: default; }
+@media (max-width: 900px) {
+  .space-board { grid-template-columns: minmax(0, 1fr); }
+  .space-pool { position: static; max-height: 320px; }
+}

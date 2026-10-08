@@ -437,6 +437,19 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
             Array.Empty<SessionPermissionSnapshot>());
 
     /// <summary>
+    /// Lists the sessions that wait for the user: a command to allow or refuse, or a form to fill. Each session
+    /// is listed once. Returns an empty list after disposal; a reading that can be stale at once.
+    /// </summary>
+    public ValueTask<IReadOnlyList<string>> ListWaitingSessionsAsync()
+        => ExecuteAsync<IReadOnlyList<string>>(
+            () => Array.AsReadOnly(_ownedDeliveries
+                .Where(pending => _pending.ContainsKey(pending.Snapshot.Handle) && !IsCanceled(pending))
+                .Select(static pending => pending.Snapshot.Handle.SessionId)
+                .Concat(_inputs.Values.Where(LiveInput).Select(static pending => pending.Snapshot.Handle.SessionId))
+                .Distinct(StringComparer.Ordinal).ToArray()),
+            Array.Empty<string>());
+
+    /// <summary>
     /// Lists at most four complete owned plain-command attempts for an exact session under mailbox authority.
     /// Legacy trusted registrations are never included. Cancellation or closure invalidates observations, not accepted decisions.
     /// Returns an empty window after disposal. This does not create runtime state or wait for user decisions.

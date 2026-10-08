@@ -1,6 +1,10 @@
 import type { ComponentProps } from "react";
 import {
   House,
+  Orbit,
+  GripVertical,
+  ArrowLeft,
+  ArrowRight,
   ArrowDown,
   ArrowUp,
   ArrowDownUp,
@@ -248,6 +252,10 @@ const icons = {
   hand: Hand,
   chat: MessagesSquare,
   question: ShieldQuestion,
+  space: Orbit,
+  grip: GripVertical,
+  arrowLeft: ArrowLeft,
+  arrowRight: ArrowRight,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof icons;

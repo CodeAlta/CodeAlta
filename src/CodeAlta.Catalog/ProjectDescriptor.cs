@@ -56,6 +56,13 @@ public sealed class ProjectDescriptor
     public List<string> Tags { get; set; } = [];
 
     /// <summary>
+    /// Gets or sets the identifiers of the spaces the project belongs to, besides the default space,
+    /// which holds every project. An identifier no space has is kept and means nothing.
+    /// </summary>
+    [JsonPropertyName("spaces")]
+    public List<string> Spaces { get; set; } = [];
+
+    /// <summary>
     /// Gets or sets a value indicating whether the project is archived.
     /// </summary>
     [JsonPropertyName("archived")]

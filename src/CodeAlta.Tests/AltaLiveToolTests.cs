@@ -1695,6 +1695,57 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task ProjectRemove_DeleteSessions_DeletesTheSessionsWithTheProjectAndKeepsTheFolder()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "home") };
+        Directory.CreateDirectory(options.GlobalRoot);
+        var providerId = new ModelProviderId("stateful");
+        var runtime = CreateRuntime(options, new StatefulProviderRuntime(providerId));
+        await using var _ = runtime.ConfigureAwait(false);
+        var catalog = new ProjectCatalog(options);
+        var projectPath = Path.Combine(root.Path, "code", "beta");
+        Directory.CreateDirectory(projectPath);
+        var project = await catalog.UpsertFromPathAsync(projectPath).ConfigureAwait(false);
+        var session = await runtime.CreateProjectSessionAsync(project, new SessionExecutionOptions
+        {
+            ProviderId = providerId,
+            ProviderKey = providerId.Value,
+            WorkingDirectory = projectPath,
+            ProjectRoots = [projectPath],
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        }, "Session of beta").ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(catalog)
+            .Add(new SessionViewCatalog(options))
+            .Add(runtime));
+
+        // Without --delete-sessions a project that has sessions stays.
+        var refused = await dispatcher.InvokeAsync(["project", "remove", project.Id], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Unsupported, refused.ExitCode, refused.Stdout);
+        Assert.AreEqual("project.hasSessions", ReadJsonLines(refused.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.error").GetProperty("code").GetString());
+
+        // A session does not remove the project it runs in.
+        var own = await dispatcher.InvokeAsync(["project", "remove", project.Id, "--delete-sessions"],
+            caller: new AltaCallerIdentity { Kind = "agent", SourceSessionId = session.SessionId, SourceProjectId = project.Id }).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Unsupported, own.ExitCode, own.Stdout);
+        Assert.AreEqual("project.callerSession", ReadJsonLines(own.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.error").GetProperty("code").GetString());
+        Assert.IsNotNull(await catalog.GetByIdAsync(project.Id).ConfigureAwait(false));
+
+        var removed = await dispatcher.InvokeAsync(["project", "remove", project.Id, "--delete-sessions"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, removed.ExitCode, removed.Stdout);
+        var record = ReadJsonLines(removed.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.project.removed");
+        Assert.AreEqual(project.Id, record.GetProperty("projectId").GetString());
+        Assert.AreEqual(1, record.GetProperty("deletedSessions").GetInt32());
+        Assert.AreEqual(session.SessionId, record.GetProperty("deletedSessionIds")[0].GetString());
+        Assert.IsNull(await catalog.GetByIdAsync(project.Id).ConfigureAwait(false));
+        Assert.IsTrue(Directory.Exists(projectPath));
+        var sessions = await dispatcher.InvokeAsync(["session", "list", "--state", "all"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.IsFalse(sessions.Stdout.Contains(session.SessionId, StringComparison.Ordinal), sessions.Stdout);
+    }
+
+    [TestMethod]
     public async Task SessionEvents_ReadStoredLocalHistoryWithFiltersLimitsAndFallbackWarning()
     {
         using var root = TempDirectory.Create();

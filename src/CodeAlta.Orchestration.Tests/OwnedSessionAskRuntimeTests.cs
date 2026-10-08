@@ -200,6 +200,8 @@ public sealed class OwnedSessionAskRuntimeTests
                 await Keep(send.Receipt.Completion);
                 var head = _host.Commands.Asks.List("session").Head;
                 Assert.IsNotNull(head);
+                // The session is one that waits for the user, for a summary of every session.
+                CollectionAssert.AreEqual(new[] { "session" }, _host.Commands.Asks.ListWaitingSessions().ToArray());
                 var action = new OwnedAskAction(Guid.NewGuid(), head.Handle, [new() { QuestionIndex = 0, FreeformText = "yes" }]);
                 var answer = Keep(_host.Commands.Asks.AnswerAsync(action, default));
                 await Keep(Task.WhenAny(_provider.AnswerEntered.Task, answer));

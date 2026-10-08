@@ -10,7 +10,8 @@ export type CommandId =
   | "usage" | "sessionInfo" | "reminders" | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest"
   | "expandPrompt" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "clearQueue" | "compact"
   | "newSession" | "browseSessions" | "searchSessions" | "toggleNotes" | "previousSession" | "nextSession"
-  | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses" | "zoomIn" | "zoomOut" | "resetZoom" | "exit";
+  | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses" | "zoomIn" | "zoomOut" | "resetZoom" | "exit"
+  | "spaces" | "newSpace" | "goToSpace" | "previousSpace" | "nextSpace";
 export type CommandCategory = "General" | "Prompt" | "Session" | "Navigation" | "Inspection";
 export type CommandDefinition = Readonly<{
   id: CommandId;
@@ -43,6 +44,8 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "automations", name: "automations", label: "Automations", description: "Open the automations: prompts that start a session by themselves.", category: "General", keys: ["Ctrl+G Ctrl+M"], search: "schedule cron trigger daily hourly weekly task routine recurring" },
   { id: "workItems", name: "work_items", label: "Work items", description: "Open the work items: the tasks agents proposed and the plans of the projects.", category: "General", keys: ["Ctrl+G Ctrl+I"], search: "tasks plans todo backlog follow-up proposals pending work_items" },
   { id: "issues", name: "issues", label: "Issues", description: "Open the issues and the pull requests of the projects.", category: "General", keys: ["Ctrl+G Ctrl+B"], search: "issues pull requests merge requests prs bugs tickets github gitlab azure devops bitbucket jira" },
+  { id: "spaces", name: "spaces", label: "Spaces", description: "Create the spaces and choose the projects of each.", category: "General", search: "space group projects organize workspaces" },
+  { id: "newSpace", name: "new_space", label: "New Space", description: "Create a space: a group of projects shown together.", category: "General", search: "space create group projects workspace" },
   { id: "newSession", name: "new_session", label: "New Session", description: "Start a new session in the selected project.", category: "General", search: "create session draft" },
   { id: "about", name: "about", label: "About", description: "Show the version of CodeAlta.", category: "General", keys: ["Ctrl+G Ctrl+A"] },
   { id: "exit", name: "exit", label: "Exit", description: "Close CodeAlta.", category: "General", keys: ["Ctrl+Q"], search: "quit close" },
@@ -87,6 +90,9 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "nextSession", name: "session_next", label: "Next Session", description: "Select the next session of the project.", category: "Navigation", keys: ["Alt+Down"], outsideText: true },
   { id: "previousProject", name: "project_prev", label: "Previous Project", description: "Select the previous project.", category: "Navigation", keys: ["Alt+Left"], outsideText: true },
   { id: "nextProject", name: "project_next", label: "Next Project", description: "Select the next project.", category: "Navigation", keys: ["Alt+Right"], outsideText: true },
+  { id: "goToSpace", name: "space", label: "Go to Space", description: "Show another space.", category: "Navigation", keys: ["Ctrl+G Ctrl+V"], hints: ["Ctrl+G 1-9"], search: "space switch workspace" },
+  { id: "previousSpace", name: "space_prev", label: "Previous Space", description: "Show the previous space.", category: "Navigation", keys: ["Ctrl+Alt+PageUp"], search: "space switch workspace" },
+  { id: "nextSpace", name: "space_next", label: "Next Space", description: "Show the next space.", category: "Navigation", keys: ["Ctrl+Alt+PageDown"], search: "space switch workspace" },
   { id: "renameProject", name: "rename_project", label: "Rename Project", description: "Rename the focused project.", category: "Navigation", keys: ["F2"], outsideText: true, hidden: true },
 
   { id: "usage", name: "context_usage", label: "Context Usage", description: "Show context and token usage.", category: "Inspection", keys: ["Ctrl+G Ctrl+U"] },
