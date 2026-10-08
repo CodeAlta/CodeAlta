@@ -15,7 +15,7 @@ test("an authorization is offered only for the saved, enabled definition in effe
   assert.equal(authorizationBlocked({ enabled: true, shadowed: false }, false), null);
   assert.equal(authorizationBlocked({ enabled: true, shadowed: false }, true), "Save before authorizing.");
   assert.equal(authorizationBlocked({ enabled: false, shadowed: false }, false), "Enable the server before authorizing.");
-  assert.equal(authorizationBlocked({ enabled: true, shadowed: true }, false), "The project's definition of this server is the one in use; authorize that one.");
+  assert.equal(authorizationBlocked({ enabled: true, shadowed: true }, false), "Another definition of this server is the one in use; authorize that one.");
   assert.equal(authorizationBlocked({ enabled: false, shadowed: true }, true), "Save before authorizing.", "unsaved changes come first");
 });
 

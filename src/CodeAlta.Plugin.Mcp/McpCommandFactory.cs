@@ -44,7 +44,8 @@ internal static class McpCommandFactory
         command.Add(CreateToolCommand(context, options));
         AddHelpText(
             command,
-            "Configuration commands read fixed CodeAlta MCP config paths: project .alta/mcp.json and global ~/.alta/mcp.json.",
+            "Configuration commands read and write the CodeAlta MCP files: project .alta/mcp.json and global ~/.alta/mcp.json.",
+            "Servers of other tools are read where they are and never written: project .mcp.json, .github/mcp.json, .vscode/mcp.json and ~/.copilot/mcp-config.json.",
             "Tool commands lazily connect to configured stdio and HTTP/SSE MCP servers with bounded startup and tool-call timeouts.",
             "`alta mcp activate <id>` called by an agent registers the server's tools in the running turn: call them in the next step, without ending the turn.",
             "Examples: `alta mcp list`; `alta mcp auth login docs`; `alta mcp tool search`; `alta mcp tool describe --server memory --tool read_graph`; `alta mcp tool call --server memory --tool echo --arguments {\"text\":\"hi\"}`.");
@@ -416,15 +417,19 @@ internal static class McpCommandFactory
                 correlationId = context.CorrelationId,
                 configuredServerCount = snapshot.EffectiveServers.Count,
                 matchingServerCount = effective.Length,
-                invalidSourceCount = snapshot.Sources.Count(static source => source.Exists && !source.IsValid),
-                shadowedGlobalServerCount = snapshot.ShadowedGlobalServers.Count,
+                invalidSourceCount = AllSources(snapshot).Count(static source => source.Exists && !source.IsValid),
+                shadowedGlobalServerCount = snapshot.ShadowedServers.Count(static server => server.Definition.SourceScope == McpConfigScope.Global),
+                shadowedServerCount = snapshot.ShadowedServers.Count,
+                skippedServerCount = snapshot.ExternalSources.Sum(static source => source.SkippedServers.Count),
                 defaultWriteScope = FormatScope(snapshot.DefaultWriteScope),
                 connectionRuntime = "not_started",
             });
-            foreach (var source in snapshot.Sources.Where(static source => source.Exists && !source.IsValid))
+            foreach (var source in AllSources(snapshot).Where(static source => source.Exists && !source.IsValid))
             {
                 WriteRecord(context.Stdout, CreateSourceRecord("alta.mcp.config.source", context, source, snapshot));
             }
+
+            WriteSkippedServers(context, snapshot, "all");
 
             foreach (var server in effective)
             {
@@ -447,13 +452,13 @@ internal static class McpCommandFactory
     {
         var includeMissing = false;
         var scope = "all";
-        var command = Leaf("sources", "Show fixed global/project MCP config sources and overlay diagnostics.");
+        var command = Leaf("sources", "Show the global/project MCP config sources, the files of other tools that are read, and overlay diagnostics.");
         command.Add("include-missing", "Include missing fixed config files in output.", value => includeMissing = value is not null);
         command.Add("scope=", "Source scope to show: all, project, or global.", value => scope = ValidateScope(value));
         command.Add((_, _) =>
         {
             var snapshot = Discover(context, options);
-            foreach (var source in snapshot.Sources.Where(source => ShouldEmitSource(source, includeMissing, scope)))
+            foreach (var source in AllSources(snapshot).Where(source => ShouldEmitSource(source, includeMissing, scope)))
             {
                 WriteRecord(context.Stdout, CreateSourceRecord("alta.mcp.config.source", context, source, snapshot));
             }
@@ -473,19 +478,24 @@ internal static class McpCommandFactory
                 });
             }
 
-            foreach (var shadowed in snapshot.ShadowedGlobalServers.Where(server => scope is "all" or "global"))
+            foreach (var shadowed in snapshot.ShadowedServers.Where(server => scope == "all" || scope == FormatScope(server.Definition.SourceScope)))
             {
+                var definition = shadowed.Definition;
                 WriteRecord(context.Stdout, new
                 {
                     type = "alta.mcp.config.shadowed_server",
                     version = 1,
                     correlationId = context.CorrelationId,
-                    server = shadowed.Key,
-                    sourceScope = "global",
-                    sourcePath = shadowed.SourcePath,
-                    reason = "project-overrides-global",
+                    server = definition.Key,
+                    sourceScope = FormatScope(definition.SourceScope),
+                    sourcePath = definition.SourcePath,
+                    sourceOrigin = FormatOrigin(definition.SourceOrigin),
+                    reason = definition.SourceScope == shadowed.OverriddenBy.SourceScope ? "same-scope-source-comes-first" : "project-overrides-global",
+                    overriddenByPath = shadowed.OverriddenBy.SourcePath,
                 });
             }
+
+            WriteSkippedServers(context, snapshot, scope);
 
             return ValueTask.FromResult(0);
         });
@@ -608,6 +618,11 @@ internal static class McpCommandFactory
             if (target.ErrorMessage is not null)
             {
                 return WriteError(context, "invalid_scope", target.ErrorMessage);
+            }
+
+            if (FindReadOnlyDefinition(Discover(context, options), key, target.Scope) is { } readOnly)
+            {
+                return WriteError(context, "read_only_source", $"MCP server '{key}' is defined in {readOnly.SourcePath}, which CodeAlta does not change. Use `alta mcp server disable {key}` to turn it off.");
             }
 
             try
@@ -811,6 +826,8 @@ internal static class McpCommandFactory
             sourceScope = FormatScope(definition.SourceScope),
             sourcePath = definition.SourcePath,
             sourceFormat = FormatFlavor(definition.SourceFlavor),
+            sourceOrigin = FormatOrigin(definition.SourceOrigin),
+            readOnly = definition.SourceOrigin != McpConfigOrigin.CodeAlta,
             overlay = server.OverridesGlobal ? "project-overrides-global" : FormatScope(definition.SourceScope),
             command = definition.Transport == McpTransportKind.Stdio ? definition.Command : null,
             args = definition.Transport == McpTransportKind.Stdio && definition.Args.Count > 0 ? McpRedactor.RedactArguments(definition.Args) : null,
@@ -882,6 +899,8 @@ internal static class McpCommandFactory
             version = 1,
             correlationId = context.CorrelationId,
             scope = FormatScope(source.Scope),
+            origin = FormatOrigin(source.Origin),
+            readOnly = source.Origin != McpConfigOrigin.CodeAlta,
             path = source.Path,
             exists = source.Exists,
             directoryExists = source.DirectoryExists,
@@ -892,7 +911,58 @@ internal static class McpCommandFactory
             serverKeys = source.Servers.Select(static server => server.Key).OrderBy(static key => key, StringComparer.Ordinal).ToArray(),
             diagnostic = source.Diagnostic,
             defaultWriteScope = FormatScope(snapshot.DefaultWriteScope),
-            wouldCreateParentDirectory = !source.DirectoryExists,
+            wouldCreateParentDirectory = source.Origin == McpConfigOrigin.CodeAlta && !source.DirectoryExists,
+            skippedServerKeys = source.SkippedServers.Count == 0 ? null : source.SkippedServers.Select(static server => server.Key).OrderBy(static key => key, StringComparer.Ordinal).ToArray(),
+        };
+
+    private static IEnumerable<McpConfigSource> AllSources(McpConfigSnapshot snapshot)
+        => snapshot.Sources.Concat(snapshot.ExternalSources);
+
+    // The definition in a file of another tool, when the CodeAlta file of the scope has none to remove.
+    private static McpServerDefinition? FindReadOnlyDefinition(McpConfigSnapshot snapshot, string key, McpConfigScope scope)
+    {
+        var owned = snapshot.Sources.Any(source => source.Scope == scope && source.Servers.Any(server => string.Equals(server.Key, key, StringComparison.Ordinal)));
+        return owned
+            ? null
+            : snapshot.ExternalSources.SelectMany(static source => source.Servers)
+                .FirstOrDefault(server => string.Equals(server.Key, key, StringComparison.Ordinal));
+    }
+
+    private static void WriteSkippedServers(PluginAltaCommandContext context, McpConfigSnapshot snapshot, string scope)
+    {
+        foreach (var skipped in snapshot.ExternalSources.SelectMany(static source => source.SkippedServers).Where(server => scope == "all" || scope == FormatScope(server.Scope)))
+        {
+            WriteRecord(context.Stdout, new
+            {
+                type = "alta.mcp.config.skipped_server",
+                version = 1,
+                correlationId = context.CorrelationId,
+                server = skipped.Key,
+                sourceScope = FormatScope(skipped.Scope),
+                sourcePath = skipped.Path,
+                sourceOrigin = FormatOrigin(skipped.Origin),
+                reason = FormatSkipReason(skipped.Reason),
+                message = skipped.Message,
+            });
+        }
+    }
+
+    private static string FormatOrigin(McpConfigOrigin origin)
+        => origin switch
+        {
+            McpConfigOrigin.Common => "common",
+            McpConfigOrigin.Copilot => "copilot",
+            McpConfigOrigin.Vscode => "vscode",
+            _ => "codealta",
+        };
+
+    private static string FormatSkipReason(McpSkipReason reason)
+        => reason switch
+        {
+            McpSkipReason.InputVariable => "input_variable",
+            McpSkipReason.UnknownVariable => "unknown_variable",
+            McpSkipReason.EnvironmentFile => "environment_file",
+            _ => "invalid",
         };
 
     private static string ValidateScope(string? value)

@@ -8,6 +8,9 @@ internal static class McpConfigFormatAdapter
     private const string McpServersRootKey = "mcpServers";
     private const string VscodeServersRootKey = "servers";
 
+    // GitHub Copilot CLI writes a server it starts itself as "local".
+    private const string CopilotStdioType = "local";
+
     public static McpConfigDocument CreateEmptyDocument()
     {
         var root = new JsonObject
@@ -31,6 +34,33 @@ internal static class McpConfigFormatAdapter
             throw new InvalidDataException("MCP config root must be a JSON object.");
         }
 
+        return DescribeDocument(root) ?? throw new InvalidDataException("MCP config must contain a top-level 'mcpServers' or 'servers' object.");
+    }
+
+    // A file another tool keeps. It is only read: comments and trailing commas are accepted, and so is a file whose
+    // root is the map of the servers, without 'mcpServers' (GitHub Copilot CLI accepts it in a project).
+    public static McpConfigDocument ParseExternalDocument(string json)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+        var node = JsonNode.Parse(json, documentOptions: new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+        if (node is not JsonObject root)
+        {
+            throw new InvalidDataException("MCP config root must be a JSON object.");
+        }
+
+        if (DescribeDocument(root) is { } document)
+        {
+            return document;
+        }
+
+        var isServerMap = root.Count == 0 || root.Any(static item => item.Value is JsonObject server && (server.ContainsKey("command") || server.ContainsKey("url")));
+        return isServerMap
+            ? new McpConfigDocument { Root = root, Flavor = DetectMcpServersFlavor(root), RootKey = string.Empty }
+            : throw new InvalidDataException("MCP config must contain a top-level 'mcpServers' or 'servers' object.");
+    }
+
+    private static McpConfigDocument? DescribeDocument(JsonObject root)
+    {
         var hasMcpServers = root.TryGetPropertyValue(McpServersRootKey, out var mcpServersNode);
         var hasVscodeServers = root.TryGetPropertyValue(VscodeServersRootKey, out var vscodeServersNode);
         if (hasMcpServers && hasVscodeServers)
@@ -60,7 +90,7 @@ internal static class McpConfigFormatAdapter
             };
         }
 
-        throw new InvalidDataException("MCP config must contain a top-level 'mcpServers' or 'servers' object.");
+        return null;
     }
 
     public static IReadOnlyList<McpServerDefinition> ReadServers(McpConfigDocument document, McpConfigScope scope, string path)
@@ -81,9 +111,71 @@ internal static class McpConfigFormatAdapter
                 throw new InvalidDataException($"MCP server '{key}' must be a JSON object.");
             }
 
-            result.Add(ReadServer(key, server, document.Flavor, scope, path));
+            result.Add(ReadServer(key, server, document.Flavor, scope, path, lenient: false));
         }
 
+        return result;
+    }
+
+    // Reads the servers of a file another tool keeps. A server CodeAlta cannot use is left out and named in `skipped`;
+    // the others are still read, because the file is not CodeAlta's to fix.
+    public static IReadOnlyList<McpServerDefinition> ReadExternalServers(
+        McpConfigDocument document,
+        McpConfigScope scope,
+        McpConfigOrigin origin,
+        string path,
+        McpExternalContext context,
+        out IReadOnlyList<McpSkippedServer> skipped)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var servers = GetServerMap(document.Root, document.RootKey);
+        var result = new List<McpServerDefinition>(servers.Count);
+        var left = new List<McpSkippedServer>();
+        foreach (var (key, value) in servers)
+        {
+            void Skip(McpSkipReason reason, string message)
+                => left.Add(new McpSkippedServer { Key = key, Scope = scope, Origin = origin, Path = path, Reason = reason, Message = message });
+
+            if (string.IsNullOrWhiteSpace(key) || value is not JsonObject server)
+            {
+                // A root that is the map of the servers can hold other things, such as "$schema".
+                if (document.RootKey.Length > 0)
+                {
+                    Skip(McpSkipReason.Invalid, $"MCP server '{key}' must be a named JSON object.");
+                }
+
+                continue;
+            }
+
+            if (HasNonEmptyString(server, "envFile"))
+            {
+                Skip(McpSkipReason.EnvironmentFile, $"MCP server '{key}' reads its environment from a file (envFile).");
+                continue;
+            }
+
+            McpServerDefinition definition;
+            try
+            {
+                definition = ReadServer(key, server, document.Flavor, scope, path, lenient: true) with { SourceOrigin = origin };
+            }
+            catch (InvalidDataException ex)
+            {
+                Skip(McpSkipReason.Invalid, ex.Message);
+                continue;
+            }
+
+            if (McpExternalVariables.TryNormalize(definition, context, out var normalized, out var reason, out var message))
+            {
+                result.Add(normalized);
+            }
+            else
+            {
+                Skip(reason, message);
+            }
+        }
+
+        skipped = left;
         return result;
     }
 
@@ -119,6 +211,11 @@ internal static class McpConfigFormatAdapter
 
     private static JsonObject GetServerMap(JsonObject root, string rootKey)
     {
+        if (rootKey.Length == 0)
+        {
+            return root;
+        }
+
         if (!root.TryGetPropertyValue(rootKey, out var node) || node is not JsonObject servers)
         {
             servers = new JsonObject();
@@ -130,7 +227,7 @@ internal static class McpConfigFormatAdapter
 
     private static McpConfigFlavor DetectMcpServersFlavor(JsonObject servers)
     {
-        var hasTools = false;
+        var isCopilot = false;
         var hasExplicitStdioType = false;
         var hasUntypedUrl = false;
         foreach (var (_, value) in servers)
@@ -140,14 +237,14 @@ internal static class McpConfigFormatAdapter
                 continue;
             }
 
-            hasTools |= server.ContainsKey("tools");
             var type = GetString(server, "type");
+            isCopilot |= server.ContainsKey("tools") || string.Equals(type, CopilotStdioType, StringComparison.OrdinalIgnoreCase);
             var hasUrl = HasNonEmptyString(server, "url");
             hasExplicitStdioType |= string.Equals(type, "stdio", StringComparison.OrdinalIgnoreCase);
             hasUntypedUrl |= hasUrl && string.IsNullOrWhiteSpace(type);
         }
 
-        if (hasTools)
+        if (isCopilot)
         {
             return McpConfigFlavor.Copilot;
         }
@@ -165,7 +262,7 @@ internal static class McpConfigFormatAdapter
         return McpConfigFlavor.CodeAlta;
     }
 
-    private static McpServerDefinition ReadServer(string key, JsonObject server, McpConfigFlavor flavor, McpConfigScope scope, string path)
+    private static McpServerDefinition ReadServer(string key, JsonObject server, McpConfigFlavor flavor, McpConfigScope scope, string path, bool lenient)
     {
         var command = GetString(server, "command");
         var url = GetString(server, "url");
@@ -189,14 +286,14 @@ internal static class McpConfigFormatAdapter
                 throw new InvalidDataException($"MCP server '{key}' uses unsupported transport type '{type}'.");
             }
 
-            if (hasCommand && !string.Equals(type, "stdio", StringComparison.OrdinalIgnoreCase))
+            if (hasCommand && !IsStdioType(type))
             {
                 throw new InvalidDataException($"MCP server '{key}' mixes command transport with type '{type}'.");
             }
 
-            if (hasUrl && string.Equals(type, "stdio", StringComparison.OrdinalIgnoreCase))
+            if (hasUrl && IsStdioType(type))
             {
-                throw new InvalidDataException($"MCP server '{key}' mixes URL transport with type 'stdio'.");
+                throw new InvalidDataException($"MCP server '{key}' mixes URL transport with type '{type}'.");
             }
         }
 
@@ -210,9 +307,9 @@ internal static class McpConfigFormatAdapter
             Command = command,
             Args = ReadStringArray(server, "args"),
             Cwd = GetString(server, "cwd"),
-            Env = ReadStringDictionary(server, "env"),
+            Env = ReadStringDictionary(server, "env", lenient),
             Url = url,
-            Headers = ReadStringDictionary(server, "headers"),
+            Headers = ReadStringDictionary(server, "headers", lenient: false),
             OAuth = ReadOAuthOptions(server),
         };
     }
@@ -313,9 +410,13 @@ internal static class McpConfigFormatAdapter
     }
 
     private static bool IsSupportedType(string type)
-        => string.Equals(type, "stdio", StringComparison.OrdinalIgnoreCase) ||
+        => IsStdioType(type) ||
            string.Equals(type, "http", StringComparison.OrdinalIgnoreCase) ||
            string.Equals(type, "sse", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsStdioType(string type)
+        => string.Equals(type, "stdio", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(type, CopilotStdioType, StringComparison.OrdinalIgnoreCase);
 
     private static bool HasNonEmptyString(JsonObject obj, string propertyName)
         => !string.IsNullOrWhiteSpace(GetString(obj, propertyName));
@@ -351,7 +452,8 @@ internal static class McpConfigFormatAdapter
         return values;
     }
 
-    private static IReadOnlyDictionary<string, string> ReadStringDictionary(JsonObject obj, string propertyName)
+    // Visual Studio Code also accepts a number as the value of an environment variable, and null for one that is not set.
+    private static IReadOnlyDictionary<string, string> ReadStringDictionary(JsonObject obj, string propertyName, bool lenient)
     {
         if (!obj.TryGetPropertyValue(propertyName, out var node) || node is null)
         {
@@ -366,12 +468,22 @@ internal static class McpConfigFormatAdapter
         var values = new Dictionary<string, string>(map.Count, StringComparer.Ordinal);
         foreach (var (key, valueNode) in map)
         {
-            if (valueNode is not JsonValue value || !value.TryGetValue<string>(out var text))
+            if (valueNode is JsonValue value && value.TryGetValue<string>(out var text))
+            {
+                values[key] = text;
+            }
+            else if (lenient && valueNode is null)
+            {
+                continue;
+            }
+            else if (lenient && valueNode is not null && valueNode.GetValueKind() == JsonValueKind.Number)
+            {
+                values[key] = valueNode.ToJsonString();
+            }
+            else
             {
                 throw new InvalidDataException($"MCP field '{propertyName}.{key}' must be a string.");
             }
-
-            values[key] = text;
         }
 
         return values;

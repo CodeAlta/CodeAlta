@@ -190,7 +190,7 @@ export const globalConfig = Object.freeze({
 export const mcpServers = Object.freeze({
   list: async () => ({
     status: "unavailable", projectId: null, servers: [], globalConfigState: null, projectConfigState: null,
-    mcpEnabled: false, policyReadError: false, omitted: 0,
+    mcpEnabled: false, policyReadError: false, omitted: 0, unsupported: [],
   }),
   save: async () => ({ status: "unavailable", message: null }),
   remove: async () => ({ status: "unavailable", message: null }),

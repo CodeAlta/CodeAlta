@@ -34,6 +34,25 @@ public enum McpManagementConfigFormat
 }
 
 /// <summary>
+/// Says whose file an MCP server definition comes from. CodeAlta writes only its own files; it reads the
+/// others where another tool keeps them.
+/// </summary>
+public enum McpManagementConfigOrigin
+{
+    /// <summary>A file of CodeAlta: <c>.alta/mcp.json</c> of a project or of the user.</summary>
+    CodeAlta,
+
+    /// <summary>The file several tools share: <c>.mcp.json</c> of a project.</summary>
+    Common,
+
+    /// <summary>A file of GitHub Copilot: <c>.github/mcp.json</c> of a project or <c>~/.copilot/mcp-config.json</c>.</summary>
+    Copilot,
+
+    /// <summary>The file of Visual Studio Code: <c>.vscode/mcp.json</c> of a project.</summary>
+    Vscode,
+}
+
+/// <summary>
 /// Describes an MCP server transport in a management snapshot.
 /// </summary>
 public enum McpManagementTransport
@@ -62,8 +81,11 @@ public enum McpManagementServerState
     /// <summary>A configuration source exists but could not be parsed or normalized.</summary>
     InvalidConfig,
 
-    /// <summary>A global server definition is shadowed by a project definition with the same key.</summary>
+    /// <summary>A server definition is not used because a source that comes first defines the same key.</summary>
     Shadowed,
+
+    /// <summary>A server of a file of another tool is left out because CodeAlta cannot use its definition.</summary>
+    Unsupported,
 }
 
 /// <summary>
@@ -144,6 +166,12 @@ public sealed record McpManagementConfigSourceSnapshot
 
     /// <summary>Gets configured server keys found in this source.</summary>
     public IReadOnlyList<string> ServerKeys { get; init; } = [];
+
+    /// <summary>Gets whose file this is.</summary>
+    public McpManagementConfigOrigin Origin { get; init; }
+
+    /// <summary>Gets a value indicating whether the file belongs to another tool: CodeAlta reads it and never writes it.</summary>
+    public bool IsReadOnly => Origin != McpManagementConfigOrigin.CodeAlta;
 }
 
 /// <summary>
@@ -246,6 +274,31 @@ public sealed record McpManagementServerSnapshot
 
     /// <summary>Gets the source JSON format.</summary>
     public McpManagementConfigFormat? SourceFormat { get; init; }
+
+    /// <summary>Gets whose file the definition comes from.</summary>
+    public McpManagementConfigOrigin SourceOrigin { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the definition is in a file of another tool. It can be enabled, disabled,
+    /// tested and authorized, but not changed or removed: saving it writes a definition of the same key to a file
+    /// of CodeAlta, which then comes first.
+    /// </summary>
+    public bool IsReadOnly => SourceOrigin != McpManagementConfigOrigin.CodeAlta;
+
+    /// <summary>Gets the path of the file whose definition is used instead of this one, for a shadowed row.</summary>
+    public string? OverriddenByPath { get; init; }
+
+    /// <summary>
+    /// Gets the short name of the source file for a list, relative to the project or to the home of the user:
+    /// <c>.mcp.json</c>, <c>.github/mcp.json</c>, <c>~/.copilot/mcp-config.json</c>.
+    /// </summary>
+    public string? SourceName { get; init; }
+
+    /// <summary>
+    /// Gets why a row in the <see cref="McpManagementServerState.Unsupported" /> state is left out:
+    /// <c>input_variable</c>, <c>unknown_variable</c>, <c>environment_file</c> or <c>invalid</c>.
+    /// </summary>
+    public string? UnsupportedReason { get; init; }
 
     /// <summary>Gets a value indicating whether this project server overrides a global server.</summary>
     public bool OverridesGlobal { get; init; }
@@ -361,7 +414,7 @@ public sealed record McpManagementSummary
     /// <summary>Gets the number of missing fixed JSON sources.</summary>
     public int MissingSourceCount { get; init; }
 
-    /// <summary>Gets the number of shadowed global server definitions.</summary>
+    /// <summary>Gets the number of server definitions that are not used because a source that comes first defines the same key.</summary>
     public int ShadowedServerCount { get; init; }
 
     /// <summary>Gets the cached exposed tool count. This remains zero until a runtime test updates the cached snapshot.</summary>
@@ -433,8 +486,11 @@ public sealed record McpManagementSnapshot
     /// <summary>Gets the selected project directory, when available.</summary>
     public string? ProjectDirectory { get; init; }
 
-    /// <summary>Gets the fixed JSON configuration sources.</summary>
+    /// <summary>Gets the fixed JSON configuration sources of CodeAlta, the ones it writes.</summary>
     public IReadOnlyList<McpManagementConfigSourceSnapshot> Sources { get; init; } = [];
+
+    /// <summary>Gets the files of other tools that exist and are read, in the order they are applied. CodeAlta never writes them.</summary>
+    public IReadOnlyList<McpManagementConfigSourceSnapshot> ExternalSources { get; init; } = [];
 
     /// <summary>Gets server and configuration rows.</summary>
     public IReadOnlyList<McpManagementServerSnapshot> Servers { get; init; } = [];
@@ -589,15 +645,17 @@ public sealed class McpManagementService
         var projectPolicyPath = projectDirectory is null ? null : McpPolicyWriter.GetProjectPolicyPath(projectDirectory);
         var (policy, policyDiagnostic) = LoadPolicy(globalPolicyPath, projectPolicyPath);
         var sources = configSnapshot.Sources.Select(MapSource).ToArray();
-        var servers = BuildServers(configSnapshot, policy, sources, request.UserHomeDirectory);
+        var externalSources = configSnapshot.ExternalSources.Select(MapSource).ToArray();
+        var servers = BuildServers(configSnapshot, policy, [.. sources, .. externalSources], request.UserHomeDirectory);
         var snapshot = new McpManagementSnapshot
         {
             ProjectDirectory = projectDirectory,
             Sources = sources,
+            ExternalSources = externalSources,
             Servers = servers,
             Policy = MapPolicy(policy, globalPolicyPath, projectPolicyPath, policyDiagnostic),
             DefaultWriteScope = MapScope(configSnapshot.DefaultWriteScope),
-            Summary = BuildSummary(configSnapshot, sources, servers, globalPolicyPath, projectPolicyPath),
+            Summary = BuildSummary(configSnapshot, [.. sources, .. externalSources], servers, globalPolicyPath, projectPolicyPath),
             CreatedAt = DateTimeOffset.UtcNow,
         };
 
@@ -615,7 +673,11 @@ public sealed class McpManagementService
     /// </summary>
     /// <param name="definition">The editable server definition to save.</param>
     /// <param name="scope">The JSON configuration scope to write, or <see langword="null" /> to use the default.</param>
-    /// <param name="originalKey">The previous server key when renaming or moving an existing server.</param>
+    /// <param name="originalKey">
+    /// The previous server key when renaming or moving an existing server of a file of CodeAlta. Leave it
+    /// <see langword="null" /> when the edited server is read-only (<see cref="McpManagementServerSnapshot.IsReadOnly" />):
+    /// its definition stays where it is, and the saved one comes first.
+    /// </param>
     /// <param name="originalScope">The previous JSON configuration scope when renaming or moving an existing server.</param>
     /// <param name="request">Optional path request used to resolve scope paths.</param>
     /// <param name="cancellationToken">A token that cancels the write.</param>
@@ -1167,14 +1229,17 @@ public sealed class McpManagementService
         var rows = new List<McpManagementServerSnapshot>();
         foreach (var source in sources.Where(static source => !source.Exists || !source.IsValid))
         {
+            var name = GetSourceName(MapScope(source.Scope), MapOrigin(source.Origin));
             rows.Add(new McpManagementServerSnapshot
             {
-                Key = $"{FormatScope(source.Scope)}-config",
-                DisplayName = $"{FormatScope(source.Scope)} MCP config",
+                Key = source.IsReadOnly ? $"{FormatScope(source.Scope)}-{source.Origin.ToString().ToLowerInvariant()}-config" : $"{FormatScope(source.Scope)}-config",
+                DisplayName = source.IsReadOnly ? name : $"{FormatScope(source.Scope)} MCP config",
                 State = source.Exists ? McpManagementServerState.InvalidConfig : McpManagementServerState.MissingConfig,
                 StateReason = source.Exists ? "Invalid JSON configuration" : "Config file is missing",
                 SourceScope = source.Scope,
                 SourcePath = source.Path,
+                SourceName = name,
+                SourceOrigin = source.Origin,
                 SourceFormat = source.Format,
                 Diagnostics = string.IsNullOrWhiteSpace(source.Diagnostic) ? [] : [source.Diagnostic!],
             });
@@ -1185,9 +1250,38 @@ public sealed class McpManagementService
             rows.Add(MapServer(server, policy, McpManagementServerState.Configured, userHomeDirectory));
         }
 
-        foreach (var shadowed in configSnapshot.ShadowedGlobalServers)
+        foreach (var shadowed in configSnapshot.ShadowedServers)
         {
             rows.Add(MapShadowedServer(shadowed, policy, userHomeDirectory));
+        }
+
+        foreach (var skipped in configSnapshot.ExternalSources.SelectMany(static source => source.SkippedServers))
+        {
+            rows.Add(new McpManagementServerSnapshot
+            {
+                Key = skipped.Key,
+                DisplayName = skipped.Key,
+                State = McpManagementServerState.Unsupported,
+                StateReason = skipped.Reason switch
+                {
+                    McpSkipReason.InputVariable => "Needs a value Visual Studio Code asks for",
+                    McpSkipReason.UnknownVariable => "Uses a variable CodeAlta does not resolve",
+                    McpSkipReason.EnvironmentFile => "Reads its environment from a file",
+                    _ => "Invalid definition",
+                },
+                UnsupportedReason = skipped.Reason switch
+                {
+                    McpSkipReason.InputVariable => "input_variable",
+                    McpSkipReason.UnknownVariable => "unknown_variable",
+                    McpSkipReason.EnvironmentFile => "environment_file",
+                    _ => "invalid",
+                },
+                SourceScope = MapScope(skipped.Scope),
+                SourcePath = skipped.Path,
+                SourceName = GetSourceName(skipped.Scope, skipped.Origin),
+                SourceOrigin = MapOrigin(skipped.Origin),
+                Diagnostics = [skipped.Message],
+            });
         }
 
         return rows
@@ -1212,6 +1306,8 @@ public sealed class McpManagementService
             Transport = MapTransport(definition.Transport),
             SourceScope = MapScope(definition.SourceScope),
             SourcePath = definition.SourcePath,
+            SourceName = GetSourceName(definition.SourceScope, definition.SourceOrigin),
+            SourceOrigin = MapOrigin(definition.SourceOrigin),
             SourceFormat = MapFormat(definition.SourceFlavor),
             OverridesGlobal = effective.OverridesGlobal,
             ShadowedGlobalPath = effective.ShadowedGlobalDefinition?.SourcePath,
@@ -1241,8 +1337,12 @@ public sealed class McpManagementService
         };
     }
 
-    private static McpManagementServerSnapshot MapShadowedServer(McpServerDefinition definition, McpPolicyOptions policy, string? userHomeDirectory)
+    private static McpManagementServerSnapshot MapShadowedServer(McpShadowedServer shadowed, McpPolicyOptions policy, string? userHomeDirectory)
     {
+        var definition = shadowed.Definition;
+        var winner = shadowed.OverriddenBy;
+        // The wording of a global definition under a project one is the one this had before other files were read.
+        var byProject = definition.SourceScope == McpConfigScope.Global && winner.SourceScope == McpConfigScope.Project;
         policy.Servers.TryGetValue(definition.Key, out var serverPolicy);
         var oauthStatus = GetOAuthStatus(definition, userHomeDirectory);
         return new McpManagementServerSnapshot
@@ -1250,10 +1350,13 @@ public sealed class McpManagementService
             Key = definition.Key,
             DisplayName = definition.Key,
             State = McpManagementServerState.Shadowed,
-            StateReason = "Shadowed by project config",
+            StateReason = byProject ? "Shadowed by project config" : $"Shadowed by {GetSourceName(winner.SourceScope, winner.SourceOrigin)}",
             Transport = MapTransport(definition.Transport),
             SourceScope = MapScope(definition.SourceScope),
             SourcePath = definition.SourcePath,
+            SourceName = GetSourceName(definition.SourceScope, definition.SourceOrigin),
+            SourceOrigin = MapOrigin(definition.SourceOrigin),
+            OverriddenByPath = winner.SourcePath,
             SourceFormat = MapFormat(definition.SourceFlavor),
             Command = definition.Transport == McpTransportKind.Stdio ? definition.Command : null,
             Args = definition.Transport == McpTransportKind.Stdio ? McpRedactor.RedactArguments(definition.Args) : [],
@@ -1275,9 +1378,41 @@ public sealed class McpManagementService
             DirectTools = serverPolicy?.DirectTools ?? [],
             AllowedTools = serverPolicy?.AllowedTools ?? [],
             DisabledTools = serverPolicy?.DisabledTools ?? [],
-            Diagnostics = ["This global definition is ignored because a project server uses the same key."],
+            Diagnostics = [byProject
+                ? "This global definition is ignored because a project server uses the same key."
+                : $"This definition is ignored because {winner.SourcePath} defines a server with the same key."],
         };
     }
+
+    // The name a list shows for the file of a definition.
+    private static string GetSourceName(McpConfigScope scope, McpConfigOrigin origin)
+        => (origin, scope) switch
+        {
+            (McpConfigOrigin.Common, _) => ".mcp.json",
+            (McpConfigOrigin.Vscode, _) => ".vscode/mcp.json",
+            (McpConfigOrigin.Copilot, McpConfigScope.Project) => ".github/mcp.json",
+            (McpConfigOrigin.Copilot, _) => "~/.copilot/mcp-config.json",
+            (_, McpConfigScope.Project) => ".alta/mcp.json",
+            _ => "~/.alta/mcp.json",
+        };
+
+    private static McpManagementConfigOrigin MapOrigin(McpConfigOrigin origin)
+        => origin switch
+        {
+            McpConfigOrigin.Common => McpManagementConfigOrigin.Common,
+            McpConfigOrigin.Copilot => McpManagementConfigOrigin.Copilot,
+            McpConfigOrigin.Vscode => McpManagementConfigOrigin.Vscode,
+            _ => McpManagementConfigOrigin.CodeAlta,
+        };
+
+    private static McpConfigOrigin MapOrigin(McpManagementConfigOrigin origin)
+        => origin switch
+        {
+            McpManagementConfigOrigin.Common => McpConfigOrigin.Common,
+            McpManagementConfigOrigin.Copilot => McpConfigOrigin.Copilot,
+            McpManagementConfigOrigin.Vscode => McpConfigOrigin.Vscode,
+            _ => McpConfigOrigin.CodeAlta,
+        };
 
     private static McpOAuthTokenStatus GetOAuthStatus(McpServerDefinition definition, string? userHomeDirectory)
     {
@@ -1315,7 +1450,7 @@ public sealed class McpManagementService
             UnavailableServerCount = unavailable,
             InvalidSourceCount = sources.Count(static source => source.Exists && !source.IsValid),
             MissingSourceCount = sources.Count(static source => !source.Exists),
-            ShadowedServerCount = configSnapshot.ShadowedGlobalServers.Count,
+            ShadowedServerCount = configSnapshot.ShadowedServers.Count,
             ExposedToolCount = 0,
             TotalToolCount = 0,
         };
@@ -1325,6 +1460,7 @@ public sealed class McpManagementService
         => new()
         {
             Scope = MapScope(source.Scope),
+            Origin = MapOrigin(source.Origin),
             Path = source.Path,
             Exists = source.Exists,
             DirectoryExists = source.DirectoryExists,
@@ -1362,6 +1498,7 @@ public sealed class McpManagementService
             McpManagementServerState.Disabled => 2,
             McpManagementServerState.Shadowed => 3,
             McpManagementServerState.MissingConfig => 4,
+            McpManagementServerState.Unsupported => 5,
             _ => 9,
         };
 

@@ -452,7 +452,14 @@ internal sealed class McpRuntimeService : IAsyncDisposable
             }));
         }
 
-        var validation = ValidateRuntimeDefinition(effective.Definition);
+        // The tokens of a server are kept under its address as the file writes it, also when a variable is part of it.
+        var tokenUrl = effective.Definition.Url;
+        if (!TryExpandConnectionFields(effective.Definition, out var definition, out var missing))
+        {
+            return Cache(cacheKey, ServerRuntimeState.Failed(missing));
+        }
+
+        var validation = ValidateRuntimeDefinition(definition);
         if (validation is not null)
         {
             return Cache(cacheKey, ServerRuntimeState.Failed(validation));
@@ -465,7 +472,7 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         McpClient? client = null;
         try
         {
-            transport = CreateTransport(effective.Definition, context.Request, timeoutMs);
+            transport = CreateTransport(definition, tokenUrl, context.Request, timeoutMs);
             client = await McpClient.CreateAsync(transport, loggerFactory: NullLoggerFactory.Instance, cancellationToken: timeout.Token).ConfigureAwait(false);
             transport = null;
             var listedTools = await client.ListToolsAsync(cancellationToken: timeout.Token).ConfigureAwait(false);
@@ -527,7 +534,7 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         }
     }
 
-    private static IClientTransport CreateTransport(McpServerDefinition definition, McpRuntimeRequest request, int timeoutMs)
+    private static IClientTransport CreateTransport(McpServerDefinition definition, string? tokenUrl, McpRuntimeRequest request, int timeoutMs)
     {
         if (definition.Transport == McpTransportKind.Stdio)
         {
@@ -552,7 +559,7 @@ internal sealed class McpRuntimeService : IAsyncDisposable
             ConnectionTimeout = TimeSpan.FromMilliseconds(timeoutMs),
             AdditionalHeaders = headers,
         };
-        var oauth = CreateOAuthOptions(definition, request);
+        var oauth = CreateOAuthOptions(definition, tokenUrl, request);
         if (oauth is not null)
         {
             httpOptions.OAuth = oauth;
@@ -664,7 +671,7 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         }
     }
 
-    private static ClientOAuthOptions? CreateOAuthOptions(McpServerDefinition definition, McpRuntimeRequest request)
+    private static ClientOAuthOptions? CreateOAuthOptions(McpServerDefinition definition, string? tokenUrl, McpRuntimeRequest request)
     {
         if (definition.Transport != McpTransportKind.Http || string.IsNullOrWhiteSpace(definition.Url))
         {
@@ -677,7 +684,7 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         }
 
         var configured = definition.OAuth is { Enabled: true } ? definition.OAuth : null;
-        var tokenPath = McpOAuthTokenCache.GetTokenPath(request.UserHomeDirectory, definition.Key, definition.Url);
+        var tokenPath = McpOAuthTokenCache.GetTokenPath(request.UserHomeDirectory, definition.Key, tokenUrl);
         if (!request.ForceOAuth && configured is null && !File.Exists(tokenPath))
         {
             return null;
@@ -973,6 +980,54 @@ internal sealed class McpRuntimeService : IAsyncDisposable
             Message = $"Invalid MCP server '{definition.Key}': {fieldKind} '{McpRedactor.RedactValue(fieldKind, fieldName)}' references environment variable '{variableName}', but it is not set.",
         };
 
+    // Resolves ${NAME} in the command, its arguments, its folder and the address. The values of environment variables
+    // and headers are resolved where they are used, so that a diagnostic can name the one that fails.
+    private static bool TryExpandConnectionFields(
+        McpServerDefinition definition,
+        out McpServerDefinition expanded,
+        [NotNullWhen(false)] out McpRuntimeDiagnostic? diagnostic)
+    {
+        string? missing = null;
+        string? field = null;
+        string? Expand(string? value, string fieldName)
+        {
+            if (value is null || missing is not null || !TryExpandEnvironmentVariables(value, out var result, out var variable))
+            {
+                return value;
+            }
+
+            if (variable is not null)
+            {
+                missing = variable;
+                field = fieldName;
+                return value;
+            }
+
+            return result;
+        }
+
+        var command = Expand(definition.Command, "command");
+        var args = definition.Args.Count == 0 ? definition.Args : definition.Args.Select(arg => Expand(arg, "args")!).ToArray();
+        var cwd = Expand(definition.Cwd, "cwd");
+        var url = Expand(definition.Url, "url");
+        if (missing is not null)
+        {
+            expanded = definition;
+            diagnostic = new McpRuntimeDiagnostic
+            {
+                Code = "environment_variable_not_found",
+                Server = definition.Key,
+                Transport = FormatTransport(definition.Transport),
+                Message = $"Invalid MCP server '{definition.Key}': '{field}' references environment variable '{missing}', but it is not set.",
+            };
+            return false;
+        }
+
+        expanded = definition with { Command = command, Args = args, Cwd = cwd, Url = url };
+        diagnostic = null;
+        return true;
+    }
+
     private static Dictionary<string, string> ExpandDictionary(IReadOnlyDictionary<string, string> values)
     {
         var expanded = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -1016,7 +1071,11 @@ internal sealed class McpRuntimeService : IAsyncDisposable
             }
             else
             {
-                var variableValue = Environment.GetEnvironmentVariable(variableName);
+                // ${NAME:-default}: the default stands for a variable that is not set.
+                var defaultIndex = variableName.IndexOf(":-", StringComparison.Ordinal);
+                var defaultValue = defaultIndex > 0 ? variableName[(defaultIndex + 2)..] : null;
+                variableName = defaultIndex > 0 ? variableName[..defaultIndex] : variableName;
+                var variableValue = Environment.GetEnvironmentVariable(variableName) ?? defaultValue;
                 if (variableValue is null)
                 {
                     expanded = value;

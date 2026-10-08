@@ -168,6 +168,7 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 [JsonSerializable(typeof(McpServersListRequest))]
 [JsonSerializable(typeof(McpServersListResponse))]
 [JsonSerializable(typeof(McpServerEntry))]
+[JsonSerializable(typeof(McpUnsupportedServer))]
 [JsonSerializable(typeof(McpServerValueName))]
 [JsonSerializable(typeof(McpServerValueEdit))]
 [JsonSerializable(typeof(McpServerEdit))]

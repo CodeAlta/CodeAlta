@@ -41,21 +41,56 @@ The `alta mcp ...` surface is an in-session live tool for the agent/LLM. Users c
 
 ## Configuration paths and overlay
 
-MCP connection definitions live only in fixed JSON files:
+CodeAlta keeps MCP connection definitions in two JSON files:
 
 {.table}
 | Scope | File | Notes |
 |---|---|---|
-| Global | `~/.alta/mcp.json` | Loaded first and available across workspaces. |
-| Project | `<project>/.alta/mcp.json` | Loaded only for that project and shadows global servers with the same key. |
+| Global | `~/.alta/mcp.json` | Available in every project. |
+| Project | `<project>/.alta/mcp.json` | For that project only. |
 
-CodeAlta does not scan editor- or provider-specific MCP paths. Server keys and tool names are matched exactly and case-sensitively. If a project file defines the same server key as the global file, the project definition wins; the global one is reported as shadowed and is not connected.
+Server keys and tool names are matched exactly and case-sensitively. When two files define the same server key, one definition is used and the others are shown as overridden and are not connected: a project comes before your global file.
 
 New files created by CodeAlta use the `mcpServers` root. Existing supported formats are detected and preserved when CodeAlta edits a file. Unknown root/server fields are preserved, but CodeAlta only uses the fields documented below.
 
+## Servers of other tools
+
+CodeAlta also reads the MCP files other tools keep. A server you defined for GitHub Copilot, Visual Studio Code or Claude Code works in CodeAlta without being copied.
+
+{.table}
+| Scope | File | Kept by |
+|---|---|---|
+| Project | `<project>/.mcp.json` | GitHub Copilot CLI, Visual Studio Code, Claude Code |
+| Project | `<project>/.github/mcp.json` | GitHub Copilot CLI |
+| Project | `<project>/.vscode/mcp.json` | Visual Studio Code |
+| Global | `~/.copilot/mcp-config.json` | GitHub Copilot CLI, Visual Studio Code |
+
+These servers are listed with the others, with the name of their file, or the **Copilot** mark for the two files of GitHub Copilot. You enable, disable, activate and authorize them like any server.
+
+CodeAlta never changes these files:
+
+- A server of such a file has no **Remove**. Disable it, or remove it in the tool it belongs to.
+- When you edit one and save it, CodeAlta writes a server of the same name to its own file. That one is used from then on, and the other is shown as overridden. Remove yours to go back to the original.
+
+When several files define the same server, the file of CodeAlta comes first, then `.mcp.json`, `.github/mcp.json` and `.vscode/mcp.json`. The files of a project come before the global ones.
+
+A file of another tool can contain comments and trailing commas, as Visual Studio Code writes them. A server of a project starts in the folder of the project. The variables of these files work as follows:
+
+{.table}
+| Variable | In CodeAlta |
+|---|---|
+| `${env:NAME}`, `${NAME}`, `${NAME:-default}` | The environment variable `NAME` of the CodeAlta process, or the default. |
+| `${workspaceFolder}`, `${workspaceFolderBasename}` | The folder of the project, and its name. |
+| `${userHome}` | Your home folder. |
+| `${input:...}` | The server is not loaded: only Visual Studio Code can ask for this value. |
+
+A server that uses `${input:...}`, an `envFile` or another variable CodeAlta does not know is listed as **Not supported**, with the reason. To use it, add a server of the same name to CodeAlta with the value it needs, for example from an environment variable.
+
+The `tools` list of a GitHub Copilot file is not applied. To limit the tools of a server, use the [TOML policy](#toml-policy-fields) or the tool switches of the MCP Servers dialog of CodeAlta TUI.
+
 ## Supported JSON formats
 
-Each MCP JSON file must be a JSON object with exactly one supported server-map root. JSON comments are not allowed.
+Each MCP JSON file of CodeAlta must be a JSON object with exactly one supported server-map root. JSON comments are not allowed in it.
 
 {.table}
 | Format detected by CodeAlta | Root key | How it is detected | Notes when CodeAlta writes it |
@@ -75,14 +110,14 @@ A server entry must be an object under the selected root key. It must define exa
 {.table}
 | Field | Type | Used with | Meaning |
 |---|---|---|---|
-| `command` | string | stdio | Executable or command to launch. Required for stdio servers and mutually exclusive with `url`. |
-| `args` | array of strings | stdio | Arguments passed as separate argument values. Use this instead of embedding arguments in `command`. |
-| `cwd` | string | stdio | Working directory passed to the stdio transport. |
+| `command` | string | stdio | Executable or command to launch. Required for stdio servers and mutually exclusive with `url`. May reference environment variables with `${NAME}`. |
+| `args` | array of strings | stdio | Arguments passed as separate argument values. Use this instead of embedding arguments in `command`. Values may reference environment variables with `${NAME}`. |
+| `cwd` | string | stdio | Working directory passed to the stdio transport. May reference environment variables with `${NAME}`. |
 | `env` | object with string values | stdio | Environment variables for the launched server. Values may reference process environment variables with `${NAME}`. |
-| `url` | string | HTTP/SSE | Remote MCP endpoint. Runtime validation requires an absolute `http` or `https` URL. Mutually exclusive with `command`. |
+| `url` | string | HTTP/SSE | Remote MCP endpoint. Runtime validation requires an absolute `http` or `https` URL. Mutually exclusive with `command`. May reference environment variables with `${NAME}`. |
 | `headers` | object with string values | HTTP/SSE | Static HTTP headers for remote servers. Values may reference process environment variables with `${NAME}`. Header names must be valid HTTP token names; values cannot contain CR/LF after expansion. |
 | `auth` | object | HTTP/SSE | Optional CodeAlta OAuth/Authv2 browser-login settings. Use `{ "type": "oauth" }` for dynamic client registration, or include `clientId`, optional `clientSecret`, `scopes`, and `redirectUri` when the authorization server requires a pre-registered client. Tokens are not stored in MCP JSON. |
-| `type` | string | both | Optional transport hint. Supported values are `stdio`, `http`, and `sse`. `command` can only be combined with `stdio`; `url` cannot be combined with `stdio`. |
+| `type` | string | both | Optional transport hint. Supported values are `stdio`, `local` (the name GitHub Copilot CLI gives to stdio), `http`, and `sse`. `command` can only be combined with `stdio` or `local`; `url` cannot be combined with them. |
 | `tools` | any existing JSON value | Copilot-style files | Preserved for flavor compatibility. CodeAlta does not use it to enable/disable tools; use TOML policy instead. |
 
 Array and map fields are strict: `args` must be an array of strings, and `env`/`headers` must be objects whose values are strings.
@@ -121,7 +156,7 @@ Remote server:
 }
 ```
 
-`${NAME}` placeholders are expanded only in stdio `env` values and remote `headers` values. If the referenced environment variable is missing, CodeAlta reports an `environment_variable_not_found` diagnostic and does not send the literal placeholder to the server.
+`${NAME}` placeholders are expanded in `command`, `args`, `cwd`, `url`, `env` values and `headers` values. `${NAME:-default}` uses the default when the variable is not set. If a referenced environment variable is missing and has no default, CodeAlta reports an `environment_variable_not_found` diagnostic and does not send the literal placeholder to the server.
 
 ### Remote OAuth/Authv2 browser login
 
@@ -277,6 +312,8 @@ Enable the memory MCP server in project policy.
 
 When removing from inside a project, a global-only server requires explicit global scope so a project context does not accidentally delete global user configuration. Ask for that directly: "Remove the global MCP server named memory."
 
+The agent adds and removes servers in the files of CodeAlta only. It can disable a [server of another tool](#servers-of-other-tools), or add a server of the same name that replaces it, but it does not remove it from that tool's file.
+
 ## Discovering and calling tools through prompts
 
 When you ask the agent to discover MCP tools, it can use its MCP live tool to connect to enabled effective servers, list tools, apply `allowed_tools`/`disabled_tools`, and report enabled tools plus diagnostics. Ask for one server or a query when you want a smaller result:
@@ -326,8 +363,8 @@ If a server cannot start, connect, authenticate, or list tools, it contributes d
 
 Open it from `/mcp`, the command **MCP Servers**, or the MCP status indicator of the prompt bar. In the desktop app it is the **MCP Servers** page of Settings (`Ctrl+G Ctrl+Y`), where you add, edit, enable and remove servers of the global or project scope, and authorize or sign out of an HTTP server. The TUI dialog can:
 
-- show global and project MCP definitions, including project definitions that shadow global ones;
-- add, edit, save, and remove server JSON definitions;
+- show global and project MCP definitions, the servers of other tools with the file they come from, and the definitions that are overridden;
+- add, edit, save, and remove server JSON definitions in the files of CodeAlta;
 - toggle server enablement through TOML policy;
 - discover tools in the background when a configured server is selected;
 - test a server with configured timeouts;

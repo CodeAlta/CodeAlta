@@ -556,6 +556,54 @@ public sealed partial class McpRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task Search_StartsTheServersOfOtherToolsFiles_ResolvingVariablesInTheirCommandLine()
+    {
+        using var project = TempDirectory.Create();
+        var assemblyVariable = "CODEALTA_TEST_MCP_ASSEMBLY_" + Guid.NewGuid().ToString("N");
+        var unsetVariable = "CODEALTA_TEST_MCP_UNSET_" + Guid.NewGuid().ToString("N");
+        try
+        {
+            Environment.SetEnvironmentVariable(assemblyVariable, TinyServerAssemblyPath);
+            Directory.CreateDirectory(Path.Combine(project.Path, ".vscode"));
+            // Visual Studio Code: ${env:NAME}, with comments and trailing commas.
+            File.WriteAllText(
+                Path.Combine(project.Path, ".vscode", "mcp.json"),
+                "{\n  // servers of the workspace\n  \"servers\": {\n    \"vscode\": { \"type\": \"stdio\", \"command\": \"dotnet\", \"args\": [\"${env:" + assemblyVariable + "}\"], \"env\": { \"MCP_TEST_EXTRA_TOOL\": \"from_vscode\" }, },\n  },\n}\n");
+            // The shared file: ${NAME}, and ${NAME:-default} for a variable that is not set.
+            File.WriteAllText(
+                Path.Combine(project.Path, ".mcp.json"),
+                JsonSerializer.Serialize(new
+                {
+                    mcpServers = new Dictionary<string, object>
+                    {
+                        ["shared"] = new
+                        {
+                            command = "dotnet",
+                            args = new[] { "${" + assemblyVariable + "}" },
+                            env = new Dictionary<string, string> { ["MCP_TEST_EXTRA_TOOL"] = "${" + unsetVariable + ":-from_default}" },
+                        },
+                        ["missing"] = new { command = "dotnet", args = new[] { "${" + unsetVariable + "}" } },
+                    },
+                }));
+            await using var service = new McpRuntimeService(_home.Path);
+
+            var search = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, serverFilter: null, query: null, CancellationToken.None);
+
+            Assert.IsTrue(search.Tools.Any(static tool => tool is { Server: "vscode", Name: "from_vscode" }), string.Join(Environment.NewLine, search.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+            Assert.IsTrue(search.Tools.Any(static tool => tool is { Server: "shared", Name: "from_default" }), string.Join(Environment.NewLine, search.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+            var diagnostic = search.Diagnostics.Single();
+            Assert.AreEqual("missing", diagnostic.Server);
+            Assert.AreEqual("environment_variable_not_found", diagnostic.Code);
+            StringAssert.Contains(diagnostic.Message, unsetVariable);
+            StringAssert.Contains(diagnostic.Message, "'args'");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(assemblyVariable, null);
+        }
+    }
+
+    [TestMethod]
     public async Task Search_ReturnsDiagnosticWhenEnvironmentVariableReferenceIsMissing()
     {
         using var project = TempDirectory.Create();

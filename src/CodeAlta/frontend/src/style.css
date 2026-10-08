@@ -1227,6 +1227,11 @@ dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px
 .settings-editor-name small { color: var(--muted); }
 .settings-editor-tags { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
 .settings-editor-tags .bp6-switch { margin: 0; }
+/* A server shows where it is kept, the file of another tool it is read from and whether it is overridden: its tags have a row of their own. */
+.mcp-settings .settings-editor-list.bp6-card-list > .bp6-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 12px; }
+.mcp-settings .settings-editor-list .settings-editor-tags { grid-column: 1 / -1; flex-wrap: wrap; gap: 6px; }
+.mcp-settings .settings-editor-list .bp6-switch { margin: 0; }
+.mcp-unsupported .settings-editor-name strong { color: var(--muted); }
 .settings-editor-list .settings-editor-group { margin: 0; padding: 8px 12px 4px; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--panel-2); border-bottom: 1px solid var(--line); }
 .settings-editor-fields.bp6-section-card { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 4px 20px; }
 .settings-editor-fields .bp6-form-group { margin: 0 0 10px; }

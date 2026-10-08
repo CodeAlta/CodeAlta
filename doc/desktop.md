@@ -1345,6 +1345,18 @@ list enables or disables a server without opening it. Stored environment and hea
 sent to the page; leaving a value blank keeps the stored one. Connection tests, sign-in and per-tool
 switches are done in the TUI. Enabling or disabling rewrites `config.toml` without its comments.
 
+The list also holds the servers of the files of other tools (`.mcp.json`, `.github/mcp.json`,
+`.vscode/mcp.json`, `~/.copilot/mcp-config.json`; see `mcp.md`). Each card has the name and the
+switch on its first row and its tags below: the scope, the file for a server of another tool (the
+Copilot mark for the two files of GitHub Copilot, the name of the file for the others), and
+**Overridden** for a definition that is not the one in effect. Such a server has no **Remove**:
+its switch and its authorization work as for any server, and **Save** writes a server of the same
+name to the file of CodeAlta of the chosen scope, which then comes first. The `mcpServers` RPC
+names a definition by key, scope and origin (`CodeAlta`, `Common`, `Copilot`, `Vscode`); a request
+without an origin names a file of CodeAlta. A server that is left out (it needs `${input:...}`,
+an `envFile` or an unknown variable) is listed after the others as **Not supported** with the
+reason, by its name only.
+
 The MCP server of CodeAlta itself, which other applications connect to, has its own page (see "MCP
 server").
 

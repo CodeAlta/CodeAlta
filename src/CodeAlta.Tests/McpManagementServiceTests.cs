@@ -97,6 +97,85 @@ public sealed class McpManagementServiceTests
     }
 
     [TestMethod]
+    public async Task ServersOfOtherTools_AreReadOnlyRows_ThatASaveOverridesInTheFileOfCodeAlta()
+    {
+        using var home = TempDirectory.Create();
+        using var project = TempDirectory.Create();
+        var shared = Path.Combine(project.Path, ".mcp.json");
+        var vscode = Path.Combine(project.Path, ".vscode", "mcp.json");
+        var copilot = Path.Combine(home.Path, ".copilot", "mcp-config.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(vscode)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(copilot)!);
+        File.WriteAllText(shared, """{ "mcpServers": { "docs": { "command": "docs-server", "env": { "API_TOKEN": "abc123" } } } }""");
+        File.WriteAllText(vscode, """{ "servers": { "asks": { "type": "stdio", "command": "node", "args": ["${input:token}"] }, "broken": 1 }, "inputs": [] }""");
+        File.WriteAllText(copilot, "{ not json");
+        var before = (File.ReadAllText(shared), File.ReadAllText(vscode), File.ReadAllText(copilot));
+        var service = new McpManagementService(_home.Path);
+        var request = new McpManagementRequest { ProjectDirectory = project.Path, UserHomeDirectory = home.Path };
+
+        var snapshot = service.RefreshSnapshot(request);
+
+        Assert.HasCount(2, snapshot.Sources);
+        Assert.IsTrue(snapshot.Sources.All(static source => !source.IsReadOnly));
+        CollectionAssert.AreEqual(
+            new[] { McpManagementConfigOrigin.Common, McpManagementConfigOrigin.Vscode, McpManagementConfigOrigin.Copilot },
+            snapshot.ExternalSources.Select(static source => source.Origin).ToArray());
+        Assert.IsTrue(snapshot.ExternalSources.All(static source => source.IsReadOnly && !source.IsWritable));
+        Assert.IsTrue(snapshot.Summary.HasConfiguration);
+        Assert.AreEqual(1, snapshot.Summary.ConfiguredServerCount);
+        Assert.AreEqual(1, snapshot.Summary.InvalidSourceCount);
+        var docs = snapshot.Servers.Single(static server => server.Key == "docs");
+        Assert.AreEqual(McpManagementServerState.Configured, docs.State);
+        Assert.IsTrue(docs.IsReadOnly);
+        Assert.AreEqual(McpManagementConfigOrigin.Common, docs.SourceOrigin);
+        Assert.AreEqual(".mcp.json", docs.SourceName);
+        Assert.AreEqual(shared, docs.SourcePath);
+        Assert.AreEqual("[redacted]", docs.Env["API_TOKEN"]);
+        var asks = snapshot.Servers.Single(static server => server.Key == "asks");
+        Assert.AreEqual(McpManagementServerState.Unsupported, asks.State);
+        Assert.AreEqual("input_variable", asks.UnsupportedReason);
+        Assert.AreEqual(".vscode/mcp.json", asks.SourceName);
+        Assert.IsNull(asks.Transport);
+        Assert.AreEqual("invalid", snapshot.Servers.Single(static server => server.Key == "broken").UnsupportedReason);
+        var invalid = snapshot.Servers.Single(static server => server.State == McpManagementServerState.InvalidConfig);
+        Assert.AreEqual("~/.copilot/mcp-config.json", invalid.DisplayName);
+        Assert.AreEqual(McpManagementConfigOrigin.Copilot, invalid.SourceOrigin);
+
+        // The list of the dialog names the file of a server of another tool.
+        StringAssert.Contains(McpServersDialog.BuildServerListItemMarkup(docs, selected: false), "configured · stdio · project · .mcp.json · tools 0/0");
+        StringAssert.Contains(McpServersDialog.BuildServerListItemMarkup(asks, selected: false), "not supported · project · .vscode/mcp.json");
+
+        // Enablement is policy of CodeAlta, for a server of any file.
+        await service.SetServerEnabledAsync("docs", enabled: false, McpManagementScope.Project, request, CancellationToken.None);
+        Assert.AreEqual(McpManagementServerState.Disabled, service.CachedSnapshot!.Servers.Single(static server => server.Key == "docs").State);
+        await service.SetServerEnabledAsync("docs", enabled: true, McpManagementScope.Project, request, CancellationToken.None);
+
+        // A save of the read-only row names no original: the definition of the other tool stays, and the saved one comes first.
+        var saved = await service.AddOrUpdateServerAsync(
+            new McpManagementServerEdit { Key = "docs", Transport = McpManagementTransport.Stdio, Command = "docs-override" },
+            McpManagementScope.Project,
+            originalKey: null,
+            originalScope: null,
+            request,
+            CancellationToken.None);
+
+        Assert.AreEqual(Path.Combine(project.Path, ".alta", "mcp.json"), saved.Path);
+        var rows = service.CachedSnapshot!.Servers.Where(static server => server.Key == "docs").ToArray();
+        var effective = rows.Single(static server => server.State == McpManagementServerState.Configured);
+        Assert.IsFalse(effective.IsReadOnly);
+        Assert.AreEqual("docs-override", effective.Command);
+        var overridden = rows.Single(static server => server.State == McpManagementServerState.Shadowed);
+        Assert.IsTrue(overridden.IsReadOnly);
+        Assert.AreEqual("docs-server", overridden.Command);
+        Assert.AreEqual(saved.Path, overridden.OverriddenByPath);
+        Assert.AreEqual("Shadowed by .alta/mcp.json", overridden.StateReason);
+
+        await service.RemoveServerAsync("docs", McpManagementScope.Project, request, CancellationToken.None);
+        Assert.IsTrue(service.CachedSnapshot!.Servers.Single(static server => server.Key == "docs").IsReadOnly, "The removal leaves the definition of the other tool in effect.");
+        Assert.AreEqual(before, (File.ReadAllText(shared), File.ReadAllText(vscode), File.ReadAllText(copilot)));
+    }
+
+    [TestMethod]
     public void RefreshSnapshot_ReportsAndDeletesOAuthTokenCacheWithoutMcpConfigMutation()
     {
         using var home = TempDirectory.Create();

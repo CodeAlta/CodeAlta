@@ -49,12 +49,19 @@ export function mcpServerFormDirty(form: McpServerForm, baseline: McpServerForm)
   return JSON.stringify(form) !== JSON.stringify(baseline);
 }
 
-/** The first problem that prevents saving, or null. Keys follow the host's `[A-Za-z0-9._-]{1,128}` rule. */
-export function validateMcpServerForm(form: McpServerForm, existing: readonly Pick<McpServerEntry, "key" | "scope">[],
-  original: Pick<McpServerEntry, "key" | "scope"> | null): MessageKey | null {
+/** A server defined in a file of another tool (`.mcp.json`, `.github/mcp.json`...): CodeAlta reads it and never changes it. */
+export const mcpServerReadOnly = (server: Pick<McpServerEntry, "origin">) => server.origin !== "CodeAlta";
+
+/**
+ * The first problem that prevents saving, or null. Keys follow the host's `[A-Za-z0-9._-]{1,128}` rule. A save
+ * writes to the file of CodeAlta, so only its servers can already use the name: one of another tool is overridden.
+ */
+export function validateMcpServerForm(form: McpServerForm, existing: readonly Pick<McpServerEntry, "key" | "scope" | "origin">[],
+  original: Pick<McpServerEntry, "key" | "scope" | "origin"> | null): MessageKey | null {
   const key = form.key.trim();
   if (!/^[A-Za-z0-9._-]{1,128}$/.test(key)) return "Use 1 to 128 letters, digits, dots, dashes or underscores for the name.";
-  if (existing.some(entry => entry.key === key && entry.scope === form.scope && !(original && original.key === entry.key && original.scope === entry.scope)))
+  const edited = original && !mcpServerReadOnly(original) ? original : null;
+  if (existing.some(entry => !mcpServerReadOnly(entry) && entry.key === key && entry.scope === form.scope && !(edited && edited.key === entry.key && edited.scope === entry.scope)))
     return "A server with this name already exists in that scope.";
   if (form.transport === "Stdio" && !form.command.trim()) return "Enter the command that starts the server.";
   if (form.transport === "Http" && !/^https?:\/\/\S+$/i.test(form.url.trim()) && form.url.trim() !== "[redacted]") return "Enter the server URL (http or https).";
@@ -80,3 +87,6 @@ export function mcpServerEdit(form: McpServerForm): McpServerEdit {
 
 /** Stable list identity of a scoped item. */
 export const scopedKey = (scope: string, key: string) => `${scope}\u0000${key}`;
+
+/** Stable list identity of an MCP server: a scope can hold the same name once per file. */
+export const mcpServerId = (server: Pick<McpServerEntry, "key" | "scope" | "origin">) => scopedKey(`${server.scope}:${server.origin}`, server.key);

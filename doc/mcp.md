@@ -4,14 +4,51 @@ CodeAlta ships MCP support as a trusted built-in plugin (`CodeAlta.Plugin.Mcp`).
 
 ## Configuration files and overlay
 
-MCP server connection fields live only in fixed JSON MCP config files:
+CodeAlta writes MCP server connection fields to one JSON file per scope:
 
 | Scope | Path | Notes |
 | --- | --- | --- |
-| Global | `~/.alta/mcp.json` | Loaded first. |
-| Project | `<project>/.alta/mcp.json` | Loaded only when a project directory is active; overlays global. |
+| Global | `~/.alta/mcp.json` | For every project. |
+| Project | `<project>/.alta/mcp.json` | Read only when a project directory is active; comes before global. |
 
-CodeAlta uses one JSON file per scope and does not scan editor/provider-specific MCP locations. Effective servers are keyed by the raw server key. When a project file contains the same key as a global file, the project definition wins and the global definition is reported as shadowed instead of producing a duplicate connection or duplicate tools.
+It also reads the files other tools keep, where they are, and never writes them:
+
+| Scope | Path | Kept by | Origin |
+| --- | --- | --- | --- |
+| Project | `<project>/.mcp.json` | GitHub Copilot CLI, Visual Studio Code, Claude Code | `Common` |
+| Project | `<project>/.github/mcp.json` | GitHub Copilot CLI | `Copilot` |
+| Project | `<project>/.vscode/mcp.json` | Visual Studio Code | `Vscode` |
+| Global | `~/.copilot/mcp-config.json` | GitHub Copilot CLI, Visual Studio Code | `Copilot` |
+
+Effective servers are keyed by the raw server key, and the first definition of a key is the one in effect: a project comes before the user, and in each scope the file of CodeAlta comes before the files of other tools, in the order of the table. The other definitions of the key are reported as shadowed, with the file that comes first, instead of producing a duplicate connection or duplicate tools.
+
+`McpConfigSnapshot.Sources` are the two files CodeAlta writes, as before. `ExternalSources` are the files of other tools that exist (a missing one is not a source: CodeAlta does not create it). Every definition has a `SourceOrigin`, and `McpManagementServerSnapshot.IsReadOnly` is true for a server of another tool:
+
+- its enablement and its tool policy are in `config.toml`, as for any server, and it is tested, activated and authorized the same way;
+- its definition is never changed or removed. Saving it from a dialog writes a definition of the same key to the file of CodeAlta of the chosen scope, which then comes first; removing that one puts the other back in effect. `alta mcp server remove` refuses a key that only a file of another tool defines (`read_only_source`).
+
+A file of another tool is read with more tolerance than a file of CodeAlta, because it is not CodeAlta's to fix:
+
+- comments and trailing commas are accepted (Visual Studio Code writes JSON with comments);
+- the root can be the map of the servers itself, without `mcpServers` (GitHub Copilot CLI accepts it in a project);
+- the value of an environment variable can be a number, and `null` leaves the variable out;
+- a server that is not valid is left out and the others are read. A file that cannot be parsed is an invalid source (`InvalidConfig` row), and the other files stay in effect;
+- a server of a project starts in the folder of the project when it has no `cwd`, and a relative `cwd` is resolved from it, as in the tools the file is written for.
+
+Variables of such a file are brought to what CodeAlta resolves (`McpExternalVariables`):
+
+| Written | Becomes |
+| --- | --- |
+| `${env:NAME}` | `${NAME}`, resolved when the server starts |
+| `${NAME}`, `${NAME:-default}` | Kept in an `mcpServers` file; an unknown variable in a `servers` file, where Visual Studio Code would not resolve it |
+| `${workspaceFolder}`, `${workspaceFolderBasename}` | The folder of the project and its name |
+| `${userHome}`, `${pathSeparator}`, `${/}` | The home of the user and the separator of the platform |
+| `${input:id}` | The server is left out (`input_variable`): only Visual Studio Code can ask for the value |
+| Any other `${...}` | The server is left out (`unknown_variable`) |
+
+A server with an `envFile` is left out too (`environment_file`). A server that is left out is an `Unsupported` row of the management snapshot (`UnsupportedReason`, and a message that names the variable, never a value), an `alta.mcp.config.skipped_server` record of `alta mcp status` and `alta mcp config sources`, and a **Not supported** card of the desktop page.
+
+The `tools` list of a GitHub Copilot file is not used: the tools of a server are filtered by the TOML policy.
 
 The default write scope is project when a project directory is active and global otherwise. New files are created in CodeAlta's default `mcpServers` format:
 
@@ -43,7 +80,7 @@ Existing files are parsed and written back using the detected root/flavor where 
 - GitHub Copilot-style `mcpServers` files, detected by `tools` entries and preserved when writing;
 - Visual Studio Code-style `servers` files, including `stdio`, `http`, and `sse` transport type values.
 
-A single file containing both `mcpServers` and `servers` is invalid because its flavor is ambiguous. A server definition must choose exactly one transport: `command` for stdio or `url` for HTTP/SSE. Stdio servers can include `args`, `cwd`, and `env`; HTTP/SSE servers can include `headers`. String values in stdio `env` entries and HTTP/SSE `headers` may reference process environment variables with `${NAME}` placeholders, for example `"Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"`; missing variables produce a finite MCP diagnostic instead of sending the literal placeholder.
+A single file containing both `mcpServers` and `servers` is invalid because its flavor is ambiguous. A server definition must choose exactly one transport: `command` for stdio or `url` for HTTP/SSE. The `type` of a stdio server is `stdio` or `local`, as GitHub Copilot CLI writes it. Stdio servers can include `args`, `cwd`, and `env`; HTTP/SSE servers can include `headers`. The `command`, `args`, `cwd` and `url` of a server, its `env` values and its `headers` values may reference process environment variables with `${NAME}` placeholders, for example `"Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"`, and `${NAME:-default}` gives a value for a variable that is not set. A missing variable produces a finite MCP diagnostic (`environment_variable_not_found`) instead of sending the literal placeholder. The tokens of an HTTP server are kept under its `url` as the file writes it, also when a variable is part of it.
 
 ## TOML policy overlay
 
@@ -115,7 +152,7 @@ alta mcp server enable <server> --scope project
 alta mcp server disable <server> --global
 ```
 
-`activate` mutates only in-memory session activation state and immediately enumerates tools from active servers so the UI can show whether activation took effect. When an agent run calls it, the enumerated tools are also registered in that run (`AgentToolInvocation.RunTools`, see below): its result says `toolsAvailable: "now"` and the model calls them in its next step. Called from a terminal, or when a server gave no tool, the result says `"next_run"`. On every later agent run, the same activated servers are refreshed and registered as `mcp__<server>__<tool>` after normal MCP policy filters. `server add` and `server remove` mutate only the selected JSON MCP file. `server enable` and `server disable` mutate TOML policy only and preserve JSON server definitions. Removing a global-only server from inside a project requires `--scope global` so a project context does not accidentally delete global user configuration.
+`activate` mutates only in-memory session activation state and immediately enumerates tools from active servers so the UI can show whether activation took effect. When an agent run calls it, the enumerated tools are also registered in that run (`AgentToolInvocation.RunTools`, see below): its result says `toolsAvailable: "now"` and the model calls them in its next step. Called from a terminal, or when a server gave no tool, the result says `"next_run"`. On every later agent run, the same activated servers are refreshed and registered as `mcp__<server>__<tool>` after normal MCP policy filters. `server add` and `server remove` mutate only the selected JSON MCP file of CodeAlta: adding a server that a file of another tool defines overrides it, and removing a key that only such a file defines is refused (`read_only_source`). `server enable` and `server disable` mutate TOML policy only and preserve JSON server definitions, whose file they are in. `list`, `status` and `config sources` say where a definition comes from (`sourceOrigin`: `codealta`, `common`, `copilot` or `vscode`; `readOnly`), `config sources` also lists the files of other tools that exist, and a shadowed definition has its reason (`project-overrides-global` or `same-scope-source-comes-first`) and `overriddenByPath`. Removing a global-only server from inside a project requires `--scope global` so a project context does not accidentally delete global user configuration.
 
 Runtime tool commands:
 
@@ -168,7 +205,7 @@ CodeAlta stores access/refresh tokens in local user MCP plugin state under `~/.a
 
 Use the MCP Servers dialog **Authorize/Login** action for a configured HTTP server to open the browser flow. The action opens a small modal login dialog on top of the MCP dialog, shows/copies the login URL when available, and supports **Cancel Login** (`Esc` or `Ctrl+G Ctrl+C`) for stuck or unwanted browser flows. Use **Logout** to delete cached tokens. The CLI fallback is `alta mcp auth login <server>`, `alta mcp auth status`, and `alta mcp auth logout <server>`.
 
-The desktop app has the same flow on the **MCP Servers** page of Settings. The form of a saved HTTP server ends with an **Authorization** block that says whether tokens are stored and until when, with **Authorize** (or **Authorize again**), and **Sign out** to remove the tokens. The `mcpServers` RPC service streams the login as events (`login`: the address to open, then `completed` with the number of listed tools or `failed` with a code and the plugin's redacted explanation); closing the channel, the page's **Cancel**, or closing the application cancels it. One login runs at a time, and only for the definition in effect: a global server that the selected project overrides is refused. The page receives the address and the token's presence and expiry, never a token.
+The desktop app has the same flow on the **MCP Servers** page of Settings. The form of a saved HTTP server ends with an **Authorization** block that says whether tokens are stored and until when, with **Authorize** (or **Authorize again**), and **Sign out** to remove the tokens. The `mcpServers` RPC service streams the login as events (`login`: the address to open, then `completed` with the number of listed tools or `failed` with a code and the plugin's redacted explanation); closing the channel, the page's **Cancel**, or closing the application cancels it. One login runs at a time, and only for the definition in effect: a definition that another one overrides is refused. The page receives the address and the token's presence and expiry, never a token.
 
 Tool-call results preserve `isError` from MCP. Text content becomes `contentText` and `content` blocks; structured content is included after redaction when it fits the output character budget. Image, audio, embedded-resource, resource-link, and unknown non-text content are summarized instead of embedding raw payloads. Output beyond `max_tool_output_chars` is truncated and marked with `truncated = true`.
 
@@ -185,7 +222,7 @@ Open the MCP Servers dialog through any of these entry points:
 - `Ctrl+G Ctrl+Y` (not `Ctrl+G Ctrl+M`, because some terminals report Enter as `Ctrl+M`);
 - the clickable MCP status indicator when a cached MCP snapshot exists and MCP JSON/TOML configuration is present.
 
-The dialog and status indicator share `McpManagementService`. `Refresh` reads the fixed JSON config files and TOML policy without connecting to servers. The server list includes effective servers, disabled servers, invalid/missing config rows, and global definitions shadowed by project config. Dialog counts are cached snapshot counts; the status indicator uses cached exposed/total counts when a dialog test has run, otherwise it reports session activation state as `tools pending`, `active tools N`, or `tools not loaded`; `tools pending` should be transient and is replaced after activation-time or agent-run tool enumeration updates the bindable status state. Enabled configured servers with no cached test result start a background, cancellable tool discovery when selected so the **Tools (N)** tab is prefilled without blocking rendering, close, or application shutdown.
+The dialog and status indicator share `McpManagementService`. `Refresh` reads the fixed JSON config files, the files of other tools and TOML policy without connecting to servers. The server list includes effective servers, disabled servers, invalid/missing config rows, shadowed definitions, and the servers of other tools that are left out (`not supported`). A server of another tool names its file in the list and in **Details** (**Source Owner**, **Shadowed By**); **Remove** is not offered for it, and **Save** writes the edited definition to the file of CodeAlta and leaves the other file as it is. Dialog counts are cached snapshot counts; the status indicator uses cached exposed/total counts when a dialog test has run, otherwise it reports session activation state as `tools pending`, `active tools N`, or `tools not loaded`; `tools pending` should be transient and is replaced after activation-time or agent-run tool enumeration updates the bindable status state. Enabled configured servers with no cached test result start a background, cancellable tool discovery when selected so the **Tools (N)** tab is prefilled without blocking rendering, close, or application shutdown.
 
 For a selected configured server, the dialog shows compact enablement/actions above the tab strip. The first **Config** tab contains editable JSON server fields. The **Tools (N)** tab contains discovered tool policy controls. The following **Details** tab contains normalized/redacted connection fields, authorization status for HTTP servers, source scope/path/format, policy values, and diagnostics. Rendering and refresh use cached/discovered config snapshots and do not synchronously connect to servers; background prefill and the explicit **Test** action connect to the selected stdio or HTTP/SSE server with configured timeouts, update cached exposed/total tool counts, and surface success, failure, timeout, cancellation, and auth/unavailable diagnostics without blocking normal config refresh/rendering. The **Authorize/Login** action is explicit and may open a browser; automatic prefill and background agent-tool enumeration remain non-interactive. The top-level **Add**, **Save**, and **Remove** actions create/update/remove JSON server definitions in the selected project/global scope. Editable config fields show the unredacted JSON values because they are write-back fields. Editable arguments use semicolon-separated values; env/header fields use semicolon-separated `KEY=VALUE` pairs and support `${NAME}` environment-variable placeholders. The compact Enabled checkbox writes server `enabled` policy. The discovered tools table shows Enabled, raw MCP name/title, and policy status. Toggling a tool writes/removes that raw tool name in `disabled_tools`; it does not edit JSON server definitions.
 

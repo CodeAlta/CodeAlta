@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { McpServerEntry } from "#neoastra";
-import { mcpServerEdit, mcpServerForm, mcpServerFormDirty, scopedKey, settingsFailure, validateMcpServerForm } from "./settingsEditing";
+import { mcpServerEdit, mcpServerForm, mcpServerFormDirty, mcpServerId, mcpServerReadOnly, scopedKey, settingsFailure, validateMcpServerForm } from "./settingsEditing";
 
 const entry: McpServerEntry = { key: "files", scope: "Project", transport: "Stdio", enabled: true, command: "npx", arguments: ["-y", "server", "[redacted]"],
   argumentsRedacted: true, workingDirectory: null, url: null, urlRedacted: false, disabledTools: [], overridesGlobal: false, shadowed: false,
-  environment: [{ name: "TOKEN", hasValue: true }, { name: "EMPTY", hasValue: false }], headers: [], authorized: false, authorizationExpiresAt: null };
+  environment: [{ name: "TOKEN", hasValue: true }, { name: "EMPTY", hasValue: false }], headers: [], authorized: false, authorizationExpiresAt: null,
+  origin: "CodeAlta", source: ".alta/mcp.json" };
 
 test("a failed settings call explains itself, success is silent", () => {
   assert.equal(settingsFailure("ok"), null);
@@ -50,4 +51,18 @@ test("validation names the first problem and allows keeping an item's own name",
   assert.match(validateMcpServerForm({ ...mcpServerForm(entry), environment: [{ name: "", value: "1", stored: false }] }, [entry], entry)!, /needs a name/);
   assert.match(validateMcpServerForm({ ...mcpServerForm(entry), environment: [{ name: "A", value: "1", stored: false }, { name: "A", value: "2", stored: false }] }, [entry], entry)!, /unique/);
   assert.notEqual(scopedKey("Global", "a"), scopedKey("Project", "a"));
+});
+
+test("a server of another tool is read-only: saving it writes one of the same name to the file of CodeAlta", () => {
+  const shared: McpServerEntry = { ...entry, origin: "Common", source: ".mcp.json" };
+  assert.equal(mcpServerReadOnly(entry), false);
+  assert.equal(mcpServerReadOnly(shared), true);
+  assert.equal(mcpServerReadOnly({ origin: "Copilot" }), true);
+  assert.notEqual(mcpServerId(entry), mcpServerId(shared), "The same name in the same scope is listed once per file.");
+  // Its name is free in the file of CodeAlta, for an edit of it and for a new server.
+  assert.equal(validateMcpServerForm(mcpServerForm(shared), [shared], shared), null);
+  assert.equal(validateMcpServerForm({ ...mcpServerForm(null), key: "files", scope: "Project", command: "x" }, [shared], null), null);
+  // Once CodeAlta has a server of that name, saving the other one again would replace it.
+  assert.match(validateMcpServerForm(mcpServerForm(shared), [entry, shared], shared)!, /already exists/);
+  assert.equal(validateMcpServerForm(mcpServerForm(entry), [entry, shared], entry), null);
 });

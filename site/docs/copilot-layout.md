@@ -18,6 +18,8 @@ What comes from the Copilot layout is marked **Copilot**, with the GitHub mark, 
 | Your skills | `~/.copilot/skills/<name>/SKILL.md` | The same, for every project. |
 | Custom agents of a project | `.github/agents/<name>.agent.md` | An agent prompt you select for a session, listed in **Settings > Agent prompts**. |
 | Your custom agents | `~/.copilot/agents/<name>.agent.md` | The same, for every project. |
+| MCP servers of a project | `.github/mcp.json` | Listed in **Settings > MCP Servers**, activated by a session like any server. |
+| Your MCP servers | `~/.copilot/mcp-config.json` | The same, for every project. |
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-copilot-skills.webp" alt="The Skills page of Settings with a skill of the .github folder marked Copilot" loading="lazy">
@@ -71,3 +73,44 @@ The session keeps its model and the tools of CodeAlta: the `tools`, `model` and 
 CodeAlta does not change these files. To change an agent for CodeAlta only, open it in **Settings > Agent prompts** and select **Customize a copy**: the copy is a prompt of yours with the same name, and it is the one that is used. A prompt of the same name in `.alta/prompts/agents` or `~/.alta/prompts/agents` also comes first, and so do the built-in **Default** and **Plan**.
 
 In CodeAlta TUI, a custom agent is in the prompt selector, marked Copilot.
+
+## MCP servers
+
+The MCP servers GitHub Copilot CLI uses are servers of CodeAlta too: those of `.github/mcp.json` in a project, and yours in `~/.copilot/mcp-config.json`.
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "tools": ["*"]
+    },
+    "playwright": {
+      "type": "local",
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"],
+      "tools": ["*"]
+    }
+  }
+}
+```
+
+They are listed in **Settings > MCP Servers**, marked Copilot. A session activates one and uses its tools like any [MCP server](plugins/mcp.md).
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-copilot-mcp.webp" alt="The MCP Servers page of Settings with two servers of the .github folder marked Copilot, and one of them open" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Two servers of <code>.github/mcp.json</code> in Settings > MCP Servers, marked Copilot.</figcaption>
+</figure>
+
+You can enable, disable and authorize such a server. CodeAlta does not change the file: when you edit a server and save it, the server is written to `.alta/mcp.json` with the same name, and that one is used. A server of the same name in `.alta/mcp.json` or `~/.alta/mcp.json` always comes first.
+
+The `tools` list of the file is for Copilot. To limit the tools of a server in CodeAlta, use its [policy](plugins/mcp.md#toml-policy-fields).
+
+CodeAlta reads the MCP files of other tools the same way: `.mcp.json` and `.vscode/mcp.json` of a project. See [Servers of other tools](plugins/mcp.md#servers-of-other-tools).
+
+In CodeAlta TUI, these servers are in the MCP Servers dialog, with the name of their file.
+
+## Prompt files
+
+CodeAlta does not read the prompt files of Copilot (`.github/prompts/*.prompt.md`). Write a [skill](#skills) instead: Copilot reads skills too.

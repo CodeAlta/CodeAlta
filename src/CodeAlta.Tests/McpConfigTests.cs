@@ -57,7 +57,7 @@ public sealed class McpConfigTests
         Assert.AreEqual(McpConfigFlavor.CodeAlta, snapshot.Sources[0].Flavor);
         Assert.AreEqual(McpConfigFlavor.Vscode, snapshot.Sources[1].Flavor);
         Assert.AreEqual(3, snapshot.EffectiveServers.Count);
-        Assert.AreEqual(1, snapshot.ShadowedGlobalServers.Count);
+        Assert.AreEqual(1, snapshot.ShadowedServers.Count);
         var shared = snapshot.EffectiveServers.Single(server => server.Definition.Key == "shared");
         Assert.AreEqual(McpConfigScope.Project, shared.Definition.SourceScope);
         Assert.IsTrue(shared.OverridesGlobal);
@@ -82,6 +82,137 @@ public sealed class McpConfigTests
         Assert.IsFalse(snapshot.Sources[0].IsValid);
         StringAssert.Contains(snapshot.Sources[0].Diagnostic!, "both 'command' and 'url'");
         Assert.AreEqual(0, snapshot.EffectiveServers.Count);
+    }
+
+    [TestMethod]
+    public void Discovery_ReadsTheFilesOfOtherToolsBelowTheFileOfCodeAltaOfTheSameScope()
+    {
+        using var home = TempDirectory.Create();
+        using var project = TempDirectory.Create();
+        var projectPath = Path.GetFullPath(project.Path);
+        WriteFile(Path.Combine(home.Path, ".alta", "mcp.json"), """{ "mcpServers": { "user": { "command": "alta-user" }, "both-user": { "command": "alta-user" } } }""");
+        // GitHub Copilot CLI writes a server it starts as "local", with the tools it may use.
+        WriteFile(Path.Combine(home.Path, ".copilot", "mcp-config.json"), """
+            { "mcpServers": {
+                "both-user": { "type": "local", "command": "copilot-user", "tools": ["*"] },
+                "copilot-user": { "type": "local", "command": "npx", "args": ["-y", "server"], "tools": ["*"] },
+                "shared": { "type": "http", "url": "https://user.example.test/mcp" } } }
+            """);
+        WriteFile(Path.Combine(projectPath, ".alta", "mcp.json"), """{ "mcpServers": { "everywhere": { "command": "alta-project" } } }""");
+        WriteFile(Path.Combine(projectPath, ".mcp.json"), """
+            { "mcpServers": {
+                "everywhere": { "command": "common" },
+                "shared": { "type": "http", "url": "https://${DOCS_HOST:-docs.example.test}/mcp", "headers": { "Authorization": "Bearer ${DOCS_TOKEN}" } },
+                "relative": { "command": "node", "args": ["server.js"], "cwd": "tools" } } }
+            """);
+        // A project file of GitHub Copilot CLI can be the map of the servers itself.
+        WriteFile(Path.Combine(projectPath, ".github", "mcp.json"), """
+            { "everywhere": { "command": "copilot" }, "github-only": { "type": "local", "command": "gh-mcp" } }
+            """);
+        // Visual Studio Code accepts comments and trailing commas, and has variables of its own.
+        WriteFile(Path.Combine(projectPath, ".vscode", "mcp.json"), """
+            {
+              // The servers of this workspace.
+              "inputs": [{ "id": "token", "type": "promptString", "password": true }],
+              "servers": {
+                "everywhere": { "type": "stdio", "command": "vscode" },
+                "workspace": {
+                  "type": "stdio",
+                  "command": "${workspaceFolder}/bin/server",
+                  "args": ["--home", "${userHome}", "--name", "${workspaceFolderBasename}", "--key", "${env:API_KEY}"],
+                  "env": { "PORT": 8080, "UNSET": null, "TOKEN": "${env:API_TOKEN}" },
+                },
+                "asks": { "type": "http", "url": "https://example.test/mcp", "headers": { "Authorization": "Bearer ${input:token}" } },
+                "from-file": { "type": "stdio", "command": "node", "envFile": "${workspaceFolder}/.env" },
+                "other-variable": { "type": "stdio", "command": "node", "args": ["${config:editor.tabSize}"] },
+                "bare-name": { "type": "stdio", "command": "node", "args": ["${HOME}"] },
+                "no-transport": { "type": "stdio" },
+              },
+            }
+            """);
+
+        var snapshot = new McpConfigDiscovery().Discover(new McpConfigPathOptions { UserHomeDirectory = home.Path, ProjectDirectory = projectPath });
+
+        Assert.AreEqual(2, snapshot.Sources.Count, "The files CodeAlta writes are still the two of its own.");
+        Assert.IsTrue(snapshot.Sources.All(static source => source.Origin == McpConfigOrigin.CodeAlta));
+        CollectionAssert.AreEqual(
+            new[] { (McpConfigScope.Project, McpConfigOrigin.Common), (McpConfigScope.Project, McpConfigOrigin.Copilot), (McpConfigScope.Project, McpConfigOrigin.Vscode), (McpConfigScope.Global, McpConfigOrigin.Copilot) },
+            snapshot.ExternalSources.Select(static source => (source.Scope, source.Origin)).ToArray());
+        Assert.IsTrue(snapshot.ExternalSources.All(static source => source.IsValid && !source.IsWritable));
+
+        McpServerDefinition Effective(string key) => snapshot.EffectiveServers.Single(server => server.Definition.Key == key).Definition;
+        Assert.AreEqual("alta-project", Effective("everywhere").Command, "The file of CodeAlta comes first in its scope.");
+        CollectionAssert.AreEqual(
+            new[] { "common", "copilot", "vscode" },
+            snapshot.ShadowedServers.Where(static server => server.Definition.Key == "everywhere").Select(static server => server.Definition.Command).ToArray(),
+            "Then .mcp.json, .github/mcp.json and .vscode/mcp.json.");
+        Assert.AreEqual("alta-user", Effective("both-user").Command);
+        Assert.AreEqual(McpConfigOrigin.Copilot, snapshot.ShadowedServers.Single(static server => server.Definition.Key == "both-user").Definition.SourceOrigin);
+        var shared = snapshot.EffectiveServers.Single(static server => server.Definition.Key == "shared");
+        Assert.AreEqual(McpConfigOrigin.Common, shared.Definition.SourceOrigin, "A project comes before the user, whose file it is.");
+        Assert.IsTrue(shared.OverridesGlobal);
+        Assert.AreEqual("https://${DOCS_HOST:-docs.example.test}/mcp", shared.Definition.Url, "An environment variable is resolved when the server starts.");
+        Assert.AreEqual("Bearer ${DOCS_TOKEN}", shared.Definition.Headers["Authorization"]);
+        Assert.AreEqual(McpConfigOrigin.Copilot, Effective("copilot-user").SourceOrigin);
+        Assert.AreEqual(McpTransportKind.Stdio, Effective("copilot-user").Transport);
+        Assert.IsNull(Effective("copilot-user").Cwd, "A server of the user has no project to start in.");
+        Assert.AreEqual(McpConfigOrigin.Copilot, Effective("github-only").SourceOrigin);
+        Assert.AreEqual(projectPath, Effective("github-only").Cwd, "A server of a project starts in the folder of the project.");
+        Assert.AreEqual(Path.Combine(projectPath, "tools"), Effective("relative").Cwd);
+
+        var workspace = Effective("workspace");
+        Assert.AreEqual(McpConfigOrigin.Vscode, workspace.SourceOrigin);
+        Assert.AreEqual(projectPath + "/bin/server", workspace.Command);
+        CollectionAssert.AreEqual(
+            new[] { "--home", home.Path, "--name", Path.GetFileName(projectPath), "--key", "${API_KEY}" },
+            workspace.Args.ToArray());
+        Assert.AreEqual("8080", workspace.Env["PORT"]);
+        Assert.AreEqual("${API_TOKEN}", workspace.Env["TOKEN"]);
+        Assert.IsFalse(workspace.Env.ContainsKey("UNSET"));
+
+        var skipped = snapshot.ExternalSources.Single(static source => source.Origin == McpConfigOrigin.Vscode).SkippedServers;
+        CollectionAssert.AreEquivalent(
+            new[]
+            {
+                ("asks", McpSkipReason.InputVariable), ("from-file", McpSkipReason.EnvironmentFile), ("other-variable", McpSkipReason.UnknownVariable),
+                ("bare-name", McpSkipReason.UnknownVariable), ("no-transport", McpSkipReason.Invalid),
+            },
+            skipped.Select(static server => (server.Key, server.Reason)).ToArray());
+        StringAssert.Contains(skipped.Single(static server => server.Key == "asks").Message, "${input:token}");
+        Assert.IsFalse(snapshot.EffectiveServers.Any(server => skipped.Any(left => left.Key == server.Definition.Key)));
+    }
+
+    [TestMethod]
+    public void Discovery_AFileOfAnotherToolThatCannotBeReadIsReportedAndLeavesTheOthersInEffect()
+    {
+        using var home = TempDirectory.Create();
+        using var project = TempDirectory.Create();
+        WriteFile(Path.Combine(project.Path, ".mcp.json"), "{ broken");
+        WriteFile(Path.Combine(project.Path, ".github", "mcp.json"), """{ "mcpServers": { "docs": { "url": "https://example.test/mcp" } } }""");
+        WriteFile(Path.Combine(project.Path, ".vscode", "mcp.json"), """{ "name": "not a list of servers" }""");
+
+        var snapshot = new McpConfigDiscovery().Discover(new McpConfigPathOptions { UserHomeDirectory = home.Path, ProjectDirectory = project.Path });
+
+        CollectionAssert.AreEqual(new[] { false, true, false }, snapshot.ExternalSources.Select(static source => source.IsValid).ToArray());
+        Assert.IsFalse(string.IsNullOrWhiteSpace(snapshot.ExternalSources[0].Diagnostic));
+        Assert.AreEqual("docs", snapshot.EffectiveServers.Single().Definition.Key);
+        Assert.IsTrue(snapshot.Sources.All(static source => !source.Exists), "A file of another tool is no reason to create one of CodeAlta.");
+    }
+
+    [TestMethod]
+    public void FormatAdapter_AFileOfCodeAltaIsStillReadStrictly()
+    {
+        Assert.ThrowsExactly<InvalidDataException>(static () => McpConfigFormatAdapter.ParseDocument("""{ "memory": { "command": "npx" } }"""));
+        Assert.Throws<JsonException>(static () => McpConfigFormatAdapter.ParseDocument("""
+            {
+              // A comment would be lost when CodeAlta writes the file again.
+              "mcpServers": {}
+            }
+            """));
+        // The stdio type of GitHub Copilot CLI is read in any file.
+        var local = McpConfigFormatAdapter.ParseDocument("""{ "mcpServers": { "memory": { "type": "local", "command": "npx" } } }""");
+        Assert.AreEqual(McpConfigFlavor.Copilot, local.Flavor);
+        Assert.AreEqual(McpTransportKind.Stdio, McpConfigFormatAdapter.ReadServers(local, McpConfigScope.Global, "mcp.json").Single().Transport);
     }
 
     [TestMethod]
@@ -715,6 +846,65 @@ public sealed class McpConfigTests
     }
 
     [TestMethod]
+    public async Task PluginCommand_AServerOfAnotherToolIsListedDisabledAndOverridden_AndItsFileIsNeverWritten()
+    {
+        using var home = TempDirectory.Create();
+        using var project = TempDirectory.Create();
+        var shared = Path.Combine(project.Path, ".mcp.json");
+        var vscode = Path.Combine(project.Path, ".vscode", "mcp.json");
+        WriteFile(shared, """{ "mcpServers": { "docs": { "type": "http", "url": "https://example.test/mcp" } } }""");
+        WriteFile(vscode, """{ "servers": { "asks": { "type": "stdio", "command": "node", "args": ["${input:token}"] } } }""");
+        var before = (File.ReadAllText(shared), File.ReadAllText(vscode));
+        var stdout = new StringWriter(CultureInfo.InvariantCulture);
+        var stderr = new StringWriter(CultureInfo.InvariantCulture);
+        var app = new CommandApp("alta", "test")
+        {
+            McpCommandFactory.CreateCommand(CreateAltaContext(stdout, stderr, project.Path), new McpCommandFactoryOptions { UserHomeDirectory = home.Path }),
+        };
+        async Task<List<JsonElement>> RunAsync(int expectedExitCode, params string[] arguments)
+        {
+            stdout.GetStringBuilder().Clear();
+            Assert.AreEqual(expectedExitCode, await app.RunAsync(["mcp", .. arguments], new CommandRunConfig { Out = TextWriter.Null, Error = stderr }), stderr.ToString());
+            return ReadJsonLines(stdout.ToString());
+        }
+
+        var listed = (await RunAsync(0, "list")).Single();
+        Assert.AreEqual("docs", listed.GetProperty("server").GetString());
+        Assert.AreEqual("common", listed.GetProperty("sourceOrigin").GetString());
+        Assert.IsTrue(listed.GetProperty("readOnly").GetBoolean());
+        Assert.AreEqual(shared, listed.GetProperty("sourcePath").GetString());
+
+        var sources = await RunAsync(0, "config", "sources", "--include-missing");
+        var files = sources.Where(static line => line.GetProperty("type").GetString() == "alta.mcp.config.source").ToArray();
+        CollectionAssert.AreEquivalent(new[] { "codealta", "codealta", "common", "vscode" }, files.Select(static line => line.GetProperty("origin").GetString()).ToArray());
+        Assert.IsTrue(files.Where(static line => line.GetProperty("readOnly").GetBoolean()).All(static line => !line.GetProperty("writable").GetBoolean() && line.GetProperty("exists").GetBoolean()));
+        var skipped = sources.Single(static line => line.GetProperty("type").GetString() == "alta.mcp.config.skipped_server");
+        Assert.AreEqual("asks", skipped.GetProperty("server").GetString());
+        Assert.AreEqual("input_variable", skipped.GetProperty("reason").GetString());
+        Assert.AreEqual(1, (await RunAsync(0, "status")).First().GetProperty("skippedServerCount").GetInt32());
+
+        var refused = (await RunAsync(1, "server", "remove", "docs")).Single();
+        Assert.AreEqual("read_only_source", refused.GetProperty("code").GetString());
+        await RunAsync(0, "server", "disable", "docs");
+        Assert.IsFalse(new McpPolicyLoader().Load(null, McpPolicyWriter.GetProjectPolicyPath(project.Path)).Servers["docs"].Enabled!.Value);
+
+        // Adding a server of the same name writes the file of CodeAlta, which comes first.
+        await RunAsync(0, "server", "add", "docs", "--url", "https://override.example.test/mcp");
+        var overriding = (await RunAsync(0, "list")).Single();
+        Assert.AreEqual("codealta", overriding.GetProperty("sourceOrigin").GetString());
+        Assert.AreEqual("https://override.example.test/mcp", overriding.GetProperty("url").GetString());
+        var shadowed = (await RunAsync(0, "config", "sources")).Single(static line => line.GetProperty("type").GetString() == "alta.mcp.config.shadowed_server");
+        Assert.AreEqual("same-scope-source-comes-first", shadowed.GetProperty("reason").GetString());
+        Assert.AreEqual(shared, shadowed.GetProperty("sourcePath").GetString());
+        Assert.AreEqual(McpConfigDiscovery.GetProjectConfigPath(project.Path), shadowed.GetProperty("overriddenByPath").GetString());
+
+        // Removing it again leaves the one of the other tool in effect.
+        await RunAsync(0, "server", "remove", "docs");
+        Assert.AreEqual("common", (await RunAsync(0, "list")).Single().GetProperty("sourceOrigin").GetString());
+        Assert.AreEqual(before, (File.ReadAllText(shared), File.ReadAllText(vscode)));
+    }
+
+    [TestMethod]
     public async Task PluginCommand_ServerDisableAndEnableMutatesPolicyOnly()
     {
         using var project = TempDirectory.Create();
@@ -1068,6 +1258,12 @@ public sealed class McpConfigTests
 
     private static IEnumerable<string> ReadStringArray(JsonElement element)
         => element.EnumerateArray().Select(static item => item.GetString()!);
+
+    private static void WriteFile(string path, string content)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, content);
+    }
 
     private sealed record FlavorWriteCase(string Name, string Json, string RootKey, string? ExpectedHttpType);
 

@@ -92,7 +92,7 @@ internal sealed class McpServersService
     public async Task<McpServersListResponse> ListAsync(McpServersListRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        McpServersListResponse Failed(string status) => new(status, request.ProjectId, [], null, null, false, false, 0);
+        McpServersListResponse Failed(string status) => new(status, request.ProjectId, [], null, null, false, false, 0, []);
         if (_projects is null) return Failed("unavailable");
         if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return Failed("stale_epoch");
         var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
@@ -103,17 +103,27 @@ internal sealed class McpServersService
             var snapshot = _management.RefreshSnapshot(Paths(project.Root));
             var servers = new List<McpServerEntry>();
             var omitted = 0;
+            // Under one key: the definition in effect first, then the ones it overrides.
             foreach (var row in snapshot.Servers.Where(IsDefinition)
-                         .OrderBy(static row => row.Key, StringComparer.OrdinalIgnoreCase).ThenBy(static row => row.SourceScope))
+                         .OrderBy(static row => row.Key, StringComparer.OrdinalIgnoreCase).ThenBy(static row => row.SourceScope)
+                         .ThenBy(static row => row.State == McpManagementServerState.Shadowed).ThenBy(static row => row.SourceOrigin))
             {
                 // A definition the editor cannot represent exactly is counted, never shortened into another one.
                 if (servers.Count < MaximumServers && Entry(row) is { } entry) servers.Add(entry);
                 else omitted++;
             }
 
+            // What a file of another tool defines and CodeAlta leaves out: the name and why, never the definition.
+            var unsupported = snapshot.Servers
+                .Where(static row => row is { State: McpManagementServerState.Unsupported, SourceScope: not null } && ValidKey(row.Key))
+                .OrderBy(static row => row.Key, StringComparer.OrdinalIgnoreCase).Take(MaximumServers)
+                .Select(static row => new McpUnsupportedServer(row.Key, row.SourceScope.ToString()!, row.SourceOrigin.ToString(),
+                    row.SourceName ?? string.Empty, row.UnsupportedReason ?? "invalid"))
+                .ToArray();
+
             return new("ok", request.ProjectId, servers, SourceState(snapshot, McpManagementScope.Global),
                 project.Root is null ? null : SourceState(snapshot, McpManagementScope.Project),
-                snapshot.Policy.Enabled, snapshot.Policy.Diagnostic is not null, omitted);
+                snapshot.Policy.Enabled, snapshot.Policy.Diagnostic is not null, omitted, unsupported);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -140,6 +150,8 @@ internal sealed class McpServersService
         var originalScope = scope;
         if (originalKey is not null && request.OriginalScope is not null && !TryScope(request.OriginalScope, out originalScope))
             return Invalid("The original scope must be Global or Project.");
+        var originalOrigin = McpManagementConfigOrigin.CodeAlta;
+        if (originalKey is not null && !TryOrigin(request.OriginalOrigin, out originalOrigin)) return Invalid(OriginRule);
         if (Validate(request.Server, out var transport) is { } refusal) return Invalid(refusal);
         var edit = request.Server!;
         var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
@@ -152,8 +164,10 @@ internal sealed class McpServersService
             var paths = Paths(project.Root);
             var snapshot = _management.RefreshSnapshot(paths);
             if (SourceState(snapshot, scope) == "invalid") return new("config_invalid", null);
-            var previous = originalKey is null ? null : Find(snapshot, originalKey, originalScope);
+            var previous = originalKey is null ? null : Find(snapshot, originalKey, originalScope, originalOrigin);
             if (originalKey is not null && previous is null) return new("not_found", null);
+            // A definition of another tool stays in its file: the saved one is written to the file of CodeAlta and comes first.
+            var replacedKey = previous is { IsReadOnly: false } ? originalKey : null;
             var key = edit.Key!.Trim();
             // Saving must never replace another definition that happens to use the requested key.
             if (Find(snapshot, key, scope) is { } occupant && !ReferenceEquals(occupant, previous)) return new("conflict", null);
@@ -171,7 +185,7 @@ internal sealed class McpServersService
             {
                 Key = key, Transport = transport, Command = edit.Command, Args = arguments, Cwd = edit.WorkingDirectory,
                 Env = environment, Url = url, Headers = headers,
-            }, scope, originalKey, originalKey is null ? null : originalScope, paths, CancellationToken.None).ConfigureAwait(false);
+            }, scope, replacedKey, replacedKey is null ? null : originalScope, paths, CancellationToken.None).ConfigureAwait(false);
 
             var saved = _management.CachedSnapshot is { } refreshed ? Find(refreshed, key, scope) : null;
             if (saved is null || (saved.PolicyEnabled != false) == edit.Enabled) return new("ok", null);
@@ -209,7 +223,7 @@ internal sealed class McpServersService
     public Task<McpServersMutationResponse> RemoveAsync(McpServersRemoveRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return MutateExistingAsync(request.ExpectedEpoch, request.ProjectId, request.Scope, request.Key, policy: false,
+        return MutateExistingAsync(request.ExpectedEpoch, request.ProjectId, request.Scope, request.Key, request.Origin, policy: false,
             async (key, scope, paths) =>
                 (await _management.RemoveServerAsync(key, scope, paths, CancellationToken.None).ConfigureAwait(false)).Changed,
             cancellationToken);
@@ -220,7 +234,7 @@ internal sealed class McpServersService
     public Task<McpServersMutationResponse> SetEnabledAsync(McpServersSetEnabledRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return MutateExistingAsync(request.ExpectedEpoch, request.ProjectId, request.Scope, request.Key, policy: true,
+        return MutateExistingAsync(request.ExpectedEpoch, request.ProjectId, request.Scope, request.Key, request.Origin, policy: true,
             async (key, scope, paths) =>
             {
                 await _management.SetServerEnabledAsync(key, request.Enabled, scope, paths, CancellationToken.None).ConfigureAwait(false);
@@ -373,7 +387,7 @@ internal sealed class McpServersService
     {
         if (_projects is null) return ("unavailable", null, null);
         if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return ("stale_epoch", null, null);
-        if (!TryScope(request.Scope, out var scope) || !ValidKey(request.Key)) return ("invalid", null, null);
+        if (!TryScope(request.Scope, out var scope) || !ValidKey(request.Key) || !TryOrigin(request.Origin, out var origin)) return ("invalid", null, null);
         try
         {
             var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
@@ -385,9 +399,9 @@ internal sealed class McpServersService
                 var paths = Paths(project.Root);
                 var snapshot = _management.RefreshSnapshot(paths);
                 if (SourceState(snapshot, scope) == "invalid") return ("config_invalid", null, null);
-                if (Find(snapshot, request.Key!, scope) is not { } row) return ("not_found", null, null);
+                if (Find(snapshot, request.Key!, scope, origin) is not { } row) return ("not_found", null, null);
                 if (row.Transport != McpManagementTransport.Http) return ("unsupported", null, null);
-                // The plugin authorizes the definition in effect: a global one that the project overrides is not it.
+                // The plugin authorizes the definition in effect: one that another definition overrides is not it.
                 if (row.State == McpManagementServerState.Shadowed) return ("shadowed", null, null);
                 var code = then?.Invoke(row.Key, paths) ?? "ok";
                 return code == "ok" ? ("ok", row.Key, paths) : (code, null, null);
@@ -432,12 +446,16 @@ internal sealed class McpServersService
 
     // Runs one edit of a definition that the listing for the same scope still contains.
     private async Task<McpServersMutationResponse> MutateExistingAsync(string? expectedEpoch, string? projectId, string? requestedScope,
-        string? requestedKey, bool policy, Func<string, McpManagementScope, McpManagementRequest, Task<bool>> edit, CancellationToken cancellationToken)
+        string? requestedKey, string? requestedOrigin, bool policy, Func<string, McpManagementScope, McpManagementRequest, Task<bool>> edit,
+        CancellationToken cancellationToken)
     {
         if (_projects is null) return new("unavailable", null);
         if (!string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null);
         if (!TryScope(requestedScope, out var scope)) return Invalid("The scope must be Global or Project.");
         if (!ValidKey(requestedKey)) return Invalid(KeyRule);
+        if (!TryOrigin(requestedOrigin, out var origin)) return Invalid(OriginRule);
+        // Enablement is policy of CodeAlta, for a server of any file; a definition is changed only in a file of CodeAlta.
+        if (!policy && origin != McpManagementConfigOrigin.CodeAlta) return Invalid("A server defined in a file of another tool is not removed here.");
         var project = await SettingsProjectScope.ResolveAsync(_projects, projectId, cancellationToken).ConfigureAwait(false);
         if (project.Status != "ok") return new(project.Status, null);
         if (project.Root is null && scope == McpManagementScope.Project) return Invalid("The project scope requires a project.");
@@ -448,7 +466,7 @@ internal sealed class McpServersService
             var snapshot = _management.RefreshSnapshot(paths);
             // A policy file that cannot be read cannot be rewritten without losing what it contains.
             if (policy ? snapshot.Policy.Diagnostic is not null : SourceState(snapshot, scope) == "invalid") return new("config_invalid", null);
-            if (Find(snapshot, requestedKey!, scope) is null) return new("not_found", null);
+            if (Find(snapshot, requestedKey!, scope, origin) is null) return new("not_found", null);
             return new(await edit(requestedKey!, scope, paths).ConfigureAwait(false) ? "ok" : "not_found", null);
         }
         catch (Exception exception) when (exception is JsonException or InvalidDataException)
@@ -472,8 +490,11 @@ internal sealed class McpServersService
         => row is { SourceScope: not null, Transport: not null }
            && row.State is not (McpManagementServerState.MissingConfig or McpManagementServerState.InvalidConfig);
 
-    private static McpManagementServerSnapshot? Find(McpManagementSnapshot snapshot, string key, McpManagementScope scope)
-        => snapshot.Servers.FirstOrDefault(row => IsDefinition(row) && row.SourceScope == scope && string.Equals(row.Key, key, StringComparison.Ordinal));
+    // A definition is named by its key, its scope and whose file it is in: a file of CodeAlta unless another is given.
+    private static McpManagementServerSnapshot? Find(McpManagementSnapshot snapshot, string key, McpManagementScope scope,
+        McpManagementConfigOrigin origin = McpManagementConfigOrigin.CodeAlta)
+        => snapshot.Servers.FirstOrDefault(row => IsDefinition(row) && row.SourceScope == scope && row.SourceOrigin == origin
+            && string.Equals(row.Key, key, StringComparison.Ordinal));
 
     private static string SourceState(McpManagementSnapshot snapshot, McpManagementScope scope)
         => snapshot.Sources.FirstOrDefault(source => source.Scope == scope) switch
@@ -499,7 +520,8 @@ internal sealed class McpServersService
             row.PolicyEnabled != false, row.OverridesGlobal, row.State == McpManagementServerState.Shadowed,
             Names(environment), Names(headers),
             row.DisabledTools.Where(static tool => tool.Length <= MaximumNameLength).Take(MaximumDisabledTools).ToArray(),
-            row.OAuthTokenCached, row.OAuthTokenCached ? row.OAuthTokenExpiresAt : null);
+            row.OAuthTokenCached, row.OAuthTokenCached ? row.OAuthTokenExpiresAt : null,
+            row.SourceOrigin.ToString(), row.SourceName ?? string.Empty);
     }
 
     private static McpServerValueName[] Names(IReadOnlyDictionary<string, string> values)
@@ -593,6 +615,22 @@ internal sealed class McpServersService
         return scope == McpManagementScope.Project || string.Equals(value, "Global", StringComparison.OrdinalIgnoreCase);
     }
 
+    private const string OriginRule = "The source must be CodeAlta, Common, Copilot or Vscode.";
+
+    // No origin names a file of CodeAlta.
+    private static bool TryOrigin(string? value, out McpManagementConfigOrigin origin)
+    {
+        (var known, origin) = value switch
+        {
+            null or "CodeAlta" => (true, McpManagementConfigOrigin.CodeAlta),
+            "Common" => (true, McpManagementConfigOrigin.Common),
+            "Copilot" => (true, McpManagementConfigOrigin.Copilot),
+            "Vscode" => (true, McpManagementConfigOrigin.Vscode),
+            _ => (false, McpManagementConfigOrigin.CodeAlta),
+        };
+        return known;
+    }
+
     private static bool TryTransport(string? value, out McpManagementTransport transport)
     {
         transport = string.Equals(value, "Http", StringComparison.OrdinalIgnoreCase) ? McpManagementTransport.Http : McpManagementTransport.Stdio;
@@ -642,30 +680,47 @@ internal static class SettingsProjectScope
 
 internal sealed record McpServersListRequest(string? ExpectedEpoch, string? ProjectId);
 
-/// <summary>The listed definitions; a configuration state is <c>missing</c>, <c>ok</c> or <c>invalid</c>.</summary>
+/// <summary>
+/// The listed definitions; a configuration state is <c>missing</c>, <c>ok</c> or <c>invalid</c> and is the one of
+/// a file of CodeAlta. <c>Unsupported</c> names the servers of files of other tools that are left out.
+/// </summary>
 internal sealed record McpServersListResponse(string Status, string? ProjectId, IReadOnlyList<McpServerEntry> Servers,
-    string? GlobalConfigState, string? ProjectConfigState, bool McpEnabled, bool PolicyReadError, int Omitted);
+    string? GlobalConfigState, string? ProjectConfigState, bool McpEnabled, bool PolicyReadError, int Omitted,
+    IReadOnlyList<McpUnsupportedServer> Unsupported);
 
 /// <summary>
 /// One definition in one scope; redacted arguments or URL may be sent back unchanged to keep the stored value.
 /// <c>Authorized</c> says that tokens of a browser authorization are stored for an HTTP server.
+/// <c>Origin</c> says whose file it is in (<c>CodeAlta</c>, <c>Common</c>, <c>Copilot</c> or <c>Vscode</c>) and
+/// <c>Source</c> is the short name of that file: a definition of another tool is never changed or removed.
 /// </summary>
 internal sealed record McpServerEntry(string Key, string Scope, string Transport, string? Command, IReadOnlyList<string> Arguments,
     bool ArgumentsRedacted, string? WorkingDirectory, string? Url, bool UrlRedacted, bool Enabled, bool OverridesGlobal, bool Shadowed,
     IReadOnlyList<McpServerValueName> Environment, IReadOnlyList<McpServerValueName> Headers, IReadOnlyList<string> DisabledTools,
-    bool Authorized, DateTimeOffset? AuthorizationExpiresAt);
+    bool Authorized, DateTimeOffset? AuthorizationExpiresAt, string Origin, string Source);
+
+/// <summary>
+/// A server of a file of another tool that is left out. <c>Reason</c> is <c>input_variable</c>,
+/// <c>unknown_variable</c>, <c>environment_file</c> or <c>invalid</c>.
+/// </summary>
+internal sealed record McpUnsupportedServer(string Key, string Scope, string Origin, string Source, string Reason);
 internal sealed record McpServerValueName(string Name, bool HasValue);
 
 /// <summary>An environment variable or header to save; a null value keeps the stored value.</summary>
 internal sealed record McpServerValueEdit(string? Name, string? Value);
 internal sealed record McpServerEdit(string? Key, string? Transport, string? Command, IReadOnlyList<string>? Arguments,
     string? WorkingDirectory, string? Url, IReadOnlyList<McpServerValueEdit>? Environment, IReadOnlyList<McpServerValueEdit>? Headers, bool Enabled);
+
+/// <summary>
+/// Saves a definition to the file of CodeAlta of <c>Scope</c>. An original in a file of another tool
+/// (<c>OriginalOrigin</c>) is left where it is: the saved definition comes first.
+/// </summary>
 internal sealed record McpServersSaveRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? OriginalKey,
-    string? OriginalScope, McpServerEdit? Server);
-internal sealed record McpServersRemoveRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? Key);
-internal sealed record McpServersSetEnabledRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? Key, bool Enabled);
+    string? OriginalScope, McpServerEdit? Server, string? OriginalOrigin = null);
+internal sealed record McpServersRemoveRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? Key, string? Origin = null);
+internal sealed record McpServersSetEnabledRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? Key, bool Enabled, string? Origin = null);
 internal sealed record McpServersMutationResponse(string Status, string? Message);
-internal sealed record McpServerLoginRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? Key);
+internal sealed record McpServerLoginRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? Key, string? Origin = null);
 
 /// <summary>
 /// One authorization event. <c>prompt</c> carries the address to open in a browser; <c>completed</c> the number

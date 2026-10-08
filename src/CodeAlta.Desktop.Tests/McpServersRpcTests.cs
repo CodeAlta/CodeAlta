@@ -209,6 +209,97 @@ public sealed class McpServersRpcTests
     }
 
     [TestMethod]
+    public async Task ServersOfOtherTools_AreListedWithTheirFile_EnabledAndAuthorizedButNeverChanged()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var project = fixture.Project.Id;
+        var shared = Path.Combine(fixture.ProjectPath, ".mcp.json");
+        var github = Path.Combine(Directory.CreateDirectory(Path.Combine(fixture.ProjectPath, ".github")).FullName, "mcp.json");
+        var vscode = Path.Combine(Directory.CreateDirectory(Path.Combine(fixture.ProjectPath, ".vscode")).FullName, "mcp.json");
+        var copilot = Path.Combine(Directory.CreateDirectory(Path.Combine(fixture.Home, ".copilot")).FullName, "mcp-config.json");
+        File.WriteAllText(shared, """
+            {"mcpServers":{
+              "docs":{"command":"npx","args":["--token","ARG_SECRET"],"env":{"API_TOKEN":"ENV_SECRET"}},
+              "remote":{"type":"http","url":"https://example.invalid/mcp?api_key=URL_SECRET","headers":{"Authorization":"Bearer HEADER_SECRET"}}}}
+            """);
+        File.WriteAllText(github, """{"docs":{"type":"local","command":"gh-docs"}}""");
+        File.WriteAllText(vscode, """
+            {
+              // Visual Studio Code asks for this one.
+              "servers":{"asks":{"type":"http","url":"https://example.invalid/mcp","headers":{"Authorization":"Bearer ${input:INPUT_SECRET}"}}},
+            }
+            """);
+        File.WriteAllText(copilot, """{"mcpServers":{"user-tool":{"type":"local","command":"copilot-tool","tools":["*"]}}}""");
+        var before = new[] { shared, github, vscode, copilot }.Select(File.ReadAllText).ToArray();
+
+        var listing = await fixture.Service.ListAsync(new(Epoch, project), default);
+
+        Assert.AreEqual("ok", listing.Status);
+        Assert.AreEqual("missing", listing.ProjectConfigState, "The state is the one of the file of CodeAlta.");
+        CollectionAssert.AreEqual(
+            new[] { ("docs", "Project", "Common", ".mcp.json", false), ("docs", "Project", "Copilot", ".github/mcp.json", true),
+                ("remote", "Project", "Common", ".mcp.json", false), ("user-tool", "Global", "Copilot", "~/.copilot/mcp-config.json", false) },
+            listing.Servers.Select(static server => (server.Key, server.Scope, server.Origin, server.Source, server.Shadowed)).ToArray());
+        Assert.AreEqual(new McpUnsupportedServer("asks", "Project", "Vscode", ".vscode/mcp.json", "input_variable"), listing.Unsupported.Single());
+        Assert.AreEqual(fixture.ProjectPath, listing.Servers[0].WorkingDirectory, "A server of a project starts in the folder of the project.");
+        Assert.IsNull(listing.Servers[^1].WorkingDirectory);
+        var wire = JsonSerializer.Serialize(listing, DesktopJsonContext.Default.McpServersListResponse);
+        foreach (var secret in new[] { "ARG_SECRET", "ENV_SECRET", "URL_SECRET", "HEADER_SECRET", "INPUT_SECRET" })
+            Assert.IsFalse(wire.Contains(secret, StringComparison.Ordinal), secret);
+        // A path is compared as JSON writes it: a backslash is escaped there.
+        foreach (var path in new[] { fixture.Home, shared, github, vscode, copilot })
+            Assert.IsFalse(wire.Contains(JsonEncodedText.Encode(path).ToString(), StringComparison.Ordinal), "The path of a file is not sent, only its short name.");
+
+        // Enablement is written to the policy of CodeAlta; the definition is named with its file.
+        Assert.AreEqual("not_found", (await fixture.Service.SetEnabledAsync(new(Epoch, project, "Project", "docs", false), default)).Status,
+            "No file of CodeAlta defines it.");
+        Assert.AreEqual("ok", (await fixture.Service.SetEnabledAsync(new(Epoch, project, "Project", "docs", false, "Common"), default)).Status);
+        StringAssert.Contains(File.ReadAllText(fixture.ProjectPolicy), "docs");
+        Assert.AreEqual("ok", (await fixture.Service.SetEnabledAsync(new(Epoch, project, "Project", "docs", true, "Common"), default)).Status);
+        Assert.AreEqual("invalid", (await fixture.Service.SetEnabledAsync(new(Epoch, project, "Project", "docs", false, "Elsewhere"), default)).Status);
+        Assert.AreEqual("invalid", (await fixture.Service.RemoveAsync(new(Epoch, project, "Project", "docs", "Common"), default)).Status);
+        Assert.AreEqual("not_found", (await fixture.Service.RemoveAsync(new(Epoch, project, "Project", "docs"), default)).Status);
+
+        // An authorization is for the definition in effect, whose file it is.
+        var requests = new List<string>();
+        var service = fixture.WithLogin((key, _, _, _) =>
+        {
+            requests.Add(key);
+            return Task.FromResult(new McpManagementServerTestResult { Server = key, Status = McpManagementTestStatus.Succeeded });
+        });
+        Assert.AreEqual("completed", (await Events(service, new(Epoch, project, "Project", "remote", "Common"))).Single().Kind);
+        AssertFailed("not_found", (await Events(service, new(Epoch, project, "Project", "remote"))).Single());
+        AssertFailed("unsupported", (await Events(service, new(Epoch, project, "Project", "docs", "Common"))).Single());
+        CollectionAssert.AreEqual(new[] { "remote" }, requests);
+
+        // Saving the edited server writes it to the file of CodeAlta, with the secrets the form never received.
+        var docs = listing.Servers[0];
+        var saved = await fixture.Service.SaveAsync(new(Epoch, project, "Project", "docs", "Project", new("docs", "Stdio", "node",
+            [.. docs.Arguments, "--verbose"], null, null, [new("API_TOKEN", null)], null, true), "Common"), default);
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        var stored = Server(fixture.ProjectJson, "docs");
+        Assert.AreEqual("node", (string?)stored["command"]);
+        CollectionAssert.AreEqual(new[] { "--token", "ARG_SECRET", "--verbose" }, stored["args"]!.AsArray().Select(static value => (string?)value).ToArray());
+        Assert.AreEqual("ENV_SECRET", (string?)stored["env"]!["API_TOKEN"]);
+        var after = await fixture.Service.ListAsync(new(Epoch, project), default);
+        CollectionAssert.AreEqual(
+            new[] { ("CodeAlta", false), ("Common", true), ("Copilot", true) },
+            after.Servers.Where(static server => server.Key == "docs").Select(static server => (server.Origin, server.Shadowed)).ToArray());
+        Assert.AreEqual("conflict", (await fixture.Service.SaveAsync(new(Epoch, project, "Project", "docs", "Project", Stdio("docs"), "Common"), default)).Status,
+            "A second save of the overridden one must not replace the definition of CodeAlta.");
+
+        // A new name leaves the original where it is; removing the override puts it back in effect.
+        Assert.AreEqual("ok", (await fixture.Service.SaveAsync(new(Epoch, project, "Global", "user-tool", "Global", Stdio("mine"), "Copilot"), default)).Status);
+        Assert.IsNotNull(Servers(fixture.GlobalJson)["mine"]);
+        Assert.AreEqual("ok", (await fixture.Service.RemoveAsync(new(Epoch, project, "Project", "docs"), default)).Status);
+        var restored = await fixture.Service.ListAsync(new(Epoch, project), default);
+        Assert.IsFalse(restored.Servers.First(static server => server.Key == "docs").Shadowed);
+        Assert.IsTrue(restored.Servers.Any(static server => server is { Key: "user-tool", Origin: "Copilot", Shadowed: false }));
+
+        CollectionAssert.AreEqual(before, new[] { shared, github, vscode, copilot }.Select(File.ReadAllText).ToArray(), "A file of another tool is never written.");
+    }
+
+    [TestMethod]
     public async Task UnreadableConfiguration_IsReportedAndLeftUntouched()
     {
         using var fixture = await Fixture.CreateAsync();

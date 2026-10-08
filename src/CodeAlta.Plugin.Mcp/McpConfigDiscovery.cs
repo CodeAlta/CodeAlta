@@ -21,17 +21,34 @@ internal sealed class McpConfigDiscovery
             sources.Add(ReadSource(McpConfigScope.Project, projectPath, options.ProbeWritability));
         }
 
-        var (effective, shadowed) = BuildOverlay(sources);
+        var home = GetUserHome(options.UserHomeDirectory);
+        var projectDirectory = projectPath is null ? null : Path.GetFullPath(options.ProjectDirectory!);
+        var context = new McpExternalContext(projectDirectory, home);
+        var external = new List<McpConfigSource>(4);
+        if (projectDirectory is not null)
+        {
+            AddExternalSource(external, McpConfigScope.Project, McpConfigOrigin.Common, Path.Combine(projectDirectory, ".mcp.json"), context);
+            AddExternalSource(external, McpConfigScope.Project, McpConfigOrigin.Copilot, Path.Combine(projectDirectory, ".github", "mcp.json"), context);
+            AddExternalSource(external, McpConfigScope.Project, McpConfigOrigin.Vscode, Path.Combine(projectDirectory, ".vscode", "mcp.json"), context);
+        }
+
+        AddExternalSource(external, McpConfigScope.Global, McpConfigOrigin.Copilot, Path.Combine(home, ".copilot", "mcp-config.json"), context);
+
+        var (effective, shadowed) = BuildOverlay(sources, external);
         return new McpConfigSnapshot
         {
             Sources = sources,
+            ExternalSources = external,
             EffectiveServers = effective,
-            ShadowedGlobalServers = shadowed,
+            ShadowedServers = shadowed,
             DefaultWriteScope = projectPath is null ? McpConfigScope.Global : McpConfigScope.Project,
         };
     }
 
     public static string GetGlobalConfigPath(string? userHomeDirectory = null)
+        => Path.Combine(GetUserHome(userHomeDirectory), ".alta", "mcp.json");
+
+    private static string GetUserHome(string? userHomeDirectory)
     {
         var home = string.IsNullOrWhiteSpace(userHomeDirectory)
             ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
@@ -41,7 +58,7 @@ internal sealed class McpConfigDiscovery
             home = Environment.GetEnvironmentVariable("USERPROFILE") ?? Environment.GetEnvironmentVariable("HOME") ?? Environment.CurrentDirectory;
         }
 
-        return Path.Combine(home, ".alta", "mcp.json");
+        return home;
     }
 
     public static string GetProjectConfigPath(string projectDirectory)
@@ -97,31 +114,81 @@ internal sealed class McpConfigDiscovery
         }
     }
 
-    private static (IReadOnlyList<McpEffectiveServer> Effective, IReadOnlyList<McpServerDefinition> Shadowed) BuildOverlay(IReadOnlyList<McpConfigSource> sources)
+    // A file of another tool is read where it is and never written. One that does not exist is not a source at all:
+    // CodeAlta does not create it.
+    private static void AddExternalSource(List<McpConfigSource> sources, McpConfigScope scope, McpConfigOrigin origin, string path, McpExternalContext context)
+    {
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            var document = McpConfigFormatAdapter.ParseExternalDocument(McpBoundedTextReader.Read(path));
+            var servers = McpConfigFormatAdapter.ReadExternalServers(document, scope, origin, path, context, out var skipped);
+            sources.Add(new McpConfigSource
+            {
+                Scope = scope,
+                Origin = origin,
+                Path = path,
+                Exists = true,
+                DirectoryExists = true,
+                Flavor = document.Flavor,
+                RootKey = document.RootKey,
+                Servers = servers,
+                SkippedServers = skipped,
+            });
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // ArgumentException: a JSON object that names a property twice.
+            sources.Add(new McpConfigSource
+            {
+                Scope = scope,
+                Origin = origin,
+                Path = path,
+                Exists = true,
+                DirectoryExists = true,
+                IsValid = false,
+                Diagnostic = ex.Message,
+            });
+        }
+    }
+
+    // The first definition of a key is the one in effect. A project comes before the user, and in each of them the
+    // file of CodeAlta comes before the files of other tools, in the order they were added.
+    private static (IReadOnlyList<McpEffectiveServer> Effective, IReadOnlyList<McpShadowedServer> Shadowed) BuildOverlay(
+        IReadOnlyList<McpConfigSource> sources,
+        IReadOnlyList<McpConfigSource> external)
     {
         var byKey = new Dictionary<string, McpEffectiveServer>(StringComparer.Ordinal);
-        var shadowed = new List<McpServerDefinition>();
-        foreach (var source in sources.Where(static source => source.Exists && source.IsValid))
+        var shadowed = new List<McpShadowedServer>();
+        McpConfigScope[] scopes = [McpConfigScope.Project, McpConfigScope.Global];
+        foreach (var scope in scopes)
         {
-            foreach (var server in source.Servers)
+            foreach (var source in sources.Concat(external).Where(source => source.Scope == scope && source.Exists && source.IsValid))
             {
-                if (server.SourceScope == McpConfigScope.Project && byKey.TryGetValue(server.Key, out var existing) && existing.Definition.SourceScope == McpConfigScope.Global)
+                foreach (var server in source.Servers)
                 {
-                    shadowed.Add(existing.Definition);
-                    byKey[server.Key] = new McpEffectiveServer
+                    if (!byKey.TryGetValue(server.Key, out var winner))
                     {
-                        Definition = server,
-                        OverridesGlobal = true,
-                        ShadowedGlobalDefinition = existing.Definition,
-                    };
-                    continue;
-                }
+                        byKey[server.Key] = new McpEffectiveServer { Definition = server };
+                        continue;
+                    }
 
-                byKey[server.Key] = new McpEffectiveServer { Definition = server };
+                    shadowed.Add(new McpShadowedServer { Definition = server, OverriddenBy = winner.Definition });
+                    if (scope == McpConfigScope.Global && winner.Definition.SourceScope == McpConfigScope.Project && winner.ShadowedGlobalDefinition is null)
+                    {
+                        byKey[server.Key] = winner with { OverridesGlobal = true, ShadowedGlobalDefinition = server };
+                    }
+                }
             }
         }
 
-        return (byKey.Values.OrderBy(static item => item.Definition.Key, StringComparer.Ordinal).ToArray(), shadowed.OrderBy(static item => item.Key, StringComparer.Ordinal).ToArray());
+        return (
+            byKey.Values.OrderBy(static item => item.Definition.Key, StringComparer.Ordinal).ToArray(),
+            shadowed.OrderBy(static item => item.Definition.Key, StringComparer.Ordinal).ToArray());
     }
 
     private static bool CanWriteFile(string path)

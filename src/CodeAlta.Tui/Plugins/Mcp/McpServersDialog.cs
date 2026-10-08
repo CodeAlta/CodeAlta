@@ -284,13 +284,16 @@ internal sealed class McpServersDialog
             return;
         }
 
+        // A definition of another tool stays in its file: the saved one goes to the file of CodeAlta and comes first.
+        var replaces = !row.IsDraft && !row.Entry.IsReadOnly;
+        var overridden = row.IsDraft || !row.Entry.IsReadOnly ? null : row.Entry.SourceName;
         try
         {
             var result = await _service.AddOrUpdateServerAsync(
                 edit,
                 scope,
-                row.IsDraft ? null : row.OriginalKey,
-                row.IsDraft ? null : row.OriginalScope,
+                replaces ? row.OriginalKey : null,
+                replaces ? row.OriginalScope : null,
                 _createRequest(),
                 CancellationToken.None);
             await PublishUiAsync(() =>
@@ -299,6 +302,10 @@ internal sealed class McpServersDialog
                 _statusText = result.CreatedFile
                     ? $"[success]Created {AnsiMarkup.Escape(result.Path)} and saved MCP server {AnsiMarkup.Escape(result.Server)}.[/]"
                     : $"[success]Saved MCP server {AnsiMarkup.Escape(result.Server)} to {AnsiMarkup.Escape(result.Path)}.[/]";
+                if (overridden is not null)
+                {
+                    _statusText += $" [dim]{AnsiMarkup.Escape(overridden)} is left as it is.[/]";
+                }
             });
         }
         catch (Exception ex)
@@ -324,6 +331,12 @@ internal sealed class McpServersDialog
             _servers.Remove(row);
             SetSelectedServerIndex(Math.Clamp(_selectedServerIndex.Value, 0, _servers.Count - 1));
             _statusText = "[dim]Discarded unsaved MCP server draft.[/]";
+            return;
+        }
+
+        if (row.Entry.IsReadOnly)
+        {
+            _statusText = $"[warning]{AnsiMarkup.Escape(row.Entry.SourceName ?? "This file")} belongs to another tool: disable the server here, or remove it there.[/]";
             return;
         }
 
@@ -1052,6 +1065,7 @@ internal sealed class McpServersDialog
     private static bool IsSameServerRow(McpManagementServerSnapshot left, McpManagementServerSnapshot right)
         => string.Equals(left.Key, right.Key, StringComparison.OrdinalIgnoreCase) &&
            left.SourceScope == right.SourceScope &&
+           left.SourceOrigin == right.SourceOrigin &&
            left.State == right.State;
 
     private static IReadOnlyList<string> MergeDiagnostics(IReadOnlyList<string> existing, IReadOnlyList<string> latest)
@@ -1538,6 +1552,8 @@ internal sealed class McpServersDialog
             ("Source Scope", entry.SourceScope?.ToString()),
             ("Source Path", entry.SourcePath),
             ("Source Format", entry.SourceFormat?.ToString()),
+            ("Source Owner", entry.IsReadOnly ? $"{FormatOrigin(entry.SourceOrigin)} (read, never written)" : null),
+            ("Shadowed By", entry.OverriddenByPath),
             ("Command", entry.Command),
             ("Arguments", entry.Args.Count > 0 ? string.Join(" ", entry.Args) : null),
             ("Working Directory", entry.Cwd),
@@ -1708,7 +1724,7 @@ internal sealed class McpServersDialog
         => TryBuildServerEdit(row, out _, out _, out _);
 
     private static bool CanRemoveServer(McpServerRow row)
-        => row.IsDraft || row.Entry.State is McpManagementServerState.Configured or McpManagementServerState.Disabled or McpManagementServerState.Shadowed;
+        => row.IsDraft || (!row.Entry.IsReadOnly && row.Entry.State is McpManagementServerState.Configured or McpManagementServerState.Disabled or McpManagementServerState.Shadowed);
 
     private bool TryBuildServerEdit(McpServerRow row, out McpManagementServerEdit edit, out McpManagementScope scope, out string errorMessage)
     {
@@ -1950,14 +1966,33 @@ internal sealed class McpServersDialog
             parts.Add(entry.SourceScope.Value == McpManagementScope.Project ? "project" : "global");
         }
 
+        // A server of another tool says which file it is read from.
+        if (entry.IsReadOnly && entry.SourceName is { } source)
+        {
+            parts.Add(source);
+        }
+
         if (entry.OverridesGlobal)
         {
             parts.Add("overrides global");
         }
 
-        parts.Add($"tools {entry.ExposedToolCount}/{entry.TotalToolCount}");
+        if (entry.State != McpManagementServerState.Unsupported)
+        {
+            parts.Add($"tools {entry.ExposedToolCount}/{entry.TotalToolCount}");
+        }
+
         return string.Join(" · ", parts);
     }
+
+    private static string FormatOrigin(McpManagementConfigOrigin origin)
+        => origin switch
+        {
+            McpManagementConfigOrigin.Copilot => "GitHub Copilot",
+            McpManagementConfigOrigin.Vscode => "Visual Studio Code",
+            McpManagementConfigOrigin.Common => "shared .mcp.json",
+            _ => "CodeAlta",
+        };
 
     private static (string Tone, string Icon) GetStatusToneAndIcon(McpManagementServerState state)
         => state switch
@@ -1967,6 +2002,7 @@ internal sealed class McpServersDialog
             McpManagementServerState.MissingConfig => ("muted", $"{McpTerminalIcons.MdFileQuestionOutline}"),
             McpManagementServerState.InvalidConfig => ("error", $"{McpTerminalIcons.MdCloseCircleOutline}"),
             McpManagementServerState.Shadowed => ("warning", $"{McpTerminalIcons.MdFileCompare}"),
+            McpManagementServerState.Unsupported => ("warning", $"{McpTerminalIcons.MdFileQuestionOutline}"),
             _ => ("primary", $"{McpTerminalIcons.MdLan}"),
         };
 
@@ -1978,6 +2014,7 @@ internal sealed class McpServersDialog
             McpManagementServerState.MissingConfig => "missing config",
             McpManagementServerState.InvalidConfig => "invalid config",
             McpManagementServerState.Shadowed => "shadowed",
+            McpManagementServerState.Unsupported => "not supported",
             _ => state.ToString(),
         };
 

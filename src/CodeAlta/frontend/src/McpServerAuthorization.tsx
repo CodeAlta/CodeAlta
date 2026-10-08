@@ -16,7 +16,7 @@ type Api = Pick<typeof McpServersClient, "login" | "logout">;
  * host opened in the browser. Mount it with a key per server, so that leaving a server cancels its authorization.
  */
 export function McpServerAuthorization({ epoch, projectId, server, api, blocked, onChanged }: {
-  epoch: string | null; projectId: string | null; server: Pick<McpServerEntry, "key" | "scope" | "authorized" | "authorizationExpiresAt">; api: Api;
+  epoch: string | null; projectId: string | null; server: Pick<McpServerEntry, "key" | "scope" | "origin" | "authorized" | "authorizationExpiresAt">; api: Api;
   /** Why an authorization is not offered right now (unsaved changes, a disabled server), or null. */
   blocked: MessageKey | null;
   /** Called after an authorization or a sign-out changed what the host stores. */
@@ -29,7 +29,7 @@ export function McpServerAuthorization({ epoch, projectId, server, api, blocked,
   const work = useRef<AbortController | null>(null);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; work.current?.abort(); }; }, []);
-  const request = { expectedEpoch: epoch, projectId, scope: server.scope, key: server.key };
+  const request = { expectedEpoch: epoch, projectId, scope: server.scope, key: server.key, origin: server.origin };
 
   async function authorize() {
     if (work.current || blocked || signingOut) return;
