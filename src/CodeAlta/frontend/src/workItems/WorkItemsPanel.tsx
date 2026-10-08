@@ -4,6 +4,7 @@ import { useRunsWith, type RunModelsLoader, type RunProvider, type RunsWith } fr
 import type { WorkspaceProject, WorkspaceSession } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
+import { ProviderIcon } from "../ProviderIcon";
 import type { MessageKey } from "../localization";
 import { useShellLanguage } from "../shellLanguage";
 import { WorkItemTags, WorkItemText, WorkStartButtons } from "./WorkItemCards";
@@ -180,7 +181,7 @@ function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, p
     </header>
     <div className="work-detail-actions">
       {startable && run.provider && <div className="work-runs-with" role="group" aria-label={t("Runs with")}>
-        <span className="work-runs-with-label"><AppIcon name="provider" size={13} />{t("Runs with")}</span>
+        <span className="work-runs-with-label"><ProviderIcon providerKey={run.provider.id} size={13} />{t("Runs with")}</span>
         <HTMLSelect aria-label={t("Provider")} value={run.provider.id} disabled={busy} onChange={event => run.chooseProvider(event.target.value)}>
           {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.isDefault ? t("{name} (default)", { name: provider.name }) : provider.name}</option>)}
         </HTMLSelect>

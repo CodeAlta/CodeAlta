@@ -126,7 +126,14 @@ test("the sessions of an open scope are rows that open them, with more on demand
   const child = listed.find(row => row.includes("title of child"))!;
   // A session started by another one is pushed in under it, with an icon of its own.
   assert.match(child, /padding-left:23px[\s\S]*data-file-tone="teal"[\s\S]*<i>marks of child<\/i>/);
-  assert.match(listed.find(row => row.includes("title of parent"))!, /aria-pressed="false"[\s\S]*padding-left:11px[\s\S]*data-file-tone="purple"/);
+  // A session shows the logo of its provider, named by its tooltip; a session started by another one has both icons.
+  assert.match(listed.find(row => row.includes("title of parent"))!, /aria-pressed="false"[\s\S]*padding-left:11px[\s\S]*<span class="session-icon session-provider" title="codex"><svg class="brand-icon" data-brand="codex"/);
+  assert.match(child, /data-file-tone="teal"[\s\S]*data-brand="codex"/);
+  // A provider of no known brand keeps the icon of a session.
+  const plain = render(sessionHierarchy([{ ...session("plain", "a"), providerKey: "my-proxy" }, { ...session("none", "a"), providerKey: null }], [], "a"), 0, false);
+  assert.equal(plain.split('class="session-icon session-provider" data-file-tone="purple"').length - 1, 2);
+  assert.match(plain, /title="my-proxy"><svg[^>]*lucide-bot/);
+  assert.doesNotMatch(plain, /brand-icon/);
   // A session started by an automation says so with its icon.
   assert.match(listed.find(row => row.includes("title of other"))!, /class="session-icon" data-file-tone="gold" title="Started by an automation"/);
   assert.doesNotMatch(listed.find(row => row.includes("title of parent"))!, /Started by an automation/);

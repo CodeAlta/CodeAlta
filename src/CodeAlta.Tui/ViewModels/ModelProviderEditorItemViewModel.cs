@@ -358,6 +358,9 @@ internal sealed partial class ModelProviderEditorItemViewModel
             ProviderKey = definition.ProviderKey,
             Enabled = definition.Enabled,
             DisplayName = definition.DisplayName,
+            // Not edited here: kept as the file has them.
+            Icon = definition.Icon,
+            Color = definition.Color,
             ProviderType = definition.ProviderType,
             Model = definition.Model,
             ReasoningEffort = definition.ReasoningEffort,

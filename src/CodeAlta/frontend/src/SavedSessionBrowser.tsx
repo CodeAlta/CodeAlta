@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
+import { ProviderIcon } from "./ProviderIcon";
 import type { SessionTab } from "./sessionTabs";
 import { browseSessions } from "./sessionBrowser";
 import type { RuntimeObservationControls } from "./RuntimeObservation";
@@ -109,7 +110,7 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
             <td data-column="title"><span>{running ? <ActivitySpinner size={12} label={t("Running")} /> : <AppIcon name="assistant" size={13} />}
               <strong>{plainTitle(row.fullTitle || row.title) || t("Untitled session")}</strong>
               {!valid && <small>{t("Ambiguous or unverified identity — unavailable")}</small>}</span></td>
-            <td data-column="provider">{row.providerKey ?? "—"}</td>
+            <td data-column="provider">{row.providerKey ? <span className="with-logo"><ProviderIcon providerKey={row.providerKey} size={13} />{row.providerKey}</span> : "—"}</td>
             <td data-column="updated"><time dateTime={time.dateTime} title={time.title}>{time.label || t("unknown")}</time></td>
             <td data-column="messages">{row.messageCount ?? "—"}</td>
           </tr>;

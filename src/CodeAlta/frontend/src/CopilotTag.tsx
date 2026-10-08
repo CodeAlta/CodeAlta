@@ -1,5 +1,5 @@
 import { Tag } from "@blueprintjs/core";
-import { AppIcon } from "./AppIcon";
+import { BrandIcon } from "./BrandIcon";
 import { useShellLanguage } from "./shellLanguage";
 
 /**
@@ -8,7 +8,7 @@ import { useShellLanguage } from "./shellLanguage";
  */
 export function CopilotTag({ title }: { title?: string }) {
   const { t } = useShellLanguage();
-  return <Tag minimal round className="copilot-tag" icon={<AppIcon name="github" size={12} />} title={title ?? t("From the GitHub Copilot layout")}>Copilot</Tag>;
+  return <Tag minimal round className="copilot-tag" icon={<BrandIcon name="githubcopilot" size={12} />} title={title ?? t("From the GitHub Copilot layout")}>Copilot</Tag>;
 }
 
 /** The scopes of agent prompts that are custom agents of GitHub Copilot, as the host names them. */

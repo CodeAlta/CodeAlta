@@ -3,6 +3,8 @@ import { Checkbox, InputGroup } from "@blueprintjs/core";
 import { gitIssues, type GitIssuesSearchResponse } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
+import { BrandIcon } from "./BrandIcon";
+import { serviceBrand } from "./brands";
 import { AppWindowSurface } from "./AppWindow";
 import { activeIssueReference, insertIssueReference } from "./issueReferences";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
@@ -85,7 +87,7 @@ export function IssuePicker({ edit, input }: { edit: (text: string) => void; inp
       if (handled) event.preventDefault();
     }}>
     <AppWindowSurface storageKey="codealta.desktop.window.issues.v1" titleId={`${listId}-title`}
-      title={<><AppIcon name="issueOpen" size={14} /> {heading}{page?.repository && <span className="reference-project"> · {page.repository}</span>}</>}
+      title={<>{serviceBrand(page?.provider) ? <BrandIcon name={serviceBrand(page?.provider)!} size={14} /> : <AppIcon name="issueOpen" size={14} />} {heading}{page?.repository && <span className="reference-project"> · {page.repository}</span>}</>}
       preferredSize={viewport => ({ width: Math.min(860, viewport.width - 40), height: Math.min(520, viewport.height - 40) })}
       minimumSize={{ width: 440, height: 260 }} onClose={() => close()} closeLabel={t("Close")}
       headerActions={status && <span className="reference-status" role="status">{!page && <ActivitySpinner size={12} />}{status}</span>}>

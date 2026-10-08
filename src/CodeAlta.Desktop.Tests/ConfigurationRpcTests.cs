@@ -106,12 +106,19 @@ public sealed class ConfigurationRpcTests
                 [providers.off]
                 type = "anthropic"
                 enabled = false
+                icon = " Flask-Conical "
+                color = "#22B8CD"
 
                 [plugins.mcp]
                 enabled = true
                 """);
 
             var result = new ConfigurationService(root).Snapshot(new ConfigurationRequest());
+
+            // What every provider of the file is shown with, the disabled one included: its sessions keep its icon.
+            CollectionAssert.AreEquivalent(
+                new[] { new ConfigurationProviderBrand("alpha", "openai-chat", "Alpha", null, null), new ConfigurationProviderBrand("off", "anthropic", "off", "flask-conical", "#22B8CD") },
+                result.ProviderBrands.ToArray());
 
             Assert.IsFalse(result.ProviderRuntimeAvailable);
             Assert.IsFalse(result.PluginRuntimeAvailable);

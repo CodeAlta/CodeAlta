@@ -101,7 +101,7 @@ test("an item that can be started says what its session runs with, and which pro
   assert.ok(!view(row("plan", "plan", "approved"), {}).includes("Runs with"));
 
   const settings = render(createElement(WorkItemSettings, { hub: hub(state()), providers, onOpenProviders: never }));
-  assert.match(settings, /Default provider and model.*?<span data-default-run="true">Codex<\/span>.*?Providers/s);
+  assert.match(settings, /Default provider and model.*?<span data-default-run="true" class="with-logo"><svg class="brand-icon" data-brand="codex"[^>]*>.*?<\/svg>Codex<\/span>.*?Providers/s);
   assert.ok(!render(createElement(WorkItemSettings, { hub: hub(state()) })).includes("Default provider and model"));
 });
 

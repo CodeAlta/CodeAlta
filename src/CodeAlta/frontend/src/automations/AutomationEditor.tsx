@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { TriggerIcon } from "./TriggerIcon";
 import { Button, ButtonGroup, Callout, FormGroup, HTMLSelect, InputGroup, Menu, MenuItem, NumericInput, PopoverNext, SegmentedControl, Switch, TextArea } from "@blueprintjs/core";
 import { modelCatalog, workspace, type AutomationTriggerItem, type ModelCatalogModel, type SessionPromptChoice, type WorkspaceProject } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
 import { useShellLanguage } from "../shellLanguage";
-import { dayName, formProblem, inputOf, isSchedule as schedule, maximumNameLength, maximumPromptLength, maximumTriggers, newTrigger, triggerIcon, triggerLabel, triggerTone, triggerTypes, weekDays,
+import { dayName, formProblem, inputOf, isSchedule as schedule, maximumNameLength, maximumPromptLength, maximumTriggers, newTrigger, triggerLabel, triggerTone, triggerTypes, weekDays,
   type AutomationForm, type TriggerType } from "./automations";
 import type { AutomationsHub } from "./automationsHub";
 
@@ -49,7 +50,7 @@ function TriggerRow({ hub, trigger, disabled, onChange, onRemove }: {
   const { t, locale } = useShellLanguage();
   const set = (change: Partial<AutomationTriggerItem>) => onChange({ ...trigger, ...change });
   return <li className="automation-trigger">
-    <span className="automation-trigger-icon" data-file-tone={triggerTone(trigger.type)}><AppIcon name={triggerIcon(trigger.type)} size={15} /></span>
+    <span className="automation-trigger-icon" data-file-tone={triggerTone(trigger.type)}><TriggerIcon type={trigger.type} size={15} /></span>
     <div className="automation-trigger-fields">
       <HTMLSelect value={trigger.type} disabled={disabled} aria-label={t("Trigger")} onChange={event => onChange(newTrigger(event.target.value as TriggerType))}>
         {triggerTypes.map(type => <option key={type} value={type}>{t(triggerLabel(type))}</option>)}
@@ -141,7 +142,7 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
   // An event is one of the repository of a project: a chat has none.
   const add = <Menu>{triggerTypes.map(type => {
     const needsProject = !schedule({ type }) && !form.projectId;
-    return <MenuItem key={type} icon={<span data-file-tone={triggerTone(type)}><AppIcon name={triggerIcon(type)} size={15} /></span>} text={t(triggerLabel(type))}
+    return <MenuItem key={type} icon={<span data-file-tone={triggerTone(type)}><TriggerIcon type={type} size={15} /></span>} text={t(triggerLabel(type))}
       disabled={needsProject} label={needsProject ? t("Needs a project") : undefined} onClick={() => edit({ triggers: [...form.triggers, newTrigger(type)] })} />;
   })}</Menu>;
 

@@ -1171,6 +1171,8 @@ public sealed class CodeAltaConfigStore
         var definition = value ?? new CodeAltaProviderDocument();
         definition.ProviderKey = NormalizeProviderEntryKey(key, definition) ?? string.Empty;
         definition.DisplayName = NormalizeText(definition.DisplayName);
+        definition.Icon = NormalizeText(definition.Icon)?.ToLowerInvariant();
+        definition.Color = NormalizeText(definition.Color);
         definition.ProviderType = NormalizeProviderType(definition.ProviderKey, definition.ProviderType);
         definition.Model = NormalizeModel(definition.Model);
         definition.ReasoningEffort = NormalizeReasoningEffortText(definition.ReasoningEffort);
@@ -2177,6 +2179,8 @@ public sealed class CodeAltaConfigStore
 
         return definition.Enabled is not null ||
                !string.IsNullOrWhiteSpace(definition.DisplayName) ||
+               !string.IsNullOrWhiteSpace(definition.Icon) ||
+               !string.IsNullOrWhiteSpace(definition.Color) ||
                !string.IsNullOrWhiteSpace(definition.ProviderType) ||
                !string.IsNullOrWhiteSpace(definition.Model) ||
                !string.IsNullOrWhiteSpace(definition.ReasoningEffort) ||
@@ -2270,6 +2274,8 @@ public sealed class CodeAltaConfigStore
             ProviderKey = definition.ProviderKey,
             Enabled = definition.Enabled,
             DisplayName = definition.DisplayName,
+            Icon = definition.Icon,
+            Color = definition.Color,
             ProviderType = definition.ProviderType,
             Model = definition.Model,
             ReasoningEffort = definition.ReasoningEffort,

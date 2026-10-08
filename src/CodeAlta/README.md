@@ -127,6 +127,11 @@ disappear on refresh. `npm run build:demo` writes the same demo as static files 
   `dotnet run --project src/CodeAlta.ColorSchemes.Generator`. Run it again when the scheme recipes
   of XenoAtom.Terminal.UI or the Blueprint palette change, and commit the result. It reads the
   Blueprint palette from `frontend/node_modules`, so build the frontend once before.
+- **Brand icons**: `frontend/src/brandIcons.gen.ts` holds the logos the page draws (model providers,
+  models, coding agents, issue trackers). `npm run icons` in `frontend/` writes it from the list in
+  `frontend/scripts/generate-brand-icons.mjs` and from two development dependencies that hold only SVG
+  files and have no dependency: `@lobehub/icons-static-svg` (MIT) and `simple-icons` (CC0). Run it again
+  after adding a brand to the list or changing the version of a package, and commit the result.
 - **Editor languages**: `frontend/src/fileLanguage.ts` maps file names and extensions to Monaco
   languages. To add a language that Monaco does not ship, add its Monarch grammar to
   `frontend/src/monacoGrammars.ts` and its extensions to `fileLanguage.ts`.

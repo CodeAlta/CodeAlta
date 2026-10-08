@@ -146,6 +146,7 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 [JsonSerializable(typeof(ConfigurationRequest))]
 [JsonSerializable(typeof(ConfigurationSnapshot))]
 [JsonSerializable(typeof(ConfigurationProvider))]
+[JsonSerializable(typeof(ConfigurationProviderBrand))]
 [JsonSerializable(typeof(ConfigurationPlugin))]
 [JsonSerializable(typeof(GlobalConfigReadRequest))]
 [JsonSerializable(typeof(GlobalConfigReadResponse))]

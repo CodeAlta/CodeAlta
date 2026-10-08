@@ -145,7 +145,8 @@ internal sealed class GlobalConfigService
                             Bound(definition?.DisplayName), Bound(effective.DisplayName) ?? effective.ProviderKey,
                             Bound(definition?.Model), Bound(definition?.ReasoningEffort),
                             Bound(definition?.ApiUrl), Bound(effective.ApiUrl), Bound(definition?.ApiKeyEnv),
-                            !string.IsNullOrEmpty(definition?.ApiKey), defaults.For(effective));
+                            !string.IsNullOrEmpty(definition?.ApiKey), defaults.For(effective))
+                        { Icon = Bound(definition?.Icon), Color = Bound(definition?.Color) };
                     }).ToArray();
                 // The providers CodeAlta knows how to configure that this configuration does not have yet.
                 var builtIn = defaults.Template.Values.Where(entry => !providers.Any(provider => string.Equals(provider.Key, entry.ProviderKey, StringComparison.OrdinalIgnoreCase)))
@@ -207,6 +208,13 @@ internal sealed class GlobalConfigService
             return new("invalid", null, "A provider key uses letters, digits, '-' or '_' (at most 64).", null, null, 0);
         if (new[] { edit.DisplayName, edit.Model, edit.ReasoningEffort, edit.ApiUrl, edit.ApiKeyEnv, edit.ApiKey, edit.Type }.Any(static value => value?.Length > 2048))
             return new("invalid", null, "A provider field is too long.", null, null, 0);
+        // The file is written by hand too, and is read whatever these two say: only the form is held to their shape.
+        var icon = Optional(edit.Icon)?.ToLowerInvariant();
+        if (icon is not null && (icon.Length > 64 || !icon.All(static character => char.IsAsciiLetterLower(character) || char.IsAsciiDigit(character) || character == '-')))
+            return new("invalid", null, "An icon is named by lowercase letters, digits or '-' (at most 64).", null, null, 0);
+        var color = Optional(edit.Color);
+        if (color is not null && !IsHexColor(color))
+            return new("invalid", null, "A color is written as #rgb or #rrggbb.", null, null, 0);
         return Mutate(request.ExpectedEpoch, request.ExpectedRevision, request.ApplyProviders, (store, definitions) =>
         {
             var original = request.OriginalKey?.Trim();
@@ -220,6 +228,8 @@ internal sealed class GlobalConfigService
             definition.ProviderType = Optional(edit.Type) ?? definition.ProviderType;
             definition.Enabled = edit.Enabled;
             definition.DisplayName = Optional(edit.DisplayName);
+            definition.Icon = icon;
+            definition.Color = color;
             definition.Model = Optional(edit.Model);
             definition.ReasoningEffort = Optional(edit.ReasoningEffort);
             definition.ApiUrl = Optional(edit.ApiUrl);
@@ -331,6 +341,9 @@ internal sealed class GlobalConfigService
     }
 
     private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static bool IsHexColor(string value)
+        => value.Length is 4 or 7 && value[0] == '#' && value.AsSpan(1).IndexOfAnyExcept("0123456789abcdefABCDEF") < 0;
 
     private const int MaximumProviders = 64;
     private static readonly ImmutableArray<string> ProviderTypes =
@@ -468,7 +481,14 @@ internal sealed record GlobalConfigAddBuiltInProviderRequest(string? ExpectedEpo
 /// <summary>One configured provider: values as written (null when the file leaves them to defaults) plus effective display values.</summary>
 internal sealed record GlobalConfigProvider(string Key, string Type, bool Enabled, string? DisplayName, string EffectiveName,
     string? Model, string? ReasoningEffort, string? ApiUrl, string? EffectiveApiUrl, string? ApiKeyEnv, bool HasApiKey,
-    GlobalConfigProviderDefaults Defaults);
+    GlobalConfigProviderDefaults Defaults)
+{
+    /// <summary>The id of the brand icon the file gives the provider; null when the icon follows its key and type.</summary>
+    public string? Icon { get; init; }
+
+    /// <summary>The color the file gives that icon, as <c>#rgb</c> or <c>#rrggbb</c>; null for the colors of the icon.</summary>
+    public string? Color { get; init; }
+}
 
 /// <summary>What each blank field of a provider falls back to; null when nothing is known for the field.</summary>
 internal sealed record GlobalConfigProviderDefaults(string? DisplayName, string? Model, string? ReasoningEffort, string? ApiUrl, string? ApiKeyEnv);
@@ -476,7 +496,14 @@ internal sealed record GlobalConfigProviderDefaults(string? DisplayName, string?
 /// <summary>The defaults of a provider of one adapter type that has no definition yet.</summary>
 internal sealed record GlobalConfigProviderTypeDefaults(string Type, GlobalConfigProviderDefaults Defaults);
 internal sealed record GlobalConfigProviderEdit(string? Key, string? Type, bool Enabled, string? DisplayName, string? Model,
-    string? ReasoningEffort, string? ApiUrl, string? ApiKeyEnv, string? ApiKey, bool ClearApiKey);
+    string? ReasoningEffort, string? ApiUrl, string? ApiKeyEnv, string? ApiKey, bool ClearApiKey)
+{
+    /// <summary>The id of the brand icon of the provider; blank for the icon that goes with its key and type.</summary>
+    public string? Icon { get; init; }
+
+    /// <summary>The color of that icon, as <c>#rgb</c> or <c>#rrggbb</c>; blank for the colors of the icon.</summary>
+    public string? Color { get; init; }
+}
 internal sealed record GlobalConfigSaveProviderRequest(string? ExpectedEpoch, string? ExpectedRevision, string? OriginalKey,
     GlobalConfigProviderEdit? Provider, bool MakeDefault, bool ApplyProviders);
 internal sealed record GlobalConfigDeleteProviderRequest(string? ExpectedEpoch, string? ExpectedRevision, string? Key, bool ApplyProviders);

@@ -1,4 +1,5 @@
 import { HTMLSelect } from "@blueprintjs/core";
+import { ModelIcon, ProviderIcon } from "./ProviderIcon";
 import { Cell, Column, Regions, SelectionModes, Table2 } from "@blueprintjs/table";
 import "@blueprintjs/table/lib/css/table.css";
 import { useEffect, useRef, useState } from "react";
@@ -154,8 +155,8 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
                 selectedRegionTransform={region => region.rows ? Regions.row(region.rows[0]) : region}
                 selectedRegions={selectedRow >= 0 ? [Regions.row(selectedRow)] : []}
                 onSelection={regions => { const row = regions[0]?.rows?.[0]; if (row !== undefined && visible[row]) { setProviderId(visible[row].provider.id); setModelId(visible[row].model.id); } }}>
-                <Column name={t("Provider")} cellRenderer={row => <Cell>{visible[row].provider.name}</Cell>} />
-                <Column name={t("Model")} cellRenderer={row => <Cell><strong>{visible[row].model.name}</strong></Cell>} />
+                <Column name={t("Provider")} cellRenderer={row => <Cell><span className="with-logo"><ProviderIcon providerKey={visible[row].provider.id} known={{ type: visible[row].provider.type, name: visible[row].provider.name }} size={14} />{visible[row].provider.name}</span></Cell>} />
+                <Column name={t("Model")} cellRenderer={row => <Cell><span className="with-logo"><ModelIcon modelId={visible[row].model.id} providerKey={visible[row].provider.id} size={14} /><strong>{visible[row].model.name}</strong></span></Cell>} />
                 <Column name={t("ID")} cellRenderer={row => <Cell className="bp6-monospace-text">{visible[row].model.id}</Cell>} />
                 <Column name={t("Context tokens")} cellRenderer={row => <Cell>{count(visible[row].model.contextTokens)}</Cell>} />
                 <Column name={t("Input tokens")} cellRenderer={row => <Cell>{count(visible[row].model.inputTokens)}</Cell>} />
@@ -167,7 +168,7 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
               </Table2>
             </div>}
             {rows.length > 0 && <p role="status" className="bp6-text-muted">{t("{count} models", { count: visible.length })}{truncated ? ` · ${t("Some provider inventories are bounded; more models may exist.")}` : ""}</p>}
-            {selected && <article className="model-catalog-detail" aria-label={t("Details for {name}", { name: selected.name })}><h3>{selected.name}</h3><p><code>{providerId} / {selected.id}</code></p>
+            {selected && <article className="model-catalog-detail" aria-label={t("Details for {name}", { name: selected.name })}><h3 className="with-logo"><ModelIcon modelId={selected.id} providerKey={providerId} size={18} />{selected.name}</h3><p><code>{providerId} / {selected.id}</code></p>
               <p>{selected.description ?? t("No description reported.")}</p><dl>
                 <dt>{t("Context tokens")}</dt><dd>{present(selected.contextTokens)}</dd>
                 <dt>{t("Input tokens")}</dt><dd>{present(selected.inputTokens)}</dd>

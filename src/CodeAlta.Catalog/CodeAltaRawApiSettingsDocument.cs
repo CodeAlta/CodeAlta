@@ -257,6 +257,21 @@ public sealed class CodeAltaProviderDocument
     public string? DisplayName { get; set; }
 
     /// <summary>
+    /// Gets or sets the icon the provider is shown with, the id of a brand logo such as <c>mistral</c> or the
+    /// name of a general icon such as <c>rocket</c>; null for the
+    /// icon that goes with its key and type. A frontend shows its own fallback for an id it does not know.
+    /// </summary>
+    [JsonPropertyName("icon")]
+    public string? Icon { get; set; }
+
+    /// <summary>
+    /// Gets or sets the color the icon of the provider is drawn in, as <c>#rgb</c> or <c>#rrggbb</c>; null for
+    /// the colors of the icon.
+    /// </summary>
+    [JsonPropertyName("color")]
+    public string? Color { get; set; }
+
+    /// <summary>
     /// Gets or sets the canonical provider type.
     /// </summary>
     [JsonPropertyName("type")]

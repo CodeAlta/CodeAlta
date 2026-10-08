@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactN
 import { Button, Callout, Tag } from "@blueprintjs/core";
 import { providerUsage, sessionUsage, type SessionUsageObservation, type SessionUsageResponse } from "#neoastra";
 import { AppIcon } from "./AppIcon";
+import { ProviderIcon } from "./ProviderIcon";
 import { AppWindow } from "./AppWindow";
 import { compactTokens, contextSegments, contextUsage, groupedTokens, mergeUsageObservation, operationSegments, persistedContextUsage,
   persistedOperation, persistedUsageFields, usageIntent, usageMarkdown, type UsageSegment } from "./contextUsage";
@@ -168,7 +169,7 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
         <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={15} />} disabled={pending} aria-label={t("Refresh usage")} title={t("Refresh usage")} onClick={() => { read(); if (!liveCurrent) asked.refresh(); }} /></>}>
       <div className="context-usage-details">
         <header className="context-usage-subject">
-          <div><strong>{provider ?? t("session provider")}</strong>{modelName && <span>{modelName}</span>}</div>
+          <div><strong className="with-logo"><ProviderIcon providerKey={provider} size={15} />{provider ?? t("session provider")}</strong>{modelName && <span>{modelName}</span>}</div>
           <div>{fromHistory && <Tag minimal round>{t("From saved history")}</Tag>}
             {updatedTime && <span className="bp6-text-muted">{t("updated {time}", { time: updatedTime })}</span>}
             <span role="status" className="bp6-text-muted">{copied === true ? t("Usage copied.") : copied === false ? t("Clipboard unavailable; nothing copied.") : ""}</span></div>

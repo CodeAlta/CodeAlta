@@ -2,6 +2,7 @@ import { AppWindowSurface } from "./AppWindow";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
+import { ProviderIcon } from "./ProviderIcon";
 import { copySessionId, dismissSessionInfoOnKey, type SessionInfoView } from "./sessionInfo";
 import { sessionRuntimeState, sessionUsage } from "#neoastra";
 import type { RuntimeTarget } from "./runtimeObservations";
@@ -133,7 +134,7 @@ export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime
       <div><dt>{t("Recorded working directory")}</dt><dd>{info.path ?? t("Not recorded or unverified")}</dd></div>
       {info.worktree && <div><dt>{t("Git worktree")}</dt><dd>{info.worktree.path}
         {info.worktree.missing && <small>{t("The folder of this worktree is gone: the session continues in the folder of the project.")}</small>}</dd></div>}
-      <div><dt>{t("Provider")}</dt><dd>{info.provider ?? t("Not recorded or unverified")}</dd></div>
+      <div><dt>{t("Provider")}</dt><dd>{info.provider ? <span className="with-logo"><ProviderIcon providerKey={info.provider} size={14} />{info.provider}</span> : t("Not recorded or unverified")}</dd></div>
       <div><dt>{t("Saved update")}</dt><dd>{info.updatedAt ? recorded(info.updatedAt) : t("Not recorded or unverified")}</dd></div>
       <div><dt>{t("Recorded creation time")}</dt><dd>{info.createdAt ? recorded(info.createdAt) : t("Not recorded or unavailable")}</dd></div>
     </dl>

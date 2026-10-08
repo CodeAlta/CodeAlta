@@ -45,6 +45,21 @@ Project-local overrides can live in `<project>/.alta/config.toml`. Project files
 > [!NOTE]
 > Project-local provider preferences are useful for repository-specific defaults, but avoid committing secrets. Prefer `api_key_env` in the global provider definition so credentials stay in your user environment.
 
+## Provider logos
+
+CodeAlta Desktop shows each provider with the logo of its brand: in the Providers and Models pages, on the provider and model of the prompt, and on every session of the sidebar, so that you see at a glance which provider a session runs with. A model is shown with the logo of its family (Claude, GPT, Gemini...) even when another provider serves it.
+
+The providers CodeAlta ships have their logos. For a provider of your own, CodeAlta looks for a brand in its key, its display name and its API URL (`my-openrouter`, `http://localhost:11434` for Ollama). When it finds none, or when you want another one, set `icon` and `color`:
+
+```toml
+[providers.work]
+type = "openai-chat"
+api_url = "https://llm.example.com/v1"
+api_key_env = "WORK_LLM_KEY"
+icon = "rocket"
+color = "#22B8CD"
+```
+
 ## Provider dialog
 
 Open it with `Ctrl+G Ctrl+R`, `/model_providers`, or the provider summary below the prompt. Use **Refresh** (or `/model_providers_refresh`) to reload the saved configuration from disk and retest provider availability, for example after starting a local LLM server that was offline earlier.
@@ -55,6 +70,7 @@ Both apps edit the same providers and share the same credentials, so a provider 
 
 - add, delete, enable, and disable provider entries;
 - in CodeAlta Desktop, **Add provider** lists the built-in providers you do not have yet: choose one to add it with its key and type, or **Custom provider…** for an entry of your own;
+- in CodeAlta Desktop, choose the **Icon** of a provider among the brand logos and the general icons, and its **Icon color**;
 - validate provider keys, endpoint URLs, required credentials, and conflicting settings;
 - store an API key directly or refer to an environment variable;
 - list and choose a provider model on demand when the Model field is not using its default;
@@ -108,6 +124,8 @@ Common provider fields are:
 | --- | --- |
 | `enabled` | Enables or disables the provider entry. Missing means enabled after normalization. |
 | `display_name` | Label shown in provider selectors and dialogs. |
+| `icon` | Icon of the provider in CodeAlta Desktop: the id of a brand logo such as `mistral`, `ollama` or `openrouter`, or the name of a general icon such as `rocket`, `server` or `flask-conical`. Missing means the logo CodeAlta finds from the key, the name, the API URL and the type of the provider. |
+| `color` | Color the icon is drawn in, as `#rgb` or `#rrggbb`. Missing means the colors of the logo. |
 | `type` | Provider type. Common aliases such as `openai`, `responses`, `aoai`, `gemini`, `vertex`, and `github-copilot` are normalized to the canonical types above. A type your version of CodeAlta does not know (one a newer version added) leaves that provider out; its section stays in the file as written. |
 | `model` | Default model id for this provider. |
 | `reasoning_effort` | Default reasoning effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Providers advertise the values supported per model. |

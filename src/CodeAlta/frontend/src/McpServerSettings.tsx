@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Button, Card, CardList, FormGroup, InputGroup, Section, SectionCard, SegmentedControl, Switch, Tag, TextArea } from "@blueprintjs/core";
 import { mcpServers, type McpServerEntry } from "#neoastra";
 import { AppIcon } from "./AppIcon";
+import { BrandIcon } from "./BrandIcon";
+import { namedBrand } from "./brands";
 import { McpServerAuthorization } from "./McpServerAuthorization";
 import { authorizationBlocked } from "./mcpAuthorization";
 import { SettingsFileLocations } from "./SettingsFileLocation";
@@ -103,6 +105,7 @@ export function McpServerSettings({ epoch, project, onOpenFile, api = mcpServers
         <CardList compact className="settings-editor-list" aria-label={t("MCP Servers")}>
           {servers.map(server => { const id = mcpServerId(server); return <Card key={id} interactive selected={selected === id}
             aria-current={selected === id ? "true" : undefined} onClick={() => choose(server)}>
+            <span className="settings-editor-logo">{namedBrand(server.key) ? <BrandIcon name={namedBrand(server.key)!} size={20} /> : <AppIcon name="server" size={18} />}</span>
             <span className="settings-editor-name"><strong>{server.key}</strong>
               <small>{server.transport === "Http" ? server.url ?? "HTTP" : [server.command, ...server.arguments].filter(Boolean).join(" ")}</small></span>
             <Switch checked={server.enabled} disabled={busy} aria-label={t("Enabled")} onClick={event => event.stopPropagation()}

@@ -59,6 +59,24 @@ public sealed class ModelProviderEditorItemViewModelTests
     }
 
     [TestMethod]
+    public void ToDocument_KeepsTheIconAndTheColorOfTheProvider_WhichTheEditorDoesNotShow()
+    {
+        var item = ModelProviderEditorItemViewModel.FromDocument(new CodeAltaProviderDocument
+        {
+            ProviderKey = "team",
+            ProviderType = "openai-chat",
+            Icon = "mistral",
+            Color = "#FA520F",
+        });
+        item.UseDefaultModel = false;
+        item.Model = "model-b";
+
+        var definition = item.ToDocument();
+
+        Assert.AreEqual(("mistral", "#FA520F", "model-b"), (definition.Icon, definition.Color, definition.Model));
+    }
+
+    [TestMethod]
     public void ToDocument_PreservesConfiguredModelSorting()
     {
         var item = ModelProviderEditorItemViewModel.FromDocument(new CodeAltaProviderDocument

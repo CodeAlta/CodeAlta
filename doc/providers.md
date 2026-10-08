@@ -65,6 +65,13 @@ Important behavior:
 
 - `enabled = false` prevents registration. Omitted `enabled` normalizes to `true` for user entries.
 - `display_name` is optional; CodeAlta can derive a display name from the provider key.
+- `icon` and `color` are optional and only change how CodeAlta Desktop shows the provider. `icon` is the id of a
+  brand logo (`mistral`, `ollama`, `openrouter`...) or the name of a general icon (`rocket`, `server`,
+  `flask-conical`...); `color` is `#rgb` or `#rrggbb`. The store keeps both as written (trimmed, the icon in
+  lower case) and never refuses a file for them: an id a version does not draw, or a text that is not a color,
+  is ignored by the page. Only the form of the Providers page holds them to their shape when it saves. The
+  shipped template names neither: the logo of a shipped provider is found from its key (see "Brand icons" in
+  `doc/desktop.md`).
 - `model` and `reasoning_effort` are defaults, not a hard limit on model selection unless the provider is configured with `single_model_id`.
 - `models_include_regex` is an optional .NET regular expression applied to discovered model ids. Omit it to expose every discovered/fallback model; use alternation such as `model1|model2` or patterns such as `model\d+` to keep a smaller catalog.
 - `sort_models = true` sorts discovered models alphabetically by display name (then id) in model selectors. The default is `false`, which preserves the order returned by the provider.

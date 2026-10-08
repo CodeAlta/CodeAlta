@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Button, Card, CardList, FormGroup, InputGroup, PopoverNext, Switch, Tag, type Intent } from "@blueprintjs/core";
 import { plugins, projectFiles, type PluginsEntry, type PluginsProblem } from "#neoastra";
 import { AppIcon } from "./AppIcon";
+import { BrandIcon } from "./BrandIcon";
+import { pluginBrand } from "./brands";
 import { SettingsFileLocation, SettingsFileLocations, type SettingsFiles } from "./SettingsFileLocation";
 import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
 import { RemoveButton, ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
@@ -102,6 +104,7 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
   return <CardList compact className="settings-editor-rows" aria-label={t("Plugins")}>
     {rows.map(row => { const entry = row.entry; const source = entry?.kind === "Source" && !row.builtIn ? entry : null; const errors = entry?.errors ?? [];
       return <Card key={`${entry?.scope ?? ""}:${row.id}`}>
+      <span className="settings-editor-logo">{pluginBrand(row.id) ? <BrandIcon name={pluginBrand(row.id)!} size={20} /> : <AppIcon name="plugin" size={18} />}</span>
       <span className="settings-editor-name"><strong>{row.name}</strong><small>{row.description || row.id}</small>
         {errors.map((error, index) => <small key={index} className="plugin-failure">{error}</small>)}
         {errors.length === 0 && entry?.runtime === "failed" && entry.runtimeMessage && <small className="plugin-failure">{entry.runtimeMessage}</small>}

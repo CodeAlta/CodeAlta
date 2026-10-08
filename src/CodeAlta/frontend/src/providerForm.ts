@@ -1,10 +1,13 @@
 import type { GlobalConfigProvider, GlobalConfigProviderEdit } from "#neoastra";
+import { brandColor } from "./brands";
 import type { MessageKey } from "./localization";
 
 /** Editable provider fields; empty strings mean "left to the provider's default". */
 export type ProviderForm = Readonly<{
   key: string; type: string; enabled: boolean; displayName: string; model: string; reasoningEffort: string;
   apiUrl: string; apiKeyEnv: string; apiKey: string; clearApiKey: boolean; makeDefault: boolean;
+  /** The id of the icon chosen for the provider, and the color it is drawn in; blank when they follow the provider. */
+  icon: string; color: string;
 }>;
 
 /** The form for an existing provider, or a blank form for a new one. */
@@ -12,9 +15,9 @@ export function providerForm(provider: GlobalConfigProvider | null, defaultProvi
   return provider
     ? { key: provider.key, type: provider.type, enabled: provider.enabled, displayName: provider.displayName ?? "", model: provider.model ?? "",
       reasoningEffort: provider.reasoningEffort ?? "", apiUrl: provider.apiUrl ?? "", apiKeyEnv: provider.apiKeyEnv ?? "", apiKey: "",
-      clearApiKey: false, makeDefault: provider.key === defaultProvider }
+      clearApiKey: false, makeDefault: provider.key === defaultProvider, icon: provider.icon ?? "", color: provider.color ?? "" }
     : { key: "", type: types[0] ?? "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "", apiUrl: "", apiKeyEnv: "",
-      apiKey: "", clearApiKey: false, makeDefault: false };
+      apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "" };
 }
 
 export function providerFormDirty(form: ProviderForm, baseline: ProviderForm): boolean {
@@ -29,6 +32,7 @@ export function validateProviderForm(form: ProviderForm, providers: readonly Pic
   if (providers.some(provider => provider.key.toLowerCase() === key && provider.key.toLowerCase() !== originalKey?.toLowerCase())) return "Another provider already uses this key.";
   if (form.apiUrl.trim() && !/^https?:\/\/\S+$/i.test(form.apiUrl.trim())) return "The API URL must start with http:// or https://.";
   if (form.makeDefault && !form.enabled) return "Only an enabled provider can be the default.";
+  if (form.color.trim() && !brandColor(form.color)) return "A color is written as #rgb or #rrggbb.";
   return null;
 }
 
@@ -39,7 +43,8 @@ export function providerEdit(form: ProviderForm): GlobalConfigProviderEdit {
   const cli = runsOwnCli(form.type);
   return { key: form.key.trim().toLowerCase(), type: form.type, enabled: form.enabled, displayName: optional(form.displayName), model: optional(form.model),
     reasoningEffort: optional(form.reasoningEffort), apiUrl: cli ? null : optional(form.apiUrl), apiKeyEnv: cli ? null : optional(form.apiKeyEnv),
-    apiKey: cli || form.clearApiKey || !form.apiKey ? null : form.apiKey, clearApiKey: cli ? true : form.clearApiKey };
+    apiKey: cli || form.clearApiKey || !form.apiKey ? null : form.apiKey, clearApiKey: cli ? true : form.clearApiKey,
+    icon: optional(form.icon)?.toLowerCase() ?? null, color: optional(form.color) };
 }
 
 /** Provider types that sign in through their own account flow instead of an API key. */

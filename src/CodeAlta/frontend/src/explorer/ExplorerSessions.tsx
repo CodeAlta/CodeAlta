@@ -1,7 +1,8 @@
 import { SubAgentBadge } from "../SessionReference";
 import type { WorkspaceSession } from "#neoastra";
-import { useState, type ReactNode } from "react";
+import { useContext, useState, type ReactNode } from "react";
 import { AppIcon } from "../AppIcon";
+import { ProviderBrandsContext, ProviderIcon, useProviderBrand } from "../ProviderIcon";
 import { SessionTabMenu } from "../SessionTabMenu";
 import type { SessionHierarchyRow } from "../sessionHierarchy";
 import { isSessionContextKey, type SessionAction } from "../sessionRowActions";
@@ -18,8 +19,14 @@ export const sessionRowIndent = (depth: number) => 11 + Math.min(depth, 8) * 12;
 export function SessionRowTitle({ session, depth, diagnostic, subAgents }: Pick<SessionHierarchyRow, "session" | "depth" | "diagnostic" | "subAgents">) {
   const { t } = useShellLanguage();
   const automated = !!session.automationId;
-  return <><span className="session-icon" data-file-tone={depth > 0 ? "teal" : automated ? "gold" : "purple"} title={automated && depth === 0 ? t("Started by an automation") : undefined}>
-    <AppIcon name={depth > 0 ? "childSession" : automated ? "automation" : "assistant"} size={13} /></span>
+  const logo = useProviderBrand(session.providerKey);
+  const provider = useContext(ProviderBrandsContext).get(session.providerKey?.toLowerCase() ?? "")?.name ?? session.providerKey;
+  // The logo of its provider tells the sessions apart at a glance. A session of a provider of no known brand
+  // keeps the icon of a session.
+  return <>{(depth > 0 || automated) && <span className="session-icon" data-file-tone={depth > 0 ? "teal" : "gold"} title={automated && depth === 0 ? t("Started by an automation") : undefined}>
+    <AppIcon name={depth > 0 ? "childSession" : "automation"} size={13} /></span>}
+    <span className="session-icon session-provider" data-file-tone={logo.icon || logo.symbol ? undefined : "purple"} title={provider ?? undefined}>
+      <ProviderIcon providerKey={session.providerKey} size={13} fallback="assistant" /></span>
     <span className="session-title">{diagnostic && <span aria-hidden="true">⚠ </span>}{plainTitle(session.title)}</span><SubAgentBadge count={subAgents ?? 0} /></>;
 }
 

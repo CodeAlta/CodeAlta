@@ -1,4 +1,5 @@
 import { useState, useSyncExternalStore } from "react";
+import { ProviderIcon } from "../ProviderIcon";
 import { Button, HTMLSelect, Switch } from "@blueprintjs/core";
 import type { WorkItemsSettings } from "#neoastra";
 import type { MessageKey } from "../localization";
@@ -76,7 +77,7 @@ export function WorkItemSettings({ hub, providers = noProviders, loadModels = nu
           </HTMLSelect>)}
         {provider && <div className="work-settings-row"><span><strong>{t("Default provider and model")}</strong>
           <small>{t("What a new session runs with when the session that proposed the work is not known. Change it before starting, in the Work items tab.")}</small></span>
-          <div className="work-settings-default"><span data-default-run>{[provider.name, starts.modelId, starts.reasoningEffort].filter(Boolean).join(" · ")}</span>
+          <div className="work-settings-default"><span data-default-run className="with-logo"><ProviderIcon providerKey={provider.id} size={14} />{[provider.name, starts.modelId, starts.reasoningEffort].filter(Boolean).join(" · ")}</span>
             {onOpenProviders && <Button size="small" variant="outlined" onClick={onOpenProviders}>{t("Providers")}</Button>}</div></div>}
       </section>
       <section className="work-settings-group">

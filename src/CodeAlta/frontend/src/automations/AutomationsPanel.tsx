@@ -3,10 +3,12 @@ import { Alert, Button, Callout, InputGroup, Menu, MenuDivider, MenuItem, Popove
 import type { AutomationItem, AutomationRunItem, WorkspaceProject, WorkspaceSession } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
+import { ModelIcon } from "../ProviderIcon";
+import { TriggerIcon } from "./TriggerIcon";
 import { sessionTime, timelineTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
 import { AutomationEditor } from "./AutomationEditor";
-import { automationTemplates, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, runStatusLabel, runTone, runTriggerLabel, timelinePosition, timelineRows, triggerIcon, triggerTone,
+import { automationTemplates, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, runStatusLabel, runTone, runTriggerLabel, timelinePosition, timelineRows, triggerTone,
   waitsToBeAllowed,
   type AutomationForm, type AutomationScope, type AutomationTemplate } from "./automations";
 import type { AutomationsHub } from "./automationsHub";
@@ -101,7 +103,7 @@ function AutomationCard({ item, paused, selected, busy, now, onSelect, onRun, on
   </Menu>;
   return <li className="automation-card" data-selected={selected || undefined} data-off={!item.enabled || undefined}>
     <button type="button" className="automation-card-main" aria-pressed={selected} onClick={onSelect}>
-      <span className="automation-card-glyph" data-file-tone={tone}>{item.running ? <ActivitySpinner size={16} /> : <AppIcon name={triggerIcon(item.triggers[0]?.type)} size={18} />}</span>
+      <span className="automation-card-glyph" data-file-tone={tone}>{item.running ? <ActivitySpinner size={16} /> : <TriggerIcon type={item.triggers[0]?.type} size={18} />}</span>
       <span className="automation-card-text">
         <strong>{item.name}</strong>
         <span className="automation-card-when">{describeTriggers(item.triggers, t, locale)}</span>
@@ -110,7 +112,7 @@ function AutomationCard({ item, paused, selected, busy, now, onSelect, onRun, on
     {item.triggers.length > 0 && <Switch className="automation-card-switch" checked={item.enabled} disabled={busy} aria-label={t("Enabled")} title={t(item.enabled ? "Enabled" : "Disabled")}
       onChange={event => onToggle(event.currentTarget.checked)} />}
     <div className="automation-card-meta"><ScopeTag item={item} />
-      {item.provider && <span className="automation-chip"><AppIcon name="model" size={12} /><span>{item.model ?? item.provider}</span></span>}</div>
+      {item.provider && <span className="automation-chip"><ModelIcon modelId={item.model} providerKey={item.provider} size={12} /><span>{item.model ?? item.provider}</span></span>}</div>
     <div className="automation-card-foot">
       <span className="automation-card-state" data-problem={problem ? true : undefined} title={problem ?? next?.title}>{state}</span>
       {item.lastRun && <span className="automation-card-last" title={`${t(runStatusLabel(item.lastRun.status))} · ${last?.title ?? ""}`}><RunMark status={item.lastRun.status} />{last?.label}</span>}
@@ -170,7 +172,7 @@ function AutomationDetail({ hub, item, paused, busy, now, sessions, onRun, onEdi
   const waits = !item.problem && waitsToBeAllowed(item);
   return <section className="automation-detail" aria-label={item.name}>
     <header>
-      <span className="automation-card-glyph" data-file-tone={triggerTone(item.triggers[0]?.type)}><AppIcon name={triggerIcon(item.triggers[0]?.type)} size={20} /></span>
+      <span className="automation-card-glyph" data-file-tone={triggerTone(item.triggers[0]?.type)}><TriggerIcon type={item.triggers[0]?.type} size={20} /></span>
       <div><h3>{item.name}</h3><ScopeTag item={item} /></div>
       <Button intent="primary" disabled={busy || !!item.problem} loading={busy} icon={<AppIcon name="play" size={14} />} onClick={onRun}>{t("Run now")}</Button>
       <Button icon={<AppIcon name="edit" size={14} />} onClick={onEdit}>{t("Edit")}</Button>
@@ -184,7 +186,7 @@ function AutomationDetail({ hub, item, paused, busy, now, sessions, onRun, onEdi
     <dl className="automation-facts">
       <dt>{t("Starts")}</dt>
       <dd>{item.triggers.length === 0 ? t("When you run it") : <ul>{item.triggers.map((trigger, index) =>
-        <li key={index}><span data-file-tone={triggerTone(trigger.type)}><AppIcon name={triggerIcon(trigger.type)} size={13} /></span>{describeTrigger(trigger, t, locale)}</li>)}</ul>}</dd>
+        <li key={index}><span data-file-tone={triggerTone(trigger.type)}><TriggerIcon type={trigger.type} size={13} /></span>{describeTrigger(trigger, t, locale)}</li>)}</ul>}</dd>
       {item.triggers.length > 0 && <><dt>{t("Next run")}</dt>
         <dd>{waits ? t("Waits for you to allow it") : !item.enabled ? t("Disabled") : paused ? t("Paused") : next?.label ?? t("Waits for its event")}</dd></>}
       {item.repository && <><dt>{t("Repository")}</dt><dd>{item.repository}</dd></>}

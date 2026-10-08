@@ -1,6 +1,8 @@
 import { useContext, type ComponentProps, type ReactNode, type SyntheticEvent } from "react";
 import { Button, ButtonGroup, FormGroup, Menu, MenuItem, PopoverNext, Slider } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
+import { modelBrand } from "./brands";
+import { ModelIcon, ProviderIcon, useProviderBrand } from "./ProviderIcon";
 import { ComposerChrome } from "./composerChrome";
 import { PromptEditor } from "./PromptEditor";
 import { useShellLanguage } from "./shellLanguage";
@@ -24,8 +26,11 @@ export function ComposerSurface({ status, busy = false, children, className, edi
   </section>;
 }
 
-/** Display names of the current next-Send selection, shown on the collapsed chip. A model without reasoning has none. */
-export type ComposerSelectionSummary = Readonly<{ agent: string; provider: string; model: string; reasoning: string | null }>;
+/**
+ * Display names of the current next-Send selection, shown on the collapsed chip. A model without reasoning has none.
+ * The key of the provider and the id of the model choose their logos.
+ */
+export type ComposerSelectionSummary = Readonly<{ agent: string; provider: string; model: string; reasoning: string | null; providerKey?: string | null; modelId?: string | null }>;
 
 // Both draft and owned composers present their selection as one chip that opens this form.
 // Supplied controls retain their own catalog/selection authority; `locked` keeps the form
@@ -36,10 +41,15 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
   summary: ComposerSelectionSummary; locked?: boolean;
 }) {
   const { t } = useShellLanguage();
+  // The logo of the provider, and the one of the model when its family is another brand: a model of Anthropic
+  // served by another provider shows both.
+  const providerLogo = useProviderBrand(summary.providerKey);
+  const modelLogo = modelBrand(summary.modelId, providerLogo);
+  const ownModelLogo = modelLogo.icon !== null && modelLogo.icon !== providerLogo.icon;
   const form = <div className="composer-selection-form" role="group" aria-label={t("Session configuration")}>
     <FormGroup label={t("Agent prompt")} labelFor={`composer-agent-${sessionId}`}>{agent}</FormGroup>
-    <FormGroup label={t("Provider")}>{provider}</FormGroup>
-    <FormGroup label={t("Model")} labelFor={`composer-model-${sessionId}`}>{model}</FormGroup>
+    <FormGroup label={<span className="composer-selection-label"><ProviderIcon providerKey={summary.providerKey} size={14} />{t("Provider")}</span>}>{provider}</FormGroup>
+    <FormGroup label={<span className="composer-selection-label"><ModelIcon modelId={summary.modelId} providerKey={summary.providerKey} size={14} />{t("Model")}</span>} labelFor={`composer-model-${sessionId}`}>{model}</FormGroup>
     <FormGroup label={t("Reasoning")}>{reasoning}</FormGroup>
     <div className="composer-selection-links">
       <Button variant="minimal" size="small" icon={<AppIcon name="assistant" size={14} />} onClick={() => onOpenCatalog?.("prompts")}>{t("Browse agent prompts")}</Button>
@@ -52,8 +62,9 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
     <Button variant="minimal" className="composer-selection" aria-label={t("Session configuration")}
       title={t("Agent, model and reasoning for the next Send")} endIcon={<AppIcon name="chevronDown" size={14} />}>
       <span className="composer-selection-part"><AppIcon name="assistant" size={14} /><span>{summary.agent}</span></span>
-      <span className="composer-selection-part"><AppIcon name="model" size={14} /><span>{summary.provider}</span>
-        <span className="composer-selection-separator" aria-hidden="true">/</span><span>{summary.model}</span></span>
+      <span className="composer-selection-part"><ProviderIcon providerKey={summary.providerKey} size={14} fallback="model" /><span>{summary.provider}</span>
+        <span className="composer-selection-separator" aria-hidden="true">/</span>
+        {ownModelLogo && <ModelIcon modelId={summary.modelId} providerKey={summary.providerKey} size={14} />}<span>{summary.model}</span></span>
       {summary.reasoning && <span className="composer-selection-part"><AppIcon name="brain" size={14} /><span>{summary.reasoning}</span></span>}
     </Button>
   </PopoverNext>;

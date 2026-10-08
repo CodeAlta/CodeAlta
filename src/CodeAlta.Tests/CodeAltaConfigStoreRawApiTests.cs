@@ -48,6 +48,47 @@ public sealed class CodeAltaConfigStoreRawApiTests
     }
 
     [TestMethod]
+    public void TheIconAndTheColorOfAProvider_AreReadAsWritten_AndKeptByASave()
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            """
+            [providers.team]
+            type = "openai-chat"
+            api_url = "http://127.0.0.1:9999/v1"
+            api_key_env = "TEAM_KEY"
+            icon = " Mistral "
+            color = " #FA520F "
+
+            [providers.plain]
+            type = "openai-chat"
+            api_url = "http://127.0.0.1:9998/v1"
+            api_key_env = "PLAIN_KEY"
+            # Not the name of an icon this version draws, and not a color: the file is read all the same.
+            icon = "an icon of a later version"
+            color = "tomato"
+            """);
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+
+        var definitions = store.LoadGlobalProviderDefinitions(includeDisabled: true);
+        var team = definitions.Single(static definition => definition.ProviderKey == "team");
+        Assert.AreEqual(("mistral", "#FA520F"), (team.Icon, team.Color));
+        var plain = definitions.Single(static definition => definition.ProviderKey == "plain");
+        Assert.AreEqual(("an icon of a later version", "tomato"), (plain.Icon, plain.Color));
+
+        // A save of the definitions, as either frontend does after an edit of something else, keeps both.
+        team.Model = "model-b";
+        store.SaveGlobalProviderDefinitions(definitions);
+        var reloaded = store.LoadGlobalProviderDefinitions(includeDisabled: true);
+        Assert.AreEqual(("mistral", "#FA520F", "model-b"), (reloaded.Single(static definition => definition.ProviderKey == "team").Icon, reloaded.Single(static definition => definition.ProviderKey == "team").Color, reloaded.Single(static definition => definition.ProviderKey == "team").Model));
+        Assert.AreEqual("tomato", reloaded.Single(static definition => definition.ProviderKey == "plain").Color);
+
+        // The shipped providers name none: the frontend finds their icons by their keys.
+        Assert.IsTrue(CodeAltaConfigStore.LoadDefaultProviderDefinitions().All(static definition => definition.Icon is null && definition.Color is null));
+    }
+
+    [TestMethod]
     public void LoadGlobalProviderDefinitions_NormalizesProviderFirstProviders()
     {
         using var temp = TempDirectory.Create();

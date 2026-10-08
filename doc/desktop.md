@@ -1181,6 +1181,41 @@ scanned. A notes scan does not hold the journal gate, so it does not delay timel
 appends for the same session. Reload can perform a
 fresh durable read without restoring run/queue/interaction authority.
 
+## Brand icons
+
+The logos of brands (model providers, models, coding agents, issue trackers) are not part
+of the icon set of the app (`lucide-react`, through `AppIcon`), which draws outlines of things and has no
+logo. They come from two packages that hold only SVG files and have no dependency, taken as development
+dependencies: `@lobehub/icons-static-svg` (MIT, the AI brands, each as a one-color mark and often as a
+colored drawing) and `simple-icons` (CC0, Jira, GitLab, Git and others it lacks). The React package
+`@lobehub/icons` is not used: it depends on `antd` and `@lobehub/ui`. `npm run icons`
+(`frontend/scripts/generate-brand-icons.mjs`) copies the drawings of the brands listed in the script into
+`frontend/src/brandIcons.gen.ts`, which is committed: the page ships that text and nothing else of the two
+packages. The script refuses a file that holds anything but a drawing.
+
+- `BrandIcon` draws a logo: its colored drawing, else its one-color mark in the color of the brand
+  (`--brand-tint`, and `--brand-tint-dark` on a dark background), else in the color of the text, which is
+  how a black mark (OpenAI, GitHub, Anthropic) stays visible in both themes. The gradients of a drawing get
+  names of their own for each logo drawn.
+- `brands.ts` chooses the logo. For a provider: the `icon` of its definition, then a brand named by its
+  key, its name or the host of its API URL, then its adapter type; `openai-chat`, the protocol of many,
+  names none. For a model: the family its id names (`claude`, `gpt`, `gemini`...), else the logo of its
+  provider. For an issue tracker: its service (`github`, `gitlab`, `azure_devops`, `bitbucket`, `jira`).
+  For a plugin: its id. `icon` can also name one of the general icons of `symbolIcons.ts`, a list of
+  `lucide-react` icons by their names in that set, for a provider of no brand.
+- `ProviderIcon` and `ModelIcon` take the key of a provider and find the rest in
+  `ProviderBrandsContext`, filled from `configuration.snapshot`: its `providerBrands` lists every
+  definition of the file (key, type, name, icon, color), the disabled ones and the ones without credentials
+  included, so that a session keeps the logo of a provider that cannot run now. A provider of no known
+  brand keeps the icon the place had before.
+- Where they show: the session rows of the sidebar (the logo replaces the icon of a session; a session
+  started by another one or by an automation keeps that icon before it), the provider and the model of
+  the prompt, the Providers page (list, form, **Add provider** menu, and the **Icon** and **Icon color**
+  fields that write `icon` and `color`), the Models page, Session info, the usage window, the saved
+  sessions, the automations and their Jira trigger, the work items, the plugin and MCP server lists, the
+  source of the Issues tab and of the issue picker, and the Copilot tag. The provider and model lists of
+  the prompt are native selects, which cannot hold a picture: the logo is beside them.
+
 ## Settings
 
 ### Appearance

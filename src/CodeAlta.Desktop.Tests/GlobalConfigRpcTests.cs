@@ -249,6 +249,39 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
+    public async Task SaveProvider_WritesTheIconAndItsColor_AndLeavesThemOutWhenTheyFollowTheProvider()
+    {
+        await using var fixture = new Fixture(ProvidersConfig);
+        var listed = fixture.Service.Providers(new(Epoch));
+        Assert.IsTrue(listed.Providers.All(static provider => provider.Icon is null && provider.Color is null));
+        var edit = new GlobalConfigProviderEdit("local", "openai-chat", true, "Local", "model-a", null, "http://127.0.0.1:9999/v1", null, null, false);
+
+        // What is not the name of an icon or a color is refused, and nothing is written.
+        foreach (var refused in new[] { edit with { Icon = "two words" }, edit with { Icon = new string('a', 65) }, edit with { Color = "red" }, edit with { Color = "#12345" }, edit with { Color = "#gggggg" } })
+            Assert.AreEqual("invalid", fixture.Service.SaveProvider(new(Epoch, listed.Revision, "local", refused, false, false)).Status, refused.Icon + refused.Color);
+        Assert.AreEqual(ProvidersConfig, File.ReadAllText(fixture.ConfigPath), "Refused edits must not write.");
+
+        var saved = fixture.Service.SaveProvider(new(Epoch, listed.Revision, "local", edit with { Icon = " Flask-Conical ", Color = " #22B8CD " }, false, false));
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        var text = File.ReadAllText(fixture.ConfigPath);
+        StringAssert.Contains(text, "icon = \"flask-conical\"");
+        StringAssert.Contains(text, "color = \"#22B8CD\"");
+        StringAssert.Contains(text, "secret-value", "The other settings of the provider are kept.");
+        var after = fixture.Service.Providers(new(Epoch));
+        var local = after.Providers.Single(static provider => provider.Key == "local");
+        Assert.AreEqual(("flask-conical", "#22B8CD"), (local.Icon, local.Color));
+        Assert.IsNull(after.Providers.Single(static provider => provider.Key == "spare").Icon);
+
+        // An edit of something else keeps them only when it sends them: the form always does. Blank takes them out.
+        var cleared = fixture.Service.SaveProvider(new(Epoch, after.Revision, "local", edit with { Icon = " ", Color = "" }, false, false));
+        Assert.AreEqual("ok", cleared.Status, cleared.Message);
+        text = File.ReadAllText(fixture.ConfigPath);
+        Assert.IsFalse(text.Contains("icon =", StringComparison.Ordinal) || text.Contains("color =", StringComparison.Ordinal), text);
+        // The short form of a color is one too.
+        Assert.AreEqual("ok", fixture.Service.SaveProvider(new(Epoch, cleared.Revision, "local", edit with { Color = "#0af" }, false, false)).Status);
+    }
+
+    [TestMethod]
     public async Task SaveProvider_UpdatesOnlyTheEditedFieldsAndKeepsTheStoredSecret()
     {
         await using var fixture = new Fixture(ProvidersConfig);

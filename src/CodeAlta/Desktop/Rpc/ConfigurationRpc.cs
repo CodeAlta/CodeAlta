@@ -9,7 +9,8 @@ namespace CodeAlta.Desktop.Rpc;
 internal sealed class ConfigurationService(
     ModelProviderRegistry? providerRegistry = null,
     PluginRuntimeManager? pluginRuntime = null,
-    DesktopDefaultProvider? defaultProvider = null)
+    DesktopDefaultProvider? defaultProvider = null,
+    CatalogOptions? catalog = null)
 {
     private readonly string? _catalogRoot;
 
@@ -66,7 +67,7 @@ internal sealed class ConfigurationService(
                 plugins = configuredPlugins.Take(32).Select(value => new ConfigurationPlugin(
                     Bound(value.Key), Bound(value.Key), null, value.Value.Enabled == false ? "Disabled" : "Configured", 0)).ToArray();
                 return new ConfigurationSnapshot(providers, plugins, false, false,
-                    configuredProviders.Count > providers.Length, configuredPlugins.Count > plugins.Length);
+                    configuredProviders.Count > providers.Length, configuredPlugins.Count > plugins.Length) { ProviderBrands = Brands() };
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
             {
@@ -74,7 +75,29 @@ internal sealed class ConfigurationService(
             }
         }
         return new ConfigurationSnapshot(providers, plugins, providerRegistry is not null, pluginRuntime is not null,
-            providerDescriptors.Count > providers.Length, pluginInstances.Count > plugins.Length);
+            providerDescriptors.Count > providers.Length, pluginInstances.Count > plugins.Length) { ProviderBrands = Brands() };
+    }
+
+    // Every provider the configuration defines, enabled or not, with credentials or not: a session names its
+    // provider by key, and is shown with the icon of that provider whether or not the provider can run now.
+    private IReadOnlyList<ConfigurationProviderBrand> Brands()
+    {
+        var options = catalog ?? (_catalogRoot is null ? null : new CatalogOptions { GlobalRoot = _catalogRoot });
+        if (options is null) return [];
+        try
+        {
+            return [.. new CodeAltaConfigStore(options).LoadGlobalProviderDefinitions(includeDisabled: true)
+                .Where(static value => value.ProviderKey.Length is > 0 and <= 256)
+                .Take(64)
+                .Select(static value => new ConfigurationProviderBrand(
+                    value.ProviderKey, Bound(value.ProviderType ?? string.Empty), Bound(value.DisplayName ?? value.ProviderKey),
+                    BoundOptional(value.Icon), BoundOptional(value.Color)))];
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            // A configuration that cannot be read gives no icon: the page falls back to the key of each provider.
+            return [];
+        }
     }
 
     private static string Bound(string value) => value.Length <= 256 ? value : value[..256];
@@ -88,7 +111,19 @@ internal sealed record ConfigurationSnapshot(
     bool ProviderRuntimeAvailable,
     bool PluginRuntimeAvailable,
     bool ProvidersTruncated,
-    bool PluginsTruncated);
+    bool PluginsTruncated)
+{
+    /// <summary>What every provider of the configuration is shown with, whether or not it is registered.</summary>
+    public IReadOnlyList<ConfigurationProviderBrand> ProviderBrands { get; init; } = [];
+}
+
+/// <summary>What a provider is shown with: its name, and the icon and color its definition gives it.</summary>
+/// <param name="Key">The key of the provider.</param>
+/// <param name="Type">Its adapter type.</param>
+/// <param name="Name">Its name.</param>
+/// <param name="Icon">The id of its brand icon; null when the icon follows its key and type.</param>
+/// <param name="Color">The color of that icon; null for the colors of the icon.</param>
+internal sealed record ConfigurationProviderBrand(string Key, string Type, string Name, string? Icon, string? Color);
 internal sealed record ConfigurationProvider(
     string Id,
     string Name,

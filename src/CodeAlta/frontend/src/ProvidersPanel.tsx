@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ProviderIcon } from "./ProviderIcon";
 import type { ConfigurationProvider, ModelCatalogProbeRequest, ModelCatalogProbeResponse, ModelCatalogProvidersRequest, ModelCatalogProvidersResponse } from "#neoastra";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
@@ -93,12 +94,12 @@ export function ProvidersPanel({ epoch, read, probe, catalogProviders, holds, on
           {error && <p role="alert" className="error-text">{t(error)}</p>}
           {inventory?.providers.length === 0 && <p role="status">{t("No providers registered.")}</p>}
           {inventory?.providers.map(provider => <button type="button" key={provider.id} aria-pressed={providerId === provider.id}
-            onClick={() => select(provider.id)}><strong>{provider.name}</strong><small>{provider.id} · {provider.enabled ? provider.availability : t("Disabled")}</small></button>)}
+            onClick={() => select(provider.id)}><strong className="with-logo"><ProviderIcon providerKey={provider.id} known={{ type: provider.type, name: provider.name }} size={15} />{provider.name}</strong><small>{provider.id} · {provider.enabled ? provider.availability : t("Disabled")}</small></button>)}
           {inventory?.truncated && <p role="status">{t("Showing 32 providers; others are omitted.")}</p>}
         </section>
         <section className="model-catalog-results" aria-label={t("Provider details")}><h2>{t("Provider details")}</h2>
           {!selected ? <p role="status">{t("Choose a provider to see its cached status. Choosing does not run a test.")}</p> : <article className="model-catalog-detail">
-            <h3>{selected.name}</h3><dl>
+            <h3 className="with-logo"><ProviderIcon providerKey={selected.id} known={{ type: selected.type, name: selected.name }} size={18} />{selected.name}</h3><dl>
               <dt>{t("ID")}</dt><dd><code>{selected.id}</code></dd><dt>{t("Adapter type")}</dt><dd>{selected.type}</dd>
               <dt>{t("Enabled")}</dt><dd>{t(selected.enabled ? "Yes" : "No")}</dd><dt>{t("Configured default provider")}</dt><dd>{t(selected.isDefault ? "Yes" : "No")}</dd>
               <dt>{t("Configured default model")}</dt><dd>{selected.defaultModel ?? t("Not configured (not a discovered model)")}</dd>

@@ -1002,7 +1002,24 @@ dialog::backdrop { background: var(--scrim); }
 .provider-settings-actions { display: flex; align-items: center; gap: 8px; }
 .provider-settings-layout { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
 .provider-settings-list.bp6-card-list > .bp6-card { justify-content: space-between; gap: 10px; }
-.provider-settings-name { display: grid; gap: 2px; min-width: 0; }
+.provider-settings-name { display: grid; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.provider-settings-logo { display: inline-flex; flex: none; width: 20px; height: 20px; margin-inline-end: 10px; align-items: center; justify-content: center; }
+/* The logo of a brand: the colors of its drawing, else the color of the brand for the theme, else the color of the text. */
+.brand-icon, .symbol-icon { flex: none; }
+.brand-icon { color: var(--brand-tint-dark, inherit); }
+:root[data-theme="light"] .brand-icon { color: var(--brand-tint, inherit); }
+.provider-icon-button .bp6-button-text { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.provider-icon-list { display: grid; gap: 8px; width: 332px; max-width: calc(100vw - 32px); padding: 10px; }
+.provider-icon-scroll { display: grid; gap: 6px; max-height: 300px; overflow-y: auto; }
+.provider-icon-scroll h6 { margin: 4px 0 0; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.provider-icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 2px; }
+.provider-icon-grid .bp6-button { min-width: 0; padding: 6px; }
+.provider-color-swatch { width: 22px; height: 22px; margin: 4px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: none; cursor: pointer; }
+.provider-color-swatch::-webkit-color-swatch-wrapper { padding: 0; }
+.provider-color-swatch::-webkit-color-swatch { border: none; border-radius: 3px; }
+.provider-color-swatch[data-unset]::-webkit-color-swatch { background: repeating-linear-gradient(45deg, transparent 0 4px, var(--line) 4px 5px) !important; }
+.composer-selection-label, .with-logo { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.session-provider { display: inline-flex; }
 .provider-settings-name strong, .provider-settings-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .provider-settings-name small { color: var(--muted); }
 .provider-settings-tags { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
@@ -1238,7 +1255,8 @@ dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px
 .settings-editor-actions { display: flex; align-items: center; gap: 8px; }
 .settings-editor-layout { flex: 1 1 auto; display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; min-height: 0; }
 .settings-editor-list.bp6-card-list > .bp6-card, .settings-editor-rows.bp6-card-list > .bp6-card { justify-content: space-between; gap: 12px; }
-.settings-editor-name { display: grid; gap: 2px; min-width: 0; }
+.settings-editor-name { display: grid; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.settings-editor-logo { display: inline-flex; flex: none; width: 20px; height: 20px; align-items: center; justify-content: center; color: var(--muted); }
 .settings-editor-name strong, .settings-editor-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings-editor-rows .settings-editor-name small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
 .settings-editor-name small { color: var(--muted); }

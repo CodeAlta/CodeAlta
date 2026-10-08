@@ -8,6 +8,9 @@ import { hasSubscriptionUsage } from "./subscriptionUsage";
 import { providerDefault } from "./providerSignIn";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
+import { providerBrand } from "./brands";
+import { Logo, ProviderIcon } from "./ProviderIcon";
+import { ProviderColorInput, ProviderIconPicker } from "./ProviderIconFields";
 import { configReadNotice, configSaveNotice, type ConfigNotice } from "./configEditor";
 import { providerEdit, providerForm, providerFormDirty, providerProblem, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
 import { GuidedTour, type GuidedTourStep } from "./GuidedTour";
@@ -127,6 +130,10 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
   const edit = (change: Partial<ProviderForm>) => setForm(current => current ? { ...current, ...change } : current);
   // What a blank field falls back to: this provider's built-in values, then its adapter type's.
   const fallback = (field: keyof GlobalConfigProviderDefaults) => form ? providerDefault(field, form.type, original, listing?.typeDefaults ?? []) : null;
+  // The icon of the provider as the form has it, before it is saved: the one found for it, and the one chosen.
+  const logoSource = form ? { key: form.key, type: form.type, name: form.displayName || fallback("displayName"), apiUrl: form.apiUrl || fallback("apiUrl") || original?.effectiveApiUrl } : null;
+  const automaticLogo = logoSource && providerBrand(logoSource);
+  const shownLogo = logoSource && providerBrand({ ...logoSource, icon: form!.icon, color: form!.color });
 
   async function settle(run: () => Promise<{ status: string; message: string | null; providersApplied: number }>, select: string | null) {
     setBusy(true); setNotice(null); setDiagnostic(null);
@@ -191,7 +198,7 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
           // The providers CodeAlta knows and the user does not have yet are offered first: one click adds one with its key and type.
           ? <PopoverNext placement="bottom-end" content={<Menu className="provider-add-menu" aria-label={t("Add provider")}>
               <MenuDivider title={t("Built-in providers")} />
-              {listing.builtIn.map(entry => <MenuItem key={entry.key} icon={<AppIcon name="model" size={15} />} text={entry.name} label={entry.type} disabled={busy}
+              {listing.builtIn.map(entry => <MenuItem key={entry.key} icon={<ProviderIcon providerKey={entry.key} known={{ type: entry.type, name: entry.name }} size={15} fallback="model" />} text={entry.name} label={entry.type} disabled={busy}
                 onClick={() => addBuiltIn(entry.key)} />)}
               <MenuDivider />
               <MenuItem icon={<AppIcon name="plus" size={15} />} text={t("Custom provider…")} disabled={busy} onClick={() => choose(newProvider)} />
@@ -216,15 +223,17 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
         <CardList compact className="provider-settings-list" aria-label={t("Configured providers")}>
           {providers.map(provider => { const state = status(provider.key, provider.enabled); return <Card key={provider.key} interactive selected={selected === provider.key}
             data-provider-key={provider.key} aria-current={selected === provider.key ? "true" : undefined} onClick={() => choose(provider.key)}>
+            <span className="provider-settings-logo"><ProviderIcon providerKey={provider.key} size={20} fallback="model"
+              known={{ type: provider.type, name: provider.effectiveName, apiUrl: provider.effectiveApiUrl, icon: provider.icon, color: provider.color }} /></span>
             <span className="provider-settings-name"><strong>{provider.effectiveName}</strong><small>{provider.key} · {provider.type}</small></span>
             <span className="provider-settings-tags">{provider.key === (listing.startingProvider ?? listing.defaultProvider) && <Tag minimal round intent="primary" title={t("New sessions start with this provider.")}>{t("Default")}</Tag>}
               <Tag minimal round intent={state.intent}>{state.label}</Tag></span>
           </Card>; })}
-          {selected === newProvider && <Card interactive selected><span className="provider-settings-name"><strong>{form?.displayName || t("New provider")}</strong>
+          {selected === newProvider && <Card interactive selected><span className="provider-settings-logo">{shownLogo && <Logo brand={shownLogo} size={20} fallback="model" />}</span><span className="provider-settings-name"><strong>{form?.displayName || t("New provider")}</strong>
             <small>{form?.key || "…"} · {form?.type}</small></span><Tag minimal round intent="warning">{t("Unsaved changes")}</Tag></Card>}
           {providers.length === 0 && selected !== newProvider && <Card><span className="bp6-text-muted">{t("No providers are configured yet.")}</span></Card>}
         </CardList>
-        {form && <Section className="provider-settings-form" title={original ? original.effectiveName : t("New provider")}
+        {form && <Section className="provider-settings-form" icon={shownLogo ? <Logo brand={shownLogo} size={20} fallback="model" /> : undefined} title={original ? original.effectiveName : t("New provider")}
           subtitle={original ? `${original.key} · ${original.type}` : t("Not saved yet")}
           rightElement={<Switch checked={form.enabled} disabled={busy} label={t("Enabled")} alignIndicator="end"
             onChange={event => edit({ enabled: event.currentTarget.checked, makeDefault: event.currentTarget.checked && form.makeDefault })} />}>
@@ -236,6 +245,10 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
                 options={[...new Set([form.type, ...listing.providerTypes])]} /></FormGroup>
             <FormGroup label={t("Display name")} labelFor="provider-name">
               <DefaultedInput id="provider-name" value={form.displayName} fallback={fallback("displayName") ?? (form.key.trim() || null)} disabled={busy} onChange={displayName => edit({ displayName })} /></FormGroup>
+            <FormGroup label={t("Icon")} labelFor="provider-icon">
+              <ProviderIconPicker id="provider-icon" value={form.icon} automatic={automaticLogo!} shown={shownLogo!} disabled={busy} onChange={icon => edit({ icon })} /></FormGroup>
+            <FormGroup label={t("Icon color")} labelFor="provider-color">
+              <ProviderColorInput id="provider-color" value={form.color} disabled={busy} onChange={color => edit({ color })} /></FormGroup>
             <FormGroup label={t("Default model")} labelFor="provider-model">
               <DefaultedInput id="provider-model" value={form.model} fallback={fallback("model")} unset={t("First model listed")} disabled={busy} onChange={model => edit({ model })} /></FormGroup>
             <FormGroup label={t("Reasoning")} labelFor="provider-reasoning">

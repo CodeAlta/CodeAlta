@@ -63,6 +63,7 @@ export const boot = Object.freeze({ status: async () => bootStatus, appearance: 
 export const configuration = Object.freeze({ snapshot: async (): Promise<ConfigurationSnapshot> => ({
   providerRuntimeAvailable: true,
   pluginRuntimeAvailable: true,
+  providerBrands: [],
   providersTruncated: false,
   pluginsTruncated: false,
   providers: [

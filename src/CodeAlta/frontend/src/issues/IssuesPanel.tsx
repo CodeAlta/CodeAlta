@@ -3,6 +3,8 @@ import { Button, Callout, HTMLSelect, InputGroup, SegmentedControl, Tab, Tabs, T
 import type { issues as issuesService, IssueReadResponse, IssueRow, IssueSource, WorkspaceProject } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
+import { BrandIcon } from "../BrandIcon";
+import { serviceBrand } from "../brands";
 import { AppWindow } from "../AppWindow";
 import type { MessageKey } from "../localization";
 import { MarkdownContent } from "../MarkdownContent";
@@ -150,8 +152,8 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
       </HTMLSelect>
       {known.length > 1
         ? <SegmentedControl size="small" value={source?.service ?? ""} onValueChange={value => { setService(value); setSelected(null); }}
-            options={known.map(candidate => ({ value: candidate.service, label: candidate.name }))} />
-        : source && <span className="issues-source" title={source.location}><strong>{source.name}</strong><span>{source.location}</span></span>}
+            options={known.map(candidate => ({ value: candidate.service, label: candidate.name, icon: serviceBrand(candidate.service) ? <BrandIcon name={serviceBrand(candidate.service)!} size={14} /> : undefined }))} />
+        : source && <span className="issues-source" title={source.location}>{serviceBrand(source.service) && <BrandIcon name={serviceBrand(source.service)!} size={15} />}<strong>{source.name}</strong><span>{source.location}</span></span>}
       {kinds.length > 1 && <SegmentedControl size="small" value={shownKind} onValueChange={value => { setKind(value as IssueKind); setSelected(null); }}
         options={kinds.map(candidate => ({ value: candidate, label: t(kindLabel(candidate, source?.service, true)) }))} />}
       <InputGroup size="small" type="search" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} value={typed} disabled={!source}

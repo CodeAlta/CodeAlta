@@ -6,15 +6,15 @@ import { providerEdit, providerForm, providerFormDirty, providerProblem, runsOwn
 const types = ["openai-chat", "anthropic", "codex"];
 const local: GlobalConfigProvider = { key: "local", type: "openai-chat", enabled: true, displayName: "Local", effectiveName: "Local", model: "model-a",
   reasoningEffort: null, apiUrl: "http://127.0.0.1:9999/v1", effectiveApiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: null, hasApiKey: true,
-  defaults: { displayName: "local", model: null, reasoningEffort: null, apiUrl: null, apiKeyEnv: null } };
+  defaults: { displayName: "local", model: null, reasoningEffort: null, apiUrl: null, apiKeyEnv: null }, icon: null, color: null };
 
 test("a form starts from the written values, never from the stored secret", () => {
   const form = providerForm(local, "local", types);
   assert.deepEqual(form, { key: "local", type: "openai-chat", enabled: true, displayName: "Local", model: "model-a", reasoningEffort: "",
-    apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: true });
+    apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: true, icon: "", color: "" });
   assert.equal(providerForm(local, "other", types).makeDefault, false);
   assert.deepEqual(providerForm(null, "local", types), { key: "", type: "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "",
-    apiUrl: "", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: false });
+    apiUrl: "", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "" });
   assert.equal(providerFormDirty(form, form), false);
   assert.equal(providerFormDirty({ ...form, model: "model-b" }, form), true);
 });
@@ -30,18 +30,31 @@ test("validation names the first problem and accepts a complete form", () => {
   assert.equal(validateProviderForm({ ...form, key: "local" }, others, null), "Another provider already uses this key.", "a new provider cannot reuse a key");
   assert.equal(validateProviderForm({ ...form, apiUrl: "ftp://x" }, others, "local"), "The API URL must start with http:// or https://.");
   assert.equal(validateProviderForm({ ...form, enabled: false }, others, "local"), "Only an enabled provider can be the default.");
+  assert.equal(validateProviderForm({ ...form, color: "red" }, others, "local"), "A color is written as #rgb or #rrggbb.");
+  assert.equal(validateProviderForm({ ...form, color: " #0AF " }, others, "local"), null);
 });
 
 test("the wire edit sends blank fields as null and keeps an untouched secret", () => {
   const form = providerForm(local, "local", types);
   assert.deepEqual(providerEdit({ ...form, key: " Local ", model: "  " }), { key: "local", type: "openai-chat", enabled: true, displayName: "Local",
-    model: null, reasoningEffort: null, apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: null, apiKey: null, clearApiKey: false });
+    model: null, reasoningEffort: null, apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: null, apiKey: null, clearApiKey: false, icon: null, color: null });
   assert.equal(providerEdit({ ...form, apiKey: "new-secret" }).apiKey, "new-secret");
   const cleared = providerEdit({ ...form, apiKey: "ignored", clearApiKey: true });
   assert.equal(cleared.apiKey, null);
   assert.equal(cleared.clearApiKey, true);
   assert.equal(usesAccountSignIn("codex"), true);
   assert.equal(usesAccountSignIn("openai-chat"), false);
+});
+
+test("the icon and its color are written as chosen, and left out when they follow the provider", () => {
+  const chosen: GlobalConfigProvider = { ...local, icon: "mistral", color: "#FA520F" };
+  const form = providerForm(chosen, "local", types);
+  assert.deepEqual([form.icon, form.color], ["mistral", "#FA520F"]);
+  assert.deepEqual([providerEdit(form).icon, providerEdit(form).color], ["mistral", "#FA520F"]);
+  assert.equal(providerFormDirty({ ...form, icon: "rocket" }, form), true);
+  const cleared = providerEdit({ ...form, icon: " ", color: "" });
+  assert.deepEqual([cleared.icon, cleared.color], [null, null]);
+  assert.equal(providerEdit({ ...form, icon: " Rocket " }).icon, "rocket");
 });
 
 test("a provider that runs its own CLI sends no key and no endpoint", () => {

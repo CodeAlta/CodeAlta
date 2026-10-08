@@ -8,6 +8,7 @@
 .issues-toolbar > .bp6-input-group { flex: 0 1 300px; min-width: 200px; }
 .issues-source { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; max-width: 320px; font-size: 12.5px; white-space: nowrap; }
 .issues-source > strong { font-weight: 600; }
+.issues-source > .brand-icon { align-self: center; }
 .issues-source > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-family: var(--bp-typography-family-mono); font-size: 12px; }
 .issues-notice { margin-top: 10px; }
 .issues-more { margin: 8px 0 0; color: var(--muted); font-size: 12px; text-align: center; }
