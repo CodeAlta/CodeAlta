@@ -33,16 +33,20 @@ export function nextChoice(index: number, key: string, count: number): number {
   return step === 0 || index < 0 || index >= count ? -1 : (index + step + count) % count;
 }
 
-/** What the question about the closed window says: where the application stays when it keeps running. */
-export function closeQuestion(platform: string): MessageKey {
-  return platform === "macos" ? "With its window closed, CodeAlta stays in the menu bar and sessions keep running."
+/**
+ * What the question about the closed window says: where the application stays when it keeps running. On macOS
+ * that is the Dock when the application has no icon in the menu bar (`trayIcon` is false).
+ */
+export function closeQuestion(platform: string, trayIcon = true): MessageKey {
+  return platform === "macos" ? trayIcon ? "With its window closed, CodeAlta stays in the menu bar and sessions keep running."
+      : "With its window closed, CodeAlta stays in the Dock and sessions keep running."
     : platform === "linux" ? "With its window closed, CodeAlta stays in the system tray and sessions keep running."
     : "With its window closed, CodeAlta stays in the notification area and sessions keep running.";
 }
 
 /** Where the application stays when its window is closed, as each platform calls it. */
-export function keepRunningPlace(platform: string): MessageKey {
-  return platform === "macos" ? "CodeAlta stays in the menu bar. Sessions keep running."
+export function keepRunningPlace(platform: string, trayIcon = true): MessageKey {
+  return platform === "macos" ? trayIcon ? "CodeAlta stays in the menu bar. Sessions keep running." : "CodeAlta stays in the Dock. Sessions keep running."
     : platform === "linux" ? "CodeAlta stays in the system tray. Sessions keep running."
     : "CodeAlta stays in the notification area. Sessions keep running.";
 }

@@ -107,6 +107,14 @@ the repair of a configuration file) and where the desktop has no status area (so
 closing the window exits whatever the setting says; on macOS the Dock icon also brings the window
 back.
 
+`CodeAlta.app` on macOS has no icon in the menu bar: it stays in the Dock, whose icon brings the
+window back, and the question and the setting say so (`trayIcon` of the shell's preferences is
+false). The process of the bundle is its script, which became the tool (`exec`), and the menu bar of
+macOS 26 no longer takes it for the application the system started: it refuses the icon, AppKit asks
+again every second for as long as the application runs, and one of these requests can leave the
+window's thread waiting forever, a frozen window in front of sessions that keep running
+(`DesktopShell.HasTrayIcon`). `alta` started from a terminal keeps its icon in the menu bar.
+
 The question, like the questions of an exit, is shown in front of an open window of the application
 (Settings, the session browser): those windows are modal dialogs in the browser's top layer, and a
 question added to the page itself would be behind them, out of reach (`frontLayer`).

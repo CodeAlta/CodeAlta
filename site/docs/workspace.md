@@ -547,7 +547,7 @@ If the display the window was on is not connected any more, the window opens on 
 
 ### Notification area (desktop)
 
-Closing the desktop window asks whether CodeAlta keeps running or exits. **Keep running** hides the window and leaves CodeAlta and its sessions running, with an icon in the notification area: click the icon to show the window, or use its menu to exit. Tick **Remember my choice** to stop being asked.
+Closing the desktop window asks whether CodeAlta keeps running or exits. **Keep running** hides the window and leaves CodeAlta and its sessions running, with an icon in the notification area: click the icon to show the window, or use its menu to exit. On macOS, CodeAlta started as an application (the Applications folder, Launchpad, Spotlight, the Dock) stays in the Dock instead: click its Dock icon to show the window, and quit with ⌘Q. Tick **Remember my choice** to stop being asked.
 
 <figure class="alta-figure my-4" style="max-width: 30rem;">
   <img src="{{site.basepath}}/img/alta-desktop-close-question.webp" alt="CodeAlta Desktop asking Keep CodeAlta running? with Cancel, Exit CodeAlta and Keep running buttons and a Remember my choice check box" loading="lazy">

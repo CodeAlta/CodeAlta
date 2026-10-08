@@ -136,7 +136,7 @@ Only one CodeAlta instance can run on a profile at a time, desktop or TUI. CodeA
 
 A second `altatui` exits with the PID of the already-running instance because multiple instances would share session state unsafely. A second `alta` shows the window of the running desktop app instead. `alta --exit` asks the running desktop app to exit.
 
-The desktop app can keep running in the notification area after its window is closed. If the TUI reports a running instance and you see no window, look for the CodeAlta icon in the notification area, or run `alta --exit`.
+The desktop app can keep running in the notification area after its window is closed. If the TUI reports a running instance and you see no window, look for the CodeAlta icon in the notification area (on macOS, in the Dock), or run `alta --exit`.
 
 ## A prompt did not send
 

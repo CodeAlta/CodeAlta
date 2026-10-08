@@ -25,6 +25,12 @@ test("the place the application stays in is named as the platform names it", () 
   assert.ok(translate("en", keepRunningPlace("macos")).includes("menu bar"));
   assert.ok(translate("en", keepRunningPlace("linux")).includes("system tray"));
   assert.equal(keepRunningPlace("other"), keepRunningPlace("windows"));
+  // CodeAlta.app has no icon in the menu bar: it stays in the Dock, and only macOS has one.
+  assert.ok(translate("en", keepRunningPlace("macos", false)).includes("Dock"));
+  assert.ok(translate("en", closeQuestion("macos", false)).includes("Dock"));
+  assert.ok(translate("en", closeQuestion("macos")).includes("menu bar"));
+  assert.equal(keepRunningPlace("windows", false), keepRunningPlace("windows"));
+  assert.equal(closeQuestion("linux", false), closeQuestion("linux"));
 });
 
 test("the first start says where the application was added", () => {

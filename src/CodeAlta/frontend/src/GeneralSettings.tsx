@@ -32,7 +32,7 @@ export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, s
   sessionWidth?: number;
   setSessionWidth?: (value: number) => void;
   /** What closing the window does; absent where the application cannot stay anywhere without it. */
-  closing?: { behavior: CloseBehavior; platform: string; set: (value: CloseBehavior) => void } | null;
+  closing?: { behavior: CloseBehavior; platform: string; trayIcon?: boolean; set: (value: CloseBehavior) => void } | null;
   notices: PreferenceNotices;
 }) {
   const { t, locale, choice, issue, setLanguage } = useShellLanguage();
@@ -83,7 +83,7 @@ export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, s
       <Switch id="settings-rail-collapsed" className="settings-checkbox" checked={desktopCollapsed} onChange={event => setDesktopCollapsed(event.currentTarget.checked)} />
     </Field>
     {closing && <Field label={t("When the window is closed")} htmlFor="settings-on-close"
-      notice={closing.behavior === "keep" && <p className="settings-field-help">{t(keepRunningPlace(closing.platform))}</p>}>
+      notice={closing.behavior === "keep" && <p className="settings-field-help">{t(keepRunningPlace(closing.platform, closing.trayIcon))}</p>}>
       <HTMLSelect id="settings-on-close" value={closing.behavior} onChange={event => closing.set(closeBehavior(event.target.value))}>
         {closeBehaviors.map(behavior => <option key={behavior} value={behavior}>{t(closeBehaviorLabel(behavior))}</option>)}
       </HTMLSelect>

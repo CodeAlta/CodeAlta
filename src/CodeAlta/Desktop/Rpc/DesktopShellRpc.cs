@@ -143,7 +143,7 @@ internal sealed class DesktopShellService
     private DesktopShellPreferences Current() => _shell is null
         ? new("unavailable", DesktopPreferences.Name(DesktopCloseBehavior.Ask), false, Platform, false)
         : new("ok", DesktopPreferences.Name(_shell.OnClose), _shell.CanHide, Platform, _shell.EntryAdded, _shell.SessionWidth,
-            [.. _shell.SessionWidths().Select(static pair => new DesktopShellSessionWidth(pair.Key, pair.Value))]);
+            [.. _shell.SessionWidths().Select(static pair => new DesktopShellSessionWidth(pair.Key, pair.Value))], _shell.TrayAvailable);
 
     private static string Platform => OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
 }
@@ -187,8 +187,9 @@ internal sealed record DesktopShellRevealEntryResponse(string Status);
 /// <param name="EntryAdded">This start added the application to the desktop's applications.</param>
 /// <param name="SessionWidth">The user's setting: the width of the conversations, in percent of the space of a session.</param>
 /// <param name="SessionWidths">The sessions that are shown with a width of their own, set by an <c>alta appearance</c> command.</param>
+/// <param name="TrayIcon">The application has an icon in the notification area; without one on macOS it stays in the Dock.</param>
 internal sealed record DesktopShellPreferences(string Status, string OnClose, bool CanKeepRunning, string Platform, bool EntryAdded,
-    int SessionWidth = DesktopPreferences.DefaultSessionWidth, DesktopShellSessionWidth[]? SessionWidths = null);
+    int SessionWidth = DesktopPreferences.DefaultSessionWidth, DesktopShellSessionWidth[]? SessionWidths = null, bool TrayIcon = false);
 
 /// <summary>The width one session is shown with instead of the user's setting.</summary>
 internal sealed record DesktopShellSessionWidth(string SessionId, int Percent);

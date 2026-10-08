@@ -99,7 +99,7 @@ public sealed class DesktopShellTests
         // What the page reads: the names of the generated client.
         // Without a shell the width of the conversations is the whole space, and asking for another keeps it.
         Assert.AreEqual(("unavailable", 100), (service.SetSessionWidth(new(70, "session-1")).Status, service.SetSessionWidth(new(70)).SessionWidth));
-        Assert.AreEqual("""{"status":"unavailable","onClose":"ask","canKeepRunning":false,"platform":"windows","entryAdded":false,"sessionWidth":100,"sessionWidths":null}""",
+        Assert.AreEqual("""{"status":"unavailable","onClose":"ask","canKeepRunning":false,"platform":"windows","entryAdded":false,"sessionWidth":100,"sessionWidths":null,"trayIcon":false}""",
             JsonSerializer.Serialize(service.Preferences(new()) with { Platform = "windows" }, DesktopJsonContext.Default.DesktopShellPreferences));
         Assert.AreEqual("""{"kind":"session-width","runningSessions":0,"busyTerminals":0,"sessionWidth":60,"sessionId":"session-1"}""",
             JsonSerializer.Serialize(new DesktopShellEvent("session-width", 0, SessionWidth: 60, SessionId: "session-1"), DesktopJsonContext.Default.DesktopShellEvent));
@@ -225,6 +225,18 @@ public sealed class DesktopShellTests
         Assert.IsFalse(DesktopIntegration.AnnouncesEntry(added: true, macOS: true, DesktopIntegration.MacBundleIdentifier));
         Assert.IsFalse(DesktopIntegration.AnnouncesEntry(added: false, macOS: true, bundleIdentifier: null));
         Assert.IsFalse(DesktopIntegration.AnnouncesEntry(added: false, macOS: false, bundleIdentifier: null));
+    }
+
+    [TestMethod]
+    public void TrayIcon_IsNotAskedForByTheMacBundle()
+    {
+        // The menu bar refuses the icon of CodeAlta.app, whose process is the bundle's script become the tool,
+        // and AppKit asks again every second: one of these requests froze the window. The Dock keeps it.
+        Assert.IsFalse(DesktopShell.HasTrayIcon(macOS: true, DesktopIntegration.MacBundleIdentifier));
+        // `alta` started from a terminal is taken as it is, and the other platforms have no bundle.
+        Assert.IsTrue(DesktopShell.HasTrayIcon(macOS: true, bundleIdentifier: null));
+        Assert.IsTrue(DesktopShell.HasTrayIcon(macOS: false, bundleIdentifier: null));
+        Assert.IsTrue(DesktopShell.HasTrayIcon(macOS: false, DesktopIntegration.MacBundleIdentifier));
     }
 
     [TestMethod]

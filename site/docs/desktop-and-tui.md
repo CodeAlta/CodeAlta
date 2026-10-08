@@ -200,9 +200,9 @@ The window of a tool call follows the call while it runs. A command shows its ou
 
 ### Runs in the background
 
-Closing the window can keep CodeAlta running in the notification area, with its sessions. CodeAlta asks whether to keep running or to exit, and remembers the answer if you tick **Remember my choice**. Use the tray icon to open the window again or to exit. **Settings > Appearance > When the window is closed** changes the choice. Exiting while sessions are running asks for confirmation first.
+Closing the window can keep CodeAlta running in the notification area, with its sessions. CodeAlta asks whether to keep running or to exit, and remembers the answer if you tick **Remember my choice**. Use the tray icon to open the window again or to exit. On macOS, CodeAlta started from the Applications folder, Launchpad, Spotlight or the Dock has no icon in the menu bar: it stays in the Dock, and its Dock icon opens the window again. **Settings > Appearance > When the window is closed** changes the choice. Exiting while sessions are running asks for confirmation first.
 
-On macOS the menu bar has the standard items and shortcuts: **Quit CodeAlta** (⌘Q), **Hide** (⌘H), **Minimize** (⌘M), **Close** (⌘W), and **Undo**, **Redo**, **Cut**, **Copy**, **Paste** and **Select All** in the **Edit** menu. ⌘W closes the window as its close button does, with the same choice between staying in the menu bar and exiting; ⌘Q exits.
+On macOS the menu bar has the standard items and shortcuts: **Quit CodeAlta** (⌘Q), **Hide** (⌘H), **Minimize** (⌘M), **Close** (⌘W), and **Undo**, **Redo**, **Cut**, **Copy**, **Paste** and **Select All** in the **Edit** menu. ⌘W closes the window as its close button does, with the same choice between keeping CodeAlta running and exiting; ⌘Q exits.
 
 ### Updates from the app
 

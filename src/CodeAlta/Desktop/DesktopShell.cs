@@ -171,13 +171,27 @@ internal sealed class DesktopShell
     internal static DesktopCloseAction DecideExit(bool confirmed, int runningSessions, bool canAsk)
         => !confirmed && runningSessions > 0 && canAsk ? DesktopCloseAction.ConfirmExit : DesktopCloseAction.Exit;
 
-    /// <summary>Puts the icon in the notification area. Where the platform has none, closing the window exits.</summary>
+    /// <summary>
+    /// Whether the application puts an icon in the notification area. Not <c>CodeAlta.app</c> on macOS, which
+    /// stays in the Dock: its process is the script of the bundle that became the tool, which the menu bar no
+    /// longer takes for the application the system started. It refuses the icon, AppKit asks again every
+    /// second, and one of these requests can block the window's thread for good (seen on macOS 26).
+    /// </summary>
+    /// <param name="macOS">Whether the platform is macOS.</param>
+    /// <param name="bundleIdentifier">The identifier of the bundle the process was started as; null for none.</param>
+    internal static bool HasTrayIcon(bool macOS, string? bundleIdentifier) => !macOS || bundleIdentifier is null;
+
+    /// <summary>
+    /// Puts the icon in the notification area. Where the platform has none, closing the window exits, except on
+    /// macOS, where the Dock keeps the application.
+    /// </summary>
     internal async ValueTask StartTrayAsync(NeoDesktopServices services, bool developer)
     {
         ArgumentNullException.ThrowIfNull(services);
         try
         {
             if (services.Tray.Support.SupportLevel is NeoSupportLevel.None or NeoSupportLevel.Emulated) return;
+            if (OperatingSystem.IsMacOS() && !HasTrayIcon(macOS: true, DesktopIntegration.MacRunningBundleIdentifier())) return;
             RegisterCommands(services);
             services.Tray.Activated += (_, activation) => { if (!activation.Secondary) Show(); };
             var name = DisplayName(developer);

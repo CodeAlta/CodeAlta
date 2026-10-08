@@ -9,8 +9,10 @@ import { useShellLanguage } from "./shellLanguage";
  * remembered. Keep running is the default: it has the focus, and Enter chooses it from the check box as well.
  * The arrow keys move between the buttons; Escape leaves the window open.
  */
-export function CloseWindowDialog({ platform, onKeepRunning, onExit, onCancel }: {
+export function CloseWindowDialog({ platform, trayIcon, onKeepRunning, onExit, onCancel }: {
   platform: string;
+  /** False when the application has no icon in the notification area: on macOS it stays in the Dock. */
+  trayIcon?: boolean;
   /** The answers; each says whether it is to be remembered. */
   onKeepRunning: (remember: boolean) => void; onExit: (remember: boolean) => void; onCancel: () => void;
 }) {
@@ -35,7 +37,7 @@ export function CloseWindowDialog({ platform, onKeepRunning, onExit, onCancel }:
   return <Dialog isOpen className="close-window-dialog" title={t("Keep CodeAlta running?")} isCloseButtonShown={false} canOutsideClickClose={false}
     portalContainer={layer.current} onClose={cancel}>
     <DialogBody>
-      <p>{t(closeQuestion(platform))}</p>
+      <p>{t(closeQuestion(platform, trayIcon))}</p>
       <Checkbox checked={remember} label={t("Remember my choice")} onChange={event => setRemember(event.currentTarget.checked)}
         onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); keepRunning(); } }} />
     </DialogBody>

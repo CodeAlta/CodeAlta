@@ -2542,7 +2542,7 @@ function App() {
       {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, darker, setDarker,
         schemes: { colorScheme, setColorScheme, shownScheme, variant, customSchemes, library: schemeLibrary, preview: appearancePreview, platform: demoMode ? null : shellPreferences?.platform ?? null }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); },
         sessionWidth, setSessionWidth,
-        closing: shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, set: setOnClose } : null }} />
+        closing: shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, trayIcon: shellPreferences.trayIcon, set: setOnClose } : null }} />
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}
         update={owned ? appUpdateResult : undefined} onOpenReleaseNotes={openReleaseNotes} onInstallUpdate={installUpdate} />
       : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} revision={pluginRevision}
@@ -2628,7 +2628,7 @@ function App() {
     {/* A first start also opens the settings of the providers, with their own guide: this one waits for them to close. */}
     {entryGuide && !settingsOpen && <EntryAddedDialog onClose={() => setEntryGuide(false)}
       onShowInFinder={() => { void desktopShell.revealEntry({}, { timeoutMilliseconds: 15_000 }).catch(() => { /* The folder is named in the dialog. */ }); }} />}
-    {closeQuestion && <CloseWindowDialog platform={shellPreferences?.platform ?? "windows"} onKeepRunning={keepRunning} onExit={exitOnClose}
+    {closeQuestion && <CloseWindowDialog platform={shellPreferences?.platform ?? "windows"} trayIcon={shellPreferences?.trayIcon} onKeepRunning={keepRunning} onExit={exitOnClose}
       onCancel={() => setCloseQuestion(false)} />}
     {exiting && <UnsavedExitDialog names={exiting.tabs.flatMap(tab => fileEditors.unsaved(fileTabKey(tab)))} busy={exiting.busy}
       onSave={() => void saveAllAndExit(exiting.tabs)} onDiscard={() => { setExiting(null); quitApplication(); }}
