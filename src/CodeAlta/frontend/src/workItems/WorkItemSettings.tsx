@@ -2,6 +2,8 @@ import { useState, useSyncExternalStore } from "react";
 import { Button, HTMLSelect, Switch } from "@blueprintjs/core";
 import type { WorkItemsSettings } from "#neoastra";
 import type { MessageKey } from "../localization";
+import { SettingsFileLocations } from "../SettingsFileLocation";
+import { useSettingsFiles, type SettingsFilesApi } from "../settingsFiles";
 import { SettingsPage, SettingsUnavailable } from "../SettingsPage";
 import type { SettingsNotice } from "../settingsEditing";
 import { useShellLanguage } from "../shellLanguage";
@@ -16,7 +18,7 @@ const noProviders: readonly RunProvider[] = [];
  * which way of starting comes first, and what becomes of the tasks and the plans that are closed. A choice
  * is saved at once, in the configuration file of the user.
  */
-export function WorkItemSettings({ hub, providers = noProviders, loadModels = null, onOpenProviders }: {
+export function WorkItemSettings({ hub, providers = noProviders, loadModels = null, onOpenProviders, epoch = null, onOpenFile, filesApi }: {
   hub: WorkItemsHub;
   /** The enabled providers; the default one is what work starts with when its item names none. */
   providers?: readonly RunProvider[];
@@ -24,6 +26,12 @@ export function WorkItemSettings({ hub, providers = noProviders, loadModels = nu
   loadModels?: RunModelsLoader | null;
   /** Opens the settings of the providers, where the default is chosen. */
   onOpenProviders?: () => void;
+  /** The host epoch; without it the page does not say where the configuration file is. */
+  epoch?: string | null;
+  /** Called once the code editor was asked to show the configuration file: the window leaves Settings. */
+  onOpenFile?: () => void;
+  /** Says where the configuration file is and opens it; the host by default. */
+  filesApi?: SettingsFilesApi;
 }) {
   const { t } = useShellLanguage();
   const provider = defaultRunProvider(providers);
@@ -33,6 +41,8 @@ export function WorkItemSettings({ hub, providers = noProviders, loadModels = nu
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<SettingsNotice | null>(null);
   const settings = state.settings;
+  // The choices are kept in the configuration file of the user: the page says where that file is.
+  const files = useSettingsFiles({ page: "config", epoch, projectId: null, revision: settings, onOpened: onOpenFile, setNotice, api: filesApi });
   async function save(change: Partial<WorkItemsSettings>) {
     setBusy(true); setNotice(null);
     const saved = await hub.saveSettings({ ...settings, ...change });
@@ -50,6 +60,7 @@ export function WorkItemSettings({ hub, providers = noProviders, loadModels = nu
   return <SettingsPage className="work-settings" label={t("Work items")} group="Agent & models" title="Work items"
     description="The follow-up tasks agents propose, and plans." notice={notice} loading={!state.loaded} busy={busy} onReload={() => void hub.refresh()}>
     {!state.available ? <SettingsUnavailable loading={!state.loaded} icon="task" title="Work items are unavailable in this window." /> : <>
+      <SettingsFileLocations files={files} disabled={busy} />
       <section className="work-settings-group">
         <h2>{t("Proposals")}</h2>
         {row("Let agents propose follow-up tasks", "When an agent finds a real gap, a problem or an improvement beside what it was asked, it writes a task for you to decide on.",

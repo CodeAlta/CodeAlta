@@ -1511,6 +1511,7 @@ of a plugin does.
 | Page | Rows above the list | Rows of the selected item |
 | --- | --- | --- |
 | Configuration file | `~/.alta/config.toml`; the `.alta/config.toml` of the selected project | |
+| Worktrees, Work items | `~/.alta/config.toml`, which keeps their choices | |
 | MCP Servers | `~/.alta/mcp.json`, the `.alta/mcp.json` of the project, and the files of other tools that exist | |
 | Agent prompts | `~/.alta/prompts`, the `.alta/prompts` of the project, the agents folders of GitHub Copilot that exist, the shipped prompts (only read) | The file of the prompt |
 | Skills | `~/.alta/skills`, the `.alta/skills` of the project, and the common and GitHub Copilot folders that exist | The folder of the skill and its `SKILL.md` |

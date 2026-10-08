@@ -412,6 +412,7 @@ A path that is too long is cut at its start; point at it to see it whole.
 | Page | Files and folders |
 | --- | --- |
 | **Configuration file** | `~/.alta/config.toml`, and `.alta/config.toml` of the selected project |
+| **Worktrees**, **Work items** | `~/.alta/config.toml`, where their choices are saved |
 | **MCP Servers** | `~/.alta/mcp.json`, `.alta/mcp.json` of the project, and the files of other tools CodeAlta reads |
 | **Agent prompts** | `~/.alta/prompts`, `.alta/prompts` of the project, and the file of the selected prompt |
 | **Skills** | `~/.alta/skills`, `.alta/skills` of the project, and the folder of the selected skill |

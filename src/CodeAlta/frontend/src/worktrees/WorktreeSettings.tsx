@@ -3,6 +3,8 @@ import { Button, InputGroup, Radio, RadioGroup } from "@blueprintjs/core";
 import { worktrees } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import type { FolderPick } from "../folderPicker";
+import { SettingsFileLocations } from "../SettingsFileLocation";
+import { useSettingsFiles, type SettingsFilesApi } from "../settingsFiles";
 import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "../SettingsPage";
 import { useShellLanguage } from "../shellLanguage";
 
@@ -13,14 +15,20 @@ const separator = (path: string) => path.includes("\\") ? "\\" : "/";
  * Settings page for git worktrees: where the worktrees of sessions are created. A choice is saved at once, in
  * the configuration file of the user; the worktrees that exist stay where they are.
  */
-export function WorktreeSettings({ epoch, pick, api = worktrees }: {
+export function WorktreeSettings({ epoch, pick, api = worktrees, onOpenFile, filesApi }: {
   epoch: string | null;
   /** Asks the operating system for a folder, starting from the one given. */
   pick?: (initialDirectory: string | null) => Promise<FolderPick>;
   api?: Pick<typeof worktrees, "settings" | "saveSettings">;
+  /** Called once the code editor was asked to show the configuration file: the window leaves Settings. */
+  onOpenFile?: () => void;
+  /** Says where the configuration file is and opens it; the host by default. */
+  filesApi?: SettingsFilesApi;
 }) {
   const { t } = useShellLanguage();
-  const { listing, loading, busy, notice, reload, mutate } = useSettingsEditor(options => api.settings({ expectedEpoch: epoch }, options), `${epoch}`);
+  const { listing, loading, busy, notice, setNotice, reload, mutate } = useSettingsEditor(options => api.settings({ expectedEpoch: epoch }, options), `${epoch}`);
+  // The choice is kept in the configuration file of the user: the page says where that file is.
+  const files = useSettingsFiles({ page: "config", epoch, projectId: null, revision: listing, onOpened: onOpenFile, setNotice, api: filesApi });
   const [folder, setFolder] = useState("");
   useEffect(() => { setFolder(listing?.folder ?? ""); }, [listing?.folder]);
   const location: Location = listing?.location === "project" || listing?.location === "custom" ? listing.location : "global";
@@ -42,6 +50,7 @@ export function WorktreeSettings({ epoch, pick, api = worktrees }: {
   return <SettingsPage className="worktree-settings" label={t("Worktrees")} group="Agent & models" title="Worktrees"
     description="Where the git worktrees of sessions are created." notice={notice} loading={loading} busy={busy} onReload={reload}>
     {!listing ? <SettingsUnavailable loading={loading} icon="worktree" title="Worktrees unavailable" /> : <>
+      <SettingsFileLocations files={files} disabled={busy} />
       <RadioGroup className="worktree-settings-places" label={t("New worktrees go")} selectedValue={location} disabled={busy}
         onChange={event => {
           const next = event.currentTarget.value as Location;
