@@ -216,6 +216,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         AppUpdateService? appUpdate = null;
         ModelCatalogService? providers = null;
         ProviderLoginService? providerLogin = null;
+        ProviderUsageService? providerUsage = null;
         McpServersService? mcpServers = null;
         PluginUiService? pluginCommands = null;
         WorkspaceService? workspace = null;
@@ -348,6 +349,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 if (reminders is not null) await reminders.DisposeAsync();
                 if (providers is not null) await providers.DrainAsync();
                 if (providerLogin is not null) await providerLogin.CloseAsync(); // A running sign-in is canceled and joined.
+                providerUsage?.Dispose();
                 if (mcpServers is not null) await mcpServers.CloseAsync(); // So is a running MCP authorization.
                 if (pluginCommands is not null) await pluginCommands.CloseAsync(); // Plugin commands still waiting in a dialog end.
             });
@@ -531,6 +533,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddGlobalConfigService(globalConfig);
                     providerLogin = new ProviderLoginService(configStore, globalConfig, options.CatalogRoot!, epoch);
                     builder.AddProviderLoginService(providerLogin);
+                    providerUsage = new ProviderUsageService(configStore, options.CatalogRoot!, epoch);
+                    builder.AddProviderUsageService(providerUsage);
                     mcpServers = new McpServersService(host.ProjectCatalog, epoch, roots.Home);
                     builder.AddMcpServersService(mcpServers);
                     builder.AddAgentPromptsService(new AgentPromptsService(host.ProjectCatalog, epoch,
@@ -724,6 +728,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddConfigurationService(new ConfigurationService(options.CatalogRoot!));
             builder.AddGlobalConfigService(new GlobalConfigService());
             builder.AddProviderLoginService(new ProviderLoginService());
+            builder.AddProviderUsageService(new ProviderUsageService());
             builder.AddMcpServersService(new McpServersService());
             builder.AddAgentPromptsService(new AgentPromptsService());
             builder.AddSkillsService(new SkillsService());

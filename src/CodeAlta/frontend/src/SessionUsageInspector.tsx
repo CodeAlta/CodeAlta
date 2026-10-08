@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Button, Callout, Tag } from "@blueprintjs/core";
-import { sessionUsage, type SessionUsageObservation, type SessionUsageRateWindow, type SessionUsageResponse } from "#neoastra";
+import { providerUsage, sessionUsage, type SessionUsageObservation, type SessionUsageResponse } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { AppWindow } from "./AppWindow";
 import { compactTokens, contextSegments, contextUsage, groupedTokens, mergeUsageObservation, operationSegments, persistedContextUsage,
-  persistedOperation, persistedUsageFields, rateWindowSummary, usageIntent, usageMarkdown, type UsageSegment } from "./contextUsage";
+  persistedOperation, persistedUsageFields, usageIntent, usageMarkdown, type UsageSegment } from "./contextUsage";
+import { UsageLimitList, usageNote, useProviderUsage } from "./UsageLimits";
+import { limitsMarkdown, liveLimitsAreCurrent, planLabel, providerLimits, sessionLimits } from "./subscriptionUsage";
 import { usageMessage, validateUsage, type UsageTarget } from "./sessionUsage";
 import type { createMutationCapability } from "./sessionOperations";
 import { useShellLanguage } from "./shellLanguage";
@@ -33,12 +35,13 @@ function UsageCard({ title, aside, children }: { title: ReactNode; aside?: React
 
 /**
  * Compact context-usage meter for the composer bar, with a details window that carries what the TUI
- * usage popup shows: context pressure, the last operation's token breakdown, rate limits and the
- * provider's session totals. It reads the last observed usage when the session is shown and again
+ * usage popup shows: context pressure, the last operation's token breakdown, the usage of the subscription and the
+ * provider's session totals. The usage of the subscription is what the last turns reported while that is recent;
+ * otherwise the provider is asked, when the window opens and on a refresh only. It reads the last observed usage when the session is shown and again
  * (at most every few seconds) when `refreshKey` changes; until the host has an observation it falls
  * back to the last persisted usage record of the loaded timeline.
  */
-export function SessionUsageInspector({ target, capability, refreshKey, persisted, provider, model }: {
+export function SessionUsageInspector({ target, capability, refreshKey, persisted, provider, model, subscription = providerUsage }: {
   target: UsageTarget; capability: ReturnType<typeof createMutationCapability>;
   /** Changes when a new observation is likely (run state or live revision). */
   refreshKey?: string;
@@ -46,6 +49,8 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
   persisted?: string | null;
   /** Session provider and selected model, shown until an operation reports its own model. */
   provider?: string | null; model?: string | null;
+  /** Reads the usage of the subscription of the provider, for a session whose turns reported none. */
+  subscription?: Pick<typeof providerUsage, "read">;
 }) {
   const { t } = useShellLanguage();
   const trigger = useRef<HTMLButtonElement>(null);
@@ -133,15 +138,17 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
     operation.initiator && t("initiator {initiator}", { initiator: operation.initiator }),
     operation.durationMs && Number.isFinite(Number(operation.durationMs)) && t("duration {duration} ms", { duration: String(Math.round(Number(operation.durationMs))) }),
     operation.cost && t("cost {cost}", { cost: operation.cost })].filter((value): value is string => !!value) : [];
-  const rate = (window: SessionUsageRateWindow) => rateWindowSummary(window, { used: value => t("{percent}% used", { percent: value }),
-    window: minutes => t("{minutes}m window", { minutes }), resets: time => t("resets {time}", { time }) });
-  const rateRow = (name: MessageKey, window: SessionUsageRateWindow | null | undefined) => window && <div className="usage-rate">
-    <span className="usage-rate-name">{t(name)}</span>
-    <span className="usage-rate-bar" data-intent={usageIntent(window.usedPercent ?? null)} aria-hidden="true"><span style={{ width: `${window.usedPercent ?? 0}%` }} /></span>
-    <span className="usage-rate-text">{rate(window) || "—"}</span></div>;
+  // What the turns of the session reported is shown while it is recent; otherwise the provider is asked.
+  const live = useMemo(() => sessionLimits(limits), [limits]);
+  const liveCurrent = liveLimitsAreCurrent(live, updated, Date.now());
+  const asked = useProviderUsage(target.epoch, provider ?? null, open && allowed && !liveCurrent, subscription);
+  const reading = asked.response?.status === "ok" && asked.response.limits.length > 0 ? asked.response : null;
+  const shownLimits = liveCurrent || !reading ? live : providerLimits(reading.limits);
+  const plan = liveCurrent || !reading ? limits?.planType ?? null : reading.plan;
+  const subscriptionNote = !shownLimits.length && asked.response?.supported ? usageNote(asked.response) : null;
   async function copy() {
-    const markdown = usageMarkdown({ provider: provider ?? null, model: modelName, usage, messages, window: observation?.window ?? null,
-      operation, rateLimits: limits, sessionTotal: total });
+    const markdown = [usageMarkdown({ provider: provider ?? null, model: modelName, usage, messages, window: observation?.window ?? null,
+      operation, rateLimits: limits, sessionTotal: total }), ...(liveCurrent || !reading ? [] : limitsMarkdown(shownLimits, plan, Date.now()))].join("\n");
     try { await navigator.clipboard.writeText(markdown); setCopied(true); } catch { setCopied(false); }
   }
   const operations = operationSegments(operation);
@@ -158,7 +165,7 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
       onCancel={event => { event.preventDefault(); setOpen(false); }} onKeyDown={event => event.stopPropagation()}
       headerActions={<>
         <Button variant="minimal" size="small" icon={<AppIcon name={copied ? "check" : "copy"} size={15} />} aria-label={t("Copy as Markdown")} title={t("Copy as Markdown")} onClick={() => void copy()} />
-        <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={15} />} disabled={pending} aria-label={t("Refresh usage")} title={t("Refresh usage")} onClick={read} /></>}>
+        <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={15} />} disabled={pending} aria-label={t("Refresh usage")} title={t("Refresh usage")} onClick={() => { read(); if (!liveCurrent) asked.refresh(); }} /></>}>
       <div className="context-usage-details">
         <header className="context-usage-subject">
           <div><strong>{provider ?? t("session provider")}</strong>{modelName && <span>{modelName}</span>}</div>
@@ -177,8 +184,9 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
           {operations.length ? <UsageBreakdown segments={operations} label={operation.label ?? t("Last operation")} />
             : <p className="usage-card-note">{t("No token counts were reported for this operation.")}</p>}
         </UsageCard>}
-        {limits && <UsageCard title={t("Limits")} aside={`${limits.name ?? t("Rate limits")} · ${limits.planType ?? t("plan unknown")}`}>
-          {rateRow("Primary", limits.primary)}{rateRow("Secondary", limits.secondary)}
+        {(shownLimits.length > 0 || subscriptionNote || asked.loading && !liveCurrent) && <UsageCard title={t("Subscription usage")} aside={planLabel(plan)}>
+          {shownLimits.length > 0 ? <UsageLimitList limits={shownLimits} />
+            : <p className="usage-card-note">{subscriptionNote ? t(subscriptionNote.key, subscriptionNote.tool ? { tool: subscriptionNote.tool } : undefined) : t("Reading the usage…")}</p>}
         </UsageCard>}
         {total && <UsageCard title={t("Session total")} aside={t("{used} tokens", { used: groupedTokens(total.totalTokens) })}>
           <dl className="context-usage-grid">

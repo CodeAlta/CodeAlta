@@ -1182,13 +1182,30 @@ dialog:has(> .app-window) .app-window-body :is(.reminder-editor, .reminder-recov
 .usage-breakdown [data-segment="cachedInput"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="cachedInput"] { background: var(--usage-cachedInput); }
 .usage-breakdown [data-segment="reasoning"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="reasoning"] { background: var(--usage-reasoning); }
 .context-usage[data-intent] .context-usage-meter > span, .context-usage-headline { transition: color .2s ease; }
-.usage-rate { display: grid; grid-template-columns: 84px minmax(60px, 1fr) minmax(0, 2fr); align-items: center; gap: 10px; font-size: 12px; }
-.usage-rate-name { color: var(--muted); }
-.usage-rate-bar { position: relative; height: 6px; overflow: hidden; border-radius: 3px; background: var(--usage-headroom); }
-.usage-rate-bar > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--accent); }
-.usage-rate-bar[data-intent="warning"] > span { background: #d1980b; }
-.usage-rate-bar[data-intent="danger"] > span { background: var(--red); }
-.usage-rate-text { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+/* The usage of a subscription: one meter per limit, in the usage window of a session and on the Providers page. */
+.subscription-limits { display: grid; gap: 14px; }
+.subscription-limit { display: grid; gap: 6px; }
+.subscription-limit-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 13px; }
+.subscription-limit-name { font-weight: 600; }
+.subscription-limit-name small { margin-left: 8px; color: var(--muted); font-size: 12px; font-weight: 400; }
+.subscription-limit-head strong { font-variant-numeric: tabular-nums; font-weight: 650; }
+.subscription-limit[data-intent="warning"] .subscription-limit-head strong { color: #d1980b; }
+.subscription-limit[data-intent="danger"] .subscription-limit-head strong { color: var(--red); }
+.subscription-limit-bar { position: relative; height: 8px; border-radius: 4px; background: var(--usage-headroom); }
+.subscription-limit-bar > span { position: absolute; inset: 0 auto 0 0; min-width: 3px; border-radius: inherit; background: var(--accent); transition: width .3s ease; }
+.subscription-limit[data-intent="warning"] .subscription-limit-bar > span { background: #d1980b; }
+.subscription-limit[data-intent="danger"] .subscription-limit-bar > span { background: var(--red); }
+/* How far the period has gone: a fill that is past the mark uses the limit faster than the time goes by. */
+.subscription-limit-bar > i { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--text); opacity: .6; }
+.subscription-limit-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.subscription-limit-foot > span:last-child { margin-left: auto; text-align: right; }
+.subscription-limit-foot small { font-size: inherit; }
+.subscription-limit-foot small::before { content: " \00b7  "; white-space: pre; }
+.provider-usage { display: grid; gap: 12px; margin: 2px 0 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.provider-usage > header { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.provider-usage h4 { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; font-weight: 650; }
+.provider-usage-spacer { flex: 1; }
+.provider-usage-note { margin: 0; color: var(--muted); font-size: 12.5px; }
 .usage-card .context-usage-grid > div { background: var(--panel); }
 
 /* Session info window: field tables without the legacy inner padding, and a quiet provenance note. */

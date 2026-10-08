@@ -379,6 +379,44 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task TheTwoWindowsOfThePlan_AreReportedTogether_WhenTheCliSendsThem()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        cli.OnUserMessage = static (process, user) =>
+        {
+            process.EmitInit();
+            process.EmitStreamEvent(new JsonObject { ["type"] = "message_start", ["message"] = new JsonObject { ["id"] = "msg_1" } });
+            process.EmitTextStream("msg_1", 0, "an", "swer");
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.TextBlock("answer")));
+            process.EmitMessageStop();
+            process.Emit(new JsonObject
+            {
+                ["type"] = "rate_limit_event",
+                ["rate_limit_info"] = new JsonObject
+                {
+                    ["status"] = "allowed", ["rateLimitType"] = "seven_day", ["utilization"] = 0.52, ["resetsAt"] = 1_800_500_000,
+                    ["unifiedWindows"] = new JsonObject
+                    {
+                        ["five_hour"] = new JsonObject { ["utilization"] = 0.06, ["resetsAt"] = 1_800_000_000 },
+                        ["seven_day"] = new JsonObject { ["utilization"] = 0.52, ["resetsAt"] = 1_800_500_000 },
+                    },
+                },
+            });
+            process.EmitResult("answer", user);
+            return Task.CompletedTask;
+        };
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+
+        var response = await executor.ExecuteTurnAsync(CreateRequest([User("one")]), static (_, _) => ValueTask.CompletedTask, static (_, _) => ValueTask.CompletedTask).WaitAsync(Timeout);
+
+        // The five hours first and the week second, whichever of them is the one that limits now.
+        var limits = response.Usage!.RateLimits!;
+        Assert.AreEqual(new AgentRateLimitWindow(6, DateTimeOffset.FromUnixTimeSeconds(1_800_000_000), 300), limits.Primary);
+        Assert.AreEqual(new AgentRateLimitWindow(52, DateTimeOffset.FromUnixTimeSeconds(1_800_500_000), 7 * 24 * 60), limits.Secondary);
+        Assert.AreEqual("seven_day", limits.Name);
+    }
+
+    [TestMethod]
     public async Task ReasoningAndLimits_AreReported()
     {
         var cli = new ClaudeCodeFakeCli();
@@ -426,6 +464,8 @@ public sealed class ClaudeCodeTurnExecutorTests
         CollectionAssert.AreEqual(response.AssistantPartContentIds!.ToArray(), new[] { deltas[0].ContentId, deltas[1].ContentId });
 
         Assert.AreEqual(91, response.Usage!.RateLimits!.Primary!.UsedPercent);
+        Assert.AreEqual(300, response.Usage.RateLimits.Primary.WindowDurationMinutes, "A window the CLI names says how long it is.");
+        Assert.IsNull(response.Usage.RateLimits.Secondary);
         Assert.AreEqual(0.01, response.Usage.LastOperation!.Cost);
         // The input that was not cached, what was read from and written to the cache, and the output of the whole
         // message: the statistics of a turn add them up.

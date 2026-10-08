@@ -225,7 +225,27 @@ Implementation notes verified against `OpenAIResponsesTurnExecutor` and `OpenAIC
 
 Relevant config keys for `type = "codex"` include `auth_source`, `account_id`, `max_concurrent_requests`, `text_verbosity`, `service_tier`, `include_encrypted_reasoning`, `model_discovery`, `response_transport`, `send_responses_beta_header`, `send_installation_id`, `installation_id_source`, and `experimental`.
 
+### Usage of the plan
+
+The sign-in of CodeAlta is not given the usage of the ChatGPT plan: the answers to its turns carry no
+`x-codex-*` limit header, and the usage endpoint of the ChatGPT backend refuses its token. The parser
+of those headers stays for the day they are sent. `CodexAccountUsage` reads the usage by asking the
+Codex CLI of OpenAI instead: it starts `codex app-server` (found on the `PATH`), sends `initialize`,
+`account/read` and `account/rateLimits/read`, and stops it. The answer is used only when the CLI is
+signed in with a ChatGPT plan of the same e-mail address as the provider (`tool_signed_out`
+otherwise, `tool_missing` without the CLI). CodeAlta never reads `auth.json` of the CLI and never
+calls the ChatGPT backend itself. The app-server schema is not a stable contract: every field is read
+leniently.
+
 ## Direct HTTP `copilot` provider
+
+`CopilotAccountUsage` reads the quotas of the billing period from `GET
+https://api.<host>/copilot_internal/user` with the GitHub token the provider stores (or the one of
+`github_token_env`): `quota_snapshots` (`premium_interactions`, `chat`, `completions`), counted in AI
+credits when `token_based_billing` is set and in requests otherwise, and `monthly_quotas` with
+`limited_user_quotas` for a free plan. The endpoint is the one the Copilot extension of an editor
+reads; it is not documented, so what is missing is left out. A Copilot token of the environment
+(`copilot_token_env`) has no GitHub account to ask.
 
 The `copilot` provider type registers direct HTTP access through `CodeAlta.Agent.Copilot`. Supported auth sources are device-flow, a GitHub-token environment variable, or a provider-token environment variable. Device-flow and GitHub-token auth exchange for a provider token and cache CodeAlta-owned credentials under the global state root.
 
@@ -382,6 +402,16 @@ args = ["--add-dir", "/shared/specs"]  # optional; added to the command line
 - `ExitPlanMode` and tools other than commands and edits are allowed without a CodeAlta prompt.
 - Images and PDFs of a prompt are sent as attachments; other files are passed as text.
 - Changing the instructions or the tools during a conversation does not change the system prompt the CLI recorded.
+
+### Usage of the plan
+
+`ClaudeCodeAccountUsage` starts the CLI as the model list does (no session is saved), sends
+`initialize` and the control request `get_usage` with `skip_behaviors`, and reads `rate_limits`:
+`five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`, `model_scoped` and `extra_usage`, with
+`subscription_type` as the plan. The request is not part of the documented contract of the CLI: an
+error answer or an answer without limits is "not available". During a turn, `rate_limit_event` fills
+the two windows of the session usage from `unifiedWindows` (five hours first, the week second) when
+the CLI sends them, and the window that limits otherwise.
 
 ## Anthropic, Google, and Mistral providers
 

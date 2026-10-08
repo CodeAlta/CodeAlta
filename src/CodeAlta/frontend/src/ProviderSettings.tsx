@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Callout, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Section, SectionCard, Switch, Tag, type Intent } from "@blueprintjs/core";
-import { globalConfig, providerLogin, type GlobalConfigProviderDefaults, type GlobalConfigProvidersResponse, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse,
+import { globalConfig, providerLogin, providerUsage, type GlobalConfigProviderDefaults, type GlobalConfigProvidersResponse, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse,
   type ModelCatalogProvidersRequest, type ModelCatalogProvidersResponse } from "#neoastra";
 import { ProviderAccount } from "./ProviderAccount";
+import { ProviderUsagePanel } from "./UsageLimits";
+import { hasSubscriptionUsage } from "./subscriptionUsage";
 import { providerDefault } from "./providerSignIn";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
@@ -33,9 +35,11 @@ function DefaultedInput({ id, value, fallback, unset, disabled, onChange }: {
  * Settings page for model providers: the configured definitions on the left, an edit form on the right.
  * Saving writes the global configuration and re-registers the providers in the running host.
  */
-export function ProviderSettings({ epoch, config = globalConfig, login = providerLogin, readRuntime, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed }: {
+export function ProviderSettings({ epoch, config = globalConfig, login = providerLogin, usage = providerUsage, readRuntime, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed }: {
   epoch: string; config?: Pick<typeof globalConfig, "providers" | "saveProvider" | "deleteProvider" | "addBuiltInProvider">;
   login?: Pick<typeof providerLogin, "status" | "login" | "logout">;
+  /** Reads the usage of the subscription of a provider that has one. */
+  usage?: Pick<typeof providerUsage, "read">;
   readRuntime: (request: ModelCatalogProvidersRequest, options: CallOptions) => Promise<ModelCatalogProvidersResponse>;
   probe: (request: ModelCatalogProbeRequest, options: CallOptions) => Promise<ModelCatalogProbeResponse>;
   onOpenModels: () => void; onOpenConfiguration: () => void; onApplied?: () => void;
@@ -243,6 +247,8 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
                   {original?.hasApiKey && <Checkbox checked={form.clearApiKey} disabled={busy} label={t("Remove the stored key")}
                     onChange={event => edit({ clearApiKey: event.currentTarget.checked, apiKey: "" })} />}</FormGroup>
               </>}
+            {original && original.type === form.type && hasSubscriptionUsage(form.type)
+              && <ProviderUsagePanel key={original.key} epoch={epoch} providerKey={original.key} api={usage} />}
             <Checkbox className="provider-settings-wide" checked={form.makeDefault} disabled={busy || !form.enabled} label={t("Use as the default provider for new sessions")}
               onChange={event => edit({ makeDefault: event.currentTarget.checked })} />
           </SectionCard>

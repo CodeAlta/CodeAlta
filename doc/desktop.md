@@ -706,6 +706,28 @@ across events, so the window keeps the newest value of each field seen on the sa
 starts over when the attachment changes. Copilot quota snapshots, named Codex limits and compaction
 details are not shown.
 
+**Subscription usage.** The window shows the limits of the subscription as meters (`UsageLimitList`,
+`subscriptionUsage.ts`): the two rate-limit windows of the last observation while that observation is
+at most 15 minutes old (`liveLimitsAreCurrent`), and otherwise the answer of `providerUsage.read` for
+the provider of the session, which is asked when the window opens and on **Refresh usage** only. A
+limit is named after the length of its window (5 hours, a day, a week, a month) or after what the
+provider counts; the mark on a meter is the share of the period that has gone by.
+
+**The `providerUsage` RPC.** `read(expectedEpoch, key, refresh)` returns the usage of the subscription
+behind a configured provider: `plan`, `observedAt` and at most 16 `limits` (`id`, `name`,
+`usedPercent`, `resetsAt`, `windowMinutes`, `used`, `total`, `unit`, `unlimited`, `remaining`, in
+whole numbers). `supported` is false, with status `ok`, for a provider type that is not Codex, Copilot
+or Claude Code. Other statuses: `signed_out`, `tool_missing` and `tool_signed_out` (with `tool`, the
+command-line program that is asked: it is not installed, or not signed in with the account of the
+provider), `not_available`, `failed`, and the codes of a provider that cannot be resolved. An answer
+is kept for a minute per provider, a failure and a refreshed answer for five seconds, and concurrent
+requests for one provider ask it once. `ConfiguredProviderUsage` (Hosting) reads it: Codex through
+`codex app-server` (`account/read`, then `account/rateLimits/read`, for the same e-mail address as the
+sign-in of CodeAlta), Copilot from `copilot_internal/user` with the stored GitHub token, Claude Code
+through the `get_usage` control request of its CLI. No model turn is sent, and the credentials of the
+two CLIs are never read. The Providers page shows the answer in the **Usage** section of a saved
+provider (`ProviderUsagePanel`).
+
 ## Timeline
 
 ### Timeline cards

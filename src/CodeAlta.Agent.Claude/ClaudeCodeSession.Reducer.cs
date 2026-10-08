@@ -508,16 +508,29 @@ internal sealed partial class ClaudeCodeSession
         var type = ClaudeCodeJson.GetString(info, "rateLimitType") ?? ClaudeCodeJson.GetString(info, "rate_limit_type");
         var utilization = ClaudeCodeJson.GetDouble(info, "utilization");
         var resetsAt = ClaudeCodeJson.GetInt64(info, "resetsAt") ?? ClaudeCodeJson.GetInt64(info, "resets_at");
+        // The window that limits now, and how long it is when the CLI names it.
+        var limiting = new AgentRateLimitWindow(
+            UsedPercent: utilization is { } used ? (int)Math.Round(Math.Clamp(used, 0d, 1d) * 100d) : null,
+            ResetsAt: resetsAt is > 0 ? DateTimeOffset.FromUnixTimeSeconds(resetsAt.Value) : null,
+            WindowDurationMinutes: type switch
+            {
+                ClaudeCodeAccountUsage.FiveHour => 5 * 60,
+                { } week when week.StartsWith(ClaudeCodeAccountUsage.SevenDay, StringComparison.Ordinal) => 7 * 24 * 60,
+                _ => null,
+            });
+        // A newer CLI also sends the two windows of the plan together: the five hours first, then the week.
+        ClaudeCodeJson.TryGetObject(info, "unifiedWindows", out var windows);
+        var fiveHour = ReadUnifiedWindow(windows, ClaudeCodeAccountUsage.FiveHour, 5 * 60);
+        var sevenDay = ReadUnifiedWindow(windows, ClaudeCodeAccountUsage.SevenDay, 7 * 24 * 60);
         _rateLimits = new AgentRateLimitSummary(
             Name: type,
-            Primary: new AgentRateLimitWindow(
-                UsedPercent: utilization is { } used ? (int)Math.Round(Math.Clamp(used, 0d, 1d) * 100d) : null,
-                ResetsAt: resetsAt is > 0 ? DateTimeOffset.FromUnixTimeSeconds(resetsAt.Value) : null),
+            Primary: fiveHour ?? (sevenDay is null ? limiting : null),
+            Secondary: sevenDay,
             Label: type is null ? "Claude usage limit" : $"Claude usage limit ({type.Replace('_', ' ')})");
         if (status is "allowed_warning" or "rejected")
         {
             var text = status == "rejected" ? "reached" : "nearly reached";
-            var until = _rateLimits.Primary?.ResetsAt is { } reset
+            var until = limiting.ResetsAt is { } reset
                 ? string.Create(CultureInfo.InvariantCulture, $" It resets at {reset.ToLocalTime():HH:mm}.")
                 : string.Empty;
             await onSessionUpdate(
@@ -526,6 +539,14 @@ internal sealed partial class ClaudeCodeSession
                 .ConfigureAwait(false);
         }
     }
+
+    private static AgentRateLimitWindow? ReadUnifiedWindow(JsonElement windows, string name, long minutes)
+        => ClaudeCodeJson.TryGetObject(windows, name, out var window) && ClaudeCodeJson.GetDouble(window, "utilization") is { } used
+            ? new AgentRateLimitWindow(
+                UsedPercent: (int)Math.Round(Math.Clamp(used, 0d, 1d) * 100d),
+                ResetsAt: ClaudeCodeJson.GetInt64(window, "resetsAt") is > 0 and var at ? DateTimeOffset.FromUnixTimeSeconds(at) : null,
+                WindowDurationMinutes: minutes)
+            : null;
 
     private void ReadResultUsage(JsonElement result)
     {

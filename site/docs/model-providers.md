@@ -69,6 +69,33 @@ Both apps edit the same providers and share the same credentials, so a provider 
 
 Each **Default** checkbox indicates that the field inherits its provider default rather than a custom override. Omitted settings stay marked as Default when you reopen or refresh the dialog; for example, a Codex entry containing only `type = "codex"` leaves its optional settings at their defaults. Uncheck Default to supply an override, or check it to remove the override when saving.
 
+## Usage of a subscription
+
+Codex, Copilot and Claude Code are subscriptions with limits. CodeAlta Desktop shows how much of each limit is used and when it starts over:
+
+- on the **Providers** page of Settings, in the **Usage** section of the provider;
+- in the [context usage](workspace.md#context-usage-popup) of a session, under **Subscription usage**.
+
+<figure class="alta-figure my-4" style="max-width: 44rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-provider-usage.webp" alt="The Usage section of a provider with a meter for the 5-hour limit and the weekly limits" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Usage section of a provider: one meter per limit, with the time left before it starts over.</figcaption>
+</figure>
+
+Each limit is a meter. Its fill is what is used; the small mark on it shows how far the period has gone, so a fill that is past the mark uses the limit faster than time goes by. A meter turns orange from 75% and red from 90%.
+
+{.table}
+| Provider | What is shown | Where it comes from |
+|---|---|---|
+| Codex | The windows of the ChatGPT plan (5 hours, a week), the limits of a model, the credits | The Codex CLI of OpenAI, which CodeAlta asks (`codex` on the `PATH`, signed in with the same account) |
+| Copilot | The AI credits or premium requests of the month, chat and completions | GitHub, with the sign-in of the provider |
+| Claude Code | The 5-hour window, the week, the limits of a model, the extra usage | The Claude Code CLI, which CodeAlta asks |
+
+CodeAlta asks when you open the page or the context usage, and when you select **Refresh usage**: never in the background. An answer is kept for a minute.
+
+For Codex and Claude Code, CodeAlta asks the command-line program of the provider and never reads its credentials. When that program is not installed, or when the Codex CLI is signed in with another account, the Usage section says so. To see the usage of a ChatGPT plan, install the Codex CLI of OpenAI and run `codex login`.
+
+In a session, the limits that the last turns reported are shown while they are recent. Otherwise CodeAlta asks the provider when the window opens.
+
 ## Advanced TOML reference
 
 Global provider entries live under `[providers.<provider-key>]`. Provider keys are normalized to lower case; `codex` and `copilot` also receive their default provider type when `type` is omitted. Supported canonical provider types are `codex`, `copilot`, `xai`, `openai-chat`, `openai-responses`, `azure-openai`, `anthropic`, `google-genai`, and `vertex-ai`.
