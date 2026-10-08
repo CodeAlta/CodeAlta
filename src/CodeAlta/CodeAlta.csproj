@@ -33,12 +33,16 @@
     <!-- The window's own icon (Alt+Tab, task switcher): the executable's icon resource does not reach the native window. -->
     <!-- These are read beside the application: Pack="false" keeps the copies NuGet adds for content files out of each package. -->
     <Content Include="../../img/alta.ico" Link="alta.ico" CopyToOutputDirectory="PreserveNewest" Pack="false" />
-    <!-- The same icon for the other desktops: the window, tray and launcher on Linux, the menu bar item, the
-         Dock and the application bundle on macOS, where the icon family keeps the margin of the system's
-         icon grid. img/make-icons.py derives them from CodeAlta.png. -->
+    <!-- The same icon for the other desktops: the window, tray and launcher on Linux; on macOS the menu bar
+         item, the Dock of an application started without its bundle (alta-dock.png) and the application
+         bundle, whose icon family keeps the margin of the system's icon grid up to macOS 15 (alta.icns) and
+         fills its canvas from macOS 26, where the system shapes it (alta-full.icns). img/make-icons.py derives
+         them from CodeAlta.png. -->
     <Content Include="../../img/alta.png" Link="alta.png" CopyToOutputDirectory="PreserveNewest" Pack="false" />
     <Content Include="../../img/alta-tray.png" Link="alta-tray.png" CopyToOutputDirectory="PreserveNewest" Pack="false" />
     <Content Include="../../img/alta.icns" Link="alta.icns" CopyToOutputDirectory="PreserveNewest" Pack="false" />
+    <Content Include="../../img/alta-full.icns" Link="alta-full.icns" CopyToOutputDirectory="PreserveNewest" Pack="false" />
+    <Content Include="../../img/alta-dock.png" Link="alta-dock.png" CopyToOutputDirectory="PreserveNewest" Pack="false" />
     <!-- The user guide of the site, for the agents: they answer questions about CodeAlta from it and guide the
          user in the window. Its pages, and the pictures of the desktop application the pages show. -->
     <Content Include="../../site/docs/**/*.md" Link="content/user-guide/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Pack="false" />

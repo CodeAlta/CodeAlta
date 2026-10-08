@@ -116,16 +116,17 @@ internal sealed class DesktopWindowChrome : IAsyncDisposable
         });
 
     /// <summary>
-    /// The icon file beside the application for a platform. On macOS it is the icon family, whose tile keeps
-    /// the margin of the system's icon grid: the Dock draws an icon as large as its canvas, so the full-bleed
-    /// tile of the other desktops would look bigger than its neighbours.
+    /// The icon file beside the application for a platform. On macOS it is a picture whose tile keeps the
+    /// margin of the system's icon grid: the Dock draws a picture that the application sets as large as its
+    /// canvas, so the full-bleed tile of the other desktops would look bigger than its neighbours.
     /// </summary>
-    internal static string WindowIconFile(bool windows, bool macOS) => windows ? "alta.ico" : macOS ? "alta.icns" : "alta.png";
+    internal static string WindowIconFile(bool windows, bool macOS) => windows ? "alta.ico" : macOS ? "alta-dock.png" : "alta.png";
 
     /// <summary>
-    /// Whether the running application gives the system its own image as icon. Not on macOS when it was
-    /// started as an application bundle: the Dock already draws the icon of the bundle, sized and shaped like
-    /// its neighbours, and macOS 26 draws an image that the application sets smaller, on a grey tile.
+    /// Whether the running application gives the system its own picture as icon. Not on macOS when it was
+    /// started as an application bundle: the Dock already draws the icon of the bundle, to which macOS 26
+    /// gives the shape and the edge of its neighbours, and a picture that the application sets replaces it.
+    /// A process started by its executable has the icon of a plain executable without one.
     /// </summary>
     /// <param name="macOS">Whether the platform is macOS.</param>
     /// <param name="bundleIdentifier">The identifier of the bundle the process was started as; null for none.</param>

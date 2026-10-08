@@ -20,18 +20,26 @@ public sealed class DesktopWindowChromeTests
     }
 
     [TestMethod]
-    public void WindowIcon_IsThePaddedIconFamilyOnMacOS()
+    public void WindowIcon_IsThePaddedPictureOnMacOS()
     {
-        // The Dock draws an icon as large as its canvas: the full-bleed tile of the other desktops looks oversized there.
-        Assert.AreEqual("alta.icns", DesktopWindowChrome.WindowIconFile(windows: false, macOS: true));
+        // The Dock draws a picture set by the application as large as its canvas: the full-bleed tile of the other
+        // desktops looks oversized there. A PNG, because the window services refuse any file but .ico and .png.
+        Assert.AreEqual("alta-dock.png", DesktopWindowChrome.WindowIconFile(windows: false, macOS: true));
         Assert.AreEqual("alta.ico", DesktopWindowChrome.WindowIconFile(windows: true, macOS: false));
         Assert.AreEqual("alta.png", DesktopWindowChrome.WindowIconFile(windows: false, macOS: false));
+        // An icon family (.icns) was refused without a word, and the Dock showed the icon of a plain executable.
+        foreach (var (windows, macOS) in new[] { (true, false), (false, true), (false, false) })
+        {
+            var file = DesktopWindowChrome.WindowIconFile(windows, macOS);
+            CollectionAssert.Contains(new[] { ".ico", ".png" }, Path.GetExtension(file), file);
+            Assert.IsTrue(File.Exists(Path.Combine(AppContext.BaseDirectory, file)), file);
+        }
     }
 
     [TestMethod]
     public void WindowIcon_IsLeftToTheBundleOnMacOS()
     {
-        // macOS 26 draws an image set by the running application smaller than the icon of its bundle, on a grey tile.
+        // The Dock draws the icon of the bundle, which macOS 26 shapes like its neighbours: a picture set by the application would replace it.
         Assert.IsFalse(DesktopWindowChrome.AppliesWindowIcon(macOS: true, DesktopIntegration.MacBundleIdentifier));
         Assert.IsTrue(DesktopWindowChrome.AppliesWindowIcon(macOS: true, bundleIdentifier: null));
         Assert.IsTrue(DesktopWindowChrome.AppliesWindowIcon(macOS: false, bundleIdentifier: null));

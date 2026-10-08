@@ -17,7 +17,8 @@ namespace CodeAlta.Desktop;
 /// </summary>
 /// <remarks>
 /// Only a tool installed with <c>dotnet tool install -g</c> is integrated; a build output or a local tool
-/// leaves the desktop alone. The files are rewritten when the version or the launcher's path changed.
+/// leaves the desktop alone. The files are rewritten when the version or the launcher's path changed, and on
+/// macOS when the system now wants the other icon of the bundle.
 /// </remarks>
 internal static class DesktopIntegration
 {
@@ -91,7 +92,9 @@ internal static class DesktopIntegration
             if (!File.Exists(start)) return false;
             var folder = Path.Combine(dataRoot, "integration");
             var stamp = Path.Combine(folder, "installed.txt");
-            var current = version + "\n" + start;
+            // The icon of the macOS bundle depends on the system: an upgrade of macOS writes the bundle again.
+            var bundleIcon = OperatingSystem.IsMacOS() ? MacBundleIconFile(OperatingSystem.IsMacOSVersionAtLeast(26)) : null;
+            var current = version + "\n" + start + (bundleIcon is null ? string.Empty : "\n" + bundleIcon);
             var target = EntryPath();
             if (target is null) return false;
             var existed = File.Exists(target) || Directory.Exists(target);
@@ -105,7 +108,7 @@ internal static class DesktopIntegration
                 var pin = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData) is { Length: > 0 } data ? WindowsTaskbarPin(data) : null;
                 if (pin is not null && File.Exists(pin)) WriteWindowsShortcut(pin, start, icon);
             }
-            else if (OperatingSystem.IsMacOS()) WriteMacBundle(target, launcher, version, Path.Combine(AppContext.BaseDirectory, "alta.icns"));
+            else if (bundleIcon is not null) WriteMacBundle(target, launcher, version, Path.Combine(AppContext.BaseDirectory, bundleIcon));
             else WriteLinuxEntry(target, launcher, CopyIcon(folder, "alta.png"));
             File.WriteAllText(stamp, current);
             LogManager.GetLogger("CodeAlta.Desktop").Info($"Desktop entry written: {target}");
@@ -134,6 +137,15 @@ internal static class DesktopIntegration
         return Path.Combine(string.IsNullOrWhiteSpace(data) || !Path.IsPathFullyQualified(data) ? Path.Combine(home, ".local", "share") : data,
             "applications", "codealta.desktop");
     }
+
+    /// <summary>
+    /// The icon family beside the application that becomes the icon of the macOS bundle. From macOS 26 the
+    /// system gives every icon its own rounded shape, at the size of its neighbours, but only to a picture
+    /// that is opaque up to its edges: it shrinks any other onto a grey tile. Earlier versions draw the
+    /// picture as it is, so there the tile has its own shape and the margin of the system's icon grid.
+    /// </summary>
+    /// <param name="shapedBySystem">Whether the system shapes the icon: macOS 26 and later.</param>
+    internal static string MacBundleIconFile(bool shapedBySystem) => shapedBySystem ? "alta-full.icns" : "alta.icns";
 
     /// <summary>The <c>Info.plist</c> of the macOS bundle.</summary>
     internal static string MacInfoPlist(string version)

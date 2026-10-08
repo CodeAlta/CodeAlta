@@ -196,6 +196,31 @@ public sealed class DesktopShellTests
     }
 
     [TestMethod]
+    public void MacBundleIcon_IsOpaqueUpToItsEdgesWhereTheSystemShapesIt()
+    {
+        Assert.AreEqual("alta.icns", DesktopIntegration.MacBundleIconFile(shapedBySystem: false));
+        Assert.AreEqual("alta-full.icns", DesktopIntegration.MacBundleIconFile(shapedBySystem: true));
+
+        // macOS 26 shrinks an icon onto a grey tile as soon as a pixel of its edges is not opaque: the pictures of
+        // this family have no alpha channel at all. Each entry is a type, a length and a PNG, whose header names
+        // its color type in its 26th byte: 2 is color without alpha.
+        var family = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "alta-full.icns"));
+        CollectionAssert.AreEqual("icns"u8.ToArray(), family[..4]);
+        Assert.AreEqual(family.Length, (int)System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(family.AsSpan(4)));
+        var entries = 0;
+        for (var at = 8; at < family.Length; entries++)
+        {
+            var length = (int)System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(family.AsSpan(at + 4));
+            var picture = family.AsSpan(at + 8, length - 8);
+            CollectionAssert.AreEqual(new byte[] { 0x89, (byte)'P', (byte)'N', (byte)'G' }, picture[..4].ToArray());
+            Assert.AreEqual(2, picture[25], System.Text.Encoding.ASCII.GetString(family, at, 4));
+            Assert.IsFalse(picture.IndexOf("tRNS"u8) >= 0, "A transparency chunk makes pixels transparent without an alpha channel.");
+            at += length;
+        }
+        Assert.AreEqual(5, entries);
+    }
+
+    [TestMethod]
     public void MacBundle_IsAScriptThatBecomesTheInstalledTool()
     {
         var plist = DesktopIntegration.MacInfoPlist("1.2.3+build<&>");

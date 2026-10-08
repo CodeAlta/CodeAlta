@@ -204,14 +204,26 @@ or the launcher's path changes. The first time, a notice in the window says wher
   the installed tool (`exec`). It starts the tool through the user's login shell so that it gets the
   PATH of a terminal (git, node, the .NET runtime), which an application started from the Finder
   does not have. Nothing is signed or downloaded: the bundle is created locally, so it is not
-  quarantined. If the tool is uninstalled, the bundle says so when opened. The bundle's icon is
-  `alta.icns`: its tile keeps the margin of the system's icon grid (824 of 1024 points, over a soft
-  shadow), because the Dock draws an icon as large as its canvas and the full-bleed tile of the
-  other desktops would look bigger than its neighbours. `img/make-icons.py` derives it from
-  `img/CodeAlta.png`. An application started as the bundle leaves that icon to the system, which
-  sizes and shapes it like its neighbours: macOS 26 draws an image that the running application sets
-  smaller, on a grey tile. Only a process started by its executable (`alta` in a terminal, a build
-  output) sets `alta.icns` itself, as it has no bundle to take an icon from.
+  quarantined. If the tool is uninstalled, the bundle says so when opened.
+
+  The icon in the Dock has three pictures, which `img/make-icons.py` derives from
+  `img/CodeAlta.png`, because the Dock draws a picture in three ways:
+
+  - From macOS 26 the system gives the icon of a bundle its own rounded shape and edge, at the size
+    of its neighbours, but only when the picture is opaque up to its edges: any other is shrunk onto
+    a grey tile. The bundle's icon is then `alta-full.icns`, the tile without its rounded corners and
+    without an alpha channel.
+  - Up to macOS 15 the icon of a bundle is drawn as it is. The bundle's icon is then `alta.icns`,
+    whose tile keeps its shape and the margin of the system's icon grid (824 of 1024 points, over a
+    soft shadow): a tile that fills the canvas would look bigger than its neighbours.
+  - A picture that the running application sets is drawn as it is on every version. A process
+    started by its executable (`alta` in a terminal, a build output) has no bundle to take an icon
+    from, and sets `alta-dock.png`, the tile with the same margin. It is a PNG because the window
+    services take no other file than `.ico` and `.png`.
+
+  An application started as the bundle sets nothing: the Dock already draws the bundle's icon, and a
+  picture of its own would replace the shape the system gave it. The bundle is written again when
+  the version of macOS now asks for the other icon family.
 - **Linux:** `codealta.desktop` in `~/.local/share/applications` (or `$XDG_DATA_HOME`).
 
 On macOS and Linux the entry starts the tool's launcher (`alta` in the .NET tools folder), so a tool
