@@ -77,7 +77,7 @@ internal sealed class GlobalConfigService
         if (request.Content is null || request.Content.Length > MaximumContentLength)
             return new(false, "The configuration exceeds the editor limit.", null, null);
         var result = CodeAltaConfigStore.ValidateGlobalConfigContent(request.Content);
-        return new(result.IsValid, Bound(result.Message), result.Line, result.Column);
+        return new(result.IsValid, Bound(result.Message), result.Line, result.Column) { Warning = Bound(result.Warning) };
     }
 
     /// <summary>
@@ -151,7 +151,13 @@ internal sealed class GlobalConfigService
                 var builtIn = defaults.Template.Values.Where(entry => !providers.Any(provider => string.Equals(provider.Key, entry.ProviderKey, StringComparison.OrdinalIgnoreCase)))
                     .Select(entry => new GlobalConfigBuiltInProvider(Bound(entry.ProviderKey)!, Bound(entry.ProviderType) ?? string.Empty, defaults.For(entry).DisplayName ?? entry.ProviderKey))
                     .OrderBy(static entry => entry.Name, StringComparer.OrdinalIgnoreCase).ToArray();
-                return new("ok", revision, Bound(document.Chat?.DefaultProvider?.Trim().ToLowerInvariant()), providers, ProviderTypes, ReasoningEfforts, defaults.Types, builtIn);
+                // The providers of a newer version: not listed, not saved over, and said to be there.
+                var unsupported = document.UnsupportedProviders.Take(MaximumProviders)
+                    .Select(static provider => new GlobalConfigUnsupportedProvider(Bound(provider.ProviderKey)!, Bound(provider.ProviderType)!)).ToArray();
+                return new("ok", revision, Bound(document.Chat?.DefaultProvider?.Trim().ToLowerInvariant()), providers, ProviderTypes, ReasoningEfforts, defaults.Types, builtIn)
+                {
+                    Unsupported = unsupported,
+                };
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
@@ -410,13 +416,28 @@ internal sealed class GlobalConfigService
 internal sealed record GlobalConfigReadRequest(string? ExpectedEpoch);
 internal sealed record GlobalConfigReadResponse(string Status, string? Content, string? Revision);
 internal sealed record GlobalConfigValidateRequest(string? Content);
-internal sealed record GlobalConfigValidationResponse(bool Valid, string? Message, int? Line, int? Column);
+internal sealed record GlobalConfigValidationResponse(bool Valid, string? Message, int? Line, int? Column)
+{
+    /// <summary>What a valid configuration leaves out: the providers whose type this version does not know.</summary>
+    public string? Warning { get; init; }
+}
 internal sealed record GlobalConfigSaveRequest(string? ExpectedEpoch, string? Content, string? ExpectedRevision, bool ApplyProviders);
 internal sealed record GlobalConfigSaveResponse(string Status, string? Revision, string? Message, int? Line, int? Column, int ProvidersApplied);
 internal sealed record GlobalConfigProvidersRequest(string? ExpectedEpoch);
 internal sealed record GlobalConfigProvidersResponse(string Status, string? Revision, string? DefaultProvider,
     IReadOnlyList<GlobalConfigProvider> Providers, IReadOnlyList<string> ProviderTypes, IReadOnlyList<string> ReasoningEfforts,
-    IReadOnlyList<GlobalConfigProviderTypeDefaults> TypeDefaults, IReadOnlyList<GlobalConfigBuiltInProvider> BuiltIn);
+    IReadOnlyList<GlobalConfigProviderTypeDefaults> TypeDefaults, IReadOnlyList<GlobalConfigBuiltInProvider> BuiltIn)
+{
+    /// <summary>
+    /// The providers of the file whose type this version does not know (a newer version wrote them): they are
+    /// not among <see cref="Providers"/>, and saving keeps their sections as they are.
+    /// </summary>
+    public IReadOnlyList<GlobalConfigUnsupportedProvider> Unsupported { get; init; } = [];
+}
+
+/// <param name="Key">The provider key.</param>
+/// <param name="Type">The type as the file writes it.</param>
+internal sealed record GlobalConfigUnsupportedProvider(string Key, string Type);
 
 /// <summary>A provider CodeAlta ships a configuration for and that the user does not have yet.</summary>
 /// <param name="Key">Its key, which the added provider takes.</param>

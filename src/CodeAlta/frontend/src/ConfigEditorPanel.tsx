@@ -95,6 +95,9 @@ export function ConfigEditorPanel({ epoch, api = globalConfig, onApplied }: {
     {baseline && validation && !validation.valid && <Callout intent="danger" compact role="alert">
       {validation.line ? t("Line {line}, column {column}", { line: validation.line, column: validation.column ?? 1 }) : t("Invalid configuration")}
       {validation.message && <div className="config-editor-diagnostic">{validation.message}</div>}</Callout>}
+    {/* A file that loads may still leave something out: the providers of a version newer than this one. */}
+    {baseline && validation?.valid && validation.warning && <Callout intent="warning" compact role="status">
+      <div className="config-editor-diagnostic">{validation.warning}</div></Callout>}
     {baseline && content.length > maximumConfigLength && <Callout intent="danger" compact role="alert">{t("The configuration is too large for this editor.")}</Callout>}
     {loading && !baseline ? <NonIdealState icon={<ActivitySpinner size={28} />} title={t("Reading configuration…")} />
       : baseline ? <div className="config-editor-surface"><CodeEditor value={content} onChange={setContent} language="ini" label={t("Configuration file")} readOnly={busy} marker={marker} /></div>

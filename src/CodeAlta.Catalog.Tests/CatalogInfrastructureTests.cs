@@ -993,7 +993,8 @@ public sealed class CatalogInfrastructureTests
         File.WriteAllText(configPath, validContent);
         var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = root.Path });
 
-        Assert.ThrowsExactly<InvalidDataException>(() => store.SaveGlobalConfigContent("[providers.openai]\ntype = \"not-supported\""));
+        // A provider without a type is a file that is wrong; a type of another version would only be left out.
+        Assert.ThrowsExactly<InvalidDataException>(() => store.SaveGlobalConfigContent("[providers.custom]\nmodel = \"some-model\""));
 
         Assert.AreEqual(validContent, File.ReadAllText(configPath));
     }

@@ -112,11 +112,33 @@ public sealed class CodeAltaConfigValidationTests
         var result = CodeAltaConfigStore.ValidateGlobalConfigContent(
             """
             [providers.custom]
-            type = "unknown"
+            model = "some-model"
             """,
             "config.toml");
 
         Assert.IsFalse(result.IsValid);
         StringAssert.Contains(result.Message, "providers.custom type must be one of");
+    }
+
+    [TestMethod]
+    public void ValidateGlobalConfigContent_ProviderTypeOfAnotherVersion_IsValidAndSaysSo()
+    {
+        // A type a newer version added, or a mistyped one: the provider is left out, and the file is not refused.
+        var result = CodeAltaConfigStore.ValidateGlobalConfigContent(
+            """
+            [providers.custom]
+            type = "unknown"
+
+            [providers.other]
+            type = "newer"
+            """,
+            "config.toml");
+
+        Assert.IsTrue(result.IsValid);
+        Assert.IsNull(result.Message);
+        StringAssert.Contains(result.Warning, "providers.custom");
+        StringAssert.Contains(result.Warning, "\"unknown\"");
+        StringAssert.Contains(result.Warning, "providers.other");
+        Assert.IsNull(CodeAltaConfigStore.ValidateGlobalConfigContent("[providers.codex]\ntype = \"codex\"\n", "config.toml").Warning);
     }
 }

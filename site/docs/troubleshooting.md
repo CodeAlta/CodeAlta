@@ -56,7 +56,9 @@ This appears to be related to how Windows Terminal handles long-running, high-re
 
 CodeAlta validates `~/.alta/config.toml` before creating providers or sessions. If the file is invalid at startup, CodeAlta opens a TOML recovery editor with syntax highlighting, an error marker, live parse feedback, `Ctrl+S` Save and Continue when valid, and `Ctrl+Q` Exit.
 
-If the file was written by a newer CodeAlta than the one you started (it names a provider type the older version does not know, for example), do not edit it: update instead. When a newer version is published, the desktop recovery editor says so above the file and has **Update and restart**.
+If the file was written by a newer CodeAlta than the one you started, do not edit it: update instead. When a newer version is published, the desktop recovery editor says so above the file and has **Update and restart**.
+
+A provider whose `type` your version does not know does not make the file invalid. CodeAlta leaves that provider out, says so in Settings → Providers and in the application log, and keeps its section in the file as written, so a newer version can still use it. Versions up to 1.3.0 refuse the whole file instead.
 
 > [!IMPORTANT]
 > Fix configuration parse errors before starting agent work. Provider creation, project overrides, and plugin configuration depend on a valid TOML file.

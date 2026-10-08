@@ -79,6 +79,12 @@ public static class ConfiguredModelProviderRegistryBuilder
             }
         }
 
+        // A provider of a newer version is not offered: the log says why it is missing.
+        foreach (var provider in configStore.LoadGlobal().UnsupportedProviders)
+        {
+            Logger.Warn($"Skipped model provider key={provider.ProviderKey} type={provider.ProviderType}: this version of CodeAlta does not know the type; its settings stay in the configuration file.");
+        }
+
         return descriptors;
     }
 

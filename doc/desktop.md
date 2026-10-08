@@ -66,11 +66,19 @@ edits; **Exit** closes the application without changing the file. A file that ch
 meantime is not overwritten. Recovery reads, checks and writes that one file only: no provider,
 plugin or session is started before it is valid.
 
-A file written by a newer version is the usual reason an installed one cannot read it (a provider
-type it does not know, for example), and recovery is then all that version shows. So recovery makes
+A file written by a newer version is the usual reason an installed one cannot read it (a value it
+does not know for a setting it does), and recovery is then all that version shows. So recovery makes
 the update check of the workspace too: when a newer version is published, a notice above the editor
 names it, says that it may have written the file, and has the update command and, for an installed
 tool, **Update and restart** (see "Updates"). The exit of that update asks nothing.
+
+A provider whose `type` this version does not know is not such a case: it is the provider of a newer
+version (1.2.0 refused the whole file for the `claude-code` type of 1.3.0). The file loads without
+it. The provider is not registered or listed; the log has a line for it, Settings → Providers names
+it above the list, and the configuration editor says so under the text. Every save keeps its section
+as written, its key cannot be given to another provider, and a default provider that names it is
+left alone. A provider without a `type`, and a setting that is wrong for a type this version knows,
+are still refused.
 
 ### The application beyond its window
 

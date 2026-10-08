@@ -207,6 +207,47 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
+    public async Task ProviderOfANewerVersion_IsReportedLeftOut_AndKeptWhenProvidersAreSaved()
+    {
+        // 1.2.0 with the file of 1.3.0: the type it did not know made it refuse the whole configuration.
+        const string newer = ProvidersConfig + """
+
+            [providers.future]
+            type = "future-provider"
+            launch_command = "future --serve"
+            """;
+        await using var fixture = new Fixture(newer);
+
+        var validation = fixture.Service.Validate(new(newer));
+        Assert.IsTrue(validation.Valid);
+        StringAssert.Contains(validation.Warning, "providers.future");
+        Assert.IsNull(fixture.Service.Validate(new(ProvidersConfig)).Warning);
+
+        var listed = fixture.Service.Providers(new(Epoch));
+        Assert.AreEqual("ok", listed.Status);
+        CollectionAssert.AreEqual(new[] { new GlobalConfigUnsupportedProvider("future", "future-provider") }, listed.Unsupported.ToArray());
+        CollectionAssert.AreEquivalent(new[] { "local", "spare" }, listed.Providers.Select(static provider => provider.Key).ToArray());
+
+        // The providers this version knows are registered; the other is not, and nothing fails for it.
+        var edit = new GlobalConfigProviderEdit("local", "openai-chat", true, "Local renamed", "model-b", "high", "http://127.0.0.1:9999/v1", null, null, false);
+        var saved = fixture.Service.SaveProvider(new(Epoch, listed.Revision, "local", edit, false, true));
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        Assert.IsFalse(fixture.Registry.ListProviders(includeDisabled: true).Any(static provider => provider.ProviderId.Value == "future"));
+        var text = File.ReadAllText(fixture.ConfigPath);
+        StringAssert.Contains(text, "[providers.future]");
+        StringAssert.Contains(text, "type = \"future-provider\"");
+        StringAssert.Contains(text, "launch_command = \"future --serve\"");
+        StringAssert.Contains(text, "Local renamed");
+
+        // Its key is taken: a provider added under it would be written into its section.
+        var after = fixture.Service.Providers(new(Epoch));
+        var taken = fixture.Service.SaveProvider(new(Epoch, after.Revision, null, edit with { Key = "future" }, false, false));
+        Assert.AreEqual("invalid", taken.Status);
+        StringAssert.Contains(taken.Message, "providers.future");
+        Assert.AreEqual(text, File.ReadAllText(fixture.ConfigPath));
+    }
+
+    [TestMethod]
     public async Task SaveProvider_UpdatesOnlyTheEditedFieldsAndKeepsTheStoredSecret()
     {
         await using var fixture = new Fixture(ProvidersConfig);

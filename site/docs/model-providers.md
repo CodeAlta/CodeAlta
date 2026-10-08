@@ -106,7 +106,7 @@ Common provider fields are:
 | --- | --- |
 | `enabled` | Enables or disables the provider entry. Missing means enabled after normalization. |
 | `display_name` | Label shown in provider selectors and dialogs. |
-| `type` | Provider type. Common aliases such as `openai`, `responses`, `aoai`, `gemini`, `vertex`, and `github-copilot` are normalized to the canonical types above. |
+| `type` | Provider type. Common aliases such as `openai`, `responses`, `aoai`, `gemini`, `vertex`, and `github-copilot` are normalized to the canonical types above. A type your version of CodeAlta does not know (one a newer version added) leaves that provider out; its section stays in the file as written. |
 | `model` | Default model id for this provider. |
 | `reasoning_effort` | Default reasoning effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Providers advertise the values supported per model. |
 | `api_key` / `api_key_env` | Literal API key or environment variable name for API-key providers. Prefer `api_key_env`. |

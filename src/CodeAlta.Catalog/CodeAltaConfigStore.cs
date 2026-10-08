@@ -23,6 +23,12 @@ public sealed record CodeAltaConfigValidationResult(bool IsValid, string? Messag
     /// Gets a successful validation result.
     /// </summary>
     public static CodeAltaConfigValidationResult Valid { get; } = new(true, null, null, null);
+
+    /// <summary>
+    /// Gets what a configuration that can be loaded leaves out, or <see langword="null"/>: the providers whose
+    /// type this version does not know.
+    /// </summary>
+    public string? Warning { get; init; }
 }
 
 /// <summary>
@@ -246,12 +252,27 @@ public sealed class CodeAltaConfigStore
         {
             var document = ParseDocument(content ?? string.Empty, sourcePath);
             ValidateGlobalDocument(document);
-            return CodeAltaConfigValidationResult.Valid;
+            return document.UnsupportedProviders.Count == 0
+                ? CodeAltaConfigValidationResult.Valid
+                : CodeAltaConfigValidationResult.Valid with { Warning = DescribeUnsupportedProviders(document.UnsupportedProviders) };
         }
         catch (Exception ex) when (IsConfigLoadException(ex))
         {
             return CreateValidationFailure(ex);
         }
+    }
+
+    /// <summary>
+    /// Says which providers a configuration leaves out because this version does not know their type.
+    /// </summary>
+    /// <param name="providers">The providers that were set aside.</param>
+    /// <returns>One sentence naming each provider and its type.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="providers"/> is <see langword="null"/>.</exception>
+    public static string DescribeUnsupportedProviders(IReadOnlyList<CodeAltaUnsupportedProvider> providers)
+    {
+        ArgumentNullException.ThrowIfNull(providers);
+        var names = string.Join(", ", providers.Select(static provider => $"providers.{provider.ProviderKey} (type \"{provider.ProviderType}\")"));
+        return $"This version of CodeAlta does not know the provider type of {names}: left out, and kept in the file as written.";
     }
 
     /// <summary>
@@ -584,9 +605,13 @@ public sealed class CodeAltaConfigStore
     }
 
     /// <summary>
-    /// Saves the complete set of global provider definitions.
+    /// Saves the complete set of global provider definitions. The providers of the file whose type this version
+    /// does not know are not part of that set: their sections stay as they are.
     /// </summary>
     /// <param name="definitions">The provider definitions to persist.</param>
+    /// <exception cref="InvalidOperationException">
+    /// A definition is not valid, or has the key of a provider whose type this version does not know.
+    /// </exception>
     public void SaveGlobalProviderDefinitions(IEnumerable<CodeAltaProviderDocument> definitions)
     {
         ArgumentNullException.ThrowIfNull(definitions);
@@ -607,6 +632,13 @@ public sealed class CodeAltaConfigStore
                 static definition => definition,
                 StringComparer.OrdinalIgnoreCase);
 
+        // Saving under the key of a provider of a newer version would write into that provider's section.
+        if (normalizedDefinitions.Keys.FirstOrDefault(key => IsUnsupported(document.UnsupportedProviders, key)) is { } taken)
+        {
+            throw new InvalidOperationException(
+                $"providers.{taken} is in the configuration with a type this version of CodeAlta does not know: use another key.");
+        }
+
         foreach (var definition in normalizedDefinitions.Values)
         {
             NormalizeProviderEntry(definition.ProviderKey, definition);
@@ -617,8 +649,10 @@ public sealed class CodeAltaConfigStore
             ? null
             : normalizedDefinitions;
 
+        // A default that names a provider of a newer version is that version's choice: it stays in the file.
         var defaultProvider = NormalizeProviderKey(document.Chat?.DefaultProvider);
         if (!string.IsNullOrWhiteSpace(defaultProvider) &&
+            !IsUnsupported(document.UnsupportedProviders, defaultProvider) &&
             !LoadEnabledProviderKeys(normalizedDefinitions.Values).Contains(defaultProvider))
         {
             document.Chat ??= new CodeAltaChatSettingsDocument();
@@ -825,12 +859,15 @@ public sealed class CodeAltaConfigStore
         };
         TomlTable root;
         TomlTable modeled;
+        IReadOnlyList<CodeAltaUnsupportedProvider> unsupported;
         try
         {
             root = TomlSerializer.Deserialize<TomlTable>(existing, options) ?? new TomlTable();
             // The file as the typed document reads it, before any normalization: its keys are the modeled ones.
-            modeled = ToTable(TomlSerializer.Deserialize<CodeAltaConfigDocument>(
-                existing, TomlSerializerOptions.Default with { SourceName = path }) ?? new CodeAltaConfigDocument());
+            var read = TomlSerializer.Deserialize<CodeAltaConfigDocument>(
+                existing, TomlSerializerOptions.Default with { SourceName = path }) ?? new CodeAltaConfigDocument();
+            modeled = ToTable(read);
+            unsupported = [.. FindUnsupportedProviders(read).Select(static entry => entry.Provider)];
         }
         catch (Exception ex) when (IsConfigLoadException(ex))
         {
@@ -838,8 +875,11 @@ public sealed class CodeAltaConfigStore
         }
 
         var updated = ToTable(document);
+        // The providers this version does not know are not in the typed document: neither their modeled
+        // settings nor their tables are taken as dropped.
+        ForgetProviders(modeled, unsupported);
         ApplyModeledSettings(root, modeled, updated);
-        RemoveDroppedProviders(root, updated);
+        RemoveDroppedProviders(root, updated, unsupported);
         return TomlSerializer.Serialize(root, options);
     }
 
@@ -891,9 +931,27 @@ public sealed class CodeAltaConfigStore
         }
     }
 
+    // The settings this version models of a provider it does not know are not compared: they are not its to drop.
+    private static void ForgetProviders(TomlTable modeled, IReadOnlyList<CodeAltaUnsupportedProvider> unsupported)
+    {
+        if (unsupported.Count == 0 || !modeled.TryGetValue("providers", out var value) || value is not TomlTable providers)
+        {
+            return;
+        }
+
+        foreach (var providerKey in providers.Keys.Where(key => IsUnsupported(unsupported, key)).ToArray())
+        {
+            providers.Remove(providerKey);
+        }
+    }
+
+    private static bool IsUnsupported(IReadOnlyList<CodeAltaUnsupportedProvider> unsupported, string? providerKey)
+        => NormalizeProviderKey(providerKey) is { } key
+           && unsupported.Any(provider => string.Equals(provider.ProviderKey, key, StringComparison.OrdinalIgnoreCase));
+
     // A provider the typed document no longer has goes with its whole table: settings left behind
-    // would bring it back as an incomplete definition on the next load.
-    private static void RemoveDroppedProviders(TomlTable root, TomlTable updated)
+    // would bring it back as an incomplete definition on the next load. Not one this version does not know.
+    private static void RemoveDroppedProviders(TomlTable root, TomlTable updated, IReadOnlyList<CodeAltaUnsupportedProvider> unsupported)
     {
         const string ProvidersKey = "providers";
         if (!root.TryGetValue(ProvidersKey, out var value) || value is not TomlTable providers)
@@ -904,7 +962,7 @@ public sealed class CodeAltaConfigStore
         var kept = updated.TryGetValue(ProvidersKey, out var updatedValue) ? updatedValue as TomlTable : null;
         foreach (var providerKey in providers.Keys)
         {
-            if (kept is null || FindKey(kept, providerKey) is null)
+            if ((kept is null || FindKey(kept, providerKey) is null) && !IsUnsupported(unsupported, providerKey))
             {
                 providers.Remove(providerKey);
             }
@@ -1001,6 +1059,19 @@ public sealed class CodeAltaConfigStore
 
         if (document.Providers is not null)
         {
+            // A type this version does not know is one a newer version added: the provider is set aside, not
+            // offered, instead of the whole file being refused. Its section stays in the file as it is.
+            var unsupported = FindUnsupportedProviders(document);
+            if (unsupported.Length > 0)
+            {
+                foreach (var (key, _) in unsupported)
+                {
+                    document.Providers.Remove(key);
+                }
+
+                document.UnsupportedProviders = [.. document.UnsupportedProviders, .. unsupported.Select(static entry => entry.Provider)];
+            }
+
             var providers = document.Providers
                 .Where(static entry => !string.IsNullOrWhiteSpace(entry.Key))
                 .Select(static entry => NormalizeProviderEntry(entry.Key, entry.Value))
@@ -1303,6 +1374,15 @@ public sealed class CodeAltaConfigStore
 
         return normalizedKey;
     }
+
+    // The providers of a document as it was read, by the key the file writes, whose type is written and that
+    // this version cannot name. A missing type stays an error of the file.
+    private static (string Key, CodeAltaUnsupportedProvider Provider)[] FindUnsupportedProviders(CodeAltaConfigDocument document)
+        => [.. (document.Providers ?? [])
+            .Where(static entry => !string.IsNullOrWhiteSpace(entry.Key) && !string.IsNullOrWhiteSpace(entry.Value?.ProviderType))
+            .Select(static entry => (entry.Key, Normalized: NormalizeProviderKey(entry.Key) ?? entry.Key.Trim(), Type: entry.Value.ProviderType!.Trim()))
+            .Where(static entry => NormalizeProviderType(entry.Normalized, entry.Type) is null)
+            .Select(static entry => (entry.Key, new CodeAltaUnsupportedProvider(entry.Normalized, entry.Type)))];
 
     private static string? NormalizeProviderType(string providerKey, string? value)
     {

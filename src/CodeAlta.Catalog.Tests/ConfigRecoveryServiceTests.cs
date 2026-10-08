@@ -40,7 +40,7 @@ public sealed class ConfigRecoveryServiceTests
 
     [TestMethod]
     [DataRow("@")]
-    [DataRow("[providers.fixture]\ntype = 'unsupported-provider-type'")]
+    [DataRow("[providers.fixture]\nmodel = 'a-provider-without-a-type'")]
     public void Save_InvalidContentAndUnknownBaselineRefuseMutation(string invalid)
     {
         File.WriteAllText(ConfigPath, "# original");

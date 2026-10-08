@@ -196,6 +196,11 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
     </header>
     {notice && <Callout intent={notice.intent} compact role={notice.intent === "success" ? "status" : "alert"}>
       {t(notice.key, notice.parameters)}{diagnostic && <div className="config-editor-diagnostic">{diagnostic}</div>}</Callout>}
+    {/* The providers a newer version wrote: not listed and not saved over, so that they are not taken as lost. */}
+    {listing && listing.unsupported.length > 0 && <Callout intent="warning" compact role="status" className="provider-settings-unsupported">
+      {t("This version of CodeAlta does not know these providers. They are left out here and kept in the configuration file; a newer version of CodeAlta can use them.")}
+      <ul>{listing.unsupported.map(provider => <li key={provider.key}><code>{provider.key}</code> — {t("type {type}", { type: provider.type })}</li>)}</ul>
+    </Callout>}
     {!listing ? <NonIdealState icon={loading ? <ActivitySpinner size={28} /> : <AppIcon name="model" size={36} />}
         title={t(loading ? "Loading configured providers." : "Provider configuration unavailable")} />
       : <div className="provider-settings-layout">

@@ -75,6 +75,11 @@ Important behavior:
 
 ## Built-in provider types
 
+A `[providers.<key>]` section whose `type` is written and is none of the values below is taken as the provider of a newer
+version: `CodeAltaConfigStore` sets it aside when it loads the file (`CodeAltaConfigDocument.UnsupportedProviders`)
+instead of refusing the file, keeps its section across every save, and the registry builder logs that it was
+skipped. A section without a `type` (other than `codex` and `copilot`, which have a default) is still an error.
+
 `ConfiguredModelProviderRegistryBuilder` currently recognizes these `type` values:
 
 | `type` | Runtime adapter | Notes |

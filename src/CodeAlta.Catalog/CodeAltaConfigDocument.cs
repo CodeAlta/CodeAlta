@@ -3,6 +3,13 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Catalog;
 
 /// <summary>
+/// A provider of a configuration file whose type this version does not know.
+/// </summary>
+/// <param name="ProviderKey">The normalized provider key.</param>
+/// <param name="ProviderType">The type as the file writes it.</param>
+public sealed record CodeAltaUnsupportedProvider(string ProviderKey, string ProviderType);
+
+/// <summary>
 /// Represents the top-level CodeAlta TOML configuration document.
 /// </summary>
 public sealed class CodeAltaConfigDocument
@@ -18,6 +25,14 @@ public sealed class CodeAltaConfigDocument
     /// </summary>
     [JsonPropertyName("providers")]
     public Dictionary<string, CodeAltaProviderDocument>? Providers { get; set; }
+
+    /// <summary>
+    /// Gets or sets the providers of the file whose type this version does not know, which a newer version
+    /// wrote. They are not among <see cref="Providers"/> and are not offered; their sections stay in the file
+    /// as they are when it is saved.
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyList<CodeAltaUnsupportedProvider> UnsupportedProviders { get; set; } = [];
 
     /// <summary>
     /// Gets or sets skill enablement settings.
