@@ -6,6 +6,11 @@ title: Jira plugin
 
 Many projects keep their code on GitHub or GitLab and their issues in Jira. The built-in Jira plugin brings the issues of a Jira project into CodeAlta: in the [Issues tab](../issues.md), for agents, and as a trigger of [automations](../automations.md).
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-issues-jira.webp" alt="The Issues tab of CodeAlta Desktop with the issues of a Jira project and one issue open" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The issues of a Jira project in the Issues tab, beside those of the repository.</figcaption>
+</figure>
+
 ## Turn it on for a project
 
 Jira is used by a project, never by all of them. Add this to the `.alta/config.toml` of the project:
