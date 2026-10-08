@@ -2,6 +2,7 @@ import createDOMPurify from "dompurify";
 import { highlightCode } from "./codeHighlight";
 import { diagramAppearance, diagrams } from "./diagrams";
 import { createMarkdownParser, frontMatterEntries, splitFrontMatter } from "./markdown";
+import { safeMarkdownHref } from "./markdownLinks";
 
 /** The alerts of GitHub: a quote whose first line is `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` or `[!CAUTION]`. */
 export const alertKinds = ["note", "tip", "important", "warning", "caution"] as const;
@@ -20,15 +21,11 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
   const tags = ["p", "br", "hr", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "code",
     "ul", "ol", "li", "dl", "dt", "dd", "strong", "em", "s", "del", "b", "i", "u", "sub", "sup", "kbd", "samp", "var",
     "abbr", "a", "span", "div", "table", "caption", "thead", "tbody", "tfoot", "tr", "th", "td", "details", "summary"];
-  function safeHref(value: string) {
-    if (!/^https?:\/\//i.test(value) || /[\u0000- \u007f\\]/.test(value)) return false;
-    try { const url = new URL(value); return !url.username && !url.password && !!url.hostname; } catch { return false; }
-  }
   purifier.addHook("uponSanitizeAttribute", (node, data) => {
     const tag = node.nodeName.toLowerCase();
     const { attrName: name, attrValue: value } = data;
     data.keepAttr = name === "title"
-      || name === "href" && tag === "a" && safeHref(value)
+      || name === "href" && tag === "a" && safeMarkdownHref(value)
       || name === "class" && tag === "code" && /^language-[a-zA-Z0-9_-]{1,32}$/.test(value)
       || name === "open" && tag === "details"
       || name === "scope" && tag === "th" && /^(col|row|colgroup|rowgroup)$/.test(value)

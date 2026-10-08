@@ -936,9 +936,17 @@ click handlers and sanitizes the SVG.
 Markdown images become **escaped alt text**; authored image/fetch nodes are removed.
 Only credential-free absolute HTTP(S) anchor href survives; relative, mailto, custom,
 executable and credentialed URLs do not. Fuzzy www/email/IP linkification is disabled.
-Trusted container click, auxiliary-click and Enter handling suppresses link navigation;
-there is no external opener or bridge action. Not every native
-gesture is suppressed. Raw source Copy, including CRLF and fences, remains independent of the
+Trusted container click, auxiliary-click and Enter handling always suppresses WebView navigation.
+Assistant messages in an owned host receive an explicit system-browser opener grant:
+normal click, Cmd/Ctrl/Shift-click, middle click and keyboard Enter open the link externally once.
+Scripted, already handled, Alt, right-click and repeated/composing Enter gestures do not invoke it.
+Rendering/streaming never opens links. User messages, other Markdown previews, tool/detail views and detached
+contexts without the callback remain inert. The dedicated `markdownLinks.open` bridge checks
+the host epoch and independently validates credential-free absolute HTTP(S) addresses within
+2,048 UTF-16 units, rejecting whitespace, controls, backslashes and malformed escapes/authority.
+Stale grants cannot invoke the opener; browser failure is a generic notice, not private diagnostics.
+Native external navigation and new-window cancellation, `app://` restrictions and CSP remain unchanged.
+Not every native gesture is suppressed. Raw source Copy, including CRLF and fences, remains independent of the
 rendered display. Parser/sanitizer errors display inert original source, never exception
 details. Equivalent source preserves rendered DOM/focus/selection/inner scroll.
 
