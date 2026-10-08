@@ -288,12 +288,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 DesktopCommandLine.Version, shell.McpServer, shell.SetMcpServer);
             _ = mcp.StartAsync(); // A server that cannot listen says so in Settings: the application does not wait for it.
             // The installed tool becomes an application of this desktop; the page says so the first time.
-            if (!options.Developer && roots.Home is null)
-                _ = Task.Run(() =>
+            var entry = options.Developer || roots.Home is not null ? Task.FromResult(default(DesktopIntegration.DesktopEntryChange))
+                : Task.Run(() =>
                 {
-                    var added = DesktopIntegration.Ensure(options.DataRoot, DesktopCommandLine.Version);
+                    var change = DesktopIntegration.Ensure(options.DataRoot, DesktopCommandLine.Version);
                     var bundle = OperatingSystem.IsMacOS() ? DesktopIntegration.MacRunningBundleIdentifier() : null;
-                    if (DesktopIntegration.AnnouncesEntry(added, OperatingSystem.IsMacOS(), bundle)) shell.NotifyEntryAdded();
+                    if (DesktopIntegration.AnnouncesEntry(change.Added, OperatingSystem.IsMacOS(), bundle)) shell.NotifyEntryAdded();
+                    return change;
                 });
             // Starting CodeAlta again, or selecting it in the Dock, brings back the window of the running one.
             application.LaunchReceived += launch =>
@@ -373,7 +374,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             environmentLifetime = environment;
             var chrome = await DesktopWindowChrome.StartAsync(application, options.DataRoot);
             chromeLifetime = chrome;
-            await chrome.ApplyWindowIconAsync(window);
+            // On macOS the icon depends on what the start did to the bundle, a few files written by now; the
+            // other desktops do not wait for their entry.
+            await chrome.ApplyWindowIconAsync(window, OperatingSystem.IsMacOS() && (await entry).IconChanged);
             shell.Dialogs = chrome.Services.Dialogs;
             await shell.StartTrayAsync(chrome.Services, options.Developer);
             await shell.StartApplicationMenuAsync(chrome.Services, options.Developer);

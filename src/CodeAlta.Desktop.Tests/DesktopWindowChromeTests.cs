@@ -40,9 +40,12 @@ public sealed class DesktopWindowChromeTests
     public void WindowIcon_IsLeftToTheBundleOnMacOS()
     {
         // The Dock draws the icon of the bundle, which macOS 26 shapes like its neighbours: a picture set by the application would replace it.
-        Assert.IsFalse(DesktopWindowChrome.AppliesWindowIcon(macOS: true, DesktopIntegration.MacBundleIdentifier));
-        Assert.IsTrue(DesktopWindowChrome.AppliesWindowIcon(macOS: true, bundleIdentifier: null));
-        Assert.IsTrue(DesktopWindowChrome.AppliesWindowIcon(macOS: false, bundleIdentifier: null));
+        Assert.IsFalse(DesktopWindowChrome.AppliesWindowIcon(macOS: true, DesktopIntegration.MacBundleIdentifier, bundleIconChanged: false));
+        Assert.IsTrue(DesktopWindowChrome.AppliesWindowIcon(macOS: true, bundleIdentifier: null, bundleIconChanged: false));
+        Assert.IsTrue(DesktopWindowChrome.AppliesWindowIcon(macOS: false, bundleIdentifier: null, bundleIconChanged: false));
+        // The Dock keeps the picture it has of an application that runs: the start that replaced the icon of the
+        // bundle (the first one after an update) sets the picture itself, until the next start shows the new icon.
+        Assert.IsTrue(DesktopWindowChrome.AppliesWindowIcon(macOS: true, DesktopIntegration.MacBundleIdentifier, bundleIconChanged: true));
         // A test host is started by its executable, as a build output or `alta` in a terminal is.
         if (OperatingSystem.IsMacOS()) Assert.IsNull(DesktopIntegration.MacRunningBundleIdentifier());
     }

@@ -22,6 +22,14 @@ namespace CodeAlta.Desktop;
 /// </remarks>
 internal static class DesktopIntegration
 {
+    /// <summary>What a start changed in the desktop's entry for the application.</summary>
+    /// <param name="Added">The entry did not exist and was added: the user is told where to find the application.</param>
+    /// <param name="IconChanged">
+    /// An existing macOS bundle got another icon. The Dock keeps the picture it has of an application that
+    /// runs, and shows the new one at the next start: until then the application sets it.
+    /// </param>
+    internal readonly record struct DesktopEntryChange(bool Added, bool IconChanged);
+
     /// <summary>The identity Windows groups the application's windows, its shortcut and its taskbar pin under.</summary>
     internal const string WindowsAppId = "CodeAlta.Desktop";
 
@@ -81,24 +89,25 @@ internal static class DesktopIntegration
     /// </summary>
     /// <param name="dataRoot">The application data root: the icons are copied below it, where they stay across updates.</param>
     /// <param name="version">The running version.</param>
-    /// <returns>True when the entry did not exist and was added: the user is told where to find the application.</returns>
-    internal static bool Ensure(string dataRoot, string version)
+    /// <returns>What this start changed: nothing for an entry that is up to date or cannot be written.</returns>
+    internal static DesktopEntryChange Ensure(string dataRoot, string version)
     {
         try
         {
             var launcher = InstalledLauncher(AppContext.BaseDirectory, OperatingSystem.IsWindows());
-            if (launcher is null || !File.Exists(launcher)) return false;
+            if (launcher is null || !File.Exists(launcher)) return default;
             var start = EntryStart(launcher, AppContext.BaseDirectory, OperatingSystem.IsWindows());
-            if (!File.Exists(start)) return false;
+            if (!File.Exists(start)) return default;
             var folder = Path.Combine(dataRoot, "integration");
             var stamp = Path.Combine(folder, "installed.txt");
             // The icon of the macOS bundle depends on the system: an upgrade of macOS writes the bundle again.
             var bundleIcon = OperatingSystem.IsMacOS() ? MacBundleIconFile(OperatingSystem.IsMacOSVersionAtLeast(26)) : null;
             var current = version + "\n" + start + (bundleIcon is null ? string.Empty : "\n" + bundleIcon);
             var target = EntryPath();
-            if (target is null) return false;
+            if (target is null) return default;
             var existed = File.Exists(target) || Directory.Exists(target);
-            if (existed && File.Exists(stamp) && File.ReadAllText(stamp) == current) return false;
+            if (existed && File.Exists(stamp) && File.ReadAllText(stamp) == current) return default;
+            var iconChanged = false;
             Directory.CreateDirectory(folder);
             if (OperatingSystem.IsWindows())
             {
@@ -108,17 +117,17 @@ internal static class DesktopIntegration
                 var pin = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData) is { Length: > 0 } data ? WindowsTaskbarPin(data) : null;
                 if (pin is not null && File.Exists(pin)) WriteWindowsShortcut(pin, start, icon);
             }
-            else if (bundleIcon is not null) WriteMacBundle(target, launcher, version, Path.Combine(AppContext.BaseDirectory, bundleIcon));
+            else if (bundleIcon is not null) iconChanged = WriteMacBundle(target, launcher, version, Path.Combine(AppContext.BaseDirectory, bundleIcon));
             else WriteLinuxEntry(target, launcher, CopyIcon(folder, "alta.png"));
             File.WriteAllText(stamp, current);
             LogManager.GetLogger("CodeAlta.Desktop").Info($"Desktop entry written: {target}");
-            return !existed;
+            return new(!existed, existed && iconChanged);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SecurityException or COMException
             or InvalidCastException or NotSupportedException or ArgumentException or PlatformNotSupportedException)
         {
             LogManager.GetLogger("CodeAlta.Desktop").Warn($"The desktop entry could not be written: {exception.Message}");
-            return false;
+            return default;
         }
     }
 
@@ -271,7 +280,15 @@ internal static class DesktopIntegration
         return target;
     }
 
-    private static void WriteMacBundle(string bundle, string launcher, string version, string icon)
+    /// <summary>
+    /// Whether a file is to be written because its content is not the source's: the icon of a bundle that
+    /// changes while the application runs leaves the Dock with the picture it had.
+    /// </summary>
+    internal static bool Differs(string source, string target)
+        => !File.Exists(target) || !File.ReadAllBytes(source).AsSpan().SequenceEqual(File.ReadAllBytes(target));
+
+    // Returns whether the bundle got another icon than it had.
+    private static bool WriteMacBundle(string bundle, string launcher, string version, string icon)
     {
         var contents = Path.Combine(bundle, "Contents");
         var executable = Path.Combine(contents, "MacOS", "CodeAlta");
@@ -282,9 +299,12 @@ internal static class DesktopIntegration
         if (!OperatingSystem.IsWindows())
             File.SetUnixFileMode(executable, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead
                 | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-        if (File.Exists(icon)) File.Copy(icon, Path.Combine(contents, "Resources", "alta.icns"), overwrite: true);
+        var target = Path.Combine(contents, "Resources", "alta.icns");
+        var iconChanged = File.Exists(icon) && Differs(icon, target);
+        if (File.Exists(icon)) File.Copy(icon, target, overwrite: true);
         // The Finder and the Dock notice a changed bundle by its modification time.
         Directory.SetLastWriteTimeUtc(bundle, DateTime.UtcNow);
+        return iconChanged;
     }
 
     private static void WriteLinuxEntry(string path, string launcher, string? icon)

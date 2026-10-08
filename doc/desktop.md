@@ -231,7 +231,10 @@ Windows and Linux, a guide on macOS (below).
 
   An application started as the bundle sets nothing: the Dock already draws the bundle's icon, and a
   picture of its own would replace the shape the system gave it. The bundle is written again when
-  the version of macOS now asks for the other icon family.
+  the version of macOS now asks for the other icon family. One start is the exception: the Dock
+  keeps the picture it has of an application that runs, whatever happens to its bundle, and shows a
+  new icon at the next start. So the start that gave an existing bundle another icon than it had
+  (the first one after an update that changes the icon) sets `alta-dock.png` for itself.
 
   Few people open the Applications folder of their home folder, and the Dock has no supported way
   for an application to add itself (only an edit of the Dock's preferences followed by a restart of

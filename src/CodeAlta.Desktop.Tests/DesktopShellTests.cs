@@ -196,6 +196,26 @@ public sealed class DesktopShellTests
     }
 
     [TestMethod]
+    public void BundleIcon_IsSaidToChangeOnlyWhenItsContentDoes()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "codealta-icon-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var (source, target) = (Path.Combine(folder, "source.icns"), Path.Combine(folder, "target.icns"));
+            File.WriteAllBytes(source, [1, 2, 3]);
+            Assert.IsTrue(DesktopIntegration.Differs(source, target), "a bundle without an icon gets one");
+            File.WriteAllBytes(target, [1, 2, 3]);
+            // The first start of most versions writes the same icon again: the Dock has the right picture.
+            Assert.IsFalse(DesktopIntegration.Differs(source, target));
+            File.WriteAllBytes(target, [1, 2, 4]);
+            Assert.IsTrue(DesktopIntegration.Differs(source, target));
+            Assert.AreEqual(default, new DesktopIntegration.DesktopEntryChange(Added: false, IconChanged: false));
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
+
+    [TestMethod]
     public void NewEntry_IsAnnouncedToAnApplicationStartedFromATerminalOnly()
     {
         // The first start of the tool, from a terminal: the user is told where the application is now.

@@ -126,21 +126,30 @@ internal sealed class DesktopWindowChrome : IAsyncDisposable
     /// Whether the running application gives the system its own picture as icon. Not on macOS when it was
     /// started as an application bundle: the Dock already draws the icon of the bundle, to which macOS 26
     /// gives the shape and the edge of its neighbours, and a picture that the application sets replaces it.
-    /// A process started by its executable has the icon of a plain executable without one.
+    /// A process started by its executable has the icon of a plain executable without one. And the Dock
+    /// keeps the picture it has of an application that runs: a bundle whose icon this start replaced (the
+    /// first start after an update) shows the old one until the next start, unless the application sets it.
     /// </summary>
     /// <param name="macOS">Whether the platform is macOS.</param>
     /// <param name="bundleIdentifier">The identifier of the bundle the process was started as; null for none.</param>
-    internal static bool AppliesWindowIcon(bool macOS, string? bundleIdentifier) => !macOS || bundleIdentifier is null;
+    /// <param name="bundleIconChanged">This start gave the bundle another icon than it had.</param>
+    internal static bool AppliesWindowIcon(bool macOS, string? bundleIdentifier, bool bundleIconChanged)
+        => !macOS || bundleIdentifier is null || bundleIconChanged;
 
     /// <summary>
     /// Gives the window the application's icon, which the task switcher (Alt+Tab) and the Dock show. A native
     /// window does not take the icon of its executable by itself. A missing icon file or an unsupported
     /// platform leaves the default icon, and so does <c>CodeAlta.app</c> on macOS, which has its own.
     /// </summary>
-    internal async ValueTask ApplyWindowIconAsync(NeoWindow window)
+    internal ValueTask ApplyWindowIconAsync(NeoWindow window) => ApplyWindowIconAsync(window, bundleIconChanged: false);
+
+    /// <inheritdoc cref="ApplyWindowIconAsync(NeoWindow)"/>
+    /// <param name="window">The window of the application.</param>
+    /// <param name="bundleIconChanged">This start gave the macOS bundle another icon than it had.</param>
+    internal async ValueTask ApplyWindowIconAsync(NeoWindow window, bool bundleIconChanged)
     {
         ArgumentNullException.ThrowIfNull(window);
-        if (OperatingSystem.IsMacOS() && !AppliesWindowIcon(macOS: true, DesktopIntegration.MacRunningBundleIdentifier())) return;
+        if (OperatingSystem.IsMacOS() && !AppliesWindowIcon(macOS: true, DesktopIntegration.MacRunningBundleIdentifier(), bundleIconChanged)) return;
         var icon = Path.Combine(AppContext.BaseDirectory, WindowIconFile(OperatingSystem.IsWindows(), OperatingSystem.IsMacOS()));
         if (!File.Exists(icon)) return;
         try { await _services.WindowPolish.SetIconAsync(window, icon).ConfigureAwait(true); }
