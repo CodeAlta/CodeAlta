@@ -153,7 +153,8 @@ test("production MarkdownContent retains useful HTML without resource or app aut
     await activate();
     assert.equal(await evaluate("markdownFixture.state.external.length"), 7, "Granted summary anchor opens without also toggling the disclosure");
     assert.equal(await evaluate("document.querySelector('.markdown-content details').open"), false);
-    await evaluate(`markdownFixture.renderGranted('assistant', true, '<a href="https://remote.invalid/safe"><pre><code>linked code</code></pre></a>')`);
+    // In a block of HTML the anchor keeps its code block; in a paragraph the parser moves the anchor inside the `pre`, which then has no Copy.
+    await evaluate(`markdownFixture.renderGranted('assistant', true, '<div><a href="https://remote.invalid/safe"><pre><code>linked code</code></pre></a></div>')`);
     const copiesBefore = await evaluate<number>("markdownFixture.state.copies.length");
     const copyRect = await evaluate<{ x: number; y: number; width: number; height: number }>("document.querySelector('.markdown-copy').getBoundingClientRect().toJSON()");
     for (const type of ["mousePressed", "mouseReleased"]) await command("Input.dispatchMouseEvent", { type, button: "left",
