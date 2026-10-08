@@ -73,3 +73,37 @@ function isWellFormed(value: string): boolean {
   }
   return true;
 }
+
+/**
+ * The prompts typed before their session exists, by scope (a project, or the chats). The prompt that shows a
+ * text follows it; the window follows only what decides whether it can be sent (see draftSendFacts), so that
+ * a keystroke renders the prompt and nothing around it.
+ */
+export function createLocalDrafts() {
+  const drafts = new Map<string, Readonly<{ text: string; revision: number }>>();
+  const listeners = new Set<() => void>();
+  return {
+    subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    /** The draft of a scope; `restore` gives its text the first time the scope is asked for. */
+    get(scope: string, restore: () => string) {
+      let draft = drafts.get(scope);
+      if (!draft) drafts.set(scope, draft = { text: restore(), revision: 0 });
+      return draft;
+    },
+    /** The draft of a scope as it is now, if the scope was asked for. */
+    peek: (scope: string) => drafts.get(scope),
+    /** Replaces the text of a scope: each edit is another revision, the same text included. */
+    edit(scope: string, text: string) {
+      drafts.set(scope, { text, revision: (drafts.get(scope)?.revision ?? 0) + 1 });
+      for (const listener of [...listeners]) listener();
+    },
+  };
+}
+
+/**
+ * What a draft says of whether it can be sent, as one number that changes only when one of these does: it is
+ * empty, it holds only white space, it is longer than a prompt with images may be.
+ */
+export function draftSendFacts(text: string, imageTextLimit: number): number {
+  return (text === "" ? 1 : 0) | (text.trim() ? 0 : 2) | (text.length > imageTextLimit ? 4 : 0);
+}

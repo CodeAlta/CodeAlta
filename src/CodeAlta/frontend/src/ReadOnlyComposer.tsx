@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type ClipboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type ClipboardEvent } from "react";
 import { Button } from "@blueprintjs/core";
 import { ActiveProviderStatus } from "./ActiveProviderStatus";
 import { ActivitySpinner } from "./ActivitySpinner";
@@ -12,6 +12,8 @@ import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
 import { IssuePicker } from "./IssuePicker";
 import { useShellLanguage } from "./shellLanguage";
+
+const noSubscription = () => () => { };
 
 // The context meter of a session that has not started: nothing used yet out of the selected model's window.
 function DraftUsage({ contextTokens }: { contextTokens: number | null }) {
@@ -31,7 +33,10 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
   draftIndicators: ReturnType<typeof createDraftIndicators>; reason?: string;
   infoControl?: ReactNode;
   onOpenHelp?: () => void; onOpenCommands?: () => void;
-  localDraft?: { text: string; edit: (text: string) => void; action: ReactNode; options?: ReactNode; notice?: ReactNode;
+  localDraft?: {
+    /** The text of the draft as it is now, and how to follow it: each keystroke renders this prompt, not its owner. */
+    read: () => string; subscribe: (listener: () => void) => () => void;
+    edit: (text: string) => void; action: ReactNode; options?: ReactNode; notice?: ReactNode;
     submit: () => void; disabled: boolean; busy: boolean;
     /** What the prompt bar of a session that does not exist yet shows in place of a session's own facts. */
     surface?: { epoch: string; onOpenProviders: () => void; contextTokens: number | null } };
@@ -39,7 +44,8 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
 }) {
   const { t } = useShellLanguage();
   const [draft, setDraft] = useState(() => ({ text: restoreDraft(key => localStorage.getItem(key), sessionId), editGeneration: null as number | null }));
-  const text = localDraft?.text ?? draft.text;
+  const readLocal = () => localDraft ? localDraft.read() : null;
+  const text = useSyncExternalStore(localDraft?.subscribe ?? noSubscription, readLocal, readLocal) ?? draft.text;
   const [expanded, setExpanded] = useState(false);
   const [imageNotice, setImageNotice] = useState("");
   function refuseImagePaste(event: ClipboardEvent<HTMLElement>) {

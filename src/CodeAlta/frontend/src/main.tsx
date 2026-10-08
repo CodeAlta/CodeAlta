@@ -88,7 +88,7 @@ import { UserInputPanel } from "./UserInputPanel";
 import { LiveSessionPanel } from "./LiveSessionPanel";
 import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePosition, timelineNotice, type TimelineNotice, type MessageNavigation } from "./timelineScroll";
 import { workspaceEditingSelector, type ShortcutAction } from "./shortcuts";
-import { createDraftIndicators, draftStorageKey, persistDraft, restoreDraft, transferPromptDraft } from "./promptDraft";
+import { createDraftIndicators, createLocalDrafts, draftSendFacts, draftStorageKey, persistDraft, restoreDraft, transferPromptDraft } from "./promptDraft";
 import { SessionDraftStatus } from "./SessionDraftBadge";
 import { collapsedSessionWidth, constrainPaneLayout, persistPaneLayout, restorePaneLayout } from "./paneLayout";
 import { composerSizeKey, rememberComposerHeight } from "./composerHeight";
@@ -301,22 +301,21 @@ function App() {
   // The kinds of tab closed, oldest first: Reopen restores the most recent one.
   const closedTabKinds = useRef<TabKind[]>([]);
   // Scope-local text is App-owned even when storage is denied or workspace DOM is unmounted.
-  const localDrafts = useRef(new Map<string, { text: string; revision: number }>());
+  const [localDrafts] = useState(createLocalDrafts);
   const localImageGeneration = useRef(0);
-  const [, renderLocalDraft] = useState(0);
   const draftScope = `local-draft:${JSON.stringify(projectId)}`;
   const localDraftStorageKey = `codealta.desktop.localPrompt.${JSON.stringify(projectId)}`;
-  if (!localDrafts.current.has(draftScope)) localDrafts.current.set(draftScope,
-    { text: restoreDraft(() => localStorage.getItem(localDraftStorageKey), draftScope), revision: 0 });
-  const localDraft = localDrafts.current.get(draftScope)!;  const [draftHandoffNotice, setDraftHandoffNotice] = useState("");
+  // The draft as it is at this render. What runs later (a paste, Start session) reads it again: a keystroke
+  // renders the prompt that shows the text, and App only when what decides the sending changes.
+  const localDraft = localDrafts.get(draftScope, () => restoreDraft(() => localStorage.getItem(localDraftStorageKey), draftScope));
+  useSyncExternalStore(localDrafts.subscribe, () => draftSendFacts(localDrafts.peek(draftScope)?.text ?? "", imageLimits.text));
+  const [draftHandoffNotice, setDraftHandoffNotice] = useState("");
   // A prompt typed in the New session tab is sent as soon as its session exists and holds the text.
   const autoSend = useRef<{ sessionId: string; text: string } | null>(null);
 
   function editLocalDraft(text: string) {
-    const current = localDrafts.current.get(draftScope)!;
-    localDrafts.current.set(draftScope, { text, revision: current.revision + 1 });
+    localDrafts.edit(draftScope, text);
     persistDraft((_key, value) => localStorage.setItem(localDraftStorageKey, value), () => localStorage.removeItem(localDraftStorageKey), draftScope, text);
-    renderLocalDraft(value => value + 1);
   }
   const tabFocusPending = useRef(false);
   function setProjectId(value: string | null) { advanceBrowserRevision(); invalidateCreation(); writeProjectId(value); activateFile(null); }
@@ -1363,7 +1362,7 @@ function App() {
   const localImages = useLocalDraftImages(submissions.imageDrafts, localImageKey, () => {
     const generation = creationGeneration.current;
     const imageGeneration = localImageGeneration.current;
-    const textRevision = localDraft.revision;
+    const textRevision = localDrafts.peek(draftScope)?.revision;
     const epoch = status?.hostEpoch;
     const scope = projectId;
     const current = () => creationAlive.current && owned && !!snapshot && snapshot.configured
@@ -1371,7 +1370,7 @@ function App() {
       && selectedScope.current === scope && selectedSessionId.current === null && currentProjectWritable()
       && currentView.current === "workspace" && !settingsVisible.current && !creatingBusy
       && !document.querySelector('dialog[open]:not(.expanded-prompt-dialog), [role="dialog"][aria-modal="true"]')
-      && localImageGeneration.current === imageGeneration && localDrafts.current.get(draftScope)?.revision === textRevision
+      && localImageGeneration.current === imageGeneration && localDrafts.peek(draftScope)?.revision === textRevision
       && generation === creationGeneration.current;
     return current() ? current : null;
   }, () => { localImageGeneration.current++; }, language.locale);
@@ -1993,10 +1992,12 @@ function App() {
     if (creationPending.current || creationHeld.current || !owned || !snapshot || !mutation?.capability.canMutate() || selectedProject?.archived
       || projectId !== null && !selectedProject || settingsVisible.current || dialog || searchOpen
       || currentView.current !== "workspace" || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
-    if (fromDraft && (!draftChoices.ready || sessionId !== null || (!localDraft.text.trim() && !localImages.images.length)
-      || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim()))) return;
+    // The text as it is now, not as it was when App was last rendered.
+    const typed = localDrafts.peek(draftScope) ?? localDraft;
+    if (fromDraft && (!draftChoices.ready || sessionId !== null || (!typed.text.trim() && !localImages.images.length)
+      || localImages.images.length > 0 && (typed.text.length > imageLimits.text || typed.text !== "" && !typed.text.trim()))) return;
     invalidateCreation(); // Deliberate capture fences any outstanding local paste.
-    const handoff = fromDraft ? { scope: draftScope, ...localDraft, imageKey: localImageKey, images: localImages.images,
+    const handoff = fromDraft ? { scope: draftScope, ...typed, imageKey: localImageKey, images: localImages.images,
       imageGeneration: localImageGeneration.current, selection: { ...draftChoices.value } } : null;
     const recordHandoff = (outcome: string) => { if (handoff) setDraftHandoffNotice(outcome); };
     creationPending.current = true;
@@ -2016,7 +2017,7 @@ function App() {
       && selectedScope.current === (target.scope === "project" ? target.projectId : null)
       && selectedSessionId.current === sessionAtAdmission && currentView.current === "workspace"
       && !settingsVisible.current && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')
-      && (!handoff || localDrafts.current.get(handoff.scope)?.revision === handoff.revision)
+      && (!handoff || localDrafts.peek(handoff.scope)?.revision === handoff.revision)
       && (!handoff || submissions.imageDrafts.get(handoff.imageKey) === handoff.images)
       && (!handoff || localImageGeneration.current === handoff.imageGeneration)
       && (target.scope === "global" || currentSnapshot.current?.projects.filter(project => project.id === target.projectId).length === 1
@@ -2073,7 +2074,7 @@ function App() {
             recordHandoff("");
             if (handoff.images.length === 0 && handoff.text.trim()) autoSend.current = { sessionId: selection.sessionId, text: handoff.text };
             // The session now owns the text; the New session tab starts empty again.
-            if (handoff.scope === draftScope && localDrafts.current.get(draftScope)?.revision === handoff.revision) editLocalDraft("");
+            if (handoff.scope === draftScope && localDrafts.peek(draftScope)?.revision === handoff.revision) editLocalDraft("");
           }
           publishWorkspaceState({ kind: "ready", snapshot: fresh });
           creationHeld.current = false;
@@ -2517,7 +2518,7 @@ function App() {
                   localImages={owned && snapshot?.configured && currentProjectWritable() ? localImages : undefined}
                   onOpenHelp={openHelp} onOpenCommands={openCommandSearch}
                   reason={t("Draft kept locally. Start a session to send it.")}
-                  localDraft={{ text: localDraft.text, edit: editLocalDraft, options: creationProviderChoice(true),
+                  localDraft={{ read: () => localDrafts.peek(draftScope)?.text ?? "", subscribe: localDrafts.subscribe, edit: editLocalDraft, options: creationProviderChoice(true),
                     disabled: newPromptDisabled, busy: creatingBusy, submit: () => void createSelectedSession(true),
                     surface: owned && status?.hostEpoch ? { epoch: status.hostEpoch, onOpenProviders: () => navigate("providers"),
                       contextTokens: draftChoices.models.find(model => model.id === draftChoices.value.modelId)?.contextTokens ?? null } : undefined,

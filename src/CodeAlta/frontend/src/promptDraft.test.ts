@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDraftIndicators, draftStorageKey, persistDraft, restoreDraft, transferPromptDraft } from "./promptDraft";
+import { createDraftIndicators, createLocalDrafts, draftSendFacts, draftStorageKey, persistDraft, restoreDraft, transferPromptDraft } from "./promptDraft";
 
 test("explicit draft transfer requires an empty readable destination and exact readback", () => {
   const values = new Map<string, string>();
@@ -99,4 +99,41 @@ test("stale persistence failure cannot revoke a newer confirmed edit or revive a
   assert.equal(indicators.visible("session", "other"), false);
   indicators.persisted("session", remounted, true);
   assert.equal(indicators.visible("session", "other"), true);
+});
+
+test("the draft of a session that does not exist yet is restored once, and each edit is another revision", () => {
+  const drafts = createLocalDrafts();
+  let restored = 0;
+  const restore = () => { restored++; return "kept"; };
+  assert.equal(drafts.peek("project"), undefined);
+  assert.deepEqual(drafts.get("project", restore), { text: "kept", revision: 0 });
+  assert.equal(drafts.get("project", restore), drafts.peek("project"));
+  assert.equal(restored, 1);
+  const seen: string[] = [];
+  const unsubscribe = drafts.subscribe(() => seen.push(drafts.peek("project")!.text));
+  drafts.edit("project", "kept and more");
+  // The same text typed again (a selection replaced by itself) is still an edit: a hand-off of the earlier one is refused.
+  drafts.edit("project", "kept and more");
+  assert.deepEqual(drafts.peek("project"), { text: "kept and more", revision: 2 });
+  assert.deepEqual(seen, ["kept and more", "kept and more"]);
+  // Another scope keeps its own text.
+  assert.deepEqual(drafts.get("chats", () => ""), { text: "", revision: 0 });
+  unsubscribe();
+  drafts.edit("project", "");
+  assert.equal(seen.length, 2);
+  assert.deepEqual(drafts.peek("project"), { text: "", revision: 3 });
+});
+
+test("typing changes what the window follows of a draft only when its sending does", () => {
+  const facts = (text: string) => draftSendFacts(text, 8);
+  // What App reads at each keystroke: it is rendered again only when the number differs.
+  const typed = ["h", "he", "hel", "hello"].map(facts);
+  assert.ok(typed.every(value => value === typed[0]));
+  assert.notEqual(facts(""), facts("h"));
+  assert.notEqual(facts(" "), facts(""));
+  assert.notEqual(facts(" "), facts("h"));
+  assert.equal(facts(" \n\t"), facts(" "));
+  // The limit of a prompt with images counts too.
+  assert.equal(facts("12345678"), facts("h"));
+  assert.notEqual(facts("123456789"), facts("12345678"));
 });
