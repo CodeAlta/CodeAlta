@@ -188,6 +188,11 @@ Several projects can stay open in the sidebar, each with its sessions, and CodeA
 
 A space is a group of projects you work on together, such as **Work** or **Personal**. The window shows one space at a time, each with its own projects and tabs, and tells you when a session waits for you in another one. CodeAlta TUI has no spaces: it lists every project. See [Spaces](spaces.md).
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-spaces.webp" alt="CodeAlta Desktop showing the Open source space, with the list of the space switch open: Default, Work, Personal and Open source" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The space switch of the title bar: one space is shown, and the others say what their sessions are doing.</figcaption>
+</figure>
+
 ### One Settings window
 
 The TUI opens a dialog for each area. The desktop app groups them as pages of one window: **Appearance**, **Spaces**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**.

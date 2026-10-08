@@ -32,8 +32,8 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. Use `Ctrl+T` (or 
 ### Projects sidebar (desktop)
 
 <figure class="alta-figure my-4" style="max-width: 30rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-explorer.webp" alt="CodeAlta Desktop sidebar with the chats, favorite projects first, three open projects with their sessions, and the buttons of a project row" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The chats, then favorite projects first, several projects open, and the buttons of the project under the pointer.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-explorer.webp" alt="CodeAlta Desktop sidebar with the chats, favorite projects first, three open projects with their sessions, the buttons of a project row, and the spaces at its foot" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The chats, then favorite projects first, several projects open, the buttons of the project under the pointer, and the spaces at the foot.</figcaption>
 </figure>
 
 - **Chats**, at the top, are the sessions that belong to no project.

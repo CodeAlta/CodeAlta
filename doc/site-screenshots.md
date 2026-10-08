@@ -8,11 +8,12 @@ feature gets a page. This is how.
 
 - One capture is **2400x1500** pixels: the window at 1600x1000 CSS pixels on a display at 150%.
 - It is taken on the **developer instance** (`alta --dev`), which runs beside the normal one and has its own
-  sessions and view state. Build it in Debug and start it:
+  sessions and view state. Build the configuration the normal instance does not run from (`Release` when it runs
+  from `bin/Debug` of this checkout, `Debug` otherwise: see "Debug or Release" in `AGENTS.md`) and start it:
 
   ```bash
-  dotnet build src/CodeAlta/CodeAlta.csproj
-  src/CodeAlta/bin/Debug/net10.0/alta.exe --dev
+  dotnet build src/CodeAlta/CodeAlta.csproj -c <Configuration>
+  src/CodeAlta/bin/<Configuration>/net10.0/alta.exe --dev
   ```
 
 - The developer instance serves an MCP server on `http://127.0.0.1:2583/mcp`. Three of its tools are enough:
@@ -45,11 +46,24 @@ Before a capture, a script adds a `<style>` and a small overlay to the page. Not
 a restart of the instance removes both.
 
 - Hide the tag of the developer instance: `.window-brand-tag { display: none !important }`.
-- Hide the projects that are not public, by the title of their row:
-  `li.project-action-row:has(> button[title^="Name"]) { display: none !important }`.
+- Show a [space](../site/docs/spaces.md) that holds public projects only, instead of hiding the others: the
+  Explorer, the search and **Open project** then list nothing else. The pictures use four spaces: **Open source**
+  (CodeAlta, Markdig, SharpYaml, Scriban), which is the one shown, **Work**, **Personal** and Default. They are
+  made with `alta space create`, `alta space add` and `alta space update --description`, and undone afterwards
+  (`alta space remove`, `alta space delete`): the spaces and the `spaces` line of the project files are in the
+  profile, which the two instances share.
+- The Default space lists every project. When a picture has to show it, hide the projects that are not public by
+  the title of their row: `li.project-action-row:has(> button[title^="Name"]) { display: none !important }`.
+- **Settings > Spaces** and the **New space** window list every project of the catalog, whatever the space shown.
+  Hide the rows that are not public by the folder they have as title, with one `:not([title="C:\\folder"])` for
+  each public project: `.space-pool li.space-project:not(...)` for the page, and
+  `.space-project-checks > label:has(> input:not(...))` for the window.
 - Show only the sessions of the scene:
   `.session-row:not(:has(> button[title^="A title"])):not(...) { display: none !important }`.
 - Hide what only says the timeline is long: `.load-more-bar, .timeline-bottom-button`.
+- The tools of the server move no real pointer: what a row shows under the pointer (the buttons of a project row
+  in `explorer`) is shown with a style, `display: inline-flex !important` on the `.project-row-action` and
+  `.project-actions-trigger` of that row.
 - The minimize, maximize and close buttons of the window are drawn by the system and are not in the capture. Add a
   fixed 138x38 box at the top right with the glyphs `E921`, `E922`, `E8BB` of *Segoe Fluent Icons*, in
   `var(--text)`. A dialog that is open covers the page: append the box to the dialog.
@@ -63,7 +77,8 @@ closes every tab and dialog, opens what it shows and takes the capture.
 
 | Picture | Scene |
 |---|---|
-| `home`, `explorer` | Three favorite projects open, a session with tool calls and a result. `explorer` is the left 1000x1160 of it. |
+| `home`, `explorer` | Three favorite projects open, a session with tool calls and a result. `explorer` is the left 1000 pixels of it, over the whole height: its foot has the spaces. |
+| `spaces`, `space-settings`, `space-new`, `space-activity` | The list of the space switch open over a session; **Settings > Spaces**; the **New space** window with a ready-made space chosen and two projects ticked (a crop of the window, then **Cancel**); the foot of the Explorer (a crop of the bottom left). `spaces` and `space-activity` want sessions at work in the other spaces. |
 | `split-side`, `split-stacked`, `split-three` | A session and its sub-agents in panes (the `…` button of a pane, **Split right** or **Split below**). |
 | `notes`, `context-usage`, `modified-files`, `tool-details` | One session with its notes, the context popover, a modified file, the window of a tool call. |
 | `new-session`, `session-browser`, `search`, `help`, `open-project`, `file-selection` | The dialogs, each at its default size. |
@@ -95,9 +110,21 @@ What the scenes with state of their own need:
 - **Add provider.** The menu lists the built-in providers the profile does not have: take the picture on a
   profile of its own (`--catalog-root`, `--data-root` and the other roots of an isolated launch, with
   `--mcp-port`), with one provider that is disabled in its `config.toml`. `add-provider` is the crop of the
-  Settings window.
+  Settings window. The folders of that profile are outside any `.alta` folder, or the start is refused. The
+  `mcp-server` picture is taken there too: it shows the address of a normal instance (port 2582), which the
+  page of an instance on another port does not have, so the port is changed in the text of the page.
 - **The sidebar.** A project lists its recent sessions only, and the sessions of the scenes get older: click
-  **Show more** until they are all listed, then hide the others.
+  **Show more** until they are all listed, then hide the others and the row of **Show more** itself
+  (`.session-list-disclosure`).
+- **Space activity.** The marks of a space are those of its sessions, so they need real ones. For a session that
+  waits: show the other space, open a new session in one of its projects and send from the page (the **Start
+  session** button of the prompt bar: a question asked with `alta ask` is only raised in a run started from the
+  application) a prompt that asks the agent to ask one question with `alta ask` and to wait for the answer. Rename
+  the session from its row menu, then show the space of the pictures again: a few seconds later the foot of the
+  Explorer names the session, and the space switch has its dot. For a running mark, start a session in a project
+  of a third space with `alta session create` and `alta session send`, on a prompt that takes a few minutes.
+  Afterwards answer the question, stop the run, and send that session a last short prompt, so that no space is
+  left with a session that waits or failed.
 
 ## Exporting
 

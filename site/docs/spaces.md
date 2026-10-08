@@ -6,6 +6,11 @@ title: Spaces
 
 A space is a named group of projects that you work on together: your job, your personal projects, the open source you contribute to. CodeAlta Desktop shows one space at a time, with its projects, its sessions and its tabs.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-spaces.webp" alt="CodeAlta Desktop showing the Open source space with its four projects, and the list of the space switch open: Default, Work, Personal and Open source, each with its key, then New space and Organize spaces" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The window shows the Open source space. The list of the space switch has the other spaces, with marks for a session that waits in Work and one that runs in Personal.</figcaption>
+</figure>
+
 - The **Default** space holds every project. It is always there and cannot be deleted.
 - You create the other spaces. A project can be in several spaces at once.
 - A space has a name, an icon, a color and a line that says what it is for.
@@ -38,6 +43,11 @@ Choose **New space…** in the space switch, or run `/new_space`.
 - **What it is for** is a line for you and for the agents, for example "Projects of the Contoso contract".
 - Tick the projects of the space in the list.
 
+<figure class="alta-figure my-4" style="max-width: 30rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-space-new.webp" alt="The New space window with the ready-made space Experiments chosen, its icon and color, a description, and two projects ticked" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A new space from the ready-made Experiments, with two projects ticked.</figcaption>
+</figure>
+
 A space created from the title bar is shown at once.
 
 An empty space says **No project in this space yet.** Its **Add projects…** button opens **Settings > Spaces**.
@@ -52,6 +62,11 @@ Add a folder with the `+` button of the Explorer, or with [Open project](workspa
 
 - On the left, the Default space lists every project, each with the icons of the spaces it is in.
 - On the right, each space has a card: its icon, its name, its color, **What it is for**, and its projects.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-space-settings.webp" alt="The Spaces page of Settings: the Default space with every project on the left, and the cards of the Work, Personal and Open source spaces with their descriptions and projects" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Settings > Spaces: every project on the left, and a card for each space with what it is for and its projects.</figcaption>
+</figure>
 
 Change the name, the icon, the color or the description on the card. The Default space can be changed the same way. Every change is saved at once.
 
@@ -107,6 +122,11 @@ When a session waits for you or failed in a space that is not shown:
 - a line above the buttons names the space and the session. Click it to show that space and open that session;
 - a dot appears on the space switch of the title bar;
 - a message says so once when a session starts to wait, with a **Show** button.
+
+<figure class="alta-figure my-4" style="max-width: 30rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-space-activity.webp" alt="The foot of the Explorer: a line that says the session Draft the release notes waits in the Work space, above the buttons of the four spaces with their marks" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The foot of the Explorer: a session waits for you in Work, sessions run in Personal, and Open source is the space shown.</figcaption>
+</figure>
 
 ## Keys and commands
 

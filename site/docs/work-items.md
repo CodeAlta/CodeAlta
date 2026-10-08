@@ -7,7 +7,7 @@ title: Work items
 Work items are what is left to do in a project: the **tasks** agents propose and the **plans** written in Plan mode. CodeAlta Desktop shows them where you decide on them, and lists them all in one tab.
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-work-items.webp" alt="The Work items tab of CodeAlta Desktop with the plans of a project and one of them open" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-work-items.webp" alt="The Work items tab of CodeAlta Desktop with the tasks of a project and one of them open" loading="lazy">
   <figcaption class="small text-secondary mt-2">The Work items tab: the tasks and the plans of your projects, with what to do next for each.</figcaption>
 </figure>
 
