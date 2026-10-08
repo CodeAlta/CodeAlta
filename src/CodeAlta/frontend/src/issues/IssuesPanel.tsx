@@ -76,7 +76,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
     return () => controller.abort();
   }, [api, epoch, available, visible, project?.id, revision]);
 
-  const known = sources?.projectId === project?.id ? sources!.sources : [];
+  const known = sources && project && sources.projectId === project.id ? sources.sources : [];
   const source = known.find(candidate => candidate.service === service) ?? known[0] ?? null;
   const kinds = sourceKinds(source);
   const shownKind = kinds.includes(kind) ? kind : kinds[0] ?? "issue";
@@ -128,6 +128,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   };
 
   if (!available) return <div className="work-page issues-page" onPointerDown={onActivate}><p className="work-empty">{t("Issues are unavailable in this window.")}</p></div>;
+  if (!project) return <div className="work-page issues-page" onPointerDown={onActivate}><p className="work-empty">{t("No projects in this snapshot.")}</p></div>;
   const loadingSources = !sources || sources.projectId !== project?.id || sources.loading && known.length === 0;
   const noun = kindLabel(shownKind, source?.service, true);
   const command = source ? signInCommand(source.service) : null;
