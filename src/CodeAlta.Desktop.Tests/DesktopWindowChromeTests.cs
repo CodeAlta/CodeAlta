@@ -29,6 +29,17 @@ public sealed class DesktopWindowChromeTests
     }
 
     [TestMethod]
+    public void WindowIcon_IsLeftToTheBundleOnMacOS()
+    {
+        // macOS 26 draws an image set by the running application smaller than the icon of its bundle, on a grey tile.
+        Assert.IsFalse(DesktopWindowChrome.AppliesWindowIcon(macOS: true, DesktopIntegration.MacBundleIdentifier));
+        Assert.IsTrue(DesktopWindowChrome.AppliesWindowIcon(macOS: true, bundleIdentifier: null));
+        Assert.IsTrue(DesktopWindowChrome.AppliesWindowIcon(macOS: false, bundleIdentifier: null));
+        // A test host is started by its executable, as a build output or `alta` in a terminal is.
+        if (OperatingSystem.IsMacOS()) Assert.IsNull(DesktopIntegration.MacRunningBundleIdentifier());
+    }
+
+    [TestMethod]
     public void ViewOptions_ShowTheMainViewAsAnApplicationShell()
     {
         var options = DesktopWindowChrome.ViewOptions();

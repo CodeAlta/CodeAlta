@@ -123,13 +123,23 @@ internal sealed class DesktopWindowChrome : IAsyncDisposable
     internal static string WindowIconFile(bool windows, bool macOS) => windows ? "alta.ico" : macOS ? "alta.icns" : "alta.png";
 
     /// <summary>
+    /// Whether the running application gives the system its own image as icon. Not on macOS when it was
+    /// started as an application bundle: the Dock already draws the icon of the bundle, sized and shaped like
+    /// its neighbours, and macOS 26 draws an image that the application sets smaller, on a grey tile.
+    /// </summary>
+    /// <param name="macOS">Whether the platform is macOS.</param>
+    /// <param name="bundleIdentifier">The identifier of the bundle the process was started as; null for none.</param>
+    internal static bool AppliesWindowIcon(bool macOS, string? bundleIdentifier) => !macOS || bundleIdentifier is null;
+
+    /// <summary>
     /// Gives the window the application's icon, which the task switcher (Alt+Tab) and the Dock show. A native
     /// window does not take the icon of its executable by itself. A missing icon file or an unsupported
-    /// platform leaves the default icon.
+    /// platform leaves the default icon, and so does <c>CodeAlta.app</c> on macOS, which has its own.
     /// </summary>
     internal async ValueTask ApplyWindowIconAsync(NeoWindow window)
     {
         ArgumentNullException.ThrowIfNull(window);
+        if (OperatingSystem.IsMacOS() && !AppliesWindowIcon(macOS: true, DesktopIntegration.MacRunningBundleIdentifier())) return;
         var icon = Path.Combine(AppContext.BaseDirectory, WindowIconFile(OperatingSystem.IsWindows(), OperatingSystem.IsMacOS()));
         if (!File.Exists(icon)) return;
         try { await _services.WindowPolish.SetIconAsync(window, icon).ConfigureAwait(true); }

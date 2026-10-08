@@ -264,6 +264,31 @@ internal static class DesktopIntegration
         File.WriteAllText(path, LinuxDesktopEntry(launcher, icon), new UTF8Encoding(false));
     }
 
+    /// <summary>
+    /// The identifier of the application bundle this process was started as (<c>CodeAlta.app</c> opened from
+    /// the Dock, the Finder or <c>open</c>), as the system knows it; null for a process started by its
+    /// executable. The environment does not tell: a process started from a session of the application
+    /// inherits its variables, and the executable is the tool's, outside the bundle.
+    /// </summary>
+    [SupportedOSPlatform("macos")]
+    internal static string? MacRunningBundleIdentifier()
+    {
+        var application = Send(objc_getClass("NSRunningApplication"), sel_registerName("currentApplication"));
+        var identifier = application == 0 ? 0 : Send(application, sel_registerName("bundleIdentifier"));
+        return identifier == 0 ? null : Marshal.PtrToStringUTF8(Send(identifier, sel_registerName("UTF8String")));
+    }
+
+    private const string ObjectiveC = "/usr/lib/libobjc.A.dylib";
+
+    [DllImport(ObjectiveC)]
+    private static extern nint objc_getClass([MarshalAs(UnmanagedType.LPUTF8Str)] string name);
+
+    [DllImport(ObjectiveC)]
+    private static extern nint sel_registerName([MarshalAs(UnmanagedType.LPUTF8Str)] string name);
+
+    [DllImport(ObjectiveC, EntryPoint = "objc_msgSend")]
+    private static extern nint Send(nint receiver, nint selector);
+
     [SupportedOSPlatform("windows")]
     internal static void WriteWindowsShortcut(string path, string launcher, string? icon)
     {

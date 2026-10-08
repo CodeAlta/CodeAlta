@@ -204,11 +204,14 @@ or the launcher's path changes. The first time, a notice in the window says wher
   the installed tool (`exec`). It starts the tool through the user's login shell so that it gets the
   PATH of a terminal (git, node, the .NET runtime), which an application started from the Finder
   does not have. Nothing is signed or downloaded: the bundle is created locally, so it is not
-  quarantined. If the tool is uninstalled, the bundle says so when opened. The bundle and the
-  running application use `alta.icns` for the Dock: its tile keeps the margin of the system's icon
-  grid (824 of 1024 points, over a soft shadow), because the Dock draws an icon as large as its
-  canvas and the full-bleed tile of the other desktops would look bigger than its neighbours.
-  `img/make-icons.py` derives it from `img/CodeAlta.png`.
+  quarantined. If the tool is uninstalled, the bundle says so when opened. The bundle's icon is
+  `alta.icns`: its tile keeps the margin of the system's icon grid (824 of 1024 points, over a soft
+  shadow), because the Dock draws an icon as large as its canvas and the full-bleed tile of the
+  other desktops would look bigger than its neighbours. `img/make-icons.py` derives it from
+  `img/CodeAlta.png`. An application started as the bundle leaves that icon to the system, which
+  sizes and shapes it like its neighbours: macOS 26 draws an image that the running application sets
+  smaller, on a grey tile. Only a process started by its executable (`alta` in a terminal, a build
+  output) sets `alta.icns` itself, as it has no bundle to take an icon from.
 - **Linux:** `codealta.desktop` in `~/.local/share/applications` (or `$XDG_DATA_HOME`).
 
 On macOS and Linux the entry starts the tool's launcher (`alta` in the .NET tools folder), so a tool
