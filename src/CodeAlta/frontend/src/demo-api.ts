@@ -132,6 +132,7 @@ export const workItems = Object.freeze({ list: async () => ({ status: "unavailab
   saveSettings: unavailable, watch: unavailable });
 // The demo has no repository whose issues could be read.
 export const issues = Object.freeze({ sources: async () => ({ status: "unavailable", sources: [] }), list: unavailable, read: unavailable, start: unavailable, openLink: unavailable });
+export const markdownLinks = Object.freeze({ open: async () => ({ status: "unavailable", hostEpoch: "" }) });
 // The demo has no host to keep the instructions for a pull request.
 export const pullRequestPrompts = Object.freeze({ list: async () => ({ status: "unavailable", items: [] }), save: unavailable, delete: unavailable });
 export const promptImages = Object.freeze({ read: unavailable });

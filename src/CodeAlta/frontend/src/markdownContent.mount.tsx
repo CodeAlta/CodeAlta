@@ -2,13 +2,14 @@ import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { MarkdownContent } from "./MarkdownContent";
-import { TimelineMessage } from "./TimelineMessage";
+import { MessageLinksContext, TimelineMessage } from "./TimelineMessage";
 import type { TimelineItem } from "./timeline";
 import MarkdownIt from "markdown-it";
 
 // Literal fixtures only; no application host, clipboard or bridge.
 const root = createRoot(document.getElementById("app")!);
 const state = { phase: "ready", executed: 0, opens: [] as string[], copies: [] as string[],
+  external: [] as string[],
   policies: [] as { directive: string; uri: string; phase: string }[], parses: 0, parsedBases: [] as string[] };
 window.open = ((url?: string | URL) => { state.opens.push(String(url)); return null; }) as typeof window.open;
 Object.defineProperty(navigator, "clipboard", { value: { writeText: async (text: string) => { state.copies.push(text); } } });
@@ -82,6 +83,11 @@ const rendererClasses: Record<string, readonly string[] | undefined> = { TABLE: 
 const copyButton = (e: Element) => e.tagName === "BUTTON" && e.className === "markdown-copy" && !e.firstChild && e.getAttribute("type") === "button"
   && e.parentElement?.tagName === "PRE" && e.parentElement.firstElementChild === e && e.nextElementSibling?.tagName === "CODE";
 Object.assign(window, { markdownFixture: { state, cases, render, snapshot,
+  // An explicit, inert recording grant, never a real bridge or system-browser launch.
+  renderGranted(category: TimelineItem["category"] = "assistant", current = true, source = '[safe](https://remote.invalid/safe)') {
+    flushSync(() => root.render(createElement(MessageLinksContext.Provider, { value: address => state.external.push(address) },
+      createElement(TimelineMessage, { item: { ...item(source), category }, canInspect: () => current }))));
+  },
   // A document, as the code editor and the Skills page show one.
   renderDocument(source: string) { state.phase = "render"; flushSync(() => root.render(createElement(MarkdownContent, { key: "document", source, document: true }))); state.phase = "insert-deferred"; },
   texts(selector: string) { return Array.from(document.querySelectorAll(`.markdown-content ${selector}`)).map(e => e.textContent); },

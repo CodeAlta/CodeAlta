@@ -128,6 +128,42 @@ test("production MarkdownContent retains useful HTML without resource or app aut
       }
     }
     assert.deepEqual(await evaluate("markdownFixture.memoCheck()"), { identity: true, focused: true, selection: "line", scroll: 30, reparsed: false });
+    // A message with an explicit grant opens only from trusted activation; rendering and scripted clicks are inert.
+    await evaluate("markdownFixture.renderGranted(); document.querySelector('.markdown-content a').click()");
+    assert.deepEqual(await evaluate("markdownFixture.state.external"), []);
+    const activate = async (button = "left", modifiers = 0) => {
+      const rect = await evaluate<{ x: number; y: number; width: number; height: number }>("markdownFixture.linkRect()");
+      for (const type of ["mousePressed", "mouseReleased"]) await command("Input.dispatchMouseEvent", { type, button, modifiers,
+        x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, clickCount: 1 });
+    };
+    await activate(); await activate("left", 4); await activate("left", 2); await activate("left", 8); await activate("middle");
+    await evaluate("markdownFixture.linkRect()");
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    assert.deepEqual(await evaluate("markdownFixture.state.external"), Array(6).fill("https://remote.invalid/safe"), "One host action per normal, Cmd, Ctrl, Shift, middle and Enter gesture");
+    await evaluate("document.querySelector('.markdown-content a').addEventListener('click', event => event.preventDefault(), { once: true })");
+    await activate();
+    await evaluate("markdownFixture.renderGranted('assistant', false)"); await activate();
+    await evaluate("markdownFixture.renderGranted('tool')");
+    // Tool inline previews are deliberately not granted.
+    assert.equal(await evaluate("!!document.querySelector('.markdown-content a')"), true); await activate();
+    await evaluate("markdownFixture.renderGranted('user')"); await activate();
+    assert.equal(await evaluate("markdownFixture.state.external.length"), 6);
+    await evaluate(`markdownFixture.renderGranted('assistant', true, '<details><summary><a href="https://remote.invalid/safe">Documentation</a></summary><p>Details</p></details>')`);
+    await activate();
+    assert.equal(await evaluate("markdownFixture.state.external.length"), 7, "Granted summary anchor opens without also toggling the disclosure");
+    assert.equal(await evaluate("document.querySelector('.markdown-content details').open"), false);
+    await evaluate(`markdownFixture.renderGranted('assistant', true, '<a href="https://remote.invalid/safe"><pre><code>linked code</code></pre></a>')`);
+    const copiesBefore = await evaluate<number>("markdownFixture.state.copies.length");
+    const copyRect = await evaluate<{ x: number; y: number; width: number; height: number }>("document.querySelector('.markdown-copy').getBoundingClientRect().toJSON()");
+    for (const type of ["mousePressed", "mouseReleased"]) await command("Input.dispatchMouseEvent", { type, button: "left",
+      x: copyRect.x + copyRect.width / 2, y: copyRect.y + copyRect.height / 2, clickCount: 1 });
+    await evaluate("document.querySelector('.markdown-copy').focus()");
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    assert.deepEqual(await evaluate(`markdownFixture.state.copies.slice(${copiesBefore})`), ["linked code", "linked code"], "Mouse and keyboard Copy retain their action once each inside an anchor");
+    assert.equal(await evaluate("markdownFixture.state.external.length"), 7, "Code-copy must not also open its enclosing link");
+    await check();
     // A document is wrapped in its source: its lines follow each other, where a message breaks them.
     await evaluate("markdownFixture.render('one\\ntwo', false)");
     assert.equal(await evaluate("document.querySelectorAll('.markdown-content br').length"), 1);

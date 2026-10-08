@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore, type KeyboardEvent 
 import { diagramAppearance, diagrams } from "./diagrams";
 import { translate } from "./localization";
 import { createMarkdownRenderer } from "./markdownBoundary";
+import { markdownLinkActivation, safeMarkdownHref } from "./markdownLinks";
 import { appearanceKey, subscribeAppearance } from "./shellColors";
 import { useShellLanguage } from "./shellLanguage";
 
@@ -9,7 +10,11 @@ import { useShellLanguage } from "./shellLanguage";
  * A text of Markdown, rendered through the sanitizing boundary. A message breaks its lines where its text does;
  * a `document` (a file, the instructions of a skill) is wrapped in its source, and its lines follow each other.
  */
-export function MarkdownContent({ source, timelineCodeBlocks = false, document: asDocument = false }: { source: string; timelineCodeBlocks?: boolean; document?: boolean }) {
+export function MarkdownContent({ source, timelineCodeBlocks = false, document: asDocument = false, onOpenLink }: {
+  source: string; timelineCodeBlocks?: boolean; document?: boolean;
+  /** Explicit trusted-container grant; without it every link remains inert. */
+  onOpenLink?: (address: string) => void;
+}) {
   // The renderer is made once for a language: the titles of the alerts are in it.
   const { locale } = useShellLanguage();
   const render = useMemo(() => createMarkdownRenderer(window, { note: translate(locale, "Note"), tip: translate(locale, "Tip"),
@@ -60,8 +65,19 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
     code.scrollTop = Math.max(0, Math.min(maximum, top));
   }
 
-  function suppressLink(event: { target: EventTarget; preventDefault(): void }) {
-    if ((event.target as Element).closest("a")) event.preventDefault();
+  function activateLink(event: { target: EventTarget; currentTarget: HTMLDivElement; nativeEvent: MouseEvent | globalThis.KeyboardEvent;
+    preventDefault(): void; defaultPrevented: boolean }) {
+    const target = event.target instanceof Element ? event.target : null;
+    // Enter on the renderer's Copy button must still produce its native click, even inside an authored anchor.
+    if (event.nativeEvent.type === "keydown" && target?.closest("button.markdown-copy")) return;
+    const link = target?.closest("a");
+    if (!link || !event.currentTarget.contains(link)) return;
+    const activate = !event.defaultPrevented && markdownLinkActivation(event.nativeEvent);
+    event.preventDefault(); // Never navigate the WebView, including ungranted and unsupported gestures.
+    if (!activate || !onOpenLink || !link.isConnected || link.closest('[inert], [hidden]')
+      || target?.closest("button") || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+    const address = link.getAttribute("href"); // Read the sanitized literal, not the browser-resolved property.
+    if (address && safeMarkdownHref(address)) onOpenLink(address);
   }
   // The button of a code block copies the text of that block, as it is written, and says so for a moment.
   function copyCode(event: { target: EventTarget }) {
@@ -73,9 +89,13 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
       window.setTimeout(() => button.removeAttribute("data-copied"), 1400);
     }, () => { /* The clipboard is unavailable: nothing was copied and nothing changes. */ });
   }
-  return <div className="markdown-content" onClick={event => { suppressLink(event); copyCode(event); }} onAuxClick={suppressLink}
+  return <div className="markdown-content" onClick={event => {
+    const handled = event.defaultPrevented;
+    activateLink(event);
+    if (!handled) copyCode(event); // Our navigation suppression must not swallow Copy inside an anchor.
+  }} onAuxClick={activateLink}
     onKeyDown={event => {
-      if (event.key === "Enter") suppressLink(event);
+      if (event.key === "Enter") activateLink(event);
       if (timelineCodeBlocks) scrollCode(event);
     }} dangerouslySetInnerHTML={codeMarkup} />;
 }

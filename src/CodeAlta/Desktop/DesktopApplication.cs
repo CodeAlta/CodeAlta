@@ -505,6 +505,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         RememberAppearance = RememberAppearance, ProviderSetup = NeedsProviderSetup(configStore),
                     });
                     builder.AddDesktopShellService(new DesktopShellService(shell));
+                    builder.AddMarkdownLinksService(new MarkdownLinksService(epoch, DesktopLinks.Open));
                     builder.AddColorSchemesService(new ColorSchemesService(options.CatalogRoot!));
                     // As the terminal application does: one look at nuget.org for a newer version. An instance on
                     // explicit roots is automation and stays off the network.

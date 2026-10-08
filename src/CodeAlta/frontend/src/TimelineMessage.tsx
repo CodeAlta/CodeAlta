@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createContext, memo, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { AppIcon } from "./AppIcon";
 import { MarkdownContent } from "./MarkdownContent";
 import { PluginHtml } from "./PluginHtml";
@@ -18,6 +18,9 @@ import { useToolOutput, type ToolOutputs } from "./toolOutput";
 const longBodyThreshold = 1200;
 const previewLength = 240;
 const commandPreviewLength = 80;
+
+/** A host-owned message-link grant. Detached fixtures and other Markdown previews have no opener. */
+export const MessageLinksContext = createContext<((address: string) => void) | null>(null);
 
 // Display-only command identity, never a command parser or execution target.
 export function commandPreview(source: string): string {
@@ -52,6 +55,9 @@ function sameMessage(previous: TimelineMessageProps, next: TimelineMessageProps)
 export const TimelineMessage = memo(function TimelineMessage({ item, canInspect, historySource, onOpenSource, toolTile = false, imageSource,
   rowKey, onOpenTool, toolOutputs }: TimelineMessageProps) {
   const { t, locale } = useShellLanguage();
+  const openLink = useContext(MessageLinksContext);
+  const messageLink = openLink && item.category === "assistant"
+    ? (address: string) => { if (canInspect?.() ?? true) openLink(address); } : undefined;
   const state = item.category === "tool" ? toolState(item.toolPhase) : null;
   // A call that runs is followed: its tile says how much it wrote and its last line.
   const live = useToolOutput(toolOutputs, item.toolCall?.activityId, toolTile && (state === "running" || state === "pending"));
@@ -207,7 +213,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
         </button>
         <div id={bodyId}>{expanded ? <MarkdownContent source={body} timelineCodeBlocks />
           : <p className="long-message-preview">{t("Preview (plain text):")} {plainTextPreview(body)}…</p>}</div>
-      </> : body && <MarkdownContent source={body} timelineCodeBlocks />)}
+      </> : body && <MarkdownContent source={body} timelineCodeBlocks onOpenLink={messageLink} />)}
       {item.images && <TimelineImages images={item.images} source={imageSource} />}
       {item.fileChanges && <FileChangeInspection key={item.fileChanges.source} changes={item.fileChanges} canInspect={canInspect} />}
       {details && <TimelineDetails item={details.item} current={detailCurrent} onClose={closeDetails} />}

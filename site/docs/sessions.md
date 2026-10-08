@@ -22,6 +22,8 @@ Open a project with `Ctrl+O`, select a provider/model/reasoning combination, and
 
 When reopening an existing session, CodeAlta restores local history before provider initialization has to finish. A ready compatible provider can resume or switch a CodeAlta-owned local session while it is idle; provider-native continuation state is reused only when it is safe.
 
+In CodeAlta Desktop, click a web link in an assistant message to open it in your default browser. You can also focus the link with Tab and press Enter, or use Cmd-click on macOS, Ctrl-click, or middle click.
+
 ## Busy sessions and queues
 
 If a session is busy, `Enter` queues your prompt instead of losing it. The waiting list appears above the status line.
