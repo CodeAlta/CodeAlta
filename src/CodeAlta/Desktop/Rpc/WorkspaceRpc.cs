@@ -168,11 +168,6 @@ internal sealed partial class WorkspaceService
                      .ThenByDescending(value => value.SessionId, StringComparer.Ordinal))
         {
             if (displayedSessions.Count == 500) break;
-            var persistedTitle = (session.Details as RawApiSessionMetadataDetails)?.Title;
-            var sourceTitle = !string.IsNullOrWhiteSpace(persistedTitle) ? persistedTitle
-                : !string.IsNullOrWhiteSpace(session.Summary) ? session.Summary : session.SessionId;
-            var title = DisplayText(sourceTitle, ref shortened);
-            var fullTitle = DisplayTextBounded(sourceTitle, 4096, ref shortened);
             var parent = session.ParentSessionId ?? session.ViewState?.ParentSessionId;
             if (string.IsNullOrWhiteSpace(parent)) parent = null;
             var lineageIssue = parent is not null && !ValidLineageId(parent) ? "invalid_parent" : null;
@@ -203,6 +198,14 @@ internal sealed partial class WorkspaceService
                     projectId = reference;
                 }
             }
+            // A session that was never named keeps the text it was created with as its saved title, while its summary
+            // follows the conversation: it is listed by the first line of that summary, as the terminal UI does. The
+            // deletion of a session is confirmed with the same title.
+            var sourceTitle = CodeAlta.Orchestration.Runtime.SessionRuntimeService.ListedTitle(session,
+                scopeKind switch { "global" => SessionViewKind.GlobalSession, "project" => SessionViewKind.ProjectSession, _ => (SessionViewKind?)null },
+                projectId is null ? null : projects.FirstOrDefault(project => project.Id == projectId));
+            var title = DisplayText(sourceTitle, ref shortened);
+            var fullTitle = DisplayTextBounded(sourceTitle, 4096, ref shortened);
             var cost = 512 + 64 + 6 * (session.SessionId.Length + title.Length + fullTitle.Length + (parent?.Length ?? 0)
                 + (session.WorkspacePath?.Length ?? 0) + (session.ProviderKey?.Length ?? 0) + (projectId?.Length ?? 0) + (automationId?.Length ?? 0)
                 + (worktreePath?.Length ?? 0) + (worktreeRoot?.Length ?? 0) + (worktreeName?.Length ?? 0));
