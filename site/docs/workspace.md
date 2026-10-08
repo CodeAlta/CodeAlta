@@ -539,6 +539,12 @@ When the startup update check finds a newer package on NuGet, CodeAlta shows a n
   <figcaption class="small text-secondary mt-2">The update notice appears once per session when a newer CodeAlta package is available.</figcaption>
 </figure>
 
+### Window size and position (desktop)
+
+CodeAlta Desktop opens its window where you left it: at the same position and size, and maximized or full screen if it was when you exited. A maximized window still goes back to the size it had before when you restore it.
+
+If the display the window was on is not connected any more, the window opens on a display that is.
+
 ### Notification area (desktop)
 
 Closing the desktop window asks whether CodeAlta keeps running or exits. **Keep running** hides the window and leaves CodeAlta and its sessions running, with an icon in the notification area: click the icon to show the window, or use its menu to exit. Tick **Remember my choice** to stop being asked.

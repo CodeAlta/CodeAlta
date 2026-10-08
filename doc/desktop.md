@@ -24,8 +24,21 @@ native services or create storage. Explicit catalog and scoped-owned options ret
 
 ## Main window
 
-The main window opens centered at 80% of the primary work area on Windows; other platforms use a
+The main window first opens centered at 80% of the primary work area on Windows; other platforms use a
 centered 1280×860 window until NeoAstra exposes display metrics.
+
+After that it opens **where it was** when the application last ended: at the same position and size, and
+maximized or fullscreen if it was (`DesktopWindowState`). A window that was maximized goes back to the
+size it had before when it is restored, and a window that was minimized opens in the state it had
+before. The placement is in `window.json` of the application data directory, beside `preferences.json`,
+so the normal and the developer instance each have their own. NeoAstra's `NeoWindowStateController`
+writes it a moment after the window was moved, resized, maximized or restored, and once more when the
+application ends. It is given back while the window is still hidden: a hidden window takes its bounds at
+once and its state when it is shown, so the window never appears in its default place first. The
+position is given back inside a display that is there now (`NeoWindowStateRestore.Clamp`), with the
+window shrunk to the work area if it has to be; where the displays are not known when the window is
+shown, only the size and the state are given back. A file that is missing or malformed gives the
+default placement.
 
 The window has no separate title bar: the page draws it. The CodeAlta mark sits at the top left
 with the buttons of the workspace beside it (the name is not written, so that these buttons keep their

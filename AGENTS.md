@@ -105,7 +105,7 @@ Only one CodeAlta runs on a profile, because two processes must not write the sa
 | --- | --- |
 | `config.toml`, providers and their credentials (`auth/`), `mcp.json`, prompts, skills, plugins and their data (`plugin-data/`), color schemes (`color-schemes/`), the project catalog (`projects/`) | `sessions/` (journals, pasted images), `cache/cache.sqlite3`, `ui-state.yaml`, `saved_prompts/`, `logs/`, `alta.lock` |
 
-The desktop developer instance also has its own WebView data (`%LOCALAPPDATA%\CodeAlta\desktop-dev`: open tabs, drafts, theme) and its own MCP port. One developer instance runs at a time, terminal or desktop. It leaves the coordinator `~/.alta/AGENTS.md` as the normal instance wrote it, and on its first run takes over the normal instance's per-project provider/model preferences.
+The desktop developer instance also has its own WebView data (`%LOCALAPPDATA%\CodeAlta\desktop-dev`: open tabs, drafts, theme, and the placement of its window) and its own MCP port. One developer instance runs at a time, terminal or desktop. It leaves the coordinator `~/.alta/AGENTS.md` as the normal instance wrote it, and on its first run takes over the normal instance's per-project provider/model preferences.
 
 This is how CodeAlta is developed with CodeAlta: you run in the normal instance (desktop or terminal, any released or built `alta`/`altatui` that has this branch's MCP support), build the repository in a configuration that instance does not run from, start that `alta.exe --dev`, and drive that window through its MCP server (`codealta-dev`). The terminal UI is checked the same way with `altatui --dev` in a separate console.
 

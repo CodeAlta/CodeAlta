@@ -221,6 +221,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         PluginUiService? pluginCommands = null;
         WorkspaceService? workspace = null;
         NeoWindow? window = null;
+        DesktopWindowState? windowState = null;
         Mcp.DesktopMcpServer? mcp = null;
         IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null, chromeLifetime = null, instanceLifetime = null;
         IAsyncDisposable? uiLifetime = null;
@@ -385,6 +386,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // does not keep the window out of sight.
             var startupShown = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             view.NavigationCompleted += (_, _) => startupShown.TrySetResult();
+            // Where the window was when the application last ended, and whether it was maximized: given back
+            // while the window is hidden, so that it appears there and not in its default place first.
+            windowState = await DesktopWindowState.StartAsync(window, options.DataRoot, chrome.Services.SystemInfo);
             var cloaked = DesktopWindowReveal.ShowCloaked(window);
             var starting = view.NavigateAsync(StartupDocument);
             await starting;
@@ -643,6 +647,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             GC.KeepAlive(window);
             return; // No native-resource disposal, lease release or ForceShutdown on this path.
         }
+        // The placement of the window for the next start, written while the window is still there.
+        if (windowState is not null) await windowState.DisposeAsync();
         var nativeFailed = false;
         foreach (var resource in new[] { uiLifetime, bindingLifetime, viewLifetime, rpcLifetime, instanceLifetime, chromeLifetime, environmentLifetime })
         {
