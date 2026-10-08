@@ -459,6 +459,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         using var gate = new SemaphoreSlim(1, 1);
         using var batch = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var running = new List<Task>();
+        // The last call that changes each file: a later call that changes the same file waits for it.
+        var changing = new Dictionary<string, Task>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         try
         {
             foreach (var toolCall in toolCalls)
@@ -477,7 +479,16 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 var before = running.Count == 0 ? Task.CompletedTask : Task.WhenAll(running);
                 if (providerToolHost?.WhenToolStarts(SessionId, toolCall) is { } started)
                 {
-                    running.Add(RunStartedToolCallAsync(run, toolCall, toolDefinition, started, before, gate, batch));
+                    var files = GetTrackedFileMutationPaths(toolCall, _summary.ExecutionDirectory);
+                    var sameFiles = files.Select(file => changing.GetValueOrDefault(file)).OfType<Task>().Distinct().ToArray();
+                    var call = RunStartedToolCallAsync(run, toolCall, toolDefinition, started, before,
+                        sameFiles.Length == 0 ? Task.CompletedTask : Task.WhenAll(sameFiles), gate, batch);
+                    running.Add(call);
+                    foreach (var file in files)
+                    {
+                        changing[file] = call;
+                    }
+
                     continue;
                 }
 
@@ -510,11 +521,16 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         AgentToolDefinition toolDefinition,
         Task started,
         Task before,
+        Task sameFiles,
         SemaphoreSlim gate,
         CancellationTokenSource batch)
     {
         try
         {
+            // A call that changes a file starts once the call that changes the same file before it has recorded
+            // what it did: the provider can start the second while the first is being recorded, and each call
+            // must show its own change of the file, not the one of the next call with it.
+            await sameFiles.WaitAsync(batch.Token).ConfigureAwait(false);
             await Task.WhenAny(started, before).WaitAsync(batch.Token).ConfigureAwait(false);
             batch.Token.ThrowIfCancellationRequested();
             await RunToolCallAsync(run, toolCall, toolDefinition, gate, batch.Token).ConfigureAwait(false);
