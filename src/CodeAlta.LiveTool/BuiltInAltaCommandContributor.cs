@@ -2398,7 +2398,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return parentResolution.ExitCode;
         }
 
-        var modelSelection = await ResolveModelSelectionAsync(context, options.Model, "alta session create").ConfigureAwait(false);
+        var modelSelection = await ResolveModelSelectionAsync(context, options.Model, "alta session create", project?.ProjectPath).ConfigureAwait(false);
         if (modelSelection.ExitCode != AltaExitCodes.Success)
         {
             return modelSelection.ExitCode;
@@ -3763,7 +3763,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         ];
     }
 
-    private static async Task<ModelResolutionResult> ResolveModelSelectionAsync(AltaCommandContext context, AltaModelSelectionOptions request, string commandPath = "alta model resolve")
+    private static Task<ModelResolutionResult> ResolveModelSelectionAsync(AltaCommandContext context, AltaModelSelectionOptions request, string commandPath = "alta model resolve")
+        => ResolveModelSelectionAsync(context, request, commandPath, projectRoot: null);
+
+    // projectRoot: the folder of the project a session is created in, whose configuration names the default provider first.
+    private static async Task<ModelResolutionResult> ResolveModelSelectionAsync(AltaCommandContext context, AltaModelSelectionOptions request, string commandPath, string? projectRoot)
     {
         if (!string.IsNullOrWhiteSpace(request.ModelRef))
         {
@@ -3798,7 +3802,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 inherited = inheritedResult.Selection;
             }
         }
-        var providerKey = FirstNonEmpty(request.ProviderKey, inherited?.ProviderKey, GetDefaultProviderKey(context));
+        var providerKey = FirstNonEmpty(request.ProviderKey, inherited?.ProviderKey, GetDefaultProviderKey(context, projectRoot));
         if (string.IsNullOrWhiteSpace(providerKey))
         {
             return ModelResolutionResult.Fail(NotFound(context, "provider.notFound", "No provider is registered or selected."));
@@ -3899,14 +3903,40 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             : SessionModelSelectionResult.Success(selection);
     }
 
-    private static string? GetDefaultProviderKey(AltaCommandContext context)
+    // The provider of a session that names none and inherits none, as the rest of the application picks it: the
+    // default provider of the configuration (of the project, then of the user) when it is enabled, otherwise the
+    // first enabled provider.
+    private static string? GetDefaultProviderKey(AltaCommandContext context, string? projectRoot)
     {
-        if (GetProviderDescriptors(context).FirstOrDefault() is { } descriptor)
+        var descriptors = GetProviderDescriptors(context);
+        var enabled = descriptors.Where(static descriptor => descriptor.IsEnabled).ToArray();
+        if (GetConfiguredDefaultProvider(context, projectRoot) is { } configured &&
+            enabled.FirstOrDefault(descriptor => string.Equals(descriptor.ProviderId.Value, configured, StringComparison.OrdinalIgnoreCase)) is { } chosen)
         {
-            return descriptor.ProviderId.Value;
+            return chosen.ProviderId.Value;
         }
 
-        return null;
+        return (enabled.FirstOrDefault() ?? descriptors.FirstOrDefault())?.ProviderId.Value;
+    }
+
+    private static string? GetConfiguredDefaultProvider(AltaCommandContext context, string? projectRoot)
+    {
+        var store = context.Services.Get<CodeAltaConfigStore>()
+            ?? (context.Services.Get<CatalogOptions>() is { } options ? new CodeAltaConfigStore(options) : null);
+        if (store is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return store.GetEffectiveDefaultProvider(projectRoot);
+        }
+        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // A configuration that cannot be read names no default.
+            return null;
+        }
     }
 
     private static IReadOnlyList<ModelProviderDescriptor> GetProviderDescriptors(AltaCommandContext context)

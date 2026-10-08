@@ -2118,6 +2118,91 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionCreate_WithoutProviderOrCallerSession_TakesTheDefaultProviderOfTheConfiguration()
+    {
+        using var root = TempDirectory.Create();
+        var projectPath = Path.Combine(root.Path, "project");
+        Directory.CreateDirectory(projectPath);
+        var options = new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "global") };
+        Directory.CreateDirectory(options.GlobalRoot);
+        var projectCatalog = new ProjectCatalog(options);
+        var project = await projectCatalog.UpsertFromPathAsync(projectPath).ConfigureAwait(false);
+        var sessionCatalog = new SessionViewCatalog(options);
+        // Listed by name: alpha is the first one, which is what a session got whatever the configuration said.
+        var descriptors = new[]
+        {
+            new ModelProviderDescriptor(new ModelProviderId("alpha"), "Alpha"),
+            new ModelProviderDescriptor(new ModelProviderId("beta"), "Beta"),
+            new ModelProviderDescriptor(new ModelProviderId("gamma"), "Gamma"),
+            new ModelProviderDescriptor(new ModelProviderId("off"), "Off") { IsEnabled = false },
+        };
+        var registry = new ModelProviderRegistry();
+        foreach (var descriptor in descriptors.Where(static descriptor => descriptor.IsEnabled))
+        {
+            var providerRuntime = new StatefulProviderRuntime(descriptor.ProviderId);
+            registry.RegisterOrReplaceSessionRuntime(descriptor, () => providerRuntime);
+        }
+
+        var skillCatalog = new SkillCatalog();
+        var runtime = new SessionRuntimeService(
+            new AgentHub(registry),
+            new AgentSessionCatalog(sessionCatalog.JournalStore.CreateSessionStore()),
+            projectCatalog,
+            sessionCatalog,
+            new AgentInstructionTemplateProvider(skillCatalog, options),
+            options,
+            skillCatalog);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(projectCatalog)
+            .Add(sessionCatalog)
+            .Add(runtime)
+            .Add<IReadOnlyList<ModelProviderDescriptor>>(descriptors)
+            .Add<IAltaSessionQueryService>(new ThrowingSessionQueryService()));
+
+        async Task<string?> Resolved()
+        {
+            var result = await dispatcher.InvokeAsync(["model", "resolve"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Stderr);
+            return ReadJsonLines(result.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.model.selection").GetProperty("providerKey").GetString();
+        }
+
+        async Task<string?> Created(string title)
+        {
+            var result = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--title", title], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, title + ": " + result.Stdout + result.Stderr);
+            return ReadJsonLines(result.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("providerKey").GetString();
+        }
+
+        // No default is configured: the first enabled provider.
+        Assert.AreEqual("alpha", await Resolved().ConfigureAwait(false));
+        Assert.AreEqual("alpha", await Created("No default").ConfigureAwait(false));
+
+        // The default provider of the user.
+        File.WriteAllText(options.ConfigPath, "[chat]\ndefault_provider = \"beta\"\n");
+        Assert.AreEqual("beta", await Resolved().ConfigureAwait(false));
+        Assert.AreEqual("beta", await Created("Default of the user").ConfigureAwait(false));
+
+        // The configuration of the project comes first for a session of that project.
+        Directory.CreateDirectory(Path.Combine(projectPath, ".alta"));
+        File.WriteAllText(Path.Combine(projectPath, ".alta", "config.toml"), "[chat]\ndefault_provider = \"gamma\"\n");
+        Assert.AreEqual("gamma", await Created("Default of the project").ConfigureAwait(false));
+        Assert.AreEqual("beta", await Resolved().ConfigureAwait(false), "A selection outside a project follows the user's configuration.");
+
+        // A provider named explicitly is kept, and a default that is not enabled gives the first enabled provider.
+        var explicitProvider = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--title", "Explicit", "--provider", "alpha"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual("alpha", ReadJsonLines(explicitProvider.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("providerKey").GetString());
+        File.WriteAllText(Path.Combine(projectPath, ".alta", "config.toml"), "[chat]\ndefault_provider = \"off\"\n");
+        File.WriteAllText(options.ConfigPath, "[chat]\ndefault_provider = \"off\"\n");
+        Assert.AreEqual("alpha", await Created("Disabled default").ConfigureAwait(false));
+
+        // A configuration that does not parse names no default, and fails nothing.
+        File.WriteAllText(options.ConfigPath, "[chat\ndefault_provider = ");
+        Assert.AreEqual("alpha", await Resolved().ConfigureAwait(false));
+    }
+
+    [TestMethod]
     public async Task SessionCreate_ResolvesPersistsModelInheritanceAndChildProvenance()
     {
         using var root = TempDirectory.Create();

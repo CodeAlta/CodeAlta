@@ -1442,6 +1442,8 @@ provider is enabled, otherwise the first enabled provider in the order of the re
 `configuration` snapshot and `modelCatalog.providers` mark that one provider `isDefault`, and
 `workspace.createSession` without a provider, `SessionStarter` (work items, issues) and
 `AutomationRunner` take the same, so the composer of a new session, a work item and an automation agree.
+`alta session create` and `alta model resolve` follow the same rule (in `CodeAlta.LiveTool`, for both
+frontends) when the command names no provider and inherits none from a calling session.
 `globalConfig.providers` reports both what the file says (`defaultProvider`, which the checkbox **Use as
 the default provider for new sessions** shows) and the provider that results (`startingProvider`, which
 carries the **Default** tag in the list). Saving a provider with the box cleared removes
