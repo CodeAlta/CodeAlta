@@ -6,6 +6,7 @@ import { projectRowAccess, projectRowCurrent, type ProjectRowContext } from "./p
 import { isSessionContextKey } from "../sessionRowActions";
 import { SessionTabMenu } from "../SessionTabMenu";
 import { useShellLanguage } from "../shellLanguage";
+import { modalDialogOpen } from "../modalDialogs";
 
 /** Session actions of one scope (a project, or the global "Global sessions" scope when the id is null). */
 export type ScopeSessionActions = {
@@ -50,12 +51,12 @@ export function ProjectRowActions({ project, authority, favorite, children }: {
     if (focus) requestAnimationFrame(() => {
       const context = latest.current?.current();
       if (value.origin.isConnected && context && projectRowCurrent(value.project, value.context, context)
-        && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) value.origin.focus();
+        && !modalDialogOpen()) value.origin.focus();
     });
   }
   function open() {
     if (!latest.current || !row.current || !trigger.current || !row.current.isConnected
-      || row.current.closest("[hidden]") || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+      || row.current.closest("[hidden]") || modalDialogOpen()) return;
     const context = latest.current.current();
     if (!projectRowAccess(project, context).open) return;
     const value: Review = { project: { ...project }, context, origin: trigger.current, row: row.current, details: false, opening: false };
@@ -89,7 +90,7 @@ export function ProjectRowActions({ project, authority, favorite, children }: {
     const value = review.current;
     const owner = latest.current;
     if (!value || value !== original || value.details || !owner?.sessions || !current(value)
-      || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')
+      || modalDialogOpen()
       || !projectRowAccess(value.project, owner.current()).open || kind === "create" && !owner.sessions.canCreate(value.project.id)) return;
     dismiss();
     owner.sessions[kind](value.project.id);
@@ -98,7 +99,7 @@ export function ProjectRowActions({ project, authority, favorite, children }: {
     const value = review.current;
     const owner = latest.current;
     if (!value || value !== original || value.details || !owner || !current(value)
-      || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')
+      || modalDialogOpen()
       || !projectRowAccess(value.project, value.context)[kind] || !projectRowAccess(value.project, owner.current())[kind]) return;
     if (kind === "details") {
       const details = { ...value, details: true, opening: true };

@@ -14,6 +14,7 @@ import type { TimelineImageSource } from "./timelineImages";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { formatSize, toolState } from "./toolCall";
 import { useToolOutput, type ToolOutputs } from "./toolOutput";
+import { modalDialogOpen } from "./modalDialogs";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
@@ -77,7 +78,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
     if (restore && origin) requestAnimationFrame(() => {
       if (origin.isConnected && !origin.closest('[inert], [hidden]') && (canInspect?.() ?? true)
         && sameDetailItem() && (details?.current?.() ?? true)
-        && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) origin.focus();
+        && !modalDialogOpen()) origin.focus();
     });
   }
   const [disclosure, setDisclosure] = useState<{ source: string; expanded: boolean; current?: () => boolean } | null>(null);
@@ -154,7 +155,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
   const callWindow = item.category === "tool" && !!item.toolCall && !!onOpenTool && !!rowKey;
   function openDetails(origin: HTMLButtonElement) {
     if (!current() || !origin.isConnected || origin.closest('[inert], [hidden]')
-      || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+      || modalDialogOpen()) return;
     if (callWindow) onOpenTool!(rowKey!, origin);
     else setDetails({ item, origin, current: canInspect });
   }
@@ -206,7 +207,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
           onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
           onClick={event => {
             if (event.defaultPrevented || !active.current || !current() || !event.currentTarget.isConnected || event.currentTarget.closest("[inert]")
-              || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+              || modalDialogOpen()) return;
             setDisclosure({ source, expanded: !expanded, current: canInspect });
           }}>
           <AppIcon name="chevronDown" size={14} />{t(expanded ? "Collapse message" : "Show full message")}

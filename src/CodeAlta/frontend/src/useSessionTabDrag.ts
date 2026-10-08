@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
 import { Actions, Model, TabNode, TabSetNode, type Action } from "flexlayout-react";
 import { sessionTabDrop, type SessionTabDrop } from "./sessionTabDrag";
+import { modalDialogOpen } from "./modalDialogs";
 
 // Native HTML5 drags enter WebView2/OLE host drop handling. Pointer capture keeps
 // session docking entirely in the WebApp while FlexLayout still owns the model.
@@ -113,7 +114,7 @@ export function useSessionTabDrag(root: RefObject<HTMLDivElement | null>, model:
     requestAnimationFrame(() => {
       const container = root.current, document = container?.ownerDocument;
       if (!container || !document || model.getNodeById(pending.node.getId()) !== pending.node
-        || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')
+        || modalDialogOpen()
         || document.activeElement !== document.body && document.activeElement !== pending.header) return;
       Array.from(container.querySelectorAll<HTMLElement>("[data-session-node]")).find(node => node.dataset.sessionNode === pending.node.getId())
         ?.closest<HTMLElement>('[role="tab"]')?.focus({ preventScroll: true });

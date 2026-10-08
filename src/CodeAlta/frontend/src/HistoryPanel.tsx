@@ -20,6 +20,7 @@ import { ToolCallDialog } from "./ToolCallDialog";
 import type { ToolCallReader } from "./toolCallReader";
 import type { ToolOutputs } from "./toolOutput";
 import type { TimelineItem } from "./timeline";
+import { modalDialogOpen } from "./modalDialogs";
 
 // The production caller supplies readTimeline (workspace.historyTimeline). The injection seam lets the mounted
 // browser fixture exercise this exact component with an isolated, revisioned test journal.
@@ -90,7 +91,7 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   const closeToolWindow = useCallback(() => setOpenTool(current => {
     const origin = current?.origin;
     if (origin) requestAnimationFrame(() => {
-      if (origin.isConnected && !origin.closest('[inert], [hidden]') && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) origin.focus();
+      if (origin.isConnected && !origin.closest('[inert], [hidden]') && !modalDialogOpen()) origin.focus();
     });
     return null;
   }), []);

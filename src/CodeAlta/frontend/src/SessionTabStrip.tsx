@@ -263,7 +263,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
         const file = files.open.find(value => fileNodeId(value) === node.getId());
         if (file) return renderFile ? <SessionTabContent node={node}>{visible => renderFile(file, visible)}</SessionTabContent> : null;
         const tab = state.open.find(tab => sessionNodeId(tab) === node.getId());
-        return tab && renderSession ? <SessionTabContent node={node}>{visible => renderSession(tab, visible)}</SessionTabContent> : null;
+        return tab && renderSession ? <SessionTabContent node={node} retained={!state.active || sessionNodeId(state.active) !== node.getId()}>{visible => renderSession(tab, visible)}</SessionTabContent> : null;
       }} /></div>
     {drag.preview && <div className="session-drop-preview" aria-hidden="true" style={{ left: drag.preview.rect.x, top: drag.preview.rect.y,
       width: drag.preview.rect.width, height: drag.preview.rect.height }} />}
@@ -272,8 +272,24 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   </div>;
 }
 
-function SessionTabContent({ node, children }: { node: TabNode; children: (visible: boolean) => ReactNode }) {
+function SessionTabContent({ node, children, retained = false }: {
+  node: TabNode; children: (visible: boolean) => ReactNode;
+  /**
+   * A hidden tab keeps what it rendered when it was hidden, until it is shown again. The window is rendered
+   * for many reasons that change nothing of a session nobody sees, and each hidden pane took its share of
+   * every one of them: the cost of a render of the window grew with the number of open tabs.
+   * The tab of the selected session is never kept, even behind the tab of a file: it holds what the window
+   * shares with the selected session (the triggers of its dialogs), and gives it up in the render where
+   * another session takes it.
+   */
+  retained?: boolean;
+}) {
   const [visible, setVisible] = useState(node.isVisible());
+  // What is kept is a pane that was rendered: while there is nothing to show yet (the catalog is being read),
+  // the tab is asked again.
+  const hidden = useRef<ReactNode>(null);
+  if (visible || !retained) hidden.current = null;
+  else hidden.current ??= children(false);
   useLayoutEffect(() => {
     // FlexLayout memoizes hidden content, so factory props alone cannot stop its readers.
     const update = () => setVisible(node.isVisible());
@@ -281,5 +297,5 @@ function SessionTabContent({ node, children }: { node: TabNode; children: (visib
     update();
     return () => node.removeEventListener("visibility");
   }, [node]);
-  return <div className="session-tab-content">{children(visible)}</div>;
+  return <div className="session-tab-content">{hidden.current ?? children(visible)}</div>;
 }

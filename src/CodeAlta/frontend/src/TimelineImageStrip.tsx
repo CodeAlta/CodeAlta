@@ -6,6 +6,7 @@ import { isDialogBackdrop } from "./dialogBackdrop";
 import { useShellLanguage } from "./shellLanguage";
 import { steppedImageIndex, viewerWindowSize, type TimelineImage, type TimelineImageSource, type TimelineImageState } from "./timelineImages";
 import type { WindowSize } from "./windowGeometry";
+import { modalDialogOpen } from "./modalDialogs";
 
 const viewerMinimum: WindowSize = { width: 360, height: 240 };
 const unavailable: TimelineImageState = { status: "failed" };
@@ -55,7 +56,7 @@ export function TimelineImages({ images, source }: { images: ReadonlyArray<Timel
   return <div className="timeline-images" ref={container}>
     {images.map((image, position) => <TimelineThumbnail key={image.index} image={image} source={source} enabled={seen}
       onOpen={origin => {
-        if (document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+        if (modalDialogOpen()) return;
         // The thumbnail already knows the image's size: the window opens at its final size.
         const shown = origin.querySelector("img");
         setViewing({ index: position, origin, size: shown?.naturalWidth ? { width: shown.naturalWidth, height: shown.naturalHeight } : null });

@@ -3,6 +3,7 @@ import type { SessionPermissionCommand } from "#neoastra";
 import type { createPermissionReviewer, PermissionDecisionObservation, PermissionReviewState } from "./sessionPermissions";
 import { useShellLanguage } from "./shellLanguage";
 import { createPaletteFocusRestoration } from "./paletteActions";
+import { modalDialogOpen } from "./modalDialogs";
 
 export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview }: {
   reviewer: ReturnType<typeof createPermissionReviewer>; epoch: string; sessionId: string;
@@ -33,7 +34,7 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview }
     setReview(null);
     if (dialog.current?.open) dialog.current.close();
     if (value) focus.schedule(value.origin, () => scope.current === value.scope && value.view() && currentView.current(),
-      () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
+      () => !!modalDialogOpen());
   }
   useLayoutEffect(() => {
     const controller = new AbortController();
@@ -145,7 +146,7 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview }
           }} onClick={event => {
             if (event.defaultPrevented || !event.currentTarget.isConnected || event.currentTarget.closest("[inert]")
               || !canReview() || currentState.current !== state || !scope.current || activeReview.current
-              || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+              || modalDialogOpen()) return;
             focus.cancel();
             const value = { id: ++generation.current, entry, state, scope: scope.current, epoch, view: canReview, origin: event.currentTarget, valid: true };
             activeReview.current = value; setReview(value);

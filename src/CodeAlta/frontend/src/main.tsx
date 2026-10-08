@@ -1,7 +1,7 @@
 import { Button, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext } from "@blueprintjs/core";
 import { connect, onDiagnostic } from "@neoastra/client";
 import { rpcFailureCode } from "./rpcDiagnostics";
-import { StrictMode, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
+import { StrictMode, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ContextType, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { ComposerStatus } from "./ComposerStatus";
@@ -189,6 +189,7 @@ import "./workItems/workItems.css";
 import "./issues/issues.css";
 import "./worktrees/worktrees.css";
 import "./mcpHost/mcpHost.css";
+import { modalDialogOpen } from "./modalDialogs";
 
 type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; epoch: string | null;
   ready: () => boolean; navigate: (action: MessageNavigation) => void;
@@ -340,7 +341,7 @@ function App() {
     setProviderGuide(false);
     const origin = settingsOrigin.current;
     focusRestoration.schedule(origin, () => currentView.current === settingsOriginView.current,
-      () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
+      () => !!modalDialogOpen());
   }
   function navigate(next: View) {
     advanceBrowserRevision();
@@ -503,7 +504,7 @@ function App() {
   const creationRefresh = useRef(new AbortController());
   const selectedScope = useRef<string | null>(null);
   function openHelp() {
-    if (searchOpen || dialog || settingsVisible.current || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+    if (searchOpen || dialog || settingsVisible.current || modalDialogOpen()) return;
     focusRestoration.cancel();
     helpOrigin.current = { element: document.activeElement instanceof HTMLElement ? document.activeElement : null,
       view: currentView.current, sessionId: selectedSessionId.current, scope: selectedScope.current };
@@ -514,7 +515,7 @@ function App() {
     setDialog(null);
     focusRestoration.schedule(origin?.element ?? null, () => currentView.current === origin?.view &&
       selectedSessionId.current === origin.sessionId && selectedScope.current === origin.scope,
-      () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
+      () => !!modalDialogOpen());
   }
   useEffect(() => {
     creationAlive.current = true;
@@ -996,7 +997,7 @@ function App() {
   function openCommandSearch() { openSearch({ text: "/" }); }
   function openFilePicker() {
     if (dialog || searchOpen || !editedProject() || currentView.current !== "workspace"
-      || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+      || modalDialogOpen()) return;
     setDialog("file");
   }
   // The code editor of a project with its files shown: `/editor`, the second Ctrl+E, the icon of a project.
@@ -1013,7 +1014,7 @@ function App() {
     return () => revision === browserRevision.current && epoch === currentHostEpoch.current
       && generation === creationGeneration.current && scope === selectedScope.current && selected === selectedSessionId.current
       && snapshot === currentSnapshot.current && currentView.current === "workspace" && !settingsVisible.current
-      && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]');
+      && !modalDialogOpen();
   }
   function captureReferenceLifetime() {
     const catalog = currentSnapshot.current;
@@ -1024,8 +1025,14 @@ function App() {
         && currentView.current === "workspace" && !settingsVisible.current && !!mutation?.capability.canMutate(),
     }));
   }
+  // The reference pickers read their scope from a context. Its value is the same object while what it says is
+  // the same: a new one on each render of App sent React through every pane in search of its readers.
+  const latestReferenceCapture = useRef(captureReferenceLifetime);
+  latestReferenceCapture.current = captureReferenceLifetime;
+  const [captureReferencePopup] = useState(() => () => latestReferenceCapture.current());
+  const observeReference = useCallback((value: { status: string; epoch: string | null }) => { mutation?.capability.observe(value); }, [mutation?.capability]);
   function openSessionBrowser() {
-    if (!currentSnapshot.current || view !== "workspace" || settingsVisible.current || dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+    if (!currentSnapshot.current || view !== "workspace" || settingsVisible.current || dialog || modalDialogOpen()) return;
     setBrowserCapture({ snapshot: currentSnapshot.current, projectId: selectedScope.current, revision: browserRevision.current,
       hostReady: mutation?.capability.canMutate() ?? false });
     setDialog("sessions");
@@ -1105,7 +1112,7 @@ function App() {
     addingFolder.current = false;
     if (pick.status === "canceled" || pick.status === "busy") return;
     // Another window was opened while the folder dialog was up: the pick is dropped.
-    if (document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+    if (modalDialogOpen()) return;
     if (pick.status !== "ok") { setDialog("project"); return; }
     const saved = currentSnapshot.current?.projects.find(project => sameFolder(project.path, pick.path));
     if (saved && !projectOpening.getSnapshot()) { selectProject(saved.id); focusPromptSoon(); return; }
@@ -1116,7 +1123,7 @@ function App() {
   function focusPromptSoon() {
     requestAnimationFrame(() => requestAnimationFrame(() => {
       if (currentView.current !== "workspace" || settingsVisible.current
-        || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') || document.querySelector(".project-editor[data-active='true'], .terminal-panel[data-active='true']")) return;
+        || modalDialogOpen() || document.querySelector(".project-editor[data-active='true'], .terminal-panel[data-active='true']")) return;
       const prompt = document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt");
       if (prompt) prompt.focus();
       else document.querySelector<HTMLButtonElement>('.session-tabs [role="tab"][aria-selected="true"], .session-tabs > button')?.focus();
@@ -1377,7 +1384,7 @@ function App() {
 
   // Opens the search of the window: on everything, on a category, or on the sessions of one project.
   function openSearch(start: SearchStart = {}) {
-    if (searchOpen || dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+    if (searchOpen || dialog || modalDialogOpen()) return;
     focusRestoration.cancel();
     searchOrigin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setSearchStart(start);
@@ -1388,7 +1395,7 @@ function App() {
     const originView = currentView.current;
     setSearchStart(null);
     focusRestoration.schedule(origin, () => currentView.current === originView,
-      () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
+      () => !!modalDialogOpen());
   }
 
   // What was chosen in the search is opened once its modal dialog has closed (see the layout effect below).
@@ -1403,7 +1410,7 @@ function App() {
     const shell = workspaceShell.current;
     if (!shell?.isConnected || !button?.isConnected || !shell.contains(button) || button.disabled ||
       button.closest('[inert], [hidden]') || currentView.current !== "workspace" || settingsVisible.current ||
-      dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+      dialog || modalDialogOpen()) return;
     // Deliberate command invocation only, after the caller's target/lifetime checks.
     // Reveal this workspace's own overflow, not arbitrary ancestors or foreign modals.
     const menu = button.closest<HTMLDetailsElement>('details.composer-actions-menu');
@@ -1542,7 +1549,7 @@ function App() {
       const target = event.target instanceof HTMLElement ? event.target : null;
       const settingsOnly = settingsVisible.current && !dialog && !searchOpen
         && document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]').length === 1;
-      const modal = searchOpen || !!dialog || !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]');
+      const modal = searchOpen || !!dialog || !!modalDialogOpen();
       if (modal && !settingsOnly) { commandChord.current = false; return; }
       // In an open ask Ctrl+N and Ctrl+P move between its questions and between the comments of its file.
       if (!commandChord.current && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && ["n", "p"].includes(event.key.toLowerCase())
@@ -1580,7 +1587,7 @@ function App() {
         timelineCommand.current?.cancelLatest();
       if (event.key !== "Escape" || event.isComposing || event.keyCode === 229 || event.defaultPrevented || event.repeat
         // An open window closes itself on Escape (its own cancel handling).
-        || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+        || modalDialogOpen()) return;
       event.preventDefault(); runShortcut("escape");
     }
     window.addEventListener("keydown", commandKey, true);
@@ -1651,7 +1658,7 @@ function App() {
   }
 
   function openSelectedReminders(session: string, epoch: string, scope: string | null) {
-    if (currentView.current !== "workspace" || dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')
+    if (currentView.current !== "workspace" || dialog || modalDialogOpen()
       || !status?.hostAvailable || currentHostEpoch.current !== epoch
       || !mutation?.capability.canMutate() || selectedSessionId.current !== session || selectedScope.current !== scope
       || selectedSession?.id !== session || projectId !== scope || !currentProjectWritable() ||
@@ -1669,7 +1676,7 @@ function App() {
     focusRestoration.schedule(origin?.element ?? null, () => !!origin && origin.lifetime.current()
       && remindersTrigger.current === origin.element && origin.element.isConnected && !origin.element.disabled
       && !origin.element.closest('details:not([open]), [hidden], [inert]'),
-    () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
+    () => !!modalDialogOpen());
   }
   const remindersCurrent = !!remindersOrigin.current?.lifetime.current();
   useLayoutEffect(() => {
@@ -1737,7 +1744,7 @@ function App() {
     if (!pending || pending.projectId !== projectId || pending.sessionId !== sessionId) return;
     // The row that was used is gone with the list of its scope: the same session is now in the list of the selected one.
     const button = sessionRail.current?.querySelector<HTMLButtonElement>('.session-row > button[aria-pressed="true"]');
-    if (!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) button?.focus({ preventScroll: true });
+    if (!modalDialogOpen()) button?.focus({ preventScroll: true });
     button?.scrollIntoView({ block: "nearest" });
     if (pending.action === "open") return;
     const rows = snapshot?.sessions.filter(session => session.id === pending.sessionId) ?? [];
@@ -1991,7 +1998,7 @@ function App() {
   async function createSelectedSession(fromDraft = false) {
     if (creationPending.current || creationHeld.current || !owned || !snapshot || !mutation?.capability.canMutate() || selectedProject?.archived
       || projectId !== null && !selectedProject || settingsVisible.current || dialog || searchOpen
-      || currentView.current !== "workspace" || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+      || currentView.current !== "workspace" || modalDialogOpen()) return;
     // The text as it is now, not as it was when App was last rendered.
     const typed = localDrafts.peek(draftScope) ?? localDraft;
     if (fromDraft && (!draftChoices.ready || sessionId !== null || (!typed.text.trim() && !localImages.images.length)
@@ -2016,7 +2023,7 @@ function App() {
       && currentHostEpoch.current === epoch && currentHostAvailable.current && capability.canMutate()
       && selectedScope.current === (target.scope === "project" ? target.projectId : null)
       && selectedSessionId.current === sessionAtAdmission && currentView.current === "workspace"
-      && !settingsVisible.current && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')
+      && !settingsVisible.current && !modalDialogOpen()
       && (!handoff || localDrafts.peek(handoff.scope)?.revision === handoff.revision)
       && (!handoff || submissions.imageDrafts.get(handoff.imageKey) === handoff.images)
       && (!handoff || localImageGeneration.current === handoff.imageGeneration)
@@ -2231,6 +2238,13 @@ function App() {
   const newPromptDisabled = creatingBusy || creationLocked || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !snapshot
     || !!selectedProject?.archived || projectId !== null && !selectedProject || (!localDraft.text.trim() && !localImages.images.length)
     || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim());
+  const referenceAvailable = owned && !!mutation?.capability.canMutate() && !settingsOpen && !!selectedProject && !selectedProject.archived
+    && !!snapshot && (sessionId === null || !!selectedTab(snapshot, projectId, sessionId));
+  const referenceEpoch = status?.hostEpoch, referenceProject = selectedProject?.id, referencePath = selectedProject?.path, referenceLifetime = creationGeneration.current;
+  const selectedReference = useMemo(() => referenceAvailable && referenceEpoch && referenceProject && referencePath !== undefined
+    ? { expectedEpoch: referenceEpoch, projectId: referenceProject, projectPath: referencePath, sessionId, lifetime: referenceLifetime,
+      capturePopup: captureReferencePopup, observe: observeReference } : null,
+  [referenceAvailable, referenceEpoch, referenceProject, referencePath, sessionId, referenceLifetime, captureReferencePopup, observeReference]);
   return <ShellLanguageContext.Provider value={language}><PluginUiContext.Provider value={pluginUiValue}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
     {(hostSilent || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {hostSilent && <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
@@ -2416,11 +2430,7 @@ function App() {
             </div>
           </div>
         </aside>}
-          content={<ProjectReferenceContext.Provider value={owned && mutation?.capability.canMutate() && !settingsOpen && selectedProject && !selectedProject.archived
-            && snapshot && (sessionId === null || !!selectedTab(snapshot, projectId, sessionId))
-            ? { expectedEpoch: status!.hostEpoch!, projectId: selectedProject.id, projectPath: selectedProject.path, sessionId,
-              lifetime: creationGeneration.current, capturePopup: captureReferenceLifetime,
-              observe: value => mutation?.capability.observe(value) } : null}><main className="content">
+          content={<ProjectReferenceContext.Provider value={selectedReference}><main className="content">
           <SessionTabStrip state={sessionTabPresentation(tabs, snapshot, projectId, sessionId)} snapshot={snapshot}
             newSessionLabel={selectedProject ? t("New session — {project}", { project: selectedProject.name }) : t("New chat")}
             renderSession={(tab, visible) => {
@@ -2433,9 +2443,8 @@ function App() {
               if (!owners) { owners = createSessionPaneOwners(); sessionPaneOwners.set(ownerKey, owners); }
               return <ProjectReferenceContext.Provider key={ownerKey} value={owned && status?.hostEpoch && tab.projectId !== null
                 && snapshot.projects.some(project => project.id === tab.projectId && project.path === tab.path && !project.archived)
-                ? { expectedEpoch: status.hostEpoch, projectId: tab.projectId, projectPath: tab.path!, sessionId: row.id,
-                  lifetime: creationGeneration.current, capturePopup: captureReferenceLifetime,
-                  observe: value => mutation?.capability.observe(value) } : null}>
+                ? owners.reference({ expectedEpoch: status.hostEpoch, projectId: tab.projectId, projectPath: tab.path!, sessionId: row.id,
+                  lifetime: creationGeneration.current, capturePopup: captureReferencePopup, observe: observeReference }) : null}>
               <SessionWorkspace session={row} snapshot={snapshot} selectedProjectId={tab.projectId}
                 origin={row.automationId ? (() => {
                   const origin = sessionOrigin(row.id, row.automationId, automationState.items, automationState.runs, t);
@@ -2716,8 +2725,16 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
   </AppWindow>;
 }
 
+type ReferenceScope = NonNullable<ContextType<typeof ProjectReferenceContext>>;
 function createSessionPaneOwners() {
+  let reference: ReferenceScope | undefined;
   return {
+    /** The scope the reference pickers of the pane read: the same object while its fields are the same. */
+    reference(next: ReferenceScope): ReferenceScope {
+      const same = reference && (Object.keys(next) as (keyof ReferenceScope)[]).every(key => reference![key] === next[key])
+        && Object.keys(reference).length === Object.keys(next).length;
+      return same ? reference! : reference = next;
+    },
     display: createSessionDisplayStore(sessionDisplay.observe),
     runtimeReader: createRuntimeStateReader(sessionRuntimeState.current),
     notesReader: createNotesReader(sessionNotes.current, sessionNotes.clear),
@@ -2862,7 +2879,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   const [infoFocusRestoration] = useState(createPaletteFocusRestoration);
   useEffect(() => () => infoFocusRestoration.cancel(), [infoFocusRestoration]);
   function openInfo() {
-    if (infoActive.current || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+    if (infoActive.current || modalDialogOpen()) return;
     infoFocusRestoration.cancel();
     infoActive.current = true;
     setInfoOpen(true);
@@ -2872,7 +2889,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
     infoActive.current = false;
     setInfoOpen(false);
     infoFocusRestoration.schedule(trigger, () => !infoActive.current && infoTrigger.current === trigger && !trigger?.disabled,
-      () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
+      () => !!modalDialogOpen());
   }
   const timeline = useTimelinePosition(session.id, scrollMemory);
   const composer = useComposerLayout(preferredComposerHeight, onComposerHeight);
@@ -2903,6 +2920,11 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
     timelineCommand.current = command;
     return () => { if (timelineCommand.current === command) timelineCommand.current = null; };
   });
+  // One function across renders: the history runs it when its window settles, not on each render of this panel
+  // (a reader who left the end of the timeline had its position read from the layout every time).
+  const settleHistory = useRef(() => { });
+  settleHistory.current = () => { timeline.settled(); if (!newest.pending()) timeline.pauseIfUnfollowed(); };
+  const onHistorySettled = useCallback(() => settleHistory.current(), []);
   const observedDisplay = useSyncExternalStore(display.subscribe, display.getSnapshot);
   useSyncExternalStore(submissions.subscribe, submissions.getSnapshot);
   const live = status?.hostEpoch && observedDisplay.hostEpoch === status.hostEpoch && observedDisplay.sessionId === session.id
@@ -2949,9 +2971,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
           onWheel={event => { newest.cancel(); timeline.wheel(event); }} onKeyDown={timeline.keyDown}
           onPointerDown={event => { newest.cancel(); timeline.pointerDown(event); }}
           onPointerMove={timeline.pointerMove} onPointerUp={timeline.pointerEnd} onPointerCancel={timeline.pointerEnd}>
-        <History observing={observing} sessionId={session.id} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onUsageChange={setPersistedUsage} onSettled={() => {
-          timeline.settled(); if (!newest.pending()) timeline.pauseIfUnfollowed();
-        }}
+        <History observing={observing} sessionId={session.id} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onUsageChange={setPersistedUsage} onSettled={onHistorySettled}
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}
           onNavigationReset={resetMessageNotice} newestRequest={newest.requestRef} onNewestResult={newest.onResult}
           read={readTimeline} readPluginEvents={readPluginEvents} readImages={readImages} readTool={readTool} toolOutputs={toolOutputs}

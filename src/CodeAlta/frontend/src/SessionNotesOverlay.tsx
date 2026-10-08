@@ -8,6 +8,7 @@ import type { createNotesReader } from "./sessionNotes";
 import type { createMutationCapability } from "./sessionOperations";
 import { useShellLanguage } from "./shellLanguage";
 import { clampWindowGeometry, loadWindowGeometry, saveWindowGeometry, type WindowGeometry } from "./windowGeometry";
+import { modalDialogOpen } from "./modalDialogs";
 
 // One placement for every session pane, stored relative to the pane's top-right corner so it
 // survives pane resizes: `x` is the distance from the right edge, `y` from the top.
@@ -49,7 +50,7 @@ export function SessionNotesOverlay({ sessionId, epoch, capability, fallbackMark
     // evidence. Return keyboard focus to its disclosure, not the editor.
     if (restore) requestAnimationFrame(() => {
       if (trigger.current === disclosure && disclosure?.isConnected && document
-        && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')
+        && !modalDialogOpen()
         && (document.activeElement === document.body || overlay?.contains(document.activeElement)))
         disclosure.focus({ preventScroll: true });
     });

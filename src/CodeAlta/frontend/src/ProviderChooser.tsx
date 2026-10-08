@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { HTMLSelect } from "@blueprintjs/core";
 import { sessionOperations, type SessionProviderChoices } from "#neoastra";
 import { useShellLanguage } from "./shellLanguage";
+import { modalDialogOpen } from "./modalDialogs";
 
 export function ProviderChooser({ epoch, sessionId, providerKey, disabled, current, onSelected, onBusyChange }: {
   epoch: string; sessionId: string; providerKey: string; disabled: boolean;
@@ -49,7 +50,7 @@ export function ProviderChooser({ epoch, sessionId, providerKey, disabled, curre
     const controller = scope.current;
     if (!controller || !valid(controller) || submitting.current || !choices || provider === providerKey
       || choices.providerKey !== providerKey || !choices.providers.some(value => value.id === provider)
-      || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+      || modalDialogOpen()) return;
     submitting.current = true; setBusy(true); setStatus(null); setChoices(null);
     try {
       const result = await sessionOperations.selectProvider({ expectedEpoch: epoch, sessionId, providerKey: provider,

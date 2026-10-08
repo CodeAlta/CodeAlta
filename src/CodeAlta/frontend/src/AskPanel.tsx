@@ -12,6 +12,7 @@ import { AppIcon } from "./AppIcon";
 import { showToast } from "./appToaster";
 import { AskFileReview, type AskFileReviewHandle } from "./AskFileReview";
 import { questionTabTitle, selectedChoice, submitStep } from "./askReview";
+import { modalDialogOpen } from "./modalDialogs";
 
 type Notice = "refresh" | "pending" | "empty" | "failed" | "invalid";
 const notices = Object.freeze({
@@ -148,7 +149,7 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
     let attempts = 12;
     let frame = requestAnimationFrame(function focus() {
       const input = form.current?.querySelector<HTMLElement>("[data-ask-question] input:checked, [data-ask-question] textarea, [data-ask-question] input");
-      if (document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+      if (modalDialogOpen()) return;
       if (input && input.offsetParent !== null && !input.matches(":disabled")) {
         // Text being typed elsewhere (another session's prompt, a search field) keeps the keyboard.
         const active = document.activeElement;
@@ -177,7 +178,7 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
     flushSync(() => setQuestionSelection({ source, index: next }));
     if (version !== readVersion.current || scope !== previousScope.current || sourceAuthority.current !== source
       || !fieldset.isConnected || !fieldset.querySelector(`[data-ask-question="${next}"]`)) return false;
-    if (focus && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) {
+    if (focus && !modalDialogOpen()) {
       const input = fieldset.querySelector<HTMLElement>(`[data-ask-question="${next}"] input:checked, [data-ask-question="${next}"] textarea`)
         ?? fieldset.querySelector<HTMLElement>(`[data-ask-question="${next}"] input`);
       if (input?.isConnected && !input.matches(":disabled")) input.focus();

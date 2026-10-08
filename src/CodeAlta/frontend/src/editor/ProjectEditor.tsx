@@ -29,6 +29,7 @@ import { applyTreeListing, collapseTree, emptyFileTree, expandTreeFolders, joinT
   treeAncestors, treeBaseName, treeDecorations, treeEntryRows, treeQueries, treeRows, type FileTree, type TreeDecorations, type TreeEdit } from "./fileTree";
 import { ImageView } from "./ImageView";
 import { DeleteEntryDialog, UnsavedFileDialog } from "./UnsavedDialogs";
+import { modalDialogOpen } from "../modalDialogs";
 
 /** What the shell asks of a project's editor: a file to open, a place in it, and whether its files are shown. */
 export type EditorRequest = Readonly<{ path: string | null; line: number | null; column: number | null;
@@ -41,7 +42,7 @@ type Pending = Readonly<{ path: string; line: number; column: number; length: nu
 type Deleting = Readonly<{ path: string; directory: boolean; permanent: boolean; trashFailed: boolean; busy: boolean }>;
 
 const treeRefreshMilliseconds = 4000, statMilliseconds = 2500, decorationMilliseconds = 5000, narrowWidth = 560;
-const modalOpen = () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]');
+const modalOpen = () => !!modalDialogOpen();
 const unread = { status: "read_failed", content: null, revision: null, readOnly: false, stamp: null, encoding: null, length: 0 } as const;
 
 /**

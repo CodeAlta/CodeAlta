@@ -20,10 +20,11 @@ import { useShellLanguage } from "../shellLanguage";
 import { BranchSwitcher } from "../worktrees/BranchSwitcher";
 import { WorktreeList } from "../worktrees/WorktreeList";
 import { sameFolder, worktreeSessions, worktreesReply, type Worktree } from "../worktrees/worktrees";
+import { modalDialogOpen } from "../modalDialogs";
 
 const autoRefreshMilliseconds = 5000;
 const ignore = () => { };
-const modalOpen = () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]');
+const modalOpen = () => !!modalDialogOpen();
 // A refusal that will not go away by asking again: the list it replaces is no longer shown.
 const lasting = new Set(["not_repository", "unknown_project", "project_unavailable", "unavailable", "invalid", "worktree_missing"]);
 // The same checkouts again draw nothing.

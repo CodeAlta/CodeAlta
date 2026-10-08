@@ -5,6 +5,7 @@ import { createMarkdownRenderer } from "./markdownBoundary";
 import { markdownLinkActivation, safeMarkdownHref } from "./markdownLinks";
 import { appearanceKey, subscribeAppearance } from "./shellColors";
 import { useShellLanguage } from "./shellLanguage";
+import { modalDialogOpen } from "./modalDialogs";
 
 /**
  * A text of Markdown, rendered through the sanitizing boundary. A message breaks its lines where its text does;
@@ -75,7 +76,7 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
     const activate = !event.defaultPrevented && markdownLinkActivation(event.nativeEvent);
     event.preventDefault(); // Never navigate the WebView, including ungranted and unsupported gestures.
     if (!activate || !onOpenLink || !link.isConnected || link.closest('[inert], [hidden]')
-      || target?.closest("button") || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+      || target?.closest("button") || modalDialogOpen()) return;
     const address = link.getAttribute("href"); // Read the sanitized literal, not the browser-resolved property.
     if (address && safeMarkdownHref(address)) onOpenLink(address);
   }

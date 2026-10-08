@@ -11,8 +11,9 @@ import type { TerminalLook } from "./terminalLook";
 import { TerminalOptions } from "./TerminalOptions";
 import type { TerminalMatches, TerminalSearch } from "./TerminalSurface";
 import type { TerminalWorkspace } from "./terminalWorkspace";
+import { modalDialogOpen } from "../modalDialogs";
 
-const modalOpen = () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]');
+const modalOpen = () => !!modalDialogOpen();
 
 function Toggle({ icon, label, active, onChange }: { icon: IconName; label: string; active: boolean; onChange: (value: boolean) => void }) {
   return <Button variant="minimal" size="small" className="terminal-find-toggle" icon={<AppIcon name={icon} size={15} />} active={active} aria-pressed={active}

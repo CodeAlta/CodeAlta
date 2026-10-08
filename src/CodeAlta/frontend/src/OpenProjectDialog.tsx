@@ -11,6 +11,7 @@ import { folderCompletionRequest, projectFolderCompletion } from "./directoryCom
 import { sameFolder, type FolderPick } from "./folderPicker";
 import { useShellLanguage } from "./shellLanguage";
 import { workflowNotice, type WorkflowNotice } from "./workflowNotice";
+import { modalDialogOpen } from "./modalDialogs";
 
 export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, getCurrentEpoch, getCurrentScope, allowCompletion, capability, opening,
   completeDirectory, initialFolder, pickFolder, onOpen, onRefresh, onImported, onClose }: {
@@ -66,7 +67,7 @@ export function OpenProjectDialog({ snapshot, getCurrentSnapshot, epoch, getCurr
     return capability?.subscribe(() => notifyCapability(value => value + 1));
   }, [capability]);
   const restoreFocus = () => requestAnimationFrame(() => {
-    if (origin.current?.isConnected && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) origin.current.focus();
+    if (origin.current?.isConnected && !modalDialogOpen()) origin.current.focus();
   });
   const close = () => {
     alive.current = false; followUp.current.abort(); suggestWork.current?.abort(); suggestWork.current = null; onClose();

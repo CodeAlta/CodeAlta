@@ -3,6 +3,7 @@ import { type InputEntry, type InputPage, type createUserInputReviewer } from ".
 import type { createMutationCapability } from "./sessionOperations";
 import { useShellLanguage } from "./shellLanguage";
 import { createPaletteFocusRestoration } from "./paletteActions";
+import { modalDialogOpen } from "./modalDialogs";
 
 type Props = { epoch: string; sessionId: string; reviewer: ReturnType<typeof createUserInputReviewer>; capability: ReturnType<typeof createMutationCapability>;
   canReview?: () => boolean };
@@ -35,7 +36,7 @@ export function UserInputPanel({ epoch, sessionId, reviewer, capability, canRevi
     active.current = null; setReview(null);
     if (dialog.current?.open) dialog.current.close();
     if (value) focus.schedule(value.origin, () => value.draft.scope === view.current && value.draft.allowed() && latestAllowed.current(),
-      () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
+      () => !!modalDialogOpen());
   }
   useLayoutEffect(() => {
     const controller = new AbortController();
@@ -134,7 +135,7 @@ export function UserInputPanel({ epoch, sessionId, reviewer, capability, canRevi
       }} onClick={event => {
         if (event.defaultPrevented || !event.currentTarget.isConnected || event.currentTarget.closest("[inert]") || !allowed()
           || reading.current || reviewer.blocked() || !view.current || view.current.page() !== page || active.current
-          || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+          || modalDialogOpen()) return;
         focus.cancel();
         if (!draft.current || draft.current.entry !== entry || !draftCurrent(draft.current)) {
           discard(); draft.current = { entry, page, scope: view.current, epoch, allowed, valid: true, values: {} };

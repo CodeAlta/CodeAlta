@@ -5,6 +5,7 @@ import { useShellLanguage } from "./shellLanguage";
 import { AppIcon } from "./AppIcon";
 import { isDialogBackdrop } from "./dialogBackdrop";
 import { DiffPreview } from "./changes/DiffPreview";
+import { modalDialogOpen } from "./modalDialogs";
 
 // Read-only disclosure: paths never become links, filesystem targets or RPC inputs.
 // The parent keys this subtree by the exact supplied record, not just byte offset.
@@ -21,7 +22,7 @@ export function FileChangeInspection({ changes, canInspect }: { changes: FileCha
     const valid = allowed() && (selection?.current?.() ?? true);
     setSelection(null); dialog.current?.close();
     if (valid && allowed() && (selection?.current?.() ?? true) && origin.current?.isConnected
-      && !origin.current.closest('[inert], [hidden]') && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) origin.current.focus();
+      && !origin.current.closest('[inert], [hidden]') && !modalDialogOpen()) origin.current.focus();
   }
   const allowed = () => alive.current && (canInspect?.() ?? true) && (latest.current?.() ?? true);
   useLayoutEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
@@ -45,7 +46,7 @@ export function FileChangeInspection({ changes, canInspect }: { changes: FileCha
           onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
           onClick={event => {
             if (event.defaultPrevented || !allowed() || !event.currentTarget.isConnected || event.currentTarget.closest("[inert]")
-              || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+              || modalDialogOpen()) return;
             origin.current = event.currentTarget; setSelection(open ? null : { index: row.index, current: canInspect });
           }} title={row.path}><span className="file-card-path"><strong>{row.path.split(/[\\/]/).at(-1)}</strong><small>{row.path.replace(/[\\/][^\\/]+$/, "") === row.path ? "." : row.path.replace(/[\\/][^\\/]+$/, "")}</small></span></button>
         <span className="file-counts" title={row.counts ? t("Supplied hunk lines: +{added} / -{removed}", row.counts) : t("Diff counts unavailable")}>{row.counts ? <><b>+{row.counts.added}</b> <em>−{row.counts.removed}</em></> : "—"}</span>
