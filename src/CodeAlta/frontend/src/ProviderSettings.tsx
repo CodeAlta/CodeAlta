@@ -12,6 +12,8 @@ import { configReadNotice, configSaveNotice, type ConfigNotice } from "./configE
 import { providerEdit, providerForm, providerFormDirty, providerProblem, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
 import { GuidedTour, type GuidedTourStep } from "./GuidedTour";
 import { providerTourSteps, providerTourStorageKey, startsProviderTour } from "./providerTour";
+import { SettingsFileLocations } from "./SettingsFileLocation";
+import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
 import { useShellLanguage } from "./shellLanguage";
 
 type CallOptions = { signal: AbortSignal; timeoutMilliseconds: number };
@@ -35,7 +37,7 @@ function DefaultedInput({ id, value, fallback, unset, disabled, onChange }: {
  * Settings page for model providers: the configured definitions on the left, an edit form on the right.
  * Saving writes the global configuration and re-registers the providers in the running host.
  */
-export function ProviderSettings({ epoch, config = globalConfig, login = providerLogin, usage = providerUsage, readRuntime, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed }: {
+export function ProviderSettings({ epoch, config = globalConfig, login = providerLogin, usage = providerUsage, readRuntime, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi }: {
   epoch: string; config?: Pick<typeof globalConfig, "providers" | "saveProvider" | "deleteProvider" | "addBuiltInProvider">;
   login?: Pick<typeof providerLogin, "status" | "login" | "logout">;
   /** Reads the usage of the subscription of a provider that has one. */
@@ -45,6 +47,10 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
   onOpenModels: () => void; onOpenConfiguration: () => void; onApplied?: () => void;
   /** The application started without an enabled provider: the setup guide starts by itself, the first time. */
   guide?: boolean; onGuideClosed?: () => void;
+  /** Called once the code editor was asked to show the configuration file: the window leaves Settings. */
+  onOpenFile?: () => void;
+  /** Says where the configuration file is and opens it; the host by default. */
+  filesApi?: SettingsFilesApi;
 }) {
   const { t } = useShellLanguage();
   const page = useRef<HTMLElement>(null);
@@ -55,6 +61,7 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
   const [selected, setSelected] = useState<string | null>(null);
   const [form, setForm] = useState<ProviderForm | null>(null);
   const [notice, setNotice] = useState<ConfigNotice | null>(null);
+  const files = useSettingsFiles({ page: "config", epoch, projectId: null, onOpened: onOpenFile, setNotice, api: filesApi });
   const [diagnostic, setDiagnostic] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -201,6 +208,8 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
       {t("This version of CodeAlta does not know these providers. They are left out here and kept in the configuration file; a newer version of CodeAlta can use them.")}
       <ul>{listing.unsupported.map(provider => <li key={provider.key}><code>{provider.key}</code> — {t("type {type}", { type: provider.type })}</li>)}</ul>
     </Callout>}
+    {/* The providers are sections of the configuration file of the user: the page says where that file is. */}
+    <SettingsFileLocations files={files} disabled={busy} />
     {!listing ? <NonIdealState icon={loading ? <ActivitySpinner size={28} /> : <AppIcon name="model" size={36} />}
         title={t(loading ? "Loading configured providers." : "Provider configuration unavailable")} />
       : <div className="provider-settings-layout">
