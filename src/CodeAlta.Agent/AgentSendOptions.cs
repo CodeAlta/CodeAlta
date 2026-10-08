@@ -58,4 +58,11 @@ public sealed class AgentSendOptions
     /// Session tools are not replaced. Other session implementations must explicitly support this
     /// option. Tool handlers must enforce their own lifetime; this option confers no authority.</remarks>
     public IReadOnlyList<AgentToolDefinition>? AdditionalTools { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the run shows a turn the provider started by itself
+    /// (<see cref="IAgentProviderInitiatedRuns"/>). The input is recorded as the message of the run and says what
+    /// started the turn; the provider is not sent it.
+    /// </summary>
+    internal bool IsProviderInitiated { get; init; }
 }

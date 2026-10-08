@@ -2,6 +2,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Claude;
+using CodeAlta.Orchestration.Hosting;
+using CodeAlta.Orchestration.Runtime;
 
 namespace CodeAlta.Tests;
 
@@ -69,8 +71,10 @@ public sealed class ClaudeCodeSessionTests
         // What CodeAlta has its own mechanism for is said once, for every agent prompt: which one to use.
         StringAssert.Contains(appended, "`alta ask`");
         StringAssert.Contains(appended, "`alta session`");
-        // A turn the CLI starts by itself after a run is not shown: coming back later takes a reminder.
-        StringAssert.Contains(appended, "is not shown to the user");
+        // A turn the CLI starts by itself after a run is shown while the session is open: what has to bring the
+        // agent back in any case takes a reminder.
+        StringAssert.Contains(appended, "starts a turn the user sees as a run of the session");
+        StringAssert.Contains(appended, "`alta reminder`");
         Assert.IsTrue(appended.IndexOf("Be brief.", StringComparison.Ordinal) > appended.IndexOf("`alta session`", StringComparison.Ordinal));
 
         // No tool of Claude Code is named: which ones a version has is its own business.
@@ -769,6 +773,160 @@ public sealed class ClaudeCodeSessionTests
         Assert.AreEqual("also test", ClaudeCodeFakeProcess.UserText((await steered.Task).Clone()));
         var answers = events.Snapshot().OfType<AgentContentCompletedEvent>().Where(static e => e.Kind == AgentContentKind.Assistant).Select(static e => e.Content).ToArray();
         CollectionAssert.AreEqual(new[] { "built", "and tested" }, answers);
+    }
+
+    [TestMethod]
+    public async Task TurnTheCliStartsByItself_IsShownAsARunOfTheSession()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        var permissions = new List<AgentPermissionRequest>();
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(runtime, directory, onPermission: (request, _) =>
+        {
+            lock (permissions)
+            {
+                permissions.Add(request);
+            }
+
+            return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
+        });
+        var events = Collect(session);
+        // What orders the runs of a session starts the run the provider asks for: here the test does.
+        var runs = (IAgentProviderInitiatedRuns)session;
+        var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var registration = runs.OnProviderInitiatedRun(() => asked.TrySetResult());
+        var firstRun = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("run the tests in the background") }).WaitAsync(Timeout);
+        Assert.IsNull(runs.TakeProviderInitiatedRun());
+
+        // The background command ends after the turn: the CLI says which one, and starts a turn by itself in
+        // which it asks before it runs a command.
+        var process = SessionProcess(cli);
+        var input = new JsonObject { ["command"] = "cat results.txt", ["description"] = "Read the results" };
+        process.Emit(new JsonObject
+        {
+            ["type"] = "system",
+            ["subtype"] = "task_notification",
+            ["task_id"] = "b1",
+            ["status"] = "completed",
+            ["summary"] = "Background command \"Run the tests\" completed (exit code 0)",
+            ["session_id"] = process.SessionId,
+        });
+        process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "session_state_changed", ["state"] = "running", ["session_id"] = process.SessionId });
+        process.EmitBlockStart("msg_bg", 0, "tool_use");
+        process.EmitAssistant("msg_bg", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_bg", "Bash", input)));
+        process.EmitMessageStop("tool_use");
+        var decision = process.AskPermissionAsync("Bash", input, "toolu_bg");
+        await asked.Task.WaitAsync(Timeout);
+        lock (permissions)
+        {
+            Assert.AreEqual(0, permissions.Count, "The run that shows the turn answers what the CLI asks in it.");
+        }
+
+        var options = runs.TakeProviderInitiatedRun();
+        Assert.IsNotNull(options);
+        var run = session.SendAsync(options);
+        Assert.AreEqual("allow", (await decision.WaitAsync(Timeout)).GetProperty("behavior").GetString());
+        process.EmitToolResult("toolu_bg", "3 passed");
+        process.EmitTextStream("msg_bg2", 0, "The tests pass.");
+        process.EmitAssistant("msg_bg2", new JsonArray(ClaudeCodeFakeProcess.TextBlock("The tests pass.")));
+        process.EmitMessageStop();
+        process.EmitResult("The tests pass.");
+        var secondRun = await run.WaitAsync(Timeout);
+
+        Assert.AreNotEqual(firstRun, secondRun);
+        var shown = events.Snapshot().Where(e => e.RunId == secondRun).ToArray();
+        // The run has the message that says what started it, in the place of a prompt. The CLI was not sent it.
+        Assert.AreEqual(
+            "Claude Code started a turn by itself: Background command \"Run the tests\" completed (exit code 0)",
+            shown.OfType<AgentContentCompletedEvent>().Single(static e => e.Kind == AgentContentKind.User).Content);
+        Assert.AreEqual(1, process.UserMessages.Count);
+        CollectionAssert.AreEqual(
+            new[] { AgentActivityPhase.Requested, AgentActivityPhase.Started, AgentActivityPhase.Completed },
+            shown.OfType<AgentActivityEvent>().Where(static e => e.ActivityId == "toolu_bg").Select(static e => e.Phase).ToArray());
+        Assert.AreEqual("3 passed", shown.OfType<AgentContentCompletedEvent>().Single(static e => e.Kind == AgentContentKind.ToolOutput).Content);
+        Assert.AreEqual("The tests pass.", shown.OfType<AgentContentCompletedEvent>().Single(static e => e.Kind == AgentContentKind.Assistant).Content);
+        Assert.IsTrue(shown.OfType<AgentSessionUpdateEvent>().Any(static e => e.Kind == AgentSessionUpdateKind.Idle));
+        lock (permissions)
+        {
+            Assert.AreEqual("cat results.txt", Assert.IsInstanceOfType<AgentCommandPermissionRequest>(permissions.Single()).Command);
+        }
+
+        Assert.IsNull(runs.TakeProviderInitiatedRun(), "The turn was shown: no other run is started for it.");
+    }
+
+    [TestMethod]
+    public async Task TurnTheCliStartsByItself_IsStartedAsARunByTheHost()
+    {
+        // The whole composition of an application without a window: the hub starts the run the provider asks for,
+        // and the session runtime forwards it as it does a run that was sent.
+        using var directory = TestTempDirectory.Create();
+        var globalRoot = Path.Combine(directory.Path, "global");
+        var projectRoot = Path.Combine(directory.Path, "project");
+        Directory.CreateDirectory(globalRoot);
+        Directory.CreateDirectory(projectRoot);
+        var cli = new ClaudeCodeFakeCli();
+        var options = cli.CreateOptions();
+        var providerId = new ModelProviderId(options.ProviderKey);
+        await using var host = await CodeAltaHost.CreateAsync(
+            new CodeAltaHostOptions
+            {
+                GlobalRoot = globalRoot,
+                CurrentProjectPath = projectRoot,
+                IsHeadless = true,
+                HasInteractiveUi = false,
+                StartPlugins = false,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(
+                    ClaudeCodeModelProviderRuntime.CreateDescriptor(options),
+                    () => new ClaudeCodeModelProviderRuntime(options)),
+            });
+        var execution = new SessionExecutionOptions
+        {
+            ProviderId = providerId,
+            ProviderKey = providerId.Value,
+            WorkingDirectory = projectRoot,
+            ProjectRoots = [projectRoot],
+            Model = "sonnet",
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        };
+        var events = new EventLog();
+        using var streaming = new CancellationTokenSource();
+        var stream = Task.Run(async () =>
+        {
+            await foreach (var runtimeEvent in host.RuntimeService.StreamEventsAsync(streaming.Token))
+            {
+                if (runtimeEvent is SessionAgentEvent { Event: var agentEvent })
+                {
+                    events.Add(agentEvent);
+                }
+            }
+        });
+
+        var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, execution, title: "Claude Code", CancellationToken.None);
+        var firstRun = await host.RuntimeService.SendAsync(
+            session,
+            execution,
+            new AgentSendOptions { Input = AgentInput.Text("run the tests in the background") },
+            CancellationToken.None).WaitAsync(Timeout);
+        await events.WaitForAsync(e => e is AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle } && e.RunId == firstRun, Timeout);
+        Assert.IsFalse(await host.RuntimeService.HasActiveRunAsync(session).WaitAsync(Timeout));
+
+        var process = SessionProcess(cli);
+        process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "session_state_changed", ["state"] = "running", ["session_id"] = process.SessionId });
+        process.EmitTextStream("msg_bg", 0, "The tests pass.");
+        process.EmitAssistant("msg_bg", new JsonArray(ClaudeCodeFakeProcess.TextBlock("The tests pass.")));
+        process.EmitMessageStop();
+        process.EmitResult("The tests pass.");
+
+        await events.WaitForAsync(e => e is AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle } && e.RunId is { } runId && runId != firstRun, Timeout);
+        await streaming.CancelAsync();
+        await stream.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+
+        var shown = events.Snapshot().Where(e => e.RunId is { } runId && runId != firstRun).ToArray();
+        Assert.AreEqual(1, shown.Select(static e => e.RunId).Distinct().Count());
+        Assert.AreEqual("Claude Code started a turn by itself.", shown.OfType<AgentContentCompletedEvent>().Single(static e => e.Kind == AgentContentKind.User).Content);
+        Assert.AreEqual("The tests pass.", shown.OfType<AgentContentCompletedEvent>().Single(static e => e.Kind == AgentContentKind.Assistant).Content);
+        Assert.AreEqual(1, process.UserMessages.Count);
     }
 
     private static ClaudeCodeFakeProcess SessionProcess(ClaudeCodeFakeCli cli)

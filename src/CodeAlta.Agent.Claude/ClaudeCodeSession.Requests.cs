@@ -23,15 +23,34 @@ internal sealed partial class ClaudeCodeSession
         }
 
         AgentProviderRunContext? run;
+        Task? runForOwnTurn;
         var prompt = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         lock (_gate)
         {
-            run = _run;
+            runForOwnTurn = _runForOwnTurn?.Task;
             _permissionPrompts[requestId] = prompt;
         }
 
         try
         {
+            if (runForOwnTurn is not null)
+            {
+                // The CLI asks in a turn it started by itself: the run that shows the turn answers, not the one
+                // that ended before it. A run that could not start does not leave the CLI waiting.
+                try
+                {
+                    await runForOwnTurn.WaitAsync(OwnTurnRunTimeout, prompt.Token).ConfigureAwait(false);
+                }
+                catch (TimeoutException)
+                {
+                }
+            }
+
+            lock (_gate)
+            {
+                run = _run;
+            }
+
             var interactionId = ClaudeCodeJson.GetString(request, "tool_use_id") ?? requestId;
             if (string.Equals(toolName, "AskUserQuestion", StringComparison.Ordinal))
             {

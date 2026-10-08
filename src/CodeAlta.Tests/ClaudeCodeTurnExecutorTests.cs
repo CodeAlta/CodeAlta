@@ -63,29 +63,67 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
-    public async Task TurnTheCliRanOnItsOwnBetweenTwoPrompts_IsNotTheAnswerToTheNextOne()
+    public async Task TurnTheCliStartsByItself_IsReadByTheRunStartedForIt()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var registration = executor.OnProviderTurn("session-1", () => asked.TrySetResult());
+        var first = await ExecuteAsync(executor, CreateRequest([User("run it in the background")]));
+        Assert.IsNull(executor.GetPendingProviderTurn("session-1"), "A turn that answers a prompt is not one the CLI started by itself.");
+
+        // The background command of the first turn ends: Claude Code starts a turn by itself, with a tool call.
+        var process = cli.Last;
+        EmitOwnTurn(process);
+        await asked.Task.WaitAsync(Timeout);
+        var notice = executor.GetPendingProviderTurn("session-1");
+        Assert.AreEqual("Claude Code started a turn by itself: Background command \"Run the tests\" completed (exit code 0)", notice);
+
+        // The run that is started for it records that message as its prompt. The CLI is not sent it.
+        executor.AttachRun(new AgentProviderRunContext("session-1", new AgentRunId("run-2"), AllowAsync, null, ProviderInitiated: true));
+        var conversation = new List<AgentConversationMessage> { User("run it in the background"), first.AssistantMessage, User(notice!) };
+        var second = await ExecuteAsync(executor, CreateRequest(conversation, first));
+
+        var call = second.AssistantMessage.Parts.OfType<AgentMessagePart.ToolCall>().Single();
+        Assert.AreEqual("toolu_bg", call.CallId);
+        var tool = executor.ResolveTool("session-1", call, null);
+        Assert.IsNotNull(tool, "The tool call of the turn is run by the run that shows it.");
+        var result = await tool.Handler(new AgentToolInvocation(new ModelProviderId("claude-code"), "session-1", call.CallId, call.Name, call.Arguments), CancellationToken.None).WaitAsync(Timeout);
+        Assert.AreEqual("done", result.Items.OfType<AgentToolResultItem.Text>().Single().Value);
+
+        conversation.AddRange([second.AssistantMessage, new(AgentConversationRole.Tool, [new AgentMessagePart.ToolResult(call.CallId, result)])]);
+        var third = await ExecuteAsync(executor, CreateRequest(conversation, second));
+
+        Assert.AreEqual("The background command finished.", third.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+        Assert.IsFalse(third.RequiresProviderFollowUp);
+        Assert.AreEqual(1, process.UserMessages.Count);
+        Assert.IsNull(executor.GetPendingProviderTurn("session-1"), "The turn was read: no other run is started for it.");
+
+        // The next prompt is answered as before, by the same process.
+        cli.OnUserMessage = static (fake, user) =>
+        {
+            fake.EmitTextTurn("msg_2", "second answer", user);
+            return Task.CompletedTask;
+        };
+        executor.AttachRun(new AgentProviderRunContext("session-1", new AgentRunId("run-3"), AllowAsync, null));
+        conversation.AddRange([third.AssistantMessage, User("second question")]);
+        var fourth = await ExecuteAsync(executor, CreateRequest(conversation, third));
+
+        Assert.AreEqual("second answer", fourth.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+        Assert.AreSame(process, cli.Last);
+        CollectionAssert.AreEqual(
+            new[] { "run it in the background", "second question" },
+            process.UserMessages.Select(ClaudeCodeFakeProcess.UserText).ToArray());
+    }
+
+    [TestMethod]
+    public async Task TurnTheCliStartsByItself_IsReadWithTheNextPrompt_WhenNoRunWasStartedForIt()
     {
         var cli = new ClaudeCodeFakeCli();
         await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
         var first = await ExecuteAsync(executor, CreateRequest([User("run it in the background")]));
-
-        // The background command of the first turn ends: Claude Code starts a turn by itself, with a tool call.
         var process = cli.Last;
-        process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "session_state_changed", ["state"] = "running", ["session_id"] = process.SessionId });
-        process.EmitAssistant("msg_bg", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_bg", "Read", new JsonObject { ["file_path"] = "/tmp/out" })));
-        process.EmitToolResult("toolu_bg", "done");
-        process.EmitAssistant("msg_bg2", new JsonArray(ClaudeCodeFakeProcess.TextBlock("The background command finished.")));
-        process.Emit(new JsonObject
-        {
-            ["type"] = "result",
-            ["subtype"] = "success",
-            ["is_error"] = false,
-            ["result"] = "The background command finished.",
-            ["session_id"] = process.SessionId,
-            ["user_message_uuids"] = new JsonArray(),
-            ["origin"] = new JsonObject { ["kind"] = "task-notification" },
-        });
-        process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "session_state_changed", ["state"] = "idle", ["session_id"] = process.SessionId });
+        EmitOwnTurn(process);
         cli.OnUserMessage = static (fake, user) =>
         {
             fake.EmitTextTurn("msg_2", "second answer", user);
@@ -94,11 +132,98 @@ public sealed class ClaudeCodeTurnExecutorTests
 
         // The process answers a request only after it wrote the lines above: they were all read by then.
         await process.McpAsync("ping");
-        var second = await ExecuteAsync(executor, CreateRequest([User("run it in the background"), first.AssistantMessage, User("second question")], first));
+        executor.AttachRun(new AgentProviderRunContext("session-1", new AgentRunId("run-2"), AllowAsync, null));
+        var conversation = new List<AgentConversationMessage> { User("run it in the background"), first.AssistantMessage, User("second question") };
+        var second = await ExecuteAsync(executor, CreateRequest(conversation, first));
 
-        Assert.AreEqual("second answer", second.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+        // What the CLI did by itself comes first, and is not taken for the answer to the prompt.
+        var call = second.AssistantMessage.Parts.OfType<AgentMessagePart.ToolCall>().Single();
+        Assert.AreEqual("toolu_bg", call.CallId);
+        Assert.IsNotNull(executor.ResolveTool("session-1", call, null));
+        conversation.AddRange([second.AssistantMessage, new(AgentConversationRole.Tool, [new AgentMessagePart.ToolResult(call.CallId, new AgentToolResult(true, [new AgentToolResultItem.Text("done")]))])]);
+        var third = await ExecuteAsync(executor, CreateRequest(conversation, second));
+
+        Assert.AreEqual("The background command finished.", third.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+        Assert.IsTrue(third.RequiresProviderFollowUp, "The turn of the prompt follows.");
+
+        conversation.Add(third.AssistantMessage);
+        var fourth = await ExecuteAsync(executor, CreateRequest(conversation, third));
+
+        Assert.AreEqual("second answer", fourth.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+        Assert.IsFalse(fourth.RequiresProviderFollowUp);
+        Assert.AreSame(process, cli.Last);
+        Assert.IsNull(executor.GetPendingProviderTurn("session-1"));
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task PromptSentWhileATurnOfTheCliRuns_IsAnsweredByItsOwnTurn(bool turnOfTheCliFails)
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var first = await ExecuteAsync(executor, CreateRequest([User("run it in the background")]));
+
+        // The CLI is in a turn it started by itself when the prompt is sent: it queues the prompt and ends its turn
+        // with a result that names no message.
+        var process = cli.Last;
+        process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "session_state_changed", ["state"] = "running", ["session_id"] = process.SessionId });
+        if (!turnOfTheCliFails)
+        {
+            process.EmitAssistant("msg_bg", new JsonArray(ClaudeCodeFakeProcess.TextBlock("The background command finished.")));
+        }
+        else
+        {
+            process.EmitStreamEvent(new JsonObject { ["type"] = "message_start", ["message"] = new JsonObject { ["id"] = "msg_bg" } });
+        }
+
+        cli.OnUserMessage = (fake, user) =>
+        {
+            fake.Emit(new JsonObject
+            {
+                ["type"] = "result",
+                ["subtype"] = turnOfTheCliFails ? "error_during_execution" : "success",
+                ["is_error"] = turnOfTheCliFails,
+                ["result"] = turnOfTheCliFails ? "The request failed." : "The background command finished.",
+                ["session_id"] = fake.SessionId,
+                ["origin"] = new JsonObject { ["kind"] = "task-notification" },
+            });
+            fake.EmitTextTurn("msg_2", "second answer", user);
+            return Task.CompletedTask;
+        };
+        await process.McpAsync("ping");
+        executor.AttachRun(new AgentProviderRunContext("session-1", new AgentRunId("run-2"), AllowAsync, null));
+        var conversation = new List<AgentConversationMessage> { User("run it in the background"), first.AssistantMessage, User("second question") };
+        var response = await ExecuteAsync(executor, CreateRequest(conversation, first));
+
+        if (!turnOfTheCliFails)
+        {
+            Assert.AreEqual("The background command finished.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+            Assert.IsTrue(response.RequiresProviderFollowUp);
+            conversation.Add(response.AssistantMessage);
+            response = await ExecuteAsync(executor, CreateRequest(conversation, response));
+        }
+
+        // The failure of a turn nobody asked for is not the failure of the prompt.
+        Assert.AreEqual("second answer", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+        Assert.IsFalse(response.RequiresProviderFollowUp);
+        Assert.IsNull(executor.GetPendingProviderTurn("session-1"));
+    }
+
+    [TestMethod]
+    public async Task RunStartedForATurnOfTheCli_HasNothingToRead_WhenAnotherRunReadIt()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var first = await ExecuteAsync(executor, CreateRequest([User("one")]));
+
+        executor.AttachRun(new AgentProviderRunContext("session-1", new AgentRunId("run-2"), AllowAsync, null, ProviderInitiated: true));
+        var second = await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("Claude Code started a turn by itself.")], first));
+
+        // It ends at once instead of waiting for a turn that will not come, and sends nothing to the CLI.
         Assert.IsFalse(second.RequiresProviderFollowUp);
-        Assert.AreSame(process, cli.Last, "The process is kept: only what it wrote on its own is dropped.");
+        Assert.AreEqual(1, second.AssistantMessage.Parts.Count);
+        Assert.AreEqual(1, cli.Last.UserMessages.Count);
     }
 
     [TestMethod]
@@ -184,6 +309,46 @@ public sealed class ClaudeCodeTurnExecutorTests
         await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two")], first));
 
         Assert.AreEqual(idle.SessionId, cli.Last.ResumedSessionId);
+    }
+
+    [TestMethod]
+    public async Task IdleSession_KeepsAProcessWhoseBackgroundCommandStillRuns()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        cli.OnUserMessage = static (process, user) =>
+        {
+            process.Emit(new JsonObject
+            {
+                ["type"] = "system",
+                ["subtype"] = "background_tasks_changed",
+                ["tasks"] = new JsonArray(new JsonObject { ["task_id"] = "b1", ["task_type"] = "local_bash", ["description"] = "Run the tests" }),
+                ["session_id"] = process.SessionId,
+            });
+            process.EmitTextTurn("msg_1", "started", user);
+            return Task.CompletedTask;
+        };
+        var options = cli.CreateOptions();
+        await using var executor = new ClaudeCodeTurnExecutor(new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = options.ProviderKey,
+            TransportFactory = cli,
+            ResolveCli = options.ResolveCli,
+            IdleTimeout = TimeSpan.FromMilliseconds(50),
+        });
+        await ExecuteAsync(executor, CreateRequest([User("run it in the background")]));
+        var process = cli.Last;
+
+        // Closing the process would end the command, and the turn its end starts.
+        await Task.Delay(500);
+        Assert.IsFalse(process.IsDisposed);
+
+        process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "background_tasks_changed", ["tasks"] = new JsonArray(), ["session_id"] = process.SessionId });
+        for (var attempt = 0; attempt < 200 && !process.IsDisposed; attempt++)
+        {
+            await Task.Delay(25);
+        }
+
+        Assert.IsTrue(process.IsDisposed, "Once nothing runs any more, the process of an idle session is closed.");
     }
 
     [TestMethod]
@@ -593,6 +758,39 @@ public sealed class ClaudeCodeTurnExecutorTests
 
     private static Task<AgentTurnResponse> ExecuteAsync(ClaudeCodeTurnExecutor executor, AgentTurnRequest request)
         => executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).WaitAsync(Timeout);
+
+    private static Task<AgentPermissionDecision> AllowAsync(AgentPermissionRequest request, CancellationToken cancellationToken)
+        => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
+
+    // What Claude Code 2.1.292 writes when a background command ends while no turn runs: it says which one, then
+    // runs a turn that no user message started and whose result names none.
+    private static void EmitOwnTurn(ClaudeCodeFakeProcess process)
+    {
+        process.Emit(new JsonObject
+        {
+            ["type"] = "system",
+            ["subtype"] = "task_notification",
+            ["task_id"] = "b1",
+            ["status"] = "completed",
+            ["summary"] = "Background command \"Run the tests\" completed (exit code 0)",
+            ["session_id"] = process.SessionId,
+        });
+        process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "background_tasks_changed", ["tasks"] = new JsonArray(), ["session_id"] = process.SessionId });
+        process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "session_state_changed", ["state"] = "running", ["session_id"] = process.SessionId });
+        process.EmitAssistant("msg_bg", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_bg", "Read", new JsonObject { ["file_path"] = "/tmp/out" })));
+        process.EmitToolResult("toolu_bg", "done");
+        process.EmitAssistant("msg_bg2", new JsonArray(ClaudeCodeFakeProcess.TextBlock("The background command finished.")));
+        process.Emit(new JsonObject
+        {
+            ["type"] = "result",
+            ["subtype"] = "success",
+            ["is_error"] = false,
+            ["result"] = "The background command finished.",
+            ["session_id"] = process.SessionId,
+            ["origin"] = new JsonObject { ["kind"] = "task-notification", ["producer"] = "session-task" },
+        });
+        process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "session_state_changed", ["state"] = "idle", ["session_id"] = process.SessionId });
+    }
 
     private static AgentConversationMessage User(string text)
         => new(AgentConversationRole.User, [new AgentMessagePart.Text(text)]);

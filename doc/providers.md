@@ -319,7 +319,37 @@ sequenceDiagram
 - `IAgentProviderToolHost.ResolveTool` gives `AgentSession` the definition that "runs" a tool call of such a message. For a tool of Claude Code (`Bash`, `Edit`, `Read`, ...) the handler waits for the `tool_result` the CLI writes. The session therefore emits the same `Requested`/`Started`/`Completed` activity events and records the same tool messages as for its own tools, under the names Claude Code uses.
 - The conversation in the request is not sent again. The CLI keeps the context of the session in its own transcript; the executor only sends the user messages it has not sent yet (the prompt, and steering inputs while a turn runs). `ProviderState` records the CLI session id and how much of the CodeAlta conversation it holds.
 - A session is resumed with `--resume <id>`. When the transcript is missing (another folder or machine, a cleaned profile), or when another provider wrote part of the conversation, the CLI starts a new conversation and receives a rendering of the recorded one as context (`<codealta_previous_conversation>`).
-- One process per session is kept between turns and closed after `IdleTimeout` (10 minutes); the next turn resumes. A change of model, reasoning effort or working folder restarts it the same way.
+- One process per session is kept between turns and closed after `IdleTimeout` (10 minutes); the next turn resumes. A change of model, reasoning effort or working folder restarts it the same way. A process that still works by itself is not closed: the timer starts again while the CLI runs a turn, while a turn it started by itself has not been read, and while it lists a background task (`background_tasks_changed`), because closing the process ends its background commands and the turn their end starts.
+
+### Turns Claude Code starts by itself
+
+The CLI does not only run a turn when it is sent a prompt. A command the model left running in the background (`run_in_background`) ends after the turn, or a wake-up the model scheduled fires: the CLI then starts a turn by itself, in which the model reads the output and answers. Its tool description tells the model so, and the model relies on it ("I'll report once it finishes"). No user message of CodeAlta started that turn, so no run of the session reads it. `ClaudeCodeSession` therefore has a run started for it:
+
+```mermaid
+sequenceDiagram
+    participant Hub as AgentHub
+    participant Session as AgentSession
+    participant Executor as ClaudeCodeTurnExecutor / ClaudeCodeSession
+    participant CLI as claude (child process)
+
+    CLI-->>Executor: task_notification (summary), then model output
+    Note over Executor: no user message waits for an answer: a turn of the CLI
+    Executor->>Session: OnProviderTurn handler
+    Session->>Hub: OnProviderInitiatedRun handler
+    Hub->>Session: TakeProviderInitiatedRun, then SendAsync (under the run gate)
+    Session->>Executor: AttachRun (ProviderInitiated), ExecuteTurnAsync
+    Note over Executor: nothing is sent: the run reads what the CLI wrote
+    CLI-->>Executor: assistant messages, tool results, result
+    Executor-->>Session: assistant messages, then the final one
+```
+
+- **Detection** is done by the reader of the connection (`ClaudeCodeSession.NoteModelOutput`), in the order of the lines the CLI writes. A user message is answered by the turn whose `result` names it (`user_message_uuids`). Model output of the main conversation (`assistant`, `stream_event`) while no user message waits for its answer is a turn of the CLI. Such turns are numbered; the `result` that ends one carries its number to the run that reads it (`MessageEvent.OwnTurn`), which is how the session knows a turn was read, whatever run read it.
+- **The run** is started by `AgentHub`, which registers with the session when it attaches it (`IAgentProviderInitiatedRuns`, implemented by `AgentSession` over `IAgentProviderInitiatedTurns` of the executor). It goes through the run gate of the session coordinator like a run that was sent, so it is ordered with a prompt sent at the same moment and with a manual compaction. The options are taken once the run has its turn: when a run that was waiting before it read the turn of the CLI, nothing is left to show and no run starts.
+- **What is recorded.** The run has a message in the place of a prompt, `Claude Code started a turn by itself: <summary>`, where the summary is what the CLI said ended (`task_notification`). It is a user message of the conversation of CodeAlta, so that the conversation stays well formed for another provider. The CLI is not sent it (`AgentProviderRunContext.ProviderInitiated`): it has the notification in its own words. The run never starts or restarts the process, since another process would not have what this one wrote.
+- **Permissions and tools.** A permission prompt of the CLI in such a turn waits until the run attaches, and is answered with its handlers. These are the defaults of the session, as for a queued prompt: the terminal UI asks as usual; the desktop application allows when it approves automatically and denies when it reviews commands (`--review-owned-command-permissions`). A tool of CodeAlta the model calls in the turn (`alta ...`) is run by the run, as in any turn; without a run the CLI would wait for it for ever.
+- **Without a run.** A host that does not register (a session used without `AgentHub`) starts no run. What the CLI wrote is then read with the next prompt, before its answer, and is never dropped. The same happens when a prompt gets its turn before the run that was started for the CLI.
+- A prompt sent while a turn of the CLI still runs is queued by the CLI. The run reads the end of that turn first: its `result` names no message, so the answer is the one of the turn that follows. A failure of the turn of the CLI does not fail the run of the prompt.
+- Stopping a run interrupts the CLI and withdraws what it wrote, a turn of its own included.
 
 ### Tools of CodeAlta
 
@@ -342,7 +372,7 @@ The instructions are the ones every provider gets: there is no second set of pro
 - a tool named `<name>` is `mcp__codealta__<name>`, and `alta <command> ...` is a call of that tool with those words as `args`, never a shell command;
 - CodeAlta's file, search, web, shell and question tools are not part of the session: the same work is done with the tools of Claude Code, which the note does not name (which ones a version of the CLI has is its own business);
 - what CodeAlta has its own way for is done its way, because the user sees and manages it in the window: `alta session` for the delegation the user asks for (the subagents of Claude Code stay its own, for its own work), `alta ask`, `alta skill`, the plan mode and the plan files, `alta notes`, `alta reminder`;
-- what Claude Code writes after its turn has ended, when a background command of its own ends or a wake-up of its own fires, is not shown to the user (see "Limits"): to come back later it sets an `alta reminder`;
+- a background command of its own that ends after its turn, or a wake-up of its own that fires, starts a turn the user sees as a run of the session, as long as the session stays open in CodeAlta (see "Turns Claude Code starts by itself"): for what has to bring it back in any case it sets an `alta reminder`;
 - where the instructions differ from the defaults of Claude Code (when to commit, for instance), the instructions are followed.
 
 **The CLI keeps the system prompt a conversation started with.** A process that resumes a conversation (`--resume`, also with `--fork-session`) ignores the `appendSystemPrompt` it is given: checked with CLI 2.1.292 by resuming a conversation with another appended text and asking for it. The instructions of CodeAlta change during a session (another agent prompt after `alta session set_agent`, an activated skill, the line that says whether the UI tools are active, the date), so `ClaudeCodeSession` keeps what the conversation was told and compares it with the instructions of each prompt that starts:
@@ -381,7 +411,7 @@ To show the change of an edit, `AgentSession` reads the file before and after th
 
 ### Robustness
 
-The stream is treated as open-ended: a line that is not a JSON object, a message type, a `system` subtype, a stream event or a content block this version does not know is skipped; a control request it does not handle is answered with an error instead of being left waiting. A failed request is recognized by its meaning (`is_error`, the `error` of the assistant message), not by its subtype. Stopping a turn sends `interrupt`, waits for the CLI to be idle, and stops the process when it is not within `InterruptTimeout`; the conversation is resumable either way. `ClaudeCodeFakeCli` in the tests scripts the CLI with messages of the shape Claude Code 2.1.289 and 2.1.292 write. `ClaudeCodeLiveCliTests` run against a real executable when `CODEALTA_TEST_CLAUDE_CLI` names one (`auto` for the one the provider finds); `CODEALTA_TEST_CLAUDE_TURN=1` also runs a few short turns of the smallest model with the account of that CLI (a file read, a command and an edit with their permission prompts, a tool of CodeAlta, stop and resume, and one turn through a headless `CodeAltaHost` that shows the composed instructions reach Claude Code), and `CODEALTA_TEST_CLAUDE_TRACE=1` prints the lines exchanged. Run them after a change of the protocol code and when a new CLI version behaves differently.
+The stream is treated as open-ended: a line that is not a JSON object, a message type, a `system` subtype, a stream event or a content block this version does not know is skipped; a control request it does not handle is answered with an error instead of being left waiting. A failed request is recognized by its meaning (`is_error`, the `error` of the assistant message), not by its subtype. Stopping a turn sends `interrupt`, waits for the CLI to be idle, and stops the process when it is not within `InterruptTimeout`; the conversation is resumable either way. `ClaudeCodeFakeCli` in the tests scripts the CLI with messages of the shape Claude Code 2.1.289 and 2.1.292 write (the background task messages are those of 2.1.292). `ClaudeCodeLiveCliTests` run against a real executable when `CODEALTA_TEST_CLAUDE_CLI` names one (`auto` for the one the provider finds); `CODEALTA_TEST_CLAUDE_TURN=1` also runs a few short turns of the smallest model with the account of that CLI (a file read, a command and an edit with their permission prompts, a tool of CodeAlta, stop and resume, one turn through a headless `CodeAltaHost` that shows the composed instructions reach Claude Code, and one in which a background command ends after the turn and the turn the CLI starts by itself is shown as a run), and `CODEALTA_TEST_CLAUDE_TRACE=1` prints the lines exchanged. Run them after a change of the protocol code and when a new CLI version behaves differently.
 
 On Windows the provider runs a native `claude.exe` and refuses a `.cmd`/`.bat` shim, whose arguments cannot be escaped reliably for `cmd.exe`.
 
@@ -402,7 +432,8 @@ args = ["--add-dir", "/shared/specs"]  # optional; added to the command line
 ### Limits
 
 - A prompt that starts with `/` is a slash command of Claude Code (`/compact`, `/context`, `/clear`).
-- Claude Code can start a turn by itself between two prompts: a command it ran in the background ended, a scheduled prompt fired. CodeAlta has no run to show it in. What the CLI wrote for such a turn is dropped when the next prompt is sent (it stays in the context of the CLI); a turn of its own that still runs then is read with the run. The process of an idle session is closed after 10 minutes, and its background commands may end with it. The note above therefore tells Claude Code to set an `alta reminder` when it has to come back.
+- A turn Claude Code starts by itself is only shown while its process runs. The process ends with the session (the application is closed, the session is detached, a stopped turn that the CLI does not end), and its background commands with it: nothing then starts the turn. The note above therefore tells Claude Code to set an `alta reminder` for what has to bring it back in any case. A process that lists a background task is kept for as long as the task runs, also one that never ends (a development server).
+- The message of the run that shows such a turn is recorded as a user message, and the timeline shows it as one.
 - A tool call that was running when a run is stopped stays shown as running, as for any provider: the session records no end for it.
 - The tool calls of a subagent are shown as the output of the `Agent` tool call that started it, not as tool calls of the session.
 - `ExitPlanMode` and tools other than commands and edits are allowed without a CodeAlta prompt.

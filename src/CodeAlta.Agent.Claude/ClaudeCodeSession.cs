@@ -29,7 +29,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private const string PlanModeHookId = "codealta_plan_mode";
     private const string PlanModeHookMatcher = "EnterPlanMode";
     private const string ReasoningDisplayOption = "--thinking-display";
+    private const string NothingLeftOfOwnTurn = "Claude Code had nothing more to show for this turn.";
     private static readonly TimeSpan HookGateTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan OwnTurnRunTimeout = TimeSpan.FromSeconds(30);
 
     private readonly ClaudeCodeModelProviderRuntimeOptions _options;
     private readonly IClaudeCodeTransportFactory _transportFactory;
@@ -79,15 +81,27 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     public void AttachRun(AgentProviderRunContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+        TaskCompletionSource? waiting;
         lock (_gate)
         {
             _run = context;
             _interrupt = null;
-            // The tool calls of the previous run all have their result.
-            _toolCalls.Clear();
-            _toolCallOrder.Clear();
+            _showsOwnTurn = context.ProviderInitiated;
+            _ownTurnRunStarts = context.ProviderInitiated;
+            if (_ownTurnsRead == _ownTurnsStarted)
+            {
+                // The tool calls of the previous run all have their result. Those of a turn the CLI started by
+                // itself are kept for the run that reads it, which is this one.
+                _toolCalls.Clear();
+                _toolCallOrder.Clear();
+            }
+
+            waiting = _runForOwnTurn;
+            _runForOwnTurn = null;
         }
 
+        // What the CLI asked in a turn it started by itself is answered with the handlers of this run.
+        waiting?.TrySetResult();
         ResetRunState();
     }
 
@@ -119,7 +133,34 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             var newUserMessages = BindConversation(request);
             // Before the process starts: the tools the CLI lists when it connects are the ones of this request.
             var toolsChanged = SetExposedTools(request.Tools);
-            await EnsureConnectionAsync(request, cancellationToken).ConfigureAwait(false);
+            bool showsOwnTurn, starts, hasOwnTurn;
+            lock (_gate)
+            {
+                showsOwnTurn = _showsOwnTurn;
+                starts = _ownTurnRunStarts;
+                _ownTurnRunStarts = false;
+                hasOwnTurn = _ownTurnsRead < _ownTurnsStarted;
+            }
+
+            if (starts)
+            {
+                // The run shows a turn the CLI started by itself. Its message says what started the turn: the CLI
+                // has that in its own words, and is not sent it.
+                newUserMessages = [];
+                if (!hasOwnTurn || _eventReader is null)
+                {
+                    // Another run read the turn, or its process is gone: there is nothing to read.
+                    ArmIdleTimer();
+                    return CompleteRun(NothingLeftOfOwnTurn);
+                }
+            }
+
+            // A run that shows a turn of the CLI reads the process that wrote it: another one would not have it.
+            if (!showsOwnTurn)
+            {
+                await EnsureConnectionAsync(request, cancellationToken).ConfigureAwait(false);
+            }
+
             if (toolsChanged)
             {
                 await AnnounceToolsAsync().ConfigureAwait(false);
@@ -130,11 +171,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                 _pendingInstructionsUpdate = TakeInstructionsUpdate(request);
             }
 
-            if (newUserMessages.Count > 0)
-            {
-                DropWhatTheCliDidOnItsOwn();
-            }
-
+            // What the CLI wrote by itself since the last run, when no run was started for it, is read with this
+            // one, before the answer: the result of the CLI names the messages a turn answers.
             await SendUserMessagesAsync(newUserMessages, cancellationToken).ConfigureAwait(false);
             var response = await ReadSegmentAsync(request, onUpdate, onSessionUpdate, cancellationToken).ConfigureAwait(false);
             if (!response.RequiresProviderFollowUp && response.AssistantMessage.Parts.All(static part => part is not AgentMessagePart.ToolCall))
@@ -429,8 +467,10 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             _stateEventsSeen = false;
             _cliRunning = false;
             _turnActive = false;
+            _backgroundTasks = 0;
         }
 
+        ForgetOwnTurns();
         ResetRunState();
         connection.Start();
         await connection.RequestAsync(
@@ -495,43 +535,12 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         // What a process that is being replaced still writes is not listened to.
         Interlocked.Increment(ref _generation);
 
+        ForgetOwnTurns();
         FailOutstandingToolCalls("Claude Code stopped before the tool call completed.");
         if (connection is not null)
         {
             await connection.DisposeAsync().ConfigureAwait(false);
         }
-    }
-
-    // Between two runs the CLI can start a turn by itself (a background command of the previous turn ended, a
-    // scheduled prompt fired). What it wrote for a turn that is over is not the answer to the prompt that is sent
-    // now; it stays in the context of the CLI. A turn of its own that still runs is read with the run: the result of
-    // the CLI names the messages it answers.
-    private void DropWhatTheCliDidOnItsOwn()
-    {
-        bool startsRun;
-        lock (_gate)
-        {
-            startsRun = _outstandingUserMessages.Count == 0;
-        }
-
-        if (!startsRun || IsCliBusy || _eventReader is not { } reader)
-        {
-            return;
-        }
-
-        while (reader.TryRead(out var stale))
-        {
-            if (stale is ClosedEvent)
-            {
-                // The process ended while the session was idle: the turn that starts finds it out and resumes.
-                break;
-            }
-        }
-
-        _pending = null;
-        _held = null;
-        _replay = null;
-        _apiError = null;
     }
 
     private async Task SendUserMessagesAsync(IReadOnlyList<AgentConversationMessage> messages, CancellationToken cancellationToken)
@@ -561,6 +570,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         lock (_gate)
         {
             _outstandingUserMessages.Add(uuid);
+            _unansweredUserMessages.Add(uuid);
             _turnActive = true;
             _cliRunning = true;
         }
@@ -614,6 +624,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         CancelPermissionPrompts();
         if (connection is null || reader is null || connection.IsClosed)
         {
+            ForgetOwnTurns();
             return;
         }
 
@@ -653,6 +664,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             while (reader.TryRead(out _))
             {
             }
+
+            ForgetOwnTurns();
         }
 
         ResetRunState();
@@ -687,6 +700,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     }
 
     // The process of an idle session is closed: the next turn resumes the conversation from the CLI's transcript.
+    // A process that still works by itself is kept: closing it would end its background commands, and the turn
+    // their end starts.
     private async Task CloseWhenIdleAsync(CancellationTokenSource idle)
     {
         try
@@ -697,16 +712,26 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                 return;
             }
 
+            var waitsAgain = false;
             try
             {
                 if (!idle.IsCancellationRequested && Volatile.Read(ref _disposed) == 0)
                 {
-                    await CloseConnectionAsync().ConfigureAwait(false);
+                    waitsAgain = WorksByItself;
+                    if (!waitsAgain)
+                    {
+                        await CloseConnectionAsync().ConfigureAwait(false);
+                    }
                 }
             }
             finally
             {
                 _turnGate.Release();
+            }
+
+            if (waitsAgain && !idle.IsCancellationRequested)
+            {
+                ArmIdleTimer();
             }
         }
         catch (OperationCanceledException)

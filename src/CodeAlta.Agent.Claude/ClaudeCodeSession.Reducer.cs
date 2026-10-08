@@ -11,7 +11,14 @@ internal sealed partial class ClaudeCodeSession
     private abstract record TurnEvent;
 
     /// <summary>A message of the CLI, in the order it wrote it.</summary>
-    private sealed record MessageEvent(string Type, JsonElement Message) : TurnEvent;
+    private sealed record MessageEvent(string Type, JsonElement Message) : TurnEvent
+    {
+        /// <summary>For a result: the number of the turn the CLI started by itself that it ends, or zero.</summary>
+        public int OwnTurn { get; init; }
+
+        /// <summary>For a change of state: whether a user message was waiting for its answer when the CLI wrote it.</summary>
+        public bool Unanswered { get; init; }
+    }
 
     /// <summary>The CLI asked something about a tool call, or gave its result: the message that made the call is complete.</summary>
     private sealed record ToolActivityEvent : TurnEvent;
@@ -64,6 +71,7 @@ internal sealed partial class ClaudeCodeSession
         lock (_gate)
         {
             _outstandingUserMessages.Clear();
+            _unansweredUserMessages.Clear();
         }
 
         _pending = null;
@@ -145,7 +153,7 @@ internal sealed partial class ClaudeCodeSession
             case "result":
                 return ReduceResult(@event);
             case "system":
-                return await ReduceSystemAsync(message, onSessionUpdate, cancellationToken).ConfigureAwait(false);
+                return await ReduceSystemAsync(@event, onSessionUpdate, cancellationToken).ConfigureAwait(false);
             case "rate_limit_event":
                 await ReduceRateLimitAsync(message, onSessionUpdate, cancellationToken).ConfigureAwait(false);
                 return null;
@@ -389,12 +397,14 @@ internal sealed partial class ClaudeCodeSession
                     }
                 }
             }
-            else
+            else if (@event.OwnTurn == 0 && !NamesItsOrigin(result))
             {
                 // A CLI that does not name the messages of a turn runs them in one turn.
                 _outstandingUserMessages.Clear();
             }
 
+            // A turn the CLI started by itself answers no message: one sent meanwhile has its own turn.
+            _ownTurnsRead = Math.Max(_ownTurnsRead, @event.OwnTurn);
             more = _outstandingUserMessages.Count > 0;
         }
 
@@ -410,7 +420,13 @@ internal sealed partial class ClaudeCodeSession
                 return CreateResponse(answered, requiresFollowUp: true);
             }
 
-            throw CreateFailure(result, subtype);
+            if (@event.OwnTurn == 0 || !more)
+            {
+                throw CreateFailure(result, subtype);
+            }
+
+            // The turn that failed is one the CLI started by itself: the run goes on with the turn of its message.
+            _apiError = null;
         }
 
         if (more)
@@ -441,14 +457,19 @@ internal sealed partial class ClaudeCodeSession
     }
 
     private async ValueTask<AgentTurnResponse?> ReduceSystemAsync(
-        JsonElement message,
+        MessageEvent @event,
         Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
         CancellationToken cancellationToken)
     {
+        var message = @event.Message;
         switch (ClaudeCodeJson.GetString(message, "subtype"))
         {
             case "session_state_changed":
-                if (_awaitingQueuedTurns && string.Equals(ClaudeCodeJson.GetString(message, "state"), "idle", StringComparison.Ordinal))
+                // The CLI is idle although a message waits for its turn: it will not have one. An idle state the
+                // CLI wrote before the message was sent (after a turn of its own) says nothing of it.
+                if (_awaitingQueuedTurns &&
+                    @event.Unanswered &&
+                    string.Equals(ClaudeCodeJson.GetString(message, "state"), "idle", StringComparison.Ordinal))
                 {
                     lock (_gate)
                     {
@@ -754,6 +775,17 @@ internal sealed partial class ClaudeCodeSession
 
             if (message.Type != "result")
             {
+                continue;
+            }
+
+            if (message.OwnTurn > 0)
+            {
+                // The result of a turn the CLI started by itself, which no run read: the command has its own.
+                lock (_gate)
+                {
+                    _ownTurnsRead = Math.Max(_ownTurnsRead, message.OwnTurn);
+                }
+
                 continue;
             }
 

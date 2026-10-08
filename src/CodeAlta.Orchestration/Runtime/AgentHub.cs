@@ -145,8 +145,16 @@ public sealed class AgentHub : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(options);
 
+        return await RunAsync(sessionHandleId, () => options, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<AgentRunId> RunAsync(
+        AgentSessionHandleId sessionHandleId,
+        Func<AgentSendOptions?> takeOptions,
+        CancellationToken cancellationToken)
+    {
         var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
-        var original = entry.Lifetime.RecordRun(() => entry.Coordinator.RunAsync(sessionHandleId, options, _events, cancellationToken));
+        var original = entry.Lifetime.RecordRun(() => entry.Coordinator.RunAsync(sessionHandleId, takeOptions, _events, cancellationToken));
         try
         {
             original.Launch();
@@ -157,6 +165,21 @@ public sealed class AgentHub : IAsyncDisposable
         finally
         {
             entry.Lifetime.CompleteReference(original.Failure, original);
+        }
+    }
+
+    // The provider of the session started a turn by itself (a background command of an agent CLI ended): a run is
+    // started for it, in its turn among the runs of the session, so that it is shown and recorded as any other.
+    private async Task RunProviderInitiatedAsync(AgentSessionHandleId sessionHandleId, IAgentProviderInitiatedRuns session)
+    {
+        try
+        {
+            await RunAsync(sessionHandleId, session.TakeProviderInitiatedRun, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Nobody waits for this run. A session that is gone has nothing to show, and the failure of a run is
+            // reported by the session itself, as for a run that was sent.
         }
     }
 
@@ -421,6 +444,13 @@ public sealed class AgentHub : IAsyncDisposable
             _gate.Release();
         }
 
+        if (session is IAgentProviderInitiatedRuns providerRuns)
+        {
+            // The handler is called while the provider is read: the run starts elsewhere.
+            entry.Coordinator.ObserveProviderRuns(providerRuns.OnProviderInitiatedRun(
+                () => _ = Task.Run(() => RunProviderInitiatedAsync(handleId, providerRuns))));
+        }
+
         _events.TryPublish(new AgentSessionAttachedEvent(DateTimeOffset.UtcNow, handleId, session.SessionId, new ModelProviderId(providerId.Value), normalizedParentSessionId));
         return handle;
     }
@@ -582,6 +612,7 @@ public sealed class AgentHub : IAsyncDisposable
         private readonly SemaphoreSlim _runGate = new(initialCount: 1, maxCount: 1);
         private readonly SemaphoreSlim _controlGate = new(initialCount: 1, maxCount: 1);
         private readonly CoordinatorFailureOwner _failureOwner;
+        private IDisposable? _providerRuns;
 
         public AgentSessionCoordinator(IAgentSession session)
         {
@@ -591,9 +622,14 @@ public sealed class AgentHub : IAsyncDisposable
             _failureOwner = new CoordinatorFailureOwner(this);
         }
 
+        /// <summary>Keeps the registration of the runs the provider of the session asks for, until the session is released.</summary>
+        public void ObserveProviderRuns(IDisposable registration) => _providerRuns = registration;
+
+        // The options are taken once the run has its turn: a run the provider asked for has nothing left to show
+        // when a run that was waiting before it read the turn of the provider, and then does not start.
         public async Task<AgentRunId> RunAsync(
             AgentSessionHandleId sessionHandleId,
-            AgentSendOptions options,
+            Func<AgentSendOptions?> takeOptions,
             BoundedRuntimeEventStream<OrchestrationEvent> events,
             CancellationToken cancellationToken)
         {
@@ -601,6 +637,7 @@ public sealed class AgentHub : IAsyncDisposable
             var invocation = new OwnedSessionCommandService.OriginalInvocation();
             try
             {
+                if (takeOptions() is not { } options) return default;
                 var runId = await _failureOwner.RunAsync(invocation, () => _session.SendAsync(options, cancellationToken)).ConfigureAwait(false);
                 events.TryPublish(new RunStartedEvent(DateTimeOffset.UtcNow, sessionHandleId, runId));
                 events.TryPublish(new RunCompletedEvent(DateTimeOffset.UtcNow, sessionHandleId, runId));
@@ -728,6 +765,7 @@ public sealed class AgentHub : IAsyncDisposable
 
         public async ValueTask DisposeAsync()
         {
+            Interlocked.Exchange(ref _providerRuns, null)?.Dispose();
             await _failureOwner.DisposeAsync(_session.DisposeAsync, () =>
             {
                 _runGate.Dispose();

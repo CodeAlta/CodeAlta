@@ -16,7 +16,7 @@ namespace CodeAlta.Agent.Runtime;
 /// <summary>
 /// Shared session implementation for provider-backed local raw-API agents.
 /// </summary>
-public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvider, IAgentIdleCompactionProvider, IAgentTargetedAbortProvider
+public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvider, IAgentIdleCompactionProvider, IAgentTargetedAbortProvider, IAgentProviderInitiatedRuns
 {
     private const string UserMessageEventType = "local.userMessage";
     private const string AssistantMessageEventType = "local.assistantMessage";
@@ -161,6 +161,24 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     }
 
     /// <inheritdoc />
+    IDisposable IAgentProviderInitiatedRuns.OnProviderInitiatedRun(Action handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _turnExecutor is IAgentProviderInitiatedTurns provider
+            ? provider.OnProviderTurn(SessionId, handler)
+            : new SubscriberLease(static () => { });
+    }
+
+    /// <inheritdoc />
+    AgentSendOptions? IAgentProviderInitiatedRuns.TakeProviderInitiatedRun()
+        => !_disposed &&
+           _turnExecutor is IAgentProviderInitiatedTurns provider &&
+           provider.GetPendingProviderTurn(SessionId) is { Length: > 0 } message
+            ? new AgentSendOptions { Input = AgentInput.Text(message), IsProviderInitiated = true }
+            : null;
+
+    /// <inheritdoc />
     public async Task<AgentRunId> SendAsync(AgentSendOptions options, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -242,7 +260,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             // A provider that runs tools itself answers its own permission prompts and questions through the run.
             var providerToolHost = _turnExecutor as IAgentProviderToolHost;
             providerToolHost?.AttachRun(new AgentProviderRunContext(SessionId, runId, permissionRequestHandler,
-                options.EnableUserInputTool ? userInputRequestHandler : null));
+                options.EnableUserInputTool ? userInputRequestHandler : null, options.IsProviderInitiated));
             var modelInfo = await ResolveModelInfoAsync(linkedCts.Token).ConfigureAwait(false);
             var toolMap = AgentToolBridge.CreateDefinitionMap(allTools);
             var runTools = new AgentRunTools(toolMap.Keys);

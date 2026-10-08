@@ -30,11 +30,36 @@ internal interface IAgentProviderSessionCleanup
 /// <param name="RunId">The run.</param>
 /// <param name="OnPermissionRequest">Asks the host whether a tool of the provider may run.</param>
 /// <param name="OnUserInputRequest">Asks the user a question of the provider, when the run can.</param>
+/// <param name="ProviderInitiated">Whether the run shows a turn the provider started by itself: its message is not sent to the provider.</param>
 internal sealed record AgentProviderRunContext(
     string SessionId,
     AgentRunId RunId,
     AgentPermissionRequestHandler OnPermissionRequest,
-    AgentUserInputRequestHandler? OnUserInputRequest);
+    AgentUserInputRequestHandler? OnUserInputRequest,
+    bool ProviderInitiated = false);
+
+/// <summary>
+/// A turn executor whose provider can start a turn by itself while its session has no run (an agent CLI whose
+/// background command ended). Such a turn is shown as a run of the session, started for it.
+/// </summary>
+internal interface IAgentProviderInitiatedTurns
+{
+    /// <summary>
+    /// Registers what is called when the provider started a turn by itself for a session. The handler is called
+    /// while the provider is being read: it must not wait.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="handler">What is called for each such turn.</param>
+    /// <returns>The registration, which is disposed to end it.</returns>
+    IDisposable OnProviderTurn(string sessionId, Action handler);
+
+    /// <summary>
+    /// Returns the message of the run that shows a turn the provider started by itself and that no run has read
+    /// yet, or <see langword="null" /> when there is none.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    string? GetPendingProviderTurn(string sessionId);
+}
 
 /// <summary>
 /// A turn executor whose provider runs tools itself (an agent CLI): the session still shows and records each

@@ -160,6 +160,7 @@ A session of this provider is a Claude Code session shown in CodeAlta:
 - A picture a tool returns (a screenshot of the window, for instance) is also saved by Claude Code in its own folder, `~/.claude/projects/<folder>/<session>/tool-results`.
 - Claude Code's own plan mode is not used: its approval step has no place in the CodeAlta window. Use the **Plan** agent prompt of CodeAlta instead. With `permission_mode = "plan"` in the provider configuration a session stays read-only and gives its plan as its answer.
 - Claude Code compacts its context itself. The **Compact** command asks it to (`/compact`).
+- Claude Code can leave a command running in the background and go on when it ends, after its answer. CodeAlta shows that turn as a new run of the session. Its first message says what started it, for example `Claude Code started a turn by itself: Background command "Run the tests" completed (exit code 0)`. This works while the session stays open: closing CodeAlta ends the command.
 - A prompt that starts with `/` is a Claude Code slash command.
 
 ```toml

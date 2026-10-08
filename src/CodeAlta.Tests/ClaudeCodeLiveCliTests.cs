@@ -233,6 +233,113 @@ public sealed class ClaudeCodeLiveCliTests
         }
     }
 
+    [TestMethod]
+    public async Task Host_ShowsTheTurnABackgroundCommandStarts()
+    {
+        // A command the model leaves running ends after its turn: the CLI then starts a turn by itself, which the
+        // application shows as a run of the session.
+        var command = RequireCli();
+        if (Environment.GetEnvironmentVariable("CODEALTA_TEST_CLAUDE_TURN") != "1")
+        {
+            Assert.Inconclusive("Set CODEALTA_TEST_CLAUDE_TURN=1 to run turns with the account of the CLI.");
+        }
+
+        using var directory = TestTempDirectory.Create();
+        var globalRoot = Path.Combine(directory.Path, "global");
+        var projectRoot = Path.Combine(directory.Path, "codealta-tests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(globalRoot);
+        Directory.CreateDirectory(projectRoot);
+        var options = CreateOptions(command);
+        var providerId = new ModelProviderId(options.ProviderKey);
+        try
+        {
+            await using var host = await CodeAltaHost.CreateAsync(
+                new CodeAltaHostOptions
+                {
+                    GlobalRoot = globalRoot,
+                    CurrentProjectPath = projectRoot,
+                    IsHeadless = true,
+                    HasInteractiveUi = false,
+                    StartPlugins = false,
+                    ConfigureModelProviders = registry => registry.RegisterOrReplace(
+                        ClaudeCodeModelProviderRuntime.CreateDescriptor(options),
+                        () => new ClaudeCodeModelProviderRuntime(options)),
+                });
+            var execution = new SessionExecutionOptions
+            {
+                ProviderId = providerId,
+                ProviderKey = providerId.Value,
+                WorkingDirectory = projectRoot,
+                ProjectRoots = [projectRoot],
+                Model = Model,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            };
+            var events = new List<AgentEvent>();
+            using var streaming = new CancellationTokenSource(Timeout);
+            var stream = Task.Run(async () =>
+            {
+                await foreach (var runtimeEvent in host.RuntimeService.StreamEventsAsync(streaming.Token))
+                {
+                    if (runtimeEvent is SessionAgentEvent { Event: var agentEvent })
+                    {
+                        lock (events)
+                        {
+                            events.Add(agentEvent);
+                        }
+                    }
+                }
+            });
+
+            var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, execution, title: "Live Claude Code", CancellationToken.None);
+            var firstRun = await host.RuntimeService.SendAsync(
+                session,
+                execution,
+                new AgentSendOptions
+                {
+                    Input = AgentInput.Text(
+                        "Run the shell command `sleep 8; echo finished` in the background (run_in_background: true). " +
+                        "Then end your turn at once with the single word: started. " +
+                        "When the command ends later, answer with the single word: ended."),
+                },
+                CancellationToken.None);
+
+            AgentEvent[] shown = [];
+            while (!streaming.IsCancellationRequested)
+            {
+                lock (events)
+                {
+                    shown = [.. events.Where(e => e.RunId is { } runId && runId != firstRun)];
+                }
+
+                if (shown.Any(static e => e is AgentErrorEvent or AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle }))
+                {
+                    break;
+                }
+
+                await Task.Delay(100);
+            }
+
+            await streaming.CancelAsync();
+            await stream.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            foreach (var content in shown.OfType<AgentContentCompletedEvent>())
+            {
+                Console.WriteLine($"content {content.Kind}: {content.Content}");
+            }
+
+            foreach (var error in shown.OfType<AgentErrorEvent>())
+            {
+                Console.WriteLine($"error {error.Message}");
+            }
+
+            StringAssert.StartsWith(shown.OfType<AgentContentCompletedEvent>().First(static e => e.Kind == AgentContentKind.User).Content, "Claude Code started a turn by itself");
+            StringAssert.Contains(shown.OfType<AgentContentCompletedEvent>().Last(static e => e.Kind == AgentContentKind.Assistant).Content.ToLowerInvariant(), "ended");
+        }
+        finally
+        {
+            RemoveTranscripts(projectRoot);
+        }
+    }
+
     private static string RequireCli()
     {
         var command = Environment.GetEnvironmentVariable("CODEALTA_TEST_CLAUDE_CLI");

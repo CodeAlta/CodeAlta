@@ -52,9 +52,9 @@ internal sealed partial class ClaudeCodeSession
 
         public void OnMessage(string type, JsonElement message)
         {
-            if (IsCurrent && session.OnMessage(type, message))
+            if (IsCurrent && session.OnMessage(type, message) is { } @event)
             {
-                events.TryWrite(new MessageEvent(type, message));
+                events.TryWrite(@event);
             }
         }
 
@@ -95,6 +95,22 @@ internal sealed partial class ClaudeCodeSession
     private bool _cliRunning;
     private bool _turnActive;
 
+    // What the reader of the connection knows of the turns of the CLI. A turn answers the user messages its
+    // result names. A turn in which the model writes while no user message waits for its answer is one the CLI
+    // started by itself: a background command of an earlier turn ended, a wake-up of its own fired. Such turns
+    // are numbered, so that the run that reads their result knows it read them.
+    private readonly HashSet<string> _unansweredUserMessages = new(StringComparer.Ordinal);
+    private bool _ownTurnOpen;
+    private int _ownTurnsStarted;
+    private int _ownTurnsRead;
+    private string? _ownTurnNotice;
+    private string? _taskSummary;
+    private int _backgroundTasks;
+    private Action? _onOwnTurn;
+    private TaskCompletionSource? _runForOwnTurn;
+    private bool _showsOwnTurn;
+    private bool _ownTurnRunStarts;
+
     // Whether the CLI is running a turn, as far as this side can tell.
     private bool IsCliBusy
     {
@@ -103,6 +119,147 @@ internal sealed partial class ClaudeCodeSession
             lock (_gate)
             {
                 return _stateEventsSeen ? _cliRunning : _turnActive;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the message of the run that shows a turn the CLI started by itself and that no run has read yet, or
+    /// <see langword="null" /> when there is none.
+    /// </summary>
+    public string? PendingOwnTurn
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _ownTurnsRead < _ownTurnsStarted ? _ownTurnNotice ?? ClaudeCodePrompts.CreateOwnTurnNotice(null) : null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Registers what is called when the CLI starts a turn by itself: a run is then started that reads it.
+    /// </summary>
+    public IDisposable OnOwnTurn(Action handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        lock (_gate)
+        {
+            _onOwnTurn = handler;
+        }
+
+        return new OwnTurnRegistration(this, handler);
+    }
+
+    private sealed class OwnTurnRegistration(ClaudeCodeSession session, Action handler) : IDisposable
+    {
+        public void Dispose()
+        {
+            TaskCompletionSource? waiting = null;
+            lock (session._gate)
+            {
+                if (ReferenceEquals(session._onOwnTurn, handler))
+                {
+                    session._onOwnTurn = null;
+                    // No run will come for a prompt that waits for one.
+                    waiting = session._runForOwnTurn;
+                    session._runForOwnTurn = null;
+                }
+            }
+
+            waiting?.TrySetResult();
+        }
+    }
+
+    // Called by the reader of the connection when the model writes in the main conversation.
+    private void NoteModelOutput()
+    {
+        Action? notify;
+        lock (_gate)
+        {
+            if (_ownTurnOpen || _unansweredUserMessages.Count > 0)
+            {
+                return;
+            }
+
+            _ownTurnOpen = true;
+            _turnActive = true;
+            _ownTurnsStarted++;
+            _ownTurnNotice = ClaudeCodePrompts.CreateOwnTurnNotice(_taskSummary);
+            _taskSummary = null;
+            notify = _onOwnTurn;
+            if (notify is not null)
+            {
+                // What the CLI asks in this turn is answered by the run that will show it.
+                _runForOwnTurn ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+        }
+
+        notify?.Invoke();
+    }
+
+    // Called by the reader of the connection for the result that ends a turn. Returns the number of the turn the
+    // CLI started by itself that it ends, or zero for a turn that answers user messages.
+    private int EndTurn(JsonElement result)
+    {
+        lock (_gate)
+        {
+            _turnActive = false;
+            var ownTurn = _ownTurnOpen ? _ownTurnsStarted : 0;
+            _ownTurnOpen = false;
+            _taskSummary = null;
+            if (ClaudeCodeJson.TryGetArray(result, "user_message_uuids", out var uuids))
+            {
+                foreach (var uuid in uuids.EnumerateArray())
+                {
+                    if (uuid.ValueKind == JsonValueKind.String)
+                    {
+                        _unansweredUserMessages.Remove(uuid.GetString()!);
+                    }
+                }
+            }
+            else if (ownTurn == 0 && !NamesItsOrigin(result))
+            {
+                // A CLI that does not name the messages of a turn runs them in one turn.
+                _unansweredUserMessages.Clear();
+            }
+
+            return ownTurn;
+        }
+    }
+
+    // Whether the CLI says what started the turn of a result when it was not a user message (a task notification).
+    private static bool NamesItsOrigin(JsonElement result)
+        => result.TryGetProperty("origin", out var origin) && origin.ValueKind == JsonValueKind.Object;
+
+    // What the CLI did by itself is given up: its process ended, or what it wrote was withdrawn with a turn.
+    private void ForgetOwnTurns()
+    {
+        TaskCompletionSource? waiting;
+        lock (_gate)
+        {
+            _ownTurnOpen = false;
+            _ownTurnsRead = _ownTurnsStarted;
+            _ownTurnNotice = null;
+            _taskSummary = null;
+            waiting = _runForOwnTurn;
+            _runForOwnTurn = null;
+        }
+
+        waiting?.TrySetResult();
+    }
+
+    // Whether the process still has something to do without a run: a turn of its own that goes on or that no run
+    // read yet, or a background command whose end starts one.
+    private bool WorksByItself
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _connection is { IsClosed: false } &&
+                       ((_stateEventsSeen ? _cliRunning : _turnActive) || _backgroundTasks > 0 || _ownTurnsRead < _ownTurnsStarted);
             }
         }
     }
@@ -210,8 +367,8 @@ internal sealed partial class ClaudeCodeSession
         }
     }
 
-    // Called by the reader of the connection. Returns whether the message is part of the answer of the turn.
-    private bool OnMessage(string type, JsonElement message)
+    // Called by the reader of the connection. Returns the message when it is part of the answer of a turn.
+    private MessageEvent? OnMessage(string type, JsonElement message)
     {
         if (ClaudeCodeJson.GetString(message, "session_id") is { Length: > 0 } sessionId &&
             type is "system" or "result" or "assistant")
@@ -227,43 +384,65 @@ internal sealed partial class ClaudeCodeSession
                 if (!isTopLevel)
                 {
                     ReportSubagentProgress(message);
-                    return false;
+                    return null;
                 }
 
                 RegisterToolCalls(message);
-                return true;
+                NoteModelOutput();
+                return new MessageEvent(type, message);
             case "user":
                 if (ClaudeCodeJson.GetBoolean(message, "isReplay"))
                 {
-                    return false;
+                    return null;
                 }
 
-                return CompleteToolResults(message) && isTopLevel;
+                return CompleteToolResults(message) && isTopLevel ? new MessageEvent(type, message) : null;
             case "stream_event":
-                return isTopLevel;
-            case "result":
-                lock (_gate)
+                if (!isTopLevel)
                 {
-                    _turnActive = false;
+                    return null;
                 }
+
+                NoteModelOutput();
+                return new MessageEvent(type, message);
+            case "result":
+                var ownTurn = EndTurn(message);
 
                 // A tool call without a result when the turn ends will never have one.
                 FailOutstandingToolCalls("The tool call did not complete.");
                 ReleaseAllHookGates();
-                return true;
+                return new MessageEvent(type, message) { OwnTurn = ownTurn };
             case "system":
-                if (string.Equals(ClaudeCodeJson.GetString(message, "subtype"), "session_state_changed", StringComparison.Ordinal))
+                switch (ClaudeCodeJson.GetString(message, "subtype"))
                 {
-                    lock (_gate)
-                    {
-                        _stateEventsSeen = true;
-                        _cliRunning = !string.Equals(ClaudeCodeJson.GetString(message, "state"), "idle", StringComparison.Ordinal);
-                    }
+                    case "session_state_changed":
+                        lock (_gate)
+                        {
+                            _stateEventsSeen = true;
+                            _cliRunning = !string.Equals(ClaudeCodeJson.GetString(message, "state"), "idle", StringComparison.Ordinal);
+                            return new MessageEvent(type, message) { Unanswered = _unansweredUserMessages.Count > 0 };
+                        }
+                    case "background_tasks_changed":
+                        // The commands and the subagents that go on in the background, whatever turn started them.
+                        lock (_gate)
+                        {
+                            _backgroundTasks = ClaudeCodeJson.TryGetArray(message, "tasks", out var tasks) ? tasks.GetArrayLength() : 0;
+                        }
+
+                        break;
+                    case "task_notification":
+                        // What ended, as the CLI says it. It starts a turn of its own when no turn is running.
+                        lock (_gate)
+                        {
+                            _taskSummary = ClaudeCodeJson.GetString(message, "summary");
+                        }
+
+                        break;
                 }
 
-                return true;
+                return new MessageEvent(type, message);
             default:
-                return true;
+                return new MessageEvent(type, message);
         }
     }
 

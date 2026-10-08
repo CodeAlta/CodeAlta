@@ -11,6 +11,7 @@ internal sealed class ClaudeCodeTurnExecutor :
     IAgentProviderToolHost,
     IAgentProviderCompaction,
     IAgentProviderSessionCleanup,
+    IAgentProviderInitiatedTurns,
     IAsyncDisposable
 {
     private readonly ClaudeCodeModelProviderRuntimeOptions _options;
@@ -71,6 +72,17 @@ internal sealed class ClaudeCodeTurnExecutor :
         ArgumentNullException.ThrowIfNull(request);
         return GetSession(request.SessionId).CompactAsync(request, cancellationToken);
     }
+
+    /// <inheritdoc />
+    public IDisposable OnProviderTurn(string sessionId, Action handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        return GetSession(sessionId).OnOwnTurn(handler);
+    }
+
+    /// <inheritdoc />
+    public string? GetPendingProviderTurn(string sessionId)
+        => _sessions.TryGetValue(sessionId, out var session) ? session.PendingOwnTurn : null;
 
     /// <inheritdoc />
     public async ValueTask DisposeProviderSessionAsync(string sessionId)
