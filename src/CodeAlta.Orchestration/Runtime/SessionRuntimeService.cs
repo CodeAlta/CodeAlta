@@ -3594,7 +3594,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             var firstLine = summary.Trim().Split(['\r', '\n'], 2, StringSplitOptions.RemoveEmptyEntries)[0].Trim();
             if (!string.IsNullOrWhiteSpace(firstLine))
             {
-                return firstLine.Length <= 80 ? firstLine : firstLine[..80];
+                // Cut between two characters and without a space at the end: a list shows this text as it is, and a
+                // deletion is confirmed with it.
+                return firstLine.Length <= 80 ? firstLine : firstLine[..(char.IsHighSurrogate(firstLine[79]) ? 79 : 80)].TrimEnd();
             }
         }
 
@@ -3617,11 +3619,39 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private static string? GivenTitle(AgentSessionMetadata metadata, SessionViewDescriptor session, IReadOnlyList<ProjectDescriptor> projects)
     {
         var title = NormalizeOptionalText((metadata.Details as RawApiSessionMetadataDetails)?.Title);
-        if (title is null) return null;
-        if (session.Kind == SessionViewKind.GlobalSession)
-            return title is UnnamedGlobalSessionTitle || title == SummaryTitle(UnnamedGlobalSessionSummary) ? null : title;
-        var project = projects.FirstOrDefault(candidate => string.Equals(candidate.Id, session.ProjectRef, StringComparison.Ordinal));
-        return project is not null && (title == project.DisplayName || title == SummaryTitle(UnnamedProjectSessionSummary(project))) ? null : title;
+        return title is null || IsCreationTitle(title, session.Kind, ProjectOf(session, projects)) ? null : title;
+    }
+
+    private static ProjectDescriptor? ProjectOf(SessionViewDescriptor session, IReadOnlyList<ProjectDescriptor> projects)
+        => session.Kind == SessionViewKind.GlobalSession ? null
+            : projects.FirstOrDefault(candidate => string.Equals(candidate.Id, session.ProjectRef, StringComparison.Ordinal));
+
+    // The titles a session is created with: "Global Session" or the name of its project, or the first line of the
+    // summary it is created with. A saved title that is one of them was never chosen by anyone.
+    private static bool IsCreationTitle(string title, SessionViewKind? kind, ProjectDescriptor? project) => kind switch
+    {
+        null => false,
+        SessionViewKind.GlobalSession => title is UnnamedGlobalSessionTitle || title == SummaryTitle(UnnamedGlobalSessionSummary),
+        _ => project is not null && (title == project.DisplayName || title == SummaryTitle(UnnamedProjectSessionSummary(project))),
+    };
+
+    /// <summary>
+    /// The title a list of sessions shows for a stored session, and the one its deletion is confirmed with: the name
+    /// the session was given, and for a session that was never named the first line of its summary (80 characters at
+    /// most), then the title it was created with, then its id.
+    /// </summary>
+    /// <param name="session">The stored session.</param>
+    /// <param name="kind">Whether the session is a global one or the session of a project; <see langword="null" /> when that is not known: its saved title is then taken as its name.</param>
+    /// <param name="project">The project of a project session.</param>
+    /// <returns>The title of the session in a list.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="session" /> is <see langword="null" />.</exception>
+    public static string ListedTitle(AgentSessionMetadata session, SessionViewKind? kind, ProjectDescriptor? project)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        var saved = (session.Details as RawApiSessionMetadataDetails)?.Title;
+        if (string.IsNullOrWhiteSpace(saved)) saved = null;
+        return saved is not null && !IsCreationTitle(saved.Trim(), kind, project) ? saved
+            : SummaryTitle(session.Summary) ?? saved ?? session.SessionId;
     }
 
     // The session of the agent a prompt comes from; null for a prompt of a person, of a reminder or of the host.

@@ -22,10 +22,8 @@ public sealed partial class SessionRuntimeService
             if (session is null || session.SessionId != sessionId || session.ProjectRef != projectId
                 || session.Kind != (projectId is null ? SessionViewKind.GlobalSession : SessionViewKind.ProjectSession))
                 return "session_missing";
-            var persistedTitle = (metadata.Details as RawApiSessionMetadataDetails)?.Title;
-            var visibleTitle = !string.IsNullOrWhiteSpace(persistedTitle) ? persistedTitle
-                : !string.IsNullOrWhiteSpace(metadata.Summary) ? metadata.Summary : metadata.SessionId;
-            if (visibleTitle != confirmedTitle) return "session_missing";
+            // The title the list shows: for a session that was never named, the first line of its summary.
+            if (ListedTitle(metadata, session.Kind, ProjectOf(session, projects)) != confirmedTitle) return "session_missing";
             await foreach (var candidate in store.ListSessionsAsync(filter: null, cancellationToken: token).ConfigureAwait(false))
             {
                 if (candidate.SessionId != sessionId &&

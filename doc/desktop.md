@@ -306,7 +306,8 @@ name selected: Enter or **Rename** saves it; Escape, **Cancel** or a click elsew
 as it is. A rename that is refused says why under the field. A session keeps the name it was created
 or renamed with, also when a later Send attaches it again (another model, a restart) and when it is
 continued from the terminal UI, which lists a session by the first line of its summary; a session that
-was never named shows the first line of its summary.
+was never named shows the first line of its summary, 80 characters at most
+(`SessionRuntimeService.ListedTitle`), and its deletion is confirmed with that title.
 
 Clicking a project opens one temporary **New session** tab, reused when selecting another project
 before creation. Selecting an existing session tab or sidebar session removes it. Real session

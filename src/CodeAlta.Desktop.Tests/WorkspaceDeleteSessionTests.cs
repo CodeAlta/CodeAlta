@@ -121,4 +121,82 @@ public sealed class WorkspaceDeleteSessionTests
         }
         finally { Directory.Delete(root, recursive: true); }
     }
+
+    [TestMethod]
+    public async Task NeverNamedSession_IsDeletedWithTheTitleTheListShows()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-session-delete-" + Guid.NewGuid().ToString("N"));
+        var global = Directory.CreateDirectory(Path.Combine(root, "global")).FullName;
+        var projectPath = Directory.CreateDirectory(Path.Combine(root, "project")).FullName;
+        try
+        {
+            var provider = new AnsweringProvider();
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = global, CurrentProjectPath = projectPath, IsHeadless = true, AutoApproveOwnedPermissions = true,
+                OwnedCommandReceiptCapacity = 32, OwnsLogging = false,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
+            });
+            var project = host.CurrentProject;
+            var sessionId = (await host.Commands.CreateDraftSessionAsync(project, provider.Descriptor, null)).SessionId;
+            var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "one")).Receipt;
+            Assert.IsNotNull(receipt);
+            Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10))).Outcome);
+
+            // The session was never named: the list shows the first line of what it last said, 80 characters at most.
+            var rpc = new WorkspaceService(host, Epoch);
+            var listed = (await rpc.SnapshotAsync(new(), CancellationToken.None)).Sessions.Single(session => session.Id == sessionId);
+            Assert.AreEqual(AnsweringProvider.FirstLine[..79], listed.Title);
+            Assert.AreEqual(listed.Title, listed.FullTitle);
+
+            // The title it was created with is not the one the list shows; the one the list shows deletes it.
+            WorkspaceDeleteSessionRequest Request(string title) => new(Epoch, "project", project.Id, project.ProjectPath, sessionId, title);
+            Assert.AreEqual("session_missing", (await rpc.DeleteSessionAsync(Request(project.DisplayName), CancellationToken.None)).Status);
+            Assert.AreEqual("ok", (await rpc.DeleteSessionAsync(Request(listed.Title), CancellationToken.None)).Status);
+            Assert.IsFalse((await rpc.SnapshotAsync(new(), CancellationToken.None)).Sessions.Any(session => session.Id == sessionId));
+            await rpc.CloseSessionsAsync();
+            await rpc.CloseImportsAsync();
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    // A model that answers every prompt with a first line of more than 80 characters, whose 80th is a space.
+    private sealed class AnsweringProvider : IAgentModelProviderRuntime, IModelProviderTurnExecutor
+    {
+        public static readonly string FirstLine = string.Concat(Enumerable.Repeat("word ", 30)).TrimEnd();
+
+        public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("delete-answers"), "Delete Answers") { DefaultModelId = "fake-model" };
+
+        public ModelProviderRuntimeDescriptor RuntimeDescriptor { get; } = new()
+        {
+            ProtocolFamily = "test", ProviderKey = "delete-answers", DisplayName = "Delete Answers", TransportKind = AgentTransportKind.OpenAIResponses,
+        };
+
+        public IModelProviderModelCatalog? ModelCatalog => null;
+
+        public AgentRuntimeProviderRegistration CreateProviderRegistration() => new() { Provider = RuntimeDescriptor, TurnExecutor = this };
+
+        public IModelProviderTurnExecutor CreateTurnExecutor() => this;
+
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new ModelProviderProbeResult
+            {
+                ProviderId = Descriptor.ProviderId,
+                Availability = ModelProviderAvailability.Ready,
+                Models = [new AgentModelInfo("fake-model", DisplayName: "Fake Model")],
+                SelectedModelId = "fake-model",
+            });
+
+        public Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate, CancellationToken cancellationToken = default)
+            => Task.FromResult(new AgentTurnResponse
+            {
+                AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text(FirstLine + "\nA second line.")]),
+            });
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
 }

@@ -330,6 +330,40 @@ public sealed class DesktopWorkspaceTests
         var snapshot = WorkspaceService.ProjectSnapshot([Project("p")], [session], new Dictionary<string, SessionViewJournalHeader> { ["unnamed"] = new() { SessionId = "unnamed", Kind = SessionViewKind.ProjectSession, ProjectRef = "p", CreatedAt = session.CreatedAt, WorkingDirectory = session.WorkspacePath! } });
         Assert.AreEqual("Catalogue OK. Je regarde le format des agents.", snapshot.Sessions[0].Title);
     }
+
+    [TestMethod]
+    public void Projection_NeverNamedSessionOfAProjectWithALongNameShowsFirstLineOfSummary()
+    {
+        // The runtime keeps the first 80 characters of the summary a session is created with as its title.
+        var project = Project("p");
+        project.DisplayName = new string('n', 60);
+        var session = Session("unnamed") with
+        {
+            Summary = "The answer of the model.",
+            Details = new RawApiSessionMetadataDetails(Title: $"Project session for {project.DisplayName}."[..80]),
+        };
+        var snapshot = WorkspaceService.ProjectSnapshot([project], [session], ProjectHeader(session));
+        Assert.AreEqual("The answer of the model.", snapshot.Sessions[0].Title);
+    }
+
+    [TestMethod]
+    [DataRow("😀tail")]
+    [DataRow(" tail")]
+    public void Projection_NeverNamedSessionShowsAtMost80CharactersOfItsSummary(string end)
+    {
+        // The title is complete as it is listed, since a deletion is confirmed with it: it is cut between two
+        // characters and has no space at its end.
+        var session = Session("unnamed") with
+        {
+            Summary = new string('x', 79) + end,
+            Details = new RawApiSessionMetadataDetails(Title: "Project session for p."),
+        };
+        var snapshot = WorkspaceService.ProjectSnapshot([Project("p")], [session], ProjectHeader(session));
+        Assert.AreEqual(new string('x', 79), snapshot.Sessions[0].Title);
+        Assert.AreEqual(snapshot.Sessions[0].Title, snapshot.Sessions[0].FullTitle);
+        Assert.IsFalse(snapshot.Sessions[0].FullTitleTruncated || snapshot.DisplayTextTruncated);
+    }
+
     [TestMethod]
     public void Projection_NamedSessionKeepsItsTitleWhateverItsSummary()
     {
@@ -357,6 +391,12 @@ public sealed class DesktopWorkspaceTests
         var snapshot = WorkspaceService.ProjectSnapshot([], [session], headers);
         Assert.AreEqual("Checking the catalog", snapshot.Sessions[0].Title);
     }
+
+    private static Dictionary<string, SessionViewJournalHeader> ProjectHeader(AgentSessionMetadata session) => new()
+    {
+        [session.SessionId] = new() { SessionId = session.SessionId, Kind = SessionViewKind.ProjectSession, ProjectRef = "p", CreatedAt = session.CreatedAt, WorkingDirectory = session.WorkspacePath! },
+    };
+
     private static ProjectDescriptor Project(string id) => new()
     {
         Id = id, DisplayName = id, ProjectPath = "/literal/" + id, Archived = true,

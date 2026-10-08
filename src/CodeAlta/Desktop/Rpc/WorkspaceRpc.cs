@@ -198,14 +198,12 @@ internal sealed partial class WorkspaceService
                     projectId = reference;
                 }
             }
-            var persistedTitle = (session.Details as RawApiSessionMetadataDetails)?.Title;
-            var hasTitle = !string.IsNullOrWhiteSpace(persistedTitle);
             // A session that was never named keeps the text it was created with as its saved title, while its summary
-            // follows the conversation: it is listed by the first line of that summary, as the terminal UI does.
-            var neverNamed = hasTitle && IsCreationTitle(persistedTitle!, scopeKind,
-                projects.FirstOrDefault(project => project.Id == projectId)?.DisplayName);
-            var sourceTitle = hasTitle && !neverNamed ? persistedTitle!
-                : FirstLine(session.Summary) ?? (hasTitle ? persistedTitle! : session.SessionId);
+            // follows the conversation: it is listed by the first line of that summary, as the terminal UI does. The
+            // deletion of a session is confirmed with the same title.
+            var sourceTitle = CodeAlta.Orchestration.Runtime.SessionRuntimeService.ListedTitle(session,
+                scopeKind switch { "global" => SessionViewKind.GlobalSession, "project" => SessionViewKind.ProjectSession, _ => (SessionViewKind?)null },
+                projectId is null ? null : projects.FirstOrDefault(project => project.Id == projectId));
             var title = DisplayText(sourceTitle, ref shortened);
             var fullTitle = DisplayTextBounded(sourceTitle, 4096, ref shortened);
             var cost = 512 + 64 + 6 * (session.SessionId.Length + title.Length + fullTitle.Length + (parent?.Length ?? 0)
@@ -221,18 +219,6 @@ internal sealed partial class WorkspaceService
         return new WorkspaceSnapshot(true, displayedProjects.ToArray(), displayedSessions.ToArray(),
             displayedProjects.Count < projects.Count, displayedSessions.Count < sessions.Count, shortened);
     }
-
-    // The titles a session is created with, as SessionRuntimeService names it: the project or "Global Session", or the
-    // first line of the summary it is created with. A saved title that is one of them was never chosen by a person.
-    private static bool IsCreationTitle(string title, string? scopeKind, string? projectName) => scopeKind switch
-    {
-        "project" => projectName is not null && (title == projectName || title == $"Project session for {projectName}."),
-        "global" => title is "Global Session" or "Global overview and coordination session.",
-        _ => false,
-    };
-
-    private static string? FirstLine(string? text)
-        => string.IsNullOrWhiteSpace(text) ? null : text.Trim().Split(['\r', '\n'], 2, StringSplitOptions.RemoveEmptyEntries)[0].Trim() is { Length: > 0 } line ? line : null;
 
     private static void ValidateIdentity(string? value, int maximumLength, bool required)
     {
