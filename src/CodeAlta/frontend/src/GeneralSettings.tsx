@@ -1,6 +1,7 @@
-import type { ComponentProps } from "react";
+import { useState, type ComponentProps } from "react";
 import { Button, ButtonGroup, Card, HTMLSelect, Slider, Switch } from "@blueprintjs/core";
 import { AppIcon, type IconName } from "./AppIcon";
+import { useElementSize } from "./AppWindow";
 import { ChangesViewSetting } from "./changes/ChangesViewSetting";
 import { ColorSchemeSettings } from "./ColorSchemeSettings";
 import type { ProjectSort } from "./explorer/projectRail";
@@ -14,6 +15,21 @@ import { closeBehavior, closeBehaviorLabel, closeBehaviors, keepRunningPlace, ty
 
 /** The icon of each theme choice, shared with the title-bar switch. */
 export const themeIcons: Readonly<Record<Theme, IconName>> = { dark: "themeDark", light: "themeLight", system: "themeSystem" };
+
+/**
+ * The slider of the width of the conversation. Blueprint's slider measures its track once, when it is mounted, and
+ * the pages of Settings are mounted before their dialog is shown, when nothing has a size: every press was then
+ * read as the smallest or the largest width. The slider is made again when the room it has changes, so it always
+ * reads a press on the track it is shown with.
+ */
+function SessionWidthSlider({ value, label, onChange }: { value: number; label: string; onChange: (value: number) => void }) {
+  const [room, setRoom] = useState<HTMLDivElement | null>(null);
+  const { width } = useElementSize(room);
+  return <div ref={setRoom} className="settings-session-slider">
+    <Slider key={width} min={minimumSessionWidth} max={defaultSessionWidth} stepSize={sessionWidthStep} labelRenderer={false}
+      value={clampSessionWidth(value)} onChange={next => { if (next !== value) onChange(next); }} handleHtmlProps={{ "aria-label": label }} />
+  </div>;
+}
 
 export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, sort, setSort, desktopCollapsed, setDesktopCollapsed, notices, recentSessionCount, setRecentSessionCount, sessionWidth, setSessionWidth, closing }: {
   theme: Theme;
@@ -71,9 +87,7 @@ export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, s
     </Field>
     {sessionWidth !== undefined && setSessionWidth && <Field label={t("Width of the conversation")}>
       <div className="settings-session-width">
-        <Slider min={minimumSessionWidth} max={defaultSessionWidth} stepSize={sessionWidthStep} labelRenderer={false}
-          value={clampSessionWidth(sessionWidth)} onChange={value => { if (value !== sessionWidth) setSessionWidth(value); }}
-          handleHtmlProps={{ "aria-label": t("Width of the conversation") }} />
+        <SessionWidthSlider value={sessionWidth} label={t("Width of the conversation")} onChange={setSessionWidth} />
         <output>{sessionWidth}%</output>
         <Button variant="minimal" size="small" disabled={sessionWidth === defaultSessionWidth} onClick={() => setSessionWidth(defaultSessionWidth)}>{t("Reset")}</Button>
       </div>

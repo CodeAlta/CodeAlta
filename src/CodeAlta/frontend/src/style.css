@@ -2178,6 +2178,7 @@ dialog.tool-call-dialog .app-window-body .tool-record > h4 { margin: 0 0 4px; co
 .session-width-grip::before { content: ""; position: absolute; top: 20%; bottom: 20%; left: 3px; width: 3px; border-radius: 3px; background: var(--accent); opacity: 0; transition: opacity .12s ease; }
 .session-width-grip:hover::before, .session-width-grip:active::before, .session-width-grip:focus-visible::before { opacity: .85; }
 .settings-session-width { display: flex; flex: none; align-items: center; gap: 12px; width: 340px; max-width: 100%; }
-.settings-session-width > .bp6-slider { flex: 1 1 auto; min-width: 140px; height: 16px; margin-inline: 8px; }
+.settings-session-slider { flex: 1 1 auto; min-width: 156px; padding-inline: 8px; }
+.settings-session-slider > .bp6-slider { min-width: 0; height: 16px; }
 .settings-session-width > .bp6-button { flex: none; white-space: nowrap; }
-.settings-session-width > output { flex: none; min-width: 4ch; text-align: end; color: var(--muted); font-variant-numeric: tabular-nums; }
+.settings-session-width > output { flex: none; min-width: 5ch; text-align: end; color: var(--muted); font-variant-numeric: tabular-nums; }

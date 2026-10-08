@@ -1194,7 +1194,9 @@ to 100, kept by the host in `preferences.json` (`sessionWidth`, written only whe
 keeps it because `alta appearance` reads it. It is changed by dragging an edge of the prompt
 (`SessionWidthGrips`: both edges move, the pointer sets the width to the percent, a double click or Home
 resets it, the arrow keys change it by 5), or with the slider of **Settings → Appearance**, which also resets
-it; `desktopShell.setSessionWidth` writes it and every page is told with a `session-width` notice. A session
+it. Blueprint's slider measures its track once, when it mounts, and a page of Settings mounts before its
+dialog is shown: `SessionWidthSlider` makes the slider again whenever the room it has changes, so a press is
+read on the track that is shown. `desktopShell.setSessionWidth` writes the setting and every page is told with a `session-width` notice. A session
 can be shown with a width of its own, which `alta appearance set --session-width` gives it: the host holds
 these in memory (`DesktopShell.SetSessionWidthOf`, 256 sessions at most), lists them in
 `desktopShell.preferences` and tells the pages with a `session-width` notice that names the session. Such a
