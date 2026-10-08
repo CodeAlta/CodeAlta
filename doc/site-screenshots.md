@@ -79,6 +79,22 @@ Changes made for a capture are applied as patches and reversed after it. Record 
 Settings changed for a capture (theme, color scheme, width of the conversation, number of recent sessions) are
 put back. So are favorites and open projects.
 
+What the scenes with state of their own need:
+
+- **Terminals.** `alta terminal create --project <folder> --title <name>` opens one, `alta terminal send <id> --text
+  "<command>" --enter --wait <seconds>` types in it, `alta terminal show <id>` brings its tab to the front and
+  `alta terminal close <id>` ends it. Start the application from a shell where `NO_COLOR` is not set: a terminal
+  inherits it and draws its prompt without colors. Use a prompt theme that does not show the account.
+- **Worktrees.** A session keeps the folder of its worktree. Create the worktrees again in the same folders
+  (`git worktree add -b <branch> <folder> <commit>`), restart the application so that it stops showing them as
+  removed, and remove the worktrees and their branches after the capture.
+- **Automations.** They are in `.alta/config.toml` of the project, which git tracks: add them for the capture
+  and put the file back. Automations are paused on the developer instance: let them run for the capture only.
+- **Plugins.** `alta plugin create <name>` makes a plugin of the user in `~/.alta/plugins`, which the two
+  instances share: remove its folder and its build cache right after the capture.
+- **The sidebar.** A project lists its recent sessions only, and the sessions of the scenes get older: click
+  **Show more** until they are all listed, then hide the others.
+
 ## Exporting
 
 Save a capture as **lossless WebP** (`PIL`: `image.save(path, "WEBP", lossless=True, method=6)`), about 100 to
