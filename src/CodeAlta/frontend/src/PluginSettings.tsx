@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Button, Card, CardList, FormGroup, InputGroup, PopoverNext, Switch, Tag, type Intent } from "@blueprintjs/core";
-import { plugins, type PluginsEntry, type PluginsProblem } from "#neoastra";
+import { plugins, projectFiles, type PluginsEntry, type PluginsProblem } from "#neoastra";
 import { AppIcon } from "./AppIcon";
+import { SettingsFileLocation, SettingsFileLocations, type SettingsFiles } from "./SettingsFileLocation";
+import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
 import { ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
 import { settingsFailure, type SettingsNotice, type SettingsScope } from "./settingsEditing";
 import { useShellLanguage } from "./shellLanguage";
@@ -66,13 +68,18 @@ const problemText: Record<string, MessageKey> = {
   runtime: "The state of the running plugins could not be read.",
 };
 
-/** What the host could not read while it listed the rest: each file or folder by its path, with what was said of it. */
-export function PluginProblems({ problems, omitted }: { problems: readonly PluginsProblem[]; omitted: number }) {
+/**
+ * What the host could not read while it listed the rest: each file or folder by its path, with what was said of it.
+ * A configuration file that does not parse is opened in the code editor from here.
+ */
+export function PluginProblems({ problems, omitted, files }: { problems: readonly PluginsProblem[]; omitted: number; files?: SettingsFiles }) {
   const { t } = useShellLanguage();
   if (problems.length === 0 && omitted <= 0) return null;
   return <div className="plugin-problems" role="alert">
     {problems.map((problem, index) => <small key={index} className="plugin-failure">
-      {t(problemText[problem.kind] ?? "The settings could not be read.", { path: problem.path ?? "" })}{problem.message ? ` ${problem.message}` : ""}</small>)}
+      {t(problemText[problem.kind] ?? "The settings could not be read.", { path: problem.path ?? "" })}{problem.message ? ` ${problem.message}` : ""}
+      {problem.kind === "config" && problem.path && problem.scope && files && <SettingsFileLocation path={problem.path} platform={files.platform}
+        onOpen={files.open ? () => files.open!({ kind: "config", scope: problem.scope! }) : undefined} onReveal={() => files.reveal({ kind: "config", scope: problem.scope! })} />}</small>)}
     {omitted > 0 && <small className="plugin-failure">{t("{count} more are not listed.", { count: omitted })}</small>}
   </div>;
 }
@@ -81,9 +88,13 @@ export function PluginProblems({ problems, omitted }: { problems: readonly Plugi
  * The list of the page. A source plugin says what the running application did with it and what its last build
  * reported; it is built again in the running application while it is turned on, and opened in the code editor.
  */
-export function PluginRows({ rows, disabled, onToggle, onReload, onEdit }: {
+export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, platform, onReveal }: {
   rows: readonly PluginRow[]; disabled: boolean;
   onToggle: (id: string, enabled: boolean) => void; onReload: (entry: PluginsEntry) => void; onEdit?: (folder: PluginFolder) => void;
+  /** The system, which names its file manager; null where a folder cannot be shown. */
+  platform?: string | null;
+  /** Shows the folder of a source plugin in the file manager. */
+  onReveal?: (folder: PluginFolder) => void;
 }) {
   const { t } = useShellLanguage();
   return <CardList compact className="settings-editor-rows" aria-label={t("Plugins")}>
@@ -91,7 +102,9 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit }: {
       return <Card key={`${entry?.scope ?? ""}:${row.id}`}>
       <span className="settings-editor-name"><strong>{row.name}</strong><small>{row.description || row.id}</small>
         {errors.map((error, index) => <small key={index} className="plugin-failure">{error}</small>)}
-        {errors.length === 0 && entry?.runtime === "failed" && entry.runtimeMessage && <small className="plugin-failure">{entry.runtimeMessage}</small>}</span>
+        {errors.length === 0 && entry?.runtime === "failed" && entry.runtimeMessage && <small className="plugin-failure">{entry.runtimeMessage}</small>}
+        {source?.path && <SettingsFileLocation path={source.path} platform={platform}
+          onReveal={source.folder && onReveal ? () => onReveal({ id: source.folder!, path: source.path!, name: source.id }) : undefined} />}</span>
       <span className="settings-editor-tags"><Tag minimal round>{t(row.builtIn ? "Built-in" : entry?.scope === "Project" ? "Project" : "User")}</Tag>
         {entry && entry.kind === "Source" && entry.state !== "Enabled" && entry.state !== "Disabled"
           && <Tag minimal round intent={stateIntent[entry.state] ?? "none"}>{entry.state}</Tag>}
@@ -112,13 +125,19 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit }: {
  * Settings page for plugins: one list with an enable switch per plugin. A source plugin is also opened in the
  * code editor, built again in the running application, and created from here.
  */
-export function PluginSettings({ epoch, project, revision = 0, onEdit, api = plugins }: {
+export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFile, api = plugins, reveal = projectFiles.reveal, filesApi }: {
   epoch: string | null; project: SettingsProject;
   /** Changes when the application started, replaced or stopped plugins: the list is read again. */
   revision?: number;
   /** Opens the code editor on the folder of a source plugin. */
   onEdit?: (folder: PluginFolder) => void;
+  /** Called once the code editor was asked to show a plugin folder or a configuration file: the window leaves Settings. */
+  onOpenFile?: () => void;
   api?: typeof plugins;
+  /** Says where the files of the page are and opens them; the host by default. */
+  filesApi?: SettingsFilesApi;
+  /** Shows a file of a folder the host names in the file manager. */
+  reveal?: typeof projectFiles.reveal;
 }) {
   const { t } = useShellLanguage();
   const projectId = project?.id ?? null;
@@ -131,6 +150,10 @@ export function PluginSettings({ epoch, project, revision = 0, onEdit, api = plu
   const disabled = busy || working;
   const listed = listing?.plugins ?? [];
   const rows = pluginRows(listed, t);
+  const files = useSettingsFiles({ page: "plugins", epoch, projectId, revision: listing, onOpened: onOpenFile, setNotice, api: filesApi });
+  const revealPlugin = (folder: PluginFolder) => void reveal({ expectedEpoch: epoch, projectId: folder.id, path: "" }, { timeoutMilliseconds: 15000 })
+    .then(result => { if (result.status !== "ok") setNotice({ key: "The file manager could not be opened.", intent: "warning" }); },
+      () => setNotice({ key: "The file manager could not be opened.", intent: "warning" }));
   // One change at a time; the list is read again after it, whether it succeeded or not.
   async function change<T extends { status: string; message?: string | null }>(call: () => Promise<T>, success: (result: T) => MessageKey | null) {
     setWorking(true); setNotice(null);
@@ -178,8 +201,9 @@ export function PluginSettings({ epoch, project, revision = 0, onEdit, api = plu
       <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!listing || disabled}>{t("New plugin")}</Button></PopoverNext>}>
     {!listing ? <SettingsUnavailable loading={loading} icon="plugin" title="Plugins unavailable" /> : <>
       {project && <div className="settings-editor-toolbar"><ScopeChoice value={scope} project={project} disabled={disabled} onChange={setScope} /></div>}
-      <PluginProblems problems={listing.problems ?? []} omitted={listing.omitted} />
-      <PluginRows rows={rows} disabled={disabled} onToggle={toggle} onReload={rebuild} onEdit={onEdit} />
+      <SettingsFileLocations files={files} disabled={disabled} />
+      <PluginProblems problems={listing.problems ?? []} omitted={listing.omitted} files={files} />
+      <PluginRows rows={rows} disabled={disabled} onToggle={toggle} onReload={rebuild} onEdit={onEdit} platform={files.platform} onReveal={revealPlugin} />
     </>}
   </SettingsPage>;
 }

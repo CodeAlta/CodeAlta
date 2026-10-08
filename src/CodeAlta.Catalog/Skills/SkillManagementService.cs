@@ -78,6 +78,32 @@ public sealed class SkillManagementService
         }, cancellationToken);
     }
 
+    /// <summary>
+    /// Lists the folders the skills of the user and of a project are read from, whether they exist or not: the
+    /// CodeAlta folder first, then the common one and the one of GitHub Copilot. The built-in skills and those a
+    /// plugin brings are not in a folder of the user.
+    /// </summary>
+    /// <param name="projectRoot">The folder of the project whose skill folders are listed too, or null.</param>
+    /// <returns>The folders of the user, then those of the project.</returns>
+    public IReadOnlyList<SkillRootLocation> GetRoots(string? projectRoot)
+    {
+        var roots = new List<SkillRootLocation> { new(SkillSourceKind.UserAlta, Path.Combine(_globalRoot, "skills")) };
+        if (_userProfileRoot is not null)
+        {
+            roots.Add(new(SkillSourceKind.UserCommon, Path.Combine(_userProfileRoot, ".agents", "skills")));
+            roots.Add(new(SkillSourceKind.UserCopilot, Path.Combine(_userProfileRoot, ".copilot", "skills")));
+        }
+
+        if (projectRoot is not null)
+        {
+            roots.Add(new(SkillSourceKind.ProjectAlta, Path.Combine(projectRoot, ".alta", "skills")));
+            roots.Add(new(SkillSourceKind.ProjectCommon, Path.Combine(projectRoot, ".agents", "skills")));
+            roots.Add(new(SkillSourceKind.ProjectCopilot, Path.Combine(projectRoot, ".github", "skills")));
+        }
+
+        return roots;
+    }
+
     /// <summary>Creates a complete SKILL.md scaffold at an explicit writable CodeAlta location.</summary>
     /// <exception cref="ArgumentException">The target, name, description or root is invalid.</exception>
     /// <exception cref="InvalidOperationException">A required root is absent or the skill already exists.</exception>

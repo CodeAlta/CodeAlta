@@ -1498,6 +1498,48 @@ store as the TUI. Sign in from **Settings → Providers** (or with **Continue wi
 then use that configured provider in the owned desktop. Existing legacy Codex credentials require a new sign-in; device
 login and credential import are no longer supported. No desktop-only OAuth flow or storage is added.
 
+### Files of the settings pages
+
+Every page that is backed by files says where they are, in rows of one shared component
+(`SettingsFileLocation`): the path on one line, cut at its start when it is too long with the whole path
+as its tooltip, then three quiet buttons, **Edit in the code editor** (**Open in the code editor** for
+what is only read), **Copy path**, and the action that shows it in the file manager, named after the
+system. A file that is not there yet is shown in the muted colour without the buttons that need it; a
+folder CodeAlta owns is created when it is opened. Opening leaves Settings, as **Edit in the code editor**
+of a plugin does.
+
+| Page | Rows above the list | Rows of the selected item |
+| --- | --- | --- |
+| Configuration file | `~/.alta/config.toml`; the `.alta/config.toml` of the selected project | |
+| MCP Servers | `~/.alta/mcp.json`, the `.alta/mcp.json` of the project, and the files of other tools that exist | |
+| Agent prompts | `~/.alta/prompts`, the `.alta/prompts` of the project, the agents folders of GitHub Copilot that exist, the shipped prompts (only read) | The file of the prompt |
+| Skills | `~/.alta/skills`, the `.alta/skills` of the project, and the common and GitHub Copilot folders that exist | The folder of the skill and its `SKILL.md` |
+| Plugins | `~/.alta/plugins`; the `.alta/plugins` of the project | The folder of each source plugin, in its row; a configuration file that does not parse, in its message |
+| Appearance | The folder of the color schemes | |
+| Pull requests | `~/.alta/prompts/pull-requests`; the one of the project | The file of the kind |
+
+The `settingsFiles` RPC is behind the rows (`SettingsFilesService`, `useSettingsFiles`). `list` returns
+the rows of a page (`config`, `mcp`, `prompts`, `skills`, `plugins`, `colorSchemes`, `pullRequests`), each
+with its kind, scope (`Global`, `Project`, `BuiltIn`), id, path, whether it exists and whether it can be
+opened, and the platform that names the file manager. `open` and `reveal` take the kind, the scope and the
+id of a row, or name a prompt (`prompt`, with its kind as `part`) or a kind of pull request
+(`pullRequest`) by its id. **The page never sends a path**: the host finds it again as the service of that
+page does, so nothing that a page does not list can be opened through this RPC. `open` answers `ok`,
+`not_found`, `invalid` (no page lists it) or `failed` (no window showed it).
+
+Where `open` shows a file:
+
+- a file inside the folder of a project of the catalog: in the code editor of that project;
+- a folder: in a tab of its own (`folder:<key>`);
+- a prompt or a kind of pull request of the user: in the tab of its folder of prompts;
+- a file whose folder holds more than settings (`config.toml` and `mcp.json` of `~/.alta`,
+  `~/.copilot/mcp-config.json`): in a tab that has that file alone (`folder:file:<key>`);
+- a prompt that ships with the application: in a tab that is only read (`folder:view:<key>`).
+
+The folder of a skill and the folder of a plugin keep their own ids (`skill:`, `plugin:`) and are shown
+in the file manager through `projectFiles.reveal`. The global `config.toml` keeps its editor on the
+Configuration file page; its row opens the same file in the code editor.
+
 ### Agent prompts
 
 The **Agent prompts** Settings section (or `Ctrl+G`, then `Ctrl+H`) lists agent prompts and system
@@ -1507,7 +1549,8 @@ or replaces it, and the prompt text in a Markdown editor. **New prompt** creates
 prompt in the global or project scope; **Customize a copy** on a built-in prompt creates a global
 prompt with the same name, which then overrides it; **Remove** deletes a global or project prompt
 file. Built-in prompts are read-only. A save is refused, without overwriting, when the file changed
-on disk since it was read. A session's prompt for the next Send is chosen from the prompt bar.
+on disk since it was read. The form shows the path of the file of the selected prompt
+(`AgentPromptDocument.File`) with the buttons that open, copy and show it. A session's prompt for the next Send is chosen from the prompt bar.
 
 The custom agents of GitHub Copilot (`.github/agents` of the selected project, `~/.copilot/agents`)
 are listed after the agent prompts with their scope and the Copilot mark (`PromptTags`). They are
@@ -1820,6 +1863,23 @@ labeled **Editor** and the name of the folder. Its id is `folder:<key>`, a key t
 (`DiskFolders`): the host gives it when a link is followed and knows the folder while it runs, the last 128
 of them, so an id never names a folder that the user did not open. The folder is edited like a project, has
 no git status and no Changes, and its tab is not kept across restarts.
+
+The pages of Settings open their files in such tabs too (see "Files of the settings pages"), in two more
+forms that the id names:
+
+| Id | What the tab reaches | Used for |
+| --- | --- | --- |
+| `folder:<key>` | The folder, edited like a project | A folder of skills, plugins, prompts, color schemes or pull request instructions; a file a link names |
+| `folder:file:<key>` | One file of the folder, and nothing else of it | `~/.alta/config.toml`, `~/.alta/mcp.json`, `~/.copilot/mcp-config.json` |
+| `folder:view:<key>` | The folder, only read | The prompts that ship with the application |
+
+A tab of one file exists because the folder of that file holds more than settings: `~/.alta` has the stored
+credentials (`auth/`) beside `config.toml`. `DiskFolders.GiveFile` remembers the one file of the id, and
+`ProjectFilesService` answers every other path of the folder with `not_found`: `list` returns that file
+alone, `read`, `write`, `stat`, `image` and `reveal` reach it alone, `search` finds nothing, and `create`,
+`rename` and `delete` answer `read_only`, the file itself included. A folder that is only read answers a
+write, a creation, a rename and a deletion with `read_only`, as the folder of a built-in skill does. The
+editor offers no **New file**, **New folder**, rename or delete in either (`isReadOnlyTab`).
 
 The project is the one of the code editor or the Changes tab in front, otherwise the selected project. The
 editor needs an owned host and a project that is not archived. Editor tabs close, reopen, cycle, drag and split

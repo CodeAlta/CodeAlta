@@ -361,7 +361,7 @@ If a server cannot start, connect, authenticate, or list tools, it contributes d
 
 ## MCP Servers dialog
 
-Open it from `/mcp`, the command **MCP Servers**, or the MCP status indicator of the prompt bar. In the desktop app it is the **MCP Servers** page of Settings (`Ctrl+G Ctrl+Y`), where you add, edit, enable and remove servers of the global or project scope, and authorize or sign out of an HTTP server. The TUI dialog can:
+Open it from `/mcp`, the command **MCP Servers**, or the MCP status indicator of the prompt bar. In the desktop app it is the **MCP Servers** page of Settings (`Ctrl+G Ctrl+Y`), where you add, edit, enable and remove servers of the global or project scope, and authorize or sign out of an HTTP server. The page lists the files the servers are read from, each with a button to open it in the code editor. The TUI dialog can:
 
 - show global and project MCP definitions, the servers of other tools with the file they come from, and the definitions that are overridden;
 - add, edit, save, and remove server JSON definitions in the files of CodeAlta;

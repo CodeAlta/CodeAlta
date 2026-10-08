@@ -58,6 +58,10 @@ internal sealed class SkillsService
     /// <summary>Finds the folders of the skills this service lists; null without an owned host.</summary>
     internal SkillFolders? Folders => _folders;
 
+    /// <summary>The folders the skills of the user and of a project are read from; none without an owned host.</summary>
+    /// <param name="projectRoot">The folder of the project whose skill folders are listed too, or null.</param>
+    internal IReadOnlyList<SkillRootLocation> Roots(string? projectRoot) => _management?.GetRoots(projectRoot) ?? [];
+
     /// <summary>Lists every discovered skill, including disabled, invalid and shadowed ones.</summary>
     [NeoRpcMethod("list")]
     public async Task<SkillsListResponse> ListAsync(SkillsListRequest request, CancellationToken cancellationToken)

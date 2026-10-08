@@ -109,7 +109,8 @@ internal sealed class AgentPromptsService
         if (project.Root is null && identity.Scope == PromptResourceScope.Project) return new("invalid", null, ProjectRequired);
         try
         {
-            var snapshot = Store(project.Root).Load(identity);
+            var store = Store(project.Root);
+            var snapshot = store.Load(identity);
             var content = snapshot.Content;
             // An editable value is returned whole or not at all: a shortened one would be saved back shortened.
             if (content.Body.Length > MaximumBodyLength || content.Name?.Length > MaximumNameLength
@@ -117,7 +118,7 @@ internal sealed class AgentPromptsService
                 return new("too_large", null, null);
             return new("ok", new(identity.Id, identity.Kind.ToString(), identity.Scope.ToString(), identity.Scope == PromptResourceScope.BuiltIn,
                 content.Name, content.Description, identity.Kind == PromptResourceKind.Agent ? content.SystemPromptName : null,
-                content.Body, content.Append, snapshot.File.Revision.ContentHash!), null);
+                content.Body, content.Append, snapshot.File.Revision.ContentHash!, store.GetPath(identity)), null);
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
@@ -248,12 +249,43 @@ internal sealed class AgentPromptsService
             if (agent is null) return new("not_found", null, null);
             if (agent.Body.Length > MaximumBodyLength) return new("too_large", null, null);
             return new("ok", new(agent.PromptName, nameof(PromptResourceKind.Agent), Scope(kind), true, Bound(agent.DisplayName, MaximumNameLength),
-                Bound(agent.Description, MaximumDescriptionLength), null, agent.Body, false, agent.ContentHash), null);
+                Bound(agent.Description, MaximumDescriptionLength), null, agent.Body, false, agent.ContentHash, agent.SourcePath), null);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return new("read_failed", null, null);
         }
+    }
+
+    /// <summary>The folders the prompts are read from: the shipped ones, those of the user, of a project, and of GitHub Copilot.</summary>
+    /// <param name="projectRoot">The folder of the project whose prompts are listed too, or null.</param>
+    internal SystemPromptContentRoots Roots(string? projectRoot) => _catalog.ResolveRoots(Query(projectRoot));
+
+    /// <summary>
+    /// The file of a listed prompt and the folder of prompts it is in, or null when no prompt has that kind, scope
+    /// and id. The scope is one a listing gives; a file of the shipped prompts is only read.
+    /// </summary>
+    internal (string File, string Root, bool ReadOnly)? Locate(string? kind, string? scope, string? id, string? projectRoot)
+    {
+        if (_projects is null || !ValidId(id)) return null;
+        var system = string.Equals(kind, nameof(PromptResourceKind.System), StringComparison.OrdinalIgnoreCase);
+        if (!system && !string.Equals(kind, nameof(PromptResourceKind.Agent), StringComparison.OrdinalIgnoreCase)) return null;
+        var query = Query(projectRoot);
+        var roots = _catalog.ResolveRoots(query);
+        bool Named(AgentPromptSourceKind source, string name) => string.Equals(Scope(source), scope, StringComparison.OrdinalIgnoreCase) && string.Equals(name, id, StringComparison.OrdinalIgnoreCase);
+        var (file, source) = system
+            ? _catalog.ListSystemPrompts(query).Where(prompt => Named(prompt.SourceKind, prompt.PromptName)).Select(static prompt => (prompt.SourcePath, (AgentPromptSourceKind?)prompt.SourceKind)).FirstOrDefault()
+            : _catalog.ListPrompts(query).Where(prompt => Named(prompt.SourceKind, prompt.PromptName)).Select(static prompt => (prompt.SourcePath, (AgentPromptSourceKind?)prompt.SourceKind)).FirstOrDefault();
+        var root = source switch
+        {
+            AgentPromptSourceKind.UserGlobal => roots.GlobalPromptRoot,
+            AgentPromptSourceKind.Project => roots.ProjectPromptRoot,
+            AgentPromptSourceKind.CopilotUser => roots.CopilotUserAgentsRoot,
+            AgentPromptSourceKind.CopilotProject => roots.CopilotProjectAgentsRoot,
+            AgentPromptSourceKind.BuiltIn => roots.ShippedPromptRoot,
+            _ => null,
+        };
+        return file is null || root is null ? null : (file, root, source == AgentPromptSourceKind.BuiltIn);
     }
 
     private AgentPromptCatalogQuery Query(string? projectRoot) => new()
@@ -354,9 +386,9 @@ internal sealed record AgentPromptEntry(string Id, string Name, string? Descript
 internal sealed record AgentPromptReadRequest(string? ExpectedEpoch, string? ProjectId, string? Kind, string? Scope, string? Id);
 internal sealed record AgentPromptReadResponse(string Status, AgentPromptDocument? Prompt, string? Message);
 
-/// <summary>The values written in one prompt file (null where the file leaves them unset) and its revision.</summary>
+/// <summary>The values written in one prompt file (null where the file leaves them unset), its revision and its path.</summary>
 internal sealed record AgentPromptDocument(string Id, string Kind, string Scope, bool ReadOnly, string? Name, string? Description,
-    string? SystemPromptId, string Body, bool Append, string Revision);
+    string? SystemPromptId, string Body, bool Append, string Revision, string? File = null);
 
 /// <summary>A prompt to write; a null expected revision creates the file and refuses an existing one.</summary>
 internal sealed record AgentPromptSaveRequest(string? ExpectedEpoch, string? ProjectId, string? Kind, string? Scope, string? Id,

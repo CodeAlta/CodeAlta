@@ -206,6 +206,7 @@ CodeAlta Desktop has a code editor for each project: one tab that holds the file
 - Click the `</>` button of a project in the sidebar, press `Ctrl+E` `Ctrl+E`, or run `/editor` to open it with the files of the project.
 - Press `Ctrl+E`, or run `/edit`, to open a single file. `Ctrl+B` shows or hides the files.
 - **Edit in the code editor** on a plugin of **Settings > Plugins** opens the same editor on the folder of that plugin. See [Plugin development]({{site.basepath}}/docs/plugins/developers/#edit-build-and-reload).
+- The same button beside a path in Settings opens that file or folder. See [Files of the settings](#files-of-the-settings).
 
 ### Files
 
@@ -395,6 +396,31 @@ Open settings with `Ctrl+G Ctrl+W` or `/settings`.
 ### Desktop
 
 The desktop app has one Settings window with a page per area: **Appearance**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. `Ctrl+,` and the gear button of the title bar open it too.
+
+#### Files of the settings
+
+Most settings are files on your disk. Each page shows where its files are, with three buttons beside every path:
+
+| Button | What it does |
+| --- | --- |
+| **Edit in the code editor** | Opens the file or the folder in the [code editor](#code-editor) and leaves Settings. |
+| **Copy path** | Copies the full path. |
+| **Reveal in File Explorer** | Shows it in the file manager of your system (**Reveal in Finder** on macOS). |
+
+A path that is too long is cut at its start; point at it to see it whole.
+
+| Page | Files and folders |
+| --- | --- |
+| **Configuration file** | `~/.alta/config.toml`, and `.alta/config.toml` of the selected project |
+| **MCP Servers** | `~/.alta/mcp.json`, `.alta/mcp.json` of the project, and the files of other tools CodeAlta reads |
+| **Agent prompts** | `~/.alta/prompts`, `.alta/prompts` of the project, and the file of the selected prompt |
+| **Skills** | `~/.alta/skills`, `.alta/skills` of the project, and the folder of the selected skill |
+| **Plugins** | `~/.alta/plugins`, `.alta/plugins` of the project, and the folder of each source plugin |
+| **Appearance** | The folder of your color schemes |
+
+Opening `~/.alta/skills` or `~/.alta/plugins` lets you work on all your skills or plugins at once. CodeAlta creates the folder if it does not exist yet. A file that does not exist yet, such as the `.alta/config.toml` of a project that has none, is listed without the button that opens it.
+
+`config.toml` and `mcp.json` of `~/.alta` open alone in their tab: the other files of that folder are not shown there. The prompts that ship with CodeAlta open read-only.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-settings.webp" alt="CodeAlta Desktop Settings window showing the Appearance page" loading="lazy">

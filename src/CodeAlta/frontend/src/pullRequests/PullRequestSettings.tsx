@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Callout, Card, CardList, FormGroup, HTMLSelect, InputGroup, Section, SectionCard, Tag, TextArea } from "@blueprintjs/core";
+import { Button, Callout, Card, CardList, FormGroup, HTMLSelect, InputGroup, PopoverNext, Section, SectionCard, Tag, TextArea } from "@blueprintjs/core";
 import type { pullRequestPrompts, PullRequestPromptItem } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import type { MessageKey } from "../localization";
+import { SettingsFileLocation, SettingsFileLocations } from "../SettingsFileLocation";
+import { useSettingsFiles, type SettingsFilesApi } from "../settingsFiles";
 import { SettingsPage, SettingsUnavailable } from "../SettingsPage";
 import type { SettingsNotice } from "../settingsEditing";
 import { useShellLanguage } from "../shellLanguage";
@@ -27,8 +29,12 @@ export function pullRequestForm(item: PullRequestPromptItem | null, from: PullRe
  * kind with the name of another one nearer to the project takes its place: a `default` of your own replaces the
  * built-in one.
  */
-export function PullRequestSettings({ api, epoch, project }: {
+export function PullRequestSettings({ api, epoch, project, onOpenFile, filesApi }: {
   api: PullRequestSettingsApi; epoch: string | null | undefined;
+  /** Called once the code editor was asked to show a file of instructions: the window leaves Settings. */
+  onOpenFile?: () => void;
+  /** Says where the files of instructions are and opens them; the host by default. */
+  filesApi?: SettingsFilesApi;
   /** The project selected in the window: its kinds are listed and can be written. */
   project: Readonly<{ id: string; name: string }> | null;
 }) {
@@ -42,6 +48,7 @@ export function PullRequestSettings({ api, epoch, project }: {
   const [generation, setGeneration] = useState(0);
   const selectAfter = useRef<string | null>(null);
   const projectId = project?.id ?? null;
+  const files = useSettingsFiles({ page: "pullRequests", epoch, projectId, revision: items, onOpened: onOpenFile, setNotice, api: filesApi });
   useEffect(() => {
     if (!epoch) { setAvailable(false); setItems([]); return; }
     const controller = new AbortController();
@@ -94,7 +101,7 @@ export function PullRequestSettings({ api, epoch, project }: {
     onReload={() => setGeneration(value => value + 1)}
     actions={available ? <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={busy || items === null} onClick={() => startNew(null, "global", false)}>{t("New kind")}</Button> : undefined}>
     {!available ? <SettingsUnavailable loading={items === null} icon="pullRequest" title="Pull request instructions are unavailable in this window." />
-      : <div className="provider-settings-layout pull-request-layout">
+      : <><SettingsFileLocations files={files} disabled={busy} /><div className="provider-settings-layout pull-request-layout">
         <CardList compact className="provider-settings-list" aria-label={t("Kinds of pull request")}>
           {(items ?? []).map(item => <Card key={keyOf(item)} interactive selected={selected === keyOf(item)} aria-current={selected === keyOf(item) ? "true" : undefined} onClick={() => choose(item)}>
             <span className="provider-settings-name"><strong>{item.name}</strong><small>{item.id}.pr.md</small></span>
@@ -105,7 +112,11 @@ export function PullRequestSettings({ api, epoch, project }: {
             <small>{form.id || "…"}.pr.md</small></span><Tag minimal round intent="warning">{t("Unsaved changes")}</Tag></Card>}
         </CardList>
         {form && <Section className="provider-settings-form" title={builtIn ? current!.name : form.original?.name ?? t("New kind")}
-          subtitle={builtIn ? t("Ships with CodeAlta") : form.original?.file ?? t("Not saved yet")}>
+          subtitle={builtIn ? t("Ships with CodeAlta") : form.original ? undefined : t("Not saved yet")}>
+          {form.original?.file && <SectionCard className="settings-editor-file">
+            <SettingsFileLocation path={form.original.file} platform={files.platform} disabled={busy}
+              onOpen={files.open ? () => files.open!({ kind: "pullRequest", scope: form.original!.source, id: form.original!.id }) : undefined}
+              onReveal={() => files.reveal({ kind: "pullRequest", scope: form.original!.source, id: form.original!.id })} /></SectionCard>}
           <SectionCard className="pull-request-fields">
             {builtIn
               ? <Callout compact icon={null}>
@@ -134,10 +145,13 @@ export function PullRequestSettings({ api, epoch, project }: {
                 onChange={event => edit({ content: event.target.value })} /></FormGroup>
             {!builtIn && <div className="pull-request-buttons">
               <Button intent="primary" disabled={busy || !valid} onClick={() => void save()}>{t("Save")}</Button>
-              {form.original && <Button variant="minimal" intent="danger" icon={<AppIcon name="trash" size={15} />} disabled={busy} onClick={() => void remove()}>{t("Remove")}</Button>}
+              {form.original && <PopoverNext placement="top-end" content={<div className="provider-settings-confirm"><p>{t("Remove {name}?", { name: form.original.name })}</p>
+                <Button intent="danger" disabled={busy} onClick={() => void remove()}>{t("Remove")}</Button></div>}>
+                <Button variant="minimal" intent="danger" icon={<AppIcon name="trash" size={15} />} disabled={busy} text={t("Remove")} />
+              </PopoverNext>}
             </div>}
           </SectionCard>
         </Section>}
-      </div>}
+      </div></>}
   </SettingsPage>;
 }

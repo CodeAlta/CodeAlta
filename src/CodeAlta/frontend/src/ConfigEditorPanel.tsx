@@ -5,11 +5,20 @@ import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import { CodeEditor } from "./monaco/CodeEditor";
 import { canSaveConfig, configReadNotice, configSaveNotice, maximumConfigLength, type ConfigBaseline, type ConfigNotice } from "./configEditor";
+import { SettingsFileLocations } from "./SettingsFileLocation";
+import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
+import type { SettingsProject } from "./SettingsPage";
 import { useShellLanguage } from "./shellLanguage";
 
 /** Settings page that edits the global config.toml: validated as you type, saved only against the revision that was read. */
-export function ConfigEditorPanel({ epoch, api = globalConfig, onApplied }: {
+export function ConfigEditorPanel({ epoch, project = null, api = globalConfig, onApplied, onOpenFile, filesApi }: {
   epoch: string | null; api?: Pick<typeof globalConfig, "read" | "validate" | "save">;
+  /** The selected project: its own configuration file is shown beside the global one, and opened in the code editor. */
+  project?: SettingsProject;
+  /** Called once the code editor was asked to show a configuration file: the window leaves Settings. */
+  onOpenFile?: () => void;
+  /** Says where the configuration files are and opens them; the host by default. */
+  filesApi?: SettingsFilesApi;
   /** Called after providers were re-registered so provider views can refresh. */
   onApplied?: () => void;
 }) {
@@ -24,6 +33,8 @@ export function ConfigEditorPanel({ epoch, api = globalConfig, onApplied }: {
   const [generation, setGeneration] = useState(0);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const files = useSettingsFiles({ page: "config", epoch, projectId: project?.id ?? null, revision: baseline, onOpened: onOpenFile, api: filesApi,
+    setNotice: value => setNotice(value && { key: value.key, intent: value.intent }) });
 
   // Read on open and on an explicit reload; a newer read supersedes a slower one.
   useEffect(() => {
@@ -90,6 +101,7 @@ export function ConfigEditorPanel({ epoch, api = globalConfig, onApplied }: {
           title={t("Saves, then re-registers the configured providers in this running app.")}>{t("Save and apply providers")}</Button>
       </div>
     </header>
+    <SettingsFileLocations files={files} disabled={busy} />
     {notice && <Callout intent={notice.intent} compact role={notice.intent === "success" ? "status" : "alert"}>
       {t(notice.key, notice.parameters)}{diagnostic && <div className="config-editor-diagnostic">{diagnostic}</div>}</Callout>}
     {baseline && validation && !validation.valid && <Callout intent="danger" compact role="alert">

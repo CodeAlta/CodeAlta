@@ -1,11 +1,13 @@
 import { CopilotTag, copilotSkillSource } from "./CopilotTag";
 import { useEffect, useMemo, useState } from "react";
 import { Button, Card, CardList, FormGroup, InputGroup, NonIdealState, PopoverNext, Switch, Tag } from "@blueprintjs/core";
-import { skills, type SkillsDetailResponse, type SkillsEntry } from "#neoastra";
+import { projectFiles, skills, type SkillsDetailResponse, type SkillsEntry } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { skillReadOnly } from "./fileTabs";
 import { MarkdownContent } from "./MarkdownContent";
 import { skillInstructions } from "./skillDetail";
+import { SettingsFileLocation, SettingsFileLocations } from "./SettingsFileLocation";
+import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
 import { ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
 import { settingsFailure, type SettingsScope } from "./settingsEditing";
 import { useShellLanguage } from "./shellLanguage";
@@ -23,12 +25,21 @@ export type SkillFolder = Readonly<{ id: string; path: string; name: string }>;
  * What the selected skill is, where it lives and what its SKILL.md tells the agent. Its folder opens in the code
  * editor: to be edited when the skill is one of the user or of a project, to be read otherwise.
  */
-export function SkillDetail({ skill, detail, failed, onEdit }: { skill: SkillsEntry; detail: SkillsDetailResponse | undefined; failed: boolean; onEdit?: (folder: SkillFolder) => void }) {
+export function SkillDetail({ skill, detail, failed, onEdit, platform, onReveal }: {
+  skill: SkillsEntry; detail: SkillsDetailResponse | undefined; failed: boolean; onEdit?: (folder: SkillFolder) => void;
+  /** The system, which names its file manager; null where a file cannot be shown. */
+  platform?: string | null;
+  /** Shows the folder of the skill, or a file of it, in the file manager. */
+  onReveal?: (folder: SkillFolder, path: string) => void;
+}) {
   const { t } = useShellLanguage();
   const readOnly = skillReadOnly(skill.source);
   const facts: [MessageKey, string | null | undefined][] = !detail ? [] : [
-    ["Skill file", detail.skillFilePath], ["Overridden by", detail.shadowedBy], ["License", detail.license],
+    ["Overridden by", detail.shadowedBy], ["License", detail.license],
     ["Compatibility", detail.compatibility], ["Allowed tools", detail.allowedTools]];
+  const folder = detail?.folder && detail.skillRootPath ? { id: detail.folder, path: detail.skillRootPath, name: skill.name } : null;
+  // The folder of the skill and its SKILL.md: both open the code editor on that folder.
+  const places: [MessageKey, string | null | undefined, string][] = !detail ? [] : [["Folder", detail.skillRootPath, ""], ["Skill file", detail.skillFilePath, "SKILL.md"]];
   const instructions = detail?.content ? skillInstructions(detail.content) : "";
   return <section className="skill-detail" aria-label={t("Details for {name}", { name: skill.title || skill.name })}>
     <header><h2>{skill.title || skill.name}</h2>
@@ -45,6 +56,9 @@ export function SkillDetail({ skill, detail, failed, onEdit }: { skill: SkillsEn
     {failed && <p role="alert" className="error-text">{t("The skill details could not be read.")}</p>}
     {detail && <>
       <dl className="skill-detail-facts">
+        {places.filter(([, value]) => !!value).map(([label, value, path]) => <div key={label}><dt>{t(label)}</dt><dd>
+          <SettingsFileLocation path={value!} readOnly={readOnly} platform={platform} onOpen={folder && onEdit ? () => onEdit(folder) : undefined}
+            onReveal={folder && onReveal ? () => onReveal(folder, path) : undefined} /></dd></div>)}
         {facts.filter(([, value]) => !!value).map(([label, value]) => <div key={label}><dt>{t(label)}</dt><dd><code>{value}</code></dd></div>)}
         {detail.relatedFiles.length > 0 && <div><dt>{t("Related files")}</dt><dd>{detail.relatedFiles.map(file => <code key={file.path}>{file.path}</code>)}
           {detail.relatedFilesOmitted > 0 && <span className="bp6-text-muted">+{detail.relatedFilesOmitted}</span>}</dd></div>}
@@ -62,11 +76,17 @@ export function SkillDetail({ skill, detail, failed, onEdit }: { skill: SkillsEn
  * Settings page for skills: one list with an enable switch per skill, the selected skill's details, bulk actions and
  * skill creation. The folder of a skill is opened in the code editor, and so is the one of a skill that was created.
  */
-export function SkillSettings({ epoch, project, onEdit, api = skills }: {
+export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills, reveal = projectFiles.reveal, filesApi }: {
   epoch: string | null; project: SettingsProject;
   /** Opens the folder of a skill in the code editor. */
   onEdit?: (folder: SkillFolder) => void;
+  /** Called once the code editor was asked to show a folder of skills: the window leaves Settings. */
+  onOpenFile?: () => void;
   api?: typeof skills;
+  /** Says where the files of the page are and opens them; the host by default. */
+  filesApi?: SettingsFilesApi;
+  /** Shows a file of a folder the host names in the file manager. */
+  reveal?: typeof projectFiles.reveal;
 }) {
   const { t } = useShellLanguage();
   const projectId = project?.id ?? null;
@@ -78,6 +98,10 @@ export function SkillSettings({ epoch, project, onEdit, api = skills }: {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ key: string; value: SkillsDetailResponse | null }>();
   const writeScope: SettingsScope = project ? scope : "Global";
+  const files = useSettingsFiles({ page: "skills", epoch, projectId, revision: listing, onOpened: onOpenFile, setNotice, api: filesApi });
+  const revealSkill = (folder: SkillFolder, path: string) => void reveal({ expectedEpoch: epoch, projectId: folder.id, path }, { timeoutMilliseconds: 15000 })
+    .then(result => { if (result.status !== "ok") setNotice({ key: "The file manager could not be opened.", intent: "warning" }); },
+      () => setNotice({ key: "The file manager could not be opened.", intent: "warning" }));
   const all = listing?.skills ?? [];
   const shown = useMemo(() => {
     const text = filter.trim().toLowerCase();
@@ -126,6 +150,7 @@ export function SkillSettings({ epoch, project, onEdit, api = skills }: {
       </div>}>
       <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!listing || busy}>{t("New skill")}</Button></PopoverNext>}>
     {!listing ? <SettingsUnavailable loading={loading} icon="skill" title="Skills unavailable" /> : <>
+      <SettingsFileLocations files={files} disabled={busy} />
       <div className="settings-editor-toolbar">
         <InputGroup className="settings-editor-filter" type="search" size="small" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} value={filter}
           placeholder={t("Filter skills")} aria-label={t("Filter skills")} onChange={event => setFilter(event.target.value)} />
@@ -147,7 +172,7 @@ export function SkillSettings({ epoch, project, onEdit, api = skills }: {
           </Card>)}
           {shown.length === 0 && <Card><span className="bp6-text-muted">{t(all.length ? "No skill matches the filter." : "No skills were found.")}</span></Card>}
         </CardList>
-        {selected ? <SkillDetail skill={selected} detail={shownDetail?.value ?? undefined} failed={shownDetail?.value === null} onEdit={onEdit} />
+        {selected ? <SkillDetail skill={selected} detail={shownDetail?.value ?? undefined} failed={shownDetail?.value === null} onEdit={onEdit} platform={files.platform} onReveal={revealSkill} />
           : <NonIdealState icon={<AppIcon name="skill" size={32} />} title={t("No skills were found.")} />}
       </div>
     </>}

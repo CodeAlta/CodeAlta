@@ -244,6 +244,11 @@ test("the code editor on the folder of a file that no project has has a tab that
   persistFileTabs(value => { stored = value; }, state);
   assert.deepEqual(restoreFileTabs(() => stored), { open: [editor()], active: null, closed: [] });
   assert.equal(restoreFileTabs(() => JSON.stringify({ version: 1, open: [folder], active: null })), null);
+  // A tab the host opened for one file of a folder, or to be read, has nothing created, renamed or removed in it.
+  for (const id of ["folder:file:0123456789abcdef01234567", "folder:view:0123456789abcdef01234567"]) {
+    const fixed = diskEditorTab({ id, path: "/home/.alta", name: "config.toml" });
+    assert.ok(isDiskFolderTab(fixed) && isFolderTab(fixed) && isReadOnlyTab(fixed), id);
+  }
 });
 
 test("the code editor on the folder of a plugin has a tab that names the plugin, outlives the projects and is kept for the next start", () => {

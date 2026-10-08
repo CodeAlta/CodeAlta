@@ -575,8 +575,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddProviderUsageService(providerUsage);
                     mcpServers = new McpServersService(host.ProjectCatalog, epoch, roots.Home);
                     builder.AddMcpServersService(mcpServers);
-                    builder.AddAgentPromptsService(new AgentPromptsService(host.ProjectCatalog, epoch,
-                        userProfileRoot: roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)));
+                    var agentPrompts = new AgentPromptsService(host.ProjectCatalog, epoch,
+                        userProfileRoot: roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+                    builder.AddAgentPromptsService(agentPrompts);
                     // The standard launch has no explicit discovery home: common skills come from the profile, like the TUI.
                     var skills = new SkillsService(host.ProjectCatalog, host.SkillCatalog,
                         roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), epoch);
@@ -588,7 +589,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddModelCatalogService(providers);
                     builder.AddReminderService(reminders);
                     builder.AddAutomationsService(new AutomationsService(automations, host.ProjectCatalog, epoch));
-                    builder.AddPullRequestPromptsService(new PullRequestPromptsService(new CodeAlta.Catalog.PullRequests.PullRequestPromptCatalog(host.CatalogOptions), host.ProjectCatalog, epoch));
+                    var pullRequestPrompts = new CodeAlta.Catalog.PullRequests.PullRequestPromptCatalog(host.CatalogOptions);
+                    builder.AddPullRequestPromptsService(new PullRequestPromptsService(pullRequestPrompts, host.ProjectCatalog, epoch));
                     var sessionStarter = new WorkItems.SessionStarter(host, worktrees);
                     builder.AddWorkItemsService(new WorkItemsService(workItems, host.ProjectCatalog, new WorkItems.WorkItemRunner(sessionStarter, workItems), epoch));
                     // The trackers are the ones of the plugins that are active when the page asks: the Git plugin for the
@@ -608,6 +610,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     var diskFolders = new DiskFolders();
                     var projectFiles = new ProjectFilesService(host.ProjectCatalog, epoch, host.ProjectFileSearchService, editorView, skills: skills.Folders, folders: diskFolders);
                     builder.AddProjectFilesService(projectFiles);
+                    // The files and the folders the pages of Settings read: the page names one, the host finds and opens it.
+                    builder.AddSettingsFilesService(new SettingsFilesService(host.ProjectCatalog, epoch, diskFolders, editorView, agentPrompts, skills, mcpServers, pullRequestPrompts));
                     // A link of the Markdown that the window shows: an address of the web for the system browser, a
                     // file for the code editor. A relative path starts from the folder the session works in.
                     builder.AddMarkdownLinksService(new MarkdownLinksService(epoch, DesktopLinks.Open, new DesktopFileLinks(host.ProjectCatalog, diskFolders, editorView,
@@ -784,6 +788,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddSessionPluginEventsService(new SessionPluginEventsService());
             builder.AddPluginUiService(new PluginUiService());
             builder.AddProjectFilesService(new ProjectFilesService());
+            builder.AddSettingsFilesService(new SettingsFilesService());
             builder.AddProjectGitService(new ProjectGitService());
             builder.AddWorktreesService(new WorktreesService());
             builder.AddMcpHostService(new McpHostService());

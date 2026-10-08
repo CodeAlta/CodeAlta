@@ -219,6 +219,11 @@ export const plugins = Object.freeze({
   reload: async () => ({ status: "unavailable", message: null, applied: false }),
   create: async () => ({ status: "unavailable", message: null, folder: null, path: null, name: null }),
 });
+export const settingsFiles = Object.freeze({
+  list: async () => ({ status: "unavailable", locations: [], platform: null }),
+  open: async () => ({ status: "unavailable" }),
+  reveal: async () => ({ status: "unavailable" }),
+});
 // The demo has no reminder worker.
 export const reminder = Object.freeze({
   active: async () => ({ status: "unavailable", epoch: "demo", sessions: [] }),

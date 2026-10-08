@@ -9,6 +9,7 @@ import { colorSchemeOf, colorVariants, maximumSchemeNameLength, type ColorScheme
 import { copyName, draftScheme, sameScheme, schemeNameProblem, shownColors, withColor } from "./customColorSchemes";
 import type { MessageKey } from "./localization";
 import { SettingsField } from "./SettingsField";
+import { SettingsFileLocation } from "./SettingsFileLocation";
 import { settingsFailure, type SettingsNotice } from "./settingsEditing";
 import { useShellLanguage } from "./shellLanguage";
 
@@ -53,7 +54,7 @@ function ColorField({ label, value, chosen, disabled, onChange, onReset }: {
  * editor. A scheme is made from another (a built-in one, or one of the user's) by choosing some of its
  * colors; the window shows the scheme while it is edited, and nothing is kept until it is saved.
  */
-export function ColorSchemeSettings({ colorScheme, setColorScheme, shownScheme, variant, customSchemes, library, preview, platform, notice: storageNotice }: {
+export function ColorSchemeSettings({ colorScheme, setColorScheme, shownScheme, variant, customSchemes, library, preview, platform, notice: storageNotice, onOpenFolder }: {
   /** The selection, and the scheme it stands for. */
   colorScheme: string; setColorScheme: (selection: string) => void; shownScheme: ColorScheme | CustomColorScheme;
   /** The variant the theme shows. */
@@ -65,6 +66,8 @@ export function ColorSchemeSettings({ colorScheme, setColorScheme, shownScheme, 
   platform: string | null;
   /** The notice about keeping the selection, if any. */
   notice?: ReactNode;
+  /** Opens the folder of the schemes in the code editor; without it the folder is only shown. */
+  onOpenFolder?: () => void;
 }) {
   const { t } = useShellLanguage();
   const nameId = useId();
@@ -141,6 +144,8 @@ export function ColorSchemeSettings({ colorScheme, setColorScheme, shownScheme, 
     {storageNotice}
     {shownNotice && <Callout className="settings-field-wide" intent={shownNotice.intent} compact role={shownNotice.intent === "success" ? "status" : "alert"}>
       {t(shownNotice.key)}{shownNotice.detail && <div className="config-editor-diagnostic">{shownNotice.detail}</div>}</Callout>}
+    {available && library.directory && <div className="settings-field-wide settings-file-locations" role="group" aria-label={t("Files")}>
+      <SettingsFileLocation path={library.directory} platform={platform} disabled={busy} onOpen={onOpenFolder} onReveal={() => void reveal(null)} /></div>}
     {library.problems.length > 0 && <Callout className="settings-field-wide scheme-problems" intent="warning" compact>
       {t("These files of the color scheme folder are not color schemes:")}
       <ul>{library.problems.map(entry => <li key={entry.file}><code>{entry.file}</code> {entry.message}</li>)}</ul>

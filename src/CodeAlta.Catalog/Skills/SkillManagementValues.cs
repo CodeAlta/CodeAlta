@@ -37,6 +37,11 @@ public enum SkillEnablementScope
 /// <param name="FullPath">Local absolute path, not a renderer access grant.</param>
 public sealed record SkillRelatedFile(string Category, string RelativePath, string FullPath);
 
+/// <summary>A folder the skills of the user or of a project are read from.</summary>
+/// <param name="Source">Where the skills of the folder come from.</param>
+/// <param name="RootPath">Absolute path of the folder, which may not exist.</param>
+public sealed record SkillRootLocation(SkillSourceKind Source, string RootPath);
+
 /// <summary>A successfully published skill scaffold.</summary>
 /// <param name="Name">Normalized skill name.</param>
 /// <param name="SkillRootPath">Absolute final directory.</param>

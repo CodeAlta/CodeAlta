@@ -4,6 +4,8 @@ import { mcpServers, type McpServerEntry } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { McpServerAuthorization } from "./McpServerAuthorization";
 import { authorizationBlocked } from "./mcpAuthorization";
+import { SettingsFileLocations } from "./SettingsFileLocation";
+import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
 import { ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
 import { mcpServerEdit, mcpServerForm, mcpServerFormDirty, mcpServerId, mcpServerReadOnly, validateMcpServerForm, type McpServerForm, type NameValueRow } from "./settingsEditing";
 import { CopilotTag } from "./CopilotTag";
@@ -43,8 +45,13 @@ function NameValueRows({ rows, onChange, disabled, addLabel, namePlaceholder }: 
 }
 
 /** Settings page for MCP servers: the defined servers on the left, an edit form on the right. */
-export function McpServerSettings({ epoch, project, api = mcpServers }: {
-  epoch: string | null; project: SettingsProject; api?: typeof mcpServers;
+export function McpServerSettings({ epoch, project, onOpenFile, api = mcpServers, filesApi }: {
+  epoch: string | null; project: SettingsProject;
+  /** Called once the code editor was asked to show a file of servers: the window leaves Settings. */
+  onOpenFile?: () => void;
+  api?: typeof mcpServers;
+  /** Says where the files of the page are and opens them; the host by default. */
+  filesApi?: SettingsFilesApi;
 }) {
   const { t } = useShellLanguage();
   const projectId = project?.id ?? null;
@@ -53,6 +60,7 @@ export function McpServerSettings({ epoch, project, api = mcpServers }: {
   const [selected, setSelected] = useState<string | null>(null);
   const [form, setForm] = useState<McpServerForm | null>(null);
   const servers = listing?.servers ?? [];
+  const files = useSettingsFiles({ page: "mcp", epoch, projectId, revision: listing, onOpened: onOpenFile, setNotice, api: filesApi });
   const original = selected && selected !== added ? servers.find(server => mcpServerId(server) === selected) ?? null : null;
   // A server of another tool is not changed: saving writes one of the same name to the file of CodeAlta, which comes first.
   const readOnly = !!original && mcpServerReadOnly(original);
@@ -91,7 +99,7 @@ export function McpServerSettings({ epoch, project, api = mcpServers }: {
     notice={notice} loading={loading} busy={busy} onReload={reload}
     actions={<Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!listing || busy} onClick={() => choose(null)}>{t("Add server")}</Button>}>
     {!listing ? <SettingsUnavailable loading={loading} icon="server" title="MCP servers unavailable" />
-      : <div className="settings-editor-layout">
+      : <><SettingsFileLocations files={files} disabled={busy} /><div className="settings-editor-layout">
         <CardList compact className="settings-editor-list" aria-label={t("MCP Servers")}>
           {servers.map(server => { const id = mcpServerId(server); return <Card key={id} interactive selected={selected === id}
             aria-current={selected === id ? "true" : undefined} onClick={() => choose(server)}>
@@ -152,6 +160,6 @@ export function McpServerSettings({ epoch, project, api = mcpServers }: {
             </PopoverNext>}
           </SectionCard>
         </Section>}
-      </div>}
+      </div></>}
   </SettingsPage>;
 }

@@ -117,6 +117,7 @@ internal sealed class ProjectFilesService
         if (request.ProjectId is null) return Refused("invalid");
         var named = Normalize(request.Path, out path);
         if (named != "ok") return Refused(named);
+        if (!Reaches(request.ProjectId, path!)) return Refused("not_found");
         var project = await RootAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Root is not { } root) return Refused(project.Status);
         try
@@ -171,6 +172,7 @@ internal sealed class ProjectFilesService
         if (named != "ok") return Refused(named);
         // Every supported encoding needs at least one byte for each UTF-16 unit.
         if (request.Content.Length > MaximumFileBytes) return Refused("too_large");
+        if (!Reaches(request.ProjectId, path!)) return Refused("not_found");
         var project = await RootAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Root is not { } root) return Refused(project.Status);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -238,10 +240,12 @@ internal sealed class ProjectFilesService
         if (root is null) return Refused(status);
         if (request.Folders is not { Count: > 0 and <= MaximumListedFolders } folders || folders.Any(static folder => folder is null)) return Refused("invalid");
         var includeIgnored = request.IncludeIgnored;
+        // A folder that was given for one file lists that file and nothing else.
+        var only = DiskFolders.IsFile(request.ProjectId) ? _folders?.OnlyFile(request.ProjectId) ?? string.Empty : null;
         var listed = await Task.Run(() =>
         {
             var result = new ProjectFileFolder[folders.Count];
-            for (var index = 0; index < result.Length; index++) result[index] = ListFolder(root, folders[index], includeIgnored, cancellationToken);
+            for (var index = 0; index < result.Length; index++) result[index] = ListFolder(root, folders[index], includeIgnored, only, cancellationToken);
             return result;
         }, cancellationToken).ConfigureAwait(false);
         return new("ok", request.ProjectId, listed, _trash.Available, DesktopFileReveal.Available);
@@ -263,7 +267,7 @@ internal sealed class ProjectFilesService
         var files = await Task.Run(() =>
         {
             var result = new ProjectFileStat[paths.Count];
-            for (var index = 0; index < result.Length; index++) result[index] = Stat(root, paths[index], readOnly);
+            for (var index = 0; index < result.Length; index++) result[index] = Reaches(request.ProjectId, paths[index] ?? string.Empty) ? Stat(root, paths[index], readOnly) : new(paths[index] ?? string.Empty, "not_found", null, 0, false);
             return result;
         }, cancellationToken).ConfigureAwait(false);
         return new("ok", request.ProjectId, files);
@@ -284,7 +288,7 @@ internal sealed class ProjectFilesService
         if (request.ProjectId is null) return Refused("invalid");
         var named = Normalize(request.Path, out path);
         if (named != "ok") return Refused(named);
-        if (ReadOnlyFolder(request.ProjectId)) return Refused("read_only");
+        if (FixedFolder(request.ProjectId)) return Refused("read_only");
         var project = await RootAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Root is not { } root) return Refused(project.Status);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -323,7 +327,7 @@ internal sealed class ProjectFilesService
         if (named != "ok") return Refused(named);
         named = Normalize(request.NewPath, out path);
         if (named != "ok") return Refused(named);
-        if (ReadOnlyFolder(request.ProjectId)) return Refused("read_only");
+        if (FixedFolder(request.ProjectId)) return Refused("read_only");
         var project = await RootAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Root is not { } root) return Refused(project.Status);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -380,7 +384,7 @@ internal sealed class ProjectFilesService
         if (request.ProjectId is null) return Refused("invalid");
         var named = Normalize(request.Path, out path);
         if (named != "ok") return Refused(named);
-        if (ReadOnlyFolder(request.ProjectId)) return Refused("read_only");
+        if (FixedFolder(request.ProjectId)) return Refused("read_only");
         var project = await RootAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Root is not { } root) return Refused(project.Status);
         try
@@ -430,6 +434,7 @@ internal sealed class ProjectFilesService
         if (request.ProjectId is null) return Refused("invalid");
         var named = Normalize(request.Path, out path);
         if (named != "ok") return Refused(named);
+        if (!Reaches(request.ProjectId, path!)) return Refused("not_found");
         var project = await RootAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Root is not { } root) return Refused(project.Status);
         try
@@ -465,10 +470,13 @@ internal sealed class ProjectFilesService
         var (status, root) = await OpenAsync(request.ExpectedEpoch, request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (root is null) return Refused(status);
         var full = root;
-        if (request.Path is { Length: > 0 })
+        // The folder of a tab that has one file is shown by that file.
+        var asked = request.Path is { Length: > 0 } ? request.Path : DiskFolders.IsFile(request.ProjectId) ? _folders?.OnlyFile(request.ProjectId) : null;
+        if (asked is { Length: > 0 })
         {
-            var named = Normalize(request.Path, out path);
+            var named = Normalize(asked, out path);
             if (named != "ok") return Refused(named);
+            if (!Reaches(request.ProjectId, path!)) return Refused("not_found");
             try
             {
                 var located = Locate(root, path!, EntryKind.Any, out full, out _);
@@ -507,6 +515,13 @@ internal sealed class ProjectFilesService
         if (root is null)
         {
             yield return Ended(opened);
+            yield break;
+        }
+
+        // A folder that was given for one file is not searched: the editor finds text in that file itself.
+        if (DiskFolders.IsFile(request.ProjectId))
+        {
+            yield return Ended("ok");
             yield break;
         }
 
@@ -657,12 +672,23 @@ internal sealed class ProjectFilesService
             : SettingsProjectScope.ResolveAsync(_projects, projectId, cancellationToken);
 
     // Whether a request names a folder that is only read: nothing is created, changed or removed in it.
-    private static bool ReadOnlyFolder(string? projectId) => SkillFolder.TryParse(projectId, out var skill) && skill.ReadOnly;
+    private static bool ReadOnlyFolder(string? projectId) => SkillFolder.TryParse(projectId, out var skill) ? skill.ReadOnly : DiskFolders.IsReadOnly(projectId);
 
-    private ProjectFileFolder ListFolder(string root, ProjectFileFolderQuery query, bool includeIgnored, CancellationToken cancellationToken)
+    // Whether nothing is created, renamed or removed in the folder a request names: it is only read, or it was
+    // given for one file.
+    private static bool FixedFolder(string? projectId) => ReadOnlyFolder(projectId) || DiskFolders.IsFixed(projectId);
+
+    // Whether a request may name a path: any path of a folder, and the one file of a folder that was given for
+    // that file. Such an id the host no longer knows reaches nothing.
+    private bool Reaches(string? projectId, string path)
+        => !DiskFolders.IsFile(projectId) || (_folders?.OnlyFile(projectId) is { } only && string.Equals(path, only, PathComparison));
+
+    private ProjectFileFolder ListFolder(string root, ProjectFileFolderQuery query, bool includeIgnored, string? only, CancellationToken cancellationToken)
     {
         var path = query.Path ?? string.Empty;
         ProjectFileFolder Refused(string status) => new(path, status, null, [], false);
+        // No folder below, and no other entry: see the listing of the one file further down.
+        if (only is not null && (path.Length > 0 || only.Length == 0)) return Refused("not_found");
         var folder = string.Empty;
         if (path.Length > 0)
         {
@@ -673,6 +699,14 @@ internal sealed class ProjectFilesService
 
         try
         {
+            if (only is not null)
+            {
+                // The file when it is there, whatever git ignores.
+                ProjectFileEntry[] single = Locate(root, only, EntryKind.File, out _, out _) == "ok" ? [new(only, false, false)] : [];
+                var stamp = FolderRevision(single, false);
+                return string.Equals(stamp, query.KnownRevision, StringComparison.Ordinal) ? new(path, "unchanged", stamp, [], false) : new(path, "ok", stamp, single, false);
+            }
+
             if (folder.Length > 0)
             {
                 var located = Locate(root, folder, EntryKind.Directory, out _, out _);

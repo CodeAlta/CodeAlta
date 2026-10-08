@@ -1258,6 +1258,16 @@ dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px
 .settings-editor-problem { flex: 1 0 100%; color: var(--red); font-size: 12px; }
 .settings-editor-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; font-size: 12px; }
 .settings-editor-filter.bp6-input-group { flex: 0 1 260px; }
+/* A file or a folder a settings page reads: its path on one line, cut at its start, and its actions. */
+.settings-file-locations { display: grid; gap: 2px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 12.5px; }
+.settings-file-location { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 26px; }
+.settings-file-location > code { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.settings-file-location[data-missing] > code { color: var(--muted); }
+.settings-file-label { flex: 0 0 auto; display: inline-flex; color: var(--muted); }
+.settings-file-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
+.settings-editor-file.bp6-section-card { padding-top: 6px; padding-bottom: 6px; font-size: 12.5px; }
+.settings-editor-name .settings-file-location { font-size: 12px; }
+.skill-detail-facts dd > .settings-file-location { flex: 1 1 100%; }
 .settings-editor-popover { display: grid; gap: 8px; width: 320px; padding: 14px; }
 .settings-editor-popover .bp6-form-group { margin: 0; }
 .settings-name-values { display: grid; gap: 6px; justify-items: start; }
@@ -1640,7 +1650,9 @@ button.project-context-pull:hover, button.project-context-pull:focus-visible, bu
 .plugin-picker-label, .plugin-picker-description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-picker-description { color: var(--muted); font-size: 12px; text-align: right; }
 .plugin-settings .settings-editor-name .plugin-failure, .plugin-problems .plugin-failure { color: var(--red); white-space: normal; overflow-wrap: anywhere; }
-.plugin-problems { display: grid; gap: 4px; font-size: 12px; }
+.plugin-problems { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; font-size: 12px; }
+.plugin-problems .plugin-failure { display: block; min-width: 0; }
+.plugin-problems .settings-file-location { color: var(--text); }
 .plugin-detail + .plugin-detail { margin-top: 12px; }
 
 /* Providers: default markers on blank fields and the account sign-in block. */

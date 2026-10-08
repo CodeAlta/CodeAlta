@@ -483,6 +483,21 @@ internal sealed class McpServersService
         }
     }
 
+    /// <summary>
+    /// The files the servers are read from: those of CodeAlta, whether they exist or not, then the files of
+    /// other tools that exist. The files of a project are left out without one.
+    /// </summary>
+    /// <param name="projectRoot">The folder of the project whose files are listed too, or null.</param>
+    internal IReadOnlyList<McpConfigFile> Files(string? projectRoot)
+    {
+        if (_projects is null) return [];
+        // Its own service: this only reads where the files are, beside the listing and the edits of the other one.
+        var snapshot = new McpManagementService().RefreshSnapshot(Paths(projectRoot));
+        return [.. snapshot.Sources.Concat(snapshot.ExternalSources)
+            .Where(source => projectRoot is not null || source.Scope == McpManagementScope.Global)
+            .Select(static source => new McpConfigFile(source.Scope.ToString(), source.Origin.ToString(), source.Path, source.Exists))];
+    }
+
     private McpManagementRequest Paths(string? projectRoot)
         => new() { ProjectDirectory = projectRoot, UserHomeDirectory = _home, ProbeWritability = false };
 
@@ -677,6 +692,9 @@ internal static class SettingsProjectScope
             : ("project_unavailable", null);
     }
 }
+
+/// <summary>A file servers are read from: its scope (<c>Global</c> or <c>Project</c>), whose file it is, its path and whether it exists.</summary>
+internal readonly record struct McpConfigFile(string Scope, string Origin, string Path, bool Exists);
 
 internal sealed record McpServersListRequest(string? ExpectedEpoch, string? ProjectId);
 

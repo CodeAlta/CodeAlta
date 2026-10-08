@@ -255,13 +255,18 @@ internal sealed class DesktopFileLinks
         }
     }
 
-    // The project whose folder holds a path: the innermost one when a project is inside another.
-    private async Task<(string Id, string Root)?> ProjectOfAsync(string full, CancellationToken cancellationToken)
+    private Task<(string Id, string Root)?> ProjectOfAsync(string full, CancellationToken cancellationToken) => ProjectOfAsync(_projects, full, cancellationToken);
+
+    /// <summary>The project of a catalog whose folder holds a path: the innermost one when a project is inside another; null when none does.</summary>
+    /// <param name="catalog">The project catalog.</param>
+    /// <param name="full">The full path of a file or of a folder.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    internal static async Task<(string Id, string Root)?> ProjectOfAsync(ProjectCatalog catalog, string full, CancellationToken cancellationToken)
     {
         IReadOnlyList<ProjectDescriptor> projects;
         try
         {
-            projects = await _projects.LoadAsync(cancellationToken).ConfigureAwait(false);
+            projects = await catalog.LoadAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

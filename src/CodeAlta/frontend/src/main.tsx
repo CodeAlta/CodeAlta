@@ -24,7 +24,7 @@ import {
   type ReminderListResponse,
   type ReminderDetailRequest,
   type ConfigurationSnapshot, type WorkspaceSession, type WorkspaceSnapshot,
-  desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workItems as workItemsApi, issues as issuesApi, pullRequestPrompts, markdownLinks,
+  desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workItems as workItemsApi, issues as issuesApi, pullRequestPrompts, markdownLinks, settingsFiles,
 } from "#neoastra";
 import { loadWorkspace, sessionListSignature, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
@@ -2271,6 +2271,12 @@ function App() {
 
   // Settings pages also edit the selected project's settings when it can be written.
   const settingsProject = selectedProject && !selectedProject.archived ? { id: selectedProject.id, name: selectedProject.name } : null;
+  // The folder of the color schemes of the user, in the code editor: the host finds it, and the window leaves Settings.
+  function openColorSchemeFolder() {
+    const failed = () => showToast({ message: translate(shownLocale.current, "The file could not be opened."), intent: "danger", icon: "error", timeout: 8000 });
+    void settingsFiles.open({ expectedEpoch: status?.hostEpoch ?? null, projectId: null, kind: "colorSchemes", scope: "Global", id: null, part: null }, { timeoutMilliseconds: 15000 })
+      .then(result => { if (result.status === "ok") closeSettings(); else failed(); }, failed);
+  }
   const newPromptDisabled = creatingBusy || creationLocked || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !snapshot
     || !!selectedProject?.archived || projectId !== null && !selectedProject || (!localDraft.text.trim() && !localImages.images.length)
     || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim());
@@ -2590,24 +2596,28 @@ function App() {
       </div>
     {settingsOpen && <SettingsOverlay section={settingsSection} onSection={navigate} onClose={closeSettings}>
       {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, darker, setDarker,
-        schemes: { colorScheme, setColorScheme, shownScheme, variant, customSchemes, library: schemeLibrary, preview: appearancePreview, platform: demoMode ? null : shellPreferences?.platform ?? null }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); },
+        schemes: { colorScheme, setColorScheme, shownScheme, variant, customSchemes, library: schemeLibrary, preview: appearancePreview, platform: demoMode ? null : shellPreferences?.platform ?? null,
+          onOpenFolder: owned ? openColorSchemeFolder : undefined }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); },
         sessionWidth, setSessionWidth,
         closing: shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, trayIcon: shellPreferences.trayIcon, set: setOnClose } : null }} />
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}
         update={owned ? appUpdateResult : undefined} onOpenReleaseNotes={openReleaseNotes} onInstallUpdate={installUpdate} />
       : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} revision={pluginRevision}
-        onEdit={owned ? folder => { closeSettings(); openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true }); } : undefined} />
+        onEdit={owned ? folder => { closeSettings(); openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true }); } : undefined}
+        onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "worktrees" ? <WorktreeSettings epoch={owned ? status!.hostEpoch : null}
         pick={owned ? initial => pickFolder(desktopShell.pickFolder, t("Folder for worktrees"), initial) : undefined} />
       : settingsSection === "workItems" ? <WorkItemSettings hub={workHub} providers={runProviders} loadModels={loadRunModels} onOpenProviders={() => navigate("providers")} />
       : settingsSection === "pullRequests" ? <PullRequestSettings api={pullRequestPrompts} epoch={!status ? undefined : owned ? status.hostEpoch : null}
-          project={selectedProject && !selectedProject.archived ? { id: selectedProject.id, name: selectedProject.name } : null} />
+          project={selectedProject && !selectedProject.archived ? { id: selectedProject.id, name: selectedProject.name } : null}
+          onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "mcpHost" ? <McpHostSettings epoch={owned ? status!.hostEpoch : null} developer={status?.developerMode ?? false} />
       : settingsSection === "skills" ? <SkillSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject}
-        onEdit={owned ? folder => { closeSettings(); openSkillEditor(folder); } : undefined} />
-      : settingsSection === "mcp" ? <McpServerSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
-      : settingsSection === "prompts" ? <AgentPromptSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} />
-      : settingsSection === "config" ? <ConfigEditorPanel epoch={owned ? status!.hostEpoch : null} onApplied={() => void refreshConfiguration()} />
+        onEdit={owned ? folder => { closeSettings(); openSkillEditor(folder); } : undefined} onOpenFile={owned ? closeSettings : undefined} />
+      : settingsSection === "mcp" ? <McpServerSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} onOpenFile={owned ? closeSettings : undefined} />
+      : settingsSection === "prompts" ? <AgentPromptSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} onOpenFile={owned ? closeSettings : undefined} />
+      : settingsSection === "config" ? <ConfigEditorPanel epoch={owned ? status!.hostEpoch : null} project={settingsProject} onApplied={() => void refreshConfiguration()}
+        onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "logs" ? <>
         <ApplicationLogsPanel clearActions={logClearActions} read={demoMode
           ? async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }) : applicationLogs.read} /></>

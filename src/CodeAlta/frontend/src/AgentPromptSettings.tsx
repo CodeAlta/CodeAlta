@@ -6,6 +6,8 @@ import { AppIcon } from "./AppIcon";
 import { CopilotTag, copilotPromptScope } from "./CopilotTag";
 import { PromptTags } from "./PromptTags";
 import { CodeEditor } from "./monaco/CodeEditor";
+import { SettingsFileLocation, SettingsFileLocations } from "./SettingsFileLocation";
+import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
 import { ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
 import { scopedKey, settingsFailure, type SettingsScope } from "./settingsEditing";
 import { useShellLanguage } from "./shellLanguage";
@@ -21,8 +23,13 @@ const formOf = (document: AgentPromptDocument): PromptForm => ({ id: document.id
   systemPromptId: document.systemPromptId ?? "", append: document.append, revision: document.revision });
 
 /** Settings page for agent and system prompts: the prompt files on the left, an editor on the right. */
-export function AgentPromptSettings({ epoch, project, api = agentPrompts }: {
-  epoch: string | null; project: SettingsProject; api?: typeof agentPrompts;
+export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPrompts, filesApi }: {
+  epoch: string | null; project: SettingsProject;
+  /** Called once the code editor was asked to show a prompt file or a folder of prompts: the window leaves Settings. */
+  onOpenFile?: () => void;
+  api?: typeof agentPrompts;
+  /** Says where the files of the page are and opens them; the host by default. */
+  filesApi?: SettingsFilesApi;
 }) {
   const { t } = useShellLanguage();
   const projectId = project?.id ?? null;
@@ -36,6 +43,7 @@ export function AgentPromptSettings({ epoch, project, api = agentPrompts }: {
   const prompts = listing?.prompts ?? [];
   const entry = selected && selected !== added ? prompts.find(prompt => identity(prompt) === selected) ?? null : null;
   const entryKey = entry ? identity(entry) : null;
+  const files = useSettingsFiles({ page: "prompts", epoch, projectId, revision: listing, onOpened: onOpenFile, setNotice, api: filesApi });
 
   // Keep the selection across reloads; otherwise open the first prompt.
   useEffect(() => {
@@ -103,7 +111,7 @@ export function AgentPromptSettings({ epoch, project, api = agentPrompts }: {
       <MenuItem icon={<AppIcon name="prompt" size={15} />} text={t("System prompt")} onClick={() => create("System")} /></Menu>}>
       <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!listing || busy} endIcon={<AppIcon name="chevronDown" size={14} />}>{t("New prompt")}</Button></PopoverNext>}>
     {!listing ? <SettingsUnavailable loading={loading} icon="assistant" title="Agent prompts unavailable" />
-      : <div className="settings-editor-layout">
+      : <><SettingsFileLocations files={files} disabled={busy} /><div className="settings-editor-layout">
         <CardList compact className="settings-editor-list" aria-label={t("Agent prompts")}>
           {group("Agent", "Agent prompts")}{group("System", "System prompts")}
           {selected === added && <Card interactive selected><span className="settings-editor-name"><strong>{form?.id || t("New prompt")}</strong></span>
@@ -112,6 +120,10 @@ export function AgentPromptSettings({ epoch, project, api = agentPrompts }: {
         {form ? <Section className="settings-editor-form prompt-settings-form" title={selected === added ? t("New prompt") : entry?.name || form.id}
           subtitle={`${t(form.kind === "System" ? "System prompt" : "Agent prompt")} · ${form.id || "…"}`}
           rightElement={reading ? <ActivitySpinner size={14} /> : readOnly ? copilotPromptScope(document?.scope ?? "") ? <CopilotTag /> : <Tag minimal round>{t("Built-in")}</Tag> : undefined}>
+          {document?.file && selected !== added && <SectionCard className="settings-editor-file">
+            <SettingsFileLocation path={document.file} readOnly={readOnly && !copilotPromptScope(document.scope)} platform={files.platform} disabled={busy}
+              onOpen={files.open ? () => files.open!({ kind: "prompt", scope: document.scope, id: document.id, part: document.kind }) : undefined}
+              onReveal={() => files.reveal({ kind: "prompt", scope: document.scope, id: document.id, part: document.kind })} /></SectionCard>}
           <SectionCard className="settings-editor-fields">
             {selected === added && <FormGroup label={t("Name")} labelFor="prompt-id">
               <InputGroup id="prompt-id" value={form.id} disabled={busy} maxLength={128} spellCheck={false} placeholder="my-agent" onChange={event => edit({ id: event.target.value })} /></FormGroup>}
@@ -144,6 +156,6 @@ export function AgentPromptSettings({ epoch, project, api = agentPrompts }: {
             </PopoverNext>}
           </SectionCard>
         </Section> : reading && <SettingsUnavailable loading icon="assistant" title="Agent prompts unavailable" />}
-      </div>}
+      </div></>}
   </SettingsPage>;
 }
