@@ -29,17 +29,26 @@ public sealed partial class GitWorktreeServiceTests
     }
 
     [TestMethod]
-    public void Pick_IsAnAdjectiveAndANoun()
+    public void Pick_IsAnAdjectiveANounAndAFewRandomCharacters()
     {
         var random = new Random(7);
+        var suffixes = new HashSet<string>(StringComparer.Ordinal);
         for (var index = 0; index < 200; index++)
         {
             var parts = WorktreeNames.Pick(random).Split('-');
-            Assert.AreEqual(2, parts.Length);
+            Assert.AreEqual(3, parts.Length);
             Assert.IsTrue(WorktreeNames.Adjectives.Contains(parts[0]));
             Assert.IsTrue(WorktreeNames.Nouns.Contains(parts[1]));
+            // Digits and consonants: the end of a name is never a word, and is safe in a folder and a branch.
+            Assert.IsTrue(Suffix().IsMatch(parts[2]), parts[2]);
+            suffixes.Add(parts[2]);
         }
+
+        Assert.IsTrue(suffixes.Count > 190, "The characters at the end of a name repeat too often.");
     }
+
+    [GeneratedRegex("^[2-9bcdfghjkmnpqrstvwxz]{4}$")]
+    private static partial Regex Suffix();
 
     [TestMethod]
     public void PickFree_TakesAnotherNameAndThenANumber()
@@ -47,10 +56,11 @@ public sealed partial class GitWorktreeServiceTests
         var first = WorktreeNames.Pick(new Random(11));
         var another = WorktreeNames.PickFree(new Random(11), name => name == first);
         Assert.AreNotEqual(first, another);
-        Assert.AreEqual(2, another.Split('-').Length);
+        Assert.AreEqual(3, another.Split('-').Length);
 
         // When every name is taken the last one gets a number.
-        var numbered = WorktreeNames.PickFree(new Random(11), static name => name.Split('-').Length == 2);
+        var numbered = WorktreeNames.PickFree(new Random(11), static name => name.Split('-').Length == 3);
+        Assert.AreEqual(4, numbered.Split('-').Length);
         StringAssert.EndsWith(numbered, "-2");
         Assert.ThrowsExactly<InvalidOperationException>(() => WorktreeNames.PickFree(new Random(11), static _ => true));
     }
@@ -283,6 +293,9 @@ public sealed partial class GitWorktreeServiceTests
         Assert.AreEqual(created.Root, branches.Single(branch => branch.Name == created.Branch).Worktree);
         Assert.IsNull(branches.Single(static branch => branch.Name == "feature").Worktree);
         // Seen from the worktree, its own branch is the current one.
+        Assert.AreEqual(created.Branch, (await repository.Service.ListBranchesAsync(created.Root!))!.Single(static branch => branch.Current).Name);
+        // A worktree never works on the branch of the project folder: git refuses a branch that another checkout has.
+        Assert.AreEqual("failed", (await repository.Service.SwitchAsync(created.Root!, "main", create: false)).Status);
         Assert.AreEqual(created.Branch, (await repository.Service.ListBranchesAsync(created.Root!))!.Single(static branch => branch.Current).Name);
 
         Assert.AreEqual(GitWorktreeService.Ok, (await repository.Service.SwitchAsync(repository.Root, "feature", create: false)).Status);

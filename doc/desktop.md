@@ -1934,9 +1934,15 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
   commit, a branch that is gone) no session is created and the draft says why; where none can ever be
   made (no repository, no git) the choice goes back to the folder of the project. The chip is offered
   where the folder is in a repository, and stays visible as long as a worktree is chosen.
-- **Names.** A worktree gets a name of two words, such as `quiet-heron`, `amber-denali` or
-  `brisk-zephyr` (`WorktreeNames`: 275 adjectives and 604 nouns, 166,100 names). A name that is taken,
-  as a folder or as a branch, is drawn again, and then numbered. Its branch is `alta/<name>`.
+- **Names.** A worktree gets a name of two words and four random characters, such as
+  `quiet-heron-7k2m`, `amber-denali-x4pq` or `brisk-zephyr-9bdt` (`WorktreeNames`: 275 adjectives and
+  604 nouns, 166,100 pairs; the characters are digits and consonants, 531,441 endings). A name that is
+  taken, as a folder or as a branch, is drawn again, and then numbered. Its branch is `alta/<name>`.
+  The characters are for what the check cannot see: a worktree made in another clone or on another
+  machine, whose branch of the same two words would otherwise be pushed under the same name.
+- **One branch, one checkout.** A worktree is always created on a new branch, never on the branch of
+  the project folder, and git refuses to move a checkout to a branch another checkout has: two
+  sessions never work on `main`, or on any one branch, in two folders at once.
 - **Where worktrees go.** Settings > **Worktrees** chooses it, in the configuration of the user:
 
   ```toml

@@ -56,7 +56,7 @@ Open **Settings**, then **Worktrees**.
 | Inside each project | `<project>/.alta/worktrees/<name>`, which git ignores |
 | In a folder you choose | `<folder>/<project>/<name>` |
 
-A worktree gets a name of two words, such as `quiet-heron` or `amber-denali`.
+A worktree gets a name of two words and four random characters, such as `quiet-heron-7k2m` or `amber-denali-x4pq`. Its branch has the same name, after `alta/`. The characters keep two worktrees apart when they are created at the same time by agents that do not see each other, for example in two clones of the repository.
 
 ## Good to know
 
