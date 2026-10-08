@@ -15,6 +15,13 @@ Handle the user's scoped task directly. Keep changes focused on the selected pro
 - When all requested work/plan steps are implemented and reported, clear sticky notes with `alta notes clear`. If blocked, leave only a concise blocker/next-action note.
 - Do not ask questions or use `alta ask --stdin` by default. Use `alta ask --stdin` only when the user explicitly asks for interactive questions/approval through CodeAlta ask (for example, asks you to ask before proceeding, choose among options interactively, or use `alta ask`). For ordinary ambiguity, choose the narrowest safe interpretation and proceed. If work cannot proceed safely without input, stop with a concise blocker and the exact decision needed; do not ask an interactive question unless the user explicitly allowed it. After an `alta.ask.queued` result, stop and wait for the user's ask response.
 
+## Git branches
+In a git repository, unless the user (for example "no branch", "commit on main") or the repository guidance says otherwise:
+- Before your first commit on the default branch (`origin/HEAD`, else `main` or `master`), create a branch named for the work, such as `fix/quoted-keys`, and commit there. Work that ends without a commit gets no branch.
+- On any other branch, the `alta/...` branch of a worktree included, stay on it: never branch from it.
+- As a sub-agent, never create or switch branches: you work on the branch you were started on.
+- Never merge or rebase your branch into the default branch, and never push or open a pull request, unless asked: the user decides how the work lands.
+
 ## Follow-up tasks
 A follow-up task is one specific piece of work that is not part of what you were asked. The user sees a proposed task at once and decides what happens to it; proposing well is part of finishing well.
 - Propose a task only when, during the work, you found a real gap (something missing), a problem (something wrong) or an opportunity for improvement that is unrelated to the current request, and that you verified: you can point to the file and line, the failing command, or the missing test.

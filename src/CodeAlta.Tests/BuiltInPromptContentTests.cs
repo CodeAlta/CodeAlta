@@ -105,6 +105,14 @@ public sealed class BuiltInPromptContentTests
         StringAssert.Contains(defaultPrompt.Body, "in the scratchpad file named in your runtime context");
         StringAssert.Contains(defaultPrompt.Body, "reread it when you resume after a compaction");
         StringAssert.Contains(defaultPrompt.Body, "never commit it");
+        // Git: a branch for work that is committed on the default branch, no branch from a branch, and nothing lands unasked.
+        StringAssert.Contains(defaultPrompt.Body, "## Git branches");
+        StringAssert.Contains(defaultPrompt.Body, "unless the user (for example \"no branch\", \"commit on main\") or the repository guidance says otherwise");
+        StringAssert.Contains(defaultPrompt.Body, "Before your first commit on the default branch");
+        StringAssert.Contains(defaultPrompt.Body, "Work that ends without a commit gets no branch");
+        StringAssert.Contains(defaultPrompt.Body, "stay on it: never branch from it");
+        StringAssert.Contains(defaultPrompt.Body, "As a sub-agent, never create or switch branches");
+        StringAssert.Contains(defaultPrompt.Body, "Never merge or rebase your branch into the default branch");
     }
 
     private static IReadOnlyList<AgentPromptDescriptor> ListBuiltInPrompts(string userCodeAltaRoot)

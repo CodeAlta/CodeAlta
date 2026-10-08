@@ -58,6 +58,16 @@ When you give an agent many instructions at once, such as a list of tasks or num
 
 The file is the agent's own record. It is not part of your project and is never committed.
 
+## Branches
+
+In a git repository, an agent that is about to commit on the main branch first creates a branch named for the work, such as `fix/quoted-keys`, and commits there. The main branch keeps its history, and the branch is ready for a pull request.
+
+- Work that is not committed gets no branch.
+- On another branch already, or in a [worktree](worktrees.md), the agent stays on that branch.
+- The agent does not merge the branch, push it or open a pull request by itself. Ask for it, or use the [pull request button](issues.md#create-a-pull-request).
+
+Say "commit on main" or "no branch" in your prompt to keep the work where it is. The instructions of the repository, such as `AGENTS.md`, can say it for every session.
+
 ## Agent delegation and self-inspection
 
 CodeAlta-managed agent-runtime sessions include an in-process `alta` live tool for any configured provider, but it is not a command surface that you normally type into the terminal. It is a tool the selected agent can use when your prompt asks it to inspect CodeAlta state, coordinate with other sessions, or delegate work.
