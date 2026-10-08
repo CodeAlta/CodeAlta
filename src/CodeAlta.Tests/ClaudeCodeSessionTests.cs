@@ -83,7 +83,10 @@ public sealed class ClaudeCodeSessionTests
             Assert.IsFalse(appended.Contains(tool, StringComparison.Ordinal), tool);
         }
         Assert.AreEqual("codealta", initialize.GetProperty("sdkMcpServers")[0].GetString());
-        Assert.AreEqual("codealta_pre_edit", initialize.GetProperty("hooks").GetProperty("PreToolUse")[0].GetProperty("hookCallbackIds")[0].GetString());
+        // The CLI tells before it runs a tool, whichever it is: no matcher narrows the hook.
+        var preTool = initialize.GetProperty("hooks").GetProperty("PreToolUse")[0];
+        Assert.AreEqual("codealta_pre_tool", preTool.GetProperty("hookCallbackIds")[0].GetString());
+        Assert.IsFalse(preTool.TryGetProperty("matcher", out _));
         Assert.IsFalse(process.Launch.Arguments.Contains("--system-prompt"), "The system prompt of Claude Code stays its own.");
         Assert.IsFalse(process.Launch.Arguments.Contains("--bare"), "No authentication method of the CLI is restricted.");
 
@@ -191,7 +194,7 @@ public sealed class ClaudeCodeSessionTests
             var hook = await process.RequestAsync(new JsonObject
             {
                 ["subtype"] = "hook_callback",
-                ["callback_id"] = "codealta_pre_edit",
+                ["callback_id"] = "codealta_pre_tool",
                 ["tool_use_id"] = "toolu_1",
                 ["input"] = new JsonObject { ["hook_event_name"] = "PreToolUse", ["tool_name"] = "Edit", ["tool_use_id"] = "toolu_1" },
             });
@@ -213,6 +216,121 @@ public sealed class ClaudeCodeSessionTests
         StringAssert.Contains(diff, "+two");
         Assert.AreEqual(Path.GetFullPath(file), completed.Details.Value.GetProperty("modifiedFiles")[0].GetString());
         Assert.IsTrue(events.Snapshot().OfType<AgentSessionUpdateEvent>().Any(static e => e.Kind == AgentSessionUpdateKind.DiffUpdated));
+    }
+
+    [TestMethod]
+    public async Task EditsOfOneMessage_EachWaitForTheSessionWhileTheModelStillWritesTheMessage()
+    {
+        using var directory = TestTempDirectory.Create();
+        var file = Path.Combine(directory.Path, "a.txt");
+        await File.WriteAllTextAsync(file, "one\n");
+        var cli = new ClaudeCodeFakeCli();
+        cli.OnUserMessage = async (process, user) =>
+        {
+            process.EmitInit();
+            // The CLI runs a call as soon as the model wrote it: it asks for the first edit while the model
+            // still writes the second.
+            process.EmitBlockStart("msg_1", 0, "tool_use");
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "Edit", new JsonObject { ["file_path"] = file, ["old_string"] = "one", ["new_string"] = "two" })));
+            var first = process.BeginRequest(PreToolHook("toolu_1", "Edit"));
+            process.EmitBlockStart("msg_1", 1, "tool_use");
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_2", "Edit", new JsonObject { ["file_path"] = file, ["old_string"] = "two", ["new_string"] = "three" })));
+            await Task.Delay(200);
+            Assert.IsFalse(first.Response.IsCompleted, "The session of CodeAlta has not read the file yet: it is given the call with the whole message.");
+            process.EmitMessageStop("tool_use");
+            await first.Response.WaitAsync(Timeout);
+            await File.WriteAllTextAsync(file, "two\n");
+            process.EmitToolResult("toolu_1", "The file was updated.");
+
+            // The CLI runs the edits of a message one after the other.
+            await process.RequestAsync(PreToolHook("toolu_2", "Edit"));
+            await File.WriteAllTextAsync(file, "three\n");
+            process.EmitToolResult("toolu_2", "The file was updated.");
+            process.EmitAssistant("msg_2", new JsonArray(ClaudeCodeFakeProcess.TextBlock("edited")));
+            process.EmitResult("edited", user);
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(runtime, directory);
+        var events = Collect(session);
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("edit it") }).WaitAsync(Timeout);
+
+        // Each edit shows its own change: the file was read right before it, not when the message arrived.
+        string Diff(string callId) => events.Snapshot().OfType<AgentActivityEvent>()
+            .Single(e => e.ActivityId == callId && e.Phase == AgentActivityPhase.Completed).Details!.Value.GetProperty("diff").GetString()!;
+        StringAssert.Contains(Diff("toolu_1"), "-one");
+        StringAssert.Contains(Diff("toolu_1"), "+two");
+        Assert.IsFalse(Diff("toolu_1").Contains("three", StringComparison.Ordinal));
+        StringAssert.Contains(Diff("toolu_2"), "-two");
+        StringAssert.Contains(Diff("toolu_2"), "+three");
+        Assert.IsFalse(Diff("toolu_2").Contains("one", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task ToolCallsTheCliRunsAtTheSameTime_AreEachShownFromWhenTheyStart()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        var events = new EventLog();
+        cli.OnUserMessage = async (process, user) =>
+        {
+            process.EmitInit();
+            // One message of the model: a file to read, two subagents, a command. The CLI runs a call as soon as
+            // the model wrote it, and gives the result of the first while the model still writes the others.
+            process.EmitBlockStart("msg_1", 0, "tool_use");
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_read", "Read", new JsonObject { ["file_path"] = "a.txt" })));
+            await process.RequestAsync(PreToolHook("toolu_read", "Read"));
+            process.EmitToolResult("toolu_read", "the file");
+            process.EmitBlockStart("msg_1", 1, "tool_use");
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_one", "Agent", new JsonObject { ["prompt"] = "one" })));
+            await process.RequestAsync(PreToolHook("toolu_one", "Agent"));
+            process.EmitBlockStart("msg_1", 2, "tool_use");
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_two", "Agent", new JsonObject { ["prompt"] = "two" })));
+            await process.RequestAsync(PreToolHook("toolu_two", "Agent"));
+            process.EmitBlockStart("msg_1", 3, "tool_use");
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_build", "Bash", new JsonObject { ["command"] = "build" })));
+            process.EmitMessageStop("tool_use");
+
+            // The two subagents run at the same time: both are shown as running, and what the second writes is
+            // shown while the first still runs.
+            await events.WaitForAsync(Phase("toolu_one", AgentActivityPhase.Started), Timeout);
+            await events.WaitForAsync(Phase("toolu_two", AgentActivityPhase.Started), Timeout);
+            process.EmitAssistant("msg_sub", new JsonArray(ClaudeCodeFakeProcess.TextBlock("the second looks around")), parentToolUseId: "toolu_two");
+            await events.WaitForAsync(static e => e is AgentContentDeltaEvent { Kind: AgentContentKind.ToolOutput, ParentActivityId: "toolu_two" }, Timeout);
+            Assert.IsFalse(events.Snapshot().Any(Phase("toolu_build", AgentActivityPhase.Started)), "The CLI runs the command after the subagents: it has not started.");
+
+            // The second ends before the first.
+            process.EmitToolResult("toolu_two", "two done");
+            await events.WaitForAsync(Phase("toolu_two", AgentActivityPhase.Completed), Timeout);
+            Assert.IsFalse(events.Snapshot().Any(Phase("toolu_one", AgentActivityPhase.Completed)));
+            process.EmitToolResult("toolu_one", "one done");
+            await process.RequestAsync(PreToolHook("toolu_build", "Bash"));
+            process.EmitToolResult("toolu_build", "built");
+            process.EmitAssistant("msg_2", new JsonArray(ClaudeCodeFakeProcess.TextBlock("all done")));
+            process.EmitResult("all done", user);
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(runtime, directory);
+        session.Subscribe(events.Add);
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("go") }).WaitAsync(Timeout);
+
+        // The calls of the message stay together: all are known before the first is shown as running.
+        var activities = events.Snapshot().OfType<AgentActivityEvent>().Select(static e => (e.ActivityId, e.Phase)).ToList();
+        var firstStarted = activities.FindIndex(static activity => activity.Phase == AgentActivityPhase.Started);
+        CollectionAssert.AreEqual(
+            new[] { "toolu_read", "toolu_one", "toolu_two", "toolu_build" },
+            activities.Take(firstStarted).Where(static activity => activity.Phase == AgentActivityPhase.Requested).Select(static activity => activity.ActivityId).ToArray());
+        Assert.IsTrue(
+            activities.IndexOf(("toolu_build", AgentActivityPhase.Started)) > activities.IndexOf(("toolu_one", AgentActivityPhase.Completed)),
+            "The command is shown as running when the CLI runs it.");
+        var outputs = events.Snapshot().OfType<AgentContentCompletedEvent>().Where(static e => e.Kind == AgentContentKind.ToolOutput)
+            .ToDictionary(static e => e.ParentActivityId!, static e => e.Content);
+        Assert.AreEqual("the file", outputs["toolu_read"]);
+        Assert.AreEqual("one done", outputs["toolu_one"]);
+        Assert.AreEqual("two done", outputs["toolu_two"]);
+        Assert.AreEqual("built", outputs["toolu_build"]);
+        Assert.AreEqual("all done", events.Snapshot().OfType<AgentContentCompletedEvent>().Single(static e => e.Kind == AgentContentKind.Assistant).Content);
     }
 
     [TestMethod]
@@ -928,6 +1046,19 @@ public sealed class ClaudeCodeSessionTests
         Assert.AreEqual("The tests pass.", shown.OfType<AgentContentCompletedEvent>().Single(static e => e.Kind == AgentContentKind.Assistant).Content);
         Assert.AreEqual(1, process.UserMessages.Count);
     }
+
+    // What the CLI asks before it runs a tool call of the main conversation.
+    private static JsonObject PreToolHook(string toolUseId, string toolName)
+        => new()
+        {
+            ["subtype"] = "hook_callback",
+            ["callback_id"] = "codealta_pre_tool",
+            ["tool_use_id"] = toolUseId,
+            ["input"] = new JsonObject { ["hook_event_name"] = "PreToolUse", ["tool_name"] = toolName, ["tool_use_id"] = toolUseId },
+        };
+
+    private static Func<AgentEvent, bool> Phase(string callId, AgentActivityPhase phase)
+        => e => e is AgentActivityEvent activity && activity.ActivityId == callId && activity.Phase == phase;
 
     private static ClaudeCodeFakeProcess SessionProcess(ClaudeCodeFakeCli cli)
         => cli.Processes.Last(static process => process.Launch.Arguments.Contains("--mcp-config"));

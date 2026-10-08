@@ -24,13 +24,14 @@ namespace CodeAlta.Agent.Claude;
 /// </remarks>
 internal sealed partial class ClaudeCodeSession : IAsyncDisposable
 {
-    private const string PreEditHookId = "codealta_pre_edit";
-    private const string PreEditHookMatcher = "Edit|MultiEdit|Write|NotebookEdit";
+    private const string PreToolHookId = "codealta_pre_tool";
     private const string PlanModeHookId = "codealta_plan_mode";
     private const string PlanModeHookMatcher = "EnterPlanMode";
     private const string ReasoningDisplayOption = "--thinking-display";
     private const string NothingLeftOfOwnTurn = "Claude Code had nothing more to show for this turn.";
+    private const int PreToolHookTimeoutSeconds = 600;
     private static readonly TimeSpan HookGateTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan UnresolvedHookGateTimeout = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan OwnTurnRunTimeout = TimeSpan.FromSeconds(30);
 
     private readonly ClaudeCodeModelProviderRuntimeOptions _options;
@@ -477,15 +478,17 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                 "initialize",
                 writer =>
                 {
-                    // The CLI waits for this side before it runs an edit tool, so that the file is read before
-                    // the edit and the session shows the change.
+                    // The CLI tells this side before it runs a tool, any of them: the session shows each call from
+                    // when it starts, also those the CLI runs at the same time. It waits for this side before it
+                    // edits a file, so that the file is read before the edit and the session shows the change:
+                    // that can be for as long as the model writes the message of the call.
                     writer.WriteStartObject("hooks");
                     writer.WriteStartArray("PreToolUse");
                     writer.WriteStartObject();
-                    writer.WriteString("matcher", PreEditHookMatcher);
                     writer.WriteStartArray("hookCallbackIds");
-                    writer.WriteStringValue(PreEditHookId);
+                    writer.WriteStringValue(PreToolHookId);
                     writer.WriteEndArray();
+                    writer.WriteNumber("timeout", PreToolHookTimeoutSeconds);
                     writer.WriteEndObject();
                     // The plan mode of Claude Code ends with an approval of the user that CodeAlta has no way to
                     // ask for. CodeAlta has a plan mode of its own, which the user sees: that one is used.

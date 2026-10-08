@@ -496,6 +496,7 @@ internal sealed partial class ClaudeCodeSession
 
         if (owner is not null)
         {
+            owner.Started.TrySetResult();
             owner.McpCall.TrySetResult(call);
             return true;
         }

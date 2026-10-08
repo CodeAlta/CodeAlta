@@ -80,6 +80,17 @@ internal interface IAgentProviderToolHost
     /// <param name="toolCall">The tool call the executor returned.</param>
     /// <param name="registered">The tool of the session with that name, when there is one.</param>
     AgentToolDefinition? ResolveTool(string sessionId, AgentMessagePart.ToolCall toolCall, AgentToolDefinition? registered);
+
+    /// <summary>
+    /// Returns a task that ends when the provider starts to run a tool call of a response of this executor. The
+    /// provider may run several calls of one response at the same time: the session shows each as running from
+    /// then on, and at the latest when the calls before it in the response ended. It is asked after
+    /// <see cref="ResolveTool"/>, for each call in the order of the response.
+    /// </summary>
+    /// <param name="sessionId">The session of the call.</param>
+    /// <param name="toolCall">The tool call the executor returned.</param>
+    /// <returns>The task, or <see langword="null" /> for a call that runs when the calls before it ended.</returns>
+    Task? WhenToolStarts(string sessionId, AgentMessagePart.ToolCall toolCall);
 }
 
 /// <summary>

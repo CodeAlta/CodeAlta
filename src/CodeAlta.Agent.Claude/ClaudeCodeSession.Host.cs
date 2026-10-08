@@ -29,6 +29,15 @@ internal sealed partial class ClaudeCodeSession
 
         public bool McpMatched { get; set; }
 
+        /// <summary>
+        /// Ends when the CLI starts to run the call: it asked something about it, a subagent it started wrote, or
+        /// it gave its result. The CLI runs some calls of one message at the same time.
+        /// </summary>
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>The session of CodeAlta was given the call, with the message that made it.</summary>
+        public bool Resolved { get; set; }
+
         /// <summary>The session of CodeAlta started to run the call: it read the files the call changes.</summary>
         public bool HandlerStarted { get; set; }
 
@@ -271,14 +280,25 @@ internal sealed partial class ClaudeCodeSession
     public AgentToolDefinition? ResolveTool(AgentMessagePart.ToolCall toolCall, AgentToolDefinition? registered)
     {
         ToolCallState? state;
+        var hookWaits = false;
         lock (_gate)
         {
-            _toolCalls.TryGetValue(toolCall.CallId, out state);
+            if (_toolCalls.TryGetValue(toolCall.CallId, out state))
+            {
+                state.Resolved = true;
+                hookWaits = state.HookRequestId is not null;
+            }
         }
 
         if (state is null)
         {
             return null;
+        }
+
+        if (hookWaits)
+        {
+            // The CLI already waits to edit the file: the session runs the call now.
+            _ = ReleaseHookGateLaterAsync(state.Id, HookGateTimeout);
         }
 
         var spec = registered is not null && state.IsNative
@@ -288,6 +308,13 @@ internal sealed partial class ClaudeCodeSession
             ? new AgentToolDefinition(spec, (invocation, cancellationToken) => RunNativeToolAsync(state, registered, invocation, cancellationToken))
             : new AgentToolDefinition(spec, (invocation, cancellationToken) => AwaitCliToolAsync(state, invocation, cancellationToken));
     }
+
+    /// <summary>
+    /// Returns the task that ends when the CLI starts to run a tool call of a message of this session, or
+    /// <see langword="null" /> for a call this session does not know.
+    /// </summary>
+    public Task? WhenToolStarts(AgentMessagePart.ToolCall toolCall)
+        => GetToolCall(toolCall.CallId)?.Started.Task;
 
     // A tool of Claude Code: the CLI runs it, this waits for its result.
     private async Task<AgentToolResult> AwaitCliToolAsync(ToolCallState state, AgentToolInvocation invocation, CancellationToken cancellationToken)
@@ -511,6 +538,7 @@ internal sealed partial class ClaudeCodeSession
             }
 
             completed = true;
+            state.Started.TrySetResult();
             state.Result.TrySetResult(ReadToolResult(block));
         }
 
@@ -573,6 +601,7 @@ internal sealed partial class ClaudeCodeSession
             return;
         }
 
+        parent.Started.TrySetResult();
         foreach (var block in content.EnumerateArray())
         {
             var line = ClaudeCodeJson.GetString(block, "type") switch
@@ -671,7 +700,13 @@ internal sealed partial class ClaudeCodeSession
         {
             case "can_use_tool":
                 _ = AnswerAsync(requestId, HandlePermissionAsync(requestId, request));
-                return IsKnownToolCall(ClaudeCodeJson.GetString(request, "tool_use_id"));
+                if (ClaudeCodeJson.GetString(request, "tool_use_id") is not { } askedFor || GetToolCall(askedFor) is not { } asked)
+                {
+                    return false;
+                }
+
+                asked.Started.TrySetResult();
+                return true;
             case "hook_callback":
                 return HandleHook(requestId, request);
             case "mcp_message":
@@ -683,19 +718,6 @@ internal sealed partial class ClaudeCodeSession
         }
     }
 
-    private bool IsKnownToolCall(string? toolUseId)
-    {
-        if (toolUseId is null)
-        {
-            return false;
-        }
-
-        lock (_gate)
-        {
-            return _toolCalls.ContainsKey(toolUseId);
-        }
-    }
-
     private ToolCallState? GetToolCall(string toolUseId)
     {
         lock (_gate)
@@ -704,8 +726,9 @@ internal sealed partial class ClaudeCodeSession
         }
     }
 
-    // The CLI asks before it edits a file. The answer waits until the session of CodeAlta runs the call, which is
-    // when it reads the file to show the change afterwards. It never decides: the permissions of the CLI do.
+    // The CLI asks before it runs a tool: the call starts. Before it edits a file, the answer waits until the
+    // session of CodeAlta runs the call, which is when it reads the file to show the change afterwards. The answer
+    // never decides: the permissions of the CLI do.
     private bool HandleHook(string requestId, JsonElement request)
     {
         if (string.Equals(ClaudeCodeJson.GetString(request, "callback_id"), PlanModeHookId, StringComparison.Ordinal))
@@ -727,35 +750,38 @@ internal sealed partial class ClaudeCodeSession
         ClaudeCodeJson.TryGetObject(request, "input", out var input);
         var toolUseId = ClaudeCodeJson.GetString(request, "tool_use_id") ?? ClaudeCodeJson.GetString(input, "tool_use_id");
         var isSubagent = ClaudeCodeJson.GetString(input, "agent_id") is { Length: > 0 };
+        ToolCallState? state = null;
         var waits = false;
+        var resolved = false;
         lock (_gate)
         {
-            if (toolUseId is not null &&
-                !isSubagent &&
-                _toolCalls.TryGetValue(toolUseId, out var state) &&
-                !state.HandlerStarted &&
-                state.HookRequestId is null)
+            if (toolUseId is not null && !isSubagent && _toolCalls.TryGetValue(toolUseId, out state) &&
+                state is { IsNative: false, Name: "Edit" or "MultiEdit" or "Write" or "NotebookEdit", HandlerStarted: false, HookRequestId: null })
             {
                 state.HookRequestId = requestId;
                 waits = true;
+                resolved = state.Resolved;
             }
         }
 
+        state?.Started.TrySetResult();
         if (!waits)
         {
             _ = SendSafelyAsync(connection => connection.RespondAsync(requestId, null));
-            return false;
+            return state is not null;
         }
 
-        _ = ReleaseHookGateLaterAsync(toolUseId!);
+        // The CLI may ask while the model still writes the message of the call: the session of CodeAlta is given
+        // the call with the whole message, and runs it then.
+        _ = ReleaseHookGateLaterAsync(toolUseId!, resolved ? HookGateTimeout : UnresolvedHookGateTimeout);
         return true;
     }
 
-    private async Task ReleaseHookGateLaterAsync(string toolUseId)
+    private async Task ReleaseHookGateLaterAsync(string toolUseId, TimeSpan timeout)
     {
         try
         {
-            await Task.Delay(HookGateTimeout, _lifetime.Token).ConfigureAwait(false);
+            await Task.Delay(timeout, _lifetime.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -818,6 +844,7 @@ internal sealed partial class ClaudeCodeSession
 
         foreach (var state in outstanding)
         {
+            state.Started.TrySetResult();
             state.Result.TrySetResult(Failure(message));
         }
     }

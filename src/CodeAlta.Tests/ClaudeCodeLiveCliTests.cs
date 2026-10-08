@@ -111,6 +111,35 @@ public sealed class ClaudeCodeLiveCliTests
     }
 
     [TestMethod]
+    public async Task Turn_ShowsTheCallsTheCliRunsAtTheSameTimeAsRunningTogether()
+    {
+        using var live = await LiveSession.StartAsync();
+
+        // Two subagents that wait: the CLI runs them at the same time, and neither ends before the other started.
+        await live.SendAsync(
+            "In ONE message, make exactly two Agent tool calls in parallel, both with subagent_type \"general-purpose\" and run_in_background set to false. " +
+            "Each subagent is asked to run the shell command `sleep 6` with the Bash tool and then to answer with the word ready. " +
+            "When both have answered, answer with the word finished.");
+
+        var agents = live.Events.OfType<AgentActivityEvent>().Where(static e => e.Name is "Agent" or "Task").ToArray();
+        var calls = agents.Select(static e => e.ActivityId).Distinct().ToArray();
+        if (calls.Length != 2)
+        {
+            Assert.Inconclusive($"The model made {calls.Length} subagent calls instead of two.");
+        }
+
+        var phases = agents.Select(static e => (e.ActivityId, e.Phase)).ToList();
+        var firstEnd = phases.FindIndex(static phase => phase.Phase is AgentActivityPhase.Completed or AgentActivityPhase.Failed);
+        foreach (var call in calls)
+        {
+            var started = phases.IndexOf((call, AgentActivityPhase.Started));
+            Assert.IsTrue(started >= 0 && started < firstEnd, $"Both calls are shown as running before one ends: {string.Join(", ", phases)}");
+        }
+
+        StringAssert.Contains(live.LastAnswer.ToLowerInvariant(), "finished");
+    }
+
+    [TestMethod]
     public async Task Session_RemembersResumesAndStops()
     {
         using var live = await LiveSession.StartAsync();

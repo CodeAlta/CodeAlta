@@ -351,6 +351,19 @@ sequenceDiagram
 - A prompt sent while a turn of the CLI still runs is queued by the CLI. The run reads the end of that turn first: its `result` names no message, so the answer is the one of the turn that follows. A failure of the turn of the CLI does not fail the run of the prompt.
 - Stopping a run interrupts the CLI and withdraws what it wrote, a turn of its own included.
 
+### Tool calls of one message
+
+The CLI does not wait for the end of a message of the model to run its tool calls. It runs a call as soon as the model wrote it, some at the same time and others one after the other (seen with CLI 2.1.292: two subagents and a `Read` ran together, two `Bash` commands that write a file ran in their order). The result of a first call can therefore arrive while the model still writes the next one, and several calls are running at once.
+
+`AgentSession` asks a provider for one assistant message and then runs its tool calls. For a provider that runs tools itself (`IAgentProviderToolHost`) it runs them as the provider does:
+
+- **One message of the model is one assistant message of the session.** While the stream says the message goes on (`message_start` seen, `message_stop` not yet), a tool result or a request about one of its calls does not close it (`ClaudeCodeSession.PendingGoesOn`). The calls the CLI runs together are thus given to the session together. A CLI that does not stream is read as before: the first sign of a tool call closes the message.
+- **Each call is shown from when it starts.** `IAgentProviderToolHost.WhenToolStarts` gives the session a task per call. The session records the call as started (`AgentActivityPhase.Started`, which the timeline shows as running), reads the files an edit changes and waits for the result when that task ends, and at the latest when the calls before it in the message ended, which is the order a provider that tells nothing runs them in. Calls that run at the same time end in any order, and each is recorded when it ends. What they record (events, conversation, file changes) is written by one of them at a time (`AgentSession.RunToolCallsAsync`).
+- **The CLI tells when a call starts** through a `PreToolUse` hook without a matcher (`codealta_pre_tool`), which it calls before it runs any tool. A permission prompt for the call, the request to run a tool of CodeAlta, the first output of a subagent and the result of the call say the same when the hook did not (hooks turned off in the settings of the user).
+- The tools of the session itself are still run one after the other: the CLI asks for one at a time.
+
+The model is called again when every call of the message has its result, as before.
+
 ### Tools of CodeAlta
 
 The tools of a session (`alta`, plugin tools, the tools of MCP servers CodeAlta connected) are offered to the CLI through an MCP server named `codealta` that is served over the control protocol (`"type": "sdk"`): no port is opened and the caller is the session. Claude sees them as `mcp__codealta__<name>`.
@@ -399,7 +412,7 @@ The CLI only prompts for what the user's Claude Code settings neither allow nor 
 
 "Allow for session" applies the rules the CLI proposed with the prompt (`updatedPermissions`). `permission_mode` of the provider sets the mode the CLI starts with.
 
-To show the change of an edit, `AgentSession` reads the file before and after the tool runs. The CLI does not wait for that by itself, so the provider registers one `PreToolUse` hook for the edit tools whose answer waits until the session starts the call. The hook never decides: it returns no decision, and the permissions of the CLI apply. It is released after 20 seconds at the latest.
+To show the change of an edit, `AgentSession` reads the file before and after the tool runs. The CLI does not wait for that by itself, so the answer of the `PreToolUse` hook (see "Tool calls of one message") waits, for an edit tool (`Edit`, `MultiEdit`, `Write`, `NotebookEdit`), until the session starts the call. For any other tool it is answered at once. The hook never decides: it returns no decision, and the permissions of the CLI apply. The CLI may ask while the model still writes the message of the edit: the session has the call when the message ends, and the hook is released 20 seconds after that at the latest (5 minutes after it was asked, and 10 minutes on the side of the CLI, whatever happens).
 
 ### Models, usage and compaction
 

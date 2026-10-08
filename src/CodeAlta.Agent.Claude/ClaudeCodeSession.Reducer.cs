@@ -41,6 +41,9 @@ internal sealed partial class ClaudeCodeSession
         /// <summary>The content blocks the stream announced.</summary>
         public int StreamBlocks { get; set; }
 
+        /// <summary>The stream announced the message: it ends it too.</summary>
+        public bool Streamed { get; set; }
+
         public bool StopSeen { get; set; }
 
         public bool HasToolCalls { get; set; }
@@ -115,7 +118,7 @@ internal sealed partial class ClaudeCodeSession
                 case ClosedEvent:
                     throw new InvalidOperationException(connection.DescribeExit());
                 case ToolActivityEvent:
-                    if (_pending is { HasToolCalls: true } && FinalizePending() is { } toolSegment)
+                    if (_pending is { HasToolCalls: true } && !PendingGoesOn && FinalizePending() is { } toolSegment)
                     {
                         return CreateResponse(toolSegment, requiresFollowUp: false);
                     }
@@ -146,8 +149,8 @@ internal sealed partial class ClaudeCodeSession
             case "assistant":
                 return ReduceAssistant(@event);
             case "user":
-                // The result of a tool: the message that called it has all its blocks.
-                return _pending is { HasToolCalls: true } && FinalizePending() is { } toolSegment
+                // The result of a tool: the message that called it has all its blocks, unless the model still writes it.
+                return _pending is { HasToolCalls: true } && !PendingGoesOn && FinalizePending() is { } toolSegment
                     ? CreateResponse(toolSegment, requiresFollowUp: false)
                     : null;
             case "result":
@@ -182,6 +185,7 @@ internal sealed partial class ClaudeCodeSession
                     return previous;
                 }
 
+                _pending!.Streamed = true;
                 break;
             case "content_block_start":
                 if (_pending is { } announced && ClaudeCodeJson.GetInt64(stream, "index") is { } startedIndex)
@@ -309,6 +313,11 @@ internal sealed partial class ClaudeCodeSession
             ? CreateResponse(complete, requiresFollowUp: false)
             : null;
     }
+
+    // Whether the model still writes the message being gathered. The CLI runs a tool call as soon as the model
+    // wrote it, and can give its result before the message ends: the calls of one message stay together, so that
+    // those the CLI runs at the same time are shown together.
+    private bool PendingGoesOn => _pending is { Streamed: true, StopSeen: false };
 
     // Makes the message with that identifier the one being gathered. Returns a response when a previous message
     // has to be returned first: the event is then read again by the next call.

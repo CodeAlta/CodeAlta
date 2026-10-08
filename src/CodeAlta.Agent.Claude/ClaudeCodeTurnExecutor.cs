@@ -67,6 +67,13 @@ internal sealed class ClaudeCodeTurnExecutor :
     }
 
     /// <inheritdoc />
+    public Task? WhenToolStarts(string sessionId, AgentMessagePart.ToolCall toolCall)
+    {
+        ArgumentNullException.ThrowIfNull(toolCall);
+        return _sessions.TryGetValue(sessionId, out var session) ? session.WhenToolStarts(toolCall) : null;
+    }
+
+    /// <inheritdoc />
     public Task<AgentCompactionOutcome> CompactAsync(AgentTurnRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);

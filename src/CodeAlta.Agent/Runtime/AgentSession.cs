@@ -264,6 +264,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             var modelInfo = await ResolveModelInfoAsync(linkedCts.Token).ConfigureAwait(false);
             var toolMap = AgentToolBridge.CreateDefinitionMap(allTools);
             var runTools = new AgentRunTools(toolMap.Keys);
+            var toolRun = new ToolCallRun(runId, fileChangeTracker, instructionBundle, modelInfo, runTools);
 
             while (true)
             {
@@ -362,181 +363,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     return runId;
                 }
 
-                foreach (var toolCall in toolCalls)
-                {
-                    toolMap.TryGetValue(toolCall.Name, out var toolDefinition);
-                    if (providerToolHost is not null)
-                    {
-                        toolDefinition = providerToolHost.ResolveTool(SessionId, toolCall, toolDefinition) ?? toolDefinition;
-                    }
-
-                    if (toolDefinition is null)
-                    {
-                        throw new InvalidOperationException($"Tool '{toolCall.Name}' was not registered for session '{SessionId}'.");
-                    }
-
-                    var activityKind = IsSkillActivationTool(toolCall)
-                        ? AgentActivityKind.Skill
-                        : AgentActivityKind.ToolCall;
-
-                    var started = new AgentActivityEvent(
-                        ProviderId,
-                        SessionId,
-                        DateTimeOffset.UtcNow,
-                        runId,
-                        activityKind,
-                        AgentActivityPhase.Started,
-                        toolCall.CallId,
-                        null,
-                        toolCall.Name,
-                        null,
-                        CreateToolCallDetails(toolCall, _summary.ExecutionDirectory));
-                    await AppendEventsAsync([started], linkedCts.Token).ConfigureAwait(false);
-
-                    using var progressGate = new SemaphoreSlim(1, 1);
-                    var toolOutputContentId = $"{toolCall.CallId}:output";
-                    var trackedModifiedFiles = GetTrackedFileMutationPaths(toolCall, _summary.ExecutionDirectory);
-                    AgentTurnFileChangeTracker? toolFileChangeTracker = null;
-                    if (trackedModifiedFiles.Count > 0)
-                    {
-                        toolFileChangeTracker = new AgentTurnFileChangeTracker(_summary.ExecutionDirectory);
-                        await toolFileChangeTracker.CaptureBeforeAsync(trackedModifiedFiles, linkedCts.Token).ConfigureAwait(false);
-                        await fileChangeTracker.CaptureBeforeAsync(trackedModifiedFiles, linkedCts.Token).ConfigureAwait(false);
-                    }
-
-                    AgentToolResult result;
-                    try
-                    {
-                        result = await toolDefinition.Handler(
-                                new AgentToolInvocation(
-                                    ProviderId,
-                                    SessionId,
-                                    toolCall.CallId,
-                                    toolDefinition.Spec.Name,
-                                    toolCall.Arguments,
-                                    async (update, cancellationToken) =>
-                                    {
-                                        if (string.IsNullOrEmpty(update.Delta))
-                                        {
-                                            return;
-                                        }
-
-                                        await progressGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-                                        try
-                                        {
-                                            var deltaEvent = new AgentContentDeltaEvent(
-                                                ProviderId,
-                                                SessionId,
-                                                DateTimeOffset.UtcNow,
-                                                runId,
-                                                AgentContentKind.ToolOutput,
-                                                toolOutputContentId,
-                                                toolCall.CallId,
-                                                update.Delta,
-                                                update.Details);
-                                            await AppendEventsAsync([deltaEvent], AgentEventPersistenceMode.TransientOnly, cancellationToken).ConfigureAwait(false);
-                                        }
-                                        finally
-                                        {
-                                            progressGate.Release();
-                                        }
-                                    }) { RunTools = runTools },
-                                linkedCts.Token)
-                            .ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException ex) when (!linkedCts.IsCancellationRequested)
-                    {
-                        result = CreateToolExecutionFailureResult(toolCall.Name, ex);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        result = CreateToolExecutionFailureResult(toolCall.Name, ex);
-                    }
-
-                    if (trackedModifiedFiles.Count > 0)
-                    {
-                        if (toolFileChangeTracker is not null)
-                        {
-                            await toolFileChangeTracker.CaptureAfterAsync(trackedModifiedFiles, linkedCts.Token).ConfigureAwait(false);
-                        }
-
-                        await fileChangeTracker.CaptureAfterAsync(trackedModifiedFiles, linkedCts.Token).ConfigureAwait(false);
-                    }
-
-                    var toolDiff = toolFileChangeTracker?.CreateUnifiedDiff();
-
-                    // An image the tool returned is checked, resized when needed and saved beside the journal.
-                    result = await _toolImages.PrepareAsync(result, modelInfo, linkedCts.Token).ConfigureAwait(false);
-                    var modelVisibleResult = CreateModelVisibleToolResult(
-                        toolCall,
-                        result,
-                        instructionBundle.SystemMessage,
-                        instructionBundle.DeveloperInstructions,
-                        modelInfo);
-                    var toolMessage = new AgentConversationMessage(
-                        AgentConversationRole.Tool,
-                        [new AgentMessagePart.ToolResult(toolCall.CallId, modelVisibleResult)]);
-                    _conversation.Add(toolMessage);
-
-                    var completed = new AgentActivityEvent(
-                        ProviderId,
-                        SessionId,
-                        DateTimeOffset.UtcNow,
-                        runId,
-                        activityKind,
-                        result.Success ? AgentActivityPhase.Completed : AgentActivityPhase.Failed,
-                        toolCall.CallId,
-                        null,
-                        toolCall.Name,
-                        result.Error,
-                        CreateToolResultDetails(toolCall, result, _summary.ExecutionDirectory, toolDiff));
-                    var rawToolEvent = new AgentRawEvent(
-                        ProviderId,
-                        SessionId,
-                        DateTimeOffset.UtcNow,
-                        ToolMessageEventType,
-                        SerializeLocalMessage(toolMessage),
-                        runId);
-                    AgentRawEvent? rawSkillActivationEvent = null;
-                    if (result.Success && IsSkillActivationTool(toolCall))
-                    {
-                        var activatedSkill = TryCreateLoadedSkillState(toolCall, result);
-                        if (activatedSkill is not null)
-                        {
-                            _state = _state with
-                            {
-                                LoadedSkills = MergeLoadedSkill(_state.LoadedSkills, activatedSkill),
-                                UpdatedAt = DateTimeOffset.UtcNow,
-                            };
-                            rawSkillActivationEvent = new AgentRawEvent(
-                                ProviderId,
-                                SessionId,
-                                DateTimeOffset.UtcNow,
-                                SkillActivationEventType,
-                                JsonSerializer.SerializeToElement(activatedSkill, AgentJsonSerializerContext.Default.AgentLoadedSkillState),
-                                runId);
-                        }
-                    }
-
-                    var toolOutputText = new AgentContentCompletedEvent(
-                        ProviderId,
-                        SessionId,
-                        DateTimeOffset.UtcNow,
-                        runId,
-                        AgentContentKind.ToolOutput,
-                        toolOutputContentId,
-                        toolCall.CallId,
-                        RenderToolResult(result),
-                        CreateToolResultDetails(toolCall, result, _summary.ExecutionDirectory, toolDiff));
-                    var events = rawSkillActivationEvent is null
-                        ? new AgentEvent[] { rawToolEvent, completed, toolOutputText }
-                        : [rawToolEvent, rawSkillActivationEvent, completed, toolOutputText];
-                    await AppendEventsAsync(events, linkedCts.Token).ConfigureAwait(false);
-                    if (rawSkillActivationEvent is not null)
-                    {
-                        await _store.UpsertStateAsync(_state, linkedCts.Token).ConfigureAwait(false);
-                    }
-                }
+                await RunToolCallsAsync(toolRun, toolCalls, toolMap, providerToolHost, linkedCts.Token).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
@@ -547,6 +374,279 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             try { await run.ErrorPublication.ConfigureAwait(false); }
             catch (Exception publicationFailure) { throw new AggregateException(ex, publicationFailure); }
             throw;
+        }
+    }
+
+    /// <summary>What the tool calls of a run share.</summary>
+    private sealed record ToolCallRun(
+        AgentRunId RunId,
+        AgentTurnFileChangeTracker FileChanges,
+        AgentInstructionBundle Instructions,
+        AgentModelInfo? ModelInfo,
+        AgentRunTools RunTools);
+
+    // Runs the tool calls of an assistant message. The session runs its tools one after the other, in their order.
+    // A provider that runs tools itself may run several of them at the same time: such a call is shown from when
+    // the provider says it starts, and at the latest when the calls before it ended.
+    private async Task RunToolCallsAsync(
+        ToolCallRun run,
+        IReadOnlyList<AgentMessagePart.ToolCall> toolCalls,
+        IReadOnlyDictionary<string, AgentToolDefinition> toolMap,
+        IAgentProviderToolHost? providerToolHost,
+        CancellationToken cancellationToken)
+    {
+        // What the calls record (events, conversation, file changes) is written by one of them at a time.
+        using var gate = new SemaphoreSlim(1, 1);
+        using var batch = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var running = new List<Task>();
+        try
+        {
+            foreach (var toolCall in toolCalls)
+            {
+                toolMap.TryGetValue(toolCall.Name, out var toolDefinition);
+                if (providerToolHost is not null)
+                {
+                    toolDefinition = providerToolHost.ResolveTool(SessionId, toolCall, toolDefinition) ?? toolDefinition;
+                }
+
+                if (toolDefinition is null)
+                {
+                    throw new InvalidOperationException($"Tool '{toolCall.Name}' was not registered for session '{SessionId}'.");
+                }
+
+                var before = running.Count == 0 ? Task.CompletedTask : Task.WhenAll(running);
+                if (providerToolHost?.WhenToolStarts(SessionId, toolCall) is { } started)
+                {
+                    running.Add(RunStartedToolCallAsync(run, toolCall, toolDefinition, started, before, gate, batch));
+                    continue;
+                }
+
+                await before.ConfigureAwait(false);
+                await RunToolCallAsync(run, toolCall, toolDefinition, gate, batch.Token).ConfigureAwait(false);
+            }
+
+            await Task.WhenAll(running).ConfigureAwait(false);
+        }
+        catch
+        {
+            // A call failed, or the run is cancelled: the others are not left running, and end before this returns.
+            await batch.CancelAsync().ConfigureAwait(false);
+            try
+            {
+                await Task.WhenAll(running).ConfigureAwait(false);
+            }
+            catch
+            {
+                // The first failure is the one reported.
+            }
+
+            throw;
+        }
+    }
+
+    private async Task RunStartedToolCallAsync(
+        ToolCallRun run,
+        AgentMessagePart.ToolCall toolCall,
+        AgentToolDefinition toolDefinition,
+        Task started,
+        Task before,
+        SemaphoreSlim gate,
+        CancellationTokenSource batch)
+    {
+        try
+        {
+            await Task.WhenAny(started, before).WaitAsync(batch.Token).ConfigureAwait(false);
+            batch.Token.ThrowIfCancellationRequested();
+            await RunToolCallAsync(run, toolCall, toolDefinition, gate, batch.Token).ConfigureAwait(false);
+        }
+        catch
+        {
+            await batch.CancelAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private async Task RunToolCallAsync(
+        ToolCallRun run,
+        AgentMessagePart.ToolCall toolCall,
+        AgentToolDefinition toolDefinition,
+        SemaphoreSlim gate,
+        CancellationToken cancellationToken)
+    {
+        var activityKind = IsSkillActivationTool(toolCall)
+            ? AgentActivityKind.Skill
+            : AgentActivityKind.ToolCall;
+
+        var started = new AgentActivityEvent(
+            ProviderId,
+            SessionId,
+            DateTimeOffset.UtcNow,
+            run.RunId,
+            activityKind,
+            AgentActivityPhase.Started,
+            toolCall.CallId,
+            null,
+            toolCall.Name,
+            null,
+            CreateToolCallDetails(toolCall, _summary.ExecutionDirectory));
+        var toolOutputContentId = $"{toolCall.CallId}:output";
+        var trackedModifiedFiles = GetTrackedFileMutationPaths(toolCall, _summary.ExecutionDirectory);
+        AgentTurnFileChangeTracker? toolFileChangeTracker = null;
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await AppendEventsAsync([started], cancellationToken).ConfigureAwait(false);
+            if (trackedModifiedFiles.Count > 0)
+            {
+                toolFileChangeTracker = new AgentTurnFileChangeTracker(_summary.ExecutionDirectory);
+                await toolFileChangeTracker.CaptureBeforeAsync(trackedModifiedFiles, cancellationToken).ConfigureAwait(false);
+                await run.FileChanges.CaptureBeforeAsync(trackedModifiedFiles, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            gate.Release();
+        }
+
+        AgentToolResult result;
+        try
+        {
+            result = await toolDefinition.Handler(
+                    new AgentToolInvocation(
+                        ProviderId,
+                        SessionId,
+                        toolCall.CallId,
+                        toolDefinition.Spec.Name,
+                        toolCall.Arguments,
+                        async (update, progressToken) =>
+                        {
+                            if (string.IsNullOrEmpty(update.Delta))
+                            {
+                                return;
+                            }
+
+                            await gate.WaitAsync(progressToken).ConfigureAwait(false);
+                            try
+                            {
+                                var deltaEvent = new AgentContentDeltaEvent(
+                                    ProviderId,
+                                    SessionId,
+                                    DateTimeOffset.UtcNow,
+                                    run.RunId,
+                                    AgentContentKind.ToolOutput,
+                                    toolOutputContentId,
+                                    toolCall.CallId,
+                                    update.Delta,
+                                    update.Details);
+                                await AppendEventsAsync([deltaEvent], AgentEventPersistenceMode.TransientOnly, progressToken).ConfigureAwait(false);
+                            }
+                            finally
+                            {
+                                gate.Release();
+                            }
+                        }) { RunTools = run.RunTools },
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            result = CreateToolExecutionFailureResult(toolCall.Name, ex);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            result = CreateToolExecutionFailureResult(toolCall.Name, ex);
+        }
+
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (trackedModifiedFiles.Count > 0)
+            {
+                if (toolFileChangeTracker is not null)
+                {
+                    await toolFileChangeTracker.CaptureAfterAsync(trackedModifiedFiles, cancellationToken).ConfigureAwait(false);
+                }
+
+                await run.FileChanges.CaptureAfterAsync(trackedModifiedFiles, cancellationToken).ConfigureAwait(false);
+            }
+
+            var toolDiff = toolFileChangeTracker?.CreateUnifiedDiff();
+
+            // An image the tool returned is checked, resized when needed and saved beside the journal.
+            result = await _toolImages.PrepareAsync(result, run.ModelInfo, cancellationToken).ConfigureAwait(false);
+            var modelVisibleResult = CreateModelVisibleToolResult(
+                toolCall,
+                result,
+                run.Instructions.SystemMessage,
+                run.Instructions.DeveloperInstructions,
+                run.ModelInfo);
+            var toolMessage = new AgentConversationMessage(
+                AgentConversationRole.Tool,
+                [new AgentMessagePart.ToolResult(toolCall.CallId, modelVisibleResult)]);
+            _conversation.Add(toolMessage);
+
+            var completed = new AgentActivityEvent(
+                ProviderId,
+                SessionId,
+                DateTimeOffset.UtcNow,
+                run.RunId,
+                activityKind,
+                result.Success ? AgentActivityPhase.Completed : AgentActivityPhase.Failed,
+                toolCall.CallId,
+                null,
+                toolCall.Name,
+                result.Error,
+                CreateToolResultDetails(toolCall, result, _summary.ExecutionDirectory, toolDiff));
+            var rawToolEvent = new AgentRawEvent(
+                ProviderId,
+                SessionId,
+                DateTimeOffset.UtcNow,
+                ToolMessageEventType,
+                SerializeLocalMessage(toolMessage),
+                run.RunId);
+            AgentRawEvent? rawSkillActivationEvent = null;
+            if (result.Success && IsSkillActivationTool(toolCall))
+            {
+                var activatedSkill = TryCreateLoadedSkillState(toolCall, result);
+                if (activatedSkill is not null)
+                {
+                    _state = _state with
+                    {
+                        LoadedSkills = MergeLoadedSkill(_state.LoadedSkills, activatedSkill),
+                        UpdatedAt = DateTimeOffset.UtcNow,
+                    };
+                    rawSkillActivationEvent = new AgentRawEvent(
+                        ProviderId,
+                        SessionId,
+                        DateTimeOffset.UtcNow,
+                        SkillActivationEventType,
+                        JsonSerializer.SerializeToElement(activatedSkill, AgentJsonSerializerContext.Default.AgentLoadedSkillState),
+                        run.RunId);
+                }
+            }
+
+            var toolOutputText = new AgentContentCompletedEvent(
+                ProviderId,
+                SessionId,
+                DateTimeOffset.UtcNow,
+                run.RunId,
+                AgentContentKind.ToolOutput,
+                toolOutputContentId,
+                toolCall.CallId,
+                RenderToolResult(result),
+                CreateToolResultDetails(toolCall, result, _summary.ExecutionDirectory, toolDiff));
+            var events = rawSkillActivationEvent is null
+                ? new AgentEvent[] { rawToolEvent, completed, toolOutputText }
+                : [rawToolEvent, rawSkillActivationEvent, completed, toolOutputText];
+            await AppendEventsAsync(events, cancellationToken).ConfigureAwait(false);
+            if (rawSkillActivationEvent is not null)
+            {
+                await _store.UpsertStateAsync(_state, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            gate.Release();
         }
     }
 
