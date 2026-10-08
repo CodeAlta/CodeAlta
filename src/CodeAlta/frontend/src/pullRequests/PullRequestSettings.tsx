@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Callout, Card, CardList, FormGroup, HTMLSelect, InputGroup, PopoverNext, Section, SectionCard, Tag, TextArea } from "@blueprintjs/core";
+import { Button, Callout, Card, CardList, FormGroup, HTMLSelect, InputGroup, Section, SectionCard, Tag, TextArea } from "@blueprintjs/core";
 import type { pullRequestPrompts, PullRequestPromptItem } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import type { MessageKey } from "../localization";
 import { SettingsFileLocation, SettingsFileLocations } from "../SettingsFileLocation";
 import { useSettingsFiles, type SettingsFilesApi } from "../settingsFiles";
-import { SettingsPage, SettingsUnavailable } from "../SettingsPage";
+import { RemoveButton, SettingsPage, SettingsUnavailable } from "../SettingsPage";
 import type { SettingsNotice } from "../settingsEditing";
 import { useShellLanguage } from "../shellLanguage";
 
@@ -145,10 +145,7 @@ export function PullRequestSettings({ api, epoch, project, onOpenFile, filesApi 
                 onChange={event => edit({ content: event.target.value })} /></FormGroup>
             {!builtIn && <div className="pull-request-buttons">
               <Button intent="primary" disabled={busy || !valid} onClick={() => void save()}>{t("Save")}</Button>
-              {form.original && <PopoverNext placement="top-end" content={<div className="provider-settings-confirm"><p>{t("Remove {name}?", { name: form.original.name })}</p>
-                <Button intent="danger" disabled={busy} onClick={() => void remove()}>{t("Remove")}</Button></div>}>
-                <Button variant="minimal" intent="danger" icon={<AppIcon name="trash" size={15} />} disabled={busy} text={t("Remove")} />
-              </PopoverNext>}
+              {form.original && <RemoveButton text name={form.original.name} disabled={busy} onRemove={() => void remove()} />}
             </div>}
           </SectionCard>
         </Section>}

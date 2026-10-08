@@ -112,6 +112,30 @@ test("a settings page says where its files are, and opens, copies and shows them
     await act(`${button(problem, "Edit in the code editor")}.click()`);
     assert.deepEqual(await evaluate(`${calls("files.open")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", kind: "config", scope: "Project", id: null, part: null });
     assert.equal(await evaluate(`${fixture}.state.opened`), 2);
+
+    // Remove: the red button of a source plugin asks first, with the name of what goes; a built-in plugin has none.
+    const trash = (name: string) => `${card(name)}.querySelector('button.bp6-intent-danger')`;
+    const confirm = "document.querySelector('.provider-settings-confirm')";
+    assert.equal(await evaluate(`${trash("MCP")}`), null);
+    assert.equal(await evaluate(`${trash("commits")}.getAttribute('aria-label')`), "Remove commits");
+    assert.equal(await evaluate(`getComputedStyle(${trash("commits")}).color !== getComputedStyle(${button(card("commits"), "Edit in the code editor")}).color`), true, "the button is red");
+    await act(`${trash("commits")}.click()`);
+    await until(`${confirm} !== null`, "the confirmation is shown");
+    assert.equal(await evaluate(`${confirm}.querySelector('p').textContent`), translate("en", "Remove {name}?", { name: "commits" }));
+    assert.deepEqual(await evaluate(calls("delete")), [], "Nothing is removed before it is confirmed.");
+    // The folder could not be moved: the page says so, and the plugin stays listed.
+    await act(`${fixture}.state.deleteStatus = "trash_failed"; ${confirm}.querySelector('button').click()`);
+    assert.deepEqual(await evaluate(calls("delete")), [{ expectedEpoch: "epoch", projectId: "p", scope: "Global", id: "commits" }]);
+    await until(`document.querySelector('[role=alert].bp6-callout')?.textContent === ${JSON.stringify(translate("en", "It could not be moved to the Trash."))}`, "the failure is said");
+    assert.equal(await evaluate(`${card("commits")} !== undefined`), true);
+    // Confirmed again, it is removed: the list is read again without it, and the other plugin stays.
+    await until(`${confirm} === null`, "the confirmation closed");
+    await act(`${fixture}.state.deleteStatus = "ok"; ${trash("commits")}.click()`);
+    await until(`${confirm} !== null`);
+    await act(`${confirm}.querySelector('button').click()`);
+    await until(`${card("commits")} === undefined`, "the removed plugin is no longer listed");
+    assert.equal(await evaluate("document.querySelector('[role=status].bp6-callout')?.textContent"), translate("en", "Removed."));
+    assert.equal(await evaluate(`${card("local")} !== undefined && ${calls("delete")}.length === 2`), true);
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));

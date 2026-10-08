@@ -215,6 +215,66 @@ public sealed class PluginsRpcTests
     }
 
     [TestMethod]
+    public async Task Delete_MovesTheFolderOfASourcePluginToTheTrash_AndDropsItsSwitchFromTheConfiguration()
+    {
+        using var fixture = await Fixture.CreateAsync(GlobalConfiguration + "\n[plugins.sample-plugin]\nenabled = false\n");
+        var project = fixture.Project.Id;
+        var sample = Path.Combine(fixture.Projects.Options.GlobalRoot, "plugins", "sample-plugin");
+        var local = Path.Combine(fixture.ProjectPath, ".alta", "plugins", "local-plugin");
+        Assert.AreEqual("ok", (await fixture.Service.SetEnabledAsync(new(Epoch, project, "Project", "local-plugin", false), default)).Status);
+        File.AppendAllText(fixture.ProjectConfig, "\n[skills]\ndisabled = [\"kept\"]\n");
+
+        // What is refused moves nothing: a plugin that ships with CodeAlta has no folder to remove.
+        Assert.AreEqual("unavailable", (await new PluginsService().DeleteAsync(new(Epoch, null, "Global", "sample-plugin"), default)).Status);
+        Assert.AreEqual("stale_epoch", (await fixture.Service.DeleteAsync(new("another", null, "Global", "sample-plugin"), default)).Status);
+        foreach (var id in new[] { "mcp", "git", "missing", "local-plugin" })
+            Assert.AreEqual("unknown", (await fixture.Service.DeleteAsync(new(Epoch, project, "Global", id), default)).Status, id);
+        foreach (var id in new[] { "../plugins", "sample-plugin/..", "", null, "has space" })
+            Assert.AreEqual("invalid", (await fixture.Service.DeleteAsync(new(Epoch, project, "Global", id), default)).Status, id);
+        Assert.AreEqual("invalid", (await fixture.Service.DeleteAsync(new(Epoch, project, "Everywhere", "sample-plugin"), default)).Status);
+        Assert.AreEqual("invalid", (await fixture.Service.DeleteAsync(new(Epoch, null, "Project", "local-plugin"), default)).Status, "A project plugin needs its project.");
+        fixture.Trash.Available = false;
+        Assert.AreEqual("trash_unavailable", (await fixture.Service.DeleteAsync(new(Epoch, project, "Global", "sample-plugin"), default)).Status);
+        fixture.Trash.Available = true;
+        fixture.Trash.Fails = true;
+        Assert.AreEqual("trash_failed", (await fixture.Service.DeleteAsync(new(Epoch, project, "Global", "sample-plugin"), default)).Status);
+        fixture.Trash.Fails = false;
+        Assert.IsEmpty(fixture.Trash.Moved);
+        Assert.IsTrue(Directory.Exists(sample) && Directory.Exists(local));
+        var store = new CodeAltaConfigStore(fixture.Projects.Options);
+        Assert.AreEqual(false, store.LoadGlobal().Plugins!["sample-plugin"].Enabled, "A refused removal leaves the configuration as it is.");
+
+        // The folder goes to the trash with what it holds, and the entry that turned the plugin off goes with it.
+        Assert.AreEqual("ok", (await fixture.Service.DeleteAsync(new(Epoch, project, "Global", "sample-plugin"), default)).Status);
+        CollectionAssert.AreEqual(new[] { sample }, fixture.Trash.Moved);
+        Assert.IsFalse(Directory.Exists(sample));
+        Assert.IsTrue(File.Exists(Path.Combine(fixture.Trash.Kept!, "plugin.cs")) && File.Exists(Path.Combine(fixture.Trash.Kept!, "README.md")), "Nothing is removed for good.");
+        Assert.IsTrue(Directory.Exists(Path.Combine(fixture.Projects.Options.GlobalRoot, "plugins")), "The plugin folder stays.");
+        Assert.IsFalse(store.LoadGlobal().Plugins!.ContainsKey("sample-plugin"));
+        var text = File.ReadAllText(fixture.GlobalConfig);
+        foreach (var kept in new[] { "tool_timeout_ms = 1234", "docs", "disabled_tools", "\"one\"" }) StringAssert.Contains(text, kept, "The settings of the other plugins are kept.");
+        var listed = await fixture.Service.ListAsync(new(Epoch, project), default);
+        CollectionAssert.AreEquivalent(new[] { "mcp", "local-plugin" }, listed.Plugins.Select(plugin => plugin.Id).ToArray(), "No row is left for an id of configuration.");
+
+        // A plugin of a project: its folder, and the entry of the configuration of that project.
+        Assert.AreEqual("ok", (await fixture.Service.DeleteAsync(new(Epoch, project, "Project", "local-plugin"), default)).Status);
+        Assert.IsFalse(Directory.Exists(local));
+        Assert.IsNull(store.LoadProject(fixture.ProjectPath).Plugins);
+        StringAssert.Contains(File.ReadAllText(fixture.ProjectConfig), "kept");
+        Assert.AreEqual("unknown", (await fixture.Service.DeleteAsync(new(Epoch, project, "Project", "local-plugin"), default)).Status);
+    }
+
+    [TestMethod]
+    public async Task Delete_OfAPluginWithoutAConfigurationEntry_WritesNoConfigurationFile()
+    {
+        using var fixture = await Fixture.CreateAsync(null);
+        Assert.AreEqual("ok", (await fixture.Service.DeleteAsync(new(Epoch, fixture.Project.Id, "Project", "local-plugin"), default)).Status);
+        Assert.AreEqual("ok", (await fixture.Service.DeleteAsync(new(Epoch, null, "Global", "sample-plugin"), default)).Status);
+        Assert.IsFalse(File.Exists(fixture.GlobalConfig) || File.Exists(fixture.ProjectConfig));
+        Assert.AreEqual(2, fixture.Trash.Moved.Count);
+    }
+
+    [TestMethod]
     public async Task List_WhenTheProjectIsTheFolderOfTheGlobalRoot_ListsEachPluginOnce()
     {
         // CodeAlta started in the home folder: the plugin folder of that project is the one of the user.
@@ -267,8 +327,11 @@ public sealed class PluginsRpcTests
             File.WriteAllText(Path.Combine(sample, "README.md"), "\n# Sample plugin\n\nMore text.\n");
             var local = Directory.CreateDirectory(Path.Combine(project.ProjectPath, ".alta", "plugins", "local-plugin")).FullName;
             File.WriteAllText(Path.Combine(local, "plugin.cs"), "// A project source plugin entry file.\n");
-            Service = new PluginsService(projects, Epoch);
+            Trash = new RecordingFileTrash(Path.Combine(root, "trash"));
+            Service = new PluginsService(projects, Epoch, trash: Trash);
         }
+
+        public RecordingFileTrash Trash { get; }
 
         public static async Task<Fixture> CreateAsync(string? configuration)
         {

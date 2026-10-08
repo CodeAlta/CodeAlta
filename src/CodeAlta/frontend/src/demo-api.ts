@@ -212,12 +212,14 @@ export const skills = Object.freeze({
   setAllEnabled: async () => ({ status: "unavailable", changed: 0, message: null }),
   detail: unavailable,
   create: async () => ({ status: "unavailable", name: null, message: null }),
+  delete: async () => ({ status: "unavailable", changed: 0, message: null }),
 });
 export const plugins = Object.freeze({
   list: async () => ({ status: "unavailable", projectId: null, plugins: [], omitted: 0 }),
   setEnabled: async () => ({ status: "unavailable", message: null, applied: false }),
   reload: async () => ({ status: "unavailable", message: null, applied: false }),
   create: async () => ({ status: "unavailable", message: null, folder: null, path: null, name: null }),
+  delete: async () => ({ status: "unavailable", message: null, applied: false }),
 });
 export const settingsFiles = Object.freeze({
   list: async () => ({ status: "unavailable", locations: [], platform: null }),

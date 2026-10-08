@@ -98,10 +98,11 @@ In CodeAlta Desktop, **Settings > Plugins** is where you work on a source plugin
   <figcaption class="small text-secondary mt-2">The last row is a source plugin, with a button to build and reload it and one to edit it.</figcaption>
 </figure>
 
-The row of a source plugin has two buttons and a switch:
+The row of a source plugin has the path of its folder, three buttons and a switch:
 
 - **Build and reload** builds the plugin and replaces the one that runs. Its commands, shortcuts, status items and pickers change at once.
 - **Edit in the code editor** opens the folder of the plugin in the code editor, in a **Plugin** tab.
+- The red **Remove** button stops the plugin and moves its folder to the trash of your system, after you confirm. The plugins that ship with CodeAlta cannot be removed: turn them off with their switch.
 - The switch starts or stops the plugin at once.
 
 When a build fails, the page shows the compiler errors under the plugin, with their line, and the version that ran keeps running. **Source changed** marks a plugin whose file is not the one that runs.

@@ -172,6 +172,37 @@ public sealed partial class PluginRuntimeManager
     }
 
     /// <summary>
+    /// Stops the plugins of a package and forgets what was built of it, whatever the configuration says: the
+    /// package is about to be removed from disk.
+    /// </summary>
+    /// <param name="package">The package, as <see cref="GetPackages"/> lists it.</param>
+    /// <param name="cancellationToken">Stops the wait for another change; once the stop began, it runs to its end.</param>
+    /// <returns><see cref="PluginPackageChange.Stopped"/> when plugins of the package were running, <see cref="PluginPackageChange.Unchanged"/> otherwise.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="package"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The runtime has not started, is closing, or the caller is a plugin that is being started or a callback of a plugin.</exception>
+    public async ValueTask<PluginPackageChangeResult> StopPackageAsync(SourcePluginPackage package, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(package);
+        PluginPackageChangeResult? result = null;
+        await ChangeAsync(async options =>
+        {
+            var packages = new SourcePluginDiscoveryService().Discover(BuildRoots(options));
+            var running = ActiveOf(package).Length > 0;
+            var keys = await RetireAsync(package, []).ConfigureAwait(false);
+            ReplaceDiagnostics(package, packages, keys, buildOnly: false, []);
+            Forget(package);
+            lock (_lock) _builds.Remove(package.PackageDirectory);
+            result = new()
+            {
+                Change = running ? PluginPackageChange.Stopped : PluginPackageChange.Unchanged,
+                Status = new() { Package = package, State = PluginPackageState.Stopped },
+            };
+        }, cancellationToken).ConfigureAwait(false);
+        Notify([result!]);
+        return result!;
+    }
+
+    /// <summary>
     /// Applies what changed on disk and in the configuration since the plugins were started: starts the packages
     /// that are new or turned on, replaces the plugins of the packages whose source changed, and stops those of
     /// the packages that were removed or turned off. A package whose last build failed is built again only when

@@ -13,11 +13,11 @@ const entry = (id: string, change: Partial<PluginsEntry> = {}): PluginsEntry => 
   runtime: "running", runtimeMessage: null, folder: `plugin:global:${id}`, path: `/home/.alta/plugins/${id}`, loadable: true, changed: false, errors: null, ...change,
 });
 const english = (key: Parameters<typeof translate>[1]) => translate("en", key);
-function render(listed: readonly PluginsEntry[], change: { locale?: typeof locales[number]; edit?: boolean; disabled?: boolean } = {}) {
+function render(listed: readonly PluginsEntry[], change: { locale?: typeof locales[number]; edit?: boolean; remove?: boolean; disabled?: boolean } = {}) {
   const locale = change.locale ?? "en";
   return renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } },
     createElement(PluginRows, { rows: pluginRows(listed, key => translate(locale, key)), disabled: change.disabled ?? false, onToggle: never, onReload: never,
-      onEdit: change.edit === false ? undefined : never })));
+      onEdit: change.edit === false ? undefined : never, onDelete: change.remove === false ? undefined : never, platform: "windows", onReveal: never })));
 }
 const cards = (html: string) => html.split('<div class="bp6-card').slice(1);
 const card = (html: string, name: string) => cards(html).find(value => value.includes(`<strong>${name}</strong>`)) ?? assert.fail(`no row for ${name}`);
@@ -87,6 +87,24 @@ test("a source plugin that is on is built again and opened in the code editor fr
   }
 });
 
+test("a source plugin is removed from its row with a red button, and a plugin that ships with CodeAlta is not, in every language", () => {
+  for (const locale of locales) {
+    const html = render([entry("notes", { name: "Notes" }), entry("local", { scope: "Project", folder: "plugin:project:p:local", loadable: false }), entry("git", { kind: "Config", folder: null, path: null })], { locale });
+    for (const name of ["Notes", "local"]) {
+      const row = card(html, name);
+      assert.match(row, new RegExp(`<button[^>]*bp6-intent-danger[^>]*aria-label="${translate(locale, "Remove {name}", { name })}"|<button[^>]*aria-label="${translate(locale, "Remove {name}", { name })}"[^>]*bp6-intent-danger`), row);
+      assert.ok(row.includes(`title="${translate(locale, "Remove")}"`), row);
+    }
+    for (const name of ["Git", "MCP"]) assert.ok(!card(html, name).includes("bp6-intent-danger"), card(html, name));
+  }
+  assert.ok(!render([entry("notes")], { remove: false }).includes("bp6-intent-danger"), "A page that removes nothing has no red button.");
+  assert.match(card(render([entry("notes")], { disabled: true }), "notes"), /<button[^>]*disabled=""[^>]*aria-label="Remove notes"|<button[^>]*aria-label="Remove notes"[^>]*disabled=""/);
+  // The row of a source plugin says where its folder is, and shows it in the file manager.
+  const notes = card(render([entry("notes")]), "notes");
+  assert.ok(notes.includes('<code title="/home/.alta/plugins/notes">') && notes.includes('title="Copy path"') && notes.includes('title="Reveal in File Explorer"'), notes);
+  assert.ok(!card(render([entry("notes")]), "MCP").includes("settings-file-location"));
+});
+
 test("a row says what the running application did with its plugin and what the compiler reported", () => {
   const html = render([
     entry("fine"),
@@ -130,7 +148,9 @@ test("a change that did not succeed says why in the words of plugins", () => {
   assert.deepEqual(pluginFailure("exists"), { key: "A plugin with this id already exists.", intent: "warning" });
   assert.deepEqual(pluginFailure("unknown"), pluginFailure("not_found"));
   // Every notice of the page is a message of the application, in each of its languages.
-  for (const status of ["build_failed", "start_failed", "not_loaded", "disabled", "exists", "unknown", "unavailable", "stale", "write_failed", "invalid_request"]) {
+  assert.deepEqual(pluginFailure("trash_failed"), { key: "It could not be moved to the Trash.", intent: "danger" });
+  assert.deepEqual(pluginFailure("trash_unavailable"), pluginFailure("trash_failed"));
+  for (const status of ["build_failed", "start_failed", "not_loaded", "disabled", "exists", "unknown", "unavailable", "stale", "write_failed", "invalid_request", "trash_failed"]) {
     const notice = pluginFailure(status);
     assert.ok(notice, status);
     for (const locale of locales) assert.ok(translate(locale, notice.key).length > 0, `${status} in ${locale}`);

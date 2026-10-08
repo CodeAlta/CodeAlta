@@ -278,6 +278,36 @@ public sealed class PluginRuntimeReloadTests
         CollectionAssert.AreEqual(new[] { "fresh.one" }, Commands(runtime));
     }
 
+    [TestMethod]
+    [TestCategory("RequiresDotNet10FileBuild")]
+    public async Task APackageThatIsAboutToBeRemoved_IsStopped_WhateverTheConfigurationSays()
+    {
+        using var temp = new TestTempDirectory();
+        WritePlugin(temp, "notes", Source("notes", "first"));
+        await using var runtime = await StartAsync(temp);
+        var package = Single(runtime, "notes");
+        SkipWithoutFileBuilds(package);
+        Assert.AreEqual(PluginPackageState.Running, package.State, Describe(package));
+        var changes = new List<string>();
+        runtime.Changed += (_, change) => changes.AddRange(change.PackageIds);
+
+        var stopped = await runtime.StopPackageAsync(package.Package);
+
+        Assert.AreEqual((PluginPackageChange.Stopped, PluginPackageState.Stopped), (stopped.Change, stopped.Status.State));
+        Assert.AreEqual(0, runtime.ActivePlugins.Count);
+        Assert.AreEqual(0, Commands(runtime).Length, "What the plugin contributed goes with it.");
+        CollectionAssert.AreEqual(new[] { "notes" }, changes);
+        // The package is still on disk and turned on: it is listed as not started, and starts again when asked.
+        Assert.AreEqual(PluginPackageState.Stopped, Single(runtime, "notes").State);
+        Assert.IsNull(Single(runtime, "notes").Build, "What was built of it is forgotten.");
+
+        // Nothing of it runs: stopping it again changes nothing, and tells nobody.
+        Assert.AreEqual(PluginPackageChange.Unchanged, (await runtime.StopPackageAsync(package.Package)).Change);
+        CollectionAssert.AreEqual(new[] { "notes" }, changes);
+        Assert.AreEqual(PluginPackageChange.Started, (await runtime.ReloadPackageAsync(package.Package)).Change);
+        CollectionAssert.AreEqual(new[] { "first" }, Commands(runtime));
+    }
+
     private static async Task<PluginRuntimeManager> StartAsync(TestTempDirectory temp)
     {
         var runtime = new PluginRuntimeManager();

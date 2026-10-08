@@ -337,6 +337,52 @@ public sealed class SkillsRpcTests
         Assert.AreEqual(("unknown_project", (string?)null), await folders.ResolveAsync(beta with { ProjectId = "no-such-project" }, default));
     }
 
+    [TestMethod]
+    public async Task Delete_MovesTheFolderOfASkillOfTheUserOrOfAProjectToTheTrash_AndNothingElse()
+    {
+        using var fixture = await Fixture.CreateAsync(builtin: true);
+        var project = fixture.Project.Id;
+        var alpha = Path.Combine(fixture.GlobalRoot, "skills", "alpha");
+        var beta = Path.Combine(fixture.ProjectPath, ".alta", "skills", "beta");
+        File.WriteAllText(Path.Combine(alpha, "notes.md"), "kept with the skill");
+
+        // What is refused moves nothing: another epoch, a skill that ships with CodeAlta, a source that is none, a skill that is not there.
+        Assert.AreEqual("unavailable", (await new SkillsService().DeleteAsync(new(Epoch, null, "alpha", "UserAlta"), default)).Status);
+        Assert.AreEqual("stale_epoch", (await fixture.Service.DeleteAsync(new("another", null, "alpha", "UserAlta"), default)).Status);
+        foreach (var source in new[] { "Builtin", "Plugin", "UserCopilot", "ProjectCopilot" })
+            Assert.AreEqual("read_only", (await fixture.Service.DeleteAsync(new(Epoch, project, "gamma", source), default)).Status, source);
+        foreach (var source in new[] { "Elsewhere", "0", "useralta", "" })
+            Assert.AreEqual("invalid", (await fixture.Service.DeleteAsync(new(Epoch, project, "alpha", source), default)).Status, source);
+        Assert.AreEqual("invalid", (await fixture.Service.DeleteAsync(new(Epoch, project, null, "UserAlta"), default)).Status);
+        Assert.AreEqual("not_found", (await fixture.Service.DeleteAsync(new(Epoch, project, "missing", "UserAlta"), default)).Status);
+        Assert.AreEqual("not_found", (await fixture.Service.DeleteAsync(new(Epoch, project, "../alpha", "UserAlta"), default)).Status, "A name is compared with the names of the skills, never made into a path.");
+        Assert.AreEqual("not_found", (await fixture.Service.DeleteAsync(new(Epoch, null, "beta", "ProjectAlta"), default)).Status, "A skill of a project is not found without that project.");
+        Assert.AreEqual("unknown_project", (await fixture.Service.DeleteAsync(new(Epoch, "no-such-project", "alpha", "UserAlta"), default)).Status);
+        fixture.Trash.Available = false;
+        Assert.AreEqual("trash_unavailable", (await fixture.Service.DeleteAsync(new(Epoch, project, "alpha", "UserAlta"), default)).Status);
+        fixture.Trash.Available = true;
+        fixture.Trash.Fails = true;
+        Assert.AreEqual("trash_failed", (await fixture.Service.DeleteAsync(new(Epoch, project, "alpha", "UserAlta"), default)).Status);
+        fixture.Trash.Fails = false;
+        Assert.IsEmpty(fixture.Trash.Moved);
+        Assert.IsTrue(Directory.Exists(alpha) && Directory.Exists(beta) && Directory.Exists(Path.Combine(fixture.BuiltinRoot, "gamma")));
+
+        // The folder of the skill goes to the trash with everything in it, and the skill is no longer listed.
+        var removed = await fixture.Service.DeleteAsync(new(Epoch, project, "alpha", "UserAlta"), default);
+        Assert.AreEqual(("ok", 1), (removed.Status, removed.Changed));
+        CollectionAssert.AreEqual(new[] { alpha }, fixture.Trash.Moved);
+        Assert.IsFalse(Directory.Exists(alpha));
+        Assert.AreEqual("kept with the skill", File.ReadAllText(Path.Combine(fixture.Trash.Kept!, "notes.md")), "Nothing is removed for good.");
+        Assert.IsTrue(Directory.Exists(Path.Combine(fixture.GlobalRoot, "skills")), "The folder of the skills stays.");
+        CollectionAssert.AreEquivalent(new[] { "beta", "gamma" }, (await fixture.Service.ListAsync(new(Epoch, project), default)).Skills.Select(skill => skill.Name).ToArray());
+        Assert.AreEqual("not_found", (await fixture.Service.DeleteAsync(new(Epoch, project, "alpha", "UserAlta"), default)).Status);
+
+        Assert.AreEqual("ok", (await fixture.Service.DeleteAsync(new(Epoch, project, "beta", "ProjectAlta"), default)).Status);
+        Assert.IsFalse(Directory.Exists(beta));
+        // The code editor that was open on the folder of the skill finds it gone.
+        Assert.AreEqual(("project_unavailable", (string?)null), await fixture.Service.Folders!.ResolveAsync(new SkillFolder(null, SkillSourceKind.UserAlta, "alpha"), default));
+    }
+
     private sealed class Fixture : IDisposable
     {
         private readonly string _root;
@@ -357,8 +403,11 @@ public sealed class SkillsRpcTests
                 providers.Add(new BuiltInCodeAltaSkillRootProvider(BuiltinRoot));
             }
 
-            Service = new SkillsService(projects, new SkillCatalog(providers), Path.Combine(root, "home"), Epoch);
+            Trash = new RecordingFileTrash(Path.Combine(root, "trash"));
+            Service = new SkillsService(projects, new SkillCatalog(providers), Path.Combine(root, "home"), Epoch, Trash);
         }
+
+        public RecordingFileTrash Trash { get; }
 
         public static async Task<Fixture> CreateAsync(bool builtin = false)
         {

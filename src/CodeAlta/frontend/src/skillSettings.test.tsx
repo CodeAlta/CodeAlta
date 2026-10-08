@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SkillsDetailResponse, SkillsEntry } from "#neoastra";
 import { locales, translate } from "./localization";
-import { SkillDetail, SkillRows } from "./SkillSettings";
+import { SkillDetail, SkillRows, skillRemovable } from "./SkillSettings";
 import { ShellLanguageContext } from "./shellLanguage";
 
 const never = () => assert.fail("rendering must not act");
@@ -72,6 +72,29 @@ test("the row of a skill opens its folder in the code editor, as the row of a pl
   const empty = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
     createElement(SkillRows, { skills: [], empty: "No skill matches the filter.", selected: undefined, disabled: false, onSelect: never, onToggle: never })));
   assert.ok(empty.includes("No skill matches the filter."), empty);
+});
+
+test("a skill of the user or of a project is removed with a red button, in its row and in its details; any other skill is not", () => {
+  assert.deepEqual(["UserAlta", "ProjectAlta", "UserCommon", "ProjectCommon", "UserCopilot", "ProjectCopilot", "Plugin", "Builtin"].filter(skillRemovable),
+    ["UserAlta", "ProjectAlta", "UserCommon", "ProjectCommon"]);
+  const skills = [entry("release-notes", "UserAlta"), entry("house", "ProjectCommon"), entry("codealta-plugins", "Builtin"), entry("copilot-skill", "UserCopilot"), entry("pack", "Plugin")];
+  for (const locale of locales) {
+    const rows = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } },
+      createElement(SkillRows, { skills, empty: "No skills were found.", selected: undefined, disabled: false, onSelect: never, onToggle: never, onEdit: never, onDelete: never })))
+      .split('<div class="bp6-card').slice(1);
+    for (const [index, name] of [[0, "release-notes"], [1, "house"]] as const) {
+      assert.ok(rows[index].includes("bp6-intent-danger") && rows[index].includes(`aria-label="${translate(locale, "Remove {name}", { name })}"`), rows[index]);
+    }
+    for (const index of [2, 3, 4]) assert.ok(!rows[index].includes("bp6-intent-danger"), rows[index]);
+    // The details have the same button, with its label.
+    const mine = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } },
+      createElement(SkillDetail, { skill: skills[0], detail: detail(skills[0]), failed: false, onEdit: never, onDelete: never })));
+    assert.match(mine, new RegExp(`<button[^>]*bp6-intent-danger[^>]*>.*?>${translate(locale, "Remove")}<`), mine);
+    const shipped = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } },
+      createElement(SkillDetail, { skill: skills[2], detail: detail(skills[2]), failed: false, onEdit: never, onDelete: never })));
+    assert.ok(!shipped.includes("bp6-intent-danger"), shipped);
+  }
+  assert.ok(!render(skills[0], detail(skills[0])).includes("bp6-intent-danger"), "A page that removes nothing has no red button.");
 });
 
 test("a skill has no button while its details are read, when its folder has no id, and where no editor opens", () => {

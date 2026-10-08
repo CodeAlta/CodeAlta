@@ -171,7 +171,8 @@ public sealed class DesktopPluginWorkshopTests
         var other = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(temp.Path, "other")).FullName);
         await using var runtime = new PluginRuntimeManager();
         await runtime.StartAsync(new PluginRuntimeManagerOptions { GlobalRoot = global, ProjectContext = new PluginProjectContext { ProjectId = project.Id, ProjectPath = project.ProjectPath }, IsHeadless = true });
-        var service = new PluginsService(projects, Epoch, runtime);
+        var trash = new RecordingFileTrash(Path.Combine(temp.Path, "trash"));
+        var service = new PluginsService(projects, Epoch, runtime, trash);
 
         // Create: the package, built and started, with the id the code editor opens its folder by.
         var created = await service.CreateAsync(new(Epoch, null, "Global", "notes", "Keeps notes."), default);
@@ -217,6 +218,19 @@ public sealed class DesktopPluginWorkshopTests
         var local = (await service.ListAsync(new(Epoch, other.Id), default)).Plugins.Single(static plugin => plugin.Id == "local");
         Assert.IsTrue(local is { Loadable: false, Runtime: "stopped", Scope: "Project" });
         Assert.AreEqual("not_loaded", (await service.ReloadAsync(new(Epoch, other.Id, "Project", "local"), default)).Status);
+
+        // Remove: a folder that cannot be moved leaves the plugin running; then it is stopped, and its folder goes to the trash.
+        trash.Fails = true;
+        Assert.AreEqual("trash_failed", (await service.DeleteAsync(new(Epoch, null, "Global", "notes"), default)).Status);
+        Assert.AreEqual("plugin:notes", runtime.ActivePlugins.Single().Descriptor.RuntimeKey, "What was stopped for the removal runs again.");
+        trash.Fails = false;
+        Assert.AreEqual(new PluginsMutationResponse("ok", null, true), await service.DeleteAsync(new(Epoch, null, "Global", "notes"), default));
+        Assert.AreEqual(0, runtime.ActivePlugins.Count);
+        Assert.IsFalse(Directory.Exists(created.Path));
+        Assert.IsTrue(File.Exists(Path.Combine(trash.Kept!, "plugin.cs")));
+        Assert.AreEqual(0, (await service.ListAsync(new(Epoch, null), default)).Plugins.Count(static plugin => plugin.Id == "notes"));
+        // A plugin the host does not load is removed without it.
+        Assert.AreEqual(new PluginsMutationResponse("ok", null, false), await service.DeleteAsync(new(Epoch, other.Id, "Project", "local"), default));
     }
 
     [TestMethod]

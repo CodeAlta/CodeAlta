@@ -216,6 +216,7 @@ export const messages = dictionary({
   "HTTP headers": ["Encabezados HTTP", "En-têtes HTTP", "HTTP-Header", "HTTP ヘッダー", "HTTP 标头"],
   "Add header": ["Añadir encabezado", "Ajouter un en-tête", "Header hinzufügen", "ヘッダーを追加", "添加标头"],
   "Remove {name}?": ["¿Quitar {name}?", "Supprimer {name} ?", "{name} entfernen?", "{name} を削除しますか？", "移除 {name}？"],
+  "Remove {name}": ["Quitar {name}", "Supprimer {name}", "{name} entfernen", "{name} を削除", "移除 {name}"],
   "Authorization": ["Autorización", "Autorisation", "Autorisierung", "認可", "授权"],
   "Sign in to this server in your browser. The tokens stay on this computer, outside the server definition.": ["Inicia sesión en este servidor en tu navegador. Los tokens se quedan en este equipo, fuera de la definición del servidor.", "Connectez-vous à ce serveur dans votre navigateur. Les jetons restent sur cet ordinateur, hors de la définition du serveur.", "Melden Sie sich im Browser bei diesem Server an. Die Token bleiben auf diesem Computer, außerhalb der Serverdefinition.", "ブラウザーでこのサーバーにサインインします。トークンはこのコンピューターに保存され、サーバー定義には含まれません。", "在浏览器中登录此服务器。令牌保存在这台计算机上，不写入服务器定义。"],
   "Authorized": ["Autorizado", "Autorisé", "Autorisiert", "認可済み", "已授权"],

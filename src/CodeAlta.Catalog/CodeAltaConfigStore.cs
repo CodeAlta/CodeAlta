@@ -456,6 +456,33 @@ public sealed class CodeAltaConfigStore
     }
 
     /// <summary>
+    /// Removes the global enablement override of a plugin. The other settings of its table are kept, and the
+    /// table goes when nothing is left in it.
+    /// </summary>
+    /// <param name="pluginId">The built-in plugin id or source plugin package id.</param>
+    /// <returns><see langword="true"/> when an override was removed; <see langword="false"/> when the file has none.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="pluginId"/> is empty.</exception>
+    /// <exception cref="InvalidDataException">Thrown when the configuration file cannot be parsed.</exception>
+    public bool RemoveGlobalPluginEnabled(string pluginId)
+        => RemovePluginEnabled(_options.ConfigPath, LoadGlobal(), pluginId);
+
+    /// <summary>
+    /// Removes the project-local enablement override of a plugin. The other settings of its table are kept, and
+    /// the table goes when nothing is left in it.
+    /// </summary>
+    /// <param name="projectRoot">The project root directory.</param>
+    /// <param name="pluginId">The source plugin package id.</param>
+    /// <returns><see langword="true"/> when an override was removed; <see langword="false"/> when the file has none.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="projectRoot"/> or <paramref name="pluginId"/> is empty.</exception>
+    /// <exception cref="InvalidDataException">Thrown when the configuration file cannot be parsed.</exception>
+    public bool RemoveProjectPluginEnabled(string projectRoot, string pluginId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+        var path = GetProjectConfigPath(projectRoot);
+        return RemovePluginEnabled(path, LoadDocument(path), pluginId);
+    }
+
+    /// <summary>
     /// Resolves the effective provider preference for a scope.
     /// </summary>
     /// <param name="providerKey">The provider key.</param>
@@ -990,6 +1017,27 @@ public sealed class CodeAltaConfigStore
         }
 
         return null;
+    }
+
+    // Nothing is written when the file says nothing of the plugin: a file that does not exist is not created.
+    private static bool RemovePluginEnabled(string path, CodeAltaConfigDocument document, string pluginId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
+        NormalizeDocument(document);
+        var key = document.Plugins?.Keys.FirstOrDefault(key => string.Equals(key, pluginId.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (key is null || document.Plugins![key].Enabled is null)
+        {
+            return false;
+        }
+
+        document.Plugins.Remove(key);
+        if (document.Plugins.Count == 0)
+        {
+            document.Plugins = null;
+        }
+
+        SaveDocument(path, document);
+        return true;
     }
 
     private static void SavePluginEnabled(string path, CodeAltaConfigDocument document, string pluginId, bool enabled)

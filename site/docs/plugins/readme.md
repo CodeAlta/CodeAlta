@@ -56,7 +56,7 @@ Open plugin management with `Ctrl+G Ctrl+N`, `/plugins`, or `/plugin`.
 
 {{ alta_shot "alta-desktop-plugins.webp" "alta-plugins.png" "Plugin management with the list of plugins" "Plugin management lists the plugins of the global and project scopes and lets you enable or disable them." }}
 
-The desktop **Plugins** page of Settings lists the plugins with a switch to enable or disable each one. A source plugin starts or stops at once; a built-in plugin follows at the next start. A source plugin also has a button to build and reload it while CodeAlta runs and one to edit it in the code editor, and **New plugin** creates one. A plugin that failed to build shows the compiler errors there, and a plugin made for the TUI only is marked as not supported.
+The desktop **Plugins** page of Settings lists the plugins with a switch to enable or disable each one. A source plugin starts or stops at once; a built-in plugin follows at the next start. A source plugin also has a button to build and reload it while CodeAlta runs, one to edit it in the code editor and a red one to remove it, and **New plugin** creates one. A plugin that failed to build shows the compiler errors there, and a plugin made for the TUI only is marked as not supported.
 
 When a configuration file does not parse, or a plugin folder cannot be read, the page names that file or folder in red above the list and still lists the other plugins. A plugin folder whose name is not a plugin id (letters, digits, `.`, `_` and `-`) is named there too.
 

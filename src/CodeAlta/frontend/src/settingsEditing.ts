@@ -22,6 +22,7 @@ export function settingsFailure(status: string, message?: string | null): Settin
     case "read_only": return { key: "Built-in items cannot be changed.", intent: "warning" };
     case "too_large": return { key: "The text is too large.", intent: "danger" };
     case "policy_failed": return { key: "Saved, but the enabled state could not be updated.", intent: "warning" };
+    case "trash_unavailable": case "trash_failed": return { key: "It could not be moved to the Trash.", intent: "danger" };
     default: return { key: "The operation did not complete.", intent: "danger", detail: message ?? null };
   }
 }

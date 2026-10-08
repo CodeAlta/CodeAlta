@@ -420,6 +420,8 @@ A path that is too long is cut at its start; point at it to see it whole.
 
 Opening `~/.alta/skills` or `~/.alta/plugins` lets you work on all your skills or plugins at once. CodeAlta creates the folder if it does not exist yet. A file that does not exist yet, such as the `.alta/config.toml` of a project that has none, is listed without the button that opens it.
 
+What you create in Settings you can remove there: a prompt, a skill, a plugin, an MCP server, a color scheme and a kind of pull request each have a red **Remove** button, which asks before it removes anything.
+
 `config.toml` and `mcp.json` of `~/.alta` open alone in their tab: the other files of that folder are not shown there. The prompts that ship with CodeAlta open read-only.
 
 <figure class="alta-figure my-4">
@@ -594,7 +596,7 @@ Closing the desktop window asks whether CodeAlta keeps running or exits. **Keep 
 
 {{ alta_shot "alta-desktop-plugins.webp" "alta-plugins.png" "Plugin management" "Plugin management lists built-in and source plugins and lets you enable or disable them." }}
 
-Open it with `Ctrl+G Ctrl+N`, `/plugins`, or `/plugin`. The TUI dialog shows discovered global and project plugins, state, diagnostics, contributions, and actions for source or README files. The desktop **Plugins** page lists the plugins of the global and project scopes with a switch to enable or disable each one. A source plugin has a button to build and reload it while CodeAlta runs and one to edit it in the code editor; **New plugin** creates one. See [Plugins]({{site.basepath}}/docs/plugins/).
+Open it with `Ctrl+G Ctrl+N`, `/plugins`, or `/plugin`. The TUI dialog shows discovered global and project plugins, state, diagnostics, contributions, and actions for source or README files. The desktop **Plugins** page lists the plugins of the global and project scopes with a switch to enable or disable each one. A source plugin has a button to build and reload it while CodeAlta runs, one to edit it in the code editor and a red one to remove it; **New plugin** creates one. See [Plugins]({{site.basepath}}/docs/plugins/).
 
 ## Skills management
 
@@ -603,6 +605,8 @@ Open it with `Ctrl+G Ctrl+N`, `/plugins`, or `/plugin`. The TUI dialog shows dis
 Open it with `Ctrl+G Ctrl+K` or `/skills`. CodeAlta discovers Agent Skills-compatible `SKILL.md` packages from user and project locations. Skills management lets you inspect skills and their files, create a new skill, and enable or disable skills for the global `~/.alta/config.toml` or for the selected project's `.alta/config.toml`. Disabled skills remain inspectable but are not advertised to models and cannot be activated.
 
 A skill is a folder that can hold several files. In the desktop app, the `</>` button of a skill in the list, or **Edit** in its details, opens the folder of that skill in a [code editor](#code-editor) tab, with its files on the left and `SKILL.md` open. A built-in skill, or one that a plugin brings, has **View files** instead: its files open read-only. **New skill** opens the skill it created the same way.
+
+The red **Remove** button of a skill, in its row or in its details, moves the folder of the skill to the trash of your system after you confirm. It is there for your own skills and for those of the project; a built-in skill, a skill of a plugin or of GitHub Copilot has none.
 
 To work on all your own skills at once, open `~/.alta/skills` from the top of the page: the code editor shows that folder, where each skill is a folder with its `SKILL.md`. The `.alta/skills` folder of the selected project opens the same way.
 

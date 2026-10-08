@@ -4,7 +4,7 @@ import { plugins, projectFiles, type PluginsEntry, type PluginsProblem } from "#
 import { AppIcon } from "./AppIcon";
 import { SettingsFileLocation, SettingsFileLocations, type SettingsFiles } from "./SettingsFileLocation";
 import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
-import { ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
+import { RemoveButton, ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
 import { settingsFailure, type SettingsNotice, type SettingsScope } from "./settingsEditing";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
@@ -88,9 +88,11 @@ export function PluginProblems({ problems, omitted, files }: { problems: readonl
  * The list of the page. A source plugin says what the running application did with it and what its last build
  * reported; it is built again in the running application while it is turned on, and opened in the code editor.
  */
-export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, platform, onReveal }: {
+export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelete, platform, onReveal }: {
   rows: readonly PluginRow[]; disabled: boolean;
   onToggle: (id: string, enabled: boolean) => void; onReload: (entry: PluginsEntry) => void; onEdit?: (folder: PluginFolder) => void;
+  /** Removes a source plugin: its folder goes to the trash. Without it the rows have no red button. */
+  onDelete?: (entry: PluginsEntry) => void;
   /** The system, which names its file manager; null where a folder cannot be shown. */
   platform?: string | null;
   /** Shows the folder of a source plugin in the file manager. */
@@ -116,6 +118,7 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, platfor
         {source?.folder && source.path && onEdit && <Button variant="minimal" size="small" icon={<AppIcon name="code" size={15} />}
           aria-label={t("Edit {name}", { name: row.name })} title={t("Edit in the code editor")}
           onClick={() => onEdit({ id: source.folder!, path: source.path!, name: source.id })} />}
+        {source && onDelete && <RemoveButton name={row.name} disabled={disabled} onRemove={() => onDelete(source)} />}
         <Switch checked={row.enabled} disabled={disabled} aria-label={t("Enable {name}", { name: row.name })} onChange={event => onToggle(row.id, event.currentTarget.checked)} /></span>
     </Card>; })}
   </CardList>;
@@ -173,6 +176,9 @@ export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFil
   const rebuild = (entry: PluginsEntry) => void change(
     () => api.reload({ expectedEpoch: epoch, projectId, scope: entry.scope === "Project" ? "Project" : "Global", id: entry.id }, { timeoutMilliseconds: 180000 }),
     () => "Plugin reloaded.");
+  const remove = (entry: PluginsEntry) => void change(
+    () => api.delete({ expectedEpoch: epoch, projectId, scope: entry.scope === "Project" ? "Project" : "Global", id: entry.id }, { timeoutMilliseconds: 120000 }),
+    () => "Removed.");
   const draftId = draft?.id.trim() ?? "";
   const draftProblem: MessageKey | null = !draft ? null : !pluginId.test(draftId) ? "Use letters, digits, dots, dashes or underscores for the plugin id."
     : listed.some(entry => entry.kind === "Source" && entry.scope === (writeScope === "Project" ? "Project" : "Global") && entry.id.toLowerCase() === draftId.toLowerCase())
@@ -203,7 +209,7 @@ export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFil
       {project && <div className="settings-editor-toolbar"><ScopeChoice value={scope} project={project} disabled={disabled} onChange={setScope} /></div>}
       <SettingsFileLocations files={files} disabled={disabled} />
       <PluginProblems problems={listing.problems ?? []} omitted={listing.omitted} files={files} />
-      <PluginRows rows={rows} disabled={disabled} onToggle={toggle} onReload={rebuild} onEdit={onEdit} platform={files.platform} onReveal={revealPlugin} />
+      <PluginRows rows={rows} disabled={disabled} onToggle={toggle} onReload={rebuild} onEdit={onEdit} onDelete={remove} platform={files.platform} onReveal={revealPlugin} />
     </>}
   </SettingsPage>;
 }

@@ -1540,6 +1540,38 @@ The folder of a skill and the folder of a plugin keep their own ids (`skill:`, `
 in the file manager through `projectFiles.reveal`. The global `config.toml` keeps its editor on the
 Configuration file page; its row opens the same file in the code editor.
 
+### Removing what a page creates
+
+A page that creates something removes it too, with one red button (`RemoveButton` in
+`SettingsPage.tsx`): a trash icon in a row, or **Remove** with its label at the foot of a form or in the
+details, and a popover that names what goes (**Remove {name}?**) before anything happens.
+
+| Page | What is removed | How |
+| --- | --- | --- |
+| Agent prompts | A global or project prompt | `agentPrompts.delete`: the file, when it still has the revision that was read |
+| Skills | A skill of `UserAlta`, `ProjectAlta`, `UserCommon` or `ProjectCommon` | `skills.delete`: the folder of the skill goes to the trash of the system |
+| Plugins | A source plugin, global or of a project | `plugins.delete`: stopped, then its folder goes to the trash, then its switch leaves the configuration |
+| MCP Servers | A server of a file of CodeAlta | `mcpServers.remove` |
+| Appearance | A color scheme of the user | `colorSchemes.delete` |
+| Pull requests | A kind of the user or of a project | `pullRequestPrompts.delete` |
+
+What ships with the application (a built-in prompt, skill or plugin), what a plugin brings and what
+another tool owns (a skill or an agent of GitHub Copilot, a server of `.mcp.json`) has no such button.
+
+`skills.delete` names a skill by its name and source, as `detail` does. It answers `read_only` for any
+other source, and only moves a folder that is directly inside the folder its source reads and holds a
+`SKILL.md`: a name is compared with the names of the skills and never made into a path. A code editor
+tab that was open on the folder finds it gone, as for a plugin.
+
+`plugins.delete` names a package by scope and id, as `reload` does. In order: the plugins of the package
+are stopped in the running host (`PluginRuntimeManager.StopPackageAsync`, which does not look at the
+configuration), the folder is moved to the trash (`IDesktopFileTrash`), and the `enabled` entry of
+`[plugins.<id>]` is dropped from the configuration of the scope of the package
+(`RemoveGlobalPluginEnabled`, `RemoveProjectPluginEnabled`), which keeps every other setting of that
+table. The entry stays when a built-in plugin has the same id: it is the switch of that plugin. When the
+folder cannot be moved (`trash_failed`, or `trash_unavailable` on a system without a trash) the plugin
+is started again and nothing else changes. Nothing is ever deleted for good from these pages.
+
 ### Agent prompts
 
 The **Agent prompts** Settings section (or `Ctrl+G`, then `Ctrl+H`) lists agent prompts and system
@@ -1628,7 +1660,9 @@ The row of a source plugin (`PluginRows` in `PluginSettings.tsx`) also has:
   that was built before keeps running;
 - **Source changed**, when the `plugin.cs` on disk is not the one that runs;
 - **Build and reload**, while the plugin is turned on and is one this host loads;
-- **Edit in the code editor**, which opens the folder of the plugin in the code editor (see "Code editor").
+- **Edit in the code editor**, which opens the folder of the plugin in the code editor (see "Code editor");
+- the path of its folder, with **Copy path** and the action that shows it in the file manager;
+- the red **Remove** button, which asks for a confirmation (see "Removing what a page creates").
 
 **New plugin** asks for an id and a description, writes a first `plugin.cs` and a `README.md` in the
 global plugin folder or in the one of the selected project, starts the plugin and opens its folder in
@@ -1640,7 +1674,8 @@ not started in is listed and edited, not loaded), `changed`, `errors`, `runtime`
 `runtimeMessage`; `setEnabled` answers `applied` when the running host followed; `reload` answers
 `ok`, `build_failed` (with the first error), `start_failed`, `disabled`, `not_loaded`, `unknown` or
 `unavailable`; `create` answers the folder id, the path and the name of the new plugin, or `exists`
-and `invalid`.
+and `invalid`; `delete` removes a source package and answers `ok`, `unknown`, `trash_unavailable` or
+`trash_failed`.
 
 `list` answers `ok` with every plugin it could read, and names what it could not read in `problems`
 (`PluginProblems` shows them above the list, in red, each with its path and what the parser or the

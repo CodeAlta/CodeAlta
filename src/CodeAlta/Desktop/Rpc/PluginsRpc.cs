@@ -10,8 +10,8 @@ namespace CodeAlta.Desktop.Rpc;
 /// <summary>
 /// The plugins of the Settings page: lists them from what is on disk (source packages under the global and
 /// project plugin folders, plus plugin ids named in configuration) with what the running host did with each,
-/// saves plugin enablement in the global or project configuration, creates a source plugin, and builds one
-/// again in the running host.
+/// saves plugin enablement in the global or project configuration, creates a source plugin, builds one
+/// again in the running host, and removes one: its folder is moved to the trash of the system.
 /// </summary>
 /// <remarks>
 /// The page lists the built-in plugins itself, so one is returned here only when configuration names
@@ -34,6 +34,7 @@ internal sealed class PluginsService
     private readonly CodeAltaConfigStore? _store;
     private readonly string? _epoch;
     private readonly PluginRuntimeManager? _runtime;
+    private readonly IDesktopFileTrash _trash;
     private readonly PluginManagementModelBuilder _builder = new();
     private readonly SourcePluginDiscoveryService _discovery = new();
     private readonly Lock _gate = new();
@@ -41,16 +42,19 @@ internal sealed class PluginsService
     /// <summary>Creates an unavailable service for launches without an owned host.</summary>
     internal PluginsService()
     {
+        _trash = new DesktopFileTrash();
     }
 
     /// <summary>Creates the service for an owned host.</summary>
     /// <param name="projects">The host's project catalog; its global root holds the configuration and global plugins.</param>
     /// <param name="epoch">The host epoch that requests must name.</param>
     /// <param name="runtime">The host's plugin runtime, which says what was started and loads a plugin again; null leaves that out.</param>
+    /// <param name="trash">Where the folder of a removed plugin goes; the trash of the system by default.</param>
     /// <exception cref="ArgumentNullException"><paramref name="projects"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="epoch"/> is blank.</exception>
-    internal PluginsService(ProjectCatalog projects, string epoch, PluginRuntimeManager? runtime = null)
+    internal PluginsService(ProjectCatalog projects, string epoch, PluginRuntimeManager? runtime = null, IDesktopFileTrash? trash = null)
     {
+        _trash = trash ?? new DesktopFileTrash();
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
         _projects = projects;
@@ -314,6 +318,85 @@ internal sealed class PluginsService
         }
 
         return new("ok", null, PluginFolder.Of(package, request.ProjectId).Id, package.PackageDirectory, package.PackageId);
+    }
+
+    /// <summary>
+    /// Removes a source plugin: its plugins are stopped in the running host, its folder is moved to the trash of
+    /// the system, and the entry of the configuration of its scope that turns it on or off is dropped. A plugin
+    /// that ships with CodeAlta has no folder and is never removed. Answers <c>unknown</c> for a package that is
+    /// not there, and <c>trash_unavailable</c> or <c>trash_failed</c> when nothing was moved: the plugin then
+    /// runs as before.
+    /// </summary>
+    [NeoRpcMethod("delete", TimeoutMilliseconds = 120_000)]
+    public async Task<PluginsMutationResponse> DeleteAsync(PluginsPackageRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_projects is null || _store is null) return new("unavailable", null);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null);
+        var (status, root) = await RootAsync(request.ProjectId, request.Scope, cancellationToken).ConfigureAwait(false);
+        if (root is null) return new(status, null);
+        if (!ValidId(request.Id)) return new("invalid", null);
+        var id = request.Id!;
+        var folder = Path.Combine(root.RootPath, id);
+        var file = Path.GetFullPath(Path.Combine(folder, "plugin.cs"));
+        if (!File.Exists(file)) return new("unknown", null);
+        if (!_trash.Available) return new("trash_unavailable", null);
+
+        // Stopped first, as turning it off does: nothing of it runs while its folder goes.
+        var hosted = Hosted().FirstOrDefault(package => PathComparer.Equals(package.Package.EntryFilePath, file));
+        var stopped = false;
+        if (hosted is not null)
+        {
+            try
+            {
+                await _runtime!.StopPackageAsync(hosted.Package, cancellationToken).ConfigureAwait(false);
+                stopped = true;
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException)
+            {
+                // The host is closing: nothing of the plugin is started the next time.
+            }
+        }
+
+        // Not under the gate: the system may ask a question before it moves something.
+        if (!await _trash.MoveAsync(folder, CancellationToken.None).ConfigureAwait(false))
+        {
+            if (stopped) await RestartAsync(hosted!.Package).ConfigureAwait(false);
+            return new("trash_failed", null);
+        }
+
+        // The switch of a plugin that ships with CodeAlta under the same id is not the one of this package.
+        if (!(_runtime?.StartOptions?.BuiltIns.Any(builtIn => string.Equals(builtIn.Id, id, StringComparison.OrdinalIgnoreCase)) ?? false))
+        {
+            try
+            {
+                lock (_gate)
+                {
+                    if (root.Scope == PluginScope.Project) _store.RemoveProjectPluginEnabled(root.ProjectPath!, id);
+                    else _store.RemoveGlobalPluginEnabled(id);
+                }
+            }
+            catch (Exception exception) when (exception is TomlException or InvalidDataException or InvalidOperationException or FormatException or IOException or UnauthorizedAccessException)
+            {
+                // The package is gone. A file that cannot be written keeps its entry, which the list shows as an id of configuration.
+                Log(exception, "The configuration entry of a removed plugin was not dropped");
+            }
+        }
+
+        return new("ok", null, stopped);
+    }
+
+    // The folder was not moved: what was stopped for the removal runs again.
+    private async Task RestartAsync(SourcePluginPackage package)
+    {
+        try
+        {
+            await _runtime!.ReloadPackageAsync(package, force: false, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException or IOException or UnauthorizedAccessException)
+        {
+            Log(exception, "A plugin that was not removed was not started again");
+        }
     }
 
     /// <summary>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Button, Callout, NonIdealState, SegmentedControl } from "@blueprintjs/core";
+import { Button, Callout, NonIdealState, PopoverNext, SegmentedControl } from "@blueprintjs/core";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon, type IconName } from "./AppIcon";
 import type { MessageKey } from "./localization";
@@ -78,6 +78,21 @@ export function SettingsPage({ className, label, group, title, description, acti
 export function SettingsUnavailable({ loading, icon, title }: { loading: boolean; icon: IconName; title: MessageKey }) {
   const { t } = useShellLanguage();
   return <NonIdealState icon={loading ? <ActivitySpinner size={28} /> : <AppIcon name={icon} size={36} />} title={t(loading ? "Loading…" : title)} />;
+}
+
+/**
+ * The red button that removes what a page can create (a prompt, a skill, a plugin, a server): the name of what goes
+ * is confirmed in a popover first. With `text` it is labeled, as at the foot of a form; without, it is the icon alone,
+ * as in a row.
+ */
+export function RemoveButton({ name, text = false, disabled, onRemove }: { name: string; text?: boolean; disabled?: boolean; onRemove: () => void }) {
+  const { t } = useShellLanguage();
+  return <PopoverNext placement="top-end" content={<div className="provider-settings-confirm"><p>{t("Remove {name}?", { name })}</p>
+    <Button className="bp6-popover-dismiss" intent="danger" disabled={disabled} onClick={onRemove}>{t("Remove")}</Button></div>}>
+    {text ? <Button variant="minimal" intent="danger" icon={<AppIcon name="trash" size={15} />} disabled={disabled} text={t("Remove")} />
+      : <Button variant="minimal" size="small" intent="danger" icon={<AppIcon name="trash" size={15} />} disabled={disabled}
+        aria-label={t("Remove {name}", { name })} title={t("Remove")} />}
+  </PopoverNext>;
 }
 
 /** Chooses whether a change is stored for the user (global) or for the selected project. */

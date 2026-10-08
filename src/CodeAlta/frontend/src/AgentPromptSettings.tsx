@@ -8,7 +8,7 @@ import { PromptRows, promptIdentity as identity } from "./PromptRows";
 import { CodeEditor } from "./monaco/CodeEditor";
 import { SettingsFileLocation, SettingsFileLocations } from "./SettingsFileLocation";
 import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
-import { ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
+import { RemoveButton, ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
 import { settingsFailure, type SettingsScope } from "./settingsEditing";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
@@ -145,10 +145,7 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
               <Button disabled={selected !== added && !dirty || busy} onClick={() => { if (selected === added) { setForm(null); setSelected(prompts[0] ? identity(prompts[0]) : null); } else if (baseline) setForm(baseline); }}>{t(selected === added ? "Cancel" : "Revert")}</Button>
             </>}
             <span className="settings-editor-spacer" />
-            {document && !readOnly && selected !== added && <PopoverNext placement="top-end" content={<div className="provider-settings-confirm"><p>{t("Remove {name}?", { name: entry?.name || document.id })}</p>
-              <Button intent="danger" disabled={busy} onClick={() => void remove()}>{t("Remove")}</Button></div>}>
-              <Button variant="minimal" intent="danger" icon={<AppIcon name="trash" size={15} />} disabled={busy} text={t("Remove")} />
-            </PopoverNext>}
+            {document && !readOnly && selected !== added && <RemoveButton text name={entry?.name || document.id} disabled={busy} onRemove={() => void remove()} />}
           </SectionCard>
         </Section> : reading && <SettingsUnavailable loading icon="assistant" title="Agent prompts unavailable" />}
       </div></>}

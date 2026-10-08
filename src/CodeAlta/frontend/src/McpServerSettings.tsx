@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { Button, Card, CardList, FormGroup, InputGroup, PopoverNext, Section, SectionCard, SegmentedControl, Switch, Tag, TextArea } from "@blueprintjs/core";
+import { Button, Card, CardList, FormGroup, InputGroup, Section, SectionCard, SegmentedControl, Switch, Tag, TextArea } from "@blueprintjs/core";
 import { mcpServers, type McpServerEntry } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { McpServerAuthorization } from "./McpServerAuthorization";
 import { authorizationBlocked } from "./mcpAuthorization";
 import { SettingsFileLocations } from "./SettingsFileLocation";
 import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
-import { ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
+import { RemoveButton, ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
 import { mcpServerEdit, mcpServerForm, mcpServerFormDirty, mcpServerId, mcpServerReadOnly, validateMcpServerForm, type McpServerForm, type NameValueRow } from "./settingsEditing";
 import { CopilotTag } from "./CopilotTag";
 import { useShellLanguage } from "./shellLanguage";
@@ -154,10 +154,7 @@ export function McpServerSettings({ epoch, project, onOpenFile, api = mcpServers
             <Button intent="primary" disabled={!dirty || !!problem || busy} onClick={() => void save()}>{t("Save")}</Button>
             <Button disabled={selected !== added && !dirty || busy} onClick={() => { if (selected !== added) { if (baseline) setForm(baseline); } else if (servers[0]) choose(servers[0]); else { setSelected(null); setForm(null); } }}>{t(selected === added ? "Cancel" : "Revert")}</Button>
             <span className="settings-editor-spacer" />
-            {original && !readOnly && <PopoverNext placement="top-end" content={<div className="provider-settings-confirm"><p>{t("Remove {name}?", { name: original.key })}</p>
-              <Button intent="danger" disabled={busy} onClick={() => void remove()}>{t("Remove")}</Button></div>}>
-              <Button variant="minimal" intent="danger" icon={<AppIcon name="trash" size={15} />} disabled={busy} text={t("Remove")} />
-            </PopoverNext>}
+            {original && !readOnly && <RemoveButton text name={original.key} disabled={busy} onRemove={() => void remove()} />}
           </SectionCard>
         </Section>}
       </div></>}

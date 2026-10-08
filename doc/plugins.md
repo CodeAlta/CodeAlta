@@ -207,7 +207,7 @@ In the terminal application, open plugin management with `Ctrl+G Ctrl+N` or the 
 
 ## Changing plugins while the application runs
 
-`PluginRuntimeManager` keeps the options it was started with (`StartOptions`, `Roots`) and changes one source package at a time afterwards (`PluginRuntimeReload.cs`). The desktop application uses it for its Plugins page and for the `alta plugin` commands of its sessions; the terminal application lists the packages and changes nothing.
+`PluginRuntimeManager` keeps the options it was started with (`StartOptions`, `Roots`) and changes one source package at a time afterwards (`PluginRuntimeReload.cs`): `ReloadPackageAsync` builds and replaces, `StopPackageAsync` stops a package that is about to be removed from disk, whatever the configuration says. A host started in the folder that holds the global root has one plugin folder, the global one. The desktop application uses it for its Plugins page and for the `alta plugin` commands of its sessions; the terminal application lists the packages and changes nothing.
 
 | Member | What it does |
 | --- | --- |

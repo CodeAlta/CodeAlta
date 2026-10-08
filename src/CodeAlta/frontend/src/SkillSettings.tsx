@@ -8,7 +8,7 @@ import { MarkdownContent } from "./MarkdownContent";
 import { skillInstructions } from "./skillDetail";
 import { SettingsFileLocation, SettingsFileLocations } from "./SettingsFileLocation";
 import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
-import { ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
+import { RemoveButton, ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
 import { settingsFailure, type SettingsScope } from "./settingsEditing";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
@@ -17,6 +17,8 @@ const sourceLabels: Record<string, MessageKey> = { ProjectAlta: "Project", Proje
   Plugin: "Plugin", Builtin: "Built-in" };
 
 const skillKey = (skill: Pick<SkillsEntry, "name" | "source">) => `${skill.source}:${skill.name}`;
+/** Whether a skill is removed from here: one of a CodeAlta folder or of the common folder, of the user or of a project. */
+export const skillRemovable = (source: string) => ["UserAlta", "ProjectAlta", "UserCommon", "ProjectCommon"].includes(source);
 
 /** The folder of a skill, as the code editor opens on it: the id the host gave it, its path and the name of the skill. */
 export type SkillFolder = Readonly<{ id: string; path: string; name: string }>;
@@ -25,8 +27,11 @@ export type SkillFolder = Readonly<{ id: string; path: string; name: string }>;
  * What the selected skill is, where it lives and what its SKILL.md tells the agent. Its folder opens in the code
  * editor: to be edited when the skill is one of the user or of a project, to be read otherwise.
  */
-export function SkillDetail({ skill, detail, failed, onEdit, platform, onReveal }: {
+export function SkillDetail({ skill, detail, failed, onEdit, onDelete, disabled, platform, onReveal }: {
   skill: SkillsEntry; detail: SkillsDetailResponse | undefined; failed: boolean; onEdit?: (folder: SkillFolder) => void;
+  /** Removes the skill: its folder goes to the trash. Without it, and for a skill that is not the user's to remove, there is no red button. */
+  onDelete?: (skill: SkillsEntry) => void;
+  disabled?: boolean;
   /** The system, which names its file manager; null where a file cannot be shown. */
   platform?: string | null;
   /** Shows the folder of the skill, or a file of it, in the file manager. */
@@ -51,7 +56,8 @@ export function SkillDetail({ skill, detail, failed, onEdit, platform, onReveal 
         {detail?.folder && detail.skillRootPath && onEdit && <Button size="small" icon={<AppIcon name="code" size={15} />}
           aria-label={t(readOnly ? "View the files of {name}" : "Edit {name}", { name: skill.title || skill.name })}
           title={t(readOnly ? "Open in the code editor" : "Edit in the code editor")}
-          onClick={() => onEdit({ id: detail.folder!, path: detail.skillRootPath!, name: skill.name })}>{t(readOnly ? "View files" : "Edit")}</Button>}</span></header>
+          onClick={() => onEdit({ id: detail.folder!, path: detail.skillRootPath!, name: skill.name })}>{t(readOnly ? "View files" : "Edit")}</Button>}
+        {onDelete && skillRemovable(skill.source) && <RemoveButton text name={skill.title || skill.name} disabled={disabled} onRemove={() => onDelete(skill)} />}</span></header>
     <p className="skill-detail-description">{skill.description}</p>
     {failed && <p role="alert" className="error-text">{t("The skill details could not be read.")}</p>}
     {detail && <>
@@ -76,12 +82,14 @@ export function SkillDetail({ skill, detail, failed, onEdit, platform, onReveal 
  * The list of the page: a row per skill with its switch, and the button that opens its folder in the code editor, to
  * be edited when the skill is one of the user or of a project, to be read otherwise.
  */
-export function SkillRows({ skills, empty, selected, disabled, onSelect, onToggle, onEdit }: {
+export function SkillRows({ skills, empty, selected, disabled, onSelect, onToggle, onEdit, onDelete }: {
   skills: readonly SkillsEntry[];
   /** What the list says when it has no skill. */
   empty: MessageKey;
   selected: SkillsEntry | undefined; disabled: boolean;
   onSelect: (skill: SkillsEntry) => void; onToggle: (skill: SkillsEntry, enabled: boolean) => void; onEdit?: (folder: SkillFolder) => void;
+  /** Removes a skill of the user or of a project: its folder goes to the trash. Without it the rows have no red button. */
+  onDelete?: (skill: SkillsEntry) => void;
 }) {
   const { t } = useShellLanguage();
   return <CardList compact className="settings-editor-rows settings-editor-list" aria-label={t("Skills")}>
@@ -95,6 +103,7 @@ export function SkillRows({ skills, empty, selected, disabled, onSelect, onToggl
           {skill.folder && skill.path && onEdit && <Button variant="minimal" size="small" icon={<AppIcon name="code" size={15} />}
             aria-label={t(readOnly ? "View the files of {name}" : "Edit {name}", { name })} title={t(readOnly ? "Open in the code editor" : "Edit in the code editor")}
             onClick={() => onEdit({ id: skill.folder!, path: skill.path!, name: skill.name })} />}
+          {onDelete && skillRemovable(skill.source) && <RemoveButton name={name} disabled={disabled} onRemove={() => onDelete(skill)} />}
           <Switch checked={skill.enabled} disabled={disabled} aria-label={t("Enable {name}", { name: skill.name })} onChange={event => onToggle(skill, event.currentTarget.checked)} /></span>
       </Card>; })}
     {skills.length === 0 && <Card><span className="bp6-text-muted">{t(empty)}</span></Card>}
@@ -152,6 +161,7 @@ export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills
   const toggle = (skill: SkillsEntry, enabled: boolean) => void mutate(() => api.setEnabled({ expectedEpoch: epoch, projectId, scope: writeScope, name: skill.name, enabled }, { timeoutMilliseconds: 30000 }));
   const toggleAll = (enabled: boolean) => void mutate(() => api.setAllEnabled({ expectedEpoch: epoch, projectId, scope: writeScope,
     names: [...new Set(shown.map(skill => skill.name))], enabled }, { timeoutMilliseconds: 30000 }));
+  const remove = (skill: SkillsEntry) => void mutate(() => api.delete({ expectedEpoch: epoch, projectId, name: skill.name, source: skill.source }, { timeoutMilliseconds: 120000 }), "Removed.");
   const draftProblem: MessageKey | null = !draft ? null : !/^[a-z0-9][a-z0-9-]{0,63}$/.test(draft.name.trim()) ? "Use lowercase letters, digits and dashes for the skill name."
     : all.some(skill => skill.name === draft.name.trim()) ? "A skill with this name already exists." : !draft.description.trim() ? "Describe when the skill should be used." : null;
   async function create() {
@@ -191,8 +201,8 @@ export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills
       </div>
       <div className="settings-editor-layout skill-settings-layout">
         <SkillRows skills={shown} empty={all.length ? "No skill matches the filter." : "No skills were found."} selected={selected} disabled={busy}
-          onSelect={skill => setSelectedKey(skillKey(skill))} onToggle={toggle} onEdit={onEdit} />
-        {selected ? <SkillDetail skill={selected} detail={shownDetail?.value ?? undefined} failed={shownDetail?.value === null} onEdit={onEdit} platform={files.platform} onReveal={revealSkill} />
+          onSelect={skill => setSelectedKey(skillKey(skill))} onToggle={toggle} onEdit={onEdit} onDelete={remove} />
+        {selected ? <SkillDetail skill={selected} detail={shownDetail?.value ?? undefined} failed={shownDetail?.value === null} onEdit={onEdit} onDelete={remove} disabled={busy} platform={files.platform} onReveal={revealSkill} />
           : <NonIdealState icon={<AppIcon name="skill" size={32} />} title={t("No skills were found.")} />}
       </div>
     </>}

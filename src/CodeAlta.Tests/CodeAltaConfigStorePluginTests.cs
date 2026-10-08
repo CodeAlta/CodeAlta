@@ -207,6 +207,50 @@ answer = 42
     }
 
     [TestMethod]
+    public void RemoveGlobalPluginEnabled_DropsTheSwitchOfThePluginAndKeepsEverythingElse()
+    {
+        using var config = TempConfig.Create(ConfigWithUnmodeledSettings + "\n[plugins.sample-plugin]\nenabled = false\n");
+
+        // A plugin that only has its switch goes with its table.
+        Assert.IsTrue(config.Store.RemoveGlobalPluginEnabled("Sample-Plugin"));
+
+        Assert.IsFalse(config.Store.LoadGlobal().Plugins!.ContainsKey("sample-plugin"));
+        Assert.IsFalse(File.ReadAllText(config.Path).Contains("sample-plugin", StringComparison.Ordinal));
+        Assert.AreEqual(false, config.Store.LoadGlobal().Plugins!["mcp"].Enabled);
+        AssertUnmodeledSettingsKept(config.Path);
+
+        // A plugin that has other settings keeps them: only its switch goes.
+        Assert.IsTrue(config.Store.RemoveGlobalPluginEnabled("mcp"));
+
+        Assert.IsNull(config.Store.LoadGlobal().Plugins?.GetValueOrDefault("mcp")?.Enabled);
+        AssertUnmodeledSettingsKept(config.Path);
+
+        // Nothing to remove writes nothing.
+        var written = File.ReadAllText(config.Path);
+        Assert.IsFalse(config.Store.RemoveGlobalPluginEnabled("mcp"));
+        Assert.IsFalse(config.Store.RemoveGlobalPluginEnabled("never-configured"));
+        Assert.AreEqual(written, File.ReadAllText(config.Path));
+        Assert.Throws<ArgumentException>(() => config.Store.RemoveGlobalPluginEnabled(" "));
+    }
+
+    [TestMethod]
+    public void RemovePluginEnabled_OfAFileThatIsNotThere_CreatesNoFile()
+    {
+        using var config = TempConfig.Create(null);
+        var projectPath = Path.Combine(config.Root, "project");
+        Directory.CreateDirectory(projectPath);
+
+        Assert.IsFalse(config.Store.RemoveGlobalPluginEnabled("sample-plugin"));
+        Assert.IsFalse(config.Store.RemoveProjectPluginEnabled(projectPath, "sample-plugin"));
+        Assert.IsFalse(File.Exists(config.Path) || File.Exists(Path.Combine(projectPath, ".alta", "config.toml")));
+
+        config.Store.SaveProjectPluginEnabled(projectPath, "sample-plugin", enabled: true);
+        Assert.IsTrue(config.Store.RemoveProjectPluginEnabled(projectPath, "sample-plugin"));
+        Assert.IsNull(config.Store.LoadProject(projectPath).Plugins?.GetValueOrDefault("sample-plugin"));
+        Assert.IsFalse(File.Exists(config.Path), "A project change must not create the global file.");
+    }
+
+    [TestMethod]
     public void SaveGlobalProviderPreference_KeepsLineEndingsAndEndOfLineComments()
     {
         using var config = TempConfig.Create(string.Join("\r\n",

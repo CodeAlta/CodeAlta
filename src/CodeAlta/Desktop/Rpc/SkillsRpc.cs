@@ -7,7 +7,8 @@ namespace CodeAlta.Desktop.Rpc;
 /// <summary>
 /// Lists the skills discovered for the global scope and an optional project, saves their name-based
 /// enablement in the global or project configuration, and scaffolds new skills: the operations of the
-/// terminal's skills manager. A skill is also named by the id of its folder, which the code editor opens on.
+/// terminal's skills manager. A skill is also named by the id of its folder, which the code editor opens on, and
+/// a skill of the user or of a project is removed: its folder is moved to the trash of the system.
 /// </summary>
 [NeoRpcService("skills", Version = 1)]
 internal sealed class SkillsService
@@ -28,12 +29,14 @@ internal sealed class SkillsService
     private readonly ProjectCatalog? _projects;
     private readonly SkillManagementService? _management;
     private readonly SkillFolders? _folders;
+    private readonly IDesktopFileTrash _trash;
     private readonly string? _epoch;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     /// <summary>Creates an unavailable service for launches without an owned host.</summary>
     internal SkillsService()
     {
+        _trash = new DesktopFileTrash();
     }
 
     /// <summary>Creates the service for an owned host.</summary>
@@ -41,10 +44,12 @@ internal sealed class SkillsService
     /// <param name="catalog">The host's skill catalog, including its built-in and plugin root providers.</param>
     /// <param name="userProfileRoot">The profile holding the common <c>.agents/skills</c> root, or null to omit it.</param>
     /// <param name="epoch">The host epoch that requests must name.</param>
+    /// <param name="trash">Where the folder of a removed skill goes; the trash of the system by default.</param>
     /// <exception cref="ArgumentNullException"><paramref name="projects"/> or <paramref name="catalog"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="epoch"/> is blank.</exception>
-    internal SkillsService(ProjectCatalog projects, SkillCatalog catalog, string? userProfileRoot, string epoch)
+    internal SkillsService(ProjectCatalog projects, SkillCatalog catalog, string? userProfileRoot, string epoch, IDesktopFileTrash? trash = null)
     {
+        _trash = trash ?? new DesktopFileTrash();
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
@@ -203,6 +208,59 @@ internal sealed class SkillsService
         }
     }
 
+    /// <summary>
+    /// Removes a skill of the user or of a project: its folder is moved to the trash of the system. Only a skill
+    /// of a CodeAlta folder or of the common folder (<c>UserAlta</c>, <c>ProjectAlta</c>, <c>UserCommon</c>,
+    /// <c>ProjectCommon</c>) is removed; any other source answers <c>read_only</c>. The folder must be the one
+    /// directly inside the folder its source reads: nothing else is ever moved.
+    /// </summary>
+    [NeoRpcMethod("delete", TimeoutMilliseconds = 120_000)]
+    public async Task<SkillsMutationResponse> DeleteAsync(SkillsDetailRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_projects is null || _management is null) return new("unavailable", 0, null);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", 0, null);
+        if (request.Name is not { Length: > 0 and <= MaximumNameLength } || request.Source is not { Length: > 0 and <= 64 }) return new("invalid", 0, null);
+        // The name of a source as the listing gives it: a number is not one.
+        if (!request.Source.All(char.IsAsciiLetter) || !Enum.TryParse<SkillSourceKind>(request.Source, ignoreCase: false, out var source) || !Enum.IsDefined(source))
+            return new("invalid", 0, null);
+        if (source is not (SkillSourceKind.UserAlta or SkillSourceKind.ProjectAlta or SkillSourceKind.UserCommon or SkillSourceKind.ProjectCommon)) return new("read_only", 0, null);
+        var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
+        if (project.Status != "ok") return new(project.Status, 0, null);
+        if (!_trash.Available) return new("trash_unavailable", 0, null);
+        string folder;
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var descriptors = await _management.LoadAsync(SkillListingScope.Combined, project.Root, cancellationToken).ConfigureAwait(false);
+            var skill = descriptors.FirstOrDefault(candidate => candidate.SourceKind == source && string.Equals(candidate.Name, request.Name, StringComparison.Ordinal));
+            if (skill is null) return new("not_found", 0, null);
+            folder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(skill.SkillRootPath));
+            // The folder of one skill, directly in the folder of its source: never that folder itself, nor one above it.
+            var root = _management.GetRoots(project.Root).FirstOrDefault(candidate => candidate.Source == source)?.RootPath;
+            if (root is null || !PathComparer.Equals(Path.GetDirectoryName(folder), Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)))
+                || !File.Exists(Path.Combine(folder, "SKILL.md")))
+            {
+                return new("read_only", 0, null);
+            }
+        }
+        catch (InvalidDataException)
+        {
+            return new("config_invalid", 0, null);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return new("read_failed", 0, null);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        // Not under the gate: the system may ask a question before it moves something.
+        return await _trash.MoveAsync(folder, CancellationToken.None).ConfigureAwait(false) ? new("ok", 1, null) : new("trash_failed", 0, null);
+    }
+
     private async Task<SkillsMutationResponse> SetAsync(string? expectedEpoch, string? projectId, string? scope, IReadOnlyList<string>? names,
         bool enabled, CancellationToken cancellationToken)
     {
@@ -239,6 +297,7 @@ internal sealed class SkillsService
         }
     }
 
+    private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
     private const string ScopeRule = "The scope must be Global or Project.";
     private const string ProjectRequired = "The project scope requires a project.";
 
