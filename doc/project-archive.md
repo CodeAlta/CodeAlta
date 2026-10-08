@@ -49,8 +49,12 @@ Missing/malformed/ambiguous ownership and observed reparse-point links refuse.
 Canonical and supported legacy sources are supported; a moved source cannot
 receive a stale confirmation.
 
-The codec serializes its cooperating saves and compares raw-byte revisions
-before replacement. **This is not cross-process atomic compare-and-swap.**
+The conditional edits of one `ProjectCatalog` (an archive change, a rename of
+the display name) run one at a time, from their first read of the project file
+to its replacement: a second edit that read the file while the first replaced
+it got a sharing violation on Windows where its answer is a conflict. The codec
+serializes its cooperating saves and compares raw-byte revisions before
+replacement. **This is not cross-process atomic compare-and-swap.**
 External editors, other Catalog instances, general descriptor saves and path
 swaps can still race after checks. Bounded ownership scans are not filesystem
 snapshots. Desktop admission is not a process-wide or external-writer lock.

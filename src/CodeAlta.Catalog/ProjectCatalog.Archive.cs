@@ -18,7 +18,7 @@ public sealed partial class ProjectCatalog
     }
 
     /// <summary>Conditionally replaces only an explicit root archived scalar; preserves unrelated source bytes and encoding.</summary>
-    /// <remarks>Shares the display-name codec's instance save gate. This is not cross-process CAS or protection against concurrent path swaps.
+    /// <remarks>Runs one at a time with the renames of this catalog instance. This is not cross-process CAS or protection against concurrent path swaps.
     /// Missing/complex archived scalars are unsupported. No directory, journal or running work is changed.</remarks>
     /// <param name="projectId">Exact persisted ID.</param><param name="projectPath">Exact project path.</param>
     /// <param name="expectedSourcePath">Previously observed catalog source, never renderer authority.</param><param name="expectedRevision">Previously observed raw-byte revision.</param>
@@ -28,6 +28,20 @@ public sealed partial class ProjectCatalog
     /// <exception cref="OperationCanceledException">Canceled before commit.</exception>
     public async Task<ProjectDisplayNameRenameStatus> SetArchivedAsync(string projectId, string projectPath, string expectedSourcePath,
         TextFileRevision expectedRevision, bool expectedArchived, bool archived, CancellationToken cancellationToken = default)
+    {
+        await _projectEditGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await SetArchivedCoreAsync(projectId, projectPath, expectedSourcePath, expectedRevision, expectedArchived, archived, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _projectEditGate.Release();
+        }
+    }
+
+    private async Task<ProjectDisplayNameRenameStatus> SetArchivedCoreAsync(string projectId, string projectPath, string expectedSourcePath,
+        TextFileRevision expectedRevision, bool expectedArchived, bool archived, CancellationToken cancellationToken)
     {
         var source = await ReadArchiveSourceAsync(projectId, projectPath, cancellationToken).ConfigureAwait(false);
         if (source is null) return ProjectDisplayNameRenameStatus.Unsupported;

@@ -26,6 +26,11 @@ public sealed partial class ProjectCatalog
 {
     private readonly TextFileCodec _projectNameFiles = new();
 
+    // One conditional edit of a project file at a time, from its first read to its save: a second one would
+    // otherwise read the file while the first replaces it, which the system refuses (a sharing violation on
+    // Windows) where the answer is a conflict.
+    private readonly SemaphoreSlim _projectEditGate = new(1, 1);
+
     /// <summary>Reads the exact project's current display name and source revision for a conditional rename.</summary>
     /// <param name="projectId">Persisted project ID.</param>
     /// <param name="projectPath">Exact normalized catalog project path, not the source file path.</param>
@@ -50,8 +55,10 @@ public sealed partial class ProjectCatalog
     /// <remarks>Only a unique, direct root scalar is edited; all other bytes, encoding, and Markdown remain intact.
     /// Missing, tagged, and multiline display names and observed linked catalog paths are unsupported;
     /// malformed YAML (including duplicate keys and unresolved aliases) is rejected by the catalog loader.
-    /// A shared codec serializes cooperating saves. External editors can still race after its final revision check;
-    /// this is not a cross-process atomic compare-and-swap. No conflict is retried automatically.</remarks>
+    /// Conditional edits of one catalog instance (renames and archive changes) run one after the other, from their
+    /// first read to their save: of two that started from the same revision, one is a conflict. External editors and
+    /// other processes can still race after the final revision check; this is not a cross-process atomic
+    /// compare-and-swap. No conflict is retried automatically.</remarks>
     /// <param name="projectId">Exact persisted project ID.</param>
     /// <param name="projectPath">Exact normalized catalog project path.</param>
     /// <param name="expectedSourcePath">Exact source path captured by <see cref="ReadDisplayNameAsync"/>.</param>
@@ -74,6 +81,20 @@ public sealed partial class ProjectCatalog
         ArgumentNullException.ThrowIfNull(expectedRevision);
         if (!expectedRevision.Exists) throw new ArgumentException("An existing source revision is required.", nameof(expectedRevision));
         if (!ValidDisplayName(displayName)) throw new ArgumentException("A bounded, unpadded Unicode display name is required.", nameof(displayName));
+        await _projectEditGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await RenameDisplayNameCoreAsync(projectId, projectPath, expectedSourcePath, expectedRevision, displayName, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _projectEditGate.Release();
+        }
+    }
+
+    private async Task<ProjectDisplayNameRenameStatus> RenameDisplayNameCoreAsync(string projectId, string projectPath, string expectedSourcePath,
+        TextFileRevision expectedRevision, string displayName, CancellationToken cancellationToken)
+    {
         var project = await GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false);
         if (project is null || project.Id != projectId || project.ProjectPath != projectPath
             || project.SourcePath != expectedSourcePath)
