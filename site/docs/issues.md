@@ -28,6 +28,8 @@ A public repository is read without signing in. A private one needs the sign-in 
 
 Open it with the issue icon of the activity bar, or with `Ctrl+G Ctrl+B`.
 
+With no projects, the tab shows **No projects in this snapshot.** Open a project first.
+
 - Choose the project, then **Issues** or **Pull requests**.
 - **Open**, **Closed**, **Merged** and **All** are separate lists, the most recently updated first.
 - Type words or a number to filter the list.

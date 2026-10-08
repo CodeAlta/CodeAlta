@@ -2266,6 +2266,8 @@ issue icon of the activity bar, **Issues** in the search of the window, `Ctrl+G`
 The sources are `CodeAlta.Plugins.Abstractions/PluginIssueTracking.cs` (the model), `CodeAlta.Plugin.Git/GitHostTracker.cs`
 (the hosting services), `Desktop/Rpc/IssuesRpc.cs` (host) and `frontend/src/issues/` (page).
 
+- **No project.** The tab shows **No projects in this snapshot.** instead of waiting for tracker sources.
+  Sources are used only when both their state and the selected project exist and their project IDs match.
 - **Jira** is a tracker of the projects that name one (`[plugins.jira]`, see `doc/plugins.md`): its issues have keys
   (`ALTA-12`), a type, a priority and the status of their workflow, shown beside the state. Its rows have no date,
   which the search of the Atlassian CLI does not give. When the CLI is being downloaded or nobody is signed in, the

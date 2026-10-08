@@ -68,3 +68,20 @@ test("the tab says what it waits for, and that a window without a host has no is
   assert.match(html, /<option value="p" selected="">Alpha<\/option>/);
   assert.ok(html.includes("activity-spinner") && !html.includes("No tracker for this project"), "nothing is said to be missing before the host answered");
 });
+
+test("a window without projects shows an empty state instead of waiting for sources", () => {
+  const never = () => assert.fail("rendering must not ask the host");
+  const api = { sources: never, list: never, read: never, start: never, openLink: never } as unknown as IssuesApi;
+  const render = (projectId: string | null, visible: boolean, epoch: string | null) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider,
+    { value: { locale: "en", choice: "en", setLanguage: never } },
+    createElement(IssuesPanel, { api, epoch, projects: [], projectId, visible, preferredStart: "worktree", onActivate: never, onOpenSession: never, onNotice: never })));
+  for (const projectId of [null, "removed"]) {
+    for (const visible of [true, false]) {
+      const html = render(projectId, visible, "epoch");
+      assert.ok(html.includes("No projects in this snapshot."));
+      assert.ok(!html.includes("activity-spinner"), "there is no project whose sources can load");
+      assert.ok(!html.includes("No tracker for this project"), "a missing project is not a project without a tracker");
+      assert.ok(render(projectId, visible, null).includes("Issues are unavailable in this window."));
+    }
+  }
+});
