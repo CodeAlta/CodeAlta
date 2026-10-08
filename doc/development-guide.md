@@ -151,6 +151,39 @@ Rules for these sources:
 - A feature's stylesheet is imported from `main.tsx`, after `style.css`, not from its components: the tests
   import components without a bundler.
 
+### What a render of the desktop page may cost
+
+`App` (in `main.tsx`) holds the state of the whole window, and every open session tab stays mounted with its
+timeline. A render of `App` goes through all of it, so what makes `App` render, and how far a render goes,
+decides how the application feels with long sessions and many tabs:
+
+- A keystroke, a token of a running session and a timer never render `App`. What changes often lives in a
+  store (`subscribe` and a snapshot function) or in the component that shows it, and `App` follows only what it
+  needs from it: a value that changes when its own decision does (`draftSendFacts`, `getRunning`), not the
+  store's whole state.
+- A component that shows one fact of a store follows that fact: `useSyncExternalStore(store.subscribe, () =>
+  theFact(store))`, where the function returns a primitive or an object that stays the same while the fact
+  does (`useDraftIndicator`, `RunningSessionBadge`).
+- The value of a context is the same object while what it says is the same (`useMemo`, or kept by its owner).
+  A new object on each render renders every reader of the context, through `memo`.
+- What a memoized component is given keeps its identity while it says the same: an array a function builds
+  on each call (`submissions.outgoing`), an inline function among the dependencies of an effect, break it
+  silently.
+- A live update of a session touches what changed: the rows of a timeline are compared by group
+  (`sameTimelineGroup`), and what the records of a history window say is worked out once per window
+  (`reconcileTimeline`). A history window is never changed in place.
+- Reading the layout (`getBoundingClientRect`, `scrollTop`, `offsetHeight`) in an effect that runs on every
+  render forces the browser to lay the page out each time. Such an effect has dependencies that name when
+  it must run.
+- Whether a modal dialog is open is asked with `modalDialogOpen()`, not by searching the document.
+- The host sends a session pane the live state of its own session, when it changed, at most every 33 ms
+  (`SessionDisplayService`).
+
+To see what a change costs, start the developer instance with
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223` and take a CPU profile over that port
+(`Profiler.start` and `Profiler.stop` of the DevTools protocol) with several long sessions open; a build with
+`minify: false` in `vite.config.ts` gives readable names.
+
 ## Frontend Shell Shape
 
 The TUI frontend should stay organized around explicit state, commands, events, and projections rather than broad callbacks into `CodeAltaApp`:
