@@ -378,7 +378,9 @@ as it is. A rename that is refused says why under the field. A session keeps the
 or renamed with, also when a later Send attaches it again (another model, a restart) and when it is
 continued from the terminal UI, which lists a session by the first line of its summary; a session that
 was never named shows the first line of its summary, 80 characters at most
-(`SessionRuntimeService.ListedTitle`), and its deletion is confirmed with that title.
+(`SessionRuntimeService.ListedTitle`), and its deletion is confirmed with that title. That line follows
+what the session says, also after a restart or another model: a Send that attaches a session again
+leaves its saved title as it is, so the line never becomes the name of the session.
 
 Clicking a project opens one temporary **New session** tab, reused when selecting another project
 before creation. Selecting an existing session tab or sidebar session removes it. Real session

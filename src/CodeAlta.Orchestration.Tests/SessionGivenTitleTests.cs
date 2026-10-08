@@ -11,7 +11,8 @@ namespace CodeAlta.Orchestration.Tests;
 /// </summary>
 /// <remarks>
 /// A frontend that lists the sessions itself, as the terminal UI does, gets a named session under its name, and a
-/// session that was never named under the first line of its summary, which is the title it is attached with.
+/// session that was never named under the first line of its summary. Attaching a session leaves its saved title as
+/// it is: that line does not become the name of a session that was never named.
 /// </remarks>
 [TestClass]
 public sealed class SessionGivenTitleTests
@@ -27,13 +28,7 @@ public sealed class SessionGivenTitleTests
             named = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Nightly review")).SessionId;
             renamed = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, null)).SessionId;
             unnamed = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, null)).SessionId;
-            foreach (var sessionId in new[] { named, renamed, unnamed })
-            {
-                var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "one")).Receipt;
-                Assert.IsNotNull(receipt);
-                var result = await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10));
-                Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome, result.Code);
-            }
+            foreach (var sessionId in new[] { named, renamed, unnamed }) await SendAsync(host, sessionId);
 
             Assert.IsTrue(await host.Commands.RenameSessionAsync(renamed, host.CurrentProject.Id, temp.ProjectRoot, "Renamed"));
         }
@@ -48,6 +43,7 @@ public sealed class SessionGivenTitleTests
                 // The list names a session by the name it was given, and one that was never named by what it last said:
                 // a parent session finds the sub-agents it created by the titles it gave them.
                 Assert.AreEqual(name ?? AnsweringProvider.Answer, listed.Title);
+                var saved = await StoredTitleAsync(host, sessionId);
 
                 await host.RuntimeService.EnsureCoordinatorSessionAsync(listed, new SessionExecutionOptions
                 {
@@ -59,10 +55,49 @@ public sealed class SessionGivenTitleTests
                     OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
                 });
 
-                // The name stays; a session that was never named takes the line it is listed with.
-                Assert.AreEqual(name ?? AnsweringProvider.Answer, await StoredTitleAsync(host, sessionId));
+                // The name stays; a session that was never named keeps the title it was created with, not the line
+                // it is listed with.
+                Assert.AreEqual(name ?? host.CurrentProject.DisplayName, saved);
+                Assert.AreEqual(saved, await StoredTitleAsync(host, sessionId));
             }
         }
+    }
+
+    [TestMethod]
+    public async Task NeverNamedSession_StaysListedByWhatItLastSaid_AfterASendAttachesItAgain()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new AnsweringProvider();
+        string unnamed;
+        {
+            await using var host = await CreateHostAsync(temp, provider);
+            unnamed = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, null)).SessionId;
+            await SendAsync(host, unnamed);
+        }
+
+        // Other runs of the host: each lists the session by what it last said, and its send attaches the session
+        // again without making a name of that line.
+        foreach (var (listed, reply) in new[] { (AnsweringProvider.Answer, "A second answer."), ("A second answer.", "A third answer.") })
+        {
+            await using var host = await CreateHostAsync(temp, provider);
+            Assert.AreEqual(listed, (await ListedAsync(host, unnamed)).Title);
+            provider.Reply = reply;
+            await SendAsync(host, unnamed);
+            Assert.AreEqual(host.CurrentProject.DisplayName, await StoredTitleAsync(host, unnamed));
+        }
+
+        {
+            await using var host = await CreateHostAsync(temp, provider);
+            Assert.AreEqual("A third answer.", (await ListedAsync(host, unnamed)).Title);
+        }
+    }
+
+    private static async Task SendAsync(CodeAltaHost host, string sessionId)
+    {
+        var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "one")).Receipt;
+        Assert.IsNotNull(receipt);
+        var result = await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome, result.Code);
     }
 
     private static Task<CodeAltaHost> CreateHostAsync(TempDirectory temp, AnsweringProvider provider)
@@ -100,6 +135,8 @@ public sealed class SessionGivenTitleTests
     {
         public const string Answer = "The answer of the model.";
 
+        public string Reply { get; set; } = Answer;
+
         public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("fake-titles"), "Fake Titles") { DefaultModelId = "fake-model" };
 
         public ModelProviderRuntimeDescriptor RuntimeDescriptor { get; } = new()
@@ -129,7 +166,7 @@ public sealed class SessionGivenTitleTests
         public Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate, CancellationToken cancellationToken = default)
             => Task.FromResult(new AgentTurnResponse
             {
-                AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text(Answer)]),
+                AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text(Reply)]),
             });
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;

@@ -206,7 +206,7 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
-    public Task UnnamedSession_TakesTheFirstLineOfItsSummaryWhenASendAttachesItAgain() => Fixture.RunAsync(async f =>
+    public Task UnnamedSession_KeepsTheTitleItWasCreatedWithWhenASendAttachesItAgain() => Fixture.RunAsync(async f =>
     {
         f.Provider.ExposeSelectionModels = true;
         f.Provider.ReleaseAbort.TrySetResult();
@@ -222,7 +222,8 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Receipt.Completion)).Outcome);
         var metadata = await f.Observe(f.Host.SessionViewCatalog.JournalStore.CreateSessionStore().GetSessionAsync(unnamed.SessionId));
         Assert.IsNotNull(metadata);
-        Assert.AreEqual($"Project session for {project.DisplayName}.", (metadata.Details as RawApiSessionMetadataDetails)?.Title);
+        // The first line of its summary is not written as its title: it would be taken for the name of the session.
+        Assert.AreEqual(project.DisplayName, (metadata.Details as RawApiSessionMetadataDetails)?.Title);
     });
 
     [TestMethod]
