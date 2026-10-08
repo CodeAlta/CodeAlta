@@ -3,7 +3,7 @@ using System.Diagnostics;
 
 namespace CodeAlta.Desktop;
 
-/// <summary>Opens an address of the web in the browser of the system.</summary>
+/// <summary>Opens an address of the web in the browser of the system, and a document with what the system shows it in.</summary>
 internal static class DesktopLinks
 {
     /// <summary>The longest address that is opened.</summary>
@@ -18,7 +18,10 @@ internal static class DesktopLinks
             : null;
     }
 
-    /// <summary>Opens an address <see cref="WebAddress"/> returned.</summary>
+    /// <summary>
+    /// Opens an address <see cref="WebAddress"/> returned, or the full path of a document that the caller knows
+    /// to be one (<see cref="DesktopFileLinks.IsDocument"/>): the system starts what is registered for it.
+    /// </summary>
     /// <returns>False when the system could not open it.</returns>
     internal static bool Open(string address)
     {

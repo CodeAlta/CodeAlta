@@ -9,7 +9,8 @@ import { CodePreview } from "./CodePreview";
 import { DiffPreview } from "./changes/DiffPreview";
 import { isDialogBackdrop } from "./dialogBackdrop";
 
-// Immutable supplied presentation only: opening this dialog grants no RPC or mutation authority.
+// Immutable supplied presentation only: opening this dialog grants no RPC or mutation authority. The links of
+// its texts are followed by the opener of the window, as those of a message are.
 export function TimelineDetails({ item, current, onClose }: { item: TimelineItem; current: () => boolean; onClose: () => void }) {
   const { t } = useShellLanguage();
   const dialog = useRef<HTMLDialogElement>(null);

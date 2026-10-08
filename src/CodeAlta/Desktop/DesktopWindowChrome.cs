@@ -69,6 +69,9 @@ internal sealed class DesktopWindowChrome : IAsyncDisposable
     /// <summary>
     /// Options of the main view. The application owns its shortcuts and menus, so the browser's find, print,
     /// reload and zoom keys, its context menu and its status bubble are off; editing keys keep working.
+    /// So is the navigation of its history: the back and forward buttons of a mouse or a keyboard, a swipe
+    /// and <c>history.back()</c> leave the view on the document it shows, where they would bring the start-up
+    /// screen again. The Tab key stops on links on every platform.
     /// </summary>
     internal static NeoAstraOptions ViewOptions() => new()
     {

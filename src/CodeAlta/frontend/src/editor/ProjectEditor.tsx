@@ -8,7 +8,7 @@ import { changeListReply } from "../changes/projectChanges";
 import { fileAppearance } from "../fileAppearance";
 import { fileTabKey, isFolderTab, isReadOnlyTab, type FileTab } from "../fileTabs";
 import type { MessageKey } from "../localization";
-import { MarkdownContent } from "../MarkdownContent";
+import { MarkdownContent, MarkdownLinkScopeContext } from "../MarkdownContent";
 import { SessionTabMenu, type SessionMenuEntry } from "../SessionTabMenu";
 import { useShellLanguage } from "../shellLanguage";
 import { canSaveDocument, documentChecked, documentConflictDismissed, documentEdited, documentImageRead, documentName, documentNamed, documentPreview, documentRead, documentSaved,
@@ -817,7 +817,11 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
               onSize={value => setImageSize(value && { path: activePath, ...value })} />
           : mode === "preview" && previewKind === "svg" ? <ImageView vector url={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(preview)}`} label={activePath}
               onSize={value => setImageSize(value && { path: activePath, ...value })} />
-          : mode === "preview" ? <div className="editor-markdown"><div className="markdown-content"><MarkdownContent source={preview} document /></div></div>
+          : mode === "preview" ? <div className="editor-markdown"><div className="markdown-content">
+              {/* A relative link of the document starts from its folder, as it does where the file is published. */}
+              <MarkdownLinkScopeContext.Provider value={{ projectId: tab.projectId, directory: activePath.includes("/") ? activePath.slice(0, activePath.lastIndexOf("/")) : undefined }}>
+                <MarkdownContent source={preview} document />
+              </MarkdownLinkScopeContext.Provider></div></div>
           : null}
       </div>
       <footer className="editor-status">

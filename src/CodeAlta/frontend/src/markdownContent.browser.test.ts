@@ -119,7 +119,9 @@ test("production MarkdownContent retains useful HTML without resource or app aut
         assert.equal(await evaluate("document.querySelectorAll('.markdown-content [class], .markdown-content [role], .markdown-content [data-alert]').length"), 0);
       }
       if (cases[i].id === "links") {
-        assert.equal(await evaluate("document.querySelectorAll('.markdown-content a[href]').length"), 1);
+        // A page of the web, and a file where the Markdown wrote the link: an `<a>` written in HTML only opens a page.
+        assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('.markdown-content a[href]'), a => a.getAttribute('href'))"),
+          ["https://remote.invalid/safe", "/path", "src/Program.cs#L3", "https://remote.invalid/authored"]);
         const rect = await evaluate<{ x: number; y: number; width: number; height: number }>("markdownFixture.linkRect()");
         for (const button of ["left", "middle"]) for (const type of ["mousePressed", "mouseReleased"]) await command("Input.dispatchMouseEvent", { type, button, x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, clickCount: 1 });
         await evaluate("markdownFixture.linkRect()");
@@ -145,10 +147,13 @@ test("production MarkdownContent retains useful HTML without resource or app aut
     await activate();
     await evaluate("markdownFixture.renderGranted('assistant', false)"); await activate();
     await evaluate("markdownFixture.renderGranted('tool')");
-    // Tool inline previews are deliberately not granted.
+    // The inline preview of a compact row is not where a link is followed.
     assert.equal(await evaluate("!!document.querySelector('.markdown-content a')"), true); await activate();
-    await evaluate("markdownFixture.renderGranted('user')"); await activate();
     assert.equal(await evaluate("markdownFixture.state.external.length"), 6);
+    // The message of the user has links too: the files it names, and the pages.
+    await evaluate("markdownFixture.renderGranted('user', true, '[Program.cs](src/Program.cs#L3) <a href=\"src/authored.cs\">authored</a>')"); await activate();
+    assert.deepEqual(await evaluate("markdownFixture.state.external.splice(6)"), ["src/Program.cs#L3"], "A link of the Markdown to a file is followed as it is written");
+    assert.equal(await evaluate("document.querySelectorAll('.markdown-content a[href]').length"), 1, "An <a> written in HTML names no file");
     await evaluate(`markdownFixture.renderGranted('assistant', true, '<details><summary><a href="https://remote.invalid/safe">Documentation</a></summary><p>Details</p></details>')`);
     await activate();
     assert.equal(await evaluate("markdownFixture.state.external.length"), 7, "Granted summary anchor opens without also toggling the disclosure");

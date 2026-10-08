@@ -4,8 +4,9 @@ using CodeAlta.LiveTool;
 namespace CodeAlta.Desktop;
 
 /// <summary>
-/// Passes the requests of <c>alta editor open</c> to the window: the page that watches them opens the code
-/// editor of the project, and the file that was asked for in it.
+/// Passes the requests of <c>alta editor open</c>, and the links to files that are followed in the window, to
+/// the window: the page that watches them opens the code editor of the project, and the file that was asked
+/// for in it.
 /// </summary>
 internal sealed class DesktopEditorView : IAltaEditorView
 {
@@ -40,6 +41,26 @@ internal sealed class DesktopEditorView : IAltaEditorView
         foreach (var watcher in watchers)
         {
             watcher(new(folder.Id, file, file is null ? null : line, file is null || line is null ? null : column, folder.PackageId, root));
+        }
+
+        return watchers.Length > 0;
+    }
+
+    /// <summary>Asks the window to open the code editor on a folder of the disk that is no project, and a file in it.</summary>
+    /// <param name="folder">The folder, as <see cref="DiskFolders"/> gave it.</param>
+    /// <param name="path">The file to open, relative to the folder; null to show its files only.</param>
+    /// <param name="line">The 1-based line to go to in the file; null to keep where the file was.</param>
+    /// <param name="column">The 1-based column on that line; null for its start.</param>
+    /// <returns>True when a window received the request; false when none is there to show it.</returns>
+    internal bool OpenFolder(DiskFolder folder, string? path, int? line, int? column)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(folder.Id);
+        Action<ProjectFileShowEvent>[] watchers;
+        lock (_gate) watchers = [.. _watchers];
+        var file = string.IsNullOrWhiteSpace(path) ? null : path;
+        foreach (var watcher in watchers)
+        {
+            watcher(new(folder.Id, file, file is null ? null : line, file is null || line is null ? null : column, folder.Name, folder.Root));
         }
 
         return watchers.Length > 0;

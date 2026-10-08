@@ -22,7 +22,13 @@ Open a project with `Ctrl+O`, select a provider/model/reasoning combination, and
 
 When reopening an existing session, CodeAlta restores local history before provider initialization has to finish. A ready compatible provider can resume or switch a CodeAlta-owned local session while it is idle; provider-native continuation state is reused only when it is safe.
 
-In CodeAlta Desktop, click a web link in an assistant message to open it in your default browser. Cmd-click on macOS, Ctrl-click on Windows and Linux, Shift-click and middle click open it too, and so does Enter on a link that has the keyboard focus. On macOS, Tab does not stop on links by default.
+In CodeAlta Desktop, the links of a message work, yours and the agent's:
+
+- **A web link** opens in your default browser.
+- **A link to a file** opens the file in the [code editor](workspace.md#code-editor), at the line the link names (`src/Program.cs#L42` or `src/Program.cs:42`). A relative path is read from the folder the session works in. A file that belongs to no project opens too: the editor then shows the folder of that file, so you can look at its neighbours. A file that is not text is not opened; a picture is.
+- **A `file://` link to an HTML page or a PDF** opens with what your system shows it in, usually the browser.
+
+Click a link, or press Enter on a link that has the keyboard focus, which Tab moves to. Cmd-click on macOS, Ctrl-click on Windows and Linux, Shift-click and middle click work too. Agents are asked to write the files they name as such links. The same links work in the notes of a session, in issues and pull requests, in work items and in the Markdown preview of the code editor, where a relative path is read from the folder of the document.
 
 ## Busy sessions and queues
 

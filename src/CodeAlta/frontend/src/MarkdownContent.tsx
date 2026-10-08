@@ -1,11 +1,19 @@
-import { useEffect, useMemo, useState, useSyncExternalStore, type KeyboardEvent } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import { diagramAppearance, diagrams } from "./diagrams";
 import { translate } from "./localization";
 import { createMarkdownRenderer } from "./markdownBoundary";
-import { markdownLinkActivation, safeMarkdownHref } from "./markdownLinks";
+import { markdownHrefKind, markdownLinkActivation, type MarkdownLinkScope } from "./markdownLinks";
 import { appearanceKey, subscribeAppearance } from "./shellColors";
 import { useShellLanguage } from "./shellLanguage";
-import { modalDialogOpen } from "./modalDialogs";
+import { inModalDialog, modalDialogOpen } from "./modalDialogs";
+
+/**
+ * Opens the links of the Markdown that the window shows: a page of the web in the system browser, a file of this
+ * computer in the code editor. Null where nothing opens them (a window without a host): every link stays inert.
+ */
+export const MarkdownLinksContext = createContext<((address: string, scope: MarkdownLinkScope | null) => void) | null>(null);
+/** Where the relative links of the texts below start from; null where a relative path names nothing. */
+export const MarkdownLinkScopeContext = createContext<MarkdownLinkScope | null>(null);
 
 /**
  * A text of Markdown, rendered through the sanitizing boundary. A message breaks its lines where its text does;
@@ -13,9 +21,12 @@ import { modalDialogOpen } from "./modalDialogs";
  */
 export function MarkdownContent({ source, timelineCodeBlocks = false, document: asDocument = false, onOpenLink }: {
   source: string; timelineCodeBlocks?: boolean; document?: boolean;
-  /** Explicit trusted-container grant; without it every link remains inert. */
-  onOpenLink?: (address: string) => void;
+  /** What opens a link, instead of the opener of the window ({@link MarkdownLinksContext}); null leaves every link inert. */
+  onOpenLink?: ((address: string) => void) | null;
 }) {
+  const opener = useContext(MarkdownLinksContext);
+  const scope = useContext(MarkdownLinkScopeContext);
+  const openLink = onOpenLink !== undefined ? onOpenLink : opener && ((address: string) => opener(address, scope));
   // The renderer is made once for a language: the titles of the alerts are in it.
   const { locale } = useShellLanguage();
   const render = useMemo(() => createMarkdownRenderer(window, { note: translate(locale, "Note"), tip: translate(locale, "Tip"),
@@ -75,10 +86,11 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
     if (!link || !event.currentTarget.contains(link)) return;
     const activate = !event.defaultPrevented && markdownLinkActivation(event.nativeEvent);
     event.preventDefault(); // Never navigate the WebView, including ungranted and unsupported gestures.
-    if (!activate || !onOpenLink || !link.isConnected || link.closest('[inert], [hidden]')
-      || target?.closest("button") || modalDialogOpen()) return;
+    // A link of the page under a modal dialog is not followed; one of the dialog is.
+    if (!activate || !openLink || !link.isConnected || link.closest('[inert], [hidden]')
+      || target?.closest("button") || modalDialogOpen() && !inModalDialog(link)) return;
     const address = link.getAttribute("href"); // Read the sanitized literal, not the browser-resolved property.
-    if (address && safeMarkdownHref(address)) onOpenLink(address);
+    if (address && markdownHrefKind(address)) openLink(address);
   }
   // The button of a code block copies the text of that block, as it is written, and says so for a moment.
   function copyCode(event: { target: EventTarget }) {

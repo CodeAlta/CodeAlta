@@ -217,7 +217,7 @@ A fragment is plain HTML that CodeAlta inserts in its window. Before that, CodeA
 | `PluginHtml.Code(code, "csharp")` | Source code with the colors of its language |
 | `PluginHtml.Diagram(text)` | A [Mermaid](https://mermaid.js.org/) diagram |
 
-A plugin has no JavaScript in the window, and creates no component of the app: its code is C#. Nothing in a fragment runs: scripts, styles, event handlers, images and forms are removed, and links are shown but not followed. A fragment asks the window to act with attributes, and the plugin answers in C#:
+A plugin has no JavaScript in the window, and creates no component of the app: its code is C#. Nothing in a fragment runs: scripts, styles, event handlers, images and forms are removed, and a link only opens a web page (`http` or `https`) in the browser of the user. A fragment asks the window to act with attributes, and the plugin answers in C#:
 
 {.table}
 | Attribute | Effect |
@@ -273,7 +273,7 @@ var html = $"""
   <figcaption class="small text-secondary mt-2">A plugin dialog with Markdown, a diagram and code.</figcaption>
 </figure>
 
-Each helper writes an element of class `alta-markdown` whose text is Markdown, which you can also write yourself. The code editor, the terminal, tabs, trees, icons and images of the app are not available to a fragment.
+Each helper writes an element of class `alta-markdown` whose text is Markdown, which you can also write yourself. The links of that Markdown are followed as in a message: a web link opens in the browser, and a link to a file in the code editor. The code editor, the terminal, tabs, trees, icons and images of the app are not available to a fragment.
 
 Content around the prompt and timeline cards also take Markdown directly, in both apps: `PluginRenderResult.Markdown`, `PluginDerivedSessionEvent.Markdown`.
 

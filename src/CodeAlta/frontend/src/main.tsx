@@ -29,7 +29,8 @@ import {
 import { loadWorkspace, sessionListSignature, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
 import { MessageLinksContext } from "./TimelineMessage";
-import { openMarkdownLink } from "./markdownLinks";
+import { markdownHrefKind, openMarkdownLink, type MarkdownLinkScope } from "./markdownLinks";
+import { MarkdownLinkScopeContext } from "./MarkdownContent";
 import { readTimeline } from "./readTimeline";
 import { createTimelineImageCache } from "./timelineImages";
 import { createToolCallCache } from "./toolCallReader";
@@ -44,7 +45,7 @@ import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./
 import { createProjectArchive } from "./projectArchive";
 import { browserActivation } from "./sessionBrowser";
 import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, automationsTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type TabKind, type TabPosition } from "./fileTabs";
+import { activateFileTab, automationsTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type TabKind, type TabPosition } from "./fileTabs";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
 import { OpenFileDialog } from "./editor/OpenFileDialog";
@@ -744,6 +745,12 @@ function App() {
     openFile(pluginEditorTab(folder));
   }
   const openPluginEditorLatest = useRef(openPluginEditor); openPluginEditorLatest.current = openPluginEditor;
+  // The code editor on a folder of the disk that is no project: the folder of a file that a link named.
+  function openDiskEditor(folder: Readonly<{ id: string; path: string; name: string }>, request: EditorRequest) {
+    setEditorRequests(current => new Map(current).set(folder.id, request));
+    openFile(diskEditorTab(folder));
+  }
+  const openDiskEditorLatest = useRef(openDiskEditor); openDiskEditorLatest.current = openDiskEditor;
   // The code editor on the folder of a skill, from Settings: its files, with its SKILL.md shown.
   function openSkillEditor(folder: Readonly<{ id: string; path: string; name: string }>) {
     setEditorRequests(current => new Map(current).set(folder.id, { path: "SKILL.md", line: null, column: null, explorer: true }));
@@ -761,6 +768,11 @@ function App() {
           const asked = { path: request.path, line: request.line, column: request.column, explorer: request.path === null ? true : null };
           if (request.projectId.startsWith(pluginFolderPrefix)) {
             if (request.name && request.root) openPluginEditorLatest.current({ id: request.projectId, path: request.root, name: request.name }, asked);
+            continue;
+          }
+          // A link named a file that no project has: the code editor opens on its folder.
+          if (request.projectId.startsWith(diskFolderPrefix)) {
+            if (request.name && request.root) openDiskEditorLatest.current({ id: request.projectId, path: request.root, name: request.name }, asked);
             continue;
           }
           const project = currentSnapshot.current?.projects.find(value => value.id === request.projectId && !value.archived);
@@ -1358,11 +1370,17 @@ function App() {
   const currentHostAvailable = useRef(!!status?.hostAvailable);
   currentHostAvailable.current = !!status?.hostAvailable;
   const messageLinkEpoch = owned ? status!.hostEpoch! : null;
-  const openMessageLink = useCallback((address: string) => {
+  // A link of the Markdown that the window shows: the host opens a page of the web in the system browser, and
+  // has this window show a file in the code editor (see the requests of `projectFiles.watch`).
+  const openMessageLink = useCallback((address: string, scope: MarkdownLinkScope | null) => {
     const current = () => currentHostAvailable.current && currentHostEpoch.current === messageLinkEpoch
       && mutation?.capability.canMutate() === true;
-    void openMarkdownLink(markdownLinks.open, messageLinkEpoch, address, current, mutation?.capability.observe).then(result => {
-      if (result !== "ok" && current()) showToast({ message: translate(shownLocale.current, "The page could not be opened."), intent: "danger", icon: "error", timeout: 8000 });
+    const file = markdownHrefKind(address) === "file";
+    void openMarkdownLink(markdownLinks.open, messageLinkEpoch, address, current, mutation?.capability.observe, scope).then(result => {
+      if (result === "ok" || !current()) return;
+      const message = result === "binary" ? "This file is not text and cannot be edited here."
+        : result === "not_found" ? "The file could not be found." : file ? "The file could not be opened." : "The page could not be opened.";
+      showToast({ message: translate(shownLocale.current, message), intent: "danger", icon: "error", timeout: 8000 });
     });
   }, [messageLinkEpoch, mutation?.capability]);
   const localImageKey = JSON.stringify(["local-draft", status?.hostEpoch ?? null, projectId, selectedProject?.path ?? null]);
@@ -2962,10 +2980,12 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   const toolOutputs = useMemo(() => pluginEpoch === null ? undefined : toolRecords.outputs.session(pluginEpoch, session.id),
     [toolRecords, pluginEpoch, session.id]);
   const ownWidth = useSessionWidthStyle(session.id);
-  const infoControl = <Button ref={infoTrigger} variant="minimal" className="session-info-trigger" icon={<AppIcon name="info" size={16} />}
+  const linkScope = useMemo<MarkdownLinkScope>(() => ({ sessionId: session.id }), [session.id]);
+  const infoControl =<Button ref={infoTrigger} variant="minimal" className="session-info-trigger" icon={<AppIcon name="info" size={16} />}
     aria-label={t("Session info")} title={`${t("Session info")} (Ctrl+G, Ctrl+T)`} aria-haspopup="dialog" aria-expanded={infoOpen}
     onClick={openInfo} />;
-  return <div className="session-workspace" data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
+  // A relative link of a message, of the notes or of a tool window of this session starts from the folder it works in.
+  return <MarkdownLinkScopeContext.Provider value={linkScope}><div className="session-workspace" data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       lifetime={infoLifetime} canRead={() => !!mutation?.capability.canMutate()}
       target={ownedSession && !demoMode && mutation?.capability.canMutate() ? runtimeTarget(snapshot, { sessionId: session.id, projectId: selectedProjectId, path: session.workspacePath }, status?.hostEpoch ?? undefined) : null} />}
@@ -3027,7 +3047,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
             asks={askActions} inputs={inputReviewer} permissions={permissionReviewer} /> : null} />
         </div>
       </>}
-  </div>;
+  </div></MarkdownLinkScopeContext.Provider>;
 }
 
 function DemoConversation({ session }: { session: WorkspaceSession }) {

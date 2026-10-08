@@ -204,7 +204,7 @@ Agent prompt frontmatter is the user-facing entry point for prompt composition. 
 | `append` | No | Boolean alias for `mode: append`; prefer `mode` for new prompt files. |
 | `skills` | No | Include available/active skill guidance. |
 | `project_context` | No | Include repository instruction files such as `AGENTS.md`. |
-| `runtime_context` | No | Include current date, platform, working directory, project root, and session kind. |
+| `runtime_context` | No | Include current date, platform, working directory, project root, how to write a link to a file, and session kind. |
 | `tool_guidance` | No | Include generated host-tool guidance and available agent-prompt discovery. |
 
 Do not restate defaults in every prompt. When generated-section boolean fields are omitted, CodeAlta uses its normal defaults, which currently include all generated sections when content is available. Add one of those booleans only when a workflow intentionally needs a different composition.

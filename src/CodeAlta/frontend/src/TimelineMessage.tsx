@@ -1,6 +1,6 @@
-import { createContext, memo, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { memo, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { AppIcon } from "./AppIcon";
-import { MarkdownContent } from "./MarkdownContent";
+import { MarkdownContent, MarkdownLinkScopeContext, MarkdownLinksContext } from "./MarkdownContent";
 import { PluginHtml } from "./PluginHtml";
 import { writeMarkdown, type TimelineItem } from "./timeline";
 import { SessionReference } from "./SessionReference";
@@ -20,8 +20,8 @@ const longBodyThreshold = 1200;
 const previewLength = 240;
 const commandPreviewLength = 80;
 
-/** A host-owned message-link grant. Detached fixtures and other Markdown previews have no opener. */
-export const MessageLinksContext = createContext<((address: string) => void) | null>(null);
+/** The host-owned opener of the links of a message: the one of every Markdown of the window. A detached fixture has none. */
+export const MessageLinksContext = MarkdownLinksContext;
 
 // Display-only command identity, never a command parser or execution target.
 export function commandPreview(source: string): string {
@@ -56,9 +56,11 @@ function sameMessage(previous: TimelineMessageProps, next: TimelineMessageProps)
 export const TimelineMessage = memo(function TimelineMessage({ item, canInspect, historySource, onOpenSource, toolTile = false, imageSource,
   rowKey, onOpenTool, toolOutputs }: TimelineMessageProps) {
   const { t, locale } = useShellLanguage();
+  // The links of the text of a message are followed while the row is the one that is shown: a relative path
+  // starts from the folder its session works in.
   const openLink = useContext(MessageLinksContext);
-  const messageLink = openLink && item.category === "assistant"
-    ? (address: string) => { if (canInspect?.() ?? true) openLink(address); } : undefined;
+  const linkScope = useContext(MarkdownLinkScopeContext);
+  const messageLink = openLink ? (address: string) => { if (canInspect?.() ?? true) openLink(address, linkScope); } : null;
   const state = item.category === "tool" ? toolState(item.toolPhase) : null;
   // A call that runs is followed: its tile says how much it wrote and its last line.
   const live = useToolOutput(toolOutputs, item.toolCall?.activityId, toolTile && (state === "running" || state === "pending"));
@@ -176,7 +178,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
           {item.delegated && item.sourceSessionId && <SessionReference sessionId={item.sourceSessionId} />}</span>
         {compact && item.html ? <div className="timeline-inline-preview timeline-plugin-html"><PluginHtml html={item.html} pluginKey={item.pluginKey} /></div>
           : compact && excerpt && !toolTile && item.category !== "file" && <div className="timeline-inline-preview">{codePreview !== null ? <code>{codePreview}</code>
-          : item.summary ? excerpt : <MarkdownContent source={excerpt} />}</div>}
+          : item.summary ? excerpt : <MarkdownContent source={excerpt} onOpenLink={null} />}</div>}
         {!toolTile && item.toolChanges && <span className="file-counts tool-changes" title={t("Lines added and removed by this call")}><b>+{item.toolChanges.added}</b> <em>−{item.toolChanges.removed}</em></span>}
         <span className="message-actions">
           {hasDetails && !callWindow && <button type="button" className="timeline-detail-trigger" aria-label={t("Details")} title={t("Details")} aria-haspopup="dialog"
@@ -212,7 +214,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
           }}>
           <AppIcon name="chevronDown" size={14} />{t(expanded ? "Collapse message" : "Show full message")}
         </button>
-        <div id={bodyId}>{expanded ? <MarkdownContent source={body} timelineCodeBlocks />
+        <div id={bodyId}>{expanded ? <MarkdownContent source={body} timelineCodeBlocks onOpenLink={messageLink} />
           : <p className="long-message-preview">{t("Preview (plain text):")} {plainTextPreview(body)}…</p>}</div>
       </> : body && <MarkdownContent source={body} timelineCodeBlocks onOpenLink={messageLink} />)}
       {item.images && <TimelineImages images={item.images} source={imageSource} />}

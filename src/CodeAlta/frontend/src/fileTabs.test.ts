@@ -3,7 +3,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
-import { activateFileTab, automationsTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isPluginTab, isReadOnlyTab, isSkillTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
+import { activateFileTab, automationsTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, diskEditorTab, diskFolderPrefix, isDiskFolderTab, editorTab, emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isPluginTab, isReadOnlyTab, isSkillTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
   persistFileTabs, pluginEditorTab, pluginFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, skillFolderPrefix,
   skillReadOnly, terminalTab, type FileTab } from "./fileTabs";
 import { FileTabLabel } from "./SessionTabStrip";
@@ -226,6 +226,24 @@ test("the code editor on the folder of a skill has a tab that names the skill, a
       createElement(FileTabLabel, { tab: skill, project: "release-notes", dirty: true })));
     assert.ok(html.includes(translate(locale, "Skill")) && html.includes("release-notes") && html.includes(translate(locale, "Unsaved changes")), html);
   }
+});
+
+test("the code editor on the folder of a file that no project has has a tab that names the folder, and is not kept for the next start", () => {
+  const folder = diskEditorTab({ id: "folder:0123456789abcdef01234567", path: "/tmp/elsewhere", name: "elsewhere" });
+  assert.deepEqual(folder, { projectId: "folder:0123456789abcdef01234567", projectPath: "/tmp/elsewhere", view: "editor", name: "elsewhere" });
+  assert.ok(folder.projectId.startsWith(diskFolderPrefix));
+  assert.ok(isDiskFolderTab(folder) && isFolderTab(folder) && isEditorTab(folder) && !isPluginTab(folder) && !isSkillTab(folder) && !isReadOnlyTab(folder)
+    && !isDiskFolderTab(editor()) && !isDiskFolderTab(changes("folder:0123456789abcdef01234567")));
+  const state = openFileTab(openFileTab(emptyFileTabs(), editor()), folder);
+  assert.deepEqual(names(state.open), ["editor:p", "editor:folder:0123456789abcdef01234567"]);
+  assert.equal(openFileTab(state, { ...folder }).open.length, 2, "Asked again, the one that is open is shown.");
+  // The folder is no project of the workspace: the tab stays when the projects go.
+  assert.deepEqual(reconcileFileTabs(state, { ...catalog, projects: [] }), { open: [folder], active: folder, closed: [] });
+  // The host that gave the id knows the folder while it runs: the tab is not stored, and a stored one restores nothing.
+  let stored = "";
+  persistFileTabs(value => { stored = value; }, state);
+  assert.deepEqual(restoreFileTabs(() => stored), { open: [editor()], active: null, closed: [] });
+  assert.equal(restoreFileTabs(() => JSON.stringify({ version: 1, open: [folder], active: null })), null);
 });
 
 test("the code editor on the folder of a plugin has a tab that names the plugin, outlives the projects and is kept for the next start", () => {

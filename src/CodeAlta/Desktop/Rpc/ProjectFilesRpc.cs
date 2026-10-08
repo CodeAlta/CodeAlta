@@ -20,9 +20,10 @@ namespace CodeAlta.Desktop.Rpc;
 /// path. The path must stay inside the folder: a rooted path, a drive or stream name, a parent segment and
 /// any link (reparse point) between the folder and the entry are refused as <c>outside_root</c>. The folder of
 /// the project itself is never renamed or deleted. Where a request names a project it can name the folder of a
-/// source plugin (<see cref="PluginFolder"/>) or of a skill (<see cref="SkillFolder"/>) instead: the editor then
-/// works in that folder, by the same rules. The folder of a built-in skill, or of a skill that a plugin brings,
-/// is only read: its files are reported as read-only, and a change is answered as <c>read_only</c>.
+/// source plugin (<see cref="PluginFolder"/>), of a skill (<see cref="SkillFolder"/>), or a folder of the disk
+/// that the host opened for a link (<see cref="DiskFolders"/>) instead: the editor then works in that folder,
+/// by the same rules. The folder of a built-in skill, or of a skill that a plugin brings, is only read: its
+/// files are reported as read-only, and a change is answered as <c>read_only</c>.
 /// </remarks>
 [NeoRpcService("projectFiles", Version = 1)]
 internal sealed class ProjectFilesService
@@ -54,6 +55,7 @@ internal sealed class ProjectFilesService
     private readonly IProjectFileSearchService? _search;
     private readonly DesktopEditorView? _view;
     private readonly SkillFolders? _skills;
+    private readonly DiskFolders? _folders;
     private readonly IDesktopFileTrash _trash;
     private readonly Func<string, bool> _reveal;
     private readonly TextFileCodec _textFiles = new();
@@ -84,10 +86,11 @@ internal sealed class ProjectFilesService
     /// <param name="trash">Where deleted entries go; the trash of the system by default.</param>
     /// <param name="reveal">Shows an entry in the file manager; the one of the system by default.</param>
     /// <param name="skills">Finds the folder of a skill that a request names, or null when no skill is edited.</param>
+    /// <param name="folders">The folders of the disk that links opened, or null when no link opens one.</param>
     /// <exception cref="ArgumentNullException"><paramref name="projects"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="epoch"/> is blank.</exception>
     internal ProjectFilesService(ProjectCatalog projects, string epoch, IProjectFileSearchService? search = null, DesktopEditorView? view = null,
-        IDesktopFileTrash? trash = null, Func<string, bool>? reveal = null, SkillFolders? skills = null)
+        IDesktopFileTrash? trash = null, Func<string, bool>? reveal = null, SkillFolders? skills = null, DiskFolders? folders = null)
     {
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
@@ -96,6 +99,7 @@ internal sealed class ProjectFilesService
         _search = search;
         _view = view;
         _skills = skills;
+        _folders = folders;
         _trash = trash ?? new DesktopFileTrash();
         _reveal = reveal ?? DesktopFileReveal.Show;
     }
@@ -640,12 +644,17 @@ internal sealed class ProjectFilesService
         return (project.Status, project.Root);
     }
 
-    // The folder a request names: the one of a project of the catalog, of a source plugin, or of a skill.
-    private Task<(string Status, string? Root)> RootAsync(string projectId, CancellationToken cancellationToken)
-        => PluginFolder.TryParse(projectId, out var folder) ? folder.ResolveAsync(_projects!, cancellationToken)
+    /// <summary>
+    /// The folder an id names: the one of a project of the catalog, of a source plugin, of a skill, or a folder
+    /// of the disk that a link opened. Returns <c>ok</c> with the folder, or why it has none.
+    /// </summary>
+    internal Task<(string Status, string? Root)> RootAsync(string projectId, CancellationToken cancellationToken)
+        => _projects is null ? Task.FromResult<(string Status, string? Root)>(("unavailable", null))
+            : PluginFolder.TryParse(projectId, out var folder) ? folder.ResolveAsync(_projects, cancellationToken)
             : SkillFolder.TryParse(projectId, out var skill)
                 ? _skills?.ResolveAsync(skill, cancellationToken) ?? Task.FromResult<(string Status, string? Root)>(("unknown_project", null))
-            : SettingsProjectScope.ResolveAsync(_projects!, projectId, cancellationToken);
+            : DiskFolders.IsId(projectId) ? Task.FromResult(_folders?.Resolve(projectId) ?? ("unknown_project", null))
+            : SettingsProjectScope.ResolveAsync(_projects, projectId, cancellationToken);
 
     // Whether a request names a folder that is only read: nothing is created, changed or removed in it.
     private static bool ReadOnlyFolder(string? projectId) => SkillFolder.TryParse(projectId, out var skill) && skill.ReadOnly;
@@ -1029,11 +1038,14 @@ internal sealed record ProjectFileSearchEvent(string Kind, string Status, string
 /// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>
 internal sealed record ProjectFileWatchRequest(string? ExpectedEpoch);
 
-/// <summary>A request to open the code editor of a project, or of the folder of a source plugin.</summary>
-/// <param name="ProjectId">The project, or the id of the folder of a plugin.</param>
+/// <summary>
+/// A request to open the code editor of a project, of the folder of a source plugin, or of a folder of the disk
+/// that is no project.
+/// </summary>
+/// <param name="ProjectId">The project, or the id of the folder.</param>
 /// <param name="Path">The file to open, relative to the project folder; null to show the project's files.</param>
 /// <param name="Line">The 1-based line to go to.</param>
 /// <param name="Column">The 1-based column on that line.</param>
-/// <param name="Name">For the folder of a plugin, the name its tab shows; null for a project.</param>
-/// <param name="Root">For the folder of a plugin, its path, which the tab shows; null for a project.</param>
+/// <param name="Name">For a folder, the name its tab shows; null for a project.</param>
+/// <param name="Root">For a folder, its path, which the tab shows; null for a project.</param>
 internal sealed record ProjectFileShowEvent(string ProjectId, string? Path, int? Line, int? Column, string? Name = null, string? Root = null);

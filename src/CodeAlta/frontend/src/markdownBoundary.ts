@@ -2,7 +2,7 @@ import createDOMPurify from "dompurify";
 import { highlightCode } from "./codeHighlight";
 import { diagramAppearance, diagrams } from "./diagrams";
 import { createMarkdownParser, frontMatterEntries, splitFrontMatter } from "./markdown";
-import { safeMarkdownHref } from "./markdownLinks";
+import { markdownHrefKind } from "./markdownLinks";
 
 /** The alerts of GitHub: a quote whose first line is `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` or `[!CAUTION]`. */
 export const alertKinds = ["note", "tip", "important", "warning", "caution"] as const;
@@ -16,16 +16,29 @@ export type MarkdownRenderOptions = Readonly<{ document?: boolean }>;
 
 /** Instance-owned browser boundary; parser output must never bypass this sanitizer. */
 export function createMarkdownRenderer(view: Window & typeof globalThis, labels: MarkdownLabels = englishLabels) {
-  const parsers = { message: createMarkdownParser(), document: createMarkdownParser({ breaks: false }) };
+  // A link to a file is one that the Markdown of the text wrote (`[name](path)`): the parsers mark theirs with
+  // a value that no text knows. An `<a>` written in HTML opens a page of the web, and nothing else.
+  const fileLinkMark = view.crypto?.randomUUID?.() ?? `${Math.random()}${Math.random()}`;
+  const fileLinks = new WeakSet<Node>();
+  const parsers = { message: createMarkdownParser({ fileLinkMark }), document: createMarkdownParser({ breaks: false, fileLinkMark }) };
   const purifier = createDOMPurify(view);
   const tags = ["p", "br", "hr", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "code",
     "ul", "ol", "li", "dl", "dt", "dd", "strong", "em", "s", "del", "b", "i", "u", "sub", "sup", "kbd", "samp", "var",
     "abbr", "a", "span", "div", "table", "caption", "thead", "tbody", "tfoot", "tr", "th", "td", "details", "summary"];
+  purifier.addHook("uponSanitizeElement", node => {
+    if (node.nodeName === "A" && (node as Element).getAttribute("data-file-link") === fileLinkMark) fileLinks.add(node);
+  });
   purifier.addHook("uponSanitizeAttribute", (node, data) => {
     const tag = node.nodeName.toLowerCase();
     const { attrName: name, attrValue: value } = data;
+    // The target of a link is a page of the web or, for a link of the Markdown, a file of this computer. The
+    // sanitizer has a rule of its own for an address, which knows neither a drive nor `file:`: what this
+    // boundary accepts is kept as it is.
+    const kind = name === "href" && tag === "a" ? markdownHrefKind(value) : null;
+    const link = kind === "web" || kind === "file" && fileLinks.has(node);
+    if (link) data.forceKeepAttr = true;
     data.keepAttr = name === "title"
-      || name === "href" && tag === "a" && safeMarkdownHref(value)
+      || link
       || name === "class" && tag === "code" && /^language-[a-zA-Z0-9_-]{1,32}$/.test(value)
       || name === "open" && tag === "details"
       || name === "scope" && tag === "th" && /^(col|row|colgroup|rowgroup)$/.test(value)

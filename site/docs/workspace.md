@@ -267,6 +267,8 @@ Pictures are shown as pictures. An SVG file opens as a drawing, and a Markdown f
 
 Drag the editor tab to an edge of the window to keep a file beside the session that works on it. An agent can open a file for you with `alta editor open --file <path> --line <n>`.
 
+A link to a file in a message opens that file in the editor too (see [Sessions](sessions.md)). When the file belongs to no project, the editor opens on the folder of the file, in a tab named **Editor** and the name of that folder: you can read and edit its files as in a project, without git status. Such a tab is not restored when CodeAlta starts again.
+
 ### Editor tabs in the TUI
 
 In CodeAlta TUI, `Ctrl+E` opens a file in an editor tab with syntax highlighting, `Ctrl+S` to save, and a confirmation before closing unsaved edits.

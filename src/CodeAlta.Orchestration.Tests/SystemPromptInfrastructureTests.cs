@@ -300,6 +300,9 @@ public sealed class SystemPromptInfrastructureTests
         StringAssert.Contains(developerInstructions, $"- Current working directory: `{Path.GetFullPath(workingDirectory)}`");
         StringAssert.Contains(developerInstructions, $"- Project root: `{Path.GetFullPath(projectRoot)}`");
         StringAssert.Contains(developerInstructions, $"File: `{Path.GetFullPath(projectContextFile)}`");
+        // How an answer names a file, so that the frontends open it: a link relative to the root that is named above.
+        StringAssert.Contains(developerInstructions, "- Links to files: to point the user to a file, write a Markdown link whose target is the path of the file relative to the project root, with forward slashes, and `#L<line>` after it");
+        StringAssert.Contains(developerInstructions, "`[Program.cs](src/Program.cs#L42)`");
         // Where long instructions of the user are written down: a file the agent names after the day and the request,
         // which ends with a short hash of the session, under the CodeAlta root of the user (of their profile by default).
         var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData("session-1"u8), 0, 3);
@@ -311,6 +314,8 @@ public sealed class SystemPromptInfrastructureTests
             PartOptionsOverride = new PartialSystemPromptPartOptions(Skills: false, ProjectContext: false, RuntimeContext: true, ToolGuidance: false),
         });
         StringAssert.Contains(rooted.DeveloperInstructions!, $"- Scratchpad file: `{Path.Combine(Path.GetFullPath(projectRoot), "scratchpad", $"<yyyy-mm-dd>-<short-name>-{hash}.md")}`");
+        // A session of no project has no project root: its links start from where it works.
+        StringAssert.Contains(rooted.DeveloperInstructions!, "the path of the file relative to the current working directory, with forward slashes");
         // Another session has another hash, whatever its id is made of: two agents never write the same file.
         var other = builder.Build(new SystemPromptBuildRequest
         {
@@ -380,6 +385,8 @@ public sealed class SystemPromptInfrastructureTests
         var inWorktree = Build(worktree).DeveloperInstructions!;
         StringAssert.Contains(inWorktree, $"- Current working directory: `{worktree}`");
         StringAssert.Contains(inWorktree, $"- Project root: `{worktree}`");
+        // The links to files of that session start from the worktree, which is its project root.
+        StringAssert.Contains(inWorktree, "the path of the file relative to the project root, with forward slashes");
         StringAssert.Contains(inWorktree, $"- Git worktree: the working directory is a git worktree of the project, a checkout of its own with its own branch. The main checkout of the project is `{projectRoot}`");
         // The files of the repository come from the worktree; what only the main checkout has, and what is above the repository, stay.
         StringAssert.Contains(inWorktree, "Above the repository.");

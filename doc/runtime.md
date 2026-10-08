@@ -1074,7 +1074,9 @@ The custom agents of GitHub Copilot are agent prompts too (`CopilotAgentFiles`):
 
 - native system prompt content selected from `prompts/system`;
 - the selected agent prompt body from `prompts/agents`;
-- generated runtime/tool guidance;
+- generated runtime/tool guidance. The runtime context names the working directory and the project root, and
+  says how an answer points to a file: a Markdown link whose target is the path relative to that root, with
+  `#L<line>` for a place in the file (`[Program.cs](src/Program.cs#L42)`), which the frontends open;
 - skills metadata when skills are available for the selected session;
 - project-context sections and file/reference context.
 

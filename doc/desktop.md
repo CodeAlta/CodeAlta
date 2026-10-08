@@ -57,11 +57,14 @@ the dark themes, and they follow a theme change at once. The theme and its backg
 `appearance.json` in the WebView data directory, which is what lets the window open in the right
 colors before any page exists.
 
-The view loads the document the host shows in it and no other: the start-up screen, then the
-application. Its history still holds the start-up screen, so the host cancels every navigation to
-another document than the one it shows (`DesktopNavigation`). The back and forward buttons of a mouse,
-the browser keys of a keyboard, a swipe and `history.back()` therefore leave the window on what it
-shows, and the page still loads itself again.
+The view loads the documents of the application and no other: the start-up screen, then the
+application (`DesktopApplication.DecideNavigation`). Its history still holds the start-up screen, which
+nothing leaves, so the view has no history navigation (`NeoBrowserFeatures.HistoryNavigation` is off in
+`DesktopWindowChrome.ViewOptions`, as `NeoBrowserFeatures.ApplicationShell()` selects it): NeoAstra
+refuses the request itself, without asking the host. The back and forward buttons of a mouse, the
+browser keys of a keyboard, a swipe and `history.back()` therefore leave the window on what it shows,
+and the page still loads itself again. The UI tool `navigate_page` answers that history navigation is
+turned off for the view when it is asked to go back or forward.
 
 When the global `config.toml` cannot be loaded, the window opens on **configuration recovery** instead
 of failing: the file in an editor with TOML highlighting, the error marked on its line and the caret
@@ -1021,18 +1024,57 @@ Diagrams are drawn at Mermaid's `strict` security level, which encodes markup in
 click handlers and sanitizes the SVG.
 
 Markdown images become **escaped alt text**; authored image/fetch nodes are removed.
-Only credential-free absolute HTTP(S) anchor href survives; relative, mailto, custom,
-executable and credentialed URLs do not. Fuzzy www/email/IP linkification is disabled.
+An anchor href survives when it is a credential-free absolute HTTP(S) address or, on a link that the Markdown
+wrote, a file of this computer (see "Links to files" below); mailto, custom, script, network-path and
+credentialed URLs do not. Fuzzy www/email/IP linkification is disabled.
 Trusted container click, auxiliary-click and Enter handling always suppresses WebView navigation.
-Assistant messages in an owned host receive an explicit system-browser opener grant:
-normal click, Cmd/Ctrl/Shift-click, middle click and keyboard Enter open the link externally once.
-Scripted, already handled, Alt, right-click and repeated/composing Enter gestures do not invoke it.
-Rendering/streaming never opens links. User messages, other Markdown previews, tool/detail views and detached
-contexts without the callback remain inert. The dedicated `markdownLinks.open` bridge checks
-the host epoch and independently validates credential-free absolute HTTP(S) addresses within
-2,048 UTF-16 units, rejecting whitespace, controls, backslashes and malformed escapes/authority.
-Stale grants cannot invoke the opener; browser failure is a generic notice, not private diagnostics.
+In an owned host every rendered Markdown has the opener of the window (`MarkdownLinksContext`): the
+messages of a session whatever their author, the notes, the details and tool windows, the issues, the work
+items, the instructions of a skill and the Markdown preview of the code editor. The inline preview of a
+compact timeline row is the exception: a link is not followed there.
+Normal click, Cmd/Ctrl/Shift-click, middle click and keyboard Enter follow the link once.
+Scripted, already handled, Alt, right-click and repeated/composing Enter gestures do not invoke it, and a link
+of the page under a modal dialog is not followed while a link of the dialog is.
+Rendering/streaming never opens links. Detached contexts without the opener remain inert. The dedicated
+`markdownLinks.open` bridge checks the host epoch and independently validates credential-free absolute
+HTTP(S) addresses within 2,048 UTF-16 units, rejecting whitespace, controls, backslashes and malformed
+escapes/authority; such an address opens in the system browser.
+Stale grants cannot invoke the opener; a failure is a generic notice, not private diagnostics.
 Native external navigation and new-window cancellation, `app://` restrictions and CSP remain unchanged.
+
+**Links to files.** Any other target that the boundary keeps is a link to a file of this computer, which opens
+the code editor:
+
+- **What is a link to a file.** A link that the Markdown wrote (`[Program.cs](src/Program.cs#L42)`, a
+  `<file:///…>` autolink, a `file:///…` address alone in the text) whose target is a relative path, a full path
+  (`C:/code/a.cs`, `/home/me/a.cs`, `~/notes.md`) or a `file:` address without a host. The parser lets `file:`
+  through and marks the file links it writes with a value made for the renderer; the sanitizer keeps a file
+  target only on a marked link. An `<a href>` written in HTML therefore opens a page of the web and nothing
+  else. A path of another computer (`//server/share`, a device path, a `file:` address with a host), another
+  scheme (`mailto:`, `vscode:`) and a fragment alone are no link: the host never looks at such a path, which
+  would already send the credentials of the user to that computer.
+- **The place in the file.** `#L42`, `#L42C7` and `#L42-L50` as a fragment, or `:42`, `:42:7` and `:42-50`
+  after the path, as the `@` references of a prompt write it. A range goes to its start.
+- **Where a relative path starts from.** The folder the session works in for a message, the notes and the
+  windows of that session (its git worktree while it has one, the folder of its project otherwise), and the
+  folder of the document for the Markdown preview of the code editor (`MarkdownLinkScopeContext`). Elsewhere
+  a relative path names nothing. A path that starts with `/` and is not a file is tried from that folder too,
+  as a site writes a path from its root.
+- **What opens.** The host reads the target again (`DesktopFileLink`), finds the file (`DesktopFileLinks`) and
+  has the window show it through the requests of `projectFiles.watch`, as `alta editor open` does. A file
+  inside the folder of a project opens in the code editor of that project, the innermost one. Any other file
+  opens the code editor on a folder that is no project (see "Code editor"): the folder the session works in
+  when the file is in it, a worktree for example, and the folder of the file otherwise, so that its
+  neighbours can be looked at. A folder opens with its files shown.
+- **What does not.** A file that is not text is not opened, and the window says so (`binary`): the first
+  8 KiB hold a NUL and no byte order mark. A picture is opened, because the code editor shows it. A file that
+  is not there is `not_found`.
+- **Documents.** A `file:` address of an HTML page or a PDF is handed to the system, which shows it in the
+  browser, as an address of the web is. No other kind of file is handed over: the system would start a
+  program for it. The same page named by its path opens in the code editor, like any file.
+
+The runtime context of every session tells the model how to write such a link (`SystemPromptBuilder`): a
+Markdown link whose target is the path relative to the project root, with `#L<line>` for a place in the file.
 Not every native gesture is suppressed. Raw source Copy, including CRLF and fences, remains independent of the
 rendered display. Parser/sanitizer errors display inert original source, never exception
 details. Equivalent source preserves rendered DOM/focus/selection/inner scroll.
@@ -1732,6 +1774,13 @@ source: a name is compared with the names of the skills and is never made into a
 of the user or of a project is edited like a project. The folder of a built-in skill, or of a skill of a
 plugin, is only read: the host reports its files as read-only and answers a write, a creation, a rename and
 a deletion with `read_only`, and the editor offers none of them.
+
+A link to a file that no project has opens the editor on a folder of the disk the same way (see "Links to
+files" under the Markdown boundary): the folder of the file, or the folder a session works in. Its tab is
+labeled **Editor** and the name of the folder. Its id is `folder:<key>`, a key the host makes from the path
+(`DiskFolders`): the host gives it when a link is followed and knows the folder while it runs, the last 128
+of them, so an id never names a folder that the user did not open. The folder is edited like a project, has
+no git status and no Changes, and its tab is not kept across restarts.
 
 The project is the one of the code editor or the Changes tab in front, otherwise the selected project. The
 editor needs an owned host and a project that is not archived. Editor tabs close, reopen, cycle, drag and split

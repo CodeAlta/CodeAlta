@@ -5,6 +5,9 @@ const modal = 'dialog[open], [role="dialog"][aria-modal="true"]';
 // searching them all each time took a millisecond per question.
 const watched = new WeakMap<Document, { open: boolean; current: boolean; changes: MutationObserver }>();
 
+/** Whether an element is in a modal dialog: what it does is then part of that dialog, not of the page under it. */
+export const inModalDialog = (element: Element): boolean => !!element.closest(modal);
+
 /**
  * Whether a modal dialog is open in the page: an open `dialog`, or an element that is a dialog and says it is
  * modal. The answer is exact at the time of the call: the document is searched again whenever an element was

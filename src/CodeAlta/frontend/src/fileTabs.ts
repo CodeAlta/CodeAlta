@@ -7,8 +7,8 @@ import type { WorkspaceSnapshot } from "#neoastra";
  * The tab of a terminal names the terminal; its project is empty for a terminal of no project, and its path
  * is the folder the terminal started in. The automations of the application have one tab, of no project
  * (`view: "automations"`), and so have the work items, the tasks and the plans of every project
- * (`view: "workItems"`), and the issues and pull requests (`view: "issues"`). The code editor also opens on the folder of a source plugin or of a skill: its tab
- * names that folder where a tab names a project, and carries the name of the plugin or of the skill.
+ * (`view: "workItems"`), and the issues and pull requests (`view: "issues"`). The code editor also opens on the folder of a source plugin or of a skill, and on the folder of a
+ * file that a link named and no project has: its tab names that folder where a tab names a project, and carries the name of the plugin, of the skill or of the folder.
  */
 export type FileTab = Readonly<{ projectId: string; projectPath: string; view: "editor" | "changes" | "terminal" | "automations" | "workItems" | "issues"; terminalId?: string; name?: string }>;
 export type FileTabs = Readonly<{ open: readonly FileTab[]; active: FileTab | null; closed: readonly FileTab[] }>;
@@ -47,8 +47,17 @@ export const skillFolderPrefix = "skill:";
 export const skillEditorTab = (folder: Readonly<{ id: string; path: string; name: string }>): FileTab =>
   ({ projectId: folder.id, projectPath: folder.path, view: "editor", name: folder.name });
 export const isSkillTab = (tab: FileTab) => tab.view === "editor" && tab.projectId.startsWith(skillFolderPrefix);
-/** A tab of the code editor on a folder that is no project of the workspace: the one of a plugin or of a skill. */
-export const isFolderTab = (tab: FileTab) => isPluginTab(tab) || isSkillTab(tab);
+/**
+ * What the id of a folder of the disk starts with: the folder of a file that a link names and that no project
+ * has. The host gives the id when the link is followed, and knows the folder while it runs.
+ */
+export const diskFolderPrefix = "folder:";
+/** The tab of the code editor on a folder of the disk that is no project. */
+export const diskEditorTab = (folder: Readonly<{ id: string; path: string; name: string }>): FileTab =>
+  ({ projectId: folder.id, projectPath: folder.path, view: "editor", name: folder.name });
+export const isDiskFolderTab = (tab: FileTab) => tab.view === "editor" && tab.projectId.startsWith(diskFolderPrefix);
+/** A tab of the code editor on a folder that is no project of the workspace: the one of a plugin, of a skill, or of a file a link named. */
+export const isFolderTab = (tab: FileTab) => isPluginTab(tab) || isSkillTab(tab) || isDiskFolderTab(tab);
 /** Whether the folder of a skill is only read: the skill is not one of the user or of a project. */
 export const skillReadOnly = (source: string) => !["ProjectAlta", "ProjectCommon", "UserAlta", "UserCommon", "ProjectCopilot", "UserCopilot"].includes(source);
 /** Whether nothing is changed in the folder of a tab. The id of the folder of a skill says where the skill comes from. */
@@ -143,6 +152,8 @@ function storedTab(value: unknown): { tab: FileTab; file: string | null } | null
   if (stored.view === "issues") return stored.projectId === "" && stored.projectPath === "" ? { tab: issuesTab, file: null } : null;
   if (!text(stored.projectId, 256) || !text(stored.projectPath, 4096)) return null;
   const project = { id: stored.projectId, path: stored.projectPath };
+  // The host that gave the id of a folder of the disk is gone with the application that stored the tab.
+  if (stored.projectId.startsWith(diskFolderPrefix)) return null;
   if (stored.projectId.startsWith(pluginFolderPrefix) || stored.projectId.startsWith(skillFolderPrefix))
     return stored.view === "editor" && stored.path === undefined && text(stored.name, 128) ? { tab: pluginEditorTab({ ...project, name: stored.name }), file: null } : null;
   if (stored.view === "changes" || stored.view === "editor")
@@ -187,8 +198,9 @@ export function restoreLegacyFiles(read: () => string | null): ReadonlyMap<strin
 
 export function persistFileTabs(write: (value: string) => void, state: FileTabs): boolean {
   try {
-    // A terminal does not outlive the application: its tab is not one to restore.
-    const value = JSON.stringify({ version: 1, open: state.open.filter(tab => !isTerminalTab(tab)), active: state.active && !isTerminalTab(state.active) ? state.active : null });
+    // A terminal does not outlive the application, nor does the id of a folder of the disk: their tabs are not ones to restore.
+    const kept = (tab: FileTab) => !isTerminalTab(tab) && !isDiskFolderTab(tab);
+    const value = JSON.stringify({ version: 1, open: state.open.filter(kept), active: state.active && kept(state.active) ? state.active : null });
     if (value.length > 131072) return false;
     write(value); return true;
   }

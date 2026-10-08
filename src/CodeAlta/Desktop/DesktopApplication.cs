@@ -85,6 +85,18 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         uri.IsAbsoluteUri && uri.Scheme == "app" && uri.Host == "codealta" && uri.Port == -1 &&
         string.IsNullOrEmpty(uri.UserInfo) && uri.AbsolutePath is "/index.html" or "/splash.html" && string.IsNullOrEmpty(uri.Query);
 
+    /// <summary>Allows a navigation to a document of the application, in the frame that asks, and cancels every other.</summary>
+    /// <remarks>
+    /// The view does not ask about its history: <see cref="DesktopWindowChrome.ViewOptions"/> turns history
+    /// navigation off, so the back button of a mouse never brings the start-up screen again.
+    /// </remarks>
+    /// <param name="request">The navigation the view asks for.</param>
+    internal static NeoNavigationDecision DecideNavigation(NeoNavigationRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return IsApplicationDocument(request.Uri) ? NeoNavigationDecision.Allow : NeoNavigationDecision.Cancel;
+    }
+
     /// <summary>
     /// The identity under which running instances are found: one per profile, so the developer instance and
     /// an instance on explicit roots are never mistaken for the normal one.
@@ -388,10 +400,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // The kept zoom, before the first document: the window never shows at another one.
             view.ZoomFactor = shell.Zoom / 100d;
             shell.ApplyZoom = factor => view.ZoomFactor = factor;
-            // The view loads the document this method shows and no other: its history holds the start-up screen,
-            // which the back button of a mouse would otherwise bring again, for good.
-            var documents = new DesktopNavigation();
-            view.NavigationRequested = request => ValueTask.FromResult(documents.Decide(request));
+            view.NavigationRequested = static request => ValueTask.FromResult(DecideNavigation(request));
             view.NewWindowRequested = static _ => ValueTask.FromResult(new NeoNewWindowDecision(NeoDecisionAction.Cancel));
             // The start-up screen first, then the window: it appears with the logo on its theme, never empty.
             // The browser draws into a shown window only, so the window is shown out of sight until the
@@ -403,7 +412,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // while the window is hidden, so that it appears there and not in its default place first.
             windowState = await DesktopWindowState.StartAsync(window, options.DataRoot, chrome.Services.SystemInfo);
             var cloaked = DesktopWindowReveal.ShowCloaked(window);
-            var starting = view.NavigateAsync(documents.Show(StartupDocument));
+            var starting = view.NavigateAsync(StartupDocument);
             await starting;
             await Task.WhenAny(startupShown.Task, Task.Delay(TimeSpan.FromSeconds(2)));
             if (cloaked)
@@ -472,13 +481,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 {
                     await using (NeoRpcViewBinding.Bind(recoveryRpc, view))
                     {
-                        var recovering = view.NavigateAsync(documents.Show(ApplicationDocument));
+                        var recovering = view.NavigateAsync(ApplicationDocument);
                         await recovering;
                         await Task.WhenAny(repaired.Task, closeRequested.Task);
                         // Back to the start-up screen while the host starts: the editor is gone before its bridge is.
                         if (!closeRequested.Task.IsCompleted)
                         {
-                            var restarting = view.NavigateAsync(documents.Show(StartupDocument));
+                            var restarting = view.NavigateAsync(StartupDocument);
                             await restarting;
                         }
                     }
@@ -552,7 +561,6 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         RememberAppearance = RememberAppearance, ProviderSetup = NeedsProviderSetup(configStore),
                     });
                     builder.AddDesktopShellService(new DesktopShellService(shell));
-                    builder.AddMarkdownLinksService(new MarkdownLinksService(epoch, DesktopLinks.Open));
                     builder.AddColorSchemesService(new ColorSchemesService(options.CatalogRoot!));
                     // The one of the configuration editor when the application started with it.
                     appUpdate ??= StartAppUpdate();
@@ -595,8 +603,16 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionAsksService(asks);
                     builder.AddSessionNotesService(new SessionNotesService(host.WorkspaceReads, host.RuntimeService, epoch));
                     builder.AddSessionPluginEventsService(new SessionPluginEventsService(host.WorkspaceReads, host.ProjectCatalog, epoch, host.PluginRuntime));
-                    // The code editor also opens on the folder of a skill that the Skills page names.
-                    builder.AddProjectFilesService(new ProjectFilesService(host.ProjectCatalog, epoch, host.ProjectFileSearchService, editorView, skills: skills.Folders));
+                    // The code editor also opens on the folder of a skill that the Skills page names, and on the
+                    // folder of a file that a link names when no project has it.
+                    var diskFolders = new DiskFolders();
+                    var projectFiles = new ProjectFilesService(host.ProjectCatalog, epoch, host.ProjectFileSearchService, editorView, skills: skills.Folders, folders: diskFolders);
+                    builder.AddProjectFilesService(projectFiles);
+                    // A link of the Markdown that the window shows: an address of the web for the system browser, a
+                    // file for the code editor. A relative path starts from the folder the session works in.
+                    builder.AddMarkdownLinksService(new MarkdownLinksService(epoch, DesktopLinks.Open, new DesktopFileLinks(host.ProjectCatalog, diskFolders, editorView,
+                        (sessionId, token) => SessionFolderAsync(host, sessionId, token), projectFiles.RootAsync, DesktopLinks.Open,
+                        roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))));
                     builder.AddProjectGitService(new ProjectGitService(host.ProjectCatalog, epoch, changesView));
                     builder.AddWorktreesService(new WorktreesService(worktrees, host.ProjectCatalog, worktreeConfig, host.RuntimeService.ListBusySessionFolders, epoch));
                     // A terminal opened from a session starts in the folder that session works in: its worktree
@@ -619,7 +635,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     if (!closeRequested.Task.IsCompleted)
                     {
                         bindingLifetime = NeoRpcViewBinding.Bind(rpc, view);
-                        var navigation = view.NavigateAsync(documents.Show(ApplicationDocument));
+                        var navigation = view.NavigateAsync(ApplicationDocument);
                         await navigation;
                         Mark("application loading");
                     }
@@ -784,11 +800,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             await using var rpc = builder.Build();
             window.Show();
             await using var view = await environment.CreateWebViewAsync(NeoAstraHost.FillWindow(window), DesktopWindowChrome.ViewOptions());
-            var documents = new DesktopNavigation();
-            view.NavigationRequested = request => ValueTask.FromResult(documents.Decide(request));
+            view.NavigationRequested = static request => ValueTask.FromResult(DecideNavigation(request));
             view.NewWindowRequested = static _ => ValueTask.FromResult(new NeoNewWindowDecision(NeoDecisionAction.Cancel));
             await using var binding = NeoRpcViewBinding.Bind(rpc, view);
-            await view.NavigateAsync(documents.Show(ApplicationDocument));
+            await view.NavigateAsync(ApplicationDocument);
             await closed.Task;
             ExitCode = 0;
         }

@@ -1,6 +1,7 @@
 import { useContext, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type Ref } from "react";
 import { createPortal } from "react-dom";
-import { MarkdownContent } from "./MarkdownContent";
+import { MarkdownContent, MarkdownLinksContext } from "./MarkdownContent";
+import { markdownLinkActivation, safeMarkdownHref } from "./markdownLinks";
 import { collectPluginFields, createPluginHtmlSanitizer, pluginActionAttribute, pluginCommandAttribute, pluginMarkdownClass, pluginMarkdownSource,
   pluginValueAttribute } from "./pluginHtmlSanitizer";
 import { PluginUiContext, type PluginPane } from "./pluginUi";
@@ -11,7 +12,8 @@ type MarkdownBlock = Readonly<{ element: HTMLElement; source: string }>;
  * Shows an HTML fragment given by a plugin. The fragment is sanitized first, so nothing in it runs: the
  * window acts for it. An element with `data-alta-command` runs the plugin command of that name for the
  * pane the fragment is shown in; one with `data-alta-action` reports the action with the values of the
- * fragment's named fields to `onAction` (a dialog). Links are shown and not followed.
+ * fragment's named fields to `onAction` (a dialog). A link opens its page of the web in the system browser, and
+ * never navigates the window.
  *
  * An element with the class `alta-markdown` holds Markdown as its text: it is shown by the Markdown
  * component of the window, the one of the timeline, so a fragment has highlighted code and diagrams without
@@ -25,6 +27,7 @@ export function PluginHtml({ html, pluginKey = null, pane, className, onAction, 
   ref?: Ref<HTMLDivElement>;
 }) {
   const ui = useContext(PluginUiContext);
+  const openLink = useContext(MarkdownLinksContext);
   const sanitize = useMemo(() => createPluginHtmlSanitizer(window), []);
   // React compares this prop by identity: equivalent refreshes must not replace fields the user is editing.
   const markup = useMemo(() => ({ __html: sanitize(html) }), [sanitize, html]);
@@ -50,9 +53,20 @@ export function PluginHtml({ html, pluginKey = null, pane, className, onAction, 
     setBlocks(previous => found.length === 0 && previous.length === 0 ? previous : found);
   }, [markup]);
 
+  // A link of a fragment never navigates the window: a trusted click on one opens its page of the web in the
+  // system browser, through the opener of the window.
+  function followLink(event: MouseEvent<HTMLDivElement>) {
+    const link = (event.target as Element).closest("a");
+    if (!link || !event.currentTarget.contains(link)) return;
+    const follow = !event.defaultPrevented && markdownLinkActivation(event.nativeEvent);
+    event.preventDefault();
+    const address = link.getAttribute("href");
+    if (follow && openLink && address && safeMarkdownHref(address) && !link.closest(`[${pluginCommandAttribute}], [${pluginActionAttribute}]`)) openLink(address, null);
+  }
+
   function activate(event: MouseEvent<HTMLDivElement>) {
     const target = event.target as Element;
-    if (target.closest("a")) event.preventDefault();
+    followLink(event);
     const element = target.closest<HTMLElement>(`[${pluginCommandAttribute}], [${pluginActionAttribute}]`);
     if (!element || !event.currentTarget.contains(element) || element.matches(":disabled")) return;
     // A field that carries an action raises it when it changes, not when it is clicked into.
@@ -77,7 +91,7 @@ export function PluginHtml({ html, pluginKey = null, pane, className, onAction, 
     if (typeof ref === "function") ref(element);
     else if (ref) ref.current = element;
   };
-  return <><div ref={attach} className={`plugin-html${className ? ` ${className}` : ""}`} onClick={activate} onAuxClick={event => { if ((event.target as Element).closest("a")) event.preventDefault(); }}
+  return <><div ref={attach} className={`plugin-html${className ? ` ${className}` : ""}`} onClick={activate} onAuxClick={followLink}
     onChange={event => {
       const target = event.target as unknown as HTMLElement;
       const action = target.tagName === "SELECT" ? target.getAttribute(pluginActionAttribute) : null;

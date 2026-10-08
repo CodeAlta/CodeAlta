@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { markdownLinkActivation, openMarkdownLink, safeMarkdownHref } from "./markdownLinks";
+import { fileMarkdownHref, markdownHrefKind, markdownLinkActivation, openMarkdownLink, safeMarkdownHref } from "./markdownLinks";
 import { createMutationCapability } from "./sessionOperations";
 
 const epoch = "3b0a7c1e-52c9-4f0b-8a55-6d0c2f9e1b77";
@@ -14,6 +14,22 @@ test("Markdown href policy accepts only bounded credential-free absolute HTTP(S)
     "https://example.invalid/\\path", "https://example.invalid/%", "https://example.invalid/%xx", "https://example.invalid/" + "x".repeat(2048)]) {
     assert.equal(safeMarkdownHref(value), false, JSON.stringify(value));
   }
+});
+
+test("a target is a file of this computer when it is a path or a file: address without a host", () => {
+  for (const value of ["src/Program.cs", "src/Program.cs#L42", "src/Program.cs:42", "src/Program.cs:42:7", "src/Program.cs:42-50", "README.md", "../other/a.cs", "/relative",
+    "/home/me/a.cs", "C:/code/a.cs", "C:/code/a.cs:12", "c:%5Ccode%5Ca.cs", "/C:/code/a.cs#L3", "my%20notes/a%20b.md", "~/.alta/config.toml", "notes/a:b.md",
+    "file:///C:/code/report.html", "file:///tmp/a", "file://localhost/tmp/a"]) {
+    assert.equal(fileMarkdownHref(value), true, value);
+    assert.equal(markdownHrefKind(value), "file", value);
+  }
+  for (const value of ["", "#L10", " src/a.cs", "src/a.cs\n", "//server/share/a.cs", "%5C%5Cserver%5Cshare%5Ca.cs", "file://server/share/a.cs", "file:////server/share/a.cs",
+    "file:a.cs", "mailto:a@b.invalid", "javascript:alert(1)", "vscode://file/C:/code/a.cs", "app://codealta/index.html", "https://user:pass@example.invalid/",
+    "C:/code/a.cs:stream", "x".repeat(2049)]) {
+    assert.equal(fileMarkdownHref(value), false, JSON.stringify(value));
+    assert.equal(markdownHrefKind(value), null, JSON.stringify(value));
+  }
+  assert.equal(markdownHrefKind(address), "web");
 });
 
 test("intentional primary, modified primary, middle and Enter activation only", () => {
@@ -33,13 +49,22 @@ test("no opener invocation for invalid links, missing epoch or a retired grant",
   let calls = 0;
   const open = async () => { calls++; return { status: "ok", hostEpoch: epoch }; };
   assert.equal(await openMarkdownLink(open, null, address, () => true), "unavailable");
-  assert.equal(await openMarkdownLink(open, epoch, "file:///tmp/a", () => true), "invalid_request");
+  for (const invalid of ["mailto:a@b.invalid", "//server/share/a.cs", "file://server/share/a.cs", "#L3"]) assert.equal(await openMarkdownLink(open, epoch, invalid, () => true), "invalid_request");
   assert.equal(await openMarkdownLink(open, epoch, address, () => false), "stale_epoch");
   assert.equal(calls, 0);
 });
 
 test("opener forwards exact epoch/address and handles stale replies and private failures", async () => {
-  assert.equal(await openMarkdownLink(async request => { assert.deepEqual(request, { expectedHostEpoch: epoch, address }); return { status: "ok", hostEpoch: epoch }; }, epoch, address, () => true), "ok");
+  const none = { sessionId: null, projectId: null, directory: null };
+  assert.equal(await openMarkdownLink(async request => { assert.deepEqual(request, { expectedHostEpoch: epoch, address, ...none }); return { status: "ok", hostEpoch: epoch }; }, epoch, address, () => true), "ok");
+  // A link to a file goes to the same opener, with where its relative path starts from.
+  assert.equal(await openMarkdownLink(async request => {
+    assert.deepEqual(request, { expectedHostEpoch: epoch, address: "src/Program.cs#L3", ...none, sessionId: "session-1" }); return { status: "ok", hostEpoch: epoch };
+  }, epoch, "src/Program.cs#L3", () => true, undefined, { sessionId: "session-1" }), "ok");
+  assert.equal(await openMarkdownLink(async request => {
+    assert.deepEqual(request, { expectedHostEpoch: epoch, address: "setup.md", sessionId: null, projectId: "project-1", directory: "doc" }); return { status: "not_found", hostEpoch: epoch };
+  }, epoch, "setup.md", () => true, undefined, { projectId: "project-1", directory: "doc" }), "not_found");
+  assert.equal(await openMarkdownLink(async () => ({ status: "binary", hostEpoch: epoch }), epoch, "tool.bin", () => true), "binary");
   assert.equal(await openMarkdownLink(async () => ({ status: "stale_epoch", hostEpoch: epoch }), epoch, address, () => true), "stale_epoch");
   assert.equal(await openMarkdownLink(async () => ({ status: "ok", hostEpoch: "another-host" }), epoch, address, () => true), "stale_epoch");
   let current = true;

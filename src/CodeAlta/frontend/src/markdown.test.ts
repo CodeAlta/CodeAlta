@@ -75,5 +75,20 @@ test("deliberate policy differences: escaped image alt, tasks left to the bounda
   const html = createMarkdownParser()('![alt <b>](https://example.invalid/a)\n\n- [x] task\n\nwww.example.invalid x@y.invalid\n\n[^note]\n\n[^note]: text');
   assert.match(html, /alt &lt;b&gt;/); assert.match(html, /\[x\] task/);
   assert.doesNotMatch(html, /<img|<input|href="(?:https?:|mailto:)|class="footnote/);
-  assert.match(html, /<a href="text">\^note<\/a>/); // Ordinary reference link, not a footnote extension; boundary removes relative href.
+  assert.match(html, /<a href="text">\^note<\/a>/); // Ordinary reference link, not a footnote extension: a link to a file named "text".
+});
+
+test("a link to a file is a link, and the parser marks the ones it wrote", () => {
+  const source = "[Program.cs](src/Program.cs#L42) [win](<C:\\my code\\a.cs>) [page](file:///C:/out/report.html) <file:///tmp/a.txt> see file:///tmp/b.txt. "
+    + '[web](https://example.invalid/) [mail](mailto:a@b.invalid) <a href="src/raw.cs">raw</a>';
+  const plain = createMarkdownParser()(source);
+  for (const href of ["src/Program.cs#L42", "C:%5Cmy%20code%5Ca.cs", "file:///C:/out/report.html", "file:///tmp/a.txt", "file:///tmp/b.txt", "https://example.invalid/"]) assert.ok(plain.includes(`<a href="${href}">`), href);
+  assert.doesNotMatch(plain, /data-file-link/);
+  // With a mark, each link of the Markdown that names a file carries it; a page of the web, another scheme and an authored <a> do not.
+  const marked = createMarkdownParser({ fileLinkMark: "mark-1" })(source);
+  for (const href of ["src/Program.cs#L42", "C:%5Cmy%20code%5Ca.cs", "file:///C:/out/report.html", "file:///tmp/a.txt", "file:///tmp/b.txt"]) assert.ok(marked.includes(`<a href="${href}" data-file-link="mark-1">`), href);
+  assert.equal(marked.match(/data-file-link/g)?.length, 5);
+  assert.ok(marked.includes('<a href="https://example.invalid/">web</a>') && marked.includes('<a href="mailto:a@b.invalid">mail</a>') && marked.includes('<a href="src/raw.cs">raw</a>'));
+  // Scripts are still no link.
+  assert.doesNotMatch(createMarkdownParser()("[x](javascript:alert(1)) [y](data:text/html,x) [z](vbscript:x)"), /<a /);
 });

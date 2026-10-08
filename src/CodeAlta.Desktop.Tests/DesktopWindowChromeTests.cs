@@ -59,6 +59,9 @@ public sealed class DesktopWindowChromeTests
         Assert.IsFalse(options.BrowserFeatures.ContextMenus);
         Assert.IsFalse(options.BrowserFeatures.StatusBar);
         Assert.IsFalse(options.BrowserFeatures.ZoomControls);
+        // The history of the view holds the start-up screen, which nothing leaves: back never loads it again.
+        Assert.IsFalse(options.BrowserFeatures.HistoryNavigation);
+        Assert.IsTrue(options.BrowserFeatures.TabFocusesLinks);
     }
 
     [TestMethod]

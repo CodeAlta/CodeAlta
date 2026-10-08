@@ -1,4 +1,5 @@
 import MarkdownIt from "markdown-it";
+import { fileMarkdownHref } from "./markdownLinks";
 
 /**
  * Creates an instance-owned, browser-independent parser. Output is UNSANITIZED HTML:
@@ -7,10 +8,17 @@ import MarkdownIt from "markdown-it";
  * A message breaks its lines where its text does. A document (a file, the instructions of a skill) is wrapped
  * in its source at any width: with `breaks: false` a line that follows another continues its paragraph.
  */
-export function createMarkdownParser(options: Readonly<{ breaks?: boolean }> = {}) {
+export function createMarkdownParser(options: Readonly<{ breaks?: boolean;
+  /** Written on each link of the Markdown that names a file, as `data-file-link`: what tells it from an `<a>` that the text wrote in HTML. */
+  fileLinkMark?: string }> = {}) {
   const md = new MarkdownIt("commonmark", { html: true, breaks: options.breaks ?? true, linkify: true, typographer: false })
     .enable(["table", "strikethrough", "linkify"]);
   md.linkify.set({ fuzzyLink: false, fuzzyEmail: false, fuzzyIP: false });
+  // A `file:` address is a link too, written as a link or alone in the text: markdown-it refuses the scheme, and
+  // the boundary decides what a link may name.
+  const validateLink = md.validateLink.bind(md);
+  md.validateLink = url => /^file:/i.test(url.trim()) || validateLink(url);
+  md.linkify.add("file:", { validate: (text, position) => /^\/\/\/?[^\s<>"'`]*[^\s<>"'`.,;:!?)\]}]/.exec(text.slice(position))?.[0].length ?? 0 });
   const escape = md.utils.escapeHtml;
   const code = (text: string, info: string) => {
     const language = md.utils.unescapeAll(info).trim().split(/\s+/)[0];
@@ -31,6 +39,12 @@ export function createMarkdownParser(options: Readonly<{ breaks?: boolean }> = {
     return renderer.renderToken(tokens, index, options);
   };
   md.renderer.rules.image = (tokens, index) => escape(tokens[index].content);
+  if (options.fileLinkMark) md.renderer.rules.link_open = (tokens, index, rendering, _env, renderer) => {
+    const token = tokens[index];
+    const href = token.attrGet("href");
+    if (typeof href === "string" && fileMarkdownHref(href)) token.attrSet("data-file-link", options.fileLinkMark!);
+    return renderer.renderToken(tokens, index, rendering);
+  };
   return (source: string) => md.render(source);
 }
 

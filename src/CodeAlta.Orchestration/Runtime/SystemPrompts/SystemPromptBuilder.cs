@@ -575,6 +575,14 @@ public sealed class SystemPromptBuilder
             lines.Add($"- Project root: {MarkdownCode(projectRoot)}");
         }
 
+        // How an answer names a file: the frontends open such a link on the file, at its line. A relative path is
+        // read from the folder the session works in, which is the root named above.
+        if (worktree is not null || projectRoot is not null || workingDirectory is not null)
+        {
+            var root = worktree is not null || projectRoot is not null ? "the project root" : "the current working directory";
+            lines.Add($"- Links to files: to point the user to a file, write a Markdown link whose target is the path of the file relative to {root}, with forward slashes, and `#L<line>` after it for a place in the file, as in `[Program.cs](src/Program.cs#L42)`. The user opens the file from the link. Give a full path only to a file outside {root}.");
+        }
+
         if (!string.IsNullOrWhiteSpace(request.Session.ParentSessionId))
         {
             lines.Add($"- Parent session: {request.Session.ParentSessionId}");
