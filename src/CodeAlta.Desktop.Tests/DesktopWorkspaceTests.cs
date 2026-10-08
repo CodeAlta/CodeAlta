@@ -318,6 +318,45 @@ public sealed class DesktopWorkspaceTests
         Assert.IsTrue(bytes.Length < 768 * 1024);
     }
 
+    [TestMethod]
+    public void Projection_NeverNamedProjectSessionShowsFirstLineOfSummary()
+    {
+        // Real persisted data: the title stays frozen at the text the session was created with while the summary evolves.
+        var session = Session("unnamed") with
+        {
+            Summary = "Catalogue OK. Je regarde le format des agents.\nsecond line",
+            Details = new RawApiSessionMetadataDetails(Title: "Project session for p."),
+        };
+        var snapshot = WorkspaceService.ProjectSnapshot([Project("p")], [session], new Dictionary<string, SessionViewJournalHeader> { ["unnamed"] = new() { SessionId = "unnamed", Kind = SessionViewKind.ProjectSession, ProjectRef = "p", CreatedAt = session.CreatedAt, WorkingDirectory = session.WorkspacePath! } });
+        Assert.AreEqual("Catalogue OK. Je regarde le format des agents.", snapshot.Sessions[0].Title);
+    }
+    [TestMethod]
+    public void Projection_NamedSessionKeepsItsTitleWhateverItsSummary()
+    {
+        var session = Session("named") with { Summary = "Latest answer of the assistant" };
+        var headers = new Dictionary<string, SessionViewJournalHeader>
+        {
+            ["named"] = new() { SessionId = "named", Kind = SessionViewKind.ProjectSession, ProjectRef = "p", CreatedAt = session.CreatedAt, WorkingDirectory = session.WorkspacePath! },
+        };
+        var snapshot = WorkspaceService.ProjectSnapshot([Project("p")], [session], headers);
+        Assert.AreEqual("Persisted title", snapshot.Sessions[0].Title);
+    }
+
+    [TestMethod]
+    public void Projection_NeverNamedGlobalSessionShowsFirstLineOfSummary()
+    {
+        var session = Session("global") with
+        {
+            Summary = "Checking the catalog",
+            Details = new RawApiSessionMetadataDetails(Title: "Global Session"),
+        };
+        var headers = new Dictionary<string, SessionViewJournalHeader>
+        {
+            ["global"] = new() { SessionId = "global", Kind = SessionViewKind.GlobalSession, CreatedAt = session.CreatedAt, WorkingDirectory = session.WorkspacePath! },
+        };
+        var snapshot = WorkspaceService.ProjectSnapshot([], [session], headers);
+        Assert.AreEqual("Checking the catalog", snapshot.Sessions[0].Title);
+    }
     private static ProjectDescriptor Project(string id) => new()
     {
         Id = id, DisplayName = id, ProjectPath = "/literal/" + id, Archived = true,
