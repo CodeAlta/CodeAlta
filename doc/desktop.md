@@ -296,6 +296,12 @@ keys for its program. The host applies the zoom to the view (`desktopShell.zoom`
 `preferences.json` (`zoom`, written only when it is not 100), so the next start opens at the same zoom
 before the page loads.
 
+The title bar shows the zoom as a percentage, before the theme switch (`WindowZoom`). A click opens **Zoom
+out**, the percentage, which goes back to 100%, and **Zoom in**; a step that does not exist is disabled (at
+25 and at 500). These buttons run the same commands as the keys, and every answer of `desktopShell.zoom`
+updates the percentage shown (`zoomWindow`), whoever asked. The tab strip at the end of the title bar leaves
+the room of both buttons (`--window-actions-width`). A page without a shell (the browser demo) shows no zoom.
+
 ### When the host stops responding
 
 Reloading the window opens a new RPC session with the same host; sessions keep running and prompt
@@ -1182,7 +1188,7 @@ fresh durable read without restoring run/queue/interaction authority.
 **Settings → Appearance** manages the language, the theme (Dark, Light, or Auto, which follows the
 operating system), a darker dark theme, the color scheme, project sorting, the recent-session count and
 desktop project-rail collapse. The button before the window controls at the top right switches between the
-three themes. The rail's Sort projects selector and
+three themes; the percentage before it is the zoom of the window. The rail's Sort projects selector and
 Show/Hide projects button use the same live preferences; changes apply immediately and are
 saved only to this WebView's local storage (theme, darker, colorScheme, projectSort, projectRail and projectTree v1 keys).
 The user's own color schemes are files of the profile (see below).

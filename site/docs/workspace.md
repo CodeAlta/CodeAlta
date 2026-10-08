@@ -411,6 +411,8 @@ The **Appearance** page sets:
 - the width of the conversation, as a percentage of the space of a session;
 - what closing the window does: ask, keep CodeAlta running in the notification area, or exit.
 
+The zoom of the window is in the title bar, as a percentage before the theme switch. Click it to zoom out, to zoom in, or to go back to 100% with a click on the percentage. `Ctrl+-`, `Ctrl+=` and `Ctrl+0` do the same, and the zoom is kept for the next start.
+
 <div class="row g-3 my-4">
   <div class="col-md-6">
     <figure class="alta-figure mb-0">

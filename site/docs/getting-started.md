@@ -235,7 +235,7 @@ Both apps use the same shortcuts and slash commands unless noted.
 | Close tab / reopen closed tab (desktop) | `Ctrl+W` / `Ctrl+Shift+T` |
 | Browse saved sessions (desktop) | `Ctrl+Alt+B` or `/sessions` |
 | Show or hide session notes (desktop) | `Ctrl+Shift+N` or `/notes` |
-| Zoom in / out / reset (desktop) | `Ctrl+=` or `Ctrl+Plus` / `Ctrl+-` / `Ctrl+0`, or `/zoom_in` / `/zoom_out` / `/reset_zoom` |
+| Zoom in / out / reset (desktop) | `Ctrl+=` or `Ctrl+Plus` / `Ctrl+-` / `Ctrl+0`, or `/zoom_in` / `/zoom_out` / `/reset_zoom`, or the percentage in the title bar |
 | Copy the UI as an image (TUI) | `Ctrl+F12` |
 
 If these shortcuts do not work in Windows Terminal, see [Troubleshooting: Windows Terminal shortcuts do not reach CodeAlta]({{site.basepath}}/docs/troubleshooting/#windows-terminal-shortcuts-do-not-reach-codealta).

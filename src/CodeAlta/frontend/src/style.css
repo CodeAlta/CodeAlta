@@ -1420,9 +1420,15 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body {
 .window-brand .activity-rail { display: flex; align-items: center; gap: 2px; margin-left: auto; }
 .window-brand .activity-rail > .bp6-button { min-width: 26px; min-height: 28px; padding: 0; color: var(--muted); }
 .window-brand .activity-rail > .bp6-button:hover, .window-brand .activity-rail > .bp6-button.bp6-active { color: var(--text); }
-.window-actions { position: absolute; z-index: 3; top: 0; right: var(--titlebar-inset-end); display: flex; align-items: center; justify-content: center; width: var(--window-actions-width); height: var(--titlebar-height); }
+.window-actions { position: absolute; z-index: 3; top: 0; right: var(--titlebar-inset-end); display: flex; align-items: center; justify-content: center; gap: 2px; width: var(--window-actions-width); height: var(--titlebar-height); }
 .window-actions > .bp6-button { min-width: 28px; min-height: 28px; padding: 0; color: var(--muted); }
 .window-actions > .bp6-button:hover { color: var(--text); }
+/* The zoom of the window, before the theme switch: the tab strip leaves it its room too. */
+.ide-shell:has(.window-zoom) { --window-actions-width: 82px; }
+.window-zoom.bp6-button { min-width: 40px; min-height: 28px; padding: 0 4px; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.window-zoom.bp6-button:hover, .bp6-popover-open > .window-zoom.bp6-button { color: var(--text); }
+.window-zoom-steps { display: inline-flex; align-items: center; gap: 1px; padding: 3px; }
+.window-zoom-value.bp6-button { min-width: 50px; font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .window-brand-mark { flex: none; width: 22px; height: 22px; }
 /* Without the Explorer the mark keeps its name and the first tab strip starts after it. */
 .ide-shell .workspace-shell:not(.project-rail-open) .window-brand { position: absolute; z-index: 2; top: 0; left: 0; width: var(--brand-width); height: var(--titlebar-height); }

@@ -155,6 +155,7 @@ import { createHostLiveness, hostPingInterval, hostPingTimeout } from "./hostLiv
 import { reloadsAfterClose, rpcSessionClosed, sessionRecoveryKey } from "./sessionRecovery";
 import { installKeyboardClickGuard } from "./keyboardClickGuard";
 import { closeApplicationWindow, logoUrl, useWindowTitleBar, WindowBrand, WindowControls } from "./windowChrome";
+import { WindowZoom, zoomWindow } from "./WindowZoom";
 import { createPluginEventsRead } from "./pluginEvents";
 import { ProjectContext } from "./ProjectContext";
 import { WorktreeSettings } from "./worktrees/WorktreeSettings";
@@ -1534,8 +1535,8 @@ function App() {
     if (command === "exit") { exitApplication(); return; }
     // The host zooms the window's view and keeps the zoom for the next starts; an open window does not stop it.
     if (command === "zoomIn" || command === "zoomOut" || command === "resetZoom") {
-      void desktopShell.zoom({ direction: command === "zoomIn" ? 1 : command === "zoomOut" ? -1 : 0 }, { timeoutMilliseconds: 8_000 })
-        .catch(error => console.error("[CodeAlta] zoom failed", error));
+      // The answer holds the zoom the window now has: the title bar shows it.
+      void zoomWindow(command, desktopShell.zoom, setShellPreferences).catch(error => console.error("[CodeAlta] zoom failed", error));
       return;
     }
     // Settings is a modal window: only commands that move to another Settings page run while it is open.
@@ -2312,6 +2313,7 @@ function App() {
           </nav>
         </WindowBrand>
         <div className="window-actions">
+          {shellPreferences && <WindowZoom zoom={shellPreferences.zoom} run={runCommand} />}
           <Button variant="minimal" size="small" className="theme-switch" icon={<AppIcon name={themeIcons[theme]} size={16} />}
             aria-label={t("Theme: {theme}", { theme: t(themeLabel(theme)) })} title={t("Theme: {theme}", { theme: t(themeLabel(theme)) })} onClick={() => setTheme(nextTheme(theme))} />
         </div>
