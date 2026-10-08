@@ -19,6 +19,11 @@ It finds the service from the git remote of the project. Nothing has to be confi
 
 A public repository is read without signing in. A private one needs the sign-in of its service.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-issues.webp" alt="The Issues tab of CodeAlta Desktop with the open issues of a GitHub repository and one issue open" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Issues tab: the issues and the pull requests of a project, and a session started on one of them in a click.</figcaption>
+</figure>
+
 ## The Issues tab
 
 Open it with the issue icon of the activity bar, or with `Ctrl+G Ctrl+B`.
@@ -59,6 +64,16 @@ What the session is told is listed in **Settings > Pull requests**. CodeAlta shi
 | Of one project | `<project>/.alta/prompts/pull-requests/<name>.pr.md` |
 
 A file named `default.pr.md` replaces the built-in instructions. A kind of the project replaces one of yours with the same name.
+
+<figure class="alta-figure my-4" style="max-width: 36rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-pull-request.webp" alt="The pull request button under the prompt of a session, with its menu open" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The pull request button under the prompt: it asks the session to open a pull request for its work.</figcaption>
+</figure>
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-pull-request-settings.webp" alt="The Pull requests page of Settings with the default instructions" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Settings > Pull requests: the instructions a session is given, and the kinds you add.</figcaption>
+</figure>
 
 ## For agents
 

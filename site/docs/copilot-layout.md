@@ -17,6 +17,11 @@ What comes from the Copilot layout is marked **Copilot**, with the GitHub mark, 
 | Skills of a project | `.github/skills/<name>/SKILL.md` | Listed in **Settings > Skills**, offered to the agent like any skill. |
 | Your skills | `~/.copilot/skills/<name>/SKILL.md` | The same, for every project. |
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-copilot-skills.webp" alt="The Skills page of Settings with a skill of the .github folder marked Copilot" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A skill of <code>.github/skills</code> in Settings > Skills, marked Copilot.</figcaption>
+</figure>
+
 ## Instructions
 
 `AGENTS.md`, `CLAUDE.md` and `.github/copilot-instructions.md` often say the same thing. When a folder has several of them, CodeAlta reads the largest one.

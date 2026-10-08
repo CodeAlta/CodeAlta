@@ -129,6 +129,11 @@ The width is the same for every session. **Settings > Appearance > Width of the 
 
 An agent can change the width of its own session when you ask it to, for example "show this conversation at 70%". That only changes how that session is shown, not your setting.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-conversation-width.webp" alt="A session whose timeline and prompt take 70% of the width, centered" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A conversation at 70% of the width: the timeline and the prompt stay centered.</figcaption>
+</figure>
+
 The agent prompt selector chooses the agent prompt profile for the current draft/session. Built-in prompts appear first, followed by global `~/.alta/prompts/agents` prompts and project `.alta/prompts/agents` prompts. Global/project prompts with the same file id override lower-precedence prompts; see [Agent Prompts]({{site.basepath}}/docs/prompts/).
 
 In the desktop app, the agent prompt, provider, model and reasoning effort are in one picker at the left of the prompt bar. It lists the models of the provider and the reasoning efforts of the selected model. The prompt bar also shows the project folder, the git branch and the lines added and removed since the last commit. These numbers follow the changes made outside CodeAlta too. Click them to open the [changes of the project](#changes-desktop).
@@ -227,6 +232,11 @@ The **Files** pane lists the folders and files of the project, without those exc
 `Ctrl+N`, or the **+** button beside the tabs, starts a new file. It is named **Untitled-1** and stays in the editor only: write in it at once, and save it when you want to keep it. `Ctrl+S` then asks for its path in the project, and creates the folders that do not exist yet.
 
 A new file is plain text. Choose its language with `Ctrl+K` `M`, or click the language in the status bar. The same choice changes the language of any open file.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-editor-new-file.webp" alt="A new untitled file in the code editor with the dialog that selects its language" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A new file, not saved yet, and the choice of its language.</figcaption>
+</figure>
 
 The editor asks before it closes a file with unsaved changes. A file changed by an agent or by another program is reloaded, unless you have edited it: the editor then lets you choose.
 

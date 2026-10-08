@@ -92,6 +92,11 @@ In CodeAlta Desktop:
 - A sub-agent is an ordinary session: open it to follow its work, or to write to it.
 - What agents send each other is shown as an **Agent message**, in its own color: the prompt a sub-agent receives, and the answer it gives back. The message names the session it comes from. Click the name to open that session.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-sub-agents.webp" alt="A session with three sub-agents listed under it in the sidebar and the answer of one of them in its timeline" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Three sub-agents under their session in the sidebar, and the answer of one of them as an agent message.</figcaption>
+</figure>
+
 ## Prompting for delegated work
 
 You can also ask the current agent to create and coordinate child sessions for you.
