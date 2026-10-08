@@ -91,6 +91,9 @@ public sealed class BuiltInPromptContentTests
         StringAssert.Contains(defaultPrompt.Body, "--model-ref");
         StringAssert.Contains(defaultPrompt.Body, "alta reminder create --duration 00:05:00");
         StringAssert.Contains(defaultPrompt.Body, "alta session set_agent --prompt-id plan");
+        // Waiting for something outside the session: a reminder brings the agent back, a promise does not.
+        StringAssert.Contains(defaultPrompt.Body, "nothing brings you back when it ends");
+        StringAssert.Contains(defaultPrompt.Body, "alta reminder create --duration <delay>");
         // Follow-up tasks: proposed for what was found and verified beside the request, never started by the session.
         StringAssert.Contains(defaultPrompt.Description!, "proposing follow-up tasks");
         StringAssert.Contains(defaultPrompt.Body, "unrelated to the current request");

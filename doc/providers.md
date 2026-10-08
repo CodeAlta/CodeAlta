@@ -342,6 +342,7 @@ The instructions are the ones every provider gets: there is no second set of pro
 - a tool named `<name>` is `mcp__codealta__<name>`, and `alta <command> ...` is a call of that tool with those words as `args`, never a shell command;
 - CodeAlta's file, search, web, shell and question tools are not part of the session: the same work is done with the tools of Claude Code, which the note does not name (which ones a version of the CLI has is its own business);
 - what CodeAlta has its own way for is done its way, because the user sees and manages it in the window: `alta session` for the delegation the user asks for (the subagents of Claude Code stay its own, for its own work), `alta ask`, `alta skill`, the plan mode and the plan files, `alta notes`, `alta reminder`;
+- what Claude Code writes after its turn has ended, when a background command of its own ends or a wake-up of its own fires, is not shown to the user (see "Limits"): to come back later it sets an `alta reminder`;
 - where the instructions differ from the defaults of Claude Code (when to commit, for instance), the instructions are followed.
 
 **The CLI keeps the system prompt a conversation started with.** A process that resumes a conversation (`--resume`, also with `--fork-session`) ignores the `appendSystemPrompt` it is given: checked with CLI 2.1.292 by resuming a conversation with another appended text and asking for it. The instructions of CodeAlta change during a session (another agent prompt after `alta session set_agent`, an activated skill, the line that says whether the UI tools are active, the date), so `ClaudeCodeSession` keeps what the conversation was told and compares it with the instructions of each prompt that starts:
@@ -401,7 +402,7 @@ args = ["--add-dir", "/shared/specs"]  # optional; added to the command line
 ### Limits
 
 - A prompt that starts with `/` is a slash command of Claude Code (`/compact`, `/context`, `/clear`).
-- Claude Code can start a turn by itself between two prompts: a command it ran in the background ended, a scheduled prompt fired. CodeAlta has no run to show it in. What the CLI wrote for such a turn is dropped when the next prompt is sent (it stays in the context of the CLI); a turn of its own that still runs then is read with the run.
+- Claude Code can start a turn by itself between two prompts: a command it ran in the background ended, a scheduled prompt fired. CodeAlta has no run to show it in. What the CLI wrote for such a turn is dropped when the next prompt is sent (it stays in the context of the CLI); a turn of its own that still runs then is read with the run. The process of an idle session is closed after 10 minutes, and its background commands may end with it. The note above therefore tells Claude Code to set an `alta reminder` when it has to come back.
 - A tool call that was running when a run is stopped stays shown as running, as for any provider: the session records no end for it.
 - The tool calls of a subagent are shown as the output of the `Agent` tool call that started it, not as tool calls of the session.
 - `ExitPlanMode` and tools other than commands and edits are allowed without a CodeAlta prompt.

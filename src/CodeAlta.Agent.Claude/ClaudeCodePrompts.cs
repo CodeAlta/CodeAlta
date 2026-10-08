@@ -70,6 +70,9 @@ internal static class ClaudeCodePrompts
             // Claude Code has a tool of its own for most of what CodeAlta does with its sessions, questions,
             // skills, plans and notes. The instructions name the way of CodeAlta without saying it wins.
             builder.AppendLine($"- What CodeAlta has its own way for, do its way: the user sees and manages it in the CodeAlta window. That is `{GatewayTool} session` for the child sessions and the delegation the user asks for (your own subagents stay yours, for your own work), `{GatewayTool} ask` for questions to the user, `{GatewayTool} skill` for the skills the instructions list, the plan mode and the plan files as the instructions describe them, `{GatewayTool} notes` and `{GatewayTool} reminder`.");
+            // The CLI tells the model that a background command starts it again when it ends. It does, but CodeAlta
+            // has no run to show that turn in.
+            builder.AppendLine($"- What you write after your turn has ended, when a background command of yours ends or a wake-up of yours fires, is not shown to the user. To come back later, set a `{GatewayTool} reminder` as the instructions say.");
             builder.AppendLine($"- Your own question tool reaches the user only in a run CodeAlta lets ask that way. When it is refused, `{GatewayTool} ask` is the way to ask, within the rules the instructions give for asking.");
         }
 

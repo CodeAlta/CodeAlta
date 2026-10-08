@@ -69,6 +69,8 @@ public sealed class ClaudeCodeSessionTests
         // What CodeAlta has its own mechanism for is said once, for every agent prompt: which one to use.
         StringAssert.Contains(appended, "`alta ask`");
         StringAssert.Contains(appended, "`alta session`");
+        // A turn the CLI starts by itself after a run is not shown: coming back later takes a reminder.
+        StringAssert.Contains(appended, "is not shown to the user");
         Assert.IsTrue(appended.IndexOf("Be brief.", StringComparison.Ordinal) > appended.IndexOf("`alta session`", StringComparison.Ordinal));
 
         // No tool of Claude Code is named: which ones a version has is its own business.

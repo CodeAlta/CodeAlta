@@ -141,6 +141,8 @@ In CodeAlta Desktop, an agent can show you what changed with `alta diff show`: i
 
 Agents can also ask the live tool to schedule in-process reminder prompts with `alta reminder create --duration <seconds> --content ...`. Reminders default to the calling session, can target another session with `--session <session-id>`, can repeat with `--repeat <count>`, and can be inspected or removed with `alta reminder list` and `alta reminder delete <reminder-id>`. In the TUI, use the compact clock button in the prompt bar or `/reminder` (`Ctrl+G Ctrl+D`) to create, delete, and edit reminder messages for the selected session.
 
+An agent that waits for something that takes long, such as a CI run or a deployment, sets a reminder to come back and check it, and says so in its answer. The reminder is listed in **Reminders** until it fires. Reminders are not kept when CodeAlta restarts.
+
 Agents can update the Notes of the current session (the sidebar Notes panel in the TUI, the Notes window in the desktop app) with `alta notes set --stdin`, read it back with `alta notes get`, and clear it with `alta notes clear`. Notes are session-scoped sticky Markdown for plans, checklists, and progress summaries; switching tabs shows the selected session's notes, and reopening a session restores the latest notes set/clear event from that session's journal.
 
 ## Prompting for CodeAlta self-inspection
