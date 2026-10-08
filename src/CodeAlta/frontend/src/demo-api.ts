@@ -112,7 +112,7 @@ export const desktopShell = Object.freeze({
   preferences: async () => ({ status: "unavailable", onClose: "ask", canKeepRunning: false, platform: "windows", entryAdded: false }),
   setOnClose: async () => ({ status: "unavailable", onClose: "ask", canKeepRunning: false, platform: "windows", entryAdded: false }),
   hide: async () => ({ status: "unavailable" }), exit: async () => ({ status: "unavailable" }), watch: unavailable,
-  pickFolder: async () => ({ status: "unavailable", path: null }),
+  pickFolder: async () => ({ status: "unavailable", path: null }), revealEntry: async () => ({ status: "unavailable" }),
 });
 export const providerLogin = Object.freeze({ status: unavailable, login: unavailable, logout: unavailable });
 export const providerUsage = Object.freeze({ read: unavailable });

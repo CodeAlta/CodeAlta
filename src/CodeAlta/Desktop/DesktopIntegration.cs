@@ -139,6 +139,23 @@ internal static class DesktopIntegration
     }
 
     /// <summary>
+    /// Whether the user is told that the application was added to the desktop, and on macOS shown how it gets
+    /// into the Dock. Not an application that was started as a bundle: its user has found it already.
+    /// </summary>
+    /// <param name="added">This start added the entry.</param>
+    /// <param name="macOS">Whether the platform is macOS.</param>
+    /// <param name="bundleIdentifier">The identifier of the bundle the process was started as; null for none.</param>
+    internal static bool AnnouncesEntry(bool added, bool macOS, string? bundleIdentifier) => added && (!macOS || bundleIdentifier is null);
+
+    /// <summary>
+    /// Shows the entry of this platform in its file manager, selected: the place to drag <c>CodeAlta.app</c>
+    /// to the Dock from.
+    /// </summary>
+    /// <returns>False when there is no entry, or the file manager could not be started.</returns>
+    internal static bool RevealEntry()
+        => EntryPath() is { } entry && (Directory.Exists(entry) || File.Exists(entry)) && DesktopFileReveal.Show(entry);
+
+    /// <summary>
     /// The icon family beside the application that becomes the icon of the macOS bundle. From macOS 26 the
     /// system gives every icon its own rounded shape, at the size of its neighbours, but only to a picture
     /// that is opaque up to its edges: it shrinks any other onto a grey tile. Earlier versions draw the

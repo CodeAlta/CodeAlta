@@ -45,7 +45,7 @@ The desktop app uses the web view of the operating system:
 - **macOS**: macOS 11 or later.
 - **Linux**: WebKitGTK 6.0 with GTK 4.
 
-On its first start, the desktop app adds CodeAlta to the Start Menu on Windows, to `~/Applications` on macOS, or to the applications menu on Linux. After that you can start it without a terminal. In a terminal, `alta` gives the prompt back once the window is open; `alta --wait` keeps the terminal until the app closes.
+On its first start, the desktop app adds CodeAlta to the Start Menu on Windows, to `~/Applications` on macOS, or to the applications menu on Linux. After that you can start it without a terminal. On macOS the app shows where it is and how to keep it in the Dock: **Reveal in Finder** opens the Applications folder of your home folder with CodeAlta selected, and you drag it to the Dock. The Dock entry stays the same across updates. In a terminal, `alta` gives the prompt back once the window is open; `alta --wait` keeps the terminal until the app closes.
 
 On Windows, after an update run by hand with `dotnet tool update -g CodeAlta`, start `alta` once from a terminal to refresh the Start Menu shortcut. **Update and restart** in the app does it for you.
 

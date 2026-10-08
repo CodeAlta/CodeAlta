@@ -47,9 +47,13 @@ export function keepRunningPlace(platform: string): MessageKey {
     : "CodeAlta stays in the notification area. Sessions keep running.";
 }
 
-/** Where the application was just added, so it can be started like any other. */
+/**
+ * Whether the platform is told with a picture instead of a line: on macOS the application is a bundle in a
+ * folder few people open, and it gets into the Dock by a gesture, which the Dock offers no other way for.
+ */
+export function entryAddedGuide(platform: string): boolean { return platform === "macos"; }
+
+/** Where the application was just added, so it can be started like any other; macOS has its guide instead. */
 export function entryAddedNotice(platform: string): MessageKey {
-  return platform === "macos" ? "CodeAlta was added to your Applications folder: open it from the Finder, Spotlight or Launchpad."
-    : platform === "linux" ? "CodeAlta was added to the applications menu."
-    : "CodeAlta was added to the Start Menu.";
+  return platform === "linux" ? "CodeAlta was added to the applications menu." : "CodeAlta was added to the Start Menu.";
 }

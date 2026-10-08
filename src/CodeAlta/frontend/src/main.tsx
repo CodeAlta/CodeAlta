@@ -13,7 +13,8 @@ import { useColorSchemeLibrary } from "./colorSchemeLibrary";
 import { ShellAppearance } from "./ShellAppearance";
 import { RunningExitDialog } from "./RunningExitDialog";
 import { CloseWindowDialog } from "./CloseWindowDialog";
-import { closeBehavior, entryAddedNotice, type CloseBehavior } from "./desktopShell";
+import { closeBehavior, entryAddedGuide, entryAddedNotice, type CloseBehavior } from "./desktopShell";
+import { EntryAddedDialog } from "./EntryAddedDialog";
 import { showToast } from "./appToaster";
 import { availableUpdate, installedNotice, UpdateNotice } from "./UpdateNotice";
 import {
@@ -874,12 +875,16 @@ function App() {
   }, [status?.hostEpoch]);
   const shownLocale = useRef(language.locale); shownLocale.current = language.locale;
   // Said once, the first time the installed tool is added to the desktop's applications.
+  // The notice may come before the platform is known: it then waits for it, as each platform is told differently.
   const entryAnnounced = useRef(false);
-  const currentPlatform = useRef("windows");
+  const entryPending = useRef(false);
+  const currentPlatform = useRef<string | null>(null);
+  const [entryGuide, setEntryGuide] = useState(false);
   function announceEntry(platform: string) {
     if (entryAnnounced.current) return;
     entryAnnounced.current = true;
-    showToast({ message: translate(shownLocale.current, entryAddedNotice(platform)), intent: "success", icon: "tick", timeout: 12_000 });
+    if (entryAddedGuide(platform)) setEntryGuide(true);
+    else showToast({ message: translate(shownLocale.current, entryAddedNotice(platform)), intent: "success", icon: "tick", timeout: 12_000 });
   }
   useEffect(() => {
     if (!status?.hostEpoch) return;
@@ -891,13 +896,13 @@ function App() {
         if (validSessionWidth(value.sessionWidth)) setSessionWidthValue(value.sessionWidth);
         setSessionWidths(sessionWidthsOf(value.sessionWidths));
         currentPlatform.current = value.platform;
-        if (value.entryAdded) announceEntry(value.platform);
+        if (value.entryAdded || entryPending.current) announceEntry(value.platform);
       }, () => { /* No shell: the window is the application. */ });
     void (async () => {
       try {
         for await (const notice of await desktopShell.watch({}, { signal: abort.signal })) {
           if (abort.signal.aborted) return;
-          if (notice.kind === "entry-added") announceEntry(currentPlatform.current);
+          if (notice.kind === "entry-added") { if (currentPlatform.current) announceEntry(currentPlatform.current); else entryPending.current = true; }
           else if (notice.kind === "exit-requested") requestExit.current();
           else if (notice.kind === "confirm-exit") setExitQuestionFor({ sessions: notice.runningSessions, terminals: notice.busyTerminals });
           else if (notice.kind === "confirm-close" && !exitPending.current) setCloseQuestion(true);
@@ -2591,6 +2596,9 @@ function App() {
       // A file picked for a project whose editor is not open opens it on that file alone, without the files of the project.
       onOpen={path => { setDialog(null); openEditor(filePickerProject, { path, line: null, column: null, explorer: false }); }}
       onOpenEditor={() => { setDialog(null); openProjectEditor(filePickerProject); }} />}
+    {/* A first start also opens the settings of the providers, with their own guide: this one waits for them to close. */}
+    {entryGuide && !settingsOpen && <EntryAddedDialog onClose={() => setEntryGuide(false)}
+      onShowInFinder={() => { void desktopShell.revealEntry({}, { timeoutMilliseconds: 15_000 }).catch(() => { /* The folder is named in the dialog. */ }); }} />}
     {closeQuestion && <CloseWindowDialog platform={shellPreferences?.platform ?? "windows"} onKeepRunning={keepRunning} onExit={exitOnClose}
       onCancel={() => setCloseQuestion(false)} />}
     {exiting && <UnsavedExitDialog names={exiting.tabs.flatMap(tab => fileEditors.unsaved(fileTabKey(tab)))} busy={exiting.busy}

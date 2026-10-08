@@ -112,6 +112,17 @@ internal sealed class DesktopShellService
         return text.Length == 0 ? "Select a folder" : text;
     }
 
+    /// <summary>
+    /// Shows the application's entry in the file manager: on macOS <c>CodeAlta.app</c> selected in the Finder,
+    /// from where the user drags it to the Dock. <c>unavailable</c> where there is no entry to show.
+    /// </summary>
+    [NeoRpcMethod("revealEntry")]
+    public DesktopShellRevealEntryResponse RevealEntry(DesktopShellRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return new(_shell is not null && DesktopIntegration.RevealEntry() ? "ok" : "unavailable");
+    }
+
     /// <summary>The shell's notices for this page, until the page goes away.</summary>
     [NeoRpcMethod("watch")]
     public NeoRpcChannel<DesktopShellEvent> Watch(DesktopShellRequest request, CancellationToken cancellationToken)
@@ -162,6 +173,9 @@ internal sealed record DesktopShellExitRequest(bool Confirmed);
 
 /// <summary><c>ok</c> or <c>unavailable</c>.</summary>
 internal sealed record DesktopShellExitResponse(string Status);
+
+/// <summary><c>ok</c>, or <c>unavailable</c> when the application has no entry or the file manager did not open.</summary>
+internal sealed record DesktopShellRevealEntryResponse(string Status);
 
 /// <param name="Status"><c>ok</c> or <c>unavailable</c>.</param>
 /// <param name="OnClose">

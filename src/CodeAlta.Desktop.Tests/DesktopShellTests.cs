@@ -196,6 +196,18 @@ public sealed class DesktopShellTests
     }
 
     [TestMethod]
+    public void NewEntry_IsAnnouncedToAnApplicationStartedFromATerminalOnly()
+    {
+        // The first start of the tool, from a terminal: the user is told where the application is now.
+        Assert.IsTrue(DesktopIntegration.AnnouncesEntry(added: true, macOS: true, bundleIdentifier: null));
+        Assert.IsTrue(DesktopIntegration.AnnouncesEntry(added: true, macOS: false, bundleIdentifier: null));
+        // Started from the Dock or the Finder, as a bundle: the user has found it.
+        Assert.IsFalse(DesktopIntegration.AnnouncesEntry(added: true, macOS: true, DesktopIntegration.MacBundleIdentifier));
+        Assert.IsFalse(DesktopIntegration.AnnouncesEntry(added: false, macOS: true, bundleIdentifier: null));
+        Assert.IsFalse(DesktopIntegration.AnnouncesEntry(added: false, macOS: false, bundleIdentifier: null));
+    }
+
+    [TestMethod]
     public void MacBundleIcon_IsOpaqueUpToItsEdgesWhereTheSystemShapesIt()
     {
         Assert.AreEqual("alta.icns", DesktopIntegration.MacBundleIconFile(shapedBySystem: false));

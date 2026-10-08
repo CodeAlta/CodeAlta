@@ -198,7 +198,8 @@ icon and its place in the Dock, and through the launcher when the bundle does no
 
 The first start of a tool installed with `dotnet tool install -g CodeAlta` adds CodeAlta to the
 desktop, in the user's own folders and without elevation, and refreshes the entry when the version
-or the launcher's path changes. The first time, a notice in the window says where it was added:
+or the launcher's path changes. The first time, the window says where it was added: a notice on
+Windows and Linux, a guide on macOS (below).
 
 - **Windows:** a **CodeAlta** shortcut in the Start Menu, with the application's icon. The process
   has its own application identity, so the taskbar groups the window with that shortcut and a pin
@@ -231,6 +232,17 @@ or the launcher's path changes. The first time, a notice in the window says wher
   An application started as the bundle sets nothing: the Dock already draws the bundle's icon, and a
   picture of its own would replace the shape the system gave it. The bundle is written again when
   the version of macOS now asks for the other icon family.
+
+  Few people open the Applications folder of their home folder, and the Dock has no supported way
+  for an application to add itself (only an edit of the Dock's preferences followed by a restart of
+  the Dock). So the first start, which is one from a terminal, shows a guide instead of a notice:
+  **CodeAlta is in your Applications folder**, with a picture of the application going from that
+  folder to the Dock, how it is started from now on (Launchpad, Spotlight, the folder), and
+  **Reveal in Finder**, which opens the folder with `CodeAlta.app` selected, ready to be dragged.
+  It waits for the provider settings of a first start to close, and it is never shown to an
+  application that was started as a bundle: its user has found it. A tile in the Dock is the
+  bundle, so it starts the installed version whatever it is, and the first start of each version
+  writes the bundle again with its icon: an update changes neither the tile nor its place.
 - **Linux:** `codealta.desktop` in `~/.local/share/applications` (or `$XDG_DATA_HOME`).
 
 On macOS and Linux the entry starts the tool's launcher (`alta` in the .NET tools folder), so a tool

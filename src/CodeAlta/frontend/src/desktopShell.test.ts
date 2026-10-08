@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { closeBehavior, closeBehaviorLabel, closeBehaviors, closeQuestion, entryAddedNotice, exitQuestion, keepRunningPlace, nextChoice } from "./desktopShell";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { closeBehavior, closeBehaviorLabel, closeBehaviors, closeQuestion, entryAddedGuide, entryAddedNotice, exitQuestion, keepRunningPlace, nextChoice } from "./desktopShell";
+import { EntryAddedPicture } from "./EntryAddedPicture";
 import { locales, translate } from "./localization";
 
 test("the exit question counts the sessions it would stop and the terminals whose command it would end", () => {
@@ -26,9 +29,24 @@ test("the place the application stays in is named as the platform names it", () 
 
 test("the first start says where the application was added", () => {
   assert.ok(translate("en", entryAddedNotice("windows")).includes("Start Menu"));
-  assert.ok(translate("en", entryAddedNotice("macos")).includes("Applications folder"));
   assert.ok(translate("en", entryAddedNotice("linux")).includes("applications menu"));
-  for (const locale of locales) if (locale !== "en") assert.notEqual(translate(locale, entryAddedNotice("macos")), entryAddedNotice("macos"));
+  for (const locale of locales) if (locale !== "en") assert.notEqual(translate(locale, entryAddedNotice("linux")), entryAddedNotice("linux"));
+  // macOS is shown instead: the application is a bundle in a folder, and it gets into the Dock by a gesture.
+  assert.deepEqual(["windows", "macos", "linux"].map(entryAddedGuide), [false, true, false]);
+});
+
+test("the guide of macOS shows the application going from its folder to the Dock, in every language", () => {
+  const texts = ["CodeAlta is in your Applications folder", "To keep it at hand, drag CodeAlta from that folder to the Dock.",
+    "Open CodeAlta like any other application: from Launchpad, Spotlight or the Applications folder of your home folder. No terminal is needed.",
+    "CodeAlta dragged from the Applications folder to the Dock"] as const;
+  for (const locale of locales) {
+    for (const text of texts) if (locale !== "en") assert.notEqual(translate(locale, text), text, `${locale}: ${text}`);
+    const picture = renderToStaticMarkup(createElement(EntryAddedPicture, { logo: "logo.svg", label: translate(locale, texts[3]), folder: translate(locale, "Applications") }));
+    assert.ok(picture.includes(`aria-label="${translate(locale, texts[3])}"`) && picture.includes(`>${translate(locale, "Applications")}<`), picture);
+    // The application twice, in its folder and in its place in the Dock, with the arrow between them.
+    assert.equal(picture.split("<image").length - 1, 2, picture);
+    assert.ok(picture.includes(">CodeAlta<") && picture.includes(">Dock<") && picture.includes('class="entry-added-move"'), picture);
+  }
 });
 
 test("what closing the window does is named as the host names it, and in every language", () => {

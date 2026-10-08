@@ -1896,6 +1896,18 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .settings-field-help { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; }
 .running-exit-dialog, .close-window-dialog { width: min(440px, calc(100vw - 32px)); }
 .close-window-dialog .bp6-dialog-body > p { margin: 0 0 14px; }
+.entry-added-dialog { width: min(560px, calc(100vw - 32px)); }
+.entry-added-dialog .bp6-dialog-body > p { margin: 0 0 8px; }
+.entry-added-dialog .bp6-dialog-body > p:last-child { margin-bottom: 0; }
+.entry-added-picture { display: block; width: 100%; height: auto; margin: 0 0 14px; }
+.entry-added-window, .entry-added-dock { fill: var(--panel); stroke: var(--line); }
+.entry-added-line { fill: none; stroke: var(--line); }
+.entry-added-dot, .entry-added-tile, .entry-added-name { fill: color-mix(in srgb, var(--muted) 30%, transparent); }
+.entry-added-title { fill: var(--muted); font-size: 12px; }
+.entry-added-app { fill: var(--text); font-size: 11px; font-weight: 600; }
+.entry-added-move { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 6 5; stroke-linecap: round; }
+.entry-added-accent-fill { fill: var(--accent); }
+.entry-added-place { fill: var(--accent-soft); stroke: var(--accent); stroke-dasharray: 4 3; }
 .close-window-dialog .bp6-dialog-body > .bp6-checkbox { margin-bottom: 0; }
 .running-exit-dialog .bp6-dialog-header > svg { flex: none; margin-right: 8px; color: var(--red); }
 
