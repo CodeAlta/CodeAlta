@@ -50,6 +50,7 @@ import { OpenFileDialog } from "./editor/OpenFileDialog";
 import { ProjectEditor, type EditorRequest } from "./editor/ProjectEditor";
 import { UnsavedExitDialog, UnsavedFileDialog } from "./editor/UnsavedDialogs";
 import { ProjectChangesPanel } from "./changes/ProjectChangesPanel";
+import { changeKeyKept } from "./changes/projectChanges";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { ReadOnlyComposer } from "./ReadOnlyComposer";
 import { useLocalDraftImages } from "./useLocalDraftImages";
@@ -1513,6 +1514,9 @@ function App() {
         && target?.closest("[data-ask-keys]")) return;
       // In the text of the code editor Ctrl+G goes to a line, as in the terminal UI's editor.
       const editing = !!target?.closest("[data-editor-keys]");
+      // A Changes tab goes through its changes, or its files, with Alt+Down and Alt+Up: from its list of files as
+      // well as from a diff, they are not the session shortcuts there.
+      if (!commandChord.current && changeKeyKept(event, target)) return;
       // A list that renames its own rows (the files of the code editor) keeps F2.
       if (!commandChord.current && event.key === "F2" && target?.closest("[data-rename-keys]")) return;
       if (editing && !commandChord.current && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && event.key.toLowerCase() === "g") return;

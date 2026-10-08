@@ -191,6 +191,26 @@ export function changeBar(insertions: number | null, deletions: number | null): 
   return { added: green, removed: squares - green };
 }
 
+/** Marks a Changes tab in the page: inside it, Alt+Down and Alt+Up are its own keys and not the shortcuts of the window. */
+export const changeKeysAttribute = "data-change-keys";
+
+/**
+ * Where a key takes a Changes tab: Alt+Down to the next change and Alt+Up to the previous one, with no other
+ * modifier. Null for any other key, which is not one of the tab.
+ */
+export function changeStep(event: Readonly<{ key: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }>): "next" | "previous" | null {
+  if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
+  return event.key === "ArrowDown" ? "next" : event.key === "ArrowUp" ? "previous" : null;
+}
+
+/**
+ * Whether a key pressed on `target` is one that a Changes tab keeps: Alt+Down or Alt+Up anywhere inside the
+ * tab, its list of files as well as a diff. The window then leaves the key to the tab.
+ */
+export function changeKeyKept(event: Parameters<typeof changeStep>[0], target: Pick<Element, "closest"> | null): boolean {
+  return changeStep(event) !== null && !!target?.closest(`[${changeKeysAttribute}]`);
+}
+
 /** The height of a line of a diff, in pixels. */
 export const changeLineHeight = 20;
 /**

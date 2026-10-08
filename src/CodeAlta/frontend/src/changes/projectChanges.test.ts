@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { changeBar, changeCommitsReply, changeContent, changeContentNotice, changeDiffLimit, changeHistoryHeight, changeLetter, changeLineHeight, changeListReply,
+import { changeBar, changeCommitsReply, changeContent, changeContentNotice, changeDiffLimit, changeHistoryHeight, changeKeyKept, changeKeysAttribute, changeLetter, changeLineHeight,
+  changeListReply, changeStep,
   changeListRows, changeListWidth, changeScopeKey, changesViewLabel, changesViews, changeTreeRows, defaultChangesPreferences, estimatedDiffHeight, filterChanges,
   fittedDiffHeight, orderChanges, persistChangesPreferences, projectRelativePath, restoreChangesPreferences, sectionAt, selectedChange,
   type ChangedFile } from "./projectChanges";
@@ -158,4 +159,31 @@ test("the file at the top of the view of all files is the last one that starts a
   // Above the first one (a view pulled past its start) it is still the first; without sections there is none.
   assert.equal(at(-20), 0);
   assert.equal(sectionAt(0, () => 0, 10), -1);
+});
+
+test("Alt+Down and Alt+Up alone are the keys of a Changes tab; every other key is left to the window", () => {
+  const key = (name: string, modifiers: Partial<Record<"altKey" | "ctrlKey" | "metaKey" | "shiftKey", boolean>> = { altKey: true }) =>
+    changeStep({ key: name, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, ...modifiers });
+  assert.deepEqual([key("ArrowDown"), key("ArrowUp")], ["next", "previous"]);
+  // Without Alt they move in a list, and with another modifier they are other shortcuts.
+  assert.deepEqual([key("ArrowDown", {}), key("ArrowUp", {})], [null, null]);
+  for (const other of ["ctrlKey", "metaKey", "shiftKey"] as const) assert.equal(key("ArrowDown", { altKey: true, [other]: true }), null, other);
+  // Alt+Left and Alt+Right stay the project shortcuts of the window.
+  assert.deepEqual([key("ArrowLeft"), key("ArrowRight"), key("j"), key("PageDown")], [null, null, null, null]);
+  // What the window looks for around the key: the attribute a Changes tab carries.
+  assert.equal(changeKeysAttribute, "data-change-keys");
+
+  // The tab keeps the two keys wherever the focus is inside it: its list of files, a diff, a button of its header.
+  const asked: string[] = [];
+  const inside = { closest: (selector: string) => { asked.push(selector); return selector === "[data-change-keys]" ? {} as Element : null; } };
+  const outside = { closest: () => null };
+  const down = { key: "ArrowDown", altKey: true, ctrlKey: false, metaKey: false, shiftKey: false };
+  assert.equal(changeKeyKept(down, inside), true);
+  assert.equal(changeKeyKept({ ...down, key: "ArrowUp" }, inside), true);
+  assert.deepEqual(asked, ["[data-change-keys]", "[data-change-keys]"]);
+  // Elsewhere they select another session, and inside the tab the other shortcuts of the window still work.
+  assert.equal(changeKeyKept(down, outside), false);
+  assert.equal(changeKeyKept(down, null), false);
+  assert.equal(changeKeyKept({ ...down, key: "ArrowRight" }, inside), false);
+  assert.equal(changeKeyKept({ ...down, altKey: false }, inside), false);
 });

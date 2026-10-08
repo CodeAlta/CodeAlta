@@ -1579,7 +1579,9 @@ and merged like any tab.
 - The diff is Monaco's diff editor, read-only, with the highlighting of the file's language and the
   changed words marked inside a changed line. It is side by side or inline (inline by itself when the
   pane is narrower than 780 pixels), with the unchanged regions folded behind expanders. The arrows and
-  `Alt+Up` / `Alt+Down` go through the changes. **Open file** opens the file in the code editor of the
+  `Alt+Up` / `Alt+Down` go through the changes, from the list of files as well as from the diff: inside a
+  Changes tab (`data-change-keys`) the window leaves these two keys to the tab, where they select another
+  session anywhere else (`changeKeyKept`). **Open file** opens the file in the code editor of the
   project when it is inside the project folder. The `…` menu has **Hide unchanged lines**, **Ignore whitespace
   changes**, **Wrap lines** and **Copy path**.
 - A file that is new or deleted is shown whole, tinted green or red, instead of beside an empty side.
@@ -1605,8 +1607,8 @@ the header folds the file; **Collapse all files** / **Expand all files** is in t
 - A diff of more than 1000 lines (`changeDiffLimit`) is not shown whole, as an editor draws every line
   it is tall enough for: it takes the height of the view under its header and scrolls by itself.
 - The file at the top of the view is the selected one of the list, and the header shows its place
-  (**3 of 12**). Selecting a file in the list, the arrows of the header, `alta diff show --file` and,
-  from a diff, `Alt+Up` / `Alt+Down` bring a file to the top; the view holds it there while the diffs
+  (**3 of 12**). Selecting a file in the list, the arrows of the header, `alta diff show --file` and
+  `Alt+Up` / `Alt+Down` bring a file to the top; the view holds it there while the diffs
   around it take their size. A diff that takes its size above what is read moves the view by as much:
   the view does this itself (`overflow-anchor: none`), since WebKit has no scroll anchoring.
 
@@ -2524,7 +2526,7 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | In a code editor: `Ctrl+B`, `Ctrl+Shift+E`, `Ctrl+Shift+F` | Show or hide the side, go to the files, search in files |
 | In the text of a code editor: `Ctrl+G`, `Ctrl+F`, `Ctrl+H`, `F3`, `Alt+Z` | Go to line, find, replace, next match, wrap lines |
 | In the files of a code editor: `F2`, `Delete`, `Enter`, `Space` | Rename, delete, open, preview |
-| `Alt+Up`, `Alt+Down` in a diff of a Changes tab | Go to the previous or next change of the shown file, or to the previous or next file when all files are in one view |
+| `Alt+Up`, `Alt+Down` in a Changes tab (its files or a diff) | Go to the previous or next change of the shown file, or to the previous or next file when all files are in one view |
 | ``Ctrl+` ``, `Ctrl+G` then `Ctrl+J` | New terminal (`/terminal`) in the folder of the session or of the project |
 | In a terminal: `Ctrl+C`, `Ctrl+V`, `Ctrl+F`, `Ctrl+Home` / `Ctrl+End` | Copy the selection (or interrupt the program), paste, find, top / bottom |
 | `Ctrl+G` then `Ctrl+M` | Automations (`/automations`) |
@@ -2538,7 +2540,7 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | `F8`, `F10`, `Ctrl+F11` | Abort the running turn, clear the queue, compact |
 | `F3` / `F4`, `Ctrl+F3` / `Ctrl+F4` | Previous / next message, first / latest message |
 | `Ctrl+Alt+B`, `Ctrl+F` | Browse sessions, search the sessions of every project |
-| `Alt+Up` / `Alt+Down`, `Alt+Left` / `Alt+Right` outside text | Previous / next session, previous / next project |
+| `Alt+Up` / `Alt+Down`, `Alt+Left` / `Alt+Right` outside text | Previous / next session (not in a Changes tab, which keeps these two keys), previous / next project |
 | `Ctrl+Shift+N` | Show or hide the session notes |
 | `Ctrl+G` then `Ctrl+P` / `Ctrl+S` / `Ctrl+G` | Go to prompt, go to sidebar, toggle the navigator |
 | `Ctrl+G` then `Ctrl+T` / `Ctrl+U` / `Ctrl+D` | Session info, context usage, reminders |

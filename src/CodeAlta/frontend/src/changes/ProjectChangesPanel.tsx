@@ -11,7 +11,7 @@ import type { FileTab } from "../fileTabs";
 import { AllChanges } from "./AllChanges";
 import { ChangeBar, Counts } from "./ChangeCounts";
 import { useChangesPreferences } from "./changesPreferences";
-import { changeCommitsReply, changeContent, changeContentNotice, changeFileName, changeFolder, changeHistoryHeight, changeLabel, changeLetter,
+import { changeCommitsReply, changeContent, changeKeysAttribute, changeStep, changeContentNotice, changeFileName, changeFolder, changeHistoryHeight, changeLabel, changeLetter,
   changeListReply, changeListRows, changeListWidth, changeScopeKey, changesViewLabel, changesViews, changeTreeRows, commitLimitMaximum, commitPageSize, filterChanges,
   orderChanges, projectRelativePath, selectedChange, type ChangeCommit, type ChangeCommits,
   type ChangeContent, type ChangedFile, type ChangeList, type ChangeRow, type ChangeScope } from "./projectChanges";
@@ -328,12 +328,14 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
     event.preventDefault();
   }
   // Alt+Down and Alt+Up go through the changes of the file, from the list as well as from the diff: taken before
-  // the editor, where they would move a line. Where all the files are shown, they go through the files.
+  // the editor, where they would move a line. Where all the files are shown, they go through the files. The window
+  // leaves these keys to the tab (`changeKeysAttribute`): outside it they select another session.
   function panelKeyDown(event: KeyboardEvent<HTMLElement>) {
-    if (event.defaultPrevented || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) return;
+    const step = event.defaultPrevented ? null : changeStep(event);
+    if (!step) return;
     event.preventDefault(); event.stopPropagation();
-    if (all) move(event.key === "ArrowDown" ? 1 : -1);
-    else diff.current?.go(event.key === "ArrowDown" ? "next" : "previous");
+    if (all) move(step === "next" ? 1 : -1);
+    else diff.current?.go(step);
   }
   // Drags a splitter: the one beside the files changes their width, the one above the history its height.
   function resize(event: PointerEvent<HTMLDivElement>, history = false) {
@@ -436,7 +438,7 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   </PopoverNext>;
 
   return <section ref={root} className="changes-panel" data-active={active} aria-label={`${t("Changes")} · ${projectName ?? tab.projectPath}`}
-    onFocusCapture={onActivate} onPointerDownCapture={onActivate} onKeyDownCapture={panelKeyDown}>
+    {...{ [changeKeysAttribute]: "" }} onFocusCapture={onActivate} onPointerDownCapture={onActivate} onKeyDownCapture={panelKeyDown}>
     <header className="changes-header">
       <span className="changes-project" title={list?.root ?? tab.projectPath}>
         <span className="changes-project-icon"><AppIcon name="changes" size={15} /></span>
