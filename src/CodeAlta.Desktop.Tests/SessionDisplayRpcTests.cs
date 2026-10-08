@@ -94,6 +94,62 @@ public sealed class SessionDisplayRpcTests
     }
 
     [TestMethod]
+    public async Task EventsOfOtherSessions_DoNotReachTheReaderOfASession()
+    {
+        var publisher = new SessionRuntimeEventPublisher(1);
+        var service = new SessionDisplayService(publisher.Display, HostEpoch, TimeSpan.Zero);
+        await using var channel = service.Observe(new(HostEpoch, "selected"), default);
+        await using var reader = channel.Items.GetAsyncEnumerator();
+        Assert.IsTrue(await reader.MoveNextAsync());
+        publisher.TryPublish(Text("selected", "one"));
+        Assert.IsTrue(await reader.MoveNextAsync());
+        var shown = reader.Current;
+        Assert.AreEqual("one", shown.Session!.Text.Single().Text);
+        // Another session streams: each of its events is a revision of the projection, and none is one of this session.
+        for (var i = 0; i < 40; i++)
+        {
+            publisher.TryPublish(Text("other", "x"));
+            await Task.Yield();
+        }
+        var pending = reader.MoveNextAsync().AsTask();
+        await Task.Delay(100);
+        Assert.IsFalse(pending.IsCompleted);
+        publisher.TryPublish(Text("selected", " two"));
+        Assert.IsTrue(await pending);
+        Assert.AreEqual("one two", reader.Current.Session!.Text.Single().Text);
+        // The reader is told what it last got, and that revisions lie between.
+        Assert.AreEqual(shown.Revision, reader.Current.PreviousRevision);
+        Assert.IsTrue(reader.Current.HasGap);
+        Assert.AreEqual("42", reader.Current.Revision);
+        publisher.Complete();
+        Assert.IsTrue(await reader.MoveNextAsync());
+        Assert.IsTrue(reader.Current.IsClosed);
+    }
+
+    [TestMethod]
+    public async Task Replacements_AreSpaced_AndTheNextOneHoldsWhatWasCommittedMeanwhile()
+    {
+        var publisher = new SessionRuntimeEventPublisher(1);
+        var interval = TimeSpan.FromMilliseconds(300);
+        var service = new SessionDisplayService(publisher.Display, HostEpoch, interval);
+        await using var channel = service.Observe(new(HostEpoch, "selected"), default);
+        await using var reader = channel.Items.GetAsyncEnumerator();
+        Assert.IsTrue(await reader.MoveNextAsync());
+        publisher.TryPublish(Text("selected", "a"));
+        Assert.IsTrue(await reader.MoveNextAsync());
+        var sent = System.Diagnostics.Stopwatch.GetTimestamp();
+        foreach (var delta in new[] { "b", "c", "d" }) publisher.TryPublish(Text("selected", delta));
+        Assert.IsTrue(await reader.MoveNextAsync());
+        // One replacement for the three events, and not sooner than the interval allows (the timer is coarse).
+        Assert.IsTrue(System.Diagnostics.Stopwatch.GetElapsedTime(sent) >= interval - TimeSpan.FromMilliseconds(60));
+        Assert.AreEqual("abcd", reader.Current.Session!.Text.Single().Text);
+        publisher.Complete();
+        Assert.IsTrue(await reader.MoveNextAsync());
+        Assert.IsTrue(reader.Current.IsClosed);
+        Assert.IsFalse(await reader.MoveNextAsync());
+    }
+
+    [TestMethod]
     public async Task CancellationAndEnumeratorReturn_ReleaseOnlyObservation()
     {
         var publisher = new SessionRuntimeEventPublisher(1);

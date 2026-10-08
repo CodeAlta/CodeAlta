@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using CodeAlta.Orchestration.Runtime;
@@ -7,10 +8,18 @@ namespace CodeAlta.Desktop.Rpc;
 
 // Owned-mode renderer data only. No catalog lookup, provider work, commands or original event reader.
 [NeoRpcService("display", Version = 1)]
-internal sealed class SessionDisplayService(RuntimeDisplayProjection display, string hostEpoch)
+internal sealed class SessionDisplayService(RuntimeDisplayProjection display, string hostEpoch, TimeSpan minimumInterval)
 {
     internal const int MaximumItemBytes = 256 * 1024;
     internal const int LabelCharacters = 256;
+    /// <summary>
+    /// The shortest time between two replacements of one observation. A session that streams text commits
+    /// far more often than a reader can follow; what is committed meanwhile is in the next replacement.
+    /// </summary>
+    internal static readonly TimeSpan DefaultMinimumInterval = TimeSpan.FromMilliseconds(33);
+
+    public SessionDisplayService(RuntimeDisplayProjection display, string hostEpoch)
+        : this(display, hostEpoch, DefaultMinimumInterval) { }
 
     [NeoRpcMethod("observe")]
     public NeoRpcChannel<SessionDisplayItem> Observe(SessionDisplayRequest request, CancellationToken cancellationToken)
@@ -33,8 +42,17 @@ internal sealed class SessionDisplayService(RuntimeDisplayProjection display, st
         cancellationToken.ThrowIfCancellationRequested();
         await using var observation = display.ObserveAsync(cancellationToken).GetAsyncEnumerator(cancellationToken);
         var first = true;
+        // The projection is one for all sessions and commits on every event of any of them. This observation
+        // shows one session: what it last sent says whether a replacement holds anything new for its reader.
+        long sentRevision = 0, sentEvicted = 0, sentOmitted = 0, sentAt = 0;
+        long? sentSession = null;
         while (true)
         {
+            if (!first && minimumInterval > TimeSpan.Zero)
+            {
+                var wait = minimumInterval - Stopwatch.GetElapsedTime(sentAt);
+                if (wait > TimeSpan.Zero) await Task.Delay(wait, cancellationToken).ConfigureAwait(false);
+            }
             bool moved = false;
             string? error = null;
             try { moved = await observation.MoveNextAsync().ConfigureAwait(false); }
@@ -43,9 +61,25 @@ internal sealed class SessionDisplayService(RuntimeDisplayProjection display, st
             catch (Exception) { error = "observation_failed"; }
             if (error is not null) { yield return Error(error, request.SessionId); yield break; }
             if (!moved) yield break;
+            var replacement = observation.Current;
+            var snapshot = replacement.Snapshot;
+            var session = SelectedRevision(snapshot, request.SessionId);
+            if (!first && !snapshot.IsClosed && session == sentSession
+                && snapshot.EvictedSessions == sentEvicted && snapshot.OmittedSessionEvents == sentOmitted) continue;
+            // The reader is told the revision it last got; the ones between were not sent to it.
+            if (!first) replacement = replacement with { PreviousRevision = sentRevision, HasGap = snapshot.Revision > sentRevision + 1 };
             first = false;
-            yield return Project(hostEpoch, request.SessionId, observation.Current);
+            (sentRevision, sentSession, sentEvicted, sentOmitted) = (snapshot.Revision, session, snapshot.EvictedSessions, snapshot.OmittedSessionEvents);
+            sentAt = Stopwatch.GetTimestamp();
+            yield return Project(hostEpoch, request.SessionId, replacement);
         }
+    }
+
+    private static long? SelectedRevision(RuntimeDisplaySnapshot snapshot, string sessionId)
+    {
+        foreach (var session in snapshot.Sessions)
+            if (string.Equals(session.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)) return session.Revision;
+        return null;
     }
 
     private SessionDisplayItem Error(string code, string? sessionId)
