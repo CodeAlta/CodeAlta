@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { changeBar, changeCommitsReply, changeContent, changeContentNotice, changeHistoryHeight, changeLetter, changeListReply, changeListRows, changeListWidth,
-  changeScopeKey, changeTreeRows, defaultChangesPreferences, filterChanges, orderChanges, persistChangesPreferences, projectRelativePath,
-  restoreChangesPreferences, selectedChange, type ChangedFile } from "./projectChanges";
+import { changeBar, changeCommitsReply, changeContent, changeContentNotice, changeDiffLimit, changeHistoryHeight, changeLetter, changeLineHeight, changeListReply,
+  changeListRows, changeListWidth, changeScopeKey, changesViewLabel, changesViews, changeTreeRows, defaultChangesPreferences, estimatedDiffHeight, filterChanges,
+  fittedDiffHeight, orderChanges, persistChangesPreferences, projectRelativePath, restoreChangesPreferences, sectionAt, selectedChange,
+  type ChangedFile } from "./projectChanges";
 
 const file = (path: string, values: Partial<ChangedFile> = {}): ChangedFile =>
   ({ path, originalPath: null, status: "modified", insertions: 1, deletions: 0, binary: false, revision: `r-${path}`, ...values });
@@ -118,13 +119,43 @@ test("a changed file is opened by its path inside the project, when it is inside
 
 test("the layout of the tab is kept; a stored value that is not one restores the default", () => {
   let stored = "";
-  const value = { ...defaultChangesPreferences, layout: "list" as const, sideBySide: false, autoRefresh: false, listWidth: 333, historyHeight: 120 };
+  const value = { ...defaultChangesPreferences, layout: "list" as const, view: "all" as const, sideBySide: false, autoRefresh: false, listWidth: 333, historyHeight: 120 };
   assert.equal(persistChangesPreferences(text => { stored = text; }, value), true);
   assert.deepEqual(restoreChangesPreferences(() => stored), value);
   assert.equal(persistChangesPreferences(() => { throw new Error("denied"); }, value), false);
   for (const read of [() => null, () => "{", () => "null", () => "x".repeat(2000), () => { throw new Error("denied"); }])
     assert.deepEqual(restoreChangesPreferences(read), defaultChangesPreferences);
-  assert.deepEqual(restoreChangesPreferences(() => JSON.stringify({ layout: "grid", wrap: "yes", listWidth: 5000, historyHeight: 1 })),
+  assert.deepEqual(restoreChangesPreferences(() => JSON.stringify({ layout: "grid", view: "every", wrap: "yes", listWidth: 5000, historyHeight: 1 })),
     { ...defaultChangesPreferences, listWidth: 560, historyHeight: 64 });
+  // One file at a time unless all of them were chosen: what was kept before the choice existed says nothing about it.
+  assert.equal(defaultChangesPreferences.view, "file");
+  assert.equal(restoreChangesPreferences(() => JSON.stringify({ layout: "list", sideBySide: false })).view, "file");
+  assert.deepEqual(changesViews.map(view => [view, changesViewLabel(view)]), [["file", "One file at a time"], ["all", "All files in one view"]]);
   assert.deepEqual([changeListWidth(10), changeListWidth(300.4), changeHistoryHeight(5000)], [180, 300, 900]);
+});
+
+test("in the view of all files a diff takes the height of its content, and a long one the height of the view", () => {
+  assert.equal(fittedDiffHeight(312.4, 600), 313);
+  assert.equal(fittedDiffHeight(changeDiffLimit, 600), changeDiffLimit);
+  // Longer than what is shown whole: it scrolls by itself in what the view shows at once, never in less than a few lines.
+  assert.equal(fittedDiffHeight(changeDiffLimit + 1, 600.7), 600);
+  assert.equal(fittedDiffHeight(changeDiffLimit + 1, 0), 12 * changeLineHeight);
+  assert.equal(fittedDiffHeight(changeDiffLimit + 1, 10 * changeDiffLimit), changeDiffLimit);
+  assert.deepEqual([fittedDiffHeight(-5, 600), fittedDiffHeight(Number.NaN, 600)], [0, 0]);
+
+  // Before it is read, a file stands for its changed lines and some lines around them; a new or a deleted file for all its lines.
+  assert.equal(estimatedDiffHeight(file("a.ts", { insertions: 10, deletions: 2 }), 600), 12 + 20 * changeLineHeight);
+  assert.equal(estimatedDiffHeight(file("new.ts", { status: "untracked", insertions: 40, deletions: 0 }), 600), 12 + 40 * changeLineHeight);
+  assert.equal(estimatedDiffHeight(file("gone.ts", { status: "deleted", insertions: 0, deletions: 7 }), 600), 12 + 7 * changeLineHeight);
+  assert.equal(estimatedDiffHeight(file("b.bin", { binary: true, insertions: null, deletions: null }), 600), 12 + 2 * changeLineHeight);
+  assert.equal(estimatedDiffHeight(file("huge.json", { status: "added", insertions: 50_000 }), 600), 600);
+});
+
+test("the file at the top of the view of all files is the last one that starts at or above where the view is", () => {
+  const tops = [0, 100, 250, 900];
+  const at = (offset: number) => sectionAt(tops.length, index => tops[index], offset);
+  assert.deepEqual([at(0), at(99), at(100), at(249.5), at(250), at(899), at(5000)], [0, 0, 1, 1, 2, 2, 3]);
+  // Above the first one (a view pulled past its start) it is still the first; without sections there is none.
+  assert.equal(at(-20), 0);
+  assert.equal(sectionAt(0, () => 0, 10), -1);
 });

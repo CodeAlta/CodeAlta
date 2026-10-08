@@ -191,18 +191,65 @@ export function changeBar(insertions: number | null, deletions: number | null): 
   return { added: green, removed: squares - green };
 }
 
+/** The height of a line of a diff, in pixels. */
+export const changeLineHeight = 20;
+/**
+ * The tallest diff the view of all files shows whole, in pixels: a longer one scrolls by itself. An editor that
+ * is as tall as its text draws every line of it, which a thousand lines still do in a fraction of a second.
+ */
+export const changeDiffLimit = 1000 * changeLineHeight;
+const leastScrolledDiff = 12 * changeLineHeight;
+
+/**
+ * The height the diff of a file takes in the view of all files: that of its content up to the limit. A longer
+ * one takes what the view shows at once (`viewport`, in pixels) and scrolls by itself.
+ */
+export function fittedDiffHeight(content: number, viewport: number): number {
+  if (!(content > changeDiffLimit)) return content > 0 ? Math.ceil(content) : 0;
+  return Math.min(changeDiffLimit, Math.max(leastScrolledDiff, Math.floor(viewport)));
+}
+
+/**
+ * The height the diff of a file is given in the view of all files before it was read: its changed lines and
+ * some lines around them, or the whole file when it is new or gone.
+ */
+export function estimatedDiffHeight(file: ChangedFile, viewport: number): number {
+  const changed = (file.insertions ?? 0) + (file.deletions ?? 0);
+  const whole = file.status === "added" || file.status === "untracked" || file.status === "deleted";
+  const lines = file.binary || !changed ? 2 : whole ? changed : changed + 8;
+  return fittedDiffHeight(12 + lines * changeLineHeight, viewport);
+}
+
+/**
+ * The section a view that scrolled to `offset` shows first: the last one that starts at or above it, where
+ * `top` gives the start of each section in their order. -1 when there is none.
+ */
+export function sectionAt(count: number, top: (index: number) => number, offset: number): number {
+  let low = 0, high = count - 1, found = count > 0 ? 0 : -1;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    if (top(middle) <= offset) { found = middle; low = middle + 1; } else high = middle - 1;
+  }
+  return found;
+}
+
 /** The path of a changed file inside its project, or null when the file is outside the project folder. */
 export function projectRelativePath(prefix: string, path: string): string | null {
   return !prefix ? path : path.startsWith(prefix) && path.length > prefix.length ? path.slice(prefix.length) : null;
 }
 
+/** What the diff side of a changes tab shows: the selected file alone, or every file, one under the other, in one view that scrolls. */
+export type ChangesView = "file" | "all";
+export const changesViews: readonly ChangesView[] = ["file", "all"];
+export const changesViewLabel = (view: ChangesView) => view === "all" ? "All files in one view" : "One file at a time";
+
 /** How the changes tab is laid out; kept for the next tab and the next start. */
-export type ChangesPreferences = Readonly<{ layout: "tree" | "list"; sideBySide: boolean; wrap: boolean; ignoreWhitespace: boolean;
+export type ChangesPreferences = Readonly<{ layout: "tree" | "list"; view: ChangesView; sideBySide: boolean; wrap: boolean; ignoreWhitespace: boolean;
   collapseUnchanged: boolean; autoRefresh: boolean; listWidth: number;
   /** The height of the history under the files. */
   historyHeight: number }>;
 export const changesPreferencesKey = "codealta.desktop.changes.v1";
-export const defaultChangesPreferences: ChangesPreferences = { layout: "tree", sideBySide: true, wrap: false, ignoreWhitespace: false,
+export const defaultChangesPreferences: ChangesPreferences = { layout: "tree", view: "file", sideBySide: true, wrap: false, ignoreWhitespace: false,
   collapseUnchanged: true, autoRefresh: true, listWidth: 280, historyHeight: 220 };
 export const changeListWidth = (value: number) => Math.min(560, Math.max(180, Math.round(value)));
 export const changeHistoryHeight = (value: number) => Math.min(900, Math.max(64, Math.round(value)));
@@ -214,7 +261,7 @@ export function restoreChangesPreferences(read: () => string | null): ChangesPre
     const value = JSON.parse(raw) as Record<string, unknown> | null;
     if (!value || typeof value !== "object") return defaultChangesPreferences;
     const flag = (name: keyof ChangesPreferences) => typeof value[name] === "boolean" ? value[name] as boolean : defaultChangesPreferences[name] as boolean;
-    return { layout: value.layout === "list" ? "list" : "tree", sideBySide: flag("sideBySide"), wrap: flag("wrap"), ignoreWhitespace: flag("ignoreWhitespace"),
+    return { layout: value.layout === "list" ? "list" : "tree", view: value.view === "all" ? "all" : "file", sideBySide: flag("sideBySide"), wrap: flag("wrap"), ignoreWhitespace: flag("ignoreWhitespace"),
       collapseUnchanged: flag("collapseUnchanged"), autoRefresh: flag("autoRefresh"),
       listWidth: Number.isFinite(value.listWidth) ? changeListWidth(value.listWidth as number) : defaultChangesPreferences.listWidth,
       historyHeight: Number.isFinite(value.historyHeight) ? changeHistoryHeight(value.historyHeight as number) : defaultChangesPreferences.historyHeight };

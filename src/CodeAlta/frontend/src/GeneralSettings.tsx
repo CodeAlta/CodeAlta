@@ -1,6 +1,7 @@
 import type { ComponentProps } from "react";
 import { Button, ButtonGroup, Card, HTMLSelect, Slider, Switch } from "@blueprintjs/core";
 import { AppIcon, type IconName } from "./AppIcon";
+import { ChangesViewSetting } from "./changes/ChangesViewSetting";
 import { ColorSchemeSettings } from "./ColorSchemeSettings";
 import type { ProjectSort } from "./explorer/projectRail";
 import { SettingsField as Field } from "./SettingsField";
@@ -76,6 +77,7 @@ export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, s
         <Button variant="minimal" size="small" disabled={sessionWidth === defaultSessionWidth} onClick={() => setSessionWidth(defaultSessionWidth)}>{t("Reset")}</Button>
       </div>
     </Field>}
+    <ChangesViewSetting />
     <Field label={t("Collapse desktop project rail")} htmlFor="settings-rail-collapsed"
       notice={notices.rail && <p role="status" className="notice" data-diagnostic={notices.rail}>{preferenceNotice(locale, "Desktop projects", locale === "en" ? "expanded" : t("Show projects"), notices.rail)}</p>}>
       <Switch id="settings-rail-collapsed" className="settings-checkbox" checked={desktopCollapsed} onChange={event => setDesktopCollapsed(event.currentTarget.checked)} />

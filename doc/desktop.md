@@ -1571,7 +1571,31 @@ and merged like any tab.
   changes**, **Wrap lines** and **Copy path**.
 - A file that is new or deleted is shown whole, tinted green or red, instead of beside an empty side.
   A binary file, a file over 1 MB and a file that cannot be read say so instead of a diff.
+- The diff side shows **One file at a time** (the default) or **All files in one view**: the two
+  buttons before **Side by side** / **Inline** in its header, and Settings → Appearance → **Changes are
+  shown**, set the same preference (`view` in `codealta.desktop.changes.v1`). The preferences are one
+  set for the window (`useChangesPreferences`): a change in a tab or in the settings is sent to the
+  others with a `codealta:changes-preferences` event.
 - In a pane narrower than 760 pixels the files and the history sit above the diff.
+
+**All files in one view** (`AllChanges`) puts the diffs of the listed files (the filter applies) one
+under the other in one view that scrolls, each under a header that stays at the top while its diff is
+crossed: the status, the name and the folder, the lines added and removed, and **Open file**. A click on
+the header folds the file; **Collapse all files** / **Expand all files** is in the header of the view.
+
+- Each diff is the same Monaco editor as for one file, as tall as what it shows, so the wheel moves the
+  view and not the diff (`alwaysConsumeMouseWheel` is off); a diff that scrolls sideways still does.
+  **Side by side** / **Inline** and the options of the `…` menu apply to every file.
+- A diff is read and built when its section comes within one view of what is shown, four files at a
+  time, and let go when it is farther: its section keeps the height it had. Before it is read, a
+  section has the height of the changed lines the list counts (`estimatedDiffHeight`).
+- A diff of more than 1000 lines (`changeDiffLimit`) is not shown whole, as an editor draws every line
+  it is tall enough for: it takes the height of the view under its header and scrolls by itself.
+- The file at the top of the view is the selected one of the list, and the header shows its place
+  (**3 of 12**). Selecting a file in the list, the arrows of the header, `alta diff show --file` and,
+  from a diff, `Alt+Up` / `Alt+Down` bring a file to the top; the view holds it there while the diffs
+  around it take their size. A diff that takes its size above what is read moves the view by as much:
+  the view does this itself (`overflow-anchor: none`), since WebKit has no scroll anchoring.
 
 ### Edits in the timeline
 
@@ -2487,7 +2511,7 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | In a code editor: `Ctrl+B`, `Ctrl+Shift+E`, `Ctrl+Shift+F` | Show or hide the side, go to the files, search in files |
 | In the text of a code editor: `Ctrl+G`, `Ctrl+F`, `Ctrl+H`, `F3`, `Alt+Z` | Go to line, find, replace, next match, wrap lines |
 | In the files of a code editor: `F2`, `Delete`, `Enter`, `Space` | Rename, delete, open, preview |
-| `Alt+Up`, `Alt+Down` in a Changes tab | Go to the previous or next change of the shown file |
+| `Alt+Up`, `Alt+Down` in a diff of a Changes tab | Go to the previous or next change of the shown file, or to the previous or next file when all files are in one view |
 | ``Ctrl+` ``, `Ctrl+G` then `Ctrl+J` | New terminal (`/terminal`) in the folder of the session or of the project |
 | In a terminal: `Ctrl+C`, `Ctrl+V`, `Ctrl+F`, `Ctrl+Home` / `Ctrl+End` | Copy the selection (or interrupt the program), paste, find, top / bottom |
 | `Ctrl+G` then `Ctrl+M` | Automations (`/automations`) |

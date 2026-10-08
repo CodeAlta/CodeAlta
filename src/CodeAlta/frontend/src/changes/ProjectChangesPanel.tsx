@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Button, ButtonGroup, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Switch } from "@blueprintjs/core";
 import { projectGit, worktrees as worktreesApi, type WorkspaceSession } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -8,10 +8,13 @@ import { DiffEditor, type DiffEditorChanges, type DiffEditorHandle } from "../mo
 import { fileAppearance } from "../fileAppearance";
 import { fileLanguage } from "../monaco/fileLanguage";
 import type { FileTab } from "../fileTabs";
-import { changeBar, changeCommitsReply, changeContent, changeContentNotice, changeFileName, changeFolder, changeHistoryHeight, changeLabel, changeLetter,
-  changeListReply, changeListRows, changeListWidth, changeScopeKey, changesPreferencesKey, changeTreeRows, commitLimitMaximum, commitPageSize, filterChanges,
-  orderChanges, persistChangesPreferences, projectRelativePath, restoreChangesPreferences, selectedChange, type ChangeCommit, type ChangeCommits,
-  type ChangeContent, type ChangedFile, type ChangeList, type ChangeRow, type ChangeScope, type ChangesPreferences } from "./projectChanges";
+import { AllChanges } from "./AllChanges";
+import { ChangeBar, Counts } from "./ChangeCounts";
+import { useChangesPreferences } from "./changesPreferences";
+import { changeCommitsReply, changeContent, changeContentNotice, changeFileName, changeFolder, changeHistoryHeight, changeLabel, changeLetter,
+  changeListReply, changeListRows, changeListWidth, changeScopeKey, changesViewLabel, changesViews, changeTreeRows, commitLimitMaximum, commitPageSize, filterChanges,
+  orderChanges, projectRelativePath, selectedChange, type ChangeCommit, type ChangeCommits,
+  type ChangeContent, type ChangedFile, type ChangeList, type ChangeRow, type ChangeScope } from "./projectChanges";
 import { sessionTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
 import { BranchSwitcher } from "../worktrees/BranchSwitcher";
@@ -35,18 +38,6 @@ const failures = {
   unavailable: "Changes cannot be read in this window.",
 } as const;
 const failureText = (status: string) => (failures as Record<string, typeof failures[keyof typeof failures] | undefined>)[status] ?? "The changes could not be read.";
-
-function Counts({ insertions, deletions }: { insertions: number | null; deletions: number | null }) {
-  const { locale } = useShellLanguage();
-  if (insertions === null && deletions === null) return null;
-  return <span className="changes-counts"><b>+{(insertions ?? 0).toLocaleString(locale)}</b><em>−{(deletions ?? 0).toLocaleString(locale)}</em></span>;
-}
-
-function ChangeBar({ insertions, deletions }: { insertions: number | null; deletions: number | null }) {
-  const bar = changeBar(insertions, deletions);
-  return <span className="changes-bar" aria-hidden="true">{[0, 1, 2, 3, 4].map(index =>
-    <i key={index} data-change={index < bar.added ? "added" : index < bar.added + bar.removed ? "removed" : undefined} />)}</span>;
-}
 
 const FileRow = memo(function FileRow({ row, selected, flat, onSelect }: {
   row: Extract<ChangeRow, { kind: "file" }>; selected: boolean; flat: boolean; onSelect: (path: string) => void;
@@ -91,6 +82,9 @@ const CommitRow = memo(function CommitRow({ commit, selected, onSelect }: { comm
  * are read when the tab is shown, on demand and, while auto-refresh is on, every five seconds; a list that did
  * not change redraws nothing.
  *
+ * The diff side shows one file at a time or, when the user prefers it, all the files one under the other in a
+ * view that scrolls, where the file at the top is the selected one of the list.
+ *
  * A repository that has git worktrees lists its checkouts above the files: the folder of the project and each
  * worktree. The tab shows the changes and the commits of the one that is selected, a worktree is removed from
  * its row, and the branch in the header moves the checkout to another branch.
@@ -121,14 +115,20 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   trees?: Pick<typeof worktreesApi, "list" | "remove" | "branches" | "switch">;
 }) {
   const { t, locale } = useShellLanguage();
-  const [preferences, setPreferences] = useState(() => restoreChangesPreferences(() => localStorage.getItem(changesPreferencesKey)));
+  const [preferences, update] = useChangesPreferences();
+  const all = preferences.view === "all";
   const [list, setList] = useState<ChangeList | null>(null);
+  // What the list on screen compares: while another comparison is read, the list is still the one of the previous.
+  const [listed, setListed] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [scope, setScope] = useState<ChangeScope>({ kind: "head" });
   const [history, setHistory] = useState<ChangeCommits | null>(null);
   const [historyLimit, setHistoryLimit] = useState(commitPageSize);
   const [selected, setSelected] = useState<string | null>(null);
+  // In the view of all files: the file to bring to the top (a new object for each request), and the files that are folded.
+  const [reveal, setReveal] = useState<Readonly<{ path: string }> | null>(null);
+  const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
   const [filter, setFilter] = useState("");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const [content, setContent] = useState<{ key: string; listed: string; value: ChangeContent | null; failure: string | null } | null>(null);
@@ -138,6 +138,7 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   const [checkout, setCheckout] = useState<string | null>(null);
   const [checkouts, setCheckouts] = useState<readonly Worktree[] | null>(null);
   const diff = useRef<DiffEditorHandle | null>(null);
+  const allFiles = useRef<Readonly<{ focus: () => void }> | null>(null);
   const rows = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLElement>(null);
   const reading = useRef(false), again = useRef(false);
@@ -151,16 +152,15 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   function showCheckout(folder: string | null) {
     if (folder === latest.current.checkout || folder !== null && sameFolder(folder, latest.current.checkout)) return;
     latest.current.list = null; latest.current.history = null; latest.current.historyRead = 0; latest.current.wanted = null; latest.current.checkout = folder;
-    setCheckout(folder); setList(null); setHistory(null); setFailure(null); setSelected(null); setContent(null); setScope({ kind: "head" }); setFilter("");
+    setCheckout(folder); setList(null); setListed(null); setHistory(null); setFailure(null); setSelected(null); setReveal(null); setContent(null);
+    setScope({ kind: "head" }); setFilter("");
   }
   const showCheckoutLatest = useRef(showCheckout); showCheckoutLatest.current = showCheckout;
-
-  function update(change: Partial<ChangesPreferences>) {
-    setPreferences(current => {
-      const next = { ...current, ...change };
-      persistChangesPreferences(value => localStorage.setItem(changesPreferencesKey, value), next);
-      return next;
-    });
+  // The view of all files, when it is chosen, starts at the selected file.
+  const [shownView, setShownView] = useState(preferences.view);
+  if (shownView !== preferences.view) {
+    setShownView(preferences.view);
+    setReveal(all && selected !== null ? { path: selected } : null);
   }
 
   // Reads the list. Nothing is set when the host answers that it is the one already shown.
@@ -205,16 +205,20 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
             // Kept in the order they are shown, so that the first file and the next one are the ones on screen.
             const read = { ...reply.list, files: orderChanges(reply.list.files) };
             const wanted = latest.current.wanted;
-            const next = wanted !== null && read.files.some(file => file.path === wanted) ? wanted
-              : selectedChange(latest.current.list?.files ?? [], read.files, latest.current.selected);
+            const asking = wanted !== null && read.files.some(file => file.path === wanted);
+            const next = asking ? wanted : selectedChange(latest.current.list?.files ?? [], read.files, latest.current.selected);
+            // The list of another comparison starts at its selected file, with every file unfolded.
+            const other = !latest.current.list || latest.current.listed !== asked;
             latest.current.wanted = null; latest.current.listed = asked; latest.current.list = read;
-            setList(read); setFailure(null); setSelected(next);
+            setList(read); setListed(asked); setFailure(null); setSelected(next);
+            if (other) setFolded(new Set());
+            if (other || asking) setReveal(next === null ? null : { path: next });
             // The host fell back to the uncommitted changes: the branch has no commit of its own any more.
             if (read.comparison !== scope.kind) setScope({ kind: "head" });
           } else if (reply.kind === "failed" && (lasting.has(reply.status) || !latest.current.list || latest.current.listed !== asked)) {
             // Nothing to keep: no list yet, or the one on screen is that of another comparison.
             latest.current.list = null;
-            setList(null); setFailure(reply.status);
+            setList(null); setListed(null); setFailure(reply.status);
           }
         })
         .finally(() => {
@@ -242,16 +246,17 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
     if (request?.worktree !== undefined) showCheckoutLatest.current(request.worktree);
     const path = request?.path ?? null;
     if (path === null) return;
-    if (latest.current.list?.files.some(file => file.path === path)) setSelected(path);
+    if (latest.current.list?.files.some(file => file.path === path)) { setSelected(path); setReveal({ path }); }
     else latest.current.wanted = path;
     refresh.current();
   }, [request]);
 
   const file = useMemo(() => list?.files.find(value => value.path === selected) ?? null, [list, selected]);
   const contentKey = file ? JSON.stringify([checkout, scopeKey, file.path]) : null;
-  // Both sides of the selected file, read again when the list says that one of them changed.
+  // Both sides of the selected file, read again when the list says that one of them changed. The view of all
+  // files reads each file by itself.
   useEffect(() => {
-    if (!file || !contentKey || !epoch || !visible) return;
+    if (all || !file || !contentKey || !epoch || !visible) return;
     if (content?.key === contentKey && (content.listed === file.revision || content.value?.revision === file.revision)) return;
     const abort = new AbortController();
     void api.file({ expectedEpoch: epoch, projectId: tab.projectId, comparison: scope.kind, commit: scope.kind === "commit" ? scope.id : null, path: file.path,
@@ -266,7 +271,10 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
         if (value === "not_changed") refresh.current();
       });
     return () => abort.abort();
-  }, [api, epoch, visible, tab.projectId, scopeKey, contentKey, file?.revision]);
+  }, [api, epoch, visible, all, tab.projectId, scopeKey, contentKey, file?.revision]);
+  const readFile = useCallback((changed: ChangedFile, signal: AbortSignal) => api.file({ expectedEpoch: epoch ?? "", projectId: tab.projectId, comparison: scope.kind,
+    commit: scope.kind === "commit" ? scope.id : null, path: changed.path, worktree: checkout }, { signal, timeoutMilliseconds: 30_000 })
+    .then(reply => changeContent(reply, tab.projectId, changed.path), () => "read_failed"), [api, epoch, tab.projectId, scopeKey, checkout]);
 
   const shown = useMemo(() => list ? filterChanges(list.files, filter) : [], [list, filter]);
   const layout = preferences.layout;
@@ -274,7 +282,18 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
     [shown, layout, collapsed, filter]);
   const fileRows = useMemo(() => visibleRows.filter((row): row is Extract<ChangeRow, { kind: "file" }> => row.kind === "file"), [visibleRows]);
 
-  const select = useRef((path: string) => { setSelected(path); });
+  const select = useRef((path: string) => { setSelected(path); setReveal({ path }); });
+  const follow = useRef((path: string) => setSelected(path));
+  const fold = useRef((path: string) => setFolded(current => {
+    const next = new Set(current);
+    if (!next.delete(path)) next.add(path);
+    return next;
+  }));
+  const stale = useRef(() => refresh.current());
+  const openLatest = useRef(onOpenFile); openLatest.current = onOpenFile;
+  const open = useRef((path: string) => openLatest.current(path));
+  const look = useMemo(() => ({ sideBySide: preferences.sideBySide, wrap: preferences.wrap, ignoreWhitespace: preferences.ignoreWhitespace,
+    collapseUnchanged: preferences.collapseUnchanged }), [preferences.sideBySide, preferences.wrap, preferences.ignoreWhitespace, preferences.collapseUnchanged]);
   const selectCommit = useRef((id: string) => setScope({ kind: "commit", id }));
   const shownCommit = scope.kind === "commit" ? history?.commits.find(commit => commit.id === scope.id) ?? null : null;
   const toggle = useRef((path: string) => setCollapsed(current => {
@@ -288,30 +307,33 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   // The active tab takes the keyboard in its list of files, unless a window is open over the workspace.
   useEffect(() => { if (active && !modalOpen() && !root.current?.contains(document.activeElement)) rows.current?.focus(); }, [active]);
 
+  // The files the keyboard goes through: the rows of the list, and every file where they are all shown.
+  const reachable = useMemo(() => all ? shown : fileRows.map(row => row.file), [all, shown, fileRows]);
   function move(delta: number) {
-    if (!fileRows.length) return;
-    const index = fileRows.findIndex(row => row.file.path === selected);
-    const next = index < 0 ? (delta > 0 ? 0 : fileRows.length - 1) : Math.min(fileRows.length - 1, Math.max(0, index + delta));
-    setSelected(fileRows[next].file.path);
+    if (!reachable.length) return;
+    const index = reachable.findIndex(value => value.path === selected);
+    const next = index < 0 ? (delta > 0 ? 0 : reachable.length - 1) : Math.min(reachable.length - 1, Math.max(0, index + delta));
+    select.current(reachable[next].path);
   }
   function listKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.nativeEvent.isComposing) return;
     if (event.key === "ArrowDown") move(1);
     else if (event.key === "ArrowUp") move(-1);
-    else if (event.key === "Home") move(-fileRows.length);
-    else if (event.key === "End") move(fileRows.length);
+    else if (event.key === "Home") move(-reachable.length);
+    else if (event.key === "End") move(reachable.length);
     else if (event.key === "PageDown") move(10);
     else if (event.key === "PageUp") move(-10);
-    else if (event.key === "Enter" || event.key === "ArrowRight") diff.current?.focus();
+    else if (event.key === "Enter" || event.key === "ArrowRight") (all ? allFiles : diff).current?.focus();
     else return;
     event.preventDefault();
   }
   // Alt+Down and Alt+Up go through the changes of the file, from the list as well as from the diff: taken before
-  // the editor, where they would move a line.
+  // the editor, where they would move a line. Where all the files are shown, they go through the files.
   function panelKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.defaultPrevented || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) return;
     event.preventDefault(); event.stopPropagation();
-    diff.current?.go(event.key === "ArrowDown" ? "next" : "previous");
+    if (all) move(event.key === "ArrowDown" ? 1 : -1);
+    else diff.current?.go(event.key === "ArrowDown" ? "next" : "previous");
   }
   // Drags a splitter: the one beside the files changes their width, the one above the history its height.
   function resize(event: PointerEvent<HTMLDivElement>, history = false) {
@@ -330,8 +352,11 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   // While the next file is read the editor keeps the previous one, dimmed: it is not built again for each file.
   const compared = content?.value && !changeContentNotice(content.value) && (current || file) ? content.value : null;
   // The code editor shows the folder of the project: a file of a worktree is not opened there under the same name.
-  const openable = file && list && checkout === null && file.status !== "deleted" ? projectRelativePath(list.prefix, file.path) : null;
-  const look = file ? fileAppearance(file.path, false) : null;
+  const prefix = list?.prefix ?? null;
+  const openableOf = useCallback((changed: ChangedFile) => prefix !== null && checkout === null && changed.status !== "deleted" ? projectRelativePath(prefix, changed.path) : null,
+    [prefix, checkout]);
+  const openable = file ? openableOf(file) : null;
+  const appearance = file ? fileAppearance(file.path, false) : null;
   // A file that exists on one side only has nothing to put beside it.
   const oneSided = !!compared && (compared.originalState === "absent" || compared.modifiedState === "absent");
   const folders = layout === "tree" ? visibleRows.filter(row => row.kind === "folder") : [];
@@ -377,6 +402,38 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
       </div>
     </section>
   </>;
+
+  // In the view of all files: what is compared (another comparison is another view), where the selected file is
+  // among the files, and whether every file is folded.
+  const comparison = JSON.stringify([checkout, scopeKey]);
+  const position = all ? shown.findIndex(value => value.path === selected) + 1 : 0;
+  const allFolded = shown.length > 0 && shown.every(value => folded.has(value.path));
+  // One file at a time, or all of them in one view: chosen where the diff is, and in the settings.
+  const viewChoice = <ButtonGroup className="changes-mode">
+    {changesViews.map(view => <Button key={view} variant="minimal" size="small" active={preferences.view === view} aria-pressed={preferences.view === view}
+      icon={<AppIcon name={view === "all" ? "files" : "fileGeneric"} size={14} />} aria-label={t(changesViewLabel(view))} title={t(changesViewLabel(view))}
+      onClick={() => update({ view })} />)}
+  </ButtonGroup>;
+  const sideChoice = <ButtonGroup className="changes-view">
+    <Button variant="minimal" size="small" active={preferences.sideBySide} icon={<AppIcon name="columns" size={14} />} aria-pressed={preferences.sideBySide}
+      aria-label={t("Side by side")} title={t("Side by side")} onClick={() => update({ sideBySide: true })} />
+    <Button variant="minimal" size="small" active={!preferences.sideBySide} icon={<AppIcon name="rows" size={14} />} aria-pressed={!preferences.sideBySide}
+      aria-label={t("Inline")} title={t("Inline")} onClick={() => update({ sideBySide: false })} />
+  </ButtonGroup>;
+  // What is set once and left alone stays out of the header. `path` is the file whose path can be copied.
+  const options = (path: string | null) => <PopoverNext placement="bottom-end" content={<Menu className="changes-options">
+    <MenuItem roleStructure="listoption" selected={preferences.collapseUnchanged} shouldDismissPopover={false} icon={<AppIcon name="fold" size={15} />}
+      text={t("Hide unchanged lines")} onClick={() => update({ collapseUnchanged: !preferences.collapseUnchanged })} />
+    <MenuItem roleStructure="listoption" selected={preferences.ignoreWhitespace} shouldDismissPopover={false} icon={<AppIcon name="whitespace" size={15} />}
+      text={t("Ignore whitespace changes")} onClick={() => update({ ignoreWhitespace: !preferences.ignoreWhitespace })} />
+    <MenuItem roleStructure="listoption" selected={preferences.wrap} shouldDismissPopover={false} icon={<AppIcon name="wrap" size={15} />}
+      text={t("Wrap lines")} onClick={() => update({ wrap: !preferences.wrap })} />
+    {path !== null && <><MenuDivider />
+      <MenuItem icon={<AppIcon name={copied ? "check" : "copy"} size={15} />} text={t("Copy path")} shouldDismissPopover={false}
+        onClick={() => void navigator.clipboard.writeText(path).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1400); }, () => { })} /></>}
+  </Menu>}>
+    <Button variant="minimal" size="small" icon={<AppIcon name="ellipsis" size={15} />} aria-label={t("Diff options")} title={t("Diff options")} />
+  </PopoverNext>;
 
   return <section ref={root} className="changes-panel" data-active={active} aria-label={`${t("Changes")} · ${projectName ?? tab.projectPath}`}
     onFocusCapture={onActivate} onPointerDownCapture={onActivate} onKeyDownCapture={panelKeyDown}>
@@ -445,10 +502,27 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
           {historyRows}
         </aside>
         {splitter}
-        <section className="changes-diff" aria-label={file?.path ?? t("Changes")}>
-          {file && look && <div className="changes-diff-header">
+        <section className="changes-diff" data-view={preferences.view} aria-label={all ? t("Changes") : file?.path ?? t("Changes")}>
+          {all ? <div className="changes-diff-header">
+            <span className="changes-diff-path"><strong>{t("All files")}</strong></span>
+            <span className="changes-spacer" />
+            <span className="changes-navigation">
+              <span className="changes-position">{position > 0 ? t("{current} of {count}", { current: position, count: shown.length })
+                : t(shown.length === 1 ? "{count} file" : "{count} files", { count: shown.length.toLocaleString(locale) })}</span>
+              <Button variant="minimal" size="small" icon={<AppIcon name="arrowUp" size={14} />} disabled={position <= 1}
+                aria-label={t("Previous file")} title={`${t("Previous file")} (Alt+↑)`} onClick={() => move(-1)} />
+              <Button variant="minimal" size="small" icon={<AppIcon name="arrowDown" size={14} />} disabled={!shown.length || position === shown.length}
+                aria-label={t("Next file")} title={`${t("Next file")} (Alt+↓)`} onClick={() => move(1)} />
+            </span>
+            {viewChoice}{sideChoice}
+            <Button variant="minimal" size="small" icon={<AppIcon name={allFolded ? "unfold" : "fold"} size={14} />} disabled={!shown.length}
+              aria-label={t(allFolded ? "Expand all files" : "Collapse all files")} title={t(allFolded ? "Expand all files" : "Collapse all files")}
+              onClick={() => setFolded(allFolded ? new Set() : new Set(shown.map(value => value.path)))} />
+            {options(null)}
+          </div>
+          : file && appearance && <div className="changes-diff-header">
             <span className="changes-status" data-status={file.status} title={t(changeLabel(file.status))}>{changeLetter(file.status)}</span>
-            <span className="file-tab-icon" data-file-tone={look.tone}><AppIcon name={look.icon} size={14} /></span>
+            <span className="file-tab-icon" data-file-tone={appearance.tone}><AppIcon name={appearance.icon} size={14} /></span>
             <span className="changes-diff-path" title={file.originalPath ? `${file.originalPath} → ${file.path}` : file.path}>
               <strong>{changeFileName(file.path)}</strong>{changeFolder(file.path) && <small>{changeFolder(file.path)}</small>}
               {file.originalPath && <small className="changes-renamed">{t("Renamed from {path}", { path: file.originalPath })}</small>}
@@ -465,31 +539,18 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
               <Button variant="minimal" size="small" icon={<AppIcon name="arrowDown" size={14} />} disabled={changes.count === 0}
                 aria-label={t("Next change")} title={`${t("Next change")} (Alt+↓)`} onClick={() => diff.current?.go("next")} />
             </span>}
-            {!oneSided && <ButtonGroup className="changes-view">
-              <Button variant="minimal" size="small" active={preferences.sideBySide} icon={<AppIcon name="columns" size={14} />} aria-pressed={preferences.sideBySide}
-                aria-label={t("Side by side")} title={t("Side by side")} onClick={() => update({ sideBySide: true })} />
-              <Button variant="minimal" size="small" active={!preferences.sideBySide} icon={<AppIcon name="rows" size={14} />} aria-pressed={!preferences.sideBySide}
-                aria-label={t("Inline")} title={t("Inline")} onClick={() => update({ sideBySide: false })} />
-            </ButtonGroup>}
+            {viewChoice}{!oneSided && sideChoice}
             <Button variant="minimal" size="small" icon={<AppIcon name="openExternal" size={14} />} disabled={openable === null}
               aria-label={t("Open file")} title={t("Open file")} onClick={() => { if (openable !== null) onOpenFile(openable); }} />
-            {/* What is set once and left alone stays out of the header. */}
-            <PopoverNext placement="bottom-end" content={<Menu className="changes-options">
-              <MenuItem roleStructure="listoption" selected={preferences.collapseUnchanged} shouldDismissPopover={false} icon={<AppIcon name="fold" size={15} />}
-                text={t("Hide unchanged lines")} onClick={() => update({ collapseUnchanged: !preferences.collapseUnchanged })} />
-              <MenuItem roleStructure="listoption" selected={preferences.ignoreWhitespace} shouldDismissPopover={false} icon={<AppIcon name="whitespace" size={15} />}
-                text={t("Ignore whitespace changes")} onClick={() => update({ ignoreWhitespace: !preferences.ignoreWhitespace })} />
-              <MenuItem roleStructure="listoption" selected={preferences.wrap} shouldDismissPopover={false} icon={<AppIcon name="wrap" size={15} />}
-                text={t("Wrap lines")} onClick={() => update({ wrap: !preferences.wrap })} />
-              <MenuDivider />
-              <MenuItem icon={<AppIcon name={copied ? "check" : "copy"} size={15} />} text={t("Copy path")} shouldDismissPopover={false}
-                onClick={() => void navigator.clipboard.writeText(file.path).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1400); }, () => { })} />
-            </Menu>}>
-              <Button variant="minimal" size="small" icon={<AppIcon name="ellipsis" size={15} />} aria-label={t("Diff options")} title={t("Diff options")} />
-            </PopoverNext>
+            {options(file.path)}
           </div>}
           <div className="changes-diff-surface">
-            {!file ? <NonIdealState className="changes-empty" icon={<AppIcon name="changes" size={36} />} title={t("Select a file to see its changes")} />
+            {all ? listed !== scopeKey ? <NonIdealState className="changes-empty" icon={<ActivitySpinner size={28} />} title={t("Loading…")} />
+              : !shown.length ? <NonIdealState className="changes-empty" icon={<AppIcon name="search" size={36} />} title={t("No file matches the filter.")} />
+              : <AllChanges key={comparison} files={shown} scope={comparison} visible={visible && !!epoch} look={look}
+                current={selected} reveal={reveal} collapsed={folded} truncated={list.truncated} read={readFile} openable={openableOf} handle={allFiles}
+                onCurrent={follow.current} onToggle={fold.current} onOpenFile={open.current} onStale={stale.current} />
+              : !file ? <NonIdealState className="changes-empty" icon={<AppIcon name="changes" size={36} />} title={t("Select a file to see its changes")} />
               : compared && oneSided && (!current || current.value === compared)
                 // A file that is new or gone has nothing to compare with: it is shown whole, tinted as added or removed.
                 ? <div className="changes-diff-editor changes-one-sided" data-pending={!current} data-side={compared.modifiedState === "absent" ? "removed" : "added"}>
@@ -502,7 +563,7 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
               : !current ? <NonIdealState className="changes-empty" icon={<ActivitySpinner size={28} />} title={t("Loading…")} />
               : !current.value ? <NonIdealState className="changes-empty" icon={<AppIcon name="error" size={36} />} title={changeFileName(file.path)}
                 description={t(current.failure === "not_changed" ? "The file has no changes any more." : "The file could not be read.")} />
-              : <NonIdealState className="changes-empty" icon={<AppIcon name={look!.icon} size={36} />} title={changeFileName(file.path)}
+              : <NonIdealState className="changes-empty" icon={<AppIcon name={appearance!.icon} size={36} />} title={changeFileName(file.path)}
                 description={t(notice === "binary" ? "Binary file: there is no text to compare." : notice === "too_large" ? "The file is too large to compare here."
                   : "The file could not be read.")} />}
           </div>

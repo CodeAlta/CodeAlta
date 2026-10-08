@@ -12,7 +12,7 @@ export type CodeEditorHandle = Readonly<{ focus: () => void;
   reveal: (line: number, column: number) => void }>;
 
 /** A full-size Monaco source editor for configuration and project text, with line numbers and one optional error marker. */
-export function CodeEditor({ value, onChange, language, label, readOnly = false, marker = null, wrap = false, onSave, onCursor, handle }: {
+export function CodeEditor({ value, onChange, language, label, readOnly = false, marker = null, wrap = false, onSave, onCursor, onContentHeight, handle }: {
   value: string; onChange: (text: string) => void; language: EditorLanguage; label: string;
   readOnly?: boolean; marker?: CodeEditorMarker | null;
   /** Wrap long lines (prose) instead of scrolling horizontally (configuration). */
@@ -21,11 +21,17 @@ export function CodeEditor({ value, onChange, language, label, readOnly = false,
   onSave?: () => void;
   /** The caret position, 1-based, whenever it moves. */
   onCursor?: (line: number, column: number) => void;
+  /**
+   * The height of the text, in pixels, whenever it changes: with it the editor is one of several in a view that
+   * scrolls, which gives it that height, and the wheel moves that view once the text has nothing more to scroll.
+   * Read when the editor is created.
+   */
+  onContentHeight?: (height: number) => void;
   handle?: RefObject<CodeEditorHandle | null>;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor>(null);
-  const latest = useRef({ value, onChange, onSave, onCursor }); latest.current = { value, onChange, onSave, onCursor };
+  const latest = useRef({ value, onChange, onSave, onCursor, onContentHeight }); latest.current = { value, onChange, onSave, onCursor, onContentHeight };
   useLayoutEffect(() => {
     const node = host.current!;
     // A language that is not registered yet starts as plain text and is set once its definition has loaded. Naming it
@@ -36,7 +42,8 @@ export function CodeEditor({ value, onChange, language, label, readOnly = false,
       fontFamily: getComputedStyle(node).fontFamily, fontSize: 13, lineHeight: 20, minimap: { enabled: false },
       scrollBeyondLastLine: false, wordWrap: wrap ? "on" : "off", renderLineHighlight: "line", stickyScroll: { enabled: false },
       padding: { top: 8, bottom: 8 }, quickSuggestions: false, suggestOnTriggerCharacters: false, links: false, tabSize: 2,
-      folding: false, occurrencesHighlight: "off", matchBrackets: "never" });
+      folding: false, occurrencesHighlight: "off", matchBrackets: "never",
+      ...(latest.current.onContentHeight ? { scrollbar: { alwaysConsumeMouseWheel: false } } : null) });
     editor.current = instance;
     if (handle) handle.current = { focus: () => instance.focus(), reveal: (line, column) => {
       const lineNumber = Math.min(Math.max(line, 1), model.getLineCount());
@@ -51,6 +58,8 @@ export function CodeEditor({ value, onChange, language, label, readOnly = false,
       if (next !== latest.current.value) latest.current.onChange(next);
     });
     const moved = instance.onDidChangeCursorPosition(event => latest.current.onCursor?.(event.position.lineNumber, event.position.column));
+    const sized = latest.current.onContentHeight ? instance.onDidContentSizeChange(event => latest.current.onContentHeight?.(event.contentHeight)) : null;
+    if (sized) latest.current.onContentHeight?.(instance.getContentHeight());
     // Handled on this instance: a command binding is shared by every editor on the page.
     const keys = instance.onKeyDown(event => {
       if (!latest.current.onSave || event.keyCode !== monaco.KeyCode.KeyS || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
@@ -60,7 +69,7 @@ export function CodeEditor({ value, onChange, language, label, readOnly = false,
     return () => {
       disposed = true;
       if (handle) handle.current = null;
-      unfollowTheme(); changed.dispose(); moved.dispose(); keys.dispose(); instance.dispose(); model.dispose(); editor.current = null;
+      unfollowTheme(); changed.dispose(); moved.dispose(); sized?.dispose(); keys.dispose(); instance.dispose(); model.dispose(); editor.current = null;
     };
   }, [language]);
   useLayoutEffect(() => {

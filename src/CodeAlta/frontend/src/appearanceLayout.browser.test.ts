@@ -107,7 +107,7 @@ test("the rows of the Appearance card stay readable from the narrowest Settings 
     }
     // Narrow: a list or a group goes below its name, and a switch is small enough to stay beside it.
     const narrow = (await laidOut("en", 270)).arrangement;
-    for (const id of ["settings-language", "theme", "settings-color-scheme", "settings-project-sort", "settings-recent-count", "settings-on-close"]) assert.equal(narrow[id], "below", id);
+    for (const id of ["settings-language", "theme", "settings-color-scheme", "settings-project-sort", "settings-recent-count", "settings-changes-view", "settings-on-close"]) assert.equal(narrow[id], "below", id);
     for (const id of ["settings-darker", "settings-rail-collapsed"]) assert.equal(narrow[id], "beside", id);
 
     // The editor of a color scheme, opened on a copy of the selected scheme, at the same sizes.

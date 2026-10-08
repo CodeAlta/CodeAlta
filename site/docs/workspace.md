@@ -284,9 +284,24 @@ The Changes tab shows what changed in the git repository of a project. Open it b
 - **Files**: the changed files as a tree or a flat list, with the lines added and removed in each file. Type in the filter to narrow the list.
 - **History**: under the files. Choose **Uncommitted changes**, all the changes of the branch since its base branch, or one of the recent commits. **Load more** shows older commits.
 - **Diff**: the selected file with syntax highlighting, side by side or inline. Unchanged regions are folded, and you can expand them. `Alt+Down` and `Alt+Up` jump to the next and previous change.
+- **One file or all files**: the two buttons in the header of the diff choose between **One file at a time** and **All files in one view**. See [All files in one view](#all-files-in-one-view).
 - **Refresh**: the tab refreshes every five seconds while **Auto-refresh** is on. The refresh button reads the changes right away.
 
 The `…` menu of the diff has **Hide unchanged lines**, **Ignore whitespace changes**, **Wrap lines** and **Copy path**. **Open file** opens the file in the [code editor](#code-editor).
+
+#### All files in one view
+
+By default the Changes tab shows the diff of one file at a time. Click **All files in one view** in the header of the diff to read all the changes in one view that scrolls, as in a pull request:
+
+- each file has a header with its name and the lines added and removed. The header stays at the top while you scroll through the file;
+- click a header to fold a file you have read. **Collapse all files** and **Expand all files** fold and unfold every file;
+- click a file in the list to go to it. While you scroll, the list selects the file at the top of the view;
+- the arrows in the header go to the previous and next file. In a diff, `Alt+Up` and `Alt+Down` do the same;
+- **Side by side**, **Inline** and the options of the `…` menu apply to every file.
+
+A diff of more than 1000 lines is not shown whole: it takes the height of the view and scrolls by itself.
+
+Click **One file at a time** to go back. CodeAlta remembers your choice, and **Settings > Appearance > Changes are shown** sets the same choice.
 
 An agent can open this tab for you with `alta diff show`, for example when it has finished a change and wants you to review it.
 

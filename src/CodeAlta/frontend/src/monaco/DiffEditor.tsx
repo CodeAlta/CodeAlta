@@ -17,24 +17,34 @@ export type DiffEditorChanges = Readonly<{ count: number; current: number }>;
  * with the unchanged regions folded away. The two texts of a `documentKey` keep their models, so a file that
  * is read again keeps its scroll position.
  */
-export function DiffEditor({ documentKey, original, modified, language, label, sideBySide, wrap, ignoreWhitespace, collapseUnchanged, onChanges, handle }: {
+export function DiffEditor({ documentKey, original, modified, language, label, sideBySide, wrap, ignoreWhitespace, collapseUnchanged, onChanges, onContentHeight, handle }: {
   /** Identifies the compared document: another key starts at the first change. */
   documentKey: string; original: string; modified: string; language: EditorLanguage; label: string;
   sideBySide: boolean; wrap: boolean; ignoreWhitespace: boolean; collapseUnchanged: boolean;
-  onChanges?: (changes: DiffEditorChanges) => void; handle?: RefObject<DiffEditorHandle | null>;
+  onChanges?: (changes: DiffEditorChanges) => void;
+  /**
+   * The height of what the diff shows, in pixels, whenever it changes: with it the editor is one of several in
+   * a view that scrolls, which gives it that height. It has no overview of its own then, and the wheel moves
+   * the view around it once the diff has nothing more to scroll. Read when the editor is created.
+   */
+  onContentHeight?: (height: number) => void;
+  handle?: RefObject<DiffEditorHandle | null>;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneDiffEditor>(null);
-  const latest = useRef({ original, modified, onChanges }); latest.current = { original, modified, onChanges };
+  const latest = useRef({ original, modified, onChanges, onContentHeight }); latest.current = { original, modified, onChanges, onContentHeight };
   const reported = useRef<DiffEditorChanges>({ count: -1, current: -1 });
+  // The first comparison of the document is done: until then the editor holds both texts whole, whatever the diff will fold.
+  const compared = useRef(false);
 
   useLayoutEffect(() => {
-    const node = host.current!;
+    const node = host.current!, embedded = !!latest.current.onContentHeight;
     const instance = monaco.editor.createDiffEditor(node, { automaticLayout: true, readOnly: true, originalEditable: false,
       fontFamily: getComputedStyle(node).fontFamily, fontSize: 13, lineHeight: 20, minimap: { enabled: false }, scrollBeyondLastLine: false,
-      stickyScroll: { enabled: false }, renderOverviewRuler: true, renderIndicators: true, renderMarginRevertIcon: false, renderGutterMenu: false,
+      stickyScroll: { enabled: false }, renderOverviewRuler: !embedded, renderIndicators: true, renderMarginRevertIcon: false, renderGutterMenu: false,
       useInlineViewWhenSpaceIsLimited: true, renderSideBySideInlineBreakpoint: 780, diffAlgorithm: "advanced", lineNumbersMinChars: 4,
-      glyphMargin: false, folding: false, links: false, padding: { top: 6, bottom: 6 }, renderLineHighlight: "none", scrollbar: { useShadows: false },
+      glyphMargin: false, folding: false, links: false, padding: { top: 6, bottom: 6 }, renderLineHighlight: "none",
+      scrollbar: { useShadows: false, alwaysConsumeMouseWheel: !embedded },
       occurrencesHighlight: "off", matchBrackets: "never" });
     editor.current = instance;
     if (handle) handle.current = { focus: () => instance.getModifiedEditor().focus(), go: target => { instance.goToDiff(target); report(); } };
@@ -48,11 +58,16 @@ export function DiffEditor({ documentKey, original, modified, language, label, s
       latest.current.onChanges?.(reported.current);
     };
     const unfollowTheme = followShellTheme();
-    const updated = instance.onDidUpdateDiff(report);
+    // Both sides are as tall as each other side by side; in one column the new text holds the removed lines too.
+    const sized = () => {
+      if (compared.current) latest.current.onContentHeight?.(Math.max(instance.getOriginalEditor().getContentHeight(), instance.getModifiedEditor().getContentHeight()));
+    };
+    const updated = instance.onDidUpdateDiff(() => { report(); compared.current = true; sized(); });
     const moved = instance.getModifiedEditor().onDidChangeCursorPosition(report);
+    const sizes = embedded ? [instance.getOriginalEditor().onDidContentSizeChange(sized), instance.getModifiedEditor().onDidContentSizeChange(sized)] : [];
     return () => {
       if (handle) handle.current = null;
-      unfollowTheme(); updated.dispose(); moved.dispose();
+      unfollowTheme(); updated.dispose(); moved.dispose(); sizes.forEach(size => size.dispose());
       const model = instance.getModel();
       instance.dispose(); model?.original.dispose(); model?.modified.dispose(); editor.current = null;
     };
@@ -69,6 +84,7 @@ export function DiffEditor({ documentKey, original, modified, language, label, s
     instance.setModel(models);
     previous?.original.dispose(); previous?.modified.dispose();
     reported.current = { count: -1, current: -1 };
+    compared.current = false;
     let disposed = false;
     void ensureMonacoLanguage(language).then(registered => {
       if (!registered || disposed || models.original.isDisposed()) return;
