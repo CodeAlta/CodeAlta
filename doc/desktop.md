@@ -2341,6 +2341,9 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
   start in a worktree that is gone is refused before any provider is asked, with an error that names
   the folder (`AgentSession.ExecuteRunAsync`), where a provider that starts a process would report
   that its executable could not be started.
+  The `alta` tool of a session is made once for an attachment and can outlive the worktree: it knows
+  the folder of the project too (`OwnedSessionToolRequest.ProjectDirectory`), and its commands start
+  from that folder once the worktree is gone.
 - **Changes tab.** A repository with more than one checkout lists them above the files, under
   **Worktrees**: the folder of the project first, then each worktree with its branch and the number of
   sessions that work in it. A row shows the changes and the commits of its checkout. The changes button

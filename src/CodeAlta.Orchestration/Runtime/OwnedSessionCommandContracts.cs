@@ -7,7 +7,14 @@ namespace CodeAlta.Orchestration.Runtime;
 /// <param name="ProjectId">The session's project, or null for a global session.</param>
 /// <param name="WorkingDirectory">The directory the session works in.</param>
 /// <param name="ProviderKey">The provider the session runs on.</param>
-public sealed record OwnedSessionToolRequest(string? SessionId, string? ProjectId, string WorkingDirectory, string ProviderKey);
+public sealed record OwnedSessionToolRequest(string? SessionId, string? ProjectId, string WorkingDirectory, string ProviderKey)
+{
+    /// <summary>
+    /// Gets the folder of the session's project, or null for a global session. The tools of a session outlive a
+    /// git worktree that is removed: once <see cref="WorkingDirectory"/> is gone, they work in this folder.
+    /// </summary>
+    public string? ProjectDirectory { get; init; }
+}
 
 /// <summary>Text and optional bounded image admission input; no caller-owned execution objects are accepted.</summary>
 /// <param name="ClientRequestId">Ordinal owner-lifetime retry key.</param>

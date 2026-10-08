@@ -29,6 +29,36 @@ public sealed class DesktopAltaToolsTests
     }
 
     [TestMethod]
+    public async Task SessionTool_OfASessionWhoseWorktreeIsGone_RunsItsCommandsFromTheFolderOfTheProject()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-alta-tool-").FullName;
+        try
+        {
+            var project = Directory.CreateDirectory(Path.Combine(root, "project")).FullName;
+            var worktree = Directory.CreateDirectory(Path.Combine(root, "trees", "quiet-heron")).FullName;
+            var tool = DesktopAltaTools.CreateSessionTools(Dispatcher(new Notes()))(new("s", "p", worktree, "provider") { ProjectDirectory = project }).Single();
+            async Task<string?> WorksInAsync()
+            {
+                var result = await tool.Handler(Invocation("s", ["tool", "status"], ""), default);
+                Assert.IsTrue(result.Success, result.Error);
+                var status = ((AgentToolResultItem.Text)result.Items.Single()).Value.Split('\n').Single(static line => line.Contains("\"alta.tool.status\"", StringComparison.Ordinal));
+                using var document = JsonDocument.Parse(status);
+                return document.RootElement.GetProperty("cwd").GetString();
+            }
+
+            Assert.AreEqual(worktree, await WorksInAsync());
+
+            // The worktree is removed while the session keeps its tool: the commands no longer start from a folder that is gone.
+            Directory.Delete(worktree, recursive: true);
+            Assert.AreEqual(project, await WorksInAsync());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public void SessionTool_HasTheSameSignatureForEverySession()
     {
         var tools = DesktopAltaTools.CreateSessionTools(Dispatcher(new Notes()));

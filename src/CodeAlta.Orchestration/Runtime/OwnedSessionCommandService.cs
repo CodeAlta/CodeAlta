@@ -201,8 +201,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     /// </remarks>
     public PluginOrchestrationBridge? Plugins { get; init; }
 
-    private IReadOnlyList<AgentToolDefinition> ToolsFor(string? sessionId, string? projectId, string workingDirectory, string providerKey)
-        => SessionTools?.Invoke(new(sessionId, projectId, workingDirectory, providerKey)) ?? [];
+    private IReadOnlyList<AgentToolDefinition> ToolsFor(string? sessionId, ProjectDescriptor? project, string workingDirectory, string providerKey)
+        => SessionTools?.Invoke(new(sessionId, project?.Id, workingDirectory, providerKey) { ProjectDirectory = project?.ProjectPath }) ?? [];
 
     /// <summary>
     /// Gets whether one more command can be admitted: the owner keeps fewer receipts than it can, or one of them
@@ -296,7 +296,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         var directory = project?.ProjectPath ?? _catalog.GlobalRoot;
         var policy = SessionExecutionPolicy.CapturePreferred(provider.ProviderId, directory,
             project is null ? [] : [directory], project, provider.DefaultModelId, provider.DefaultReasoningEffort, null);
-        var options = SessionExecutionPolicy.BuildOptions(policy, ToolsFor(null, project?.Id, worktreeDirectory ?? directory, provider.ProviderId.Value),
+        var options = SessionExecutionPolicy.BuildOptions(policy, ToolsFor(null, project, worktreeDirectory ?? directory, provider.ProviderId.Value),
             _runtime.Permissions.OwnedDefaultPermissionHandler, _runtime.Permissions.OwnedDefaultUserInputHandler);
         return Plugins is null ? Create(options) : CreateWithPluginsAsync(Plugins, options);
 
@@ -969,7 +969,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 session, project, _catalog.GlobalRoot, default, modelId, effort,
                 selection?.AgentPromptId ?? session.AgentPromptId);
             var options = SessionExecutionPolicy.BuildOptions(
-                policy, ToolsFor(session.SessionId, project?.Id, project is null ? _catalog.GlobalRoot : WorkFolder(session, project), session.ResolvedProviderKey),
+                policy, ToolsFor(session.SessionId, project, project is null ? _catalog.GlobalRoot : WorkFolder(session, project), session.ResolvedProviderKey),
                 _runtime.Permissions.OwnedDefaultPermissionHandler,
                 _runtime.Permissions.OwnedDefaultUserInputHandler);
             if (Plugins is not null)

@@ -69,7 +69,7 @@ public sealed class SessionWorktreeTests
         lock (tools)
         {
             Assert.IsTrue(tools.Count >= 2);
-            Assert.IsTrue(tools.All(request => request.WorkingDirectory == temp.Worktree && request.ProjectId == host.CurrentProject.Id), string.Join(", ", tools.Select(static request => request.WorkingDirectory)));
+            Assert.IsTrue(tools.All(request => request.WorkingDirectory == temp.Worktree && request.ProjectDirectory == temp.ProjectRoot && request.ProjectId == host.CurrentProject.Id), string.Join(", ", tools.Select(static request => request.WorkingDirectory)));
         }
 
         // A second send keeps the attachment: the session still works where it did.

@@ -2334,6 +2334,16 @@ public sealed class AltaLiveToolTests
             var own = Created((await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--title", "Own", "--worktree", "--base", "main"], caller: caller).ConfigureAwait(false)).Stdout);
             Assert.AreNotEqual(worktree, own.GetProperty("worktreeDirectory").GetString());
             Assert.IsTrue(Directory.Exists(own.GetProperty("worktreeDirectory").GetString()));
+            // The alta tool of a session runs its commands from its worktree, and from the folder of the project once the worktree is gone.
+            var ownTool = providerRuntime.CreatedOptions[^1].Tools!.Single(static tool => tool.Spec.Name == "alta");
+            using var statusArguments = JsonDocument.Parse("""{"args":["tool","status"]}""");
+            async Task<string?> ToolFolderAsync()
+                => ReadJsonLines(AssertTextItem(await ownTool.Handler(CreateInvocation(statusArguments.RootElement), CancellationToken.None).ConfigureAwait(false)))
+                    .Single(static line => line.GetProperty("type").GetString() == "alta.tool.status").GetProperty("cwd").GetString();
+            Assert.AreEqual(own.GetProperty("worktreeDirectory").GetString(), await ToolFolderAsync().ConfigureAwait(false));
+            Directory.Move(own.GetProperty("worktreeDirectory").GetString()!, own.GetProperty("worktreeDirectory").GetString() + "-moved");
+            Assert.AreEqual(projectPath, await ToolFolderAsync().ConfigureAwait(false));
+            Directory.Move(own.GetProperty("worktreeDirectory").GetString() + "-moved", own.GetProperty("worktreeDirectory").GetString()!);
             // A session of another project does not work in a checkout of this one.
             var elsewhere = Created((await dispatcher.InvokeAsync(["session", "create", "--project", plain.Id, "--title", "Elsewhere", "--provider", ProviderId.Value], caller: caller).ConfigureAwait(false)).Stdout);
             Assert.IsFalse(elsewhere.TryGetProperty("worktreeDirectory", out JsonElement _));

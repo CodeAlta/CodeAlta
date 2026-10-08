@@ -3686,7 +3686,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             ReasoningEffort = selection.ReasoningEffort,
             AgentPromptId = NormalizeOptionalText(promptId),
             // The commands of the session resolve paths from the folder it works in.
-            Tools = CreateAltaSessionTools(context, selection.ProviderKey, sourceSessionIdProvider, sourceProjectId, worktreeDirectory ?? workingDirectory),
+            Tools = CreateAltaSessionTools(context, selection.ProviderKey, sourceSessionIdProvider, sourceProjectId, worktreeDirectory ?? workingDirectory, workingDirectory),
             OnPermissionRequest = InteractionDefaults(context).OnPermissionRequest,
             OnUserInputRequest = InteractionDefaults(context).OnUserInputRequest,
         };
@@ -3716,7 +3716,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             AgentPromptId = NormalizeOptionalText(promptId) ?? NormalizeOptionalText(info.Session.AgentPromptId),
             // The session works where it records: its worktree while that folder exists, the folder of its project otherwise.
             Tools = CreateAltaSessionTools(context, info.Session.ProviderId, () => info.Session.SessionId, info.Session.ProjectRef,
-                info.Session.WorktreeDirectory is { Length: > 0 } worktree && Directory.Exists(worktree) ? worktree : workingDirectory),
+                info.Session.WorktreeDirectory is { Length: > 0 } worktree && Directory.Exists(worktree) ? worktree : workingDirectory, workingDirectory),
             OnPermissionRequest = InteractionDefaults(context).OnPermissionRequest,
             OnUserInputRequest = InteractionDefaults(context).OnUserInputRequest,
         };
@@ -3737,7 +3737,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         string ProviderId,
         Func<string?>? sourceSessionIdProvider,
         string? sourceProjectId,
-        string? workingDirectory)
+        string? workingDirectory,
+        string? projectDirectory)
     {
         var policy = context.Services.Get<IAltaSessionToolProviderPolicy>();
         if (policy is not null && !policy.SupportsAltaSessionTool(ProviderId))
@@ -3756,6 +3757,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                     SourceSessionIdProvider = sourceSessionIdProvider,
                     SourceProjectId = sourceProjectId,
                     WorkingDirectory = workingDirectory,
+                    // The tool outlives a worktree that is removed: its commands then start from the folder of the project.
+                    WorkingDirectoryProvider = workingDirectory is null || projectDirectory is null || string.Equals(workingDirectory, projectDirectory, StringComparison.Ordinal)
+                        ? null
+                        : () => Directory.Exists(workingDirectory) ? workingDirectory : projectDirectory,
                     DefaultMaxOutputRecords = 200,
                     DefaultMaxOutputBytes = 64 * 1024,
                     DefaultTimeout = TimeSpan.FromSeconds(120),

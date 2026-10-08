@@ -119,6 +119,10 @@ internal static class DesktopAltaTools
                 SourceSessionIdProvider = () => Volatile.Read(ref session),
                 SourceProjectId = request.ProjectId,
                 WorkingDirectory = request.WorkingDirectory,
+                // The tool outlives a worktree that is removed: its commands then start from the folder of the project.
+                WorkingDirectoryProvider = request.ProjectDirectory is { } projectDirectory
+                    ? () => Directory.Exists(request.WorkingDirectory) ? request.WorkingDirectory : projectDirectory
+                    : null,
                 DefaultMaxOutputRecords = 200,
                 DefaultMaxOutputBytes = 64 * 1024,
                 DefaultTimeout = TimeSpan.FromSeconds(120),
