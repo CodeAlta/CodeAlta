@@ -5,6 +5,7 @@ import { projectFiles, skills, type SkillsDetailResponse, type SkillsEntry } fro
 import { AppIcon } from "./AppIcon";
 import { skillReadOnly } from "./fileTabs";
 import { MarkdownContent } from "./MarkdownContent";
+import { PluginProblems } from "./PluginSettings";
 import { skillInstructions } from "./skillDetail";
 import { SettingsFileLocation, SettingsFileLocations } from "./SettingsFileLocation";
 import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
@@ -189,6 +190,8 @@ export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills
       </div>}>
       <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!listing || busy}>{t("New skill")}</Button></PopoverNext>}>
     {!listing ? <SettingsUnavailable loading={loading} icon="skill" title="Skills unavailable" /> : <>
+      {/* A configuration file that could not be read: the skills are listed as if it disabled none. */}
+      <PluginProblems problems={listing.problems ?? []} omitted={0} files={files} />
       <SettingsFileLocations files={files} disabled={busy} />
       <div className="settings-editor-toolbar">
         <InputGroup className="settings-editor-filter" type="search" size="small" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} value={filter}

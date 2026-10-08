@@ -6,6 +6,55 @@ namespace CodeAlta.Catalog.Tests;
 public sealed class SkillManagementServiceTests
 {
     [TestMethod]
+    public async Task AListingForDisplay_NamesTheConfigurationFilesItCouldNotRead_AndListsTheSkillsAsIfTheyDisabledNone()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-skill-listing-").FullName;
+        try
+        {
+            var global = Directory.CreateDirectory(Path.Combine(root, "global")).FullName;
+            var project = Directory.CreateDirectory(Path.Combine(root, "project")).FullName;
+            foreach (var (folder, name) in new[] { (Path.Combine(global, "skills"), "alpha"), (Path.Combine(project, ".alta", "skills"), "beta") })
+            {
+                File.WriteAllText(Path.Combine(Directory.CreateDirectory(Path.Combine(folder, name)).FullName, "SKILL.md"), $"---\nname: {name}\ndescription: The {name} workflow.\n---\n\n# {name}\n");
+            }
+
+            var service = new SkillManagementService(new SkillCatalog([new ProjectCodeAltaSkillRootProvider(), new UserCodeAltaSkillRootProvider()]), global, null);
+            var globalConfig = Path.Combine(global, "config.toml");
+            var projectConfig = Path.Combine(project, ".alta", "config.toml");
+            new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = global }).SaveGlobalDisabledSkillNames(["alpha"]);
+
+            // Every file is read: what it disables is disabled, and nothing is named.
+            var listing = await service.LoadListingAsync(SkillListingScope.Combined, project);
+            Assert.IsEmpty(listing.Problems);
+            Assert.IsFalse(listing.Skills.Single(static skill => skill.Name == "alpha").IsEnabled);
+            Assert.IsTrue(listing.Skills.Single(static skill => skill.Name == "beta").IsEnabled);
+
+            // The file of the project does not parse: it is named, and the file of the user still applies.
+            File.WriteAllText(projectConfig, "[skills\nbroken");
+            listing = await service.LoadListingAsync(SkillListingScope.Combined, project);
+            var problem = listing.Problems.Single();
+            Assert.AreEqual((true, projectConfig), (problem.IsProject, problem.Path));
+            Assert.IsFalse(string.IsNullOrWhiteSpace(problem.Message));
+            Assert.HasCount(2, listing.Skills);
+            Assert.IsFalse(listing.Skills.Single(static skill => skill.Name == "alpha").IsEnabled);
+
+            // The file of the user does not parse: what it disabled is not known, and is listed as enabled.
+            File.WriteAllText(globalConfig, "[skills\nbroken");
+            listing = await service.LoadListingAsync(SkillListingScope.Combined, project);
+            CollectionAssert.AreEqual(new[] { (false, globalConfig), (true, projectConfig) }, listing.Problems.Select(static item => (item.IsProject, item.Path)).ToArray());
+            Assert.IsTrue(listing.Skills.All(static skill => skill.IsEnabled));
+            Assert.IsFalse((await service.LoadListingAsync(SkillListingScope.User, null)).Problems.Single().IsProject);
+
+            // What decides the skills a model is offered does not guess: it still refuses the file.
+            Assert.ThrowsExactly<InvalidDataException>(() => { _ = service.LoadAsync(SkillListingScope.Combined, project); });
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task CreationPreservesUnicodeTemplateAndConventions()
     {
         using var fixture = new Fixture();

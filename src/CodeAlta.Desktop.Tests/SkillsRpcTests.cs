@@ -143,6 +143,50 @@ public sealed class SkillsRpcTests
     }
 
     [TestMethod]
+    public async Task AConfigurationFileThatDoesNotParse_HidesNoSkill_AndIsNamedWithTheListing()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        Assert.AreEqual("ok", (await fixture.Service.SetEnabledAsync(new(Epoch, fixture.Project.Id, "Project", "beta", false), default)).Status);
+        Assert.IsEmpty((await fixture.Service.ListAsync(new(Epoch, fixture.Project.Id), default)).Problems);
+
+        // The file of the user does not parse: the skills are listed as if it disabled none, and the file is named.
+        File.WriteAllText(fixture.GlobalConfig, "[skills\nbroken");
+        var listed = await fixture.Service.ListAsync(new(Epoch, fixture.Project.Id), default);
+        Assert.AreEqual("ok", listed.Status);
+        CollectionAssert.AreEquivalent(new[] { "alpha", "beta" }, listed.Skills.Select(static skill => skill.Name).ToArray());
+        var problem = listed.Problems.Single();
+        Assert.AreEqual(("config", fixture.GlobalConfig, "Global"), (problem.Kind, problem.Path, problem.Scope));
+        Assert.IsFalse(string.IsNullOrWhiteSpace(problem.Message), "What the parser said goes with the file.");
+        Assert.IsFalse(problem.Message!.Any(char.IsControl));
+        // What the file of the project says is still applied.
+        Assert.IsFalse(listed.Skills.Single(static skill => skill.Name == "beta").Enabled);
+        Assert.IsTrue(listed.Skills.Single(static skill => skill.Name == "alpha").Enabled);
+
+        // The details of a skill are read, and its folder is found for the code editor.
+        var detail = await fixture.Service.DetailAsync(new(Epoch, fixture.Project.Id, "alpha", "UserAlta"), default);
+        Assert.AreEqual(("ok", "skill:global:UserAlta:alpha"), (detail.Status, detail.Folder));
+
+        // The file of the project does not parse either: both are named, the one of the user first.
+        File.WriteAllText(fixture.ProjectConfig, "[skills\nbroken");
+        listed = await fixture.Service.ListAsync(new(Epoch, fixture.Project.Id), default);
+        Assert.AreEqual("ok", listed.Status);
+        CollectionAssert.AreEqual(new[] { ("Global", fixture.GlobalConfig), ("Project", fixture.ProjectConfig) }, listed.Problems.Select(static item => (item.Scope!, item.Path!)).ToArray());
+        Assert.IsTrue(listed.Skills.All(static skill => skill.Enabled), "A file that cannot be read disables nothing in the listing.");
+        // Without the project, its file is not read.
+        Assert.AreEqual("Global", (await fixture.Service.ListAsync(new(Epoch, null), default)).Problems.Single().Scope);
+
+        // A skill is still removed, and nothing was written to the files that do not parse.
+        Assert.AreEqual("ok", (await fixture.Service.DeleteAsync(new(Epoch, fixture.Project.Id, "beta", "ProjectAlta"), default)).Status);
+        Assert.AreEqual("[skills\nbroken", File.ReadAllText(fixture.GlobalConfig));
+        Assert.AreEqual("[skills\nbroken", File.ReadAllText(fixture.ProjectConfig));
+
+        // Once the files are gone, nothing is named.
+        File.Delete(fixture.GlobalConfig);
+        File.Delete(fixture.ProjectConfig);
+        Assert.IsEmpty((await fixture.Service.ListAsync(new(Epoch, fixture.Project.Id), default)).Problems);
+    }
+
+    [TestMethod]
     public async Task ProjectScope_IsResolvedThroughTheCatalog_AndUnreadableConfigurationIsLeftUntouched()
     {
         using var fixture = await Fixture.CreateAsync();
@@ -150,8 +194,8 @@ public sealed class SkillsRpcTests
         Assert.AreEqual("unknown_project", (await fixture.Service.SetEnabledAsync(new(Epoch, fixture.ProjectPath, "Project", "beta", false), default)).Status, "A path is not a project id.");
         Assert.AreEqual("unknown_project", (await fixture.Service.CreateAsync(new(Epoch, "missing", "Project", "valid-name", "Description"), default)).Status);
 
+        // A configuration that does not parse is not written over: a change of enablement is refused.
         File.WriteAllText(fixture.GlobalConfig, "[skills\nbroken");
-        Assert.AreEqual("config_invalid", (await fixture.Service.ListAsync(new(Epoch, null), default)).Status);
         var refused = await fixture.Service.SetEnabledAsync(new(Epoch, null, "Global", "alpha", false), default);
         Assert.AreEqual("config_invalid", refused.Status);
         Assert.IsNull(refused.Message);

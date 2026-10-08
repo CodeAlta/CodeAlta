@@ -1,6 +1,7 @@
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
 using NeoAstra.Rpc;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Desktop.Rpc;
 
@@ -79,21 +80,24 @@ internal sealed class SkillsService
         if (project.Status != "ok") return Failed(project.Status);
         try
         {
-            var descriptors = await _management.LoadAsync(SkillListingScope.Combined, project.Root, cancellationToken).ConfigureAwait(false);
+            // A configuration file that cannot be read hides nothing: the skills are listed as if it disabled none,
+            // and the file is named above the list.
+            var listing = await _management.LoadListingAsync(SkillListingScope.Combined, project.Root, cancellationToken).ConfigureAwait(false);
+            var descriptors = listing.Skills;
             var skills = descriptors.Take(MaximumSkills).Select(skill => new SkillsEntry(
                 Bound(skill.Name, MaximumNameLength), Bound(skill.Title, MaximumNameLength), Bound(skill.Description, MaximumDescriptionLength),
                 skill.SourceKind.ToString(), skill.Scope.ToString(), !skill.IsDisabledGlobally, !skill.IsDisabledForProject,
                 skill.IsEnabled, skill.IsValid, skill.IsShadowed, skill.IsTrusted,
                 // The row opens the folder of its skill in the code editor: the id the editor names it by, and its path.
                 SkillFolders.IdOf(skill, request.ProjectId, project.Root), Bound(skill.SkillRootPath, MaximumPathLength))).ToArray();
-            return new("ok", request.ProjectId, skills, descriptors.Count - skills.Length);
-        }
-        catch (InvalidDataException)
-        {
-            return Failed("config_invalid"); // A configuration file that does not parse hides the enablement.
+            return new("ok", request.ProjectId, skills, descriptors.Count - skills.Length)
+            {
+                Problems = [.. listing.Problems.Select(static problem => new PluginsProblem("config", Bound(problem.Path, MaximumPathLength), Clean(problem.Message), problem.IsProject ? "Project" : "Global"))],
+            };
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            Log(exception, "The skills could not be listed.");
             return Failed("read_failed");
         }
     }
@@ -114,7 +118,7 @@ internal sealed class SkillsService
         if (project.Status != "ok") return Failed(project.Status);
         try
         {
-            var descriptors = await _management.LoadAsync(SkillListingScope.Combined, project.Root, cancellationToken).ConfigureAwait(false);
+            var descriptors = (await _management.LoadListingAsync(SkillListingScope.Combined, project.Root, cancellationToken).ConfigureAwait(false)).Skills;
             // A shadowed skill shares its name with the one that hides it; the source tells them apart.
             var skill = descriptors.FirstOrDefault(candidate => string.Equals(candidate.Name, request.Name, StringComparison.Ordinal)
                 && string.Equals(candidate.SourceKind.ToString(), request.Source, StringComparison.Ordinal));
@@ -140,12 +144,9 @@ internal sealed class SkillsService
                 [.. skill.Diagnostics.Take(MaximumDiagnostics).Select(static item => new SkillsDiagnostic(item.Severity.ToString(), Bound(item.Code, 64), Bound(item.Message, MaximumMessageLength)))],
                 Math.Max(0, related.Count - MaximumRelatedFiles), SkillFolders.IdOf(skill, request.ProjectId, project.Root));
         }
-        catch (InvalidDataException)
-        {
-            return Failed("config_invalid");
-        }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            Log(exception, "The details of a skill could not be read.");
             return Failed("read_failed"); // Includes a skill file that is reached through a link.
         }
     }
@@ -232,7 +233,8 @@ internal sealed class SkillsService
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var descriptors = await _management.LoadAsync(SkillListingScope.Combined, project.Root, cancellationToken).ConfigureAwait(false);
+            // Removing a skill does not depend on what a configuration file says of it.
+            var descriptors = (await _management.LoadListingAsync(SkillListingScope.Combined, project.Root, cancellationToken).ConfigureAwait(false)).Skills;
             var skill = descriptors.FirstOrDefault(candidate => candidate.SourceKind == source && string.Equals(candidate.Name, request.Name, StringComparison.Ordinal));
             if (skill is null) return new("not_found", 0, null);
             folder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(skill.SkillRootPath));
@@ -298,6 +300,16 @@ internal sealed class SkillsService
     }
 
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    // What a parser or the system said, on one line.
+    private static string Clean(string message)
+        => Bound(new string([.. message.Where(static character => !char.IsControl(character))]).Trim(), MaximumMessageLength);
+
+    // The exception only: its message may name a path, and nothing of a file is written.
+    private static void Log(Exception exception, string message)
+    {
+        if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Desktop.Rpc").Error(exception, message);
+    }
     private const string ScopeRule = "The scope must be Global or Project.";
     private const string ProjectRequired = "The project scope requires a project.";
 
@@ -319,7 +331,14 @@ internal sealed class SkillsService
 }
 
 internal sealed record SkillsListRequest(string? ExpectedEpoch, string? ProjectId);
-internal sealed record SkillsListResponse(string Status, string? ProjectId, IReadOnlyList<SkillsEntry> Skills, int Omitted);
+internal sealed record SkillsListResponse(string Status, string? ProjectId, IReadOnlyList<SkillsEntry> Skills, int Omitted)
+{
+    /// <summary>
+    /// The configuration files that could not be read or parsed (kind <c>config</c>, with the scope of the file): the
+    /// skills are listed as if such a file disabled none, so a skill it disables is shown as enabled.
+    /// </summary>
+    public IReadOnlyList<PluginsProblem> Problems { get; init; } = [];
+}
 
 /// <summary>
 /// One discovered skill. The source is <c>ProjectAlta</c>, <c>ProjectCommon</c>, <c>UserAlta</c>, <c>UserCommon</c>,

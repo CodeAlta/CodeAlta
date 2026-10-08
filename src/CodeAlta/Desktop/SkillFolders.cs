@@ -67,7 +67,8 @@ internal sealed class SkillFolders
         if (_files.TryGetValue(id, out var known) && File.Exists(known)) return ("ok", Path.GetDirectoryName(known));
         try
         {
-            var skills = await _management.LoadAsync(SkillListingScope.Combined, projectRoot, cancellationToken).ConfigureAwait(false);
+            // The folder of a skill does not depend on what a configuration file says of it.
+            var skills = (await _management.LoadListingAsync(SkillListingScope.Combined, projectRoot, cancellationToken).ConfigureAwait(false)).Skills;
             var skill = skills.FirstOrDefault(candidate => candidate.SourceKind == folder.Source && string.Equals(candidate.Name, folder.Name, StringComparison.Ordinal));
             if (skill is null) return ("project_unavailable", null);
             var file = Path.GetFullPath(skill.SkillFilePath);

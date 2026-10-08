@@ -611,6 +611,8 @@ The red **Remove** button of a skill, in its row or in its details, moves the fo
 
 To work on all your own skills at once, open `~/.alta/skills` from the top of the page: the code editor shows that folder, where each skill is a folder with its `SKILL.md`. The `.alta/skills` folder of the selected project opens the same way.
 
+When a `config.toml` does not parse, the page still lists the skills and names that file in red above the list, with the button that opens it in the code editor. Until the file is fixed, the skills it disables are shown as enabled, and a change of a switch cannot be saved to it.
+
 In the TUI, compact `G` and `P` checkboxes set the global and project state of a skill, and bulk actions can enable, disable, or invert the currently shown skills. Enabled skills can also be activated for the session when the selected provider supports injected skill context.
 
 ## MCP servers

@@ -38,6 +38,57 @@ public sealed class SkillManagementService
     public Task<IReadOnlyList<SkillDescriptor>> LoadAsync(
         SkillListingScope scope, string? projectRoot, CancellationToken cancellationToken = default)
     {
+        ValidateListing(scope, projectRoot);
+        cancellationToken.ThrowIfCancellationRequested();
+        return _catalog.ListAsync(
+            CreateQuery(scope, projectRoot, _config.LoadGlobalDisabledSkillNames(), _config.LoadProjectDisabledSkillNames(projectRoot)), cancellationToken);
+    }
+
+    /// <summary>
+    /// Lists management descriptors as <see cref="LoadAsync"/> does, whatever the state of the configuration files:
+    /// a configuration file that cannot be read or parsed is named in the answer, and the skills are listed as if
+    /// that file disabled none. It is for showing the skills, never for deciding what a model is offered: what the
+    /// unreadable file says of a skill is not known.
+    /// </summary>
+    /// <param name="scope">Which skills to list.</param>
+    /// <param name="projectRoot">The folder of the project whose skills and configuration are read too, or null.</param>
+    /// <param name="cancellationToken">Cancels the listing.</param>
+    /// <returns>The skills, and the configuration files that could not be read.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The scope is invalid.</exception>
+    /// <exception cref="ArgumentException">A supplied root is not an absolute valid path.</exception>
+    /// <exception cref="InvalidOperationException">A required root is absent.</exception>
+    /// <exception cref="DirectoryNotFoundException">A supplied root is unavailable.</exception>
+    /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+    public async Task<SkillListing> LoadListingAsync(
+        SkillListingScope scope, string? projectRoot, CancellationToken cancellationToken = default)
+    {
+        ValidateListing(scope, projectRoot);
+        cancellationToken.ThrowIfCancellationRequested();
+        var problems = new List<SkillConfigurationProblem>();
+        var global = ReadDisabled(() => _config.LoadGlobalDisabledSkillNames(), _config.ConfigPath, isProject: false, problems);
+        var project = projectRoot is null
+            ? []
+            : ReadDisabled(() => _config.LoadProjectDisabledSkillNames(projectRoot), Path.Combine(projectRoot, ".alta", "config.toml"), isProject: true, problems);
+        var skills = await _catalog.ListAsync(CreateQuery(scope, projectRoot, global, project), cancellationToken).ConfigureAwait(false);
+        return new SkillListing(skills, problems);
+    }
+
+    private static IReadOnlyCollection<string> ReadDisabled(Func<IReadOnlyCollection<string>> read, string path, bool isProject, List<SkillConfigurationProblem> problems)
+    {
+        try
+        {
+            return read();
+        }
+        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            // The parser says where; the system says why a file being written cannot be opened.
+            problems.Add(new SkillConfigurationProblem(isProject, path, exception.GetBaseException().Message));
+            return [];
+        }
+    }
+
+    private void ValidateListing(SkillListingScope scope, string? projectRoot)
+    {
         if (!Enum.IsDefined(scope))
         {
             throw new ArgumentOutOfRangeException(nameof(scope));
@@ -59,9 +110,12 @@ public sealed class SkillManagementService
         {
             SkillAuthoring.ValidateRoot(_userProfileRoot);
         }
+    }
 
-        cancellationToken.ThrowIfCancellationRequested();
-        return _catalog.ListAsync(new SkillCatalogQuery
+    private SkillCatalogQuery CreateQuery(SkillListingScope scope, string? projectRoot, IReadOnlyCollection<string> globalDisabled, IReadOnlyCollection<string> projectDisabled)
+    {
+        var includeUser = scope is SkillListingScope.User or SkillListingScope.Combined;
+        return new SkillCatalogQuery
         {
             Discovery = new SkillDiscoveryContext
             {
@@ -69,13 +123,13 @@ public sealed class SkillManagementService
                 UserCodeAltaRoot = includeUser ? _globalRoot : null,
                 UserProfileRoot = includeUser ? _userProfileRoot : null,
             },
-            GlobalDisabledSkillNames = _config.LoadGlobalDisabledSkillNames(),
-            ProjectDisabledSkillNames = _config.LoadProjectDisabledSkillNames(projectRoot),
+            GlobalDisabledSkillNames = globalDisabled,
+            ProjectDisabledSkillNames = projectDisabled,
             IncludeDisabled = true,
             IncludeInvalid = true,
             IncludeShadowed = true,
             IncludeUntrusted = true,
-        }, cancellationToken);
+        };
     }
 
     /// <summary>
@@ -201,7 +255,8 @@ public sealed class SkillManagementService
 
         var fullPath = Path.GetFullPath(skillFilePath);
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        var descriptors = await LoadAsync(SkillListingScope.Combined, projectRoot, cancellationToken).ConfigureAwait(false);
+        // Where a skill is does not depend on what a configuration file says of it.
+        var descriptors = (await LoadListingAsync(SkillListingScope.Combined, projectRoot, cancellationToken).ConfigureAwait(false)).Skills;
         var descriptor = descriptors.FirstOrDefault(candidate => string.Equals(candidate.SkillFilePath, fullPath, comparison))
             ?? throw new ArgumentException("The skill file is not available in this context.", nameof(skillFilePath));
         var path = relatedPath is null ? descriptor.SkillFilePath :

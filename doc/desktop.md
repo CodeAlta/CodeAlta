@@ -1648,6 +1648,15 @@ selecting the skill first: `skills.list` returns the id of the folder of each sk
 path. The folders the skills are read from are listed above the list (see "Files of the settings pages"):
 `~/.alta/skills`, which holds the global skills, opens in the code editor as one folder, and is created
 when it does not exist yet.
+A configuration file that cannot be read or parsed (the `config.toml` of the user or of the project, which
+holds the disabled skills) does not blank the page: `skills.list` answers `ok` with every skill, listed as if
+that file disabled none (`SkillManagementService.LoadListingAsync`), and names the file in `problems` (kind
+`config`, with its scope and what the parser said). The page shows it in red above the list with the row that
+opens it in the code editor, as the Plugins page does. `skills.detail`, `skills.delete` and the folder of a
+skill for the code editor do not depend on that file either. A change of enablement is still refused
+(`config_invalid`): the file is not written over. Only this listing for display guesses nothing was disabled;
+what decides the skills a model is offered (`LoadAsync`, the bounded readers of the configuration) still
+refuses a file it cannot read.
 The **Models** section's table fills the page height. The **Plugins** Settings
 section has a switch per plugin, including the built-in MCP, Git, Statistics and UI tools plugins. The
 switch of a source plugin applies at once: the plugin is built and started, or stopped. The switch of a

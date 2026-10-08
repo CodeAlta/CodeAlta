@@ -136,6 +136,20 @@ test("a settings page says where its files are, and opens, copies and shows them
     await until(`${card("commits")} === undefined`, "the removed plugin is no longer listed");
     assert.equal(await evaluate("document.querySelector('[role=status].bp6-callout')?.textContent"), translate("en", "Removed."));
     assert.equal(await evaluate(`${card("local")} !== undefined && ${calls("delete")}.length === 2`), true);
+
+    // The Skills page, when the configuration file of the user does not parse: the skills are listed all the same,
+    // and the file is named in red above the list, where it is opened in the code editor.
+    await command("Page.navigate", { url: pathToFileURL(page).href + "?skills" });
+    await until(`document.querySelectorAll('.skill-settings .settings-editor-rows .bp6-card').length === 2`, "the skills are listed although a configuration file was not read");
+    assert.deepEqual(await evaluate(`[...document.querySelectorAll('.skill-settings .settings-editor-rows .bp6-card strong')].map(value => value.textContent)`), ["release-notes", "triage"]);
+    assert.equal(await evaluate("document.querySelector('.skill-settings .bp6-non-ideal-state')"), null, "the page is not blank");
+    assert.equal(await evaluate(`[...${problem}.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join("")`),
+      translate("en", "The configuration file {path} could not be read.", { path: "C:\\Users\\someone\\.alta\\config.toml" }) + " (1,8): expected ]");
+    assert.equal(await evaluate(`(${problem}.compareDocumentPosition(document.querySelector('.skill-settings .settings-editor-rows')) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0`), true,
+      "the file is named above the list");
+    await act(`${button(problem, "Edit in the code editor")}.click()`);
+    assert.deepEqual(await evaluate(`${calls("files.open")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", kind: "config", scope: "Global", id: null, part: null });
+    assert.equal(await evaluate(`${fixture}.state.opened`), 1, "the window leaves Settings for the code editor");
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
