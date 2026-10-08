@@ -33,8 +33,9 @@ test("journal plumbing between tool calls does not split their visual group", ()
   const entries = [entry("1"), entry("2", { eventType: "raw" }), entry("3", { eventType: "notes" }),
     entry("4", { eventType: "sessionUpdate", kind: "UsageUpdated" }), entry("5")];
   assert.deepEqual(groupTimelineTools(reconcileTimeline(entries, null), entries).map(group => group.rows.length), [2]);
-  entries[2] = entry("3", { eventType: "contentCompleted", kind: "Assistant", text: "Explanation" });
-  assert.deepEqual(groupTimelineTools(reconcileTimeline(entries, null), entries).map(group => group.rows.length), [1, 1, 1]);
+  // A window with other records is another array, as the history gives it: what a window says is worked out once.
+  const spoken = entries.map((value, index) => index === 2 ? entry("3", { eventType: "contentCompleted", kind: "Assistant", text: "Explanation" }) : value);
+  assert.deepEqual(groupTimelineTools(reconcileTimeline(spoken, null), spoken).map(group => group.rows.length), [1, 1, 1]);
 });
 
 test("records that show nothing between tool calls keep them in one group", () => {

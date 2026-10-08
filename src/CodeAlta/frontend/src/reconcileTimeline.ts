@@ -27,59 +27,85 @@ function withLivePhase(item: TimelineItem, phase: string): TimelineItem {
   return shown;
 }
 
-// Source timestamps and first-publication sequences keep streaming rows in place.
-// Only a run-scoped, unambiguous match can replace a journal row.
-export function reconcileTimeline(entries: HistoryResponse["entries"], live: SessionDisplayView | null): ReconciledRow[] {
+// What the records of a window say whatever the live view holds: its rows, and the text and the call each one
+// belongs to. A running session changes its live view many times a second and its window a few times: this
+// is worked out once per window, so that a live update costs the same however long the window is. A window
+// is never changed in place: the history gives a new array when it reads records (see mergeHistoryPage).
+type Journal = Readonly<{
+  rows: readonly Readonly<{ item: TimelineItem; text: string | null; call: string | null }>[];
+  /** The providers that wrote each text, by its key. */
+  providers: ReadonlyMap<string, ReadonlySet<string>>;
+  /** The pieces of text the journal holds, with the row that shows each. */
+  deltas: readonly Readonly<{ offset: string; text: string; item: TimelineItem | undefined }>[];
+  /** The texts the journal holds whole. */
+  completed: ReadonlySet<string>;
+}>;
+const journals = new WeakMap<HistoryResponse["entries"], Journal>();
+function journalOf(entries: HistoryResponse["entries"]): Journal {
+  let journal = journals.get(entries);
+  if (journal) return journal;
   const historical = buildTimelineItems(entries);
-  if (!live) return orderTimelineRows(historical.map(item => ({ source: "history", key: rowKey(item), item })));
   const providers = new Map<string, Set<string>>();
-  for (const entry of entries) {
-    if (!entry.runId || !entry.contentId || !entry.kind || !["contentDelta", "contentCompleted"].includes(entry.eventType)) continue;
-    const key = textKey(entry.runId, entry.contentId, entry.kind);
-    const values = providers.get(key) ?? new Set<string>();
-    values.add(entry.providerId);
-    providers.set(key, values);
-  }
-  const textMatches = new Map<string, SessionDisplayText>();
-  for (const row of live.text) {
-    if (row.runId && live.configuration?.providerId &&
-      providers.get(textKey(row.runId, row.contentId, row.kind))?.has(live.configuration.providerId) &&
-      providers.get(textKey(row.runId, row.contentId, row.kind))?.size === 1)
-      textMatches.set(textKey(row.runId, row.contentId, row.kind), row);
-  }
-  const completed = new Set(entries.filter(entry => entry.eventType === "contentCompleted" && entry.runId && entry.contentId &&
-    textMatches.has(textKey(entry.runId, entry.contentId, entry.kind ?? "")))
-    .map(entry => textKey(entry.runId!, entry.contentId!, entry.kind!)));
-  const activityMatches = new Map(live.toolActivities.filter(row => row.runId).map(row => [toolKey(row.providerId, row.runId!, row.activityId), row]));
-  const hidden = new Set<string>();
-  const coveredText = new Set<string>();
+  const completed = new Set<string>();
   // Looked up by journal offset: a long window must not be searched once per record.
   const itemAt = new Map(historical.map(item => [item.key, item]));
   const entryAt = new Map(entries.map(entry => [entry.offset, entry]));
+  const deltas: { offset: string; text: string; item: TimelineItem | undefined }[] = [];
   for (const entry of entries) {
-    if (entry.eventType === "contentDelta" && entry.runId && entry.contentId) {
-      const key = textKey(entry.runId, entry.contentId, entry.kind ?? "");
-      const row = textMatches.get(key);
-      const item = itemAt.get(entry.offset);
-      if (row && item && !completed.has(key)) {
-        const persisted = item.markdown ?? "";
-        if (row.isComplete && !row.isTruncated || row.text.startsWith(persisted)) hidden.add(entry.offset);
-        else if (persisted.startsWith(row.text)) coveredText.add(key);
-      }
+    if (!entry.runId || !entry.contentId) continue;
+    if (entry.kind && ["contentDelta", "contentCompleted"].includes(entry.eventType)) {
+      const key = textKey(entry.runId, entry.contentId, entry.kind);
+      const values = providers.get(key) ?? new Set<string>();
+      values.add(entry.providerId);
+      providers.set(key, values);
+    }
+    if (entry.eventType === "contentCompleted") completed.add(textKey(entry.runId, entry.contentId, entry.kind ?? ""));
+    else if (entry.eventType === "contentDelta")
+      deltas.push({ offset: entry.offset, text: textKey(entry.runId, entry.contentId, entry.kind ?? ""), item: itemAt.get(entry.offset) });
+  }
+  const rows = historical.map(item => {
+    const entry = entryAt.get(item.key);
+    return { item, text: entry?.runId && entry.contentId ? textKey(entry.runId, entry.contentId, entry.kind ?? "") : null,
+      call: item.toolCall?.runId ? toolKey(item.toolCall.providerId, item.toolCall.runId, item.toolCall.activityId) : null };
+  });
+  journals.set(entries, journal = { rows, providers, deltas, completed });
+  return journal;
+}
+
+// Source timestamps and first-publication sequences keep streaming rows in place.
+// Only a run-scoped, unambiguous match can replace a journal row.
+export function reconcileTimeline(entries: HistoryResponse["entries"], live: SessionDisplayView | null): ReconciledRow[] {
+  const journal = journalOf(entries);
+  if (!live) return orderTimelineRows(journal.rows.map(({ item }) => ({ source: "history", key: rowKey(item), item })));
+  const textMatches = new Map<string, SessionDisplayText>();
+  for (const row of live.text) {
+    if (!row.runId || !live.configuration?.providerId) continue;
+    const key = textKey(row.runId, row.contentId, row.kind), writers = journal.providers.get(key);
+    if (writers?.size === 1 && writers.has(live.configuration.providerId)) textMatches.set(key, row);
+  }
+  const completed = new Set<string>();
+  for (const key of textMatches.keys()) if (journal.completed.has(key)) completed.add(key);
+  const activityMatches = new Map(live.toolActivities.filter(row => row.runId).map(row => [toolKey(row.providerId, row.runId!, row.activityId), row]));
+  const hidden = new Set<string>();
+  const coveredText = new Set<string>();
+  if (textMatches.size) for (const delta of journal.deltas) {
+    const row = textMatches.get(delta.text);
+    if (row && delta.item && !completed.has(delta.text)) {
+      const persisted = delta.item.markdown ?? "";
+      if (row.isComplete && !row.isTruncated || row.text.startsWith(persisted)) hidden.add(delta.offset);
+      else if (persisted.startsWith(row.text)) coveredText.add(delta.text);
     }
   }
   // A call the journal shows keeps its row, which says more than the live one: the command, its output.
   const journaled = new Set<string>();
-  const result: ReconciledRow[] = historical.filter(item => !hidden.has(item.key))
-    .map(item => {
-      const entry = entryAt.get(item.key);
-      const text = entry?.runId && entry.contentId ? textKey(entry.runId, entry.contentId, entry.kind ?? "") : null;
-      const call = item.toolCall?.runId ? toolKey(item.toolCall.providerId, item.toolCall.runId, item.toolCall.activityId) : null;
-      if (call) journaled.add(call);
-      const reported = call ? activityMatches.get(call) : undefined;
-      const key = text && textMatches.has(text) && (completed.has(text) || coveredText.has(text)) ? `text:${text}` : rowKey(item);
-      return { source: "history", key, item: reported ? withLivePhase(item, reported.phase) : item };
-    });
+  const result: ReconciledRow[] = [];
+  for (const { item, text, call } of journal.rows) {
+    if (hidden.has(item.key)) continue;
+    if (call) journaled.add(call);
+    const reported = call ? activityMatches.get(call) : undefined;
+    const key = text && textMatches.has(text) && (completed.has(text) || coveredText.has(text)) ? `text:${text}` : rowKey(item);
+    result.push({ source: "history", key, item: reported ? withLivePhase(item, reported.phase) : item });
+  }
   for (const row of live.toolActivities) {
     if (row.runId && journaled.has(toolKey(row.providerId, row.runId, row.activityId))) continue;
     result.push({ source: "liveTool", key: `tool:${toolKey(row.providerId, row.runId, row.activityId)}`, row });

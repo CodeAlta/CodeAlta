@@ -8,6 +8,7 @@ import { historyCanRetry, historyMessage, historySettled, loadHistory, mergeHist
 import { liveTextItem, liveToolItem } from "./liveTimeline";
 import { orderTimelineRows, reconcileTimeline, type ReconciledRow } from "./reconcileTimeline";
 import { groupTimelineTools } from "./toolGroups";
+import { groupHistorySource, sameTimelineGroup, type HistorySources, type TimelineGroupProps } from "./timelineGroupView";
 import { latestNotes, latestUsageText } from "./timeline";
 import { pluginEventItems, pluginEventsWindow, type PluginEventsRead } from "./pluginEvents";
 import { TimelineMessage } from "./TimelineMessage";
@@ -40,10 +41,31 @@ type HistoryTarget = { request: HistoryRequest; explicitOlder: boolean; explicit
 const publicationRecords = 300, publicationInterval = 400;
 const noEntries: HistoryTimeline["entries"] = [];
 
+/** One row of the timeline on its own, or a run of tool calls under one heading. */
+const TimelineGroupView = memo(function TimelineGroupView(props: TimelineGroupProps) {
+  const { sessionId, group, echoImages, readImages, toolOutputs, canInspect, onOpenSource, onOpenTool } = props;
+  const { t } = useShellLanguage();
+  return <div className={group.tools ? "timeline-tool-group" : "timeline-single-row"} role={group.tools ? "group" : undefined}
+    aria-label={group.tools ? t("Tools") : undefined}>
+    {group.tools && <div className="timeline-tool-group-heading"><AppIcon name="tool" size={14} /><span>{t("Tool calls")}</span><span className="tool-group-counts">{t("{count} call(s)", { count: group.rows.length })}
+      {(["completed", "failed", "started", "canceled"] as const).map(phase => {
+        const count = group.rows.filter(row => (row.source === "history" ? row.item.toolPhase : row.source === "liveTool" ? row.row.phase.toLowerCase() : null) === phase).length;
+        return count > 0 ? <span key={phase} data-phase={phase}> · {t(phase === "completed" ? "{count} done" : phase === "failed" ? "{count} failed" : phase === "started" ? "{count} running" : "{count} canceled", { count })}</span> : null;
+      })}</span></div>}
+    {group.rows.map(item => item.source === "history" ? <TimelineMessage key={`${sessionId}:${item.key}`} item={item.item} canInspect={canInspect} toolTile={group.tools}
+    imageSource={!item.item.images ? undefined : echoImages.get(item.key) ?? (item.item.eventType !== "plugin" ? readImages?.(item.item.key) : undefined)}
+    rowKey={item.key} onOpenTool={onOpenTool} toolOutputs={toolOutputs}
+    onOpenSource={onOpenSource} historySource={groupHistorySource(props, item.item.key)} />
+    : <TimelineMessage key={`${sessionId}:${item.key}`} item={item.source === "liveText" ? liveTextItem(item.row) : liveToolItem(item.row)} canInspect={canInspect} toolTile={group.tools}
+      rowKey={item.key} onOpenTool={onOpenTool} toolOutputs={toolOutputs} />)}
+  </div>;
+}, sameTimelineGroup);
+
 /**
  * The rows of the timeline: the persisted and live records, the prompts being sent and the cards plugins
  * derive, in order, with consecutive tool calls grouped. It is rendered again only when one of these
- * changes, not on every page the panel reads, and each row only when its own item changed.
+ * changes, not on every page the panel reads, each group only when one of its rows did, and each row only
+ * when its own item changed.
  */
 const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outgoing, onAcknowledgeOutgoing, pluginEvents, echoes: showEchoes, empty,
   revision, sources, readImages, readTool, toolOutputs, canInspect, onOpenSource }: {
@@ -54,7 +76,7 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   echoes: boolean;
   /** The history was read and holds nothing to show. It only changes while there are no rows. */
   empty: boolean;
-  revision: HistoryTimeline["revision"] | null; sources: ReadonlyMap<string, NonNullable<HistoryTimeline["sources"]>[number]>;
+  revision: HistoryTimeline["revision"] | null; sources: HistorySources;
   readImages?: TimelineImageReader; canInspect: () => boolean; onOpenSource: (target: HistorySourceTarget) => void;
   /** Reads the whole record of a tool call, and follows what a running one writes. */
   readTool?: ToolCallReader; toolOutputs?: ToolOutputs;
@@ -72,6 +94,9 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
     });
     return null;
   }), []);
+  // The cards of plugins are the same items until the plugins answer again: their rows are not rendered on a live update.
+  const firstTimestamp = entries[0]?.timestamp;
+  const pluginItems = useMemo(() => pluginEvents ? pluginEventItems(pluginEvents, firstTimestamp) : [], [pluginEvents, firstTimestamp]);
   const items = rows.slice();
   // Match each echo to at most one new source message. Never deduplicate repeated
   // prompts against old history or use this display match to settle a Send intent.
@@ -105,9 +130,7 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
       images: images?.map((image, index) => ({ index, title: image.title, mediaType: image.mediaType })),
       subtitle: echo.state === "sending" ? "Sending…" : echo.state === "failed" ? "Failed" : echo.state === "uncertain" ? "Pending" : null } });
   }
-  if (pluginEvents) {
-    for (const item of pluginEventItems(pluginEvents, entries[0]?.timestamp)) items.push({ source: "history", key: item.key, item });
-  }
+  for (const item of pluginItems) items.push({ source: "history", key: item.key, item });
   orderTimelineRows(items);
   const groups = groupTimelineTools(items, entries);
   const opened = openTool?.sessionId === sessionId ? items.find(row => row.key === openTool.key) : undefined;
@@ -118,21 +141,8 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   return <>
     {items.length === 0 && empty && <div className="empty-history">{t("No visible events in this history.")}</div>}
     <div className="messages">
-      {groups.map(group => <div key={`${sessionId}:${group.key}`}
-        className={group.tools ? "timeline-tool-group" : "timeline-single-row"} role={group.tools ? "group" : undefined}
-        aria-label={group.tools ? t("Tools") : undefined}>
-        {group.tools && <div className="timeline-tool-group-heading"><AppIcon name="tool" size={14} /><span>{t("Tool calls")}</span><span className="tool-group-counts">{t("{count} call(s)", { count: group.rows.length })}
-          {(["completed", "failed", "started", "canceled"] as const).map(phase => {
-            const count = group.rows.filter(row => (row.source === "history" ? row.item.toolPhase : row.source === "liveTool" ? row.row.phase.toLowerCase() : null) === phase).length;
-            return count > 0 ? <span key={phase} data-phase={phase}> · {t(phase === "completed" ? "{count} done" : phase === "failed" ? "{count} failed" : phase === "started" ? "{count} running" : "{count} canceled", { count })}</span> : null;
-          })}</span></div>}
-        {group.rows.map(item => item.source === "history" ? <TimelineMessage key={`${sessionId}:${item.key}`} item={item.item} canInspect={canInspect} toolTile={group.tools}
-        imageSource={!item.item.images ? undefined : echoImages.get(item.key) ?? (item.item.eventType !== "plugin" ? readImages?.(item.item.key) : undefined)}
-        rowKey={item.key} onOpenTool={openToolWindow} toolOutputs={toolOutputs}
-        onOpenSource={onOpenSource} historySource={revision && sources.has(item.item.key) ? { revision, ...sources.get(item.item.key)! } : undefined} />
-        : <TimelineMessage key={`${sessionId}:${item.key}`} item={item.source === "liveText" ? liveTextItem(item.row) : liveToolItem(item.row)} canInspect={canInspect} toolTile={group.tools}
-          rowKey={item.key} onOpenTool={openToolWindow} toolOutputs={toolOutputs} />)}
-      </div>)}
+      {groups.map(group => <TimelineGroupView key={`${sessionId}:${group.key}`} sessionId={sessionId} group={group} revision={revision} sources={sources}
+        echoImages={echoImages} readImages={readImages} toolOutputs={toolOutputs} canInspect={canInspect} onOpenSource={onOpenSource} onOpenTool={openToolWindow} />)}
     </div>
     {shownTool && <ToolCallDialog item={shownTool} reader={readTool} outputs={toolOutputs} imageSource={toolImages} current={canInspect} onClose={closeToolWindow} />}
   </>;
