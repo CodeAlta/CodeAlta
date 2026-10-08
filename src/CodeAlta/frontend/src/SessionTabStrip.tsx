@@ -13,9 +13,20 @@ import { ActivitySpinner } from "./ActivitySpinner";
 import { terminalTabLabel } from "./terminal/terminals";
 import { useSessionTabDrag } from "./useSessionTabDrag";
 import { plainTitle } from "./sessionTitle";
+import { useDraftIndicator, type DraftIndicators } from "./SessionDraftBadge";
 
-export function SessionTabLabel({ label, path, dirty }: { label: string; path: string | null; dirty: boolean }) {
+export type SessionTabDrafts = Readonly<{ indicators: DraftIndicators; selectedId: string | null }>;
+
+export function SessionTabLabel({ label, path, dirty: shown, drafts, sessionId = null }: {
+  label: string; path: string | null;
+  /** Whether the prompt of the session was edited, when the caller knows. */
+  dirty?: boolean;
+  /** The edited prompts of the window: the label follows the one of its session by itself. */
+  drafts?: SessionTabDrafts; sessionId?: string | null;
+}) {
   const { t } = useShellLanguage();
+  const edited = useDraftIndicator(drafts?.indicators, sessionId, drafts?.selectedId ?? null);
+  const dirty = shown ?? edited;
   return <span className="session-tab-title"><span className="session-tab-label" title={`${label}\n${path ?? ""}`}>{label}</span>
     {dirty && <span className="session-tab-dirty" role="img" title={t("Draft edited in this window")} aria-label={t("Draft edited in this window")} />}</span>;
 }
@@ -50,9 +61,11 @@ const noFiles = emptyFileTabs();
 
 // Each pane retains its own live factory payload. App owns session authority and drafts.
 // The code editors and the changes of projects are tabs of the same dock; App owns which are open and which one is active.
-export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen, observations, capture, children, renderSession, newSessionLabel,
+export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen, observations, capture, children, renderSession, newSessionLabel,
   files = noFiles, renderFile, selectFile, closeFile, fileDirty, terminal, onSessionTabClick }: {
-  state: Tabs; snapshot?: WorkspaceSnapshot; dirty: (id: string) => boolean;
+  state: Tabs; snapshot?: WorkspaceSnapshot;
+  /** The edited prompts of the window and the selected session, for the mark of a session tab. */
+  drafts?: SessionTabDrafts;
   select: (tab: SessionTab) => void; close: (tab: SessionTab) => void; reopen: () => void;
   observations?: RuntimeObservationControls;
   capture: () => () => boolean; children: ReactNode;
@@ -227,7 +240,7 @@ export function SessionTabStrip({ state, snapshot, dirty, select, close, reopen,
           return;
         }
         const tab = state.open.find(value => sessionNodeId(value) === node.getId());
-        values.content = <span data-session-node={node.getId()}><SessionTabLabel label={label(tab ?? null)} path={tab?.path ?? null} dirty={!!tab && dirty(tab.sessionId)} /></span>;
+        values.content = <span data-session-node={node.getId()}><SessionTabLabel label={label(tab ?? null)} path={tab?.path ?? null} drafts={drafts} sessionId={tab?.sessionId ?? null} /></span>;
         if (tab && observations) values.leading = <SessionTabActivity controls={observations} tab={tab} />;
       }}
       onRenderTabSet={(node, values) => values.buttons.push(<Button key="more" variant="minimal" size="small" className="session-tab-more"

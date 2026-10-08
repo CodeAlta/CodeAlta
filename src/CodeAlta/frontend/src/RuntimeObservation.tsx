@@ -9,16 +9,18 @@ export type RuntimeObservationControls = { store: ReturnType<typeof createRuntim
 /** Sidebar activity: a spinner while an observed session (or any observed session of a project) is running. */
 export function RunningSessionBadge({ controls, tab, projectId }: { controls: RuntimeObservationControls; tab?: SessionTab; projectId?: string | null }) {
   const { t } = useShellLanguage();
-  const state = useSyncExternalStore(controls.store.subscribe, controls.store.getSnapshot);
-  if (!controls.enabled || (tab ? !controls.canObserve(tab) || !sessionRunning(state, tab) : !projectRunning(state, projectId ?? null))) return null;
+  // The answer is followed, not the observations: a refresh that changes nothing of it renders nothing.
+  const running = useSyncExternalStore(controls.store.subscribe,
+    () => tab ? sessionRunning(controls.store.getSnapshot(), tab) : projectRunning(controls.store.getSnapshot(), projectId ?? null));
+  if (!controls.enabled || !running || tab && !controls.canObserve(tab)) return null;
   return <span className="session-running"><ActivitySpinner size={12} label={t("Running")} /></span>;
 }
 
 /** Tab-title activity: a spinner while the session runs, nothing otherwise. */
 export function SessionTabActivity({ controls, tab }: { controls: RuntimeObservationControls; tab: SessionTab }) {
   const { t } = useShellLanguage();
-  const state = useSyncExternalStore(controls.store.subscribe, controls.store.getSnapshot);
-  if (!controls.enabled || !controls.canObserve(tab) || !sessionRunning(state, tab)) return null;
+  const running = useSyncExternalStore(controls.store.subscribe, () => sessionRunning(controls.store.getSnapshot(), tab));
+  if (!controls.enabled || !running || !controls.canObserve(tab)) return null;
   return <span className="session-running"><ActivitySpinner size={12} label={t("Running")} /></span>;
 }
 

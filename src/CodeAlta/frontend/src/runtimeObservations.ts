@@ -12,8 +12,19 @@ export type RuntimeObservationState = Readonly<{ rows: ReadonlyMap<string, Runti
 
 /** Whether a session is working: what its open panel reports wins over the last polled observation. */
 export function sessionRunning(state: RuntimeObservationState, tab: SessionTab): boolean {
-  const key = tabKey(tab), row = state.rows.get(key);
+  return keyRunning(state, tabKey(tab));
+}
+function keyRunning(state: RuntimeObservationState, key: string): boolean {
+  const row = state.rows.get(key);
   return state.live.get(key)?.running ?? (!!row?.running && !row.stale);
+}
+
+/** The keys (`tabKey`) of the sessions that are working. */
+export function runningSessionKeys(state: RuntimeObservationState): ReadonlySet<string> {
+  const running = new Set<string>();
+  for (const key of state.live.keys()) if (keyRunning(state, key)) running.add(key);
+  for (const key of state.rows.keys()) if (keyRunning(state, key)) running.add(key);
+  return running;
 }
 
 /** Whether any known session of a project (or global session, for null) is working. */
@@ -54,15 +65,26 @@ export function createRuntimeObservations(read: Read) {
   let fences = new Map<string, RuntimeObservation>();
   let state: RuntimeObservationState = { rows: new Map(), summary: "Not observed. Refresh explicitly; no polling.", live: new Map() };
   const listeners = new Set<() => void>();
-  const publish = (rows: ReadonlyMap<string, RuntimeObservation>, summary: string, live = state.live) => { state = { rows, summary, live }; for (const listener of listeners) listener(); };
+  // The sessions that work: the same set is given again while it holds the same sessions, so what follows it
+  // is not rendered again by the answers of a refresh that change nothing of it.
+  let running: ReadonlySet<string> = new Set();
+  const publish = (rows: ReadonlyMap<string, RuntimeObservation>, summary: string, live = state.live) => {
+    state = { rows, summary, live };
+    const next = runningSessionKeys(state);
+    if (next.size !== running.size || [...next].some(key => !running.has(key))) running = next;
+    for (const listener of listeners) listener();
+  };
+  const cancel = () => { generation++; abort?.abort(); abort = undefined; };
   function invalidate() {
-    generation++; abort?.abort(); abort = undefined;
+    cancel();
     if (state.rows.size) publish(new Map([...state.rows].map(([key, row]) => [key, { ...row,
       label: row.label.startsWith("Loading") ? "Unknown · canceled/omitted" : row.label, stale: true }])), "Stale observations — scope changed. Refresh explicitly.");
   }
   return {
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     getSnapshot: () => state,
+    /** The keys (`tabKey`) of the sessions that work; the set changes only when one starts or stops. */
+    getRunning: () => running,
     invalidate,
     /** Records what the open panel of a session sees of its run; null when the panel stops watching. */
     setLive(tab: SessionTab, running: boolean | null) {
@@ -74,7 +96,8 @@ export function createRuntimeObservations(read: Read) {
     },
     async refresh(targets: readonly RuntimeTarget[], omitted = 0) {
       const before = state.rows;
-      invalidate(); const version = generation; const controller = new AbortController(); abort = controller;
+      // The rows are replaced at once by the ones being read, which keep what was known: nothing is shown stale between.
+      cancel(); const version = generation; const controller = new AbortController(); abort = controller;
       const unique = new Map(targets.map(target => [tabKey(target.tab), target]));
       const selected = [...unique.values()].slice(0, maximumRuntimeRows);
       fences = new Map(selected.flatMap(target => { const key = tabKey(target.tab); const prior = fences.get(key); return prior ? [[key, prior] as const] : []; }));

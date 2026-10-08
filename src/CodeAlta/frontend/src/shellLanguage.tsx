@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { languageStorageKey, readLanguage, resolveLocale, saveLanguage, translate, type LanguageChoice, type Locale, type PreferenceIssue, type MessageKey } from "./localization";
 
 type LanguageState = Readonly<{ locale: Locale; choice: LanguageChoice; issue?: PreferenceIssue; setLanguage: (choice: string) => void }>;
@@ -13,8 +13,9 @@ export function useLanguagePreference(): LanguageState {
   const [browserLanguages] = useState(() => typeof navigator === "undefined" ? [] : [...navigator.languages].slice(0, 8));
   const locale = resolveLocale(saved.choice, browserLanguages);
   useEffect(() => { document.documentElement.lang = locale; }, [locale]);
-  return { ...saved, locale, setLanguage: value => {
+  // The value of the context every component reads: it changes with the language only, not on each render of App.
+  return useMemo(() => ({ ...saved, locale, setLanguage: (value: string) => {
     const next = saveLanguage(value, choice => localStorage.setItem(languageStorageKey, choice));
     if (next) setSaved(next);
-  } };
+  } }), [saved, locale]);
 }

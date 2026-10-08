@@ -39,6 +39,8 @@ export type OutgoingMessage = Readonly<{ key: string; epoch: string; sessionId: 
   imageCount: number; timestamp: string; runId: string | null; state: "sending" | "accepted" | "uncertain" | "failed";
   /** The images of the prompt, for its card: each URL is built once and shares the request's content. */
   images?: readonly Readonly<{ title: string; mediaType: string; url: string }>[] }>;
+/** No prompt is being sent: one value, so a timeline that takes it has nothing to compare. */
+export const noOutgoing: readonly OutgoingMessage[] = Object.freeze([]);
 
 function wellFormed(value: string): boolean {
   for (let index = 0; index < value.length; index++) {
@@ -155,11 +157,21 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
   const outgoing = new Map<string, OutgoingMessage>();
   const change = createOwnerChangeSignal();
   const sessionKey = (sessionId: string) => sessionId.toLowerCase();
+  // What outgoing() last answered for a session: the same array is given again while its rows are the same,
+  // so the timeline that takes it is not rendered again on every render of its panel.
+  const shownOutgoing = new Map<string, readonly OutgoingMessage[]>();
   return {
     imageDrafts: createImageDrafts(),
     subscribe: change.subscribe, getSnapshot: change.getSnapshot,
-    outgoing(epoch: string, sessionId: string) {
-      return [...outgoing.values()].filter(row => row.epoch === epoch && sessionKey(row.sessionId) === sessionKey(sessionId));
+    outgoing(epoch: string, sessionId: string): readonly OutgoingMessage[] {
+      const key = sessionKey(sessionId);
+      const rows = outgoing.size === 0 ? noOutgoing
+        : [...outgoing.values()].filter(row => row.epoch === epoch && sessionKey(row.sessionId) === key);
+      if (rows.length === 0) { shownOutgoing.delete(key); return noOutgoing; }
+      const shown = shownOutgoing.get(key);
+      if (shown && shown.length === rows.length && shown.every((row, index) => row === rows[index])) return shown;
+      shownOutgoing.set(key, rows);
+      return rows;
     },
     acknowledgeOutgoing(keys: readonly string[]) {
       let changed = false;

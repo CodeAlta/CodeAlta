@@ -103,3 +103,22 @@ test("a row keeps its activity while it reloads, and an open panel's report wins
   owner.setLive(tab, false);
   assert.equal(running(), false); assert.equal(projectRunning(owner.getSnapshot(), null), false);
 });
+
+test("a refresh that changes no running session keeps the running set, and never shows it stale on the way", async () => {
+  const owner = createRuntimeObservations(async request => reply(request.sessionId));
+  await owner.refresh([target("one"), target("two")]);
+  const running = owner.getRunning();
+  assert.deepEqual([...running].sort(), [tabKey(target("one").tab), tabKey(target("two").tab)].sort());
+  // What follows the set (App) is rendered again only when the set is another one: each publication is looked at.
+  const seen = new Set<ReadonlySet<string>>();
+  let publications = 0;
+  const unsubscribe = owner.subscribe(() => { publications++; seen.add(owner.getRunning()); });
+  await owner.refresh([target("one"), target("two")]);
+  assert.ok(publications >= 3);
+  assert.deepEqual([...seen], [running]);
+  owner.setLive(target("one").tab, false);
+  unsubscribe();
+  assert.notEqual(owner.getRunning(), running);
+  assert.deepEqual([...owner.getRunning()], [tabKey(target("two").tab)]);
+  assert.equal(sessionRunning(owner.getSnapshot(), target("one").tab), false);
+});

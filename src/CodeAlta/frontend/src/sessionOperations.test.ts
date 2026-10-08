@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { captureSubmission, captureSubmissionAbort, createMutationCapability, createOwnedSubmissions, outgoingKey, refreshSubmissions } from "./sessionOperations";
+import { captureSubmission, captureSubmissionAbort, createMutationCapability, createOwnedSubmissions, noOutgoing, outgoingKey, refreshSubmissions } from "./sessionOperations";
 import type { SessionAdmission, SessionAbortRequest, SessionReceiptPage, SessionReceiptView, SessionSendRequest } from "#neoastra";
 
 const operation = "abcdefab-1234-5678-9abc-abcdefabcdef";
@@ -414,3 +414,26 @@ test("combined retention bound precancellation and coherent definite refusals pr
   await f.wait(store.abort(abortIntent(), signal, capability, () => {})); assert.equal(store.abortPending(operation), undefined);
   await f.wait(store.submit(retained, signal, capability, () => {})); assert.ok(store.pending("s0"));
 }));
+test("the echoes of a session are the same array until one of them changes", async () => {
+  const capability = createMutationCapability("epoch");
+  const answer: SessionAdmission = { status: "invalid_request", epoch: "epoch", receipt: null };
+  const store = createOwnedSubmissions(async () => answer, async () => { throw new Error("unused"); });
+  const send = (key: string, sessionId = "session"): SessionSendRequest => ({ expectedEpoch: "epoch", clientRequestId: key, sessionId, text: key,
+    selection: null, references: null, images: null });
+  // Nothing sent: one shared value, whatever the session, so a memoized timeline has nothing to render again.
+  assert.equal(store.outgoing("epoch", "session"), noOutgoing);
+  assert.equal(store.outgoing("epoch", "other"), noOutgoing);
+  await store.submit(send("first"), new AbortController().signal, capability, () => {});
+  const shown = store.outgoing("epoch", "session");
+  assert.deepEqual(shown.map(echo => echo.state), ["failed"]);
+  assert.equal(store.outgoing("epoch", "SESSION"), shown);
+  // The echo of another session leaves this array alone.
+  await store.submit(send("second", "other"), new AbortController().signal, capability, () => {});
+  assert.equal(store.outgoing("epoch", "session"), shown);
+  await store.submit(send("third"), new AbortController().signal, capability, () => {});
+  const next = store.outgoing("epoch", "session");
+  assert.notEqual(next, shown);
+  assert.equal(next.length, 2);
+  store.acknowledgeOutgoing(next.map(echo => echo.key));
+  assert.equal(store.outgoing("epoch", "session"), noOutgoing);
+});

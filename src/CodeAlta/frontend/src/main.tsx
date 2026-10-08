@@ -40,7 +40,7 @@ import { sessionTabPresentation } from "./sessionTabLayout";
 import { createReferencePopupLifetime } from "./referencePopup";
 import { SessionBrowser } from "./SavedSessionBrowser";
 import { ProjectArchiveDialog } from "./ProjectArchiveDialog";
-import { sessionRunning, createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./runtimeObservations";
+import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./runtimeObservations";
 import { createProjectArchive } from "./projectArchive";
 import { browserActivation } from "./sessionBrowser";
 import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
@@ -70,7 +70,7 @@ import { activeReminderCounts, sameActiveReminders, scopeReminderCount, type Act
 import { ReminderBadge } from "./ReminderBadge";
 import { verifiedReminderCountTarget } from "./reminderListObservation";
 import { applyCatalogNextSend, createNextSendSelectionStore } from "./nextSendSelection";
-import { createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
+import { createMutationCapability, createOwnedSubmissions, noOutgoing } from "./sessionOperations";
 import { createSessionDisplayStore } from "./sessionDisplay";
 import { createRuntimeStateReader } from "./runtimeState";
 import { createPermissionReviewer } from "./sessionPermissions";
@@ -89,7 +89,7 @@ import { LiveSessionPanel } from "./LiveSessionPanel";
 import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePosition, timelineNotice, type TimelineNotice, type MessageNavigation } from "./timelineScroll";
 import { workspaceEditingSelector, type ShortcutAction } from "./shortcuts";
 import { createDraftIndicators, draftStorageKey, persistDraft, restoreDraft, transferPromptDraft } from "./promptDraft";
-import { SessionDraftBadge } from "./SessionDraftBadge";
+import { SessionDraftStatus } from "./SessionDraftBadge";
 import { collapsedSessionWidth, constrainPaneLayout, persistPaneLayout, restorePaneLayout } from "./paneLayout";
 import { composerSizeKey, rememberComposerHeight } from "./composerHeight";
 import { ComposerSplitter, useComposerLayout } from "./ComposerLayout";
@@ -440,9 +440,10 @@ function App() {
   }, reminder.save));
   const [providerProbeHolds] = useState(() => new Set<string>());
   const [draftIndicators] = useState(createDraftIndicators);
+  // The marks of an edited prompt follow the indicators by themselves: a keystroke does not render App.
+  const tabDrafts = useMemo(() => ({ indicators: draftIndicators, selectedId: sessionId }), [draftIndicators, sessionId]);
   const [nextSendSelections] = useState(() => createNextSendSelectionStore(
     key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value)));
-  useSyncExternalStore(draftIndicators.subscribe, draftIndicators.snapshot);
   const [steering] = useState(() => createSteeringSubmissions(sessionOperations.steer));
   const [compaction] = useState(() => createCompactionSubmissions(sessionOperations.compact));
   const [abortRuns] = useState(() => createAbortRunSubmissions(sessionOperations.abortRun));
@@ -1250,9 +1251,10 @@ function App() {
   useEffect(() => { if (workOrder) workHub.setProjects(workOrder); }, [workHub, workOrder]);
   const workSessionIds = useMemo(() => new Set(snapshot?.sessions.map(session => session.id) ?? []), [snapshot]);
   const work = useMemo(() => workItems(workState.projects, workSessionIds), [workState.projects, workSessionIds]);
-  const observedRuns = useSyncExternalStore(runtimeObservations.subscribe, runtimeObservations.getSnapshot);
-  const runningSessionIds = useMemo(() => new Set((snapshot?.sessions ?? []).filter(session => sessionRunning(observedRuns,
-    { projectId: session.scopeKind === "project" ? session.projectId : null, sessionId: session.id, path: session.workspacePath })).map(session => session.id)), [snapshot, observedRuns]);
+  // Each answer of a status refresh changes the observations; App follows only which sessions run.
+  const observedRunning = useSyncExternalStore(runtimeObservations.subscribe, runtimeObservations.getRunning);
+  const runningSessionIds = useMemo(() => new Set((snapshot?.sessions ?? []).filter(session => observedRunning.has(tabKey(
+    { projectId: session.scopeKind === "project" ? session.projectId : null, sessionId: session.id, path: session.workspacePath }))).map(session => session.id)), [snapshot, observedRunning]);
   const workByProject = useMemo(() => workCounts(work, runningSessionIds), [work, runningSessionIds]);
   const [workFocus, setWorkFocus] = useState<WorkItemsFocus | null>(null);
   const [workBusy, setWorkBusy] = useState<ReadonlySet<string>>(new Set());
@@ -1752,7 +1754,7 @@ function App() {
   }, [projectId, sessionId]);
   function sessionMarks(session: WorkspaceSession, scope: string | null) {
     return <>
-      <SessionDraftBadge active={draftIndicators.visible(session.id, sessionId)} />
+      <SessionDraftStatus indicators={draftIndicators} sessionId={session.id} selectedId={sessionId} />
       {snapshot && <RunningSessionBadge controls={runtimeObservationControls()} tab={{ projectId: scope, sessionId: session.id, path: session.workspacePath }} />}
       <ReminderBadge count={activeReminders?.get(session.id) ?? 0} />
       {carriedBy(work, session.id).length > 0 && <span className="session-work-mark" role="img" aria-label={t("Carries out a work item")}
@@ -2457,7 +2459,7 @@ function App() {
                 permissionReviewer={owners.permissionReviewer} inputReviewer={owners.inputReviewer} configuration={configurationState.snapshot}
                 selections={nextSendSelections} timelineCommand={timelineCommand} /></ProjectReferenceContext.Provider>;
             }}
-            capture={captureTabLifetime} dirty={id => draftIndicators.visible(id, sessionId)} observations={runtimeObservationControls()}
+            capture={captureTabLifetime} drafts={tabDrafts} observations={runtimeObservationControls()}
             onSessionTabClick={focusPromptSoon}
             select={selectSessionTab} close={tab => {
               if (!snapshot || snapshot !== currentSnapshot.current || !resolveSessionTab(snapshot, tab)) return;
@@ -2952,7 +2954,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}
           onNavigationReset={resetMessageNotice} newestRequest={newest.requestRef} onNewestResult={newest.onResult}
           read={readTimeline} readPluginEvents={readPluginEvents} readImages={readImages} readTool={readTool} toolOutputs={toolOutputs}
-          outgoing={ownedSession && status?.hostEpoch ? submissions.outgoing(status.hostEpoch, session.id) : []}
+          outgoing={ownedSession && status?.hostEpoch ? submissions.outgoing(status.hostEpoch, session.id) : noOutgoing}
           onAcknowledgeOutgoing={submissions.acknowledgeOutgoing}
           live={ownedSession ? live?.snapshot?.session ?? null : null} />
         {ownedSession && status?.hostEpoch

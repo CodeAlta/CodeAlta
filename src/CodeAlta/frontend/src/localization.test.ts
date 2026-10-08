@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import { historyMessage } from "./history";
 import { timelineNotice } from "./timelineScroll";
 import { renderToStaticMarkup } from "react-dom/server";
-import { createElement } from "react";
+import { createElement, useState } from "react";
 import { messages, locales, translate, resolveLocale, readLanguage, saveLanguage } from "./localization";
 import { inventoryNotice } from "./inventoryNotice";
 import { workflowNotice } from "./workflowNotice";
 import { ProjectRailRows } from "./explorer/ProjectRailRows";
-import { ShellLanguageContext } from "./shellLanguage";
+import { ShellLanguageContext, useLanguagePreference } from "./shellLanguage";
 import { AboutSettings } from "./AboutDialog";
 
 test("support labels translate while recorded host identity and confirmation bytes stay literal", () => {
@@ -147,4 +147,19 @@ test("storage failures and malformed values never cause automatic writes; failed
   assert.deepEqual(readLanguage(() => { throw new Error("denied"); }), { choice: "en", issue: "unavailable" });
   assert.deepEqual(saveLanguage("ja", () => { throw new Error("denied"); }), { choice: "ja", issue: "unsaved" });
   let writes = 0; assert.equal(saveLanguage("bad", () => { writes++; }), null); assert.equal(writes, 0);
+});
+
+test("the language of the shell is one value across the renders of its owner", () => {
+  // Every component reads this value from a context: a new object on each render of App rendered all of them again.
+  const values: unknown[] = [];
+  function Owner() {
+    const language = useLanguagePreference();
+    const [pass, setPass] = useState(0);
+    values.push(language);
+    if (pass < 2) setPass(pass + 1);
+    return null;
+  }
+  renderToStaticMarkup(createElement(Owner));
+  assert.equal(values.length, 3);
+  assert.ok(values.every(value => value === values[0]));
 });
