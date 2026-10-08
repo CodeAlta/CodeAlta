@@ -6,13 +6,14 @@ import { defaultWorkSettings, workItems, type WorkItem } from "./workItems";
 import { createWorkItemsHub, readingBatches, type WorkItemsApi } from "./workItemsHub";
 
 const row = (id: string, more: Partial<WorkItemRow> = {}): WorkItemRow => ({ id, kind: "task", title: id, summary: null, category: "gap", status: "pending", statusText: null,
-  created: null, file: `.alta/tasks/${id}.md`, proposedBy: null, runner: null, acknowledged: false, ...more });
+  created: null, file: `.alta/tasks/${id}.md`, proposedBy: null, runner: null, acknowledged: false, runsWith: null, ...more });
 const settled = () => new Promise<void>(resolve => setImmediate(resolve));
 
 /** A host whose projects each have what the test says, and that records what it is asked. */
 function host(found: Record<string, WorkItemRow[]>) {
   const asked: (readonly string[] | null)[] = [];
   const acted: string[] = [];
+  const ranWith: (string | null)[][] = [];
   let settings: WorkItemsSettings = defaultWorkSettings;
   let tell: (() => void) | null = null;
   const pending: (() => void)[] = [];
@@ -28,6 +29,7 @@ function host(found: Record<string, WorkItemRow[]>) {
     async read() { return { status: "ok", markdown: "Text.", truncated: false }; },
     async act(request) {
       acted.push(`${request.action}:${request.id}:${request.sessionId ?? ""}`);
+      if (request.action.startsWith("start_")) ranWith.push([request.providerId, request.modelId, request.reasoningEffort]);
       if (request.action === "dismiss") found[request.projectId] = found[request.projectId].filter(item => item.id !== request.id);
       return request.action === "start_here" ? { status: "ok", sessionId: request.sessionId, message: null, reason: null, prompt: "Do it.", agentPromptId: request.kind === "plan" ? "default" : null }
         : request.action === "start_worktree" ? { status: "refused", sessionId: null, message: "git said no", reason: "worktree_not_repository", prompt: null, agentPromptId: null }
@@ -44,7 +46,7 @@ function host(found: Record<string, WorkItemRow[]>) {
       })();
     },
   } as WorkItemsApi;
-  return { api, asked, acted, change: () => tell?.(), holding: (value: boolean) => { hold = value; }, release: () => pending.shift()?.() };
+  return { api, asked, acted, ranWith, change: () => tell?.(), holding: (value: boolean) => { hold = value; }, release: () => pending.shift()?.() };
 }
 const noTimers = { set: () => 0, clear: () => {} };
 
@@ -145,6 +147,14 @@ test("work starts in a new session, or through the composer of the session that 
 
   assert.equal(await startWorkItem(window(false), item, "session", { id: "s1", workingDirectory: "C:/app" }), true);
   assert.deepEqual([server.acted.at(-1), opened], ["start_session:one:s1", ["new"]], "the new session takes the model of the one that showed the item, and is shown");
+  assert.deepEqual(server.ranWith.at(-1), [null, null, null], "nothing was chosen: the host takes what the session, then the item, then the defaults say");
+
+  // What the user chose in the Work items tab goes with the start; an effort is of a model.
+  assert.equal(await startWorkItem(window(false), item, "session", null, { providerId: "codex", modelId: "gpt-a", reasoningEffort: "high" }), true);
+  assert.deepEqual([server.acted.at(-1), server.ranWith.at(-1)], ["start_session:one:", ["codex", "gpt-a", "high"]]);
+  assert.equal(await startWorkItem(window(false), item, "session", null, { providerId: "codex", modelId: null, reasoningEffort: "high" }), true);
+  assert.deepEqual(server.ranWith.at(-1), ["codex", null, null]);
+  opened.splice(0, opened.length, "new");
 
   assert.equal(await startWorkItem(window(false), item, "here", { id: "s1", workingDirectory: "C:/app" }), true);
   assert.deepEqual(composer.splice(0), ["state:s1::", "send:s1:Do it.:"], "an idle session is sent the prompt");

@@ -2071,6 +2071,53 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task TaskCreateAndPlanApproval_RecordWhatTheProposingSessionRunsWith()
+    {
+        using var root = TempDirectory.Create();
+        var projectPath = Path.Combine(root.Path, "project");
+        Directory.CreateDirectory(projectPath);
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var projectCatalog = new ProjectCatalog(options);
+        var project = await projectCatalog.UpsertFromPathAsync(projectPath).ConfigureAwait(false);
+        var sessionCatalog = new SessionViewCatalog(options);
+        var providerId = new ModelProviderId("work-model");
+        var runtime = CreateRuntime(options, new StatefulProviderRuntime(providerId));
+        await using var _ = runtime.ConfigureAwait(false);
+        var items = new CodeAlta.Catalog.WorkItems.WorkItemService(new CodeAltaConfigStore(options), Path.Combine(root.Path, "state"));
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(projectCatalog)
+            .Add(sessionCatalog)
+            .Add(runtime)
+            .Add(items)
+            .Add<IAltaSessionQueryService>(new ThrowingSessionQueryService()));
+        var session = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--title", "Proposer", "--model-ref", $"{providerId.Value}:gpt-work@low"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(session.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+        var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = sessionId, SourceProjectId = project.Id };
+
+        // A task a session proposes is started later with what that session runs with.
+        var created = await dispatcher.InvokeAsync(["task", "create", "--project", project.Id, "--title", "A follow-up", "--content", "Body."], caller: caller).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, created.ExitCode, created.Stderr);
+        var taskId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.task.created").GetProperty("id").GetString()!;
+        var link = items.GetLink(project.Id, CodeAlta.Catalog.WorkItems.WorkItemKinds.Task, taskId)!;
+        Assert.AreEqual(sessionId, link.ProposedBy);
+        Assert.AreEqual(new CodeAlta.Catalog.WorkItems.WorkItemSelection("work-model", "gpt-work", "low"), link.RunsWith);
+
+        // So is the plan a session had approved.
+        File.WriteAllText(Path.Combine(Directory.CreateDirectory(Path.Combine(projectPath, ".alta", "plans")).FullName, "a-plan.md"), "---\nstatus: draft\n---\n# A plan\n");
+        var approved = await dispatcher.InvokeAsync(["plan", "status", "a-plan", "approved", "--project", project.Id], caller: caller).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, approved.ExitCode, approved.Stderr);
+        Assert.AreEqual(new CodeAlta.Catalog.WorkItems.WorkItemSelection("work-model", "gpt-work", "low"),
+            items.GetLink(project.Id, CodeAlta.Catalog.WorkItems.WorkItemKinds.Plan, "a-plan")!.RunsWith);
+
+        // A task nobody in a session proposed has nothing to run with: the page proposes the default.
+        var outside = await dispatcher.InvokeAsync(["task", "create", "--project", project.Id, "--title", "From a terminal", "--content", "Body."], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, outside.ExitCode, outside.Stderr);
+        var outsideId = ReadJsonLines(outside.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.task.created").GetProperty("id").GetString()!;
+        Assert.IsNull(items.GetLink(project.Id, CodeAlta.Catalog.WorkItems.WorkItemKinds.Task, outsideId)?.RunsWith);
+    }
+
+    [TestMethod]
     public async Task SessionCreate_ResolvesPersistsModelInheritanceAndChildProvenance()
     {
         using var root = TempDirectory.Create();

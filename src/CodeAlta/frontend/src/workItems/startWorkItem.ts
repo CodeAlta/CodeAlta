@@ -1,5 +1,6 @@
 import type { MessageKey } from "../localization";
 import type { PluginComposerRequest } from "../pluginUi";
+import type { RunsWith } from "./runsWith";
 import type { WorkItem, WorkStart } from "./workItems";
 import type { WorkItemsHub } from "./workItemsHub";
 
@@ -20,11 +21,13 @@ export type WorkStartSession = Readonly<{ id: string; workingDirectory: string |
 /**
  * Starts the work of a task or a plan. In a new session, with or without a new worktree, the host creates the
  * session and sends it the item. In the session that shows the item, the prompt goes through the composer of
- * that session: sent when the session is idle, queued behind its current work otherwise.
+ * that session: sent when the session is idle, queued behind its current work otherwise. A new session runs
+ * with what the user chose; without a choice, with what the session that shows the item runs with, then with
+ * what the item was proposed with, then with the defaults.
  */
-export async function startWorkItem(host: WorkStartHost, item: WorkItem, start: WorkStart, session: WorkStartSession | null): Promise<boolean> {
+export async function startWorkItem(host: WorkStartHost, item: WorkItem, start: WorkStart, session: WorkStartSession | null, runsWith: RunsWith | null = null): Promise<boolean> {
   if (start !== "here") {
-    const outcome = await host.hub.act(item, start === "worktree" ? "start_worktree" : "start_session", { sessionId: session?.id ?? null });
+    const outcome = await host.hub.act(item, start === "worktree" ? "start_worktree" : "start_session", { sessionId: session?.id ?? null, runsWith });
     // A session may exist although its prompt was refused: it is shown, with what went wrong.
     if (outcome.sessionId) host.openSession(outcome.sessionId, item.projectId);
     if (outcome.ok) return true;

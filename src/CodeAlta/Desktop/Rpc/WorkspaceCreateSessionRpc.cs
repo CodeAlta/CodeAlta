@@ -11,6 +11,8 @@ namespace CodeAlta.Desktop.Rpc;
 internal sealed partial class WorkspaceService
 {
     private readonly ModelProviderRegistry? _sessionProviders;
+    // The provider of a session that names none: the default of the configuration, as the page shows it.
+    private readonly DesktopDefaultProvider? _defaultProvider;
     private readonly Func<ProjectDescriptor?, ModelProviderDescriptor, string?, Task<SessionViewDescriptor>>? _createSession;
     // A session that works in a worktree: the worktree is created first, and removed again when no session comes of it.
     private readonly GitWorktreeService? _worktrees;
@@ -29,6 +31,7 @@ internal sealed partial class WorkspaceService
     internal WorkspaceService(CodeAltaHost host, string epoch, GitWorktreeService? worktrees = null) : this(host.WorkspaceReads, host.ProjectCatalog, epoch)
     {
         _sessionProviders = host.ModelProviderRegistry;
+        _defaultProvider = new(host.CatalogOptions);
         _createSession = (project, provider, title) => host.Commands.CreateDraftSessionAsync(project, provider, title);
         _worktrees = worktrees;
         _createInWorktree = (project, provider, title, folder) => host.Commands.CreateDraftSessionAsync(project, provider, title, null, folder);
@@ -112,7 +115,7 @@ internal sealed partial class WorkspaceService
             var providers = _sessionProviders.ListProviders();
             var matches = request.ProviderId is null ? [] : providers.Where(value => value.ProviderId.Value == request.ProviderId).Take(2).ToArray();
             var provider = request.ProviderId is null
-                ? providers.FirstOrDefault(static value => value.IsDefault) ?? providers.FirstOrDefault()
+                ? _defaultProvider?.Of(providers, request.ProjectPath) ?? providers.FirstOrDefault(static value => value.IsDefault) ?? providers.FirstOrDefault()
                 : matches.Length == 1 ? matches[0] : null;
             if (provider is null) return Reply("provider_unavailable");
             var completion = new TaskCompletionSource<WorkspaceCreateSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);

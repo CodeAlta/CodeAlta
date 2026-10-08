@@ -45,7 +45,7 @@ internal sealed class WorkItemLinkStore
             var links = Load();
             var key = Key(projectId, kind, id);
             var next = change(links.GetValueOrDefault(key) ?? new WorkItemLink(projectId, kind, id));
-            if (next is { ProposedBy: null, Runner: null, Acknowledged: false })
+            if (next is { ProposedBy: null, Runner: null, Acknowledged: false, RunsWith: null })
             {
                 if (!links.Remove(key))
                 {
@@ -67,7 +67,7 @@ internal sealed class WorkItemLinkStore
         }
     }
 
-    internal void Remove(string projectId, string kind, string id) => Update(projectId, kind, id, static link => link with { ProposedBy = null, Runner = null, StartedAt = null, Acknowledged = false });
+    internal void Remove(string projectId, string kind, string id) => Update(projectId, kind, id, static link => link with { ProposedBy = null, Runner = null, StartedAt = null, Acknowledged = false, RunsWith = null });
 
     private static string Key(string projectId, string kind, string id) => string.Concat(projectId, "\n", kind, "\n", id);
 

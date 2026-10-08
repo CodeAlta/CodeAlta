@@ -12,7 +12,8 @@ namespace CodeAlta.Desktop.Rpc;
 internal sealed class ModelCatalogService(
     ModelProviderRegistry? registry = null,
     ModelProviderInitializationService? initialization = null,
-    string? epoch = null)
+    string? epoch = null,
+    DesktopDefaultProvider? defaultProvider = null)
 {
     internal const int MaximumModelsResponseBytes = 96 * 1024;
     private readonly object _probeGate = new();
@@ -51,6 +52,8 @@ internal sealed class ModelCatalogService(
         ArgumentNullException.ThrowIfNull(request);
         var denied = CheckEpoch(request.ExpectedEpoch);
         if (denied is not null) return new(denied, epoch, [], false);
+        // One provider is the default: the one a new session starts with.
+        var startsWith = defaultProvider?.Of(registry!.ListProviders())?.ProviderId.Value;
         lock (_probeGate)
         {
             if (_closed) return new("closed", epoch, [], false);
@@ -61,7 +64,8 @@ internal sealed class ModelCatalogService(
                 descriptor.ProviderId.Value, Bound(descriptor.DisplayName, 256), descriptor.IsEnabled,
                 states.TryGetValue(descriptor.ProviderId.Value, out var state) ? state.Availability.ToString() : "Unknown")
             {
-                Type = Bound(descriptor.ProviderType, 256), IsDefault = descriptor.IsDefault,
+                Type = Bound(descriptor.ProviderType, 256),
+                IsDefault = defaultProvider is null ? descriptor.IsDefault : string.Equals(descriptor.ProviderId.Value, startsWith, StringComparison.Ordinal),
                 DefaultModel = descriptor.DefaultModelId is null ? null : Bound(descriptor.DefaultModelId, 256),
                 ObservedAt = state is { Availability: not ModelProviderAvailability.Unknown } ? state.ObservedAt : null,
             }).ToArray(),

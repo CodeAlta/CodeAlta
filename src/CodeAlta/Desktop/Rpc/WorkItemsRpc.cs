@@ -118,7 +118,10 @@ internal sealed class WorkItemsService
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
         if (!Valid(request.ProjectId, request.Kind, request.Id) || request.Action is not { Length: > 0 and <= 32 }
-            || request.SessionId is not null && !Identifier(request.SessionId)) return new("invalid_request");
+            || request.SessionId is not null && !Identifier(request.SessionId)
+            || request.ProviderId is not null && !Identifier(request.ProviderId)
+            || request.ModelId is not null && (request.ProviderId is null || !Identifier(request.ModelId))
+            || request.ReasoningEffort is not null && (request.ModelId is null || !Identifier(request.ReasoningEffort))) return new("invalid_request");
         if (await ProjectAsync(request.ProjectId, cancellationToken).ConfigureAwait(false) is not { } project) return new("not_found");
         var task = request.Kind == WorkItemKinds.Task;
         var exists = task ? _items!.GetTask(project, request.Id) is not null : _items!.GetPlan(project, request.Id) is not null;
@@ -142,7 +145,8 @@ internal sealed class WorkItemsService
             case "start_worktree" or "start_session":
             {
                 // The session is created whether or not the page still waits: it is told when it lists again.
-                var started = await _runner!.StartAsync(project, request.Kind, request.Id, request.Action == "start_worktree", request.SessionId).ConfigureAwait(false);
+                var asked = request.ProviderId is null ? null : new WorkItemSelection(request.ProviderId, request.ModelId, request.ReasoningEffort);
+                var started = await _runner!.StartAsync(project, request.Kind, request.Id, request.Action == "start_worktree", request.SessionId, asked).ConfigureAwait(false);
                 return started.Problem is null ? new("ok") { SessionId = started.SessionId }
                     : new("refused") { SessionId = started.SessionId, Message = started.Problem, Reason = started.Reason };
             }
@@ -236,11 +240,14 @@ internal sealed class WorkItemsService
 
     private static WorkItemRow Row(WorkTask task, WorkItemLink? link)
         => new(task.Id, WorkItemKinds.Task, task.Title, task.Summary, task.Kind, WorkItemFiles.NameOf(task.Status), null, task.Created,
-            WorkItemFiles.TasksFolder + "/" + task.Id + ".md", link?.ProposedBy, link?.Runner, link?.Acknowledged ?? false);
+            WorkItemFiles.TasksFolder + "/" + task.Id + ".md", link?.ProposedBy, link?.Runner, link?.Acknowledged ?? false, RunsWith(link));
 
     private static WorkItemRow Row(WorkPlan plan, WorkItemLink? link)
         => new(plan.Id, WorkItemKinds.Plan, plan.Title, plan.Summary, null, WorkItemFiles.NameOf(plan.Status), plan.StatusText, plan.Created,
-            WorkItemFiles.PlansFolder + "/" + plan.Id + ".md", link?.ProposedBy, link?.Runner, link?.Acknowledged ?? false);
+            WorkItemFiles.PlansFolder + "/" + plan.Id + ".md", link?.ProposedBy, link?.Runner, link?.Acknowledged ?? false, RunsWith(link));
+
+    private static WorkItemRunsWith? RunsWith(WorkItemLink? link)
+        => link?.RunsWith is { } selection ? new(selection.ProviderKey, selection.ModelId, selection.ReasoningEffort) : null;
 
     private static WorkItemsSettings Settings(WorkItemSettings settings)
         => new(settings.Propose, settings.Notify, WorkItemSettings.NameOf(settings.CompletedTasks), WorkItemSettings.NameOf(settings.DismissedTasks),
@@ -265,8 +272,14 @@ internal sealed record WorkItemsProject(string ProjectId, IReadOnlyList<WorkItem
 /// <param name="ProposedBy">The session that proposed the item, which shows it as a card.</param>
 /// <param name="Runner">The session that carries the item out.</param>
 /// <param name="Acknowledged">The user put the card of the item away.</param>
+/// <param name="RunsWith">What the session that proposed the item ran with, which a session started for it takes; null when it is not known.</param>
 internal sealed record WorkItemRow(string Id, string Kind, string Title, string? Summary, string? Category, string Status, string? StatusText, string? Created,
-    string File, string? ProposedBy, string? Runner, bool Acknowledged);
+    string File, string? ProposedBy, string? Runner, bool Acknowledged, WorkItemRunsWith? RunsWith = null);
+
+/// <param name="ProviderId">The key of the model provider.</param>
+/// <param name="ModelId">The model; null leaves it to the provider.</param>
+/// <param name="ReasoningEffort">The name of the reasoning effort, in lower case; null leaves it to the model.</param>
+internal sealed record WorkItemRunsWith(string ProviderId, string? ModelId, string? ReasoningEffort);
 
 /// <param name="CompletedTasks"><c>delete</c> or <c>keep</c>.</param>
 /// <param name="DismissedTasks"><c>delete</c> or <c>keep</c>.</param>
@@ -282,8 +295,11 @@ internal sealed record WorkItemReadResponse(string Status, string? Markdown, boo
 /// <param name="Value">The status of a plan, for <c>status</c>.</param>
 /// <param name="SessionId">The session that shows the item: the one that carries it out for <c>start_here</c>, the one a new session takes its model from otherwise.</param>
 /// <param name="WorkingDirectory">The folder that session works in, for <c>start_here</c>.</param>
+/// <param name="ProviderId">The provider the user chose for a new session; null to take what the item or the showing session says, then the default.</param>
+/// <param name="ModelId">The model the user chose, of that provider; null leaves it to the provider.</param>
+/// <param name="ReasoningEffort">The reasoning effort the user chose, for that model; null leaves it to the model.</param>
 internal sealed record WorkItemActionRequest(string? ExpectedEpoch, string ProjectId, string Kind, string Id, string Action, string? Value = null,
-    string? SessionId = null, string? WorkingDirectory = null);
+    string? SessionId = null, string? WorkingDirectory = null, string? ProviderId = null, string? ModelId = null, string? ReasoningEffort = null);
 
 /// <param name="Status"><c>ok</c>, <c>refused</c> (with a message), <c>not_found</c>, <c>write_failed</c>, <c>invalid_request</c>, <c>unavailable</c> or <c>stale_epoch</c>.</param>
 internal sealed record WorkItemActionResponse(string Status)

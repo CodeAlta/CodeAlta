@@ -1425,8 +1425,19 @@ account, a button per sign-in method (**Sign in with the browser**, **Sign in wi
 and **Sign out**. A sign-in opens the provider's page in the system browser and shows the address,
 and the code to enter for a device flow, each with a copy button, until it completes or is canceled;
 a provider that was disabled is enabled when its sign-in succeeds. Save a new or edited provider
-before signing in. The default provider shown here is `[chat] default_provider`; the host's own inventory marks every registered provider as
-default, so it is not used for that.
+before signing in.
+
+**The default provider.** `ModelProviderDescriptor.IsDefault` is true for every configured provider (it is
+the default option of its own definition), so it never says which provider a new session starts with.
+`DesktopDefaultProvider` does: `[chat] default_provider` (of the project, then of the user) when that
+provider is enabled, otherwise the first enabled provider in the order of the registry (by name). The
+`configuration` snapshot and `modelCatalog.providers` mark that one provider `isDefault`, and
+`workspace.createSession` without a provider, `SessionStarter` (work items, issues) and
+`AutomationRunner` take the same, so the composer of a new session, a work item and an automation agree.
+`globalConfig.providers` reports both what the file says (`defaultProvider`, which the checkbox **Use as
+the default provider for new sessions** shows) and the provider that results (`startingProvider`, which
+carries the **Default** tag in the list). Saving a provider with the box cleared removes
+`default_provider` when it named that provider.
 
 **Provider defaults.** `globalConfig.providers` also reports what a blank field falls back to. Each provider carries
 `defaults` (`displayName`, `model`, `reasoningEffort`, `apiUrl`, `apiKeyEnv`; null when nothing is
@@ -2383,6 +2394,19 @@ settings, the store of the links), `Desktop/WorkItems/WorkItemRunner.cs` and
   the user put its card away are facts of this machine: they are kept in `work_items.json` of the
   state folder, at most 2,000 of them, never in the repository. A link to a session that no longer
   exists counts for nothing.
+- **What an item runs with.** The link also keeps the provider, the model and the reasoning effort of
+  the session that proposed the item (`WorkItemLink.RunsWith`): `alta task create` and `alta plan
+  status <id> approved` record those of the calling session, resolved as `alta session create` resolves
+  them for a child. A provider key, like a session id, means nothing on another computer, which is why
+  it is not in the file. A session started for the item is given, in this order
+  (`SessionStartChoice.ChooseAsync`): what the user chose in the Work items tab (`providerId`,
+  `modelId`, `reasoningEffort` of `workItems.act`), which is used as it is or refused with the reason;
+  what the session that shows the card runs with; what is recorded with the item; then the default
+  provider (see "The default provider"). The last three are passed over when their provider is no
+  longer enabled, and keep their provider with its own model when their model is no longer offered.
+  The Work items tab shows the result as **Runs with** (provider, model, effort), pre-filled the same
+  way from the row (`runsWith`) and the defaults of the provider (`workItems/runsWith.ts`), and always
+  sends what it shows.
 - **Cards of a session.** A session shows, in its top right corner, what it proposed and the user has
   not decided on: its pending tasks, and its plans once they are approved (`alta plan status <id>
   approved`, which the Plan prompt runs after the review). One card is shown at a time, the plan

@@ -154,9 +154,16 @@ internal sealed class GlobalConfigService
                 // The providers of a newer version: not listed, not saved over, and said to be there.
                 var unsupported = document.UnsupportedProviders.Take(MaximumProviders)
                     .Select(static provider => new GlobalConfigUnsupportedProvider(Bound(provider.ProviderKey)!, Bound(provider.ProviderType)!)).ToArray();
-                return new("ok", revision, Bound(document.Chat?.DefaultProvider?.Trim().ToLowerInvariant()), providers, ProviderTypes, ReasoningEfforts, defaults.Types, builtIn)
+                var configured = Bound(document.Chat?.DefaultProvider?.Trim().ToLowerInvariant());
+                // The provider a new session starts with: the configured one when it is enabled, else the first
+                // enabled one in the order the providers are listed everywhere (by name).
+                var enabled = providers.Where(static provider => provider.Enabled)
+                    .OrderBy(static provider => provider.EffectiveName, StringComparer.OrdinalIgnoreCase).ThenBy(static provider => provider.Key, StringComparer.OrdinalIgnoreCase).ToArray();
+                var starting = enabled.FirstOrDefault(provider => string.Equals(provider.Key, configured, StringComparison.OrdinalIgnoreCase)) ?? enabled.FirstOrDefault();
+                return new("ok", revision, configured, providers, ProviderTypes, ReasoningEfforts, defaults.Types, builtIn)
                 {
                     Unsupported = unsupported,
+                    StartingProvider = starting?.Key,
                 };
             }
         }
@@ -222,6 +229,10 @@ internal sealed class GlobalConfigService
             else if (!string.IsNullOrEmpty(edit.ApiKey)) definition.ApiKey = edit.ApiKey;
             store.SaveGlobalProviderDefinitions(definitions);
             if (request.MakeDefault && edit.Enabled) store.SaveGlobalDefaultProvider(key);
+            // A provider that is no longer the default, or no longer enabled, is not left named as the default.
+            else if (store.GetEffectiveDefaultProvider() is { } current
+                && (string.Equals(current, key, StringComparison.OrdinalIgnoreCase) || string.Equals(current, original, StringComparison.OrdinalIgnoreCase)))
+                store.SaveGlobalDefaultProvider(null);
             return null;
         });
     }
@@ -433,6 +444,12 @@ internal sealed record GlobalConfigProvidersResponse(string Status, string? Revi
     /// not among <see cref="Providers"/>, and saving keeps their sections as they are.
     /// </summary>
     public IReadOnlyList<GlobalConfigUnsupportedProvider> Unsupported { get; init; } = [];
+
+    /// <summary>
+    /// The provider a new session starts with: <see cref="DefaultProvider"/> when it is enabled, otherwise the
+    /// first enabled provider. Null when no provider is enabled.
+    /// </summary>
+    public string? StartingProvider { get; init; }
 }
 
 /// <param name="Key">The provider key.</param>

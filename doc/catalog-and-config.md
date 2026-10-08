@@ -26,7 +26,7 @@ CodeAlta keeps user-owned durable state under a global root and project-local `.
 | `worktrees/` | `GitWorktreeService` | The git worktrees CodeAlta creates for sessions, unless the user chose another place: one folder for each project, and in it one folder for each worktree (see `doc/desktop.md`). |
 | `color-schemes/` | Desktop `ColorSchemesService` | The user's color schemes of the desktop window, one JSON file each (see `doc/desktop.md`). |
 | `automations.json` | Desktop `AutomationStateStore` | What an instance remembers of the automations: whether they are paused, their runs, what the event triggers have seen and which automations of a project the user allowed (see `doc/desktop.md`). It is under the state root. |
-| `work_items.json` | Catalog `WorkItemLinkStore` | Which session proposed a task or a plan, which one carries it out, and whether the user put its card away. It is under the state root; the tasks and the plans themselves are files of their project. |
+| `work_items.json` | Catalog `WorkItemLinkStore` | Which session proposed a task or a plan, what that session ran with (provider, model, reasoning effort), which one carries it out, and whether the user put its card away. It is under the state root; the tasks and the plans themselves are files of their project. |
 | `sessions/internal/` | Work-session catalog | Internal session linkage descriptors still read by the catalog. |
 
 CodeAlta Desktop also writes two files of its MCP server in the state root of the instance (see below):

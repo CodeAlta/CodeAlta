@@ -208,7 +208,7 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
           {providers.map(provider => { const state = status(provider.key, provider.enabled); return <Card key={provider.key} interactive selected={selected === provider.key}
             data-provider-key={provider.key} aria-current={selected === provider.key ? "true" : undefined} onClick={() => choose(provider.key)}>
             <span className="provider-settings-name"><strong>{provider.effectiveName}</strong><small>{provider.key} · {provider.type}</small></span>
-            <span className="provider-settings-tags">{provider.key === listing.defaultProvider && <Tag minimal round intent="primary">{t("Default")}</Tag>}
+            <span className="provider-settings-tags">{provider.key === (listing.startingProvider ?? listing.defaultProvider) && <Tag minimal round intent="primary" title={t("New sessions start with this provider.")}>{t("Default")}</Tag>}
               <Tag minimal round intent={state.intent}>{state.label}</Tag></span>
           </Card>; })}
           {selected === newProvider && <Card interactive selected><span className="provider-settings-name"><strong>{form?.displayName || t("New provider")}</strong>

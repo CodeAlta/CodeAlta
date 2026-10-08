@@ -309,6 +309,20 @@ internal sealed partial class BuiltInAltaCommandContributor
         return AltaExitCodes.Success;
     }
 
+    // What the session that proposes an item runs with: a session started for the item takes the same.
+    private static async Task<WorkItemSelection?> CallerSelectionAsync(AltaCommandContext context, string? sessionId)
+    {
+        if (sessionId is null)
+        {
+            return null;
+        }
+
+        var resolved = await ResolveSessionModelSelectionAsync(context, sessionId).ConfigureAwait(false);
+        return resolved.Selection is { ProviderKey: { Length: > 0 } provider } selection
+            ? new(provider, selection.ModelId, selection.ReasoningEffort?.ToString().ToLowerInvariant())
+            : null;
+    }
+
     private static async ValueTask<int> HandleTaskCreateAsync(AltaCommandContext context, TaskCreateOptions options)
     {
         const string Command = "alta task create";
@@ -342,7 +356,9 @@ internal sealed partial class BuiltInAltaCommandContributor
         WorkTaskCreation creation;
         try
         {
-            creation = items.CreateTask(project, new WorkTaskDraft(title, options.Kind, options.Summary, body), NormalizeOptionalText(context.Caller.SourceSessionId));
+            var proposer = NormalizeOptionalText(context.Caller.SourceSessionId);
+            creation = items.CreateTask(project, new WorkTaskDraft(title, options.Kind, options.Summary, body), proposer,
+                await CallerSelectionAsync(context, proposer).ConfigureAwait(false));
         }
         catch (ArgumentException exception)
         {
@@ -490,7 +506,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         {
             if (next == WorkPlanStatus.Approved)
             {
-                items.Propose(project.Id, WorkItemKinds.Plan, planId, session);
+                items.Propose(project.Id, WorkItemKinds.Plan, planId, session, await CallerSelectionAsync(context, session).ConfigureAwait(false));
             }
             else if (next == WorkPlanStatus.InProgress)
             {

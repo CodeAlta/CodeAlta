@@ -1,20 +1,34 @@
 import { useState, useSyncExternalStore } from "react";
-import { HTMLSelect, Switch } from "@blueprintjs/core";
+import { Button, HTMLSelect, Switch } from "@blueprintjs/core";
 import type { WorkItemsSettings } from "#neoastra";
 import type { MessageKey } from "../localization";
 import { SettingsPage, SettingsUnavailable } from "../SettingsPage";
 import type { SettingsNotice } from "../settingsEditing";
 import { useShellLanguage } from "../shellLanguage";
+import { defaultRunProvider, runModel, useRunModels, type RunModelsLoader, type RunProvider } from "./runsWith";
 import { startLabel, workStarts } from "./workItems";
 import type { WorkItemsHub } from "./workItemsHub";
+
+const noProviders: readonly RunProvider[] = [];
 
 /**
  * Settings page for work items: whether agents may propose follow-up tasks and whether a session shows them,
  * which way of starting comes first, and what becomes of the tasks and the plans that are closed. A choice
  * is saved at once, in the configuration file of the user.
  */
-export function WorkItemSettings({ hub }: { hub: WorkItemsHub }) {
+export function WorkItemSettings({ hub, providers = noProviders, loadModels = null, onOpenProviders }: {
+  hub: WorkItemsHub;
+  /** The enabled providers; the default one is what work starts with when its item names none. */
+  providers?: readonly RunProvider[];
+  /** Lists the models of a provider. */
+  loadModels?: RunModelsLoader | null;
+  /** Opens the settings of the providers, where the default is chosen. */
+  onOpenProviders?: () => void;
+}) {
   const { t } = useShellLanguage();
+  const provider = defaultRunProvider(providers);
+  const offered = useRunModels(provider?.id ?? null, loadModels);
+  const starts = runModel(provider, offered.models, null, {});
   const state = useSyncExternalStore(hub.subscribe, hub.getSnapshot, hub.getSnapshot);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<SettingsNotice | null>(null);
@@ -49,6 +63,10 @@ export function WorkItemSettings({ hub }: { hub: WorkItemsHub }) {
           <HTMLSelect aria-label={t("Start by default")} value={settings.start} disabled={busy} onChange={event => void save({ start: event.target.value })}>
             {workStarts.map(start => <option key={start} value={start}>{t(startLabel(start))}</option>)}
           </HTMLSelect>)}
+        {provider && <div className="work-settings-row"><span><strong>{t("Default provider and model")}</strong>
+          <small>{t("What a new session runs with when the session that proposed the work is not known. Change it before starting, in the Work items tab.")}</small></span>
+          <div className="work-settings-default"><span data-default-run>{[provider.name, starts.modelId, starts.reasoningEffort].filter(Boolean).join(" · ")}</span>
+            {onOpenProviders && <Button size="small" variant="outlined" onClick={onOpenProviders}>{t("Providers")}</Button>}</div></div>}
       </section>
       <section className="work-settings-group">
         <h2>{t("Closed tasks")}</h2>

@@ -160,7 +160,7 @@ public sealed class IssuesRpcTests
         public List<(string ProjectId, string Title, string Prompt, bool Worktree, string? Like, string Origin)> Started { get; } = [];
         public (string Message, string Reason)? Problem { get; set; }
 
-        public Task<SessionStartResult> StartAsync(ProjectDescriptor project, string title, Func<string, string> prompt, bool worktree, string? likeSessionId, string origin)
+        public Task<SessionStartResult> StartAsync(ProjectDescriptor project, string title, Func<string, string> prompt, bool worktree, string? likeSessionId, string origin, SessionStartModel? model)
         {
             Started.Add((project.Id, title, prompt(project.ProjectPath), worktree, likeSessionId, origin));
             return Task.FromResult(Problem is { } problem ? new SessionStartResult(null, problem.Message, problem.Reason) : new SessionStartResult("new-session", null));

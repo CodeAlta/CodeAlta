@@ -159,7 +159,7 @@ internal sealed class IssuesService
         if (detail is null || Row(detail.Item) is not { } row) return new("not_found");
 
         var started = await _starter.StartAsync(project, IssuePrompts.SessionTitle(row), _ => IssuePrompts.For(tracker.DisplayName, GitIssuesService.Clean(tracker.Location, MaximumTitle), row, detail.Body),
-            request.Worktree, request.SessionId, "issue").ConfigureAwait(false);
+            request.Worktree, request.SessionId, "issue", model: null).ConfigureAwait(false);
         return new(started.Problem is null ? "ok" : "refused", started.SessionId, started.Problem, started.Reason);
     }
 

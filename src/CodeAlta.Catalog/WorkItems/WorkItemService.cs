@@ -129,6 +129,20 @@ public sealed class WorkItemService
     /// <exception cref="ArgumentException">The title or the body is blank or too long, the summary is too long, or the kind is not one.</exception>
     /// <exception cref="IOException">The file could not be written.</exception>
     public WorkTaskCreation CreateTask(ProjectDescriptor project, WorkTaskDraft draft, string? proposedBy)
+        => CreateTask(project, draft, proposedBy, runsWith: null);
+
+    /// <summary>
+    /// Writes a new task of a project, and records what the session that proposes it runs with.
+    /// </summary>
+    /// <param name="project">The project.</param>
+    /// <param name="draft">What the task is.</param>
+    /// <param name="proposedBy">The session that proposes it, which then shows it; null when a person or a tool outside a session does.</param>
+    /// <param name="runsWith">The provider, the model and the effort of that session, which a session started for the task takes; null when they are not known.</param>
+    /// <returns>The task, or why it was refused.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="project"/> or <paramref name="draft"/> is null.</exception>
+    /// <exception cref="ArgumentException">The title or the body is blank or too long, the summary is too long, or the kind is not one.</exception>
+    /// <exception cref="IOException">The file could not be written.</exception>
+    public WorkTaskCreation CreateTask(ProjectDescriptor project, WorkTaskDraft draft, string? proposedBy, WorkItemSelection? runsWith)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(draft);
@@ -198,9 +212,9 @@ public sealed class WorkItemService
                     stream.Write(Encoding.UTF8.GetBytes(text));
                 }
 
-                if (proposedBy is not null)
+                if (proposedBy is not null || runsWith is not null)
                 {
-                    _links.Update(project.Id, WorkItemKinds.Task, id, link => link with { ProposedBy = proposedBy });
+                    _links.Update(project.Id, WorkItemKinds.Task, id, link => link with { ProposedBy = proposedBy, RunsWith = Normalize(runsWith) });
                 }
 
                 Changed?.Invoke();
@@ -395,10 +409,31 @@ public sealed class WorkItemService
     /// <param name="id">The id of the item.</param>
     /// <param name="sessionId">The session.</param>
     public void Propose(string projectId, string kind, string id, string sessionId)
+        => Propose(projectId, kind, id, sessionId, runsWith: null);
+
+    /// <summary>
+    /// Records the session that proposed an item, which shows it as a card until the user decides, and what that
+    /// session runs with.
+    /// </summary>
+    /// <param name="projectId">The project.</param>
+    /// <param name="kind">One of <see cref="WorkItemKinds"/>.</param>
+    /// <param name="id">The id of the item.</param>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="runsWith">The provider, the model and the effort of that session; null keeps what was recorded.</param>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is blank.</exception>
+    public void Propose(string projectId, string kind, string id, string sessionId, WorkItemSelection? runsWith)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        Link(projectId, kind, id, link => link with { ProposedBy = sessionId, Acknowledged = false });
+        Link(projectId, kind, id, link => link with { ProposedBy = sessionId, Acknowledged = false, RunsWith = Normalize(runsWith) ?? link.RunsWith });
     }
+
+    // A selection without a provider says nothing; blank parts are left to the provider and to the model.
+    private static WorkItemSelection? Normalize(WorkItemSelection? selection)
+        => selection is null || string.IsNullOrWhiteSpace(selection.ProviderKey)
+            ? null
+            : new(selection.ProviderKey.Trim(),
+                string.IsNullOrWhiteSpace(selection.ModelId) ? null : selection.ModelId.Trim(),
+                string.IsNullOrWhiteSpace(selection.ReasoningEffort) ? null : selection.ReasoningEffort.Trim().ToLowerInvariant());
 
     /// <summary>Records the session that carries an item out.</summary>
     /// <param name="projectId">The project.</param>

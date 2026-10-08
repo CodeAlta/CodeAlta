@@ -16,7 +16,7 @@ const never = () => assert.fail("rendering must not act");
 const render = (element: ReactElement, locale: (typeof locales)[number] = "en") =>
   renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } }, element));
 const row = (id: string, kind: "task" | "plan", status: string, more: Partial<WorkItemRow> = {}): WorkItemRow => ({ id, kind, title: `Title of ${id}`, summary: `Summary of ${id}`,
-  category: kind === "task" ? "problem" : null, status, statusText: null, created: "2026-10-07", file: `.alta/${kind}s/${id}.md`, proposedBy: "s1", runner: null, acknowledged: false, ...more });
+  category: kind === "task" ? "problem" : null, status, statusText: null, created: "2026-10-07", file: `.alta/${kind}s/${id}.md`, proposedBy: "s1", runner: null, acknowledged: false, runsWith: null, ...more });
 const state = (more: Partial<WorkItemsState> = {}): WorkItemsState => ({ loaded: true, complete: true, available: true, settings: defaultWorkSettings,
   projects: [{ projectId: "p", truncated: false, tasks: [row("task", "task", "pending"), row("running", "task", "pending", { runner: "s2" }), row("parked", "task", "later")],
     plans: [row("plan", "plan", "approved")] }], ...more });
@@ -78,6 +78,31 @@ test("the tab lists what waits, with the item that is read and what can be done 
   assert.ok(!view(state({ projects: [], complete: false })).includes("Nothing is waiting"), "nothing is said to be empty before every project was read");
   assert.ok(view(state({ loaded: false, available: false })).includes("activity-spinner"));
   assert.ok(view(state({ available: false })).includes("Work items are unavailable in this window."));
+});
+
+test("an item that can be started says what its session runs with, and which provider is the default", () => {
+  const providers = [{ id: "anthropic", name: "Anthropic", isDefault: false, defaultModel: null, defaultReasoning: null },
+    { id: "codex", name: "Codex", isDefault: true, defaultModel: "gpt-b", defaultReasoning: "low" }];
+  const view = (plan: WorkItemRow, more: object = { providers }) => render(createElement(WorkItemsPanel, { hub: hub(state({ projects: [{ projectId: "p", truncated: false, tasks: [], plans: [plan] }] })),
+    projects: [project], sessions, runningSessions: new Set<string>(), projectId: "p", visible: false, onActivate: never, onStart: never, onOpenSession: never, onOpenFile: never, onOpenSettings: never, ...more }));
+
+  // Nothing is recorded with the item: the default provider, which is marked.
+  const fresh = view(row("plan", "plan", "approved"));
+  assert.match(fresh, /role="group" aria-label="Runs with"/);
+  assert.match(fresh, /<option value="codex" selected="">Codex \(default\)<\/option>/);
+  assert.match(fresh, /<option value="anthropic">Anthropic<\/option>/);
+  // The session that proposed it ran with another provider: that one.
+  const proposed = view(row("plan", "plan", "approved", { runsWith: { providerId: "anthropic", modelId: "claude", reasoningEffort: "high" } }));
+  assert.match(proposed, /<option value="anthropic" selected="">Anthropic<\/option>/);
+  // A provider that is no longer enabled is not offered: the default one.
+  assert.match(view(row("plan", "plan", "approved", { runsWith: { providerId: "gone", modelId: null, reasoningEffort: null } })), /<option value="codex" selected="">/);
+  // What cannot be started has nothing to run with, and a window without providers shows no choice.
+  assert.ok(!view(row("plan", "plan", "done")).includes("Runs with"));
+  assert.ok(!view(row("plan", "plan", "approved"), {}).includes("Runs with"));
+
+  const settings = render(createElement(WorkItemSettings, { hub: hub(state()), providers, onOpenProviders: never }));
+  assert.match(settings, /Default provider and model.*?<span data-default-run="true">Codex<\/span>.*?Providers/s);
+  assert.ok(!render(createElement(WorkItemSettings, { hub: hub(state()) })).includes("Default provider and model"));
 });
 
 test("the settings show the choices of the user, in every language", () => {

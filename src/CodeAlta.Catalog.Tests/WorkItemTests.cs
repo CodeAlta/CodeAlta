@@ -289,6 +289,39 @@ public sealed class WorkItemTests
     }
 
     [TestMethod]
+    public async Task Links_KeepWhatTheSessionThatProposedAnItemRanWith()
+    {
+        using var root = new TempRoot();
+        var (items, project) = await root.CreateAsync();
+        var task = items.CreateTask(project, new WorkTaskDraft("A task", null, null, "Body."), "session-1", new WorkItemSelection(" codex ", "gpt-a", "High")).Task!;
+
+        // The next run of the application starts the task with the same provider, model and effort.
+        Assert.AreEqual(new WorkItemSelection("codex", "gpt-a", "high"), root.Service().GetLink(project.Id, WorkItemKinds.Task, task.Id)!.RunsWith);
+
+        // It outlives the card being put away and the task being started and released.
+        items.Acknowledge(project.Id, WorkItemKinds.Task, task.Id);
+        items.SetRunner(project.Id, WorkItemKinds.Task, task.Id, "session-2");
+        items.SetRunner(project.Id, WorkItemKinds.Task, task.Id, null);
+        Assert.AreEqual("codex", root.Service().GetLink(project.Id, WorkItemKinds.Task, task.Id)!.RunsWith!.ProviderKey);
+
+        // A plan takes those of the session that had it approved; approving again without them keeps them.
+        items.Propose(project.Id, WorkItemKinds.Plan, "a-plan", "session-1", new WorkItemSelection("anthropic", null, " "));
+        Assert.AreEqual(new WorkItemSelection("anthropic"), items.GetLink(project.Id, WorkItemKinds.Plan, "a-plan")!.RunsWith);
+        items.Propose(project.Id, WorkItemKinds.Plan, "a-plan", "session-3");
+        Assert.AreEqual(("session-3", "anthropic"), (items.GetLink(project.Id, WorkItemKinds.Plan, "a-plan")!.ProposedBy, items.GetLink(project.Id, WorkItemKinds.Plan, "a-plan")!.RunsWith!.ProviderKey));
+
+        // Without a provider there is nothing to keep, and a task nobody proposed with nothing keeps no link.
+        var plain = items.CreateTask(project, new WorkTaskDraft("Another", null, null, "Body."), null, new WorkItemSelection(" ", "gpt-a")).Task!;
+        Assert.IsNull(items.GetLink(project.Id, WorkItemKinds.Task, plain.Id));
+        var outside = items.CreateTask(project, new WorkTaskDraft("A third", null, null, "Body."), null, new WorkItemSelection("codex")).Task!;
+        Assert.AreEqual("codex", items.GetLink(project.Id, WorkItemKinds.Task, outside.Id)!.RunsWith!.ProviderKey);
+
+        // The task that is removed leaves nothing behind.
+        Assert.IsTrue(items.RemoveTask(project, task.Id));
+        Assert.IsNull(root.Service().GetLink(project.Id, WorkItemKinds.Task, task.Id));
+    }
+
+    [TestMethod]
     public void Settings_ReadWhatIsWritten_AndDefaultOtherwise()
     {
         Assert.AreEqual(WorkItemSettings.Default, WorkItemSettings.Read(null));

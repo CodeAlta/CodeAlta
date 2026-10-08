@@ -1,5 +1,6 @@
 // The page's link to the work items of the application: what they are now, and the calls that change them.
 import type { workItems, WorkItemActionResponse, WorkItemsProject, WorkItemsSettings } from "#neoastra";
+import type { RunsWith } from "./runsWith";
 import { defaultWorkSettings, type WorkKind } from "./workItems";
 
 export type WorkItemsApi = Pick<typeof workItems, "list" | "read" | "act" | "saveSettings" | "watch">;
@@ -101,12 +102,15 @@ export function createWorkItemsHub(api: WorkItemsApi, timers: Timers = { set: (r
     try { await ask(host, [projectId], () => true); } catch { /* Read again at the next reading. */ }
   }
 
-  async function act(target: WorkItemTarget, action: string, more: Readonly<{ value?: string; sessionId?: string | null; workingDirectory?: string | null }> = {}): Promise<WorkItemOutcome> {
+  async function act(target: WorkItemTarget, action: string, more: Readonly<{ value?: string; sessionId?: string | null; workingDirectory?: string | null; runsWith?: RunsWith | null }> = {}): Promise<WorkItemOutcome> {
     const host = epoch;
     if (!host) return failed;
     try {
       const reply: WorkItemActionResponse = await api.act({ expectedEpoch: host, projectId: target.projectId, kind: target.kind, id: target.id, action,
-        value: more.value ?? null, sessionId: more.sessionId ?? null, workingDirectory: more.workingDirectory ?? null }, { timeoutMilliseconds: 600_000 });
+        value: more.value ?? null, sessionId: more.sessionId ?? null, workingDirectory: more.workingDirectory ?? null,
+        // What the user chose for a new session; nothing leaves it to the item, then to the defaults.
+        providerId: more.runsWith?.providerId ?? null, modelId: more.runsWith?.modelId ?? null,
+        reasoningEffort: more.runsWith?.modelId ? more.runsWith.reasoningEffort : null }, { timeoutMilliseconds: 600_000 });
       await readProject(target.projectId);
       return { ok: reply.status === "ok", status: reply.status, message: reply.message ?? null, reason: reply.reason ?? null, sessionId: reply.sessionId ?? null,
         prompt: reply.prompt ?? null, agentPromptId: reply.agentPromptId ?? null };

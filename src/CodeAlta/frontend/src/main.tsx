@@ -134,6 +134,7 @@ import { WorkItemsPanel, type WorkItemsFocus } from "./workItems/WorkItemsPanel"
 import { WorkItemCards } from "./workItems/WorkItemCards";
 import { WorkItemsBadge } from "./workItems/WorkItemsBadge";
 import { WorkItemSettings } from "./workItems/WorkItemSettings";
+import type { RunModelsLoader, RunProvider, RunsWith } from "./workItems/runsWith";
 import { startWorkItem, type WorkStartSession } from "./workItems/startWorkItem";
 import { carriedBy, readingOrder, sessionCards, workCounts, workItemKey, workItems, type WorkItem, type WorkStart } from "./workItems/workItems";
 import { TerminalList } from "./terminal/TerminalList";
@@ -1281,13 +1282,20 @@ function App() {
     openFile(workItemsTab);
   }
   // Starts the work of a task or a plan: in a new session, or in the session that shows it.
-  async function startWork(item: WorkItem, start: WorkStart, session: WorkStartSession | null) {
+  // The providers a new session can run with, and the models of one of them: a work item is started with them.
+  const runEpoch = owned ? status?.hostEpoch ?? null : null;
+  const runInventory = configurationState.snapshot;
+  const runProviders = useMemo<readonly RunProvider[]>(() => runEpoch && runInventory?.providerRuntimeAvailable
+    ? runInventory.providers.filter(provider => provider.enabled) : [], [runEpoch, runInventory]);
+  const loadRunModels = useMemo<RunModelsLoader | null>(() => !runEpoch ? null : (providerId, signal) =>
+    modelCatalog.models({ expectedEpoch: runEpoch, providerId }, { signal, timeoutMilliseconds: 15000 }).then(reply => reply.status === "ok" ? reply.models : []), [runEpoch]);
+  async function startWork(item: WorkItem, start: WorkStart, session: WorkStartSession | null, runsWith: RunsWith | null = null) {
     const key = workItemKey(item);
     setWorkBusy(value => new Set(value).add(key));
     try {
       return await startWorkItem({ hub: workHub, composer: (kind, id, text, agent) => askPluginComposer(kind, id, text ?? null, agent ?? null),
         openSession: id => void openAutomationSession(id),
-        refuse: (message, detail) => showToast({ message: message ? t(message) : detail ?? t("The work did not start."), intent: "danger", icon: "error", timeout: 8000 }) }, item, start, session);
+        refuse: (message, detail) => showToast({ message: message ? t(message) : detail ?? t("The work did not start."), intent: "danger", icon: "error", timeout: 8000 }) }, item, start, session, runsWith);
     } finally { setWorkBusy(value => { const next = new Set(value); next.delete(key); return next; }); }
   }
   function showTerminal(terminal: TerminalItem) { openFile(terminalTab(terminal)); }
@@ -1987,7 +1995,7 @@ function App() {
     const select = <HTMLSelect fill value={usedProvider} aria-label={t("Provider for new session")} disabled={creatingBusy || creationLocked || !owned} onChange={event => setCreatingProvider(event.target.value)}>
       {!usedProvider && <option value="">{t("No provider")}</option>}
       {usedProvider && !providers.some(provider => provider.id === usedProvider) && <option value={usedProvider} disabled>{usedProvider}</option>}
-      {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.id}</option>)}
+      {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.isDefault ? t("{name} (default)", { name: provider.id }) : provider.id}</option>)}
     </HTMLSelect>;
     if (compact) {
       const locked = creatingBusy || creationLocked || !owned;
@@ -2519,7 +2527,8 @@ function App() {
               ? <WorkItemsPanel key={fileTabKey(tab)} hub={workHub} projects={snapshot?.projects.filter(project => !project.archived) ?? []} sessions={snapshot?.sessions ?? []}
                 runningSessions={runningSessionIds} projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null}
                 visible={visible && view === "workspace" && !settingsOpen} focus={workFocus} onFocused={() => setWorkFocus(null)}
-                onActivate={() => activateFile(tab)} onStart={(item, start) => startWork(item, start, null)} onOpenSession={id => void openAutomationSession(id)}
+                onActivate={() => activateFile(tab)} onStart={(item, start, runsWith) => startWork(item, start, null, runsWith)} providers={runProviders} loadModels={loadRunModels}
+                onOpenSession={id => void openAutomationSession(id)}
                 onOpenFile={(id, file) => { const project = snapshot?.projects.find(candidate => candidate.id === id); if (project) openEditor(project, { path: file, line: null, column: null, explorer: null }); }}
                 onOpenSettings={() => navigate("workItems")} />
               : isAutomationsTab(tab)
@@ -2588,7 +2597,7 @@ function App() {
         onEdit={owned ? folder => { closeSettings(); openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true }); } : undefined} />
       : settingsSection === "worktrees" ? <WorktreeSettings epoch={owned ? status!.hostEpoch : null}
         pick={owned ? initial => pickFolder(desktopShell.pickFolder, t("Folder for worktrees"), initial) : undefined} />
-      : settingsSection === "workItems" ? <WorkItemSettings hub={workHub} />
+      : settingsSection === "workItems" ? <WorkItemSettings hub={workHub} providers={runProviders} loadModels={loadRunModels} onOpenProviders={() => navigate("providers")} />
       : settingsSection === "pullRequests" ? <PullRequestSettings api={pullRequestPrompts} epoch={!status ? undefined : owned ? status.hostEpoch : null}
           project={selectedProject && !selectedProject.archived ? { id: selectedProject.id, name: selectedProject.name } : null} />
       : settingsSection === "mcpHost" ? <McpHostSettings epoch={owned ? status!.hostEpoch : null} developer={status?.developerMode ?? false} />

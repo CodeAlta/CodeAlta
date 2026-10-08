@@ -38,6 +38,8 @@ A separate `[chat]` section chooses the default enabled provider:
 default_provider = "openai"
 ```
 
+Without a `default_provider`, or when the provider it names is disabled, the default is the first enabled provider by name. CodeAlta Desktop marks that provider **Default** in **Settings > Providers** and in the provider lists, and a new session, a [work item](work-items.md) and an automation that name no provider start with it. **Use as the default provider for new sessions** on a provider's page writes `default_provider`; clearing the box removes it.
+
 Project-local overrides can live in `<project>/.alta/config.toml`. Project files currently override `[chat].default_provider` and each provider's selected `model` / `reasoning_effort`; global `~/.alta/config.toml` still defines the provider registrations, credentials, endpoints, and advanced provider metadata.
 
 > [!NOTE]

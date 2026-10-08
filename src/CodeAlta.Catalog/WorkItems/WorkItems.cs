@@ -80,8 +80,18 @@ public static class WorkItemKinds
 }
 
 /// <summary>
-/// What this computer knows of a task or a plan beside its file: the session that proposed it and the session
-/// that carries it out. Session ids mean nothing to another computer, so they are not written in the file.
+/// The provider, the model and the reasoning effort a task or a plan is carried out with: those of the session
+/// that proposed it.
+/// </summary>
+/// <param name="ProviderKey">The key of the model provider.</param>
+/// <param name="ModelId">The model; null leaves it to the provider.</param>
+/// <param name="ReasoningEffort">The name of the reasoning effort, in lower case; null leaves it to the model.</param>
+public sealed record WorkItemSelection(string ProviderKey, string? ModelId = null, string? ReasoningEffort = null);
+
+/// <summary>
+/// What this computer knows of a task or a plan beside its file: the session that proposed it, what that session
+/// ran with, and the session that carries it out. Session ids and provider keys mean nothing to another computer,
+/// so they are not written in the file.
 /// </summary>
 /// <param name="ProjectId">The project of the item.</param>
 /// <param name="Kind">One of <see cref="WorkItemKinds"/>.</param>
@@ -99,4 +109,7 @@ public sealed record WorkItemLink(string ProjectId, string Kind, string Id)
 
     /// <summary>Gets a value indicating whether the user put the card of the item away without deciding.</summary>
     public bool Acknowledged { get; init; }
+
+    /// <summary>Gets what the session that proposed the item ran with, which a session started for the item takes; null when it is not known.</summary>
+    public WorkItemSelection? RunsWith { get; init; }
 }

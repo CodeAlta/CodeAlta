@@ -151,6 +151,64 @@ public sealed class WorkItemHostTests
     }
 
     [TestMethod]
+    public async Task ThePage_SeesWhatAnItemRunsWith_AndStartsItWithWhatTheUserChose()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var id = fixture.Items.CreateTask(fixture.Project, new WorkTaskDraft("A task", null, null, "Body."), "session-of-the-user", new WorkItemSelection("codex", "gpt-a", "high")).Task!.Id;
+        var plain = fixture.Items.CreateTask(fixture.Project, new WorkTaskDraft("Another task", null, null, "Body."), null).Task!.Id;
+
+        var rows = (await fixture.Rpc.ListAsync(new(Epoch), default)).Projects.Single().Tasks;
+        Assert.AreEqual(new WorkItemRunsWith("codex", "gpt-a", "high"), rows.Single(row => row.Id == id).RunsWith);
+        Assert.IsNull(rows.Single(row => row.Id == plain).RunsWith, "Nothing is known: the page proposes the default.");
+
+        Task<WorkItemActionResponse> Start(string? provider, string? model = null, string? effort = null)
+            => fixture.Rpc.ActAsync(new(Epoch, fixture.Project.Id, "task", id, "start_session", ProviderId: provider, ModelId: model, ReasoningEffort: effort), default);
+
+        // Nothing chosen: the runner takes what is recorded with the item, then the defaults.
+        Assert.AreEqual("ok", (await Start(null)).Status);
+        Assert.IsNull(fixture.Runner.Asked.Single());
+        Assert.AreEqual("ok", (await Start("anthropic", "claude", "low")).Status);
+        Assert.AreEqual(new WorkItemSelection("anthropic", "claude", "low"), fixture.Runner.Asked[^1]);
+        Assert.AreEqual("ok", (await Start("anthropic")).Status);
+        Assert.AreEqual(new WorkItemSelection("anthropic"), fixture.Runner.Asked[^1]);
+
+        // A model is of a provider, an effort of a model, and none of them is a control character away from another.
+        Assert.AreEqual("invalid_request", (await Start(null, "claude")).Status);
+        Assert.AreEqual("invalid_request", (await Start("anthropic", null, "low")).Status);
+        Assert.AreEqual("invalid_request", (await Start("anthro\npic")).Status);
+        Assert.HasCount(3, fixture.Runner.Asked);
+    }
+
+    [TestMethod]
+    public async Task TheRunner_GivesTheStarter_WhatTheUserChoseAndWhatIsRecordedWithTheItem()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var id = fixture.Items.CreateTask(fixture.Project, new WorkTaskDraft("A task", null, null, "Body."), "session-of-the-user", new WorkItemSelection("codex", "gpt-a", "high")).Task!.Id;
+        var starter = new RecordingStarter();
+        var runner = new WorkItemRunner(starter, fixture.Items);
+
+        Assert.AreEqual("new-session", (await runner.StartAsync(fixture.Project, "task", id, worktree: false, likeSessionId: "session-1", asked: null)).SessionId);
+        Assert.AreEqual(("session-1", null, new WorkItemSelection("codex", "gpt-a", "high")), (starter.Like, starter.Model!.Asked, starter.Model.Recorded));
+        Assert.AreEqual("new-session", fixture.Items.GetLink(fixture.Project.Id, "task", id)!.Runner);
+
+        await runner.StartAsync(fixture.Project, "task", id, worktree: true, likeSessionId: null, asked: new("anthropic", "claude"));
+        Assert.AreEqual((null, new WorkItemSelection("anthropic", "claude"), new WorkItemSelection("codex", "gpt-a", "high")), (starter.Like, starter.Model!.Asked, starter.Model.Recorded));
+    }
+
+    private sealed class RecordingStarter : ISessionStarter
+    {
+        internal string? Like { get; private set; }
+
+        internal SessionStartModel? Model { get; private set; }
+
+        public Task<SessionStartResult> StartAsync(ProjectDescriptor project, string title, Func<string, string> prompt, bool worktree, string? likeSessionId, string origin, SessionStartModel? model)
+        {
+            (Like, Model) = (likeSessionId, model);
+            return Task.FromResult(new SessionStartResult("new-session", null));
+        }
+    }
+
+    [TestMethod]
     public async Task ThePage_DecidesAnItem()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -229,12 +287,15 @@ public sealed class WorkItemHostTests
     {
         internal List<(string ProjectId, string Kind, string Id, bool Worktree, string? Like)> Starts { get; } = [];
 
+        internal List<WorkItemSelection?> Asked { get; } = [];
+
         internal (string Message, string Reason)? Problem { get; set; }
 
-        public Task<WorkItemStartResult> StartAsync(ProjectDescriptor project, string kind, string id, bool worktree, string? likeSessionId)
+        public Task<WorkItemStartResult> StartAsync(ProjectDescriptor project, string kind, string id, bool worktree, string? likeSessionId, WorkItemSelection? asked)
         {
             if (Problem is { } problem) return Task.FromResult(new WorkItemStartResult(null, problem.Message, problem.Reason));
             Starts.Add((project.Id, kind, id, worktree, likeSessionId));
+            Asked.Add(asked);
             return Task.FromResult(new WorkItemStartResult("new-session", null));
         }
     }

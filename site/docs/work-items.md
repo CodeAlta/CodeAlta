@@ -32,6 +32,8 @@ You decide on each card:
 
 Agents are told to propose a task only for something concrete they verified, and not to start it themselves. A session has at most five proposals waiting.
 
+A new session started from a card runs with the provider, the model and the reasoning effort of the session that shows the card.
+
 ## Plans
 
 A plan is a document you review before the work starts. In [Plan mode](prompts.md) the agent researches, writes the plan and asks for your review: the plan opens as a formatted page, and **Source and comments** shows its text, where you comment on lines or edit it.
@@ -43,6 +45,7 @@ Once you approve it, the session shows the plan as a card with the same choices 
 Open it with the checklist icon of the activity bar, with `Ctrl+G Ctrl+I`, or with the mark of a project in the Explorer.
 
 - **To do**, **In progress**, **Later** and **Closed** separate what waits from what is done.
+- **Runs with** says which provider, model and reasoning effort the new session will use. It starts with those of the session that proposed the item. When that is not known (a task written by hand, or on another computer), it starts with the [default provider](model-providers.md) and its model. Change any of the three before you start.
 - Filter by tasks or plans, by project, or by text.
 - Select an item to read it, start it, mark it done, open its file, or remove it.
 

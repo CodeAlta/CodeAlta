@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.WorkItems;
 using CodeAlta.Catalog.Worktrees;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
@@ -21,10 +22,11 @@ internal interface ISessionStarter
     /// <param name="title">The name of the session.</param>
     /// <param name="prompt">Gives the prompt for the folder the session works in.</param>
     /// <param name="worktree">Whether the session works in a new git worktree.</param>
-    /// <param name="likeSessionId">A session whose provider, model and effort the new one takes; null for the defaults.</param>
+    /// <param name="likeSessionId">A session whose provider, model and effort the new one takes; null when no session shows the work.</param>
     /// <param name="origin">A word for what starts the session, for the identity of its first prompt.</param>
+    /// <param name="model">What the work itself says of the provider, the model and the effort; null when nothing.</param>
     /// <returns>The session, or why the work did not start. Failures are results, not exceptions.</returns>
-    Task<SessionStartResult> StartAsync(ProjectDescriptor project, string title, Func<string, string> prompt, bool worktree, string? likeSessionId, string origin);
+    Task<SessionStartResult> StartAsync(ProjectDescriptor project, string title, Func<string, string> prompt, bool worktree, string? likeSessionId, string origin, SessionStartModel? model);
 }
 
 /// <summary>
@@ -44,7 +46,7 @@ internal sealed class SessionStarter : ISessionStarter
     }
 
     /// <inheritdoc />
-    public async Task<SessionStartResult> StartAsync(ProjectDescriptor project, string title, Func<string, string> prompt, bool worktree, string? likeSessionId, string origin)
+    public async Task<SessionStartResult> StartAsync(ProjectDescriptor project, string title, Func<string, string> prompt, bool worktree, string? likeSessionId, string origin, SessionStartModel? model)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(prompt);
@@ -55,24 +57,24 @@ internal sealed class SessionStarter : ISessionStarter
             if (project.Archived || !Directory.Exists(project.ProjectPath)) return Refuse("The folder of the project is missing.");
             if (worktree && _worktrees is null) return Refuse("Worktrees are not available.");
 
-            // The session that showed the item gives its provider and its model; without one, the defaults of a new session.
-            OwnedSessionSelection? like = null;
-            if (!string.IsNullOrWhiteSpace(likeSessionId))
+            // What the user chose comes first, then the session that shows the item, then the session that proposed
+            // it; without any of them, the default provider of the configuration, as for a new session.
+            WorkItemSelection? like = null;
+            if (model?.Asked is null && !string.IsNullOrWhiteSpace(likeSessionId)
+                && (await _host.Commands.GetObservedSelectionChoicesAsync(likeSessionId, CancellationToken.None).ConfigureAwait(false))?.Current is { } current)
             {
-                like = (await _host.Commands.GetObservedSelectionChoicesAsync(likeSessionId, CancellationToken.None).ConfigureAwait(false))?.Current;
+                like = new(current.ProviderKey, current.ModelId, current.ModelId is null ? null : current.ReasoningEffort?.ToString().ToLowerInvariant());
             }
 
-            var providers = _host.ModelProviderRegistry.ListProviders();
-            var providerKey = like?.ProviderKey
-                ?? new CodeAltaConfigStore(_host.CatalogOptions).GetEffectiveDefaultProvider(project.ProjectPath)
-                ?? providers.FirstOrDefault()?.ProviderId.Value;
-            if (providerKey is null) return Refuse("No model provider is enabled.");
-            if (!_host.ModelProviderRegistry.TryGetProvider(new ModelProviderId(providerKey), out var provider) || !provider.IsEnabled)
-            {
-                provider = providers.FirstOrDefault();
-                like = null;
-                if (provider is null) return Refuse("No model provider is enabled.");
-            }
+            var choice = await SessionStartChoice.ChooseAsync(
+                    _host.ModelProviderRegistry.ListProviders(),
+                    new CodeAltaConfigStore(_host.CatalogOptions).GetEffectiveDefaultProvider(project.ProjectPath),
+                    model?.Asked,
+                    like,
+                    model?.Recorded,
+                    providerId => _host.ModelProviderInitializationService.GetModelsAsync(providerId, CancellationToken.None))
+                .ConfigureAwait(false);
+            if (choice.Provider is not { } provider) return Refuse(choice.Problem ?? "No model provider is enabled.");
 
             var agent = AgentPromptCatalog.DefaultPromptName;
             var prompts = await _host.Commands.GetDraftPromptChoicesAsync(new(project.Id, project.ProjectPath), CancellationToken.None).ConfigureAwait(false);
@@ -88,8 +90,8 @@ internal sealed class SessionStarter : ISessionStarter
 
             var session = await _host.Commands.CreateDraftSessionAsync(project, provider, title, null, created?.Folder).ConfigureAwait(false);
             sessionId = session.SessionId;
-            // A model the session that showed the item ran with is kept; the host completes what is left to it.
-            var selection = new OwnedSessionSelection(provider.ProviderId.Value, agent, like?.ModelId, like?.ModelId is null ? null : like.ReasoningEffort);
+            // The host completes what the choice leaves to the provider and to the model.
+            var selection = new OwnedSessionSelection(provider.ProviderId.Value, agent, choice.ModelId, choice.ModelId is null ? null : choice.Effort);
             var admission = _host.Commands.AdmitSend(new OwnedTextSendRequest(origin + ":" + Guid.NewGuid().ToString("N"), sessionId, prompt(created?.Folder ?? project.ProjectPath)) { Selection = selection }, CancellationToken.None);
             if (admission.Kind is not (OwnedSessionCommandAdmissionKind.Accepted or OwnedSessionCommandAdmissionKind.Replay) || admission.Receipt is null)
             {

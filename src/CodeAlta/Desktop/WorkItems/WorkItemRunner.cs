@@ -17,9 +17,10 @@ internal interface IWorkItemRunner
     /// <param name="kind">One of <see cref="WorkItemKinds"/>.</param>
     /// <param name="id">The id of the item.</param>
     /// <param name="worktree">Whether the session works in a new git worktree.</param>
-    /// <param name="likeSessionId">A session whose provider, model and effort the new one takes; null for the defaults.</param>
+    /// <param name="likeSessionId">A session whose provider, model and effort the new one takes; null when no session shows the item.</param>
+    /// <param name="asked">The provider, the model and the effort the user chose for the session; null to take those of the session that shows the item, then those recorded with the item, then the defaults.</param>
     /// <returns>The session, or why the work did not start. Failures are results, not exceptions.</returns>
-    Task<WorkItemStartResult> StartAsync(ProjectDescriptor project, string kind, string id, bool worktree, string? likeSessionId);
+    Task<WorkItemStartResult> StartAsync(ProjectDescriptor project, string kind, string id, bool worktree, string? likeSessionId, WorkItemSelection? asked);
 }
 
 /// <summary>
@@ -39,7 +40,7 @@ internal sealed class WorkItemRunner : IWorkItemRunner
     }
 
     /// <inheritdoc />
-    public async Task<WorkItemStartResult> StartAsync(ProjectDescriptor project, string kind, string id, bool worktree, string? likeSessionId)
+    public async Task<WorkItemStartResult> StartAsync(ProjectDescriptor project, string kind, string id, bool worktree, string? likeSessionId, WorkItemSelection? asked)
     {
         ArgumentNullException.ThrowIfNull(project);
         var task = kind == WorkItemKinds.Task ? _items.GetTask(project, id) : null;
@@ -48,7 +49,7 @@ internal sealed class WorkItemRunner : IWorkItemRunner
 
         var started = await _starter.StartAsync(project, WorkItemPrompts.SessionTitle(task?.Title ?? plan!.Title),
             folder => task is not null ? WorkItemPrompts.ForTask(task) : WorkItemPrompts.ForPlan(plan!, project.ProjectPath, folder),
-            worktree, likeSessionId, "workitem").ConfigureAwait(false);
+            worktree, likeSessionId, "workitem", new(asked, _items.GetLink(project.Id, kind, id)?.RunsWith)).ConfigureAwait(false);
         if (started is { Problem: null, SessionId: { } sessionId }) _items.SetRunner(project.Id, kind, id, sessionId);
         return new(started.SessionId, started.Problem, started.Reason);
     }

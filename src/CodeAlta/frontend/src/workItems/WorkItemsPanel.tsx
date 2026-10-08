@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Alert, Button, Callout, HTMLSelect, InputGroup, SegmentedControl, Tab, Tabs, Tag } from "@blueprintjs/core";
+import { useRunsWith, type RunModelsLoader, type RunProvider, type RunsWith } from "./runsWith";
 import type { WorkspaceProject, WorkspaceSession } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
@@ -19,7 +20,7 @@ export type WorkItemsFocus = Readonly<{ projectId: string | null; key?: string |
  * is done does not hide what is left. An item is read on the right, and decided there: started, kept for
  * later, marked done, or removed.
  */
-export function WorkItemsPanel({ hub, projects, sessions, runningSessions, projectId, visible, focus, onFocused, onActivate, onStart, onOpenSession, onOpenFile, onOpenSettings }: {
+export function WorkItemsPanel({ hub, projects, sessions, runningSessions, projectId, visible, focus, onFocused, onActivate, onStart, onOpenSession, onOpenFile, onOpenSettings, providers = noProviders, loadModels = null }: {
   hub: WorkItemsHub;
   projects: readonly WorkspaceProject[];
   sessions: readonly WorkspaceSession[];
@@ -32,7 +33,11 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   onFocused?: () => void;
   onActivate: () => void;
   /** Starts the work of an item in a new session; resolves when the session exists or the start was refused. */
-  onStart: (item: WorkItem, start: WorkStart) => Promise<boolean>;
+  onStart: (item: WorkItem, start: WorkStart, runsWith: RunsWith | null) => Promise<boolean>;
+  /** The enabled providers a new session can run with; none when the window cannot start one. */
+  providers?: readonly RunProvider[];
+  /** Lists the models of a provider. */
+  loadModels?: RunModelsLoader | null;
   onOpenSession: (sessionId: string, projectId: string) => void;
   /** Opens the file of an item in the code editor of its project. */
   onOpenFile: (projectId: string, file: string) => void;
@@ -75,7 +80,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   };
   const act = (item: WorkItem, action: string, value?: string) => void during(item, async () => (await hub.act(item, action, { value })).ok);
   // A start says itself why it was refused.
-  const start = (item: WorkItem, way: WorkStart) => void during(item, async () => { await onStart(item, way); return true; });
+  const start = (item: WorkItem, way: WorkStart, runsWith: RunsWith | null) => void during(item, async () => { await onStart(item, way, runsWith); return true; });
 
   if (!state.loaded) return <div className="work-page" onPointerDown={onActivate}><p className="work-empty"><ActivitySpinner size={16} /></p></div>;
   if (!state.available) return <div className="work-page" onPointerDown={onActivate}><p className="work-empty">{t("Work items are unavailable in this window.")}</p></div>;
@@ -133,9 +138,10 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
             </section>)}
           </div>
           <aside className="work-detail">
-            {current ? <WorkItemDetail hub={hub} item={current} busy={busy.has(workItemKey(current))} projectName={projectById.get(current.projectId)?.name ?? null}
+            {current ? <WorkItemDetail key={workItemKey(current)} hub={hub} item={current} busy={busy.has(workItemKey(current))} projectName={projectById.get(current.projectId)?.name ?? null}
+                providers={providers} loadModels={loadModels}
                 runner={current.runner ? sessionById.get(current.runner) ?? null : null} runnerWorking={!!current.runner && runningSessions.has(current.runner)}
-                preferredStart={state.settings.start} onStart={way => start(current, way)} onAct={(action, value) => act(current, action, value)}
+                preferredStart={state.settings.start} onStart={(way, runsWith) => start(current, way, runsWith)} onAct={(action, value) => act(current, action, value)}
                 onRemove={() => setRemoving(current)} onOpenSession={() => current.runner && onOpenSession(current.runner, current.projectId)}
                 onOpenFile={() => onOpenFile(current.projectId, current.file)} />
               : <p className="work-empty">{t("Choose a work item to read it.")}</p>}
@@ -149,14 +155,19 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   </div>;
 }
 
-function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, preferredStart, onStart, onAct, onRemove, onOpenSession, onOpenFile }: {
+const noProviders: readonly RunProvider[] = [];
+
+function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, preferredStart, providers, loadModels, onStart, onAct, onRemove, onOpenSession, onOpenFile }: {
   hub: WorkItemsHub; item: WorkItem; busy: boolean; projectName: string | null;
   runner: WorkspaceSession | null; runnerWorking: boolean; preferredStart: string;
-  onStart: (start: WorkStart) => void; onAct: (action: string, value?: string) => void; onRemove: () => void; onOpenSession: () => void; onOpenFile: () => void;
+  providers: readonly RunProvider[]; loadModels: RunModelsLoader | null;
+  onStart: (start: WorkStart, runsWith: RunsWith | null) => void; onAct: (action: string, value?: string) => void; onRemove: () => void; onOpenSession: () => void; onOpenFile: () => void;
 }) {
   const { t } = useShellLanguage();
   const task = item.kind === "task";
   const startable = item.stage === "todo" || item.stage === "later";
+  // What the new session runs with: what the item was proposed with, else the defaults, until the user changes it.
+  const run = useRunsWith(startable ? providers : noProviders, item.runsWith, startable ? loadModels : null);
   return <section className="work-detail-card" aria-label={item.title}>
     <header>
       <div className="work-detail-kind"><AppIcon name={workKindIcon(item.kind)} size={14} />{t(task ? "Task" : "Plan")}
@@ -168,7 +179,20 @@ function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, p
         {runnerWorking ? <ActivitySpinner size={12} /> : <AppIcon name="chat" size={12} />}<span>{runner.title}</span><AppIcon name="chevronRight" size={12} /></button>}
     </header>
     <div className="work-detail-actions">
-      {startable && <WorkStartButtons preferred={preferredStart} here={false} disabled={busy} onStart={onStart} />}
+      {startable && run.provider && <div className="work-runs-with" role="group" aria-label={t("Runs with")}>
+        <span className="work-runs-with-label"><AppIcon name="provider" size={13} />{t("Runs with")}</span>
+        <HTMLSelect aria-label={t("Provider")} value={run.provider.id} disabled={busy} onChange={event => run.chooseProvider(event.target.value)}>
+          {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.isDefault ? t("{name} (default)", { name: provider.name }) : provider.name}</option>)}
+        </HTMLSelect>
+        <HTMLSelect aria-label={t("Model")} value={run.modelId ?? ""} disabled={busy || run.loading || run.models.length === 0} onChange={event => run.chooseModel(event.target.value)}>
+          {run.modelId === null && <option value="">{t(run.loading ? "Loading…" : "Host default")}</option>}
+          {run.models.map(model => <option key={model.id} value={model.id}>{model.name || model.id}</option>)}
+        </HTMLSelect>
+        {run.efforts.length > 0 && <HTMLSelect aria-label={t("Reasoning")} value={run.reasoningEffort ?? ""} disabled={busy} onChange={event => run.chooseEffort(event.target.value)}>
+          {run.efforts.map(effort => <option key={effort} value={effort}>{effort}</option>)}
+        </HTMLSelect>}
+      </div>}
+      {startable && <WorkStartButtons preferred={preferredStart} here={false} disabled={busy} onStart={way => onStart(way, run.selection)} />}
       <div className="work-detail-buttons">
         {task && item.stage === "todo" && <Button size="small" disabled={busy} icon={<AppIcon name="later" size={14} />} onClick={() => onAct("later")}>{t("Later")}</Button>}
         {task && (item.stage === "later" || item.stage === "closed") && <Button size="small" disabled={busy} icon={<AppIcon name="restore" size={14} />} onClick={() => onAct("reopen")}>{t("Back to To do")}</Button>}

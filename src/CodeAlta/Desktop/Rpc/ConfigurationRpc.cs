@@ -8,7 +8,8 @@ namespace CodeAlta.Desktop.Rpc;
 [NeoRpcService("configuration", Version = 1)]
 internal sealed class ConfigurationService(
     ModelProviderRegistry? providerRegistry = null,
-    PluginRuntimeManager? pluginRuntime = null)
+    PluginRuntimeManager? pluginRuntime = null,
+    DesktopDefaultProvider? defaultProvider = null)
 {
     private readonly string? _catalogRoot;
 
@@ -26,16 +27,18 @@ internal sealed class ConfigurationService(
         ArgumentNullException.ThrowIfNull(request);
         var providerDescriptors = providerRegistry?.ListProviders(includeDisabled: true) ?? [];
         var pluginInstances = pluginRuntime?.ActivePlugins ?? [];
+        // One provider is the default: the one a new session starts with.
+        var startsWith = defaultProvider?.Of([.. providerDescriptors.Where(static value => value.IsEnabled)])?.ProviderId.Value;
         var providers = providerDescriptors
             .Take(32)
             // Identity must never be truncated into another selectable provider key.
             .Where(static value => value.ProviderId.Value.Length <= 256)
-            .Select(static value => new ConfigurationProvider(
+            .Select(value => new ConfigurationProvider(
                 value.ProviderId.Value,
                 Bound(value.DisplayName),
                 Bound(value.ProviderType),
                 value.IsEnabled,
-                value.IsDefault,
+                defaultProvider is null ? value.IsDefault : string.Equals(value.ProviderId.Value, startsWith, StringComparison.Ordinal),
                 BoundOptional(value.DefaultModelId),
                 BoundOptional(value.DefaultReasoningEffort?.ToString())))
             .ToArray();

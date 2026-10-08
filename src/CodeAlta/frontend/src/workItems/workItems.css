@@ -108,6 +108,13 @@
 .work-detail-card > header .work-runner-link { justify-self: start; }
 .work-detail-actions { display: grid; gap: 8px; padding: 10px 4px 10px 20px; border-block: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 60%, transparent); }
 .work-detail-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.work-runs-with { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.work-runs-with-label { display: inline-flex; align-items: center; gap: 5px; margin-right: 2px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.work-runs-with .bp6-html-select { min-width: 0; max-width: 100%; }
+.work-runs-with .bp6-html-select select { height: 26px; font-size: 12.5px; text-overflow: ellipsis; }
+.work-runs-with .bp6-html-select .bp6-icon { top: 5px; }
+.work-settings-default { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; font-size: 12.5px; }
+.work-settings-default > span { overflow-wrap: anywhere; text-align: right; }
 .work-detail-spacer { flex: 1; }
 .work-detail-text { min-height: 0; overflow-y: auto; padding: 16px 12px 28px 20px; }
 @container (max-width: 860px) {

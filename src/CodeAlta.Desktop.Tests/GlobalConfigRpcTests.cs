@@ -110,6 +110,7 @@ public sealed class GlobalConfigRpcTests
 
         Assert.AreEqual("ok", listed.Status);
         Assert.AreEqual("local", listed.DefaultProvider);
+        Assert.AreEqual("local", listed.StartingProvider, "The configured default is enabled: a new session starts with it.");
         Assert.AreEqual(GlobalConfigService.Revision(File.ReadAllText(fixture.ConfigPath)), listed.Revision);
         var local = listed.Providers.Single(provider => provider.Key == "local");
         Assert.IsTrue(local.Enabled);
@@ -303,6 +304,58 @@ public sealed class GlobalConfigRpcTests
         Assert.IsFalse(final.Providers.Any(provider => provider.Key == "extra"));
         Assert.AreNotEqual("extra", final.DefaultProvider);
         CollectionAssert.DoesNotContain(fixture.Registry.ListProviders(includeDisabled: true).Select(provider => provider.ProviderId.Value).ToArray(), "extra");
+    }
+
+    [TestMethod]
+    public async Task TheProviderANewSessionStartsWith_IsNamed_AndADefaultThatIsUncheckedIsCleared()
+    {
+        const string Config = """
+            [chat]
+            default_provider = "zulu"
+
+            [providers.zulu]
+            type = "openai-chat"
+            display_name = "Zulu"
+            api_url = "http://127.0.0.1:9999/v1"
+            api_key_env = "ZULU_KEY"
+
+            [providers.bravo]
+            type = "openai-chat"
+            display_name = "Bravo"
+            api_url = "http://127.0.0.1:9998/v1"
+            api_key_env = "BRAVO_KEY"
+
+            [providers.alpha]
+            enabled = false
+            type = "openai-chat"
+            display_name = "Alpha"
+            api_url = "http://127.0.0.1:9997/v1"
+            api_key_env = "ALPHA_KEY"
+            """;
+        await using var fixture = new Fixture(Config);
+        var listed = fixture.Service.Providers(new(Epoch));
+        Assert.AreEqual(("zulu", "zulu"), (listed.DefaultProvider, listed.StartingProvider));
+        var zulu = new GlobalConfigProviderEdit("zulu", "openai-chat", true, "Zulu", null, null, "http://127.0.0.1:9999/v1", "ZULU_KEY", null, false);
+
+        // The box is unchecked: the provider is no longer named as the default, and the first enabled one by name is.
+        var cleared = fixture.Service.SaveProvider(new(Epoch, listed.Revision, "zulu", zulu, MakeDefault: false, ApplyProviders: false));
+        Assert.AreEqual("ok", cleared.Status, cleared.Message);
+        listed = fixture.Service.Providers(new(Epoch));
+        Assert.AreEqual((null, "bravo"), (listed.DefaultProvider, listed.StartingProvider), "A disabled provider is never the one a session starts with.");
+        Assert.IsNull(fixture.Store.GetEffectiveDefaultProvider());
+
+        // Saving another provider leaves the default of the configuration alone.
+        Assert.AreEqual("ok", fixture.Service.SaveProvider(new(Epoch, listed.Revision, "zulu", zulu, MakeDefault: true, ApplyProviders: false)).Status);
+        listed = fixture.Service.Providers(new(Epoch));
+        var bravo = new GlobalConfigProviderEdit("bravo", "openai-chat", true, "Bravo", "model-b", null, "http://127.0.0.1:9998/v1", "BRAVO_KEY", null, false);
+        Assert.AreEqual("ok", fixture.Service.SaveProvider(new(Epoch, listed.Revision, "bravo", bravo, MakeDefault: false, ApplyProviders: false)).Status);
+        listed = fixture.Service.Providers(new(Epoch));
+        Assert.AreEqual(("zulu", "zulu"), (listed.DefaultProvider, listed.StartingProvider));
+
+        // A default that is disabled is no longer the default: the store gives the place to the first enabled provider.
+        Assert.AreEqual("ok", fixture.Service.SaveProvider(new(Epoch, listed.Revision, "zulu", zulu with { Enabled = false }, MakeDefault: false, ApplyProviders: false)).Status);
+        listed = fixture.Service.Providers(new(Epoch));
+        Assert.AreEqual(("bravo", "bravo"), (listed.DefaultProvider, listed.StartingProvider));
     }
 
     // Settings the provider form never shows and the typed configuration document does not model.

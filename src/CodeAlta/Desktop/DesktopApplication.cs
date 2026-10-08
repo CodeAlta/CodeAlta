@@ -566,7 +566,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     appUpdate ??= StartAppUpdate();
                     builder.AddAppUpdateService(appUpdate);
                     builder.AddWorkspaceService(workspace);
-                    builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime));
+                    builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime, new DesktopDefaultProvider(host.CatalogOptions)));
                     var globalConfig = new GlobalConfigService(configStore, host.ModelProviderRegistry, options.CatalogRoot!, epoch);
                     builder.AddGlobalConfigService(globalConfig);
                     providerLogin = new ProviderLoginService(configStore, globalConfig, options.CatalogRoot!, epoch);
@@ -583,7 +583,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSkillsService(skills);
                     builder.AddPluginsService(new PluginsService(host.ProjectCatalog, epoch, host.PluginRuntime));
                     builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
-                    providers = new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch);
+                    providers = new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch, new DesktopDefaultProvider(host.CatalogOptions));
                     _ = providers.StartInitialization(); // Retained and joined by providers.DrainAsync.
                     builder.AddModelCatalogService(providers);
                     builder.AddReminderService(reminders);
