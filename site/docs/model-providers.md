@@ -62,6 +62,11 @@ Both apps edit the same providers and share the same credentials, so a provider 
 - preserve advanced TOML settings such as `profile`, `compaction`, `extra_body`, `model_overrides`, and `protocol_trace`;
 - open an Advanced TOML editor with live validation (the **Configuration file** page in the desktop app).
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-add-provider.webp" alt="The Providers page of Settings with the Add provider menu open on the built-in providers" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Add provider: the built-in providers you do not have yet, and Custom provider for an entry of your own.</figcaption>
+</figure>
+
 Each **Default** checkbox indicates that the field inherits its provider default rather than a custom override. Omitted settings stay marked as Default when you reopen or refresh the dialog; for example, a Codex entry containing only `type = "codex"` leaves its optional settings at their defaults. Uncheck Default to supply an override, or check it to remove the override when saving.
 
 ## Advanced TOML reference

@@ -92,6 +92,10 @@ What the scenes with state of their own need:
   and put the file back. Automations are paused on the developer instance: let them run for the capture only.
 - **Plugins.** `alta plugin create <name>` makes a plugin of the user in `~/.alta/plugins`, which the two
   instances share: remove its folder and its build cache right after the capture.
+- **Add provider.** The menu lists the built-in providers the profile does not have: take the picture on a
+  profile of its own (`--catalog-root`, `--data-root` and the other roots of an isolated launch, with
+  `--mcp-port`), with one provider that is disabled in its `config.toml`. `add-provider` is the crop of the
+  Settings window.
 - **The sidebar.** A project lists its recent sessions only, and the sessions of the scenes get older: click
   **Show more** until they are all listed, then hide the others.
 
