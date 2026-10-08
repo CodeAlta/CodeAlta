@@ -1698,6 +1698,12 @@
   fr: "{0} copié dans le presse-papiers."
   ja: "{0} をクリップボードにコピーしました。"
   zh: "已将 {0} 复制到剪贴板。"
+"Copilot":
+  de: "Copilot"
+  es: "Copilot"
+  fr: "Copilot"
+  ja: "Copilot"
+  zh: "Copilot"
 "Copilot Browser Login":
   de: "Browser-Anmeldung"
   es: "Login en navegador Copilot"

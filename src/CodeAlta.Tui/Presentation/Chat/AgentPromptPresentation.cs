@@ -12,7 +12,9 @@ internal static class AgentPromptPresentation
     {
         ArgumentNullException.ThrowIfNull(prompts);
         return prompts
-            .OrderBy(static prompt => prompt.Precedence)
+            // The custom agents of GitHub Copilot after the prompts of CodeAlta.
+            .OrderBy(static prompt => prompt.IsCopilot)
+            .ThenBy(static prompt => prompt.Precedence)
             .ThenBy(static prompt => prompt.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(static prompt => prompt.PromptName, StringComparer.OrdinalIgnoreCase)
             .Select(static prompt => new AgentPromptOption(
@@ -61,6 +63,7 @@ internal static class AgentPromptPresentation
             AgentPromptSourceKind.BuiltIn => SR.T("built-in"),
             AgentPromptSourceKind.UserGlobal => SR.T("global"),
             AgentPromptSourceKind.Project => SR.T("project"),
+            AgentPromptSourceKind.CopilotUser or AgentPromptSourceKind.CopilotProject => SR.T("Copilot"),
             _ => SR.T("unknown"),
         };
 }

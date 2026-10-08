@@ -187,6 +187,59 @@ public sealed class AgentPromptsRpcTests
         Assert.IsFalse(Directory.Exists(Path.Combine(fixture.GlobalRoot, "prompts")));
     }
 
+    [TestMethod]
+    public async Task CustomAgentsOfGitHubCopilot_AreListedAndRead_AndNeverWritten()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var projectAgents = Directory.CreateDirectory(Path.Combine(fixture.ProjectPath, ".github", "agents")).FullName;
+        var userAgents = Directory.CreateDirectory(Path.Combine(fixture.Profile, ".copilot", "agents")).FullName;
+        var reviewer = Path.Combine(projectAgents, "reviewer.agent.md");
+        File.WriteAllText(reviewer, "---\nname: Reviewer\ndescription: Reviews a change\ntools: ['read', 'search']\n---\nReview the change and report.\n");
+        File.WriteAllText(Path.Combine(userAgents, "writer.agent.md"), "---\ndescription: Writes the documentation\n---\nWrite the documentation.\n");
+        // A prompt of CodeAlta with the id of an agent comes first.
+        File.WriteAllText(Path.Combine(userAgents, "default.agent.md"), "Another default.\n");
+
+        var global = await fixture.Service.ListAsync(new(Epoch, null), default);
+        Assert.AreEqual("ok", global.Status);
+        Assert.IsFalse(global.Prompts.Any(prompt => prompt.Scope == "CopilotProject"), "A project agent belongs to its project.");
+        var writer = global.Prompts.Single(prompt => prompt is { Scope: "CopilotGlobal", Id: "writer" });
+        Assert.AreEqual("writer", writer.Name);
+        Assert.AreEqual("Writes the documentation", writer.Description);
+        Assert.IsTrue(writer.ReadOnly);
+        Assert.IsFalse(writer.Shadowed);
+        var other = global.Prompts.Single(prompt => prompt is { Scope: "CopilotGlobal", Id: "default" });
+        Assert.IsTrue(other.Shadowed);
+        Assert.AreEqual("BuiltIn", other.ShadowedByScope);
+        Assert.IsFalse(global.Prompts.Single(prompt => prompt is { Kind: "Agent", Scope: "BuiltIn" }).Shadowed);
+
+        var scoped = await fixture.Service.ListAsync(new(Epoch, fixture.Project.Id), default);
+        var listed = scoped.Prompts.Single(prompt => prompt.Scope == "CopilotProject");
+        Assert.AreEqual("reviewer", listed.Id);
+        Assert.AreEqual("Reviewer", listed.Name);
+        Assert.IsTrue(listed.ReadOnly);
+        // The prompts of CodeAlta first, the agents of Copilot after them.
+        var agents = scoped.Prompts.Where(prompt => prompt.Kind == "Agent").Select(prompt => prompt.Scope).ToArray();
+        Assert.AreEqual("BuiltIn", agents[0]);
+        CollectionAssert.AreEqual(new[] { "CopilotGlobal", "CopilotGlobal", "CopilotProject" }, agents[1..]);
+
+        var read = await fixture.Service.ReadAsync(new(Epoch, fixture.Project.Id, "Agent", "CopilotProject", "reviewer"), default);
+        Assert.AreEqual("ok", read.Status, read.Message);
+        Assert.IsTrue(read.Prompt!.ReadOnly);
+        Assert.AreEqual("CopilotProject", read.Prompt.Scope);
+        Assert.AreEqual("Reviewer", read.Prompt.Name);
+        Assert.AreEqual("Review the change and report.", read.Prompt.Body);
+        Assert.AreEqual("Write the documentation.", (await fixture.Service.ReadAsync(new(Epoch, null, "Agent", "CopilotGlobal", "writer"), default)).Prompt!.Body);
+        Assert.AreEqual("not_found", (await fixture.Service.ReadAsync(new(Epoch, null, "Agent", "CopilotProject", "reviewer"), default)).Status);
+        Assert.AreEqual("not_found", (await fixture.Service.ReadAsync(new(Epoch, fixture.Project.Id, "Agent", "CopilotProject", "missing"), default)).Status);
+        Assert.AreEqual("invalid", (await fixture.Service.ReadAsync(new(Epoch, fixture.Project.Id, "System", "CopilotProject", "reviewer"), default)).Status);
+        Assert.AreEqual("invalid", (await fixture.Service.ReadAsync(new(Epoch, fixture.Project.Id, "Agent", "CopilotProject", "../reviewer"), default)).Status);
+
+        var before = File.ReadAllText(reviewer);
+        Assert.AreEqual("read_only", (await fixture.Service.SaveAsync(Save("Agent", "CopilotProject", "reviewer", read.Prompt.Revision) with { ProjectId = fixture.Project.Id }, default)).Status);
+        Assert.AreEqual("read_only", (await fixture.Service.DeleteAsync(new(Epoch, fixture.Project.Id, "Agent", "CopilotProject", "reviewer", read.Prompt.Revision), default)).Status);
+        Assert.AreEqual(before, File.ReadAllText(reviewer));
+    }
+
     private static AgentPromptSaveRequest Save(string kind, string scope, string id, string? revision)
         => new(Epoch, null, kind, scope, id, revision, "Reviewer", "Reviews changes", "strict", "Review the change.", false);
 
@@ -209,7 +262,7 @@ public sealed class AgentPromptsRpcTests
             var application = Path.Combine(root, "app");
             Write(Path.Combine(application, "content"), "agents", "default.prompt.md", "---\nname: \"Default\"\n---\nBuilt-in body\n");
             Write(Path.Combine(application, "content"), "system", "default.system-prompt.md", "Built-in system\n");
-            Service = new AgentPromptsService(projects, Epoch, application);
+            Service = new AgentPromptsService(projects, Epoch, application, Profile);
         }
 
         public static async Task<Fixture> CreateAsync()
@@ -224,6 +277,7 @@ public sealed class AgentPromptsRpcTests
         public ProjectDescriptor Project { get; }
         public AgentPromptsService Service { get; }
         public string GlobalRoot => Projects.Options.GlobalRoot;
+        public string Profile => Path.Combine(_root, "home");
         public string ProjectPath => Project.ProjectPath;
         public string BuiltInAgent => Path.Combine(_root, "app", "content", "prompts", "agents", "default.prompt.md");
 

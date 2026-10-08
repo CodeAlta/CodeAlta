@@ -3,6 +3,8 @@ import { Button, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, Me
 import { agentPrompts, type AgentPromptDocument, type AgentPromptEntry } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
+import { CopilotTag, copilotPromptScope } from "./CopilotTag";
+import { PromptTags } from "./PromptTags";
 import { CodeEditor } from "./monaco/CodeEditor";
 import { ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
 import { scopedKey, settingsFailure, type SettingsScope } from "./settingsEditing";
@@ -91,8 +93,7 @@ export function AgentPromptSettings({ epoch, project, api = agentPrompts }: {
     {rows.map(prompt => { const id = identity(prompt); return <Card key={id} interactive selected={selected === id} aria-current={selected === id ? "true" : undefined}
       onClick={() => { if (!busy) { setNotice(null); setSelected(id); } }}>
       <span className="settings-editor-name"><strong>{prompt.name || prompt.id}</strong><small>{prompt.description || prompt.id}</small></span>
-      <span className="settings-editor-tags"><Tag minimal round intent={prompt.scope === "BuiltIn" ? "none" : "primary"}>{t(prompt.scope === "BuiltIn" ? "Built-in" : prompt.scope === "Project" ? "Project" : "Global")}</Tag>
-        {prompt.shadowed && <Tag minimal round intent="warning">{t("Overridden")}</Tag>}</span>
+      <PromptTags prompt={prompt} />
     </Card>; })}</>; };
 
   return <SettingsPage className="prompt-settings" label={t("Agent prompts")} group="Agent & models" title="Agent prompts" description="Instructions that define how an agent behaves. Pick one per session from the prompt bar."
@@ -110,7 +111,7 @@ export function AgentPromptSettings({ epoch, project, api = agentPrompts }: {
         </CardList>
         {form ? <Section className="settings-editor-form prompt-settings-form" title={selected === added ? t("New prompt") : entry?.name || form.id}
           subtitle={`${t(form.kind === "System" ? "System prompt" : "Agent prompt")} · ${form.id || "…"}`}
-          rightElement={reading ? <ActivitySpinner size={14} /> : readOnly ? <Tag minimal round>{t("Built-in")}</Tag> : undefined}>
+          rightElement={reading ? <ActivitySpinner size={14} /> : readOnly ? copilotPromptScope(document?.scope ?? "") ? <CopilotTag /> : <Tag minimal round>{t("Built-in")}</Tag> : undefined}>
           <SectionCard className="settings-editor-fields">
             {selected === added && <FormGroup label={t("Name")} labelFor="prompt-id">
               <InputGroup id="prompt-id" value={form.id} disabled={busy} maxLength={128} spellCheck={false} placeholder="my-agent" onChange={event => edit({ id: event.target.value })} /></FormGroup>}

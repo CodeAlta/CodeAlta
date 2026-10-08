@@ -4,7 +4,8 @@ using System.Text;
 namespace CodeAlta.Orchestration.Runtime.SystemPrompts;
 
 /// <summary>
-/// Discovers file-backed CodeAlta agent prompts from built-in, user-global, and project-local prompt roots.
+/// Discovers file-backed CodeAlta agent prompts from built-in, user-global, and project-local prompt roots, and
+/// the custom agents of GitHub Copilot (<c>.github/agents</c>, <c>~/.copilot/agents</c>) beside them.
 /// </summary>
 public sealed class AgentPromptCatalog
 {
@@ -34,7 +35,8 @@ public sealed class AgentPromptCatalog
         var roots = ResolveRoots(query);
         var prompts = EnumeratePromptRoots(roots)
             .SelectMany(static root => LoadAgentPromptResources(root))
-            .OrderBy(static prompt => prompt.Precedence)
+            .OrderBy(static prompt => prompt.SourceKind.IsCopilot())
+            .ThenBy(static prompt => prompt.Precedence)
             .ThenBy(static prompt => prompt.PromptName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(static prompt => prompt.SourcePath, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -102,7 +104,8 @@ public sealed class AgentPromptCatalog
             .SelectMany(static root => LoadAgentPromptResources(root))
             .GroupBy(static prompt => prompt.PromptName, StringComparer.OrdinalIgnoreCase)
             .Select(static group => ComposeEffectivePrompt(group))
-            .OrderBy(static prompt => prompt.Precedence)
+            .OrderBy(static prompt => prompt.IsCopilot)
+            .ThenBy(static prompt => prompt.Precedence)
             .ThenBy(static prompt => prompt.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(static prompt => prompt.PromptName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -195,6 +198,12 @@ public sealed class AgentPromptCatalog
 
     private static IEnumerable<GlobalPromptRoot> EnumeratePromptRoots(SystemPromptContentRoots roots)
     {
+        // The custom agents of GitHub Copilot come first: a prompt of CodeAlta with the same id replaces one.
+        foreach (var (kind, precedence, folder) in CopilotAgentFiles.Folders(roots))
+        {
+            yield return new GlobalPromptRoot(kind, precedence, folder);
+        }
+
         if (Directory.Exists(Path.Combine(roots.ShippedPromptRoot, "agents")))
         {
             yield return new GlobalPromptRoot(AgentPromptSourceKind.BuiltIn, 0, Path.Combine(roots.ShippedPromptRoot, "agents"));
@@ -231,6 +240,17 @@ public sealed class AgentPromptCatalog
 
     private static IEnumerable<LoadedAgentPromptResource> LoadAgentPromptResources(GlobalPromptRoot root)
     {
+        if (root.SourceKind.IsCopilot())
+        {
+            foreach (var agent in CopilotAgentFiles.ReadAll(root.Path))
+            {
+                yield return new LoadedAgentPromptResource(agent.Id, agent.Name, agent.Description, null, agent.Body, root.SourceKind, root.Precedence,
+                    agent.Path, HashText(agent.Body), PromptCompositionMode.Replace);
+            }
+
+            yield break;
+        }
+
         foreach (var path in Directory.EnumerateFiles(root.Path, "*.prompt.md", SearchOption.TopDirectoryOnly))
         {
             if (TryLoadPrompt(root, path, out var descriptor))
@@ -555,6 +575,19 @@ public enum AgentPromptSourceKind
 
     /// <summary>The prompt comes from the project-local <c>.alta/prompts/agents</c> root.</summary>
     Project,
+
+    /// <summary>The prompt is a custom agent of GitHub Copilot of the user (<c>~/.copilot/agents</c>).</summary>
+    CopilotUser,
+
+    /// <summary>The prompt is a custom agent of GitHub Copilot of the project (<c>.github/agents</c>).</summary>
+    CopilotProject,
+}
+
+/// <summary>Questions about a <see cref="AgentPromptSourceKind"/>.</summary>
+public static class AgentPromptSourceKindExtensions
+{
+    /// <summary>Gets whether the prompt is a custom agent of GitHub Copilot.</summary>
+    public static bool IsCopilot(this AgentPromptSourceKind kind) => kind is AgentPromptSourceKind.CopilotUser or AgentPromptSourceKind.CopilotProject;
 }
 
 /// <summary>
@@ -600,6 +633,9 @@ public sealed record AgentPromptDescriptor(
 {
     /// <summary>Gets a value indicating whether the prompt is built into CodeAlta.</summary>
     public bool IsBuiltIn => SourceKind == AgentPromptSourceKind.BuiltIn;
+
+    /// <summary>Gets a value indicating whether the prompt is a custom agent of GitHub Copilot, which CodeAlta reads and does not write.</summary>
+    public bool IsCopilot => SourceKind.IsCopilot();
 }
 
 /// <summary>

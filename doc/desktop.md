@@ -1331,6 +1331,11 @@ prompt with the same name, which then overrides it; **Remove** deletes a global 
 file. Built-in prompts are read-only. A save is refused, without overwriting, when the file changed
 on disk since it was read. A session's prompt for the next Send is chosen from the prompt bar.
 
+The custom agents of GitHub Copilot (`.github/agents` of the selected project, `~/.copilot/agents`)
+are listed after the agent prompts with their scope and the Copilot mark (`PromptTags`). They are
+read-only like a built-in prompt, and **Customize a copy** creates a global prompt with the same
+name, which is then the one that is used.
+
 ### MCP Servers
 
 The **MCP Servers** Settings section lists the servers defined in the global and selected project

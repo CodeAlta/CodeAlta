@@ -526,6 +526,128 @@ public sealed class SystemPromptInfrastructureTests
         Assert.IsTrue(bundle.Manifest.Parts.Any(static part => part.Key == "prompt.discovery" && part.Kind == "agent_prompts" && part.Status == "selected"));
     }
 
+    [TestMethod]
+    public void AgentPromptCatalog_ListsTheCustomAgentsOfGitHubCopilot_AfterThePromptsOfCodeAlta()
+    {
+        using var temp = TempDirectory.Create();
+        var appBase = Path.Combine(temp.Path, "app");
+        var globalRoot = Path.Combine(temp.Path, "global");
+        var projectRoot = Path.Combine(temp.Path, "project");
+        var profile = Path.Combine(temp.Path, "home");
+        WritePrompt(appBase, "default", "Default", "default", "Built-in body.");
+        WritePrompt(projectRoot, "docs", "Docs of CodeAlta", "default", "The docs prompt of CodeAlta.");
+        var projectAgents = Directory.CreateDirectory(Path.Combine(projectRoot, ".github", "agents")).FullName;
+        var userAgents = Directory.CreateDirectory(Path.Combine(profile, ".copilot", "agents")).FullName;
+        // The header of an agent file is YAML: only its top-level scalars present the agent.
+        File.WriteAllText(Path.Combine(projectAgents, "reviewer.agent.md"), """
+            ---
+            name: 'Security reviewer'
+            description: >
+              Reviews a change
+              for security problems
+            tools:
+              - read
+              - search
+            mcp-servers:
+              scanner:
+                name: not-the-agent
+                command: scan
+            handoffs:
+              - label: Fix
+                agent: default
+            ---
+            Review the change for security problems.
+            """);
+        File.WriteAllText(Path.Combine(projectAgents, "docs.agent.md"), "---\nname: Docs of Copilot\n---\nThe docs agent of Copilot.\n");
+        File.WriteAllText(Path.Combine(projectAgents, "README.md"), "# The agents of this project\n");
+        File.WriteAllText(Path.Combine(projectAgents, "empty.agent.md"), "---\nname: Empty\n---\n");
+        File.WriteAllText(Path.Combine(projectAgents, "a b.agent.md"), "Not an id.\n");
+        File.WriteAllText(Path.Combine(userAgents, "reviewer.agent.md"), "The reviewer of the user.\n");
+        File.WriteAllText(Path.Combine(userAgents, "planner.md"), "Plan the work.\n");
+
+        var catalog = new AgentPromptCatalog(new FileSystemPromptContentLocator(appBase));
+        var query = new AgentPromptCatalogQuery { UserCodeAltaRoot = globalRoot, UserProfileRoot = profile, ProjectRoot = projectRoot, ProjectPromptResourcesTrusted = true };
+        var all = catalog.ListPrompts(query);
+
+        CollectionAssert.AreEqual(
+            new[] { "BuiltIn:default", "Project:docs", "CopilotUser:planner", "CopilotUser:reviewer", "CopilotProject:docs", "CopilotProject:reviewer" },
+            all.Select(static prompt => $"{prompt.SourceKind}:{prompt.PromptName}").ToArray());
+        var reviewer = all.Single(static prompt => prompt is { SourceKind: AgentPromptSourceKind.CopilotProject, PromptName: "reviewer" });
+        Assert.AreEqual("Security reviewer", reviewer.DisplayName);
+        Assert.AreEqual("Reviews a change for security problems", reviewer.Description);
+        Assert.AreEqual("Review the change for security problems.", reviewer.Body);
+        Assert.IsTrue(reviewer.IsCopilot);
+        Assert.IsFalse(reviewer.IsBuiltIn);
+        Assert.IsFalse(reviewer.IsShadowed);
+        // The agent of the project comes before the one of the user, and a prompt of CodeAlta before both.
+        Assert.IsTrue(all.Single(static prompt => prompt is { SourceKind: AgentPromptSourceKind.CopilotUser, PromptName: "reviewer" }).IsShadowed);
+        Assert.IsTrue(all.Single(static prompt => prompt is { SourceKind: AgentPromptSourceKind.CopilotProject, PromptName: "docs" }).IsShadowed);
+        Assert.AreEqual("planner", all.Single(static prompt => prompt.PromptName == "planner").DisplayName);
+
+        var effective = catalog.ListEffectivePrompts(query);
+        CollectionAssert.AreEqual(new[] { "default", "docs", "planner", "reviewer" }, effective.Select(static prompt => prompt.PromptName).ToArray());
+        Assert.AreEqual("The docs prompt of CodeAlta.", effective.Single(static prompt => prompt.PromptName == "docs").Body);
+        Assert.AreEqual(AgentPromptSourceKind.CopilotProject, catalog.ResolvePrompt(query, "reviewer")!.SourceKind);
+
+        // Without a profile and a project, there is no agent of Copilot.
+        Assert.HasCount(1, catalog.ListPrompts(new AgentPromptCatalogQuery { UserCodeAltaRoot = globalRoot }));
+    }
+
+    [TestMethod]
+    public void SystemPromptBuilder_UsesACustomAgentOfGitHubCopilotAsTheAgentPrompt()
+    {
+        using var temp = TempDirectory.Create();
+        var appBase = Path.Combine(temp.Path, "app");
+        var globalRoot = Path.Combine(temp.Path, "global");
+        var projectRoot = Path.Combine(temp.Path, "project");
+        var profile = Path.Combine(temp.Path, "home");
+        WriteSystem(appBase, "default", "Built-in default system.");
+        WritePrompt(appBase, "default", "Default", "default", "Built-in default prompt.");
+        var projectAgents = Directory.CreateDirectory(Path.Combine(projectRoot, ".github", "agents")).FullName;
+        File.WriteAllText(Path.Combine(projectAgents, "reviewer.agent.md"), "---\nname: Reviewer\ntools: ['read']\n---\nReview the change for security problems.\n");
+        File.WriteAllText(Path.Combine(Directory.CreateDirectory(Path.Combine(profile, ".copilot", "agents")).FullName, "writer.agent.md"), "Write the documentation.\n");
+
+        SystemPromptBundle Build(string prompt) => new SystemPromptBuilder(new FileSystemPromptContentLocator(appBase)).Build(new SystemPromptBuildRequest
+        {
+            ProviderKey = "codex",
+            ProviderType = "codex",
+            ProtocolFamily = "codex",
+            Session = new SessionViewDescriptor { SessionId = "session-1", ProviderId = "codex", ProviderKey = "codex", WorkingDirectory = projectRoot, Kind = SessionViewKind.ProjectSession },
+            Project = new ProjectDescriptor { Id = "project-1", Slug = "project-1", DisplayName = "Project 1", ProjectPath = projectRoot },
+            UserCodeAltaRoot = globalRoot,
+            UserProfileRoot = profile,
+            SelectedPromptName = prompt,
+            PartOptionsOverride = new PartialSystemPromptPartOptions(Skills: false, ProjectContext: false, RuntimeContext: false, ToolGuidance: true),
+        });
+
+        var bundle = Build("reviewer");
+        Assert.AreEqual("Built-in default system.", bundle.SystemMessage);
+        Assert.AreEqual("reviewer", bundle.Manifest.Composition.AgentPromptName);
+        StringAssert.Contains(bundle.DeveloperInstructions!, "Review the change for security problems.");
+        Assert.IsFalse(bundle.DeveloperInstructions!.Contains("Built-in default prompt.", StringComparison.Ordinal));
+        Assert.IsFalse(bundle.DeveloperInstructions.Contains("tools:", StringComparison.Ordinal), "The header of the file is not part of the prompt.");
+        Assert.IsTrue(bundle.Manifest.Parts.Any(static part => part.Key == "agents/reviewer" && part.Status == "selected"));
+        // The session is told which agents it can give to a sub-agent.
+        StringAssert.Contains(bundle.DeveloperInstructions, "- current: `reviewer` — Reviewer");
+        StringAssert.Contains(bundle.DeveloperInstructions, "Source: copilot-project");
+        StringAssert.Contains(bundle.DeveloperInstructions, "- `writer` — writer");
+        StringAssert.Contains(bundle.DeveloperInstructions, "Source: copilot-user");
+
+        StringAssert.Contains(Build("writer").DeveloperInstructions!, "Write the documentation.");
+
+        // A prompt of CodeAlta that is appended extends the agent.
+        WritePrompt(globalRoot, "writer", null, "default", "In CodeAlta, write for CodeAlta Desktop first.", description: null, frontmatterLines: ["mode: append"]);
+        var extended = Build("writer").DeveloperInstructions!;
+        Assert.IsTrue(extended.IndexOf("Write the documentation.", StringComparison.Ordinal) is var first and >= 0
+            && extended.IndexOf("In CodeAlta, write for CodeAlta Desktop first.", StringComparison.Ordinal) > first, extended);
+
+        // A prompt of CodeAlta with the same id is the one that is used.
+        WritePrompt(projectRoot, "reviewer", "Reviewer of CodeAlta", "default", "The reviewer prompt of CodeAlta.");
+        var replaced = Build("reviewer");
+        StringAssert.Contains(replaced.DeveloperInstructions!, "The reviewer prompt of CodeAlta.");
+        Assert.IsFalse(replaced.DeveloperInstructions!.Contains("Review the change for security problems.", StringComparison.Ordinal));
+    }
+
     private static void WriteSystem(string root, string id, string body, IReadOnlyList<string>? frontmatterLines = null)
     {
         var directory = root.EndsWith("app", StringComparison.OrdinalIgnoreCase)

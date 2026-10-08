@@ -328,6 +328,7 @@ public sealed class SystemPromptBuilder
     {
         var candidates = EnumerateExistingRoots(roots)
             .Select(root => LoadResource(root, folder, suffix, name, diagnostics, resourceKind))
+            .Concat(resourceKind == SystemPromptResourceKind.AgentPrompt ? CopilotAgents(roots, name) : [])
             .Where(static resource => resource is not null)
             .Cast<PromptResource>()
             .OrderBy(static resource => resource.Precedence)
@@ -356,6 +357,20 @@ public sealed class SystemPromptBuilder
             .ToArray();
         var body = JoinPromptBodies(applied.Select(static resource => resource.Resource.Body));
         return new ResourceResolution(selected, body, applied, skipped);
+    }
+
+    // The custom agents of GitHub Copilot with this id (`.github/agents`, `~/.copilot/agents`), below every prompt of
+    // CodeAlta: the text of the file is the agent prompt.
+    private static IEnumerable<PromptResource?> CopilotAgents(SystemPromptContentRoots roots, string name)
+    {
+        foreach (var (kind, precedence, folder) in CopilotAgentFiles.Folders(roots))
+        {
+            if (CopilotAgentFiles.Read(folder, name) is { } agent)
+            {
+                yield return new PromptResource(ToPromptSourceLabel(kind), precedence, agent.Path, agent.Body, agent.Description, agent.Name, null,
+                    PartialSystemPromptPartOptions.Empty, HashText(agent.Body), PromptCompositionMode.Replace);
+            }
+        }
     }
 
     private static PromptResource? LoadResource(PromptRoot root, string folder, string suffix, string name, List<SystemPromptDiagnostic> diagnostics, SystemPromptResourceKind resourceKind)
@@ -1011,6 +1026,8 @@ public sealed class SystemPromptBuilder
             AgentPromptSourceKind.BuiltIn => "built-in",
             AgentPromptSourceKind.UserGlobal => "user-global",
             AgentPromptSourceKind.Project => "project",
+            AgentPromptSourceKind.CopilotUser => "copilot-user",
+            AgentPromptSourceKind.CopilotProject => "copilot-project",
             _ => sourceKind.ToString(),
         };
 

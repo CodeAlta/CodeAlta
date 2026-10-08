@@ -533,7 +533,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddProviderLoginService(providerLogin);
                     mcpServers = new McpServersService(host.ProjectCatalog, epoch, roots.Home);
                     builder.AddMcpServersService(mcpServers);
-                    builder.AddAgentPromptsService(new AgentPromptsService(host.ProjectCatalog, epoch));
+                    builder.AddAgentPromptsService(new AgentPromptsService(host.ProjectCatalog, epoch,
+                        userProfileRoot: roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)));
                     // The standard launch has no explicit discovery home: common skills come from the profile, like the TUI.
                     var skills = new SkillsService(host.ProjectCatalog, host.SkillCatalog,
                         roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), epoch);

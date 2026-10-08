@@ -82,6 +82,18 @@ public sealed record SystemPromptContentRoots(
     /// An application that ships none does not have the folder.
     /// </summary>
     public string ShippedUserGuideRoot => Path.Combine(Path.GetDirectoryName(ShippedDocsRoot) ?? ShippedDocsRoot, "user-guide");
+
+    /// <summary>
+    /// Gets the folder of the custom agents GitHub Copilot keeps in the project (<c>.github/agents</c>), when a
+    /// project is named.
+    /// </summary>
+    public string? CopilotProjectAgentsRoot { get; init; }
+
+    /// <summary>
+    /// Gets the folder of the custom agents GitHub Copilot keeps for the user (<c>~/.copilot/agents</c>), when a
+    /// profile is named.
+    /// </summary>
+    public string? CopilotUserAgentsRoot { get; init; }
 }
 
 /// <summary>
@@ -115,7 +127,12 @@ public sealed class FileSystemPromptContentLocator : ISystemPromptContentLocator
             ShippedDocsRoot: Path.Combine(appBaseDirectory, "content", "docs"),
             GlobalPromptRoot: Path.Combine(userCodeAltaRoot, "prompts"),
             ProjectPromptRoot: projectRoot is null ? null : Path.Combine(projectRoot, ".alta", "prompts"),
-            ProjectPromptResourcesTrusted: context.ProjectPromptResourcesTrusted);
+            ProjectPromptResourcesTrusted: context.ProjectPromptResourcesTrusted)
+        {
+            CopilotProjectAgentsRoot = projectRoot is null ? null : Path.Combine(projectRoot, ".github", "agents"),
+            // The profile the caller names: a caller that names none is given no file of the real one.
+            CopilotUserAgentsRoot = NormalizeOptionalRoot(context.UserProfileRoot) is { } named ? Path.Combine(named, ".copilot", "agents") : null,
+        };
     }
 
     /// <inheritdoc />

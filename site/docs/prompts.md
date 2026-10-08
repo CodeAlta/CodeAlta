@@ -135,6 +135,8 @@ Prompt resources are layered in this order:
 2. User-global resources under `~/.alta/prompts/`.
 3. Project-local resources under `<project>/.alta/prompts/`.
 
+The custom agents of GitHub Copilot (`.github/agents`, `~/.copilot/agents`) are agent prompts too. A resource of CodeAlta with the same id comes first. See [GitHub Copilot layout](copilot-layout.md#custom-agents).
+
 Each root has the same layout:
 
 ```text

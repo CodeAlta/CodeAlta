@@ -67,7 +67,7 @@ closes every tab and dialog, opens what it shows and takes the capture.
 | `split-side`, `split-stacked`, `split-three` | A session and its sub-agents in panes (the `…` button of a pane, **Split right** or **Split below**). |
 | `notes`, `context-usage`, `modified-files`, `tool-details` | One session with its notes, the context popover, a modified file, the window of a tool call. |
 | `new-session`, `session-browser`, `search`, `help`, `open-project`, `file-selection` | The dialogs, each at its default size. |
-| `settings`, `models`, `model-providers`, `prompts`, `skills`, `mcp`, `logs`, `pull-request-settings`, `copilot-skills` | A page of Settings over a session. Never select a provider row that shows an account, and never the Configuration file page. |
+| `settings`, `models`, `model-providers`, `prompts`, `skills`, `mcp`, `logs`, `pull-request-settings`, `copilot-skills`, `copilot-agents` | A page of Settings over a session. Never select a provider row that shows an account, and never the Configuration file page. |
 | `code-editor`, `editor-search`, `editor-session`, `editor-preview`, `editor-new-file`, `changes` | The code editor and the Changes tab of SharpYaml, with changes made for the capture. |
 | `theme-dark`, `theme-light`, `themes` | One scene in each theme; `themes` is a montage of six color schemes. |
 | `work-items`, `issues`, `sub-agents`, `pull-request`, `conversation-width` | The Work items and Issues tabs of CodeAlta, a session with sub-agents, the pull request menu (a crop), a conversation at 70%. |
