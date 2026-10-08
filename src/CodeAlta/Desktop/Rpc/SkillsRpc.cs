@@ -75,10 +75,12 @@ internal sealed class SkillsService
         try
         {
             var descriptors = await _management.LoadAsync(SkillListingScope.Combined, project.Root, cancellationToken).ConfigureAwait(false);
-            var skills = descriptors.Take(MaximumSkills).Select(static skill => new SkillsEntry(
+            var skills = descriptors.Take(MaximumSkills).Select(skill => new SkillsEntry(
                 Bound(skill.Name, MaximumNameLength), Bound(skill.Title, MaximumNameLength), Bound(skill.Description, MaximumDescriptionLength),
                 skill.SourceKind.ToString(), skill.Scope.ToString(), !skill.IsDisabledGlobally, !skill.IsDisabledForProject,
-                skill.IsEnabled, skill.IsValid, skill.IsShadowed, skill.IsTrusted)).ToArray();
+                skill.IsEnabled, skill.IsValid, skill.IsShadowed, skill.IsTrusted,
+                // The row opens the folder of its skill in the code editor: the id the editor names it by, and its path.
+                SkillFolders.IdOf(skill, request.ProjectId, project.Root), Bound(skill.SkillRootPath, MaximumPathLength))).ToArray();
             return new("ok", request.ProjectId, skills, descriptors.Count - skills.Length);
         }
         catch (InvalidDataException)
@@ -264,8 +266,10 @@ internal sealed record SkillsListResponse(string Status, string? ProjectId, IRea
 /// One discovered skill. The source is <c>ProjectAlta</c>, <c>ProjectCommon</c>, <c>UserAlta</c>, <c>UserCommon</c>,
 /// <c>Plugin</c> or <c>Builtin</c>; the scope is <c>Project</c>, <c>User</c>, <c>Plugin</c> or <c>Builtin</c>.
 /// </summary>
+/// <param name="Folder">The id that names the folder of the skill to the code editor; null for a skill whose name cannot be part of an id.</param>
+/// <param name="Path">The path of the folder of the skill.</param>
 internal sealed record SkillsEntry(string Name, string Title, string Description, string Source, string Scope, bool EnabledGlobal,
-    bool EnabledProject, bool Enabled, bool Valid, bool Shadowed, bool Trusted);
+    bool EnabledProject, bool Enabled, bool Valid, bool Shadowed, bool Trusted, string? Folder = null, string? Path = null);
 /// <summary>Names one listed skill by its name and source.</summary>
 internal sealed record SkillsDetailRequest(string? ExpectedEpoch, string? ProjectId, string? Name, string? Source);
 

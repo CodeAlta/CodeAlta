@@ -357,7 +357,7 @@ Open it with `Ctrl+G Ctrl+R`, `/model_providers`, or the provider summary. Use i
 
 ## Prompt manager
 
-Open it with `Ctrl+G Ctrl+H` or `/prompt`. It lists built-in modes such as Default and Plan plus global/project custom prompts, shows which prompts are shadowed by overrides, and edits the selected prompt on the right. Agent prompt properties are `name`, `description`, `system`, and the Markdown body. System prompt files are listed with the same override rules, and only global/project override bodies can be edited. Built-in prompts are displayed for inspection but are read-only; create a global or project prompt/system prompt with the same id to override one. Advanced prompt workflows can combine prompts with sessions, notes, reminders, asks, MCP, and skills; see [Advanced Agent Workflows]({{site.basepath}}/docs/advanced-agent-workflows/).
+Open it with `Ctrl+G Ctrl+H` or `/prompt`. It lists built-in modes such as Default and Plan plus global/project custom prompts, shows which prompts are shadowed by overrides, and edits the selected prompt on the right. Agent prompt properties are `name`, `description`, `system`, and the Markdown body. System prompt files are listed with the same override rules, and only global/project override bodies can be edited. Built-in prompts are displayed for inspection but are read-only; create a global or project prompt/system prompt with the same id to override one. In the desktop app, the `</>` button of a prompt opens its file in the [code editor](#code-editor), and the path of the selected prompt is shown above its form; a built-in prompt opens read-only. Advanced prompt workflows can combine prompts with sessions, notes, reminders, asks, MCP, and skills; see [Advanced Agent Workflows]({{site.basepath}}/docs/advanced-agent-workflows/).
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-prompts.webp" alt="CodeAlta Desktop Agent prompts page listing built-in prompts with the selected prompt on the right" loading="lazy">
@@ -602,7 +602,9 @@ Open it with `Ctrl+G Ctrl+N`, `/plugins`, or `/plugin`. The TUI dialog shows dis
 
 Open it with `Ctrl+G Ctrl+K` or `/skills`. CodeAlta discovers Agent Skills-compatible `SKILL.md` packages from user and project locations. Skills management lets you inspect skills and their files, create a new skill, and enable or disable skills for the global `~/.alta/config.toml` or for the selected project's `.alta/config.toml`. Disabled skills remain inspectable but are not advertised to models and cannot be activated.
 
-A skill is a folder that can hold several files. In the desktop app, **Edit** opens the folder of the selected skill in a [code editor](#code-editor) tab, with its files on the left and `SKILL.md` open. A built-in skill, or one that a plugin brings, has **View files** instead: its files open read-only. **New skill** opens the skill it created the same way.
+A skill is a folder that can hold several files. In the desktop app, the `</>` button of a skill in the list, or **Edit** in its details, opens the folder of that skill in a [code editor](#code-editor) tab, with its files on the left and `SKILL.md` open. A built-in skill, or one that a plugin brings, has **View files** instead: its files open read-only. **New skill** opens the skill it created the same way.
+
+To work on all your own skills at once, open `~/.alta/skills` from the top of the page: the code editor shows that folder, where each skill is a folder with its `SKILL.md`. The `.alta/skills` folder of the selected project opens the same way.
 
 In the TUI, compact `G` and `P` checkboxes set the global and project state of a skill, and bulk actions can enable, disable, or invert the currently shown skills. Enabled skills can also be activated for the session when the selected provider supports injected skill context.
 

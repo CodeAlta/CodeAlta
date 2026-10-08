@@ -47,6 +47,11 @@ public sealed class SkillsRpcTests
         var beta = scoped.Skills.Single(skill => skill.Name == "beta");
         Assert.AreEqual("ProjectAlta", beta.Source);
         Assert.AreEqual("Project", beta.Scope);
+
+        // A row opens the folder of its skill in the code editor: the id of that folder and its path come with it.
+        Assert.AreEqual(("skill:global:UserAlta:alpha", Path.Combine(fixture.GlobalRoot, "skills", "alpha")), (alpha.Folder, alpha.Path));
+        Assert.AreEqual(($"skill:project:{fixture.Project.Id}:ProjectAlta:beta", Path.Combine(fixture.ProjectPath, ".alta", "skills", "beta")), (beta.Folder, beta.Path));
+        Assert.AreEqual("skill:global:UserAlta:alpha", scoped.Skills.Single(skill => skill.Name == "alpha").Folder, "A skill of the user is found without the project.");
     }
 
     [TestMethod]

@@ -4,12 +4,12 @@ import { agentPrompts, type AgentPromptDocument, type AgentPromptEntry } from "#
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import { CopilotTag, copilotPromptScope } from "./CopilotTag";
-import { PromptTags } from "./PromptTags";
+import { PromptRows, promptIdentity as identity } from "./PromptRows";
 import { CodeEditor } from "./monaco/CodeEditor";
 import { SettingsFileLocation, SettingsFileLocations } from "./SettingsFileLocation";
 import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
 import { ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
-import { scopedKey, settingsFailure, type SettingsScope } from "./settingsEditing";
+import { settingsFailure, type SettingsScope } from "./settingsEditing";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
 
@@ -17,7 +17,6 @@ type Kind = "Agent" | "System";
 type PromptForm = Readonly<{ id: string; kind: Kind; scope: SettingsScope; name: string; description: string; body: string;
   systemPromptId: string; append: boolean; revision: string | null }>;
 const added = "\u0000new";
-const identity = (entry: Pick<AgentPromptEntry, "kind" | "scope" | "id">) => scopedKey(`${entry.kind}:${entry.scope}`, entry.id);
 const formOf = (document: AgentPromptDocument): PromptForm => ({ id: document.id, kind: document.kind === "System" ? "System" : "Agent",
   scope: document.scope === "Project" ? "Project" : "Global", name: document.name ?? "", description: document.description ?? "", body: document.body,
   systemPromptId: document.systemPromptId ?? "", append: document.append, revision: document.revision });
@@ -96,13 +95,9 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
     if (await mutate(() => api.delete({ expectedEpoch: epoch, projectId, id: document.id, kind: document.kind, scope: document.scope, expectedRevision: document.revision },
       { timeoutMilliseconds: 30000 }), "Removed.")) setSelected(null);
   }
-  const group = (kind: Kind, title: MessageKey) => { const rows = prompts.filter(prompt => prompt.kind === kind); return rows.length === 0 ? null : <>
-    <h3 className="settings-editor-group">{t(title)}</h3>
-    {rows.map(prompt => { const id = identity(prompt); return <Card key={id} interactive selected={selected === id} aria-current={selected === id ? "true" : undefined}
-      onClick={() => { if (!busy) { setNotice(null); setSelected(id); } }}>
-      <span className="settings-editor-name"><strong>{prompt.name || prompt.id}</strong><small>{prompt.description || prompt.id}</small></span>
-      <PromptTags prompt={prompt} />
-    </Card>; })}</>; };
+  const group = (kind: Kind, title: MessageKey) => <PromptRows prompts={prompts.filter(prompt => prompt.kind === kind)} title={title} selected={selected} disabled={busy}
+    onSelect={prompt => { if (!busy) { setNotice(null); setSelected(identity(prompt)); } }}
+    onOpen={files.open ? prompt => files.open!({ kind: "prompt", scope: prompt.scope, id: prompt.id, part: prompt.kind }) : undefined} />;
 
   return <SettingsPage className="prompt-settings" label={t("Agent prompts")} group="Agent & models" title="Agent prompts" description="Instructions that define how an agent behaves. Pick one per session from the prompt bar."
     notice={notice} loading={loading} busy={busy} onReload={reload}

@@ -4,12 +4,13 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SkillsDetailResponse, SkillsEntry } from "#neoastra";
 import { locales, translate } from "./localization";
-import { SkillDetail } from "./SkillSettings";
+import { SkillDetail, SkillRows } from "./SkillSettings";
 import { ShellLanguageContext } from "./shellLanguage";
 
 const never = () => assert.fail("rendering must not act");
 const entry = (name: string, source: string): SkillsEntry => ({ name, title: name, description: "What it is for.", source,
-  scope: source.startsWith("Project") ? "Project" : source.startsWith("User") ? "User" : source, enabledGlobal: true, enabledProject: true, enabled: true, valid: true, shadowed: false, trusted: true });
+  scope: source.startsWith("Project") ? "Project" : source.startsWith("User") ? "User" : source, enabledGlobal: true, enabledProject: true, enabled: true, valid: true, shadowed: false, trusted: true,
+  folder: `skill:global:${source}:${name}`, path: `/skills/${name}` });
 const detail = (skill: SkillsEntry, change: Partial<SkillsDetailResponse> = {}): SkillsDetailResponse => ({ status: "ok", name: skill.name, source: skill.source,
   skillFilePath: `/skills/${skill.name}/SKILL.md`, skillRootPath: `/skills/${skill.name}`, sourceId: "source", shadowedBy: null, modelVisible: true, license: null,
   // The instructions are Markdown, which only a browser renders: the text of the file is left out.
@@ -36,6 +37,41 @@ test("the folder of a skill opens in the code editor: to be edited when it is th
       assert.ok(html.includes(`>${translate(locale, "View files")}<`) && !html.includes(`>${translate(locale, "Edit")}<`), html);
     }
   }
+});
+
+test("the details of a skill say where its folder and its SKILL.md are, with the buttons that open, copy and show them", () => {
+  const skill = entry("release-notes", "UserAlta");
+  const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
+    createElement(SkillDetail, { skill, detail: detail(skill), failed: false, onEdit: never, platform: "windows", onReveal: never })));
+  const rows = html.split('class="settings-file-location"').slice(1);
+  assert.deepEqual(rows.map(row => /<code title="([^"]*)"/.exec(row)?.[1]), ["/skills/release-notes", "/skills/release-notes/SKILL.md"]);
+  for (const row of rows) assert.deepEqual([...row.matchAll(/<button[^>]*title="([^"]*)"/g)].map(match => match[1]), ["Edit in the code editor", "Copy path", "Reveal in File Explorer"], row);
+  assert.ok(html.includes("<dt>Folder</dt>") && html.includes("<dt>Skill file</dt>"), html);
+  // A skill that ships with CodeAlta is read: its files are opened, not edited.
+  const builtin = entry("codealta-plugins", "Builtin");
+  assert.ok(render(builtin, detail(builtin)).includes('title="Open in the code editor"') && !render(builtin, detail(builtin)).includes('title="Edit in the code editor"'));
+});
+
+test("the row of a skill opens its folder in the code editor, as the row of a plugin does, in every language", () => {
+  const skills = [entry("release-notes", "UserAlta"), entry("codealta-plugins", "Builtin"), { ...entry("odd", "ProjectAlta"), folder: null }];
+  const rows = (change: { locale?: typeof locales[number]; edit?: boolean; disabled?: boolean } = {}) => {
+    const locale = change.locale ?? "en";
+    return renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } },
+      createElement(SkillRows, { skills, empty: "No skills were found.", selected: skills[0], disabled: change.disabled ?? false, onSelect: never, onToggle: never,
+        onEdit: change.edit === false ? undefined : never }))).split('<div class="bp6-card').slice(1);
+  };
+  for (const locale of locales) {
+    const [mine, shipped, odd] = rows({ locale });
+    assert.ok(mine.includes(`aria-label="${translate(locale, "Edit {name}", { name: "release-notes" })}"`) && mine.includes(`title="${translate(locale, "Edit in the code editor")}"`), mine);
+    assert.ok(shipped.includes(`aria-label="${translate(locale, "View the files of {name}", { name: "codealta-plugins" })}"`) && shipped.includes(`title="${translate(locale, "Open in the code editor")}"`), shipped);
+    // A skill whose folder the host could not name has its switch and no button.
+    assert.ok(!odd.includes("<button") && odd.includes(translate(locale, "Enable {name}", { name: "odd" })), odd);
+  }
+  assert.ok(rows({ edit: false }).every(row => !row.includes("<button")), "A page without an owned host opens no editor.");
+  assert.ok(rows()[0].includes('aria-current="true"') && !rows()[1].includes("aria-current"));
+  const empty = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
+    createElement(SkillRows, { skills: [], empty: "No skill matches the filter.", selected: undefined, disabled: false, onSelect: never, onToggle: never })));
+  assert.ok(empty.includes("No skill matches the filter."), empty);
 });
 
 test("a skill has no button while its details are read, when its folder has no id, and where no editor opens", () => {

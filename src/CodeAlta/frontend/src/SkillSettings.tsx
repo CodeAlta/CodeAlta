@@ -73,6 +73,35 @@ export function SkillDetail({ skill, detail, failed, onEdit, platform, onReveal 
 }
 
 /**
+ * The list of the page: a row per skill with its switch, and the button that opens its folder in the code editor, to
+ * be edited when the skill is one of the user or of a project, to be read otherwise.
+ */
+export function SkillRows({ skills, empty, selected, disabled, onSelect, onToggle, onEdit }: {
+  skills: readonly SkillsEntry[];
+  /** What the list says when it has no skill. */
+  empty: MessageKey;
+  selected: SkillsEntry | undefined; disabled: boolean;
+  onSelect: (skill: SkillsEntry) => void; onToggle: (skill: SkillsEntry, enabled: boolean) => void; onEdit?: (folder: SkillFolder) => void;
+}) {
+  const { t } = useShellLanguage();
+  return <CardList compact className="settings-editor-rows settings-editor-list" aria-label={t("Skills")}>
+    {skills.map(skill => { const readOnly = skillReadOnly(skill.source), name = skill.title || skill.name;
+      return <Card key={skillKey(skill)} interactive selected={skill === selected} aria-current={skill === selected ? "true" : undefined}
+        onClick={event => { if (!(event.target as HTMLElement).closest(".bp6-switch, .bp6-button")) onSelect(skill); }}>
+        <span className="settings-editor-name"><strong>{name}</strong><small>{skill.description}</small></span>
+        <span className="settings-editor-tags"><Tag minimal round>{t(sourceLabels[skill.source] ?? "Plugin")}</Tag>{copilotSkillSource(skill.source) && <CopilotTag />}
+          {skill.shadowed && <Tag minimal round intent="warning">{t("Overridden")}</Tag>}
+          {!skill.valid && <Tag minimal round intent="danger">{t("Invalid")}</Tag>}
+          {skill.folder && skill.path && onEdit && <Button variant="minimal" size="small" icon={<AppIcon name="code" size={15} />}
+            aria-label={t(readOnly ? "View the files of {name}" : "Edit {name}", { name })} title={t(readOnly ? "Open in the code editor" : "Edit in the code editor")}
+            onClick={() => onEdit({ id: skill.folder!, path: skill.path!, name: skill.name })} />}
+          <Switch checked={skill.enabled} disabled={disabled} aria-label={t("Enable {name}", { name: skill.name })} onChange={event => onToggle(skill, event.currentTarget.checked)} /></span>
+      </Card>; })}
+    {skills.length === 0 && <Card><span className="bp6-text-muted">{t(empty)}</span></Card>}
+  </CardList>;
+}
+
+/**
  * Settings page for skills: one list with an enable switch per skill, the selected skill's details, bulk actions and
  * skill creation. The folder of a skill is opened in the code editor, and so is the one of a skill that was created.
  */
@@ -161,17 +190,8 @@ export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills
         <Button size="small" disabled={busy || shown.length === 0} onClick={() => toggleAll(false)}>{t("Disable all")}</Button>
       </div>
       <div className="settings-editor-layout skill-settings-layout">
-        <CardList compact className="settings-editor-rows settings-editor-list" aria-label={t("Skills")}>
-          {shown.map(skill => <Card key={skillKey(skill)} interactive selected={skill === selected} aria-current={skill === selected ? "true" : undefined}
-            onClick={event => { if (!(event.target as HTMLElement).closest(".bp6-switch")) setSelectedKey(skillKey(skill)); }}>
-            <span className="settings-editor-name"><strong>{skill.title || skill.name}</strong><small>{skill.description}</small></span>
-            <span className="settings-editor-tags"><Tag minimal round>{t(sourceLabels[skill.source] ?? "Plugin")}</Tag>{copilotSkillSource(skill.source) && <CopilotTag />}
-              {skill.shadowed && <Tag minimal round intent="warning">{t("Overridden")}</Tag>}
-              {!skill.valid && <Tag minimal round intent="danger">{t("Invalid")}</Tag>}
-              <Switch checked={skill.enabled} disabled={busy} aria-label={t("Enable {name}", { name: skill.name })} onChange={event => toggle(skill, event.currentTarget.checked)} /></span>
-          </Card>)}
-          {shown.length === 0 && <Card><span className="bp6-text-muted">{t(all.length ? "No skill matches the filter." : "No skills were found.")}</span></Card>}
-        </CardList>
+        <SkillRows skills={shown} empty={all.length ? "No skill matches the filter." : "No skills were found."} selected={selected} disabled={busy}
+          onSelect={skill => setSelectedKey(skillKey(skill))} onToggle={toggle} onEdit={onEdit} />
         {selected ? <SkillDetail skill={selected} detail={shownDetail?.value ?? undefined} failed={shownDetail?.value === null} onEdit={onEdit} platform={files.platform} onReveal={revealSkill} />
           : <NonIdealState icon={<AppIcon name="skill" size={32} />} title={t("No skills were found.")} />}
       </div>

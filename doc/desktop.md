@@ -1550,7 +1550,11 @@ prompt in the global or project scope; **Customize a copy** on a built-in prompt
 prompt with the same name, which then overrides it; **Remove** deletes a global or project prompt
 file. Built-in prompts are read-only. A save is refused, without overwriting, when the file changed
 on disk since it was read. The form shows the path of the file of the selected prompt
-(`AgentPromptDocument.File`) with the buttons that open, copy and show it. A session's prompt for the next Send is chosen from the prompt bar.
+(`AgentPromptDocument.File`) with the buttons that open, copy and show it. Each row of the list
+(`PromptRows`) has the same `</>` button as the row of a plugin: **Edit in the code editor** opens the
+file of the prompt, in the code editor of its project or in the tab of its folder of prompts, and
+**Open in the code editor** shows a built-in prompt read-only. The form stays the way to edit the values
+of a prompt. A session's prompt for the next Send is chosen from the prompt bar.
 
 The custom agents of GitHub Copilot (`.github/agents` of the selected project, `~/.copilot/agents`)
 are listed after the agent prompts with their scope and the Copilot mark (`PromptTags`). They are
@@ -1603,7 +1607,12 @@ instructions of the `SKILL.md` rendered as Markdown (the first 64 Ki characters 
 A skill is a folder that can hold several files: the button of the details opens that folder in the code
 editor, on its `SKILL.md` and with its files (see "The folder of a plugin or of a skill"). It is **Edit** for
 a skill of the user or of a project, and **View files** for a built-in skill and for a skill that a plugin
-brings, whose folder is only read. **New skill** opens the folder it created the same way.
+brings, whose folder is only read. **New skill** opens the folder it created the same way. Each row of the
+list (`SkillRows`) has the same `</>` button as the row of a plugin, which opens that folder without
+selecting the skill first: `skills.list` returns the id of the folder of each skill (`folder`) and its
+path. The folders the skills are read from are listed above the list (see "Files of the settings pages"):
+`~/.alta/skills`, which holds the global skills, opens in the code editor as one folder, and is created
+when it does not exist yet.
 The **Models** section's table fills the page height. The **Plugins** Settings
 section has a switch per plugin, including the built-in MCP, Git, Statistics and UI tools plugins. The
 switch of a source plugin applies at once: the plugin is built and started, or stopped. The switch of a

@@ -90,7 +90,7 @@ Available actions:
 
 The scaffold creates `SKILL.md` plus empty `scripts/`, `references/`, and `assets/` directories, then opens `SKILL.md` in the editor.
 
-The Desktop **Settings → Skills** page lists the discovered skills with a switch per skill, a filter, **Enable all** / **Disable all** and **New skill**; see the [desktop reference](desktop.md#skills-and-plugins). The details of a skill open its folder in the code editor: **Edit** for a skill of the user or of a project, **View files**, read-only, for a built-in skill and for one that a plugin brings.
+The Desktop **Settings → Skills** page lists the discovered skills with a switch per skill, a filter, **Enable all** / **Disable all** and **New skill**; see the [desktop reference](desktop.md#skills-and-plugins). The details of a skill, and the `</>` button of its row, open its folder in the code editor: **Edit** for a skill of the user or of a project, **View files**, read-only, for a built-in skill and for one that a plugin brings. The page lists the folders the skills are read from, and opens `~/.alta/skills` or the `.alta/skills` of the project in the code editor as one folder.
 
 ## Live-tool commands
 
