@@ -10,7 +10,7 @@ export type CommandId =
   | "usage" | "sessionInfo" | "reminders" | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest"
   | "expandPrompt" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "clearQueue" | "compact"
   | "newSession" | "browseSessions" | "searchSessions" | "toggleNotes" | "previousSession" | "nextSession"
-  | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses" | "exit";
+  | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses" | "zoomIn" | "zoomOut" | "resetZoom" | "exit";
 export type CommandCategory = "General" | "Prompt" | "Session" | "Navigation" | "Inspection";
 export type CommandDefinition = Readonly<{
   id: CommandId;
@@ -57,6 +57,9 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "focusAskFile", name: "go_to_ask_file", label: "Go to Ask File", description: "Move focus to the file under review.", category: "General", keys: ["Ctrl+G Ctrl+E"], search: "plan review ask file" },
   { id: "focusSidebar", name: "go_to_sidebar", label: "Go to Sidebar", description: "Move focus to the project explorer.", category: "General", keys: ["Ctrl+G Ctrl+S"], search: "sidebar explorer" },
   { id: "modelSelector", name: "model", label: "Model", description: "Choose the agent, model and reasoning for the next send.", category: "General", search: "model_selector provider selector reasoning" },
+  { id: "zoomIn", name: "zoom_in", label: "Zoom In", description: "Make the text and the controls of the window larger.", category: "General", keys: ["Ctrl+=", "Ctrl+Plus"], search: "zoom larger bigger font text size scale" },
+  { id: "zoomOut", name: "zoom_out", label: "Zoom Out", description: "Make the text and the controls of the window smaller.", category: "General", keys: ["Ctrl+-"], search: "zoom smaller font text size scale" },
+  { id: "resetZoom", name: "reset_zoom", label: "Reset Zoom", description: "Show the window at 100% again.", category: "General", keys: ["Ctrl+0"], search: "zoom actual size font text size scale" },
   { id: "toggleNotes", name: "notes", label: "Toggle Notes", description: "Show or hide the session notes.", category: "General", keys: ["Ctrl+Shift+N"], search: "alta notes" },
 
   { id: "expandPrompt", name: "full_prompt", label: "Full Prompt", description: "Edit the prompt in a large window.", category: "Prompt", keys: ["F6"] },
@@ -100,7 +103,8 @@ export type CommandFocus = "prompt" | "text" | "none";
 export type CommandResolution = Readonly<{ command: CommandId | null; chord: boolean; handled: boolean }>;
 
 const chordPrefix = "ctrl+g";
-const keyNames: Readonly<Record<string, string>> = { left: "arrowleft", right: "arrowright", up: "arrowup", down: "arrowdown" };
+// "Plus" names the "+" key, which cannot be written in a gesture whose parts "+" separates.
+const keyNames: Readonly<Record<string, string>> = { left: "arrowleft", right: "arrowright", up: "arrowup", down: "arrowdown", plus: "+" };
 // "Ctrl+Alt+Left" -> "ctrl+alt+arrowleft": modifiers in a fixed order, then the lower-case key.
 function normalize(gesture: string): string {
   const parts = gesture.toLowerCase().split("+");
@@ -109,7 +113,9 @@ function normalize(gesture: string): string {
   return `${has("ctrl") ? "ctrl+" : ""}${has("alt") ? "alt+" : ""}${has("shift") ? "shift+" : ""}${keyNames[key] ?? key}`;
 }
 function stroke(event: CommandKey): string {
-  return `${event.ctrlKey ? "ctrl+" : ""}${event.altKey ? "alt+" : ""}${event.shiftKey ? "shift+" : ""}${event.key.toLowerCase()}`;
+  // Shift is how "+" is typed on most layouts (Shift+=), so it is part of the key rather than a modifier.
+  const shift = event.shiftKey && event.key !== "+";
+  return `${event.ctrlKey ? "ctrl+" : ""}${event.altKey ? "alt+" : ""}${shift ? "shift+" : ""}${event.key.toLowerCase()}`;
 }
 const single = new Map<string, CommandDefinition>();
 const chords = new Map<string, CommandDefinition>();

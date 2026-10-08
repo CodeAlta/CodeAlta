@@ -129,7 +129,9 @@ public sealed class RawSkillCandidateReaderTests
         var longChild = Directory.CreateDirectory(Path.Combine(deepRoot, "long-" + new string('c', 240)));
         var oversized = Directory.CreateDirectory(Path.Combine(longChild.FullName, "deeper-" + new string('d', 240)));
         File.WriteAllText(Path.Combine(oversized.FullName, "SKILL.md"), "");
-        var paths = RawSkillCandidateReader.Scan(deepRoot);
+        // The scan starts at the long child: from deepRoot the candidates beside it can reach their character bound
+        // and end the scan before it, depending on the order the file system lists them (tmpfs lists newest first).
+        var paths = RawSkillCandidateReader.Scan(longChild.FullName);
         Assert.IsTrue(paths.Diagnostics.HasFlag(RawSkillCandidateDiagnostics.PathLimit));
         Assert.IsTrue(paths.CandidatePaths.All(path => path.Length <= RawSkillCandidateReader.MaximumPathLength));
     }

@@ -1506,6 +1506,12 @@ function App() {
   function runCommand(command: CommandId) {
     if (!commandAvailable(command)) return;
     if (command === "exit") { exitApplication(); return; }
+    // The host zooms the window's view and keeps the zoom for the next starts; an open window does not stop it.
+    if (command === "zoomIn" || command === "zoomOut" || command === "resetZoom") {
+      void desktopShell.zoom({ direction: command === "zoomIn" ? 1 : command === "zoomOut" ? -1 : 0 }, { timeoutMilliseconds: 8_000 })
+        .catch(error => console.error("[CodeAlta] zoom failed", error));
+      return;
+    }
     // Settings is a modal window: only commands that move to another Settings page run while it is open.
     const pages: Partial<Record<CommandId, View>> = { settings: "appearance", about: "about", skills: "skills", plugins: "plugins", mcp: "mcp",
       config: "config", prompts: "prompts", providers: "providers", models: "models", logs: "logs" };
@@ -1542,9 +1548,12 @@ function App() {
       if (event.key === "Escape") { commandChord.current = false; return; }
       // A terminal has the keyboard: its program gets every key but the few the application keeps.
       if (!commandChord.current && event.target instanceof HTMLElement && event.target.closest("[data-terminal-keys] .terminal-host") && !applicationKey(event)) return;
-      // Exit is global, as in the terminal UI: it also works while a window of the app is open.
-      if (!commandChord.current && resolveCommandKey(event, false, "none").command === "exit") {
-        event.preventDefault(); event.stopPropagation(); requestExit.current(); return;
+      // Exit is global, as in the terminal UI: it also works while a window of the app is open. So is zoom: it
+      // changes the whole window, whatever is open in it.
+      const global = commandChord.current ? null : resolveCommandKey(event, false, "none").command;
+      if (global === "exit") { event.preventDefault(); event.stopPropagation(); requestExit.current(); return; }
+      if (global === "zoomIn" || global === "zoomOut" || global === "resetZoom") {
+        event.preventDefault(); event.stopPropagation(); runCommand(global); return;
       }
       const target = event.target instanceof HTMLElement ? event.target : null;
       const settingsOnly = settingsVisible.current && !dialog && !searchOpen

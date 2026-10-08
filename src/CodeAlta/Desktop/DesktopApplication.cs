@@ -385,6 +385,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var view = await creatingView;
             Mark("view created");
             viewLifetime = view;
+            // The kept zoom, before the first document: the window never shows at another one.
+            view.ZoomFactor = shell.Zoom / 100d;
+            shell.ApplyZoom = factor => view.ZoomFactor = factor;
             // The view loads the document this method shows and no other: its history holds the start-up screen,
             // which the back button of a mouse would otherwise bring again, for good.
             var documents = new DesktopNavigation();
